@@ -561,10 +561,15 @@ const app = new Hono<HonoAppContext>()
         url: settings.companyUrl,
       });
 
-      // Ingest in background
-      resourceService
-        .ingestWebpage(project.id, resource.id, settings.companyUrl, resource.title)
-        .catch(() => {});
+      // Ingest in background (use waitUntil to keep isolate alive)
+      c.executionCtx.waitUntil(
+        resourceService.ingestWebpage(
+          project.id,
+          resource.id,
+          settings.companyUrl,
+          resource.title,
+        ),
+      );
 
       // Summarize via Gemini
       const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
@@ -1011,11 +1016,13 @@ const app = new Hono<HonoAppContext>()
       });
 
       const buffer = await fileObj.arrayBuffer();
-      resourceService.ingestPdf(
-        project.id,
-        resource.id,
-        buffer,
-        title.trim(),
+      c.executionCtx.waitUntil(
+        resourceService.ingestPdf(
+          project.id,
+          resource.id,
+          buffer,
+          title.trim(),
+        ),
       );
 
       return c.json(resource, 201);
@@ -1034,21 +1041,24 @@ const app = new Hono<HonoAppContext>()
       content: parsed.data.content,
     });
 
-    // Trigger ingestion based on type
+    // Trigger ingestion based on type (use waitUntil to keep isolate alive)
     if (parsed.data.type === "webpage" && parsed.data.url) {
-      // Don't await -- run in background
-      resourceService.ingestWebpage(
-        project.id,
-        resource.id,
-        parsed.data.url,
-        parsed.data.title,
+      c.executionCtx.waitUntil(
+        resourceService.ingestWebpage(
+          project.id,
+          resource.id,
+          parsed.data.url,
+          parsed.data.title,
+        ),
       );
     } else if (parsed.data.type === "faq" && parsed.data.content) {
-      resourceService.ingestFaq(
-        project.id,
-        resource.id,
-        parsed.data.title,
-        parsed.data.content,
+      c.executionCtx.waitUntil(
+        resourceService.ingestFaq(
+          project.id,
+          resource.id,
+          parsed.data.title,
+          parsed.data.content,
+        ),
       );
     }
 
@@ -1092,20 +1102,51 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    // Re-trigger ingestion
+    // Reset status to pending before re-ingestion
+    await resourceService.updateResourceStatus(resource.id, "pending");
+
+    // Re-trigger ingestion (use waitUntil to keep isolate alive)
     if (resource.type === "webpage" && resource.url) {
-      resourceService.ingestWebpage(
-        project.id,
-        resource.id,
-        resource.url,
-        resource.title,
+      c.executionCtx.waitUntil(
+        resourceService.ingestWebpage(
+          project.id,
+          resource.id,
+          resource.url,
+          resource.title,
+        ),
       );
     } else if (resource.type === "faq" && resource.content) {
-      resourceService.ingestFaq(
-        project.id,
-        resource.id,
-        resource.title,
-        resource.content,
+      c.executionCtx.waitUntil(
+        resourceService.ingestFaq(
+          project.id,
+          resource.id,
+          resource.title,
+          resource.content,
+        ),
+      );
+    } else if (resource.type === "pdf" && resource.r2Key) {
+      // Re-put the existing R2 object to trigger AI Search re-indexing
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const obj = await c.env.UPLOADS.get(resource.r2Key!);
+            if (!obj) {
+              await resourceService.updateResourceStatus(resource.id, "failed");
+              return;
+            }
+            const body = await obj.arrayBuffer();
+            await c.env.UPLOADS.put(resource.r2Key!, body, {
+              httpMetadata: { contentType: "application/pdf" },
+              customMetadata: {
+                context: `PDF document: ${resource.title}`,
+              },
+            });
+            await resourceService.updateResourceStatus(resource.id, "indexed");
+          } catch (err) {
+            console.error(`PDF reindex failed for resource ${resource.id}:`, err);
+            await resourceService.updateResourceStatus(resource.id, "failed");
+          }
+        })(),
       );
     }
 

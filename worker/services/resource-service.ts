@@ -106,7 +106,8 @@ export class ResourceService {
         .update(resources)
         .set({ r2Key, status: "indexed", lastIndexedAt: new Date() })
         .where(eq(resources.id, resourceId));
-    } catch {
+    } catch (err) {
+      console.error(`Webpage ingestion failed for resource ${resourceId}:`, err);
       await this.updateResourceStatus(resourceId, "failed");
     }
   }
@@ -131,7 +132,8 @@ export class ResourceService {
         .update(resources)
         .set({ r2Key, status: "indexed", lastIndexedAt: new Date() })
         .where(eq(resources.id, resourceId));
-    } catch {
+    } catch (err) {
+      console.error(`FAQ ingestion failed for resource ${resourceId}:`, err);
       await this.updateResourceStatus(resourceId, "failed");
     }
   }
@@ -156,7 +158,8 @@ export class ResourceService {
         .update(resources)
         .set({ r2Key, status: "indexed", lastIndexedAt: new Date() })
         .where(eq(resources.id, resourceId));
-    } catch {
+    } catch (err) {
+      console.error(`PDF ingestion failed for resource ${resourceId}:`, err);
       await this.updateResourceStatus(resourceId, "failed");
     }
   }
