@@ -139,7 +139,7 @@ function Layout() {
 
           {!currentProject && (
             <Link
-              to="/app/new-project"
+              to="/app/onboarding"
               className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/50"
             >
               <Plus className="w-4 h-4" />

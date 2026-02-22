@@ -21,6 +21,9 @@ export const projects = sqliteTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     domain: text("domain"),
+    onboarded: integer("onboarded", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -47,10 +50,14 @@ export const projectSettings = sqliteTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    geminiApiKey: text("gemini_api_key"), // encrypted via AES-GCM
+    geminiApiKey: text("gemini_api_key"), // deprecated: platform key used instead
     aiSearchInstanceName: text("ai_search_instance_name"),
     telegramBotToken: text("telegram_bot_token"), // encrypted
     telegramChatId: text("telegram_chat_id"),
+    companyName: text("company_name"),
+    companyUrl: text("company_url"),
+    industry: text("industry"),
+    companyContext: text("company_context"),
     toneOfVoice: text("tone_of_voice", {
       enum: ["professional", "friendly", "casual", "formal", "custom"],
     })

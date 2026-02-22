@@ -26,6 +26,9 @@ import {
   createCannedResponseSchema,
   updateCannedResponseSchema,
   updateTelegramSchema,
+  onboardingStep1Schema,
+  onboardingContextSchema,
+  onboardingWidgetSchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -231,18 +234,8 @@ const app = new Hono<HonoAppContext>()
         content: parsed.data.content,
       });
 
-      // Get project settings for Gemini API key and tone
+      // Get project settings for tone and context
       const settings = await projectService.getSettings(project.id);
-      if (!settings?.geminiApiKey) {
-        // No API key configured -- return a simple message
-        const botMsg = await chatService.addMessage({
-          conversationId,
-          role: "bot",
-          content:
-            "I'm sorry, but I'm not fully configured yet. Please check back later or contact support directly.",
-        });
-        return c.json(botMsg);
-      }
 
       // Get conversation history from cache or DB
       const history =
@@ -284,9 +277,9 @@ const app = new Hono<HonoAppContext>()
       );
 
       // Build system prompt and stream response
-      const geminiService = new GeminiService(settings.geminiApiKey);
+      const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
       const systemPrompt = geminiService.buildSystemPrompt(
-        settings,
+        settings ?? { toneOfVoice: "professional", customTonePrompt: null, companyContext: null },
         ragContext,
         cannedMatch ? cannedMatch.response : null,
       );
@@ -325,7 +318,7 @@ const app = new Hono<HonoAppContext>()
               );
 
               // Notify via Telegram if configured
-              if (settings.telegramBotToken && settings.telegramChatId) {
+              if (settings?.telegramBotToken && settings?.telegramChatId) {
                 const telegramService = new TelegramService(db);
                 await telegramService.notifyHandoff(
                   settings.telegramBotToken,
@@ -463,6 +456,219 @@ const app = new Hono<HonoAppContext>()
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // ONBOARDING ENDPOINTS (session-authenticated)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ─── Step 1: Create project with company info ──────────────────────────────
+  .post("/api/onboarding", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(onboardingStep1Schema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+
+    // Generate slug from website name
+    const slug = slugify(parsed.data.websiteName);
+
+    // Extract domain from URL
+    let domain: string | undefined;
+    try {
+      domain = new URL(parsed.data.websiteUrl).hostname;
+    } catch {
+      domain = undefined;
+    }
+
+    // Create the project
+    const project = await projectService.createProject({
+      userId: user.id,
+      name: parsed.data.websiteName,
+      slug,
+      domain,
+    });
+
+    // Update settings with company info
+    await projectService.updateSettings(project.id, {
+      companyName: parsed.data.companyName,
+      companyUrl: parsed.data.websiteUrl,
+      industry: parsed.data.industry,
+    });
+
+    return c.json({ projectId: project.id, slug: project.slug }, 201);
+  })
+
+  // ─── Step 2: Scrape website and build context ─────────────────────────────
+  .post("/api/onboarding/:projectId/scrape", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("projectId"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const settings = await projectService.getSettings(project.id);
+    if (!settings?.companyUrl) {
+      return c.json({ context: "", scraped: false });
+    }
+
+    try {
+      // Fetch the website
+      const response = await fetch(settings.companyUrl, {
+        headers: {
+          "User-Agent": "ReplyMaven Bot/1.0 (https://replymaven.com)",
+          Accept: "text/html",
+        },
+        redirect: "follow",
+      });
+
+      if (!response.ok) {
+        return c.json({ context: "", scraped: false });
+      }
+
+      const html = await response.text();
+
+      // Strip HTML tags to get plain text
+      const rawText = html
+        .replace(/<script[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      // If too little content, let user input manually
+      if (rawText.length < 100) {
+        return c.json({ context: "", scraped: false });
+      }
+
+      // Store as a resource (webpage type) in R2
+      const resourceService = new ResourceService(db, c.env.UPLOADS);
+      const resource = await resourceService.createResource({
+        projectId: project.id,
+        type: "webpage",
+        title: `${settings.companyName ?? project.name} - Website`,
+        url: settings.companyUrl,
+      });
+
+      // Ingest in background
+      resourceService
+        .ingestWebpage(project.id, resource.id, settings.companyUrl, resource.title)
+        .catch(() => {});
+
+      // Summarize via Gemini
+      const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
+      const context = await geminiService.summarizeWebsite(rawText);
+
+      if (!context) {
+        return c.json({ context: "", scraped: false });
+      }
+
+      // Save the summary to project settings
+      await projectService.updateSettings(project.id, {
+        companyContext: context,
+      });
+
+      return c.json({ context, scraped: true });
+    } catch {
+      return c.json({ context: "", scraped: false });
+    }
+  })
+
+  // ─── Step 2 fallback: Manually set context ────────────────────────────────
+  .put("/api/onboarding/:projectId/context", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(onboardingContextSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("projectId"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    await projectService.updateSettings(project.id, {
+      companyContext: parsed.data.companyContext,
+    });
+
+    return c.json({ ok: true });
+  })
+
+  // ─── Step 3: Update widget styling ────────────────────────────────────────
+  .put("/api/onboarding/:projectId/widget", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(onboardingWidgetSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("projectId"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    await widgetService.updateWidgetConfig(project.id, parsed.data);
+
+    return c.json({ ok: true });
+  })
+
+  // ─── Step 4: Generate sample customer question ────────────────────────────
+  .get("/api/onboarding/:projectId/sample-question", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("projectId"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const settings = await projectService.getSettings(project.id);
+    const context = settings?.companyContext ?? `${project.name} website`;
+
+    const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
+    const question = await geminiService.generateSampleQuestion(context);
+
+    return c.json({ question });
+  })
+
+  // ─── Step 4: Mark onboarding complete ─────────────────────────────────────
+  .post("/api/onboarding/:projectId/complete", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("projectId"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    await projectService.markOnboarded(project.id);
+
+    return c.json({ ok: true });
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // DASHBOARD ENDPOINTS (session-authenticated)
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -565,7 +771,6 @@ const app = new Hono<HonoAppContext>()
     if (settings) {
       return c.json({
         ...settings,
-        geminiApiKey: settings.geminiApiKey ? "••••••••" : null,
         telegramBotToken: settings.telegramBotToken ? "••••••••" : null,
       });
     }
@@ -1005,11 +1210,11 @@ const app = new Hono<HonoAppContext>()
 
     // Auto-draft canned response if enabled
     const settings = await projectService.getSettings(project.id);
-    if (settings?.autoCannedDraft && settings?.geminiApiKey) {
+    if (settings?.autoCannedDraft) {
       // Run in background -- don't block the response
       const msgs = await chatService.getMessages(conversation.id);
       if (msgs.length >= 2) {
-        const geminiService = new GeminiService(settings.geminiApiKey);
+        const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
         geminiService
           .generateCannedDraft(
             msgs.map((m) => ({ role: m.role, content: m.content })),

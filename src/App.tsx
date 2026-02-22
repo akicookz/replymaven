@@ -2,12 +2,13 @@ import { Routes, Route } from "react-router-dom";
 
 import Layout from "./components/Layout";
 import AuthGuard from "./components/AuthGuard";
+import OnboardingGuard from "./components/OnboardingGuard";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
-import NewProject from "./pages/NewProject";
+import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
 import Resources from "./pages/Resources";
 import WidgetConfig from "./pages/WidgetConfig";
@@ -27,18 +28,34 @@ function App() {
         path="/api/auth/callback/:provider"
         element={<AuthCallback />}
       />
+
+      {/* Onboarding -- full screen, no sidebar */}
+      <Route
+        path="/app/onboarding"
+        element={
+          <ErrorBoundary>
+            <AuthGuard>
+              <Onboarding />
+            </AuthGuard>
+          </ErrorBoundary>
+        }
+      />
+
+      {/* Dashboard -- with sidebar layout and onboarding guard */}
       <Route
         path="/app"
         element={
           <ErrorBoundary>
             <AuthGuard>
-              <Layout />
+              <OnboardingGuard>
+                <Layout />
+              </OnboardingGuard>
             </AuthGuard>
           </ErrorBoundary>
         }
       >
         <Route index element={<Dashboard />} />
-        <Route path="new-project" element={<NewProject />} />
+        <Route path="new-project" element={<Onboarding />} />
         <Route
           path="projects/:projectId/conversations"
           element={<Conversations />}

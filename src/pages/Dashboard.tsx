@@ -152,10 +152,10 @@ function Dashboard() {
             Create your first project to get started
           </p>
         </div>
-        <Link to="/app/new-project">
+        <Link to="/app/onboarding">
           <Button>
             <Plus className="w-4 h-4 mr-2" />
-            Create Project
+            Get Started
           </Button>
         </Link>
       </div>

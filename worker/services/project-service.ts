@@ -103,13 +103,16 @@ export class ProjectService {
     updates: Partial<
       Pick<
         ProjectSettingsRow,
-        | "geminiApiKey"
         | "toneOfVoice"
         | "customTonePrompt"
         | "introMessage"
         | "autoCannedDraft"
         | "telegramBotToken"
         | "telegramChatId"
+        | "companyName"
+        | "companyUrl"
+        | "industry"
+        | "companyContext"
       >
     >,
   ): Promise<ProjectSettingsRow | null> {
@@ -119,5 +122,12 @@ export class ProjectService {
       .where(eq(projectSettings.projectId, projectId));
 
     return this.getSettings(projectId);
+  }
+
+  async markOnboarded(projectId: string): Promise<void> {
+    await this.db
+      .update(projects)
+      .set({ onboarded: true })
+      .where(eq(projects.id, projectId));
   }
 }

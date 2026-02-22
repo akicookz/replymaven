@@ -13,7 +13,6 @@ export const updateProjectSchema = z.object({
 
 // ─── Project Settings ─────────────────────────────────────────────────────────
 export const updateProjectSettingsSchema = z.object({
-  geminiApiKey: z.string().max(255).optional(),
   toneOfVoice: z
     .enum(["professional", "friendly", "casual", "formal", "custom"])
     .optional(),
@@ -105,4 +104,24 @@ export const updateTelegramSchema = z.object({
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 export const createApiKeySchema = z.object({
   label: z.string().min(1, "Label is required").max(100),
+});
+
+// ─── Onboarding ───────────────────────────────────────────────────────────────
+export const onboardingStep1Schema = z.object({
+  websiteName: z.string().min(1, "Website name is required").max(100),
+  websiteUrl: z.string().url("Must be a valid URL").max(2048),
+  companyName: z.string().min(1, "Company name is required").max(200),
+  industry: z.string().min(1, "Industry is required").max(100),
+});
+
+export const onboardingContextSchema = z.object({
+  companyContext: z.string().min(1, "Context is required").max(10000),
+});
+
+export const onboardingWidgetSchema = z.object({
+  primaryColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid hex color"),
+  borderRadius: z.number().min(0).max(50),
+  fontFamily: z.string().max(100),
 });

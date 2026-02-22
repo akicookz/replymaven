@@ -332,6 +332,10 @@
 
         typingIndicator.style.backgroundColor = w.primaryColor + "15";
         typingIndicator.style.color = w.primaryColor;
+
+        if (w.fontFamily && w.fontFamily !== "system-ui") {
+          container.style.fontFamily = w.fontFamily + ", system-ui, sans-serif";
+        }
       }
 
       // Intro message

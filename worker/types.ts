@@ -10,6 +10,7 @@ export interface AppEnv extends Env {
   GITHUB_CLIENT_SECRET: string;
   RESEND_API_KEY: string;
   ENCRYPTION_KEY: string;
+  GEMINI_API_KEY: string;
   UPLOADS: R2Bucket;
   CONVERSATIONS_CACHE: KVNamespace;
   AI: Ai;

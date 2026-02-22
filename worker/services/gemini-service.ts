@@ -28,7 +28,7 @@ export class GeminiService {
   buildSystemPrompt(
     settings: Pick<
       ProjectSettingsRow,
-      "toneOfVoice" | "customTonePrompt"
+      "toneOfVoice" | "customTonePrompt" | "companyContext"
     >,
     ragContext: string,
     cannedHint: string | null,
@@ -54,6 +54,12 @@ export class GeminiService {
     prompt += "- Keep responses concise and helpful.\n";
     prompt += "- Do not make up information.\n";
     prompt += '- If the visitor asks to speak to a human, respond with exactly: "[HANDOFF_REQUESTED]"\n\n';
+
+    if (settings.companyContext) {
+      prompt += "COMPANY CONTEXT:\n";
+      prompt += settings.companyContext;
+      prompt += "\n\n";
+    }
 
     if (ragContext) {
       prompt += "KNOWLEDGE BASE CONTEXT:\n";
@@ -137,6 +143,93 @@ If the conversation is too short, trivial, or doesn't contain a clear reusable Q
     }
 
     return null;
+  }
+
+  // ─── Summarize Website Content ────────────────────────────────────────────────
+
+  async summarizeWebsite(rawText: string): Promise<string> {
+    const truncated = rawText.slice(0, 15000);
+
+    const prompt = `You are analyzing a website's content to create a company knowledge base for an AI customer support chatbot.
+
+WEBSITE CONTENT:
+${truncated}
+
+Based on this content, create a concise but comprehensive company description that covers:
+- What the company does (products/services)
+- Key features or offerings
+- Target audience
+- Any important policies, pricing info, or FAQs mentioned
+
+Write it as a factual reference document (not marketing copy). Keep it under 2000 characters. If the content is very sparse, extract whatever useful info you can.`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 1024,
+        },
+      }),
+    });
+
+    if (!response.ok) return "";
+
+    const data = (await response.json()) as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+      }>;
+    };
+
+    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+  }
+
+  // ─── Generate Sample Customer Question ──────────────────────────────────────
+
+  async generateSampleQuestion(companyContext: string): Promise<string> {
+    const prompt = `You are helping a business owner test their AI customer support chatbot.
+
+COMPANY CONTEXT:
+${companyContext}
+
+Generate ONE realistic customer question that a visitor to this company's website would ask. The question should be:
+- Specific to this company's products/services
+- Something a real customer would ask (e.g., about pricing, features, how something works, return policy, etc.)
+- Natural and conversational
+- One sentence only
+
+Respond with ONLY the question, nothing else.`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 128,
+        },
+      }),
+    });
+
+    if (!response.ok) return "What services do you offer and how can I get started?";
+
+    const data = (await response.json()) as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+      }>;
+    };
+
+    return (
+      data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ??
+      "What services do you offer and how can I get started?"
+    );
   }
 
   // ─── Stream Chat Completion ─────────────────────────────────────────────────

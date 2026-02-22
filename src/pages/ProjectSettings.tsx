@@ -1,12 +1,11 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Settings, Save, Copy, Code, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Save, Copy, Code, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface ProjectSettingsData {
   id: string;
-  geminiApiKey: string | null;
   toneOfVoice: string;
   customTonePrompt: string | null;
   introMessage: string;
@@ -18,7 +17,6 @@ function ProjectSettings() {
   const queryClient = useQueryClient();
 
   const [form, setForm] = useState({
-    geminiApiKey: "",
     toneOfVoice: "professional",
     customTonePrompt: "",
     introMessage: "Hi there! How can I help you today?",
@@ -46,7 +44,6 @@ function ProjectSettings() {
   useEffect(() => {
     if (data) {
       setForm({
-        geminiApiKey: "",
         toneOfVoice: data.toneOfVoice,
         customTonePrompt: data.customTonePrompt ?? "",
         introMessage: data.introMessage,
@@ -64,9 +61,6 @@ function ProjectSettings() {
       };
       if (form.toneOfVoice === "custom") {
         body.customTonePrompt = form.customTonePrompt;
-      }
-      if (form.geminiApiKey) {
-        body.geminiApiKey = form.geminiApiKey;
       }
 
       const res = await fetch(`/api/projects/${projectId}/settings`, {
@@ -142,39 +136,6 @@ function ProjectSettings() {
           >
             <Copy className="w-3.5 h-3.5" />
           </button>
-        </div>
-      </div>
-
-      {/* Gemini API Key */}
-      <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-3">
-        <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
-          <Settings className="w-5 h-5" />
-          AI Configuration
-        </h2>
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">
-            Gemini API Key
-          </label>
-          <input
-            type="password"
-            value={form.geminiApiKey}
-            onChange={(e) =>
-              setForm({ ...form, geminiApiKey: e.target.value })
-            }
-            placeholder={data?.geminiApiKey ?? "Enter your Gemini API key"}
-            className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          <p className="text-xs text-muted-foreground">
-            Get your API key from{" "}
-            <a
-              href="https://aistudio.google.com/apikey"
-              target="_blank"
-              rel="noreferrer"
-              className="underline"
-            >
-              Google AI Studio
-            </a>
-          </p>
         </div>
       </div>
 
