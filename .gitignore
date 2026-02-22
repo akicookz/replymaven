@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+bun.lock
+
+# Build outputs
+dist/
+dist-widget/
+
+# Wrangler
+.wrangler/
+
+# Environment
+.dev.vars
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# TypeScript
+*.tsbuildinfo

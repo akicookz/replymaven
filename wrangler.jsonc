@@ -1,0 +1,52 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "replymaven",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-05-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "35bc7a4522237728214ba9d54c36002e",
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+  },
+  "observability": {
+    "enabled": true,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "supportbot-db",
+      "database_id": "930df889-1d05-4762-8fcf-072f9521fd20",
+      "migrations_dir": "worker/db/drizzle",
+      "remote": true,
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "UPLOADS",
+      "bucket_name": "supportbot-uploads",
+      "remote": true,
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CONVERSATIONS_CACHE",
+      "id": "5ba5fdd76ae84641aadfa57863e3c45b",
+      "remote": true,
+    },
+  ],
+  "ai": {
+    "binding": "AI",
+    "remote": true,
+  },
+  "vars": {
+    "BETTER_AUTH_URL": "https://replymaven.com",
+  },
+  "env": {
+    "production": {
+      "vars": {
+        "BETTER_AUTH_URL": "https://replymaven.com",
+      },
+    },
+  },
+}

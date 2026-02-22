@@ -1,0 +1,1291 @@
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { except } from "hono/combine";
+import { drizzle } from "drizzle-orm/d1";
+import { createAuth } from "./auth";
+import { type HonoAppContext } from "./types";
+import { ProjectService } from "./services/project-service";
+import { WidgetService } from "./services/widget-service";
+import { ChatService } from "./services/chat-service";
+import { ResourceService } from "./services/resource-service";
+import { GeminiService } from "./services/gemini-service";
+import { TelegramService } from "./services/telegram-service";
+import { CannedResponseService } from "./services/canned-response-service";
+import { DashboardService } from "./services/dashboard-service";
+import {
+  createProjectSchema,
+  updateProjectSchema,
+  updateProjectSettingsSchema,
+  updateWidgetConfigSchema,
+  createQuickActionSchema,
+  createQuickTopicSchema,
+  createResourceSchema,
+  createConversationSchema,
+  sendMessageSchema,
+  agentReplySchema,
+  createCannedResponseSchema,
+  updateCannedResponseSchema,
+  updateTelegramSchema,
+} from "./validation";
+
+// ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+let lastCleanup = Date.now();
+
+function checkRateLimit(
+  key: string,
+  maxRequests: number,
+  windowMs: number,
+): boolean {
+  const now = Date.now();
+
+  // Periodic cleanup of expired entries to prevent memory growth
+  if (now - lastCleanup > 60_000) {
+    lastCleanup = now;
+    for (const [k, v] of rateLimitMap) {
+      if (now > v.resetAt) rateLimitMap.delete(k);
+    }
+  }
+
+  const entry = rateLimitMap.get(key);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (entry.count >= maxRequests) return false;
+  entry.count++;
+  return true;
+}
+
+function getClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
+  return (
+    c.req.header("cf-connecting-ip") ??
+    c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
+    "unknown"
+  );
+}
+
+// ─── Zod validation helper ────────────────────────────────────────────────────
+function validate<T>(
+  schema: {
+    safeParse: (data: unknown) => {
+      success: boolean;
+      data?: T;
+      error?: { issues: Array<{ message: string }> };
+    };
+  },
+  data: unknown,
+): { success: true; data: T } | { success: false; error: string } {
+  const result = schema.safeParse(data);
+  if (result.success) return { success: true, data: result.data as T };
+  const message = result.error?.issues?.[0]?.message ?? "Validation failed";
+  return { success: false, error: message };
+}
+
+// ─── Slug generator ──────────────────────────────────────────────────────────
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 50);
+}
+
+const app = new Hono<HonoAppContext>()
+  // ─── Global CORS ────────────────────────────────────────────────────────────
+  .use("*", cors())
+  // ─── Auth-specific CORS ─────────────────────────────────────────────────────
+  .use(
+    "/api/auth/*",
+    cors({
+      origin: (origin) => origin || "*",
+      allowHeaders: ["Content-Type", "Authorization"],
+      allowMethods: ["POST", "GET", "OPTIONS"],
+      exposeHeaders: ["Content-Length"],
+      maxAge: 600,
+      credentials: true,
+    }),
+  )
+  // ─── Better Auth handler ────────────────────────────────────────────────────
+  .on(["POST", "GET"], "/api/auth/*", (c) => {
+    const auth = createAuth(
+      c.env,
+      c.req.raw.cf as CfProperties,
+    );
+    return auth.handler(c.req.raw);
+  })
+  // ─── Static SPA fallback ───────────────────────────────────────────────────
+  .use(
+    "*",
+    except(["/api/*"], async (c) => {
+      return c.env.ASSETS.fetch(c.req.raw);
+    }),
+  )
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PUBLIC WIDGET ENDPOINTS (no auth)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ─── Widget Config ──────────────────────────────────────────────────────────
+  .get("/api/widget/:projectSlug/config", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`wconf:${ip}`, 30, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const slug = c.req.param("projectSlug");
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const widgetService = new WidgetService(db);
+    const config = await widgetService.getFullWidgetConfig(project.id);
+    return c.json(config);
+  })
+
+  // ─── Create Conversation ────────────────────────────────────────────────────
+  .post("/api/widget/:projectSlug/conversations", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`conv:${ip}`, 10, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const slug = c.req.param("projectSlug");
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const body = await c.req.json();
+    const parsed = validate(createConversationSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.createConversation({
+      projectId: project.id,
+      visitorId: parsed.data.visitorId,
+      visitorName: parsed.data.visitorName,
+      visitorEmail: parsed.data.visitorEmail,
+      metadata: parsed.data.metadata
+        ? JSON.stringify(parsed.data.metadata)
+        : null,
+    });
+
+    return c.json(conversation, 201);
+  })
+
+  // ─── Get Conversation Messages ──────────────────────────────────────────────
+  .get(
+    "/api/widget/:projectSlug/conversations/:id/messages",
+    async (c) => {
+      const ip = getClientIp(c);
+      if (!checkRateLimit(`getmsg:${ip}`, 60, 60_000)) {
+        return c.json({ error: "Rate limit exceeded" }, 429);
+      }
+
+      const conversationId = c.req.param("id");
+      const db = drizzle(c.env.DB);
+      const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+
+      // Try KV cache first
+      const cached = await chatService.getFromCache(conversationId);
+      if (cached) return c.json(cached);
+
+      const messages = await chatService.getMessages(conversationId);
+      return c.json(messages);
+    },
+  )
+
+  // ─── Send Message (SSE streaming response) ─────────────────────────────────
+  .post(
+    "/api/widget/:projectSlug/conversations/:id/messages",
+    async (c) => {
+      const ip = getClientIp(c);
+      if (!checkRateLimit(`msg:${ip}`, 30, 60_000)) {
+        return c.json({ error: "Rate limit exceeded" }, 429);
+      }
+
+      const slug = c.req.param("projectSlug");
+      const conversationId = c.req.param("id");
+      const db = drizzle(c.env.DB);
+
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectBySlugPublic(slug);
+      if (!project) return c.json({ error: "Project not found" }, 404);
+
+      const body = await c.req.json();
+      const parsed = validate(sendMessageSchema, body);
+      if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+      const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+      const conversation = await chatService.getConversationById(conversationId);
+      if (!conversation || conversation.projectId !== project.id) {
+        return c.json({ error: "Conversation not found" }, 404);
+      }
+
+      // Store visitor message
+      await chatService.addMessage({
+        conversationId,
+        role: "visitor",
+        content: parsed.data.content,
+      });
+
+      // Get project settings for Gemini API key and tone
+      const settings = await projectService.getSettings(project.id);
+      if (!settings?.geminiApiKey) {
+        // No API key configured -- return a simple message
+        const botMsg = await chatService.addMessage({
+          conversationId,
+          role: "bot",
+          content:
+            "I'm sorry, but I'm not fully configured yet. Please check back later or contact support directly.",
+        });
+        return c.json(botMsg);
+      }
+
+      // Get conversation history from cache or DB
+      const history =
+        (await chatService.getFromCache(conversationId)) ??
+        (await chatService.getMessages(conversationId));
+
+      // Query AI Search for relevant context
+      let ragContext = "";
+      try {
+        const searchResults = await (c.env.AI as any).autorag("supportbot").search({
+          query: parsed.data.content,
+          filters: {
+            type: "eq",
+            key: "folder",
+            value: `${project.id}/`,
+          },
+          max_num_results: 5,
+          ranking_options: { score_threshold: 0.3 },
+        });
+
+        if (searchResults?.data?.length > 0) {
+          ragContext = searchResults.data
+            .map(
+              (item: any) =>
+                `<source file="${item.filename}">\n${item.content
+                  ?.map((c: any) => c.text)
+                  .join("\n")}\n</source>`,
+            )
+            .join("\n\n");
+        }
+      } catch {
+        // AI Search may not be configured -- continue without RAG
+      }
+
+      // Check canned responses
+      const cannedMatch = await chatService.findCannedResponse(
+        project.id,
+        parsed.data.content,
+      );
+
+      // Build system prompt and stream response
+      const geminiService = new GeminiService(settings.geminiApiKey);
+      const systemPrompt = geminiService.buildSystemPrompt(
+        settings,
+        ragContext,
+        cannedMatch ? cannedMatch.response : null,
+      );
+
+      const conversationHistory = history
+        .filter((m) => m.role !== "bot" || m.content)
+        .slice(-20) // Last 20 messages for context
+        .map((m) => ({
+          role: m.role as "visitor" | "bot" | "agent",
+          content: m.content,
+        }));
+
+      // Stream via SSE
+      const stream = new ReadableStream({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          let fullResponse = "";
+
+          try {
+            for await (const chunk of geminiService.streamChat(
+              systemPrompt,
+              conversationHistory,
+              parsed.data.content,
+            )) {
+              fullResponse += chunk;
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`),
+              );
+            }
+
+            // Check if handoff was requested
+            if (fullResponse.includes("[HANDOFF_REQUESTED]")) {
+              await chatService.updateConversationStatus(
+                conversationId,
+                "waiting_agent",
+              );
+
+              // Notify via Telegram if configured
+              if (settings.telegramBotToken && settings.telegramChatId) {
+                const telegramService = new TelegramService(db);
+                await telegramService.notifyHandoff(
+                  settings.telegramBotToken,
+                  settings.telegramChatId,
+                  conversationId,
+                  conversation.visitorName,
+                  parsed.data.content,
+                );
+              }
+
+              fullResponse = fullResponse.replace(
+                "[HANDOFF_REQUESTED]",
+                "I'll connect you with a human agent right away. They'll be with you shortly!",
+              );
+            }
+
+            // Store bot message in DB
+            await chatService.addMessage({
+              conversationId,
+              role: "bot",
+              content: fullResponse,
+              sources: ragContext ? JSON.stringify(ragContext) : null,
+            });
+
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`),
+            );
+          } catch (err) {
+            const errorMessage =
+              err instanceof Error ? err.message : "Unknown error";
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ error: errorMessage })}\n\n`,
+              ),
+            );
+          } finally {
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        },
+      });
+    },
+  )
+
+  // ─── Telegram Webhook ───────────────────────────────────────────────────────
+  .post("/api/telegram/webhook/:projectId", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`tg:${ip}`, 60, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const projectId = c.req.param("projectId");
+    const db = drizzle(c.env.DB);
+
+    const telegramService = new TelegramService(db);
+    const settings = await telegramService.getTelegramSettings(projectId);
+    if (!settings?.telegramBotToken || !settings?.telegramChatId) {
+      return c.json({ error: "Telegram not configured" }, 400);
+    }
+
+    const body = (await c.req.json()) as { message?: any };
+    const message = body.message;
+    if (!message?.text || !message?.reply_to_message) {
+      return c.json({ ok: true }); // Ignore non-reply messages
+    }
+
+    // Extract conversation ID from the original bot message
+    const originalText = message.reply_to_message.text ?? "";
+    const convMatch = originalText.match(/Conversation:\s*(\S+)/);
+    if (!convMatch) return c.json({ ok: true });
+
+    const conversationId = convMatch[1];
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.getConversationById(conversationId);
+    if (!conversation) return c.json({ ok: true });
+
+    // Store agent reply
+    await chatService.addMessage({
+      conversationId,
+      role: "agent",
+      content: message.text,
+    });
+
+    // Update conversation status
+    await chatService.updateConversationStatus(
+      conversationId,
+      "agent_replied",
+    );
+
+    return c.json({ ok: true });
+  })
+
+  // ─── Widget Embed JS ───────────────────────────────────────────────────────
+  .get("/api/widget-embed.js", async (c) => {
+    const obj = await c.env.UPLOADS.get("widget-embed.js");
+    if (!obj) {
+      return c.text("// Widget not built yet", 200, {
+        "Content-Type": "application/javascript",
+      });
+    }
+
+    const body = await obj.text();
+    return c.text(body, 200, {
+      "Content-Type": "application/javascript",
+      "Cache-Control": "public, max-age=3600",
+    });
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SESSION MIDDLEWARE (sets user, session, db on context)
+  // ═══════════════════════════════════════════════════════════════════════════
+  .use("/api/*", async (c, next) => {
+    const db = drizzle(c.env.DB);
+    c.set("db", db);
+
+    const auth = createAuth(
+      c.env,
+      c.req.raw.cf as CfProperties,
+    );
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+    });
+
+    c.set("user", session?.user ?? null);
+    c.set("session", session?.session ?? null);
+
+    await next();
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DASHBOARD ENDPOINTS (session-authenticated)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ─── Dashboard Stats ────────────────────────────────────────────────────────
+  .get("/api/dashboard", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const dashboardService = new DashboardService(db);
+    const stats = await dashboardService.getStats(user.id);
+    return c.json(stats);
+  })
+
+  // ─── Projects CRUD ──────────────────────────────────────────────────────────
+  .get("/api/projects", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const service = new ProjectService(db);
+    const projects = await service.getProjectsByUserId(user.id);
+    return c.json(projects);
+  })
+  .get("/api/projects/:id", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const service = new ProjectService(db);
+    const project = await service.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    return c.json(project);
+  })
+  .post("/api/projects", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(createProjectSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const service = new ProjectService(db);
+    const slug = slugify(parsed.data.name);
+    const project = await service.createProject({
+      userId: user.id,
+      name: parsed.data.name,
+      slug,
+      domain: parsed.data.domain,
+    });
+
+    return c.json(project, 201);
+  })
+  .patch("/api/projects/:id", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateProjectSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const service = new ProjectService(db);
+    const project = await service.updateProject(
+      c.req.param("id"),
+      user.id,
+      parsed.data,
+    );
+    if (!project) return c.json({ error: "Not found" }, 404);
+    return c.json(project);
+  })
+  .delete("/api/projects/:id", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const service = new ProjectService(db);
+    const deleted = await service.deleteProject(c.req.param("id"), user.id);
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+
+  // ─── Project Settings ──────────────────────────────────────────────────────
+  .get("/api/projects/:id/settings", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const settings = await projectService.getSettings(project.id);
+    // Don't expose encrypted keys to frontend
+    if (settings) {
+      return c.json({
+        ...settings,
+        geminiApiKey: settings.geminiApiKey ? "••••••••" : null,
+        telegramBotToken: settings.telegramBotToken ? "••••••••" : null,
+      });
+    }
+    return c.json(null);
+  })
+  .put("/api/projects/:id/settings", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateProjectSettingsSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const settings = await projectService.updateSettings(
+      project.id,
+      parsed.data,
+    );
+    return c.json(settings);
+  })
+
+  // ─── Widget Config ──────────────────────────────────────────────────────────
+  .get("/api/projects/:id/widget-config", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const config = await widgetService.getWidgetConfig(project.id);
+    return c.json(config);
+  })
+  .put("/api/projects/:id/widget-config", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateWidgetConfigSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const config = await widgetService.updateWidgetConfig(
+      project.id,
+      parsed.data,
+    );
+    return c.json(config);
+  })
+
+  // ─── Quick Actions ──────────────────────────────────────────────────────────
+  .get("/api/projects/:id/quick-actions", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const actions = await widgetService.getQuickActions(project.id);
+    return c.json(actions);
+  })
+  .post("/api/projects/:id/quick-actions", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(createQuickActionSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const action = await widgetService.createQuickAction({
+      projectId: project.id,
+      ...parsed.data,
+    });
+    return c.json(action, 201);
+  })
+  .delete("/api/projects/:id/quick-actions/:actionId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const deleted = await widgetService.deleteQuickAction(
+      c.req.param("actionId"),
+      project.id,
+    );
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+
+  // ─── Quick Topics ───────────────────────────────────────────────────────────
+  .get("/api/projects/:id/quick-topics", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const topics = await widgetService.getQuickTopics(project.id);
+    return c.json(topics);
+  })
+  .post("/api/projects/:id/quick-topics", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(createQuickTopicSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const topic = await widgetService.createQuickTopic({
+      projectId: project.id,
+      ...parsed.data,
+    });
+    return c.json(topic, 201);
+  })
+  .delete("/api/projects/:id/quick-topics/:topicId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const deleted = await widgetService.deleteQuickTopic(
+      c.req.param("topicId"),
+      project.id,
+    );
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+
+  // ─── Resources ─────────────────────────────────────────────────────────────
+  .get("/api/projects/:id/resources", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    const resources = await resourceService.getResourcesByProject(project.id);
+    return c.json(resources);
+  })
+   .post("/api/projects/:id/resources", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const contentType = c.req.header("content-type") ?? "";
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+
+    // ─── PDF upload via multipart form ──────────────────────────────────────
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await c.req.parseBody();
+      const title = formData["title"];
+      const file = formData["file"];
+
+      if (!title || typeof title !== "string" || !title.trim()) {
+        return c.json({ error: "Title is required" }, 400);
+      }
+      if (!file || typeof file === "string") {
+        return c.json({ error: "PDF file is required" }, 400);
+      }
+
+      const fileObj = file as File;
+      if (fileObj.type !== "application/pdf") {
+        return c.json({ error: "Only PDF files are allowed" }, 400);
+      }
+      if (fileObj.size > 10 * 1024 * 1024) {
+        return c.json({ error: "File too large (max 10MB)" }, 400);
+      }
+
+      const resource = await resourceService.createResource({
+        projectId: project.id,
+        type: "pdf",
+        title: title.trim(),
+      });
+
+      const buffer = await fileObj.arrayBuffer();
+      resourceService.ingestPdf(
+        project.id,
+        resource.id,
+        buffer,
+        title.trim(),
+      );
+
+      return c.json(resource, 201);
+    }
+
+    // ─── JSON body for webpage/faq ──────────────────────────────────────────
+    const body = await c.req.json();
+    const parsed = validate(createResourceSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const resource = await resourceService.createResource({
+      projectId: project.id,
+      type: parsed.data.type,
+      title: parsed.data.title,
+      url: parsed.data.url,
+      content: parsed.data.content,
+    });
+
+    // Trigger ingestion based on type
+    if (parsed.data.type === "webpage" && parsed.data.url) {
+      // Don't await -- run in background
+      resourceService.ingestWebpage(
+        project.id,
+        resource.id,
+        parsed.data.url,
+        parsed.data.title,
+      );
+    } else if (parsed.data.type === "faq" && parsed.data.content) {
+      resourceService.ingestFaq(
+        project.id,
+        resource.id,
+        parsed.data.title,
+        parsed.data.content,
+      );
+    }
+
+    return c.json(resource, 201);
+  })
+  .delete("/api/projects/:id/resources/:resourceId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    const deleted = await resourceService.deleteResource(
+      c.req.param("resourceId"),
+      project.id,
+    );
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+  .post("/api/projects/:id/resources/:resourceId/reindex", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    const resource = await resourceService.getResourceById(
+      c.req.param("resourceId"),
+    );
+    if (!resource || resource.projectId !== project.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    // Re-trigger ingestion
+    if (resource.type === "webpage" && resource.url) {
+      resourceService.ingestWebpage(
+        project.id,
+        resource.id,
+        resource.url,
+        resource.title,
+      );
+    } else if (resource.type === "faq" && resource.content) {
+      resourceService.ingestFaq(
+        project.id,
+        resource.id,
+        resource.title,
+        resource.content,
+      );
+    }
+
+    return c.json({ ok: true, message: "Reindexing started" });
+  })
+
+  // ─── Conversations (Dashboard) ──────────────────────────────────────────────
+  .get("/api/projects/:id/conversations", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const convos = await chatService.getConversationsByProject(project.id);
+    return c.json(convos);
+  })
+  .get("/api/projects/:id/conversations/:convId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.getConversationById(
+      c.req.param("convId"),
+    );
+    if (!conversation || conversation.projectId !== project.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const msgs = await chatService.getMessages(conversation.id);
+    return c.json({ conversation, messages: msgs });
+  })
+  .post("/api/projects/:id/conversations/:convId/reply", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(agentReplySchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.getConversationById(
+      c.req.param("convId"),
+    );
+    if (!conversation || conversation.projectId !== project.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const message = await chatService.addMessage({
+      conversationId: conversation.id,
+      role: "agent",
+      content: parsed.data.content,
+    });
+
+    await chatService.updateConversationStatus(
+      conversation.id,
+      "agent_replied",
+    );
+
+    return c.json(message, 201);
+  })
+  .post("/api/projects/:id/conversations/:convId/close", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.getConversationById(
+      c.req.param("convId"),
+    );
+    if (!conversation || conversation.projectId !== project.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    // Close the conversation
+    await chatService.updateConversationStatus(conversation.id, "closed");
+
+    // Auto-draft canned response if enabled
+    const settings = await projectService.getSettings(project.id);
+    if (settings?.autoCannedDraft && settings?.geminiApiKey) {
+      // Run in background -- don't block the response
+      const msgs = await chatService.getMessages(conversation.id);
+      if (msgs.length >= 2) {
+        const geminiService = new GeminiService(settings.geminiApiKey);
+        geminiService
+          .generateCannedDraft(
+            msgs.map((m) => ({ role: m.role, content: m.content })),
+          )
+          .then(async (draft) => {
+            if (draft) {
+              const cannedService = new CannedResponseService(db);
+              await cannedService.createDraft(
+                project.id,
+                draft.trigger,
+                draft.response,
+                conversation.id,
+              );
+            }
+          })
+          .catch(() => {
+            // Silently ignore auto-draft errors
+          });
+      }
+    }
+
+    return c.json({ ok: true });
+  })
+
+  // ─── Canned Responses ───────────────────────────────────────────────────────
+  .get("/api/projects/:id/canned-responses", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new CannedResponseService(db);
+    const responses = await service.getByProject(project.id);
+    return c.json(responses);
+  })
+  .post("/api/projects/:id/canned-responses", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(createCannedResponseSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new CannedResponseService(db);
+    const cr = await service.create({
+      projectId: project.id,
+      trigger: parsed.data.trigger,
+      response: parsed.data.response,
+      status: "approved",
+    });
+    return c.json(cr, 201);
+  })
+  .patch("/api/projects/:id/canned-responses/:crId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateCannedResponseSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new CannedResponseService(db);
+    const cr = await service.update(
+      c.req.param("crId"),
+      project.id,
+      parsed.data,
+    );
+    if (!cr) return c.json({ error: "Not found" }, 404);
+    return c.json(cr);
+  })
+  .post("/api/projects/:id/canned-responses/:crId/approve", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new CannedResponseService(db);
+    const approved = await service.approve(c.req.param("crId"), project.id);
+    if (!approved) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+  .delete("/api/projects/:id/canned-responses/:crId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new CannedResponseService(db);
+    const deleted = await service.delete(c.req.param("crId"), project.id);
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+
+  // ─── Telegram Config ───────────────────────────────────────────────────────
+  .get("/api/projects/:id/telegram", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const settings = await projectService.getSettings(project.id);
+    return c.json({
+      telegramBotToken: settings?.telegramBotToken ? "••••••••" : null,
+      telegramChatId: settings?.telegramChatId ?? null,
+    });
+  })
+  .put("/api/projects/:id/telegram", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateTelegramSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    await projectService.updateSettings(project.id, parsed.data);
+
+    // Set webhook if bot token is provided
+    if (parsed.data.telegramBotToken) {
+      const telegramService = new TelegramService(db);
+      const webhookUrl = `${c.env.BETTER_AUTH_URL}/api/telegram/webhook/${project.id}`;
+      await telegramService.setWebhook(
+        parsed.data.telegramBotToken,
+        webhookUrl,
+      );
+    }
+
+    return c.json({ ok: true });
+  })
+  .post("/api/projects/:id/telegram/test", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const settings = await projectService.getSettings(project.id);
+    if (!settings?.telegramBotToken || !settings?.telegramChatId) {
+      return c.json({ error: "Telegram not configured" }, 400);
+    }
+
+    const telegramService = new TelegramService(db);
+    const success = await telegramService.testConnection(
+      settings.telegramBotToken,
+      settings.telegramChatId,
+    );
+
+    return c.json({ ok: success });
+  })
+
+  // ─── Widget Bundle Upload to R2 ─────────────────────────────────────────────
+  .post("/api/admin/upload-widget", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const formData = await c.req.parseBody();
+    const file = formData["file"];
+    if (!file || typeof file === "string") {
+      return c.json({ error: "No file provided" }, 400);
+    }
+
+    const fileObj = file as File;
+    if (!fileObj.name.endsWith(".js")) {
+      return c.json({ error: "Only .js files allowed" }, 400);
+    }
+
+    const buffer = await fileObj.arrayBuffer();
+    await c.env.UPLOADS.put("widget-embed.js", buffer, {
+      httpMetadata: { contentType: "application/javascript" },
+    });
+
+    return c.json({
+      ok: true,
+      message: "Widget bundle uploaded successfully",
+      size: fileObj.size,
+    });
+  })
+
+  // ─── File Upload ────────────────────────────────────────────────────────────
+  .post("/api/upload", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const formData = await c.req.parseBody();
+    const file = formData["file"];
+    if (!file || typeof file === "string") {
+      return c.json({ error: "No file provided" }, 400);
+    }
+
+    const fileObj = file as File;
+
+    // Validate file type
+    const allowedTypes = [
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/svg+xml",
+    ];
+    if (!allowedTypes.includes(fileObj.type)) {
+      return c.json({ error: "Invalid file type" }, 400);
+    }
+
+    // Max 10MB
+    if (fileObj.size > 10 * 1024 * 1024) {
+      return c.json({ error: "File too large (max 10MB)" }, 400);
+    }
+
+    const ext = fileObj.name.split(".").pop() ?? "bin";
+    const uploadKey = `${user.id}/${crypto.randomUUID()}.${ext}`;
+    const buffer = await fileObj.arrayBuffer();
+
+    await c.env.UPLOADS.put(uploadKey, buffer, {
+      httpMetadata: { contentType: fileObj.type },
+    });
+
+    return c.json({ key: uploadKey, url: `/api/uploads/${uploadKey}` }, 201);
+  })
+
+  // ─── Serve Uploads ──────────────────────────────────────────────────────────
+  .get("/api/uploads/:key{.+}", async (c) => {
+    const key = c.req.param("key");
+    const obj = await c.env.UPLOADS.get(key);
+    if (!obj) return c.json({ error: "Not found" }, 404);
+
+    const headers = new Headers();
+    headers.set(
+      "Content-Type",
+      obj.httpMetadata?.contentType ?? "application/octet-stream",
+    );
+    headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    return new Response(obj.body, { headers });
+  });
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+export default app;
