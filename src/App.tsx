@@ -15,6 +15,7 @@ import ProjectSettings from "./pages/ProjectSettings";
 import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
 import TelegramConfig from "./pages/TelegramConfig";
+import AuthCallback from "./pages/AuthCallback";
 
 function App() {
   return (
@@ -22,6 +23,10 @@ function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
+      <Route
+        path="/api/auth/callback/:provider"
+        element={<AuthCallback />}
+      />
       <Route
         path="/app"
         element={
