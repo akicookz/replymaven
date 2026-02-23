@@ -22,6 +22,10 @@ import {
   createQuickTopicSchema,
   createHomeLinkSchema,
   createResourceSchema,
+  createFaqResourceSchema,
+  updateFaqResourceSchema,
+  updateResourceContentSchema,
+  updateCrawledPageContentSchema,
   createConversationSchema,
   sendMessageSchema,
   agentReplySchema,
@@ -1176,6 +1180,32 @@ const app = new Hono<HonoAppContext>()
 
     // ─── JSON body for webpage/faq ──────────────────────────────────────────
     const body = await c.req.json();
+
+    // Handle FAQ with structured pairs
+    if (body.type === "faq" && body.pairs) {
+      const parsed = validate(createFaqResourceSchema, body);
+      if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+      const resource = await resourceService.createResource({
+        projectId: project.id,
+        type: "faq",
+        title: parsed.data.title,
+        content: JSON.stringify(parsed.data.pairs),
+      });
+
+      c.executionCtx.waitUntil(
+        resourceService.ingestFaqFromPairs(
+          project.id,
+          resource.id,
+          parsed.data.title,
+          parsed.data.pairs,
+        ),
+      );
+
+      return c.json(resource, 201);
+    }
+
+    // Handle webpage and legacy faq
     const parsed = validate(createResourceSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
@@ -1304,6 +1334,189 @@ const app = new Hono<HonoAppContext>()
     }
 
     return c.json({ ok: true, message: "Reindexing started" });
+  })
+
+  // ─── Resource Content & Updates ─────────────────────────────────────────────
+  .get("/api/projects/:id/resources/:resourceId/content", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    const content = await resourceService.getResourceContent(
+      c.req.param("resourceId"),
+      project.id,
+    );
+    if (!content) return c.json({ error: "Not found" }, 404);
+    return c.json(content);
+  })
+  .put("/api/projects/:id/resources/:resourceId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    const resource = await resourceService.getResourceById(
+      c.req.param("resourceId"),
+      project.id,
+    );
+    if (!resource) return c.json({ error: "Not found" }, 404);
+
+    const body = await c.req.json();
+
+    // Handle FAQ updates with structured pairs
+    if (resource.type === "faq") {
+      const parsed = validate(updateFaqResourceSchema, body);
+      if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+      const updated = await resourceService.updateFaqResource(
+        resource.id,
+        project.id,
+        parsed.data.title,
+        parsed.data.pairs,
+      );
+      if (!updated) return c.json({ error: "Update failed" }, 500);
+      return c.json(updated);
+    }
+
+    // Handle PDF/other content updates
+    const parsed = validate(updateResourceContentSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const updated = await resourceService.updateResourceContent(
+      resource.id,
+      project.id,
+      parsed.data.title,
+      parsed.data.content,
+    );
+    if (!updated) return c.json({ error: "Update failed" }, 500);
+    return c.json(updated);
+  })
+
+  // ─── Crawled Pages ──────────────────────────────────────────────────────────
+  .get("/api/projects/:id/resources/:resourceId/pages", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    const resource = await resourceService.getResourceById(
+      c.req.param("resourceId"),
+      project.id,
+    );
+    if (!resource || resource.type !== "webpage") {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const pages = await resourceService.getCrawledPages(resource.id, project.id);
+    return c.json(pages);
+  })
+  .get("/api/projects/:id/resources/:resourceId/pages/:pageId/content", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    const content = await resourceService.getCrawledPageContent(
+      c.req.param("pageId"),
+      c.req.param("resourceId"),
+      project.id,
+    );
+    if (content === null) return c.json({ error: "Not found" }, 404);
+    return c.json({ content });
+  })
+  .put("/api/projects/:id/resources/:resourceId/pages/:pageId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(updateCrawledPageContentSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    const updated = await resourceService.updateCrawledPageContent(
+      c.req.param("pageId"),
+      c.req.param("resourceId"),
+      project.id,
+      parsed.data.content,
+    );
+    if (!updated) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+  .delete("/api/projects/:id/resources/:resourceId/pages/:pageId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    const deleted = await resourceService.deleteCrawledPage(
+      c.req.param("pageId"),
+      c.req.param("resourceId"),
+      project.id,
+    );
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+  .post("/api/projects/:id/resources/:resourceId/pages/:pageId/refresh", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    c.executionCtx.waitUntil(
+      resourceService.refreshCrawledPage(
+        c.req.param("pageId"),
+        c.req.param("resourceId"),
+        project.id,
+        c.env.CF_ACCOUNT_ID,
+        c.env.BROWSER_RENDERING_API_TOKEN,
+      ),
+    );
+
+    return c.json({ ok: true, message: "Refresh started" });
   })
 
   // ─── Conversations (Dashboard) ──────────────────────────────────────────────

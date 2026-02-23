@@ -70,11 +70,43 @@ export const createQuickTopicSchema = z.object({
 });
 
 // ─── Resources ────────────────────────────────────────────────────────────────
+
+export const faqPairSchema = z.object({
+  question: z.string().min(1, "Question is required").max(500),
+  answer: z.string().min(1, "Answer is required").max(5000),
+});
+
 export const createResourceSchema = z.object({
   type: z.enum(["webpage", "pdf", "faq"]),
   title: z.string().min(1, "Title is required").max(200),
   url: z.string().max(2048).optional(),
   content: z.string().max(10000).optional(),
+});
+
+export const createFaqResourceSchema = z.object({
+  type: z.literal("faq"),
+  title: z.string().min(1, "Title is required").max(200),
+  pairs: z
+    .array(faqPairSchema)
+    .min(1, "At least one Q&A pair is required")
+    .max(50, "Maximum 50 Q&A pairs allowed"),
+});
+
+export const updateFaqResourceSchema = z.object({
+  title: z.string().min(1, "Title is required").max(200).optional(),
+  pairs: z
+    .array(faqPairSchema)
+    .min(1, "At least one Q&A pair is required")
+    .max(50, "Maximum 50 Q&A pairs allowed"),
+});
+
+export const updateResourceContentSchema = z.object({
+  title: z.string().min(1, "Title is required").max(200).optional(),
+  content: z.string().min(1, "Content is required").max(100000),
+});
+
+export const updateCrawledPageContentSchema = z.object({
+  content: z.string().min(1, "Content is required").max(100000),
 });
 
 // ─── Conversations ────────────────────────────────────────────────────────────

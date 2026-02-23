@@ -10,16 +10,22 @@ import {
   Plus,
   Upload,
   AlertCircle,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import FaqEditor from "@/components/faq-editor";
+import WebpageResourceDetail from "@/components/webpage-detail";
+import PdfResourceDetail from "@/components/pdf-detail";
 
 interface Resource {
   id: string;
   type: "webpage" | "pdf" | "faq";
   title: string;
   url: string | null;
-  status: "pending" | "indexed" | "failed";
+  content: string | null;
+  status: "pending" | "crawling" | "indexed" | "failed";
   createdAt: string;
 }
 
@@ -32,9 +38,9 @@ function Resources() {
   );
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
-  const [content, setContent] = useState("");
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: resources, isLoading } = useQuery<Resource[]>({
@@ -70,32 +76,29 @@ function Resources() {
         return res.json();
       }
 
-      const body: Record<string, unknown> = { type: formType, title };
-      if (formType === "webpage") body.url = url;
-      if (formType === "faq") body.content = content;
-
-      const res = await fetch(`/api/projects/${projectId}/resources`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Failed to add resource" }));
-        throw new Error(
-          (err as { error?: string }).error ?? "Failed to add resource",
-        );
+      if (formType === "webpage") {
+        const res = await fetch(`/api/projects/${projectId}/resources`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "webpage", title, url }),
+        });
+        if (!res.ok) {
+          const err = await res
+            .json()
+            .catch(() => ({ error: "Failed to add resource" }));
+          throw new Error(
+            (err as { error?: string }).error ?? "Failed to add resource",
+          );
+        }
+        return res.json();
       }
-      return res.json();
+
+      // FAQ is handled by FaqEditor component directly
+      return null;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
-      setShowForm(false);
-      setTitle("");
-      setUrl("");
-      setContent("");
-      setPdfFile(null);
-      setError(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      resetForm();
     },
     onError: (err: Error) => {
       setError(err.message);
@@ -134,8 +137,9 @@ function Resources() {
     faq: HelpCircle,
   };
 
-  const statusColors = {
+  const statusColors: Record<string, string> = {
     pending: "bg-yellow-100 text-yellow-700",
+    crawling: "bg-blue-100 text-blue-700",
     indexed: "bg-green-100 text-green-700",
     failed: "bg-red-100 text-red-700",
   };
@@ -163,22 +167,23 @@ function Resources() {
   }
 
   function resetForm() {
-    setShowForm(!showForm);
+    setShowForm(false);
     setError(null);
-    if (showForm) {
-      setTitle("");
-      setUrl("");
-      setContent("");
-      setPdfFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
+    setTitle("");
+    setUrl("");
+    setPdfFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function toggleExpanded(resourceId: string) {
+    setExpandedId(expandedId === resourceId ? null : resourceId);
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Resources</h1>
-        <Button onClick={resetForm}>
+        <Button onClick={() => setShowForm(!showForm)}>
           <Plus className="w-4 h-4 mr-2" />
           Add Resource
         </Button>
@@ -223,109 +228,111 @@ function Resources() {
             </Button>
           </div>
 
-          {error && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              {error}
-            </div>
-          )}
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              addResource.mutate();
-            }}
-            className="space-y-3"
-          >
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Resource title"
-              required
-              className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          {/* FAQ form uses the FaqEditor component */}
+          {formType === "faq" ? (
+            <FaqEditor
+              projectId={projectId!}
+              mode="create"
+              onSave={resetForm}
+              onCancel={resetForm}
             />
-            {formType === "webpage" && (
-              <input
-                type="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://example.com/page"
-                required
-                className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-            )}
-            {formType === "pdf" && (
-              <div className="space-y-2">
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className={cn(
-                    "relative flex flex-col items-center justify-center px-6 py-8 rounded-xl border-2 border-dashed cursor-pointer transition-colors",
-                    pdfFile
-                      ? "border-primary/50 bg-primary/5"
-                      : "border-input bg-background hover:border-muted-foreground/50",
-                  )}
-                >
-                  <Upload
-                    className={cn(
-                      "w-8 h-8 mb-2",
-                      pdfFile
-                        ? "text-primary"
-                        : "text-muted-foreground",
-                    )}
-                  />
-                  {pdfFile ? (
-                    <div className="text-center">
-                      <p className="text-sm font-medium text-foreground">
-                        {pdfFile.name}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {(pdfFile.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="text-center">
-                      <p className="text-sm text-foreground">
-                        Click to upload a PDF
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Max 10MB
-                      </p>
-                    </div>
-                  )}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="application/pdf"
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
+          ) : (
+            <>
+              {error && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  {error}
                 </div>
-              </div>
-            )}
-            {formType === "faq" && (
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder="Q: What is...&#10;A: It is..."
-                required
-                rows={4}
-                className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-            )}
-            <div className="flex gap-2">
-              <Button type="submit" disabled={addResource.isPending}>
-                {addResource.isPending ? "Adding..." : "Add Resource"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={resetForm}
+              )}
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  addResource.mutate();
+                }}
+                className="space-y-3"
               >
-                Cancel
-              </Button>
-            </div>
-          </form>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Resource title"
+                  required
+                  className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                {formType === "webpage" && (
+                  <input
+                    type="url"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://example.com/page"
+                    required
+                    className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                )}
+                {formType === "pdf" && (
+                  <div className="space-y-2">
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      className={cn(
+                        "relative flex flex-col items-center justify-center px-6 py-8 rounded-xl border-2 border-dashed cursor-pointer transition-colors",
+                        pdfFile
+                          ? "border-primary/50 bg-primary/5"
+                          : "border-input bg-background hover:border-muted-foreground/50",
+                      )}
+                    >
+                      <Upload
+                        className={cn(
+                          "w-8 h-8 mb-2",
+                          pdfFile
+                            ? "text-primary"
+                            : "text-muted-foreground",
+                        )}
+                      />
+                      {pdfFile ? (
+                        <div className="text-center">
+                          <p className="text-sm font-medium text-foreground">
+                            {pdfFile.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {(pdfFile.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="text-center">
+                          <p className="text-sm text-foreground">
+                            Click to upload a PDF
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Max 10MB
+                          </p>
+                        </div>
+                      )}
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="application/pdf"
+                        onChange={handleFileChange}
+                        className="hidden"
+                      />
+                    </div>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button type="submit" disabled={addResource.isPending}>
+                    {addResource.isPending ? "Adding..." : "Add Resource"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={resetForm}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            </>
+          )}
         </div>
       )}
 
@@ -343,56 +350,111 @@ function Resources() {
         <div className="space-y-2">
           {resources?.map((resource) => {
             const Icon = typeIcons[resource.type];
+            const isExpanded = expandedId === resource.id;
+
             return (
               <div
                 key={resource.id}
-                className="flex items-center gap-4 px-4 py-3 bg-card/50 backdrop-blur-xl rounded-xl border border-border"
+                className="bg-card/50 backdrop-blur-xl rounded-xl border border-border overflow-hidden"
               >
-                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
-                  <Icon className="w-4 h-4 text-muted-foreground" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">
-                    {resource.title}
-                  </p>
-                  {resource.url && (
-                    <p className="text-xs text-muted-foreground truncate">
-                      {resource.url}
-                    </p>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {resource.type.toUpperCase()}
-                  </p>
-                </div>
-                <span
-                  className={cn(
-                    "text-xs px-2 py-0.5 rounded-full",
-                    statusColors[resource.status],
-                  )}
+                {/* Resource Header Row */}
+                <div
+                  className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
+                  onClick={() => toggleExpanded(resource.id)}
                 >
-                  {resource.status}
-                </span>
-                <button
-                  onClick={() => reindex.mutate(resource.id)}
-                  disabled={reindex.isPending}
-                  className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50"
-                  title="Reindex"
-                >
-                  <RefreshCw
-                    className={cn(
-                      "w-4 h-4",
-                      reindex.isPending && "animate-spin",
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isExpanded ? (
+                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
                     )}
-                  />
-                </button>
-                <button
-                  onClick={() => deleteResource.mutate(resource.id)}
-                  disabled={deleteResource.isPending}
-                  className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive disabled:opacity-50"
-                  title="Delete"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                    <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
+                      <Icon className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {resource.title}
+                    </p>
+                    {resource.url && (
+                      <p className="text-xs text-muted-foreground truncate">
+                        {resource.url}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {resource.type.toUpperCase()}
+                    </p>
+                  </div>
+                  <span
+                    className={cn(
+                      "text-xs px-2 py-0.5 rounded-full shrink-0",
+                      statusColors[resource.status] ?? statusColors.pending,
+                    )}
+                  >
+                    {resource.status}
+                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        reindex.mutate(resource.id);
+                      }}
+                      disabled={reindex.isPending}
+                      className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50"
+                      title="Reindex"
+                    >
+                      <RefreshCw
+                        className={cn(
+                          "w-4 h-4",
+                          reindex.isPending && "animate-spin",
+                        )}
+                      />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (expandedId === resource.id) setExpandedId(null);
+                        deleteResource.mutate(resource.id);
+                      }}
+                      disabled={deleteResource.isPending}
+                      className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive disabled:opacity-50"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Expanded Detail View */}
+                {isExpanded && (
+                  <div className="border-t border-border px-4 py-4">
+                    {resource.type === "faq" && (
+                      <FaqEditor
+                        projectId={projectId!}
+                        resourceId={resource.id}
+                        mode="edit"
+                        onSave={() => setExpandedId(null)}
+                        onCancel={() => setExpandedId(null)}
+                      />
+                    )}
+                    {resource.type === "webpage" && (
+                      <WebpageResourceDetail
+                        projectId={projectId!}
+                        resourceId={resource.id}
+                        resourceUrl={resource.url ?? ""}
+                        onRefreshAll={() => reindex.mutate(resource.id)}
+                      />
+                    )}
+                    {resource.type === "pdf" && (
+                      <PdfResourceDetail
+                        projectId={projectId!}
+                        resourceId={resource.id}
+                        resourceTitle={resource.title}
+                        onReindex={() => reindex.mutate(resource.id)}
+                      />
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
