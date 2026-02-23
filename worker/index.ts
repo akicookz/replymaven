@@ -198,13 +198,13 @@ const app = new Hono<HonoAppContext>()
       if (!project) return c.json({ error: "Project not found" }, 404);
 
       const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-      const conversation = await chatService.getConversationById(conversationId);
-      if (!conversation || conversation.projectId !== project.id) {
+      const conversation = await chatService.getConversationById(conversationId, project.id);
+      if (!conversation) {
         return c.json({ error: "Conversation not found" }, 404);
       }
 
       // Try KV cache first
-      const cached = await chatService.getFromCache(conversationId);
+      const cached = await chatService.getFromCache(conversationId, project.id);
       if (cached) return c.json(cached);
 
       const messages = await chatService.getMessages(conversationId);
@@ -234,8 +234,8 @@ const app = new Hono<HonoAppContext>()
       if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
       const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-      const conversation = await chatService.getConversationById(conversationId);
-      if (!conversation || conversation.projectId !== project.id) {
+      const conversation = await chatService.getConversationById(conversationId, project.id);
+      if (!conversation) {
         return c.json({ error: "Conversation not found" }, 404);
       }
 
@@ -244,20 +244,20 @@ const app = new Hono<HonoAppContext>()
         conversationId,
         role: "visitor",
         content: parsed.data.content,
-      });
+      }, project.id);
 
       // Get project settings for tone and context
       const settings = await projectService.getSettings(project.id);
 
       // Get conversation history from cache or DB
       const history =
-        (await chatService.getFromCache(conversationId)) ??
+        (await chatService.getFromCache(conversationId, project.id)) ??
         (await chatService.getMessages(conversationId));
 
       // Query AI Search for relevant context
       let ragContext = "";
       try {
-        const searchResults = await (c.env.AI as any).autorag("supportbot").search({
+        const searchResults = await c.env.AI.autorag("supportbot").search({
           query: parsed.data.content,
           filters: {
             type: "eq",
@@ -271,15 +271,15 @@ const app = new Hono<HonoAppContext>()
         if (searchResults?.data?.length > 0) {
           ragContext = searchResults.data
             .map(
-              (item: any) =>
+              (item: { filename?: string; content?: Array<{ text?: string }> }) =>
                 `<source file="${item.filename}">\n${item.content
-                  ?.map((c: any) => c.text)
+                  ?.map((chunk) => chunk.text)
                   .join("\n")}\n</source>`,
             )
             .join("\n\n");
         }
-      } catch {
-        // AI Search may not be configured -- continue without RAG
+      } catch (err) {
+        console.error("AI Search query failed:", err);
       }
 
       // Check canned responses
@@ -326,6 +326,7 @@ const app = new Hono<HonoAppContext>()
             if (fullResponse.includes("[HANDOFF_REQUESTED]")) {
               await chatService.updateConversationStatus(
                 conversationId,
+                project.id,
                 "waiting_agent",
               );
 
@@ -363,7 +364,7 @@ const app = new Hono<HonoAppContext>()
               role: "bot",
               content: fullResponse,
               sources: ragContext ? JSON.stringify(ragContext) : null,
-            });
+            }, project.id);
 
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`),
@@ -414,12 +415,12 @@ const app = new Hono<HonoAppContext>()
       if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
       const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-      const conversation = await chatService.getConversationById(conversationId);
-      if (!conversation || conversation.projectId !== project.id) {
+      const conversation = await chatService.getConversationById(conversationId, project.id);
+      if (!conversation) {
         return c.json({ error: "Conversation not found" }, 404);
       }
 
-      await chatService.updateConversationEmail(conversationId, parsed.data.email);
+      await chatService.updateConversationEmail(conversationId, project.id, parsed.data.email);
       return c.json({ ok: true });
     },
   )
@@ -453,8 +454,8 @@ const app = new Hono<HonoAppContext>()
 
     const conversationId = convMatch[1];
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-    const conversation = await chatService.getConversationById(conversationId);
-    if (!conversation || conversation.projectId !== projectId) {
+    const conversation = await chatService.getConversationById(conversationId, projectId);
+    if (!conversation) {
       return c.json({ ok: true });
     }
 
@@ -463,11 +464,12 @@ const app = new Hono<HonoAppContext>()
       conversationId,
       role: "agent",
       content: message.text,
-    });
+    }, projectId);
 
     // Update conversation status
     await chatService.updateConversationStatus(
       conversationId,
+      projectId,
       "agent_replied",
     );
 
@@ -1237,13 +1239,14 @@ const app = new Hono<HonoAppContext>()
     const resourceService = new ResourceService(db, c.env.UPLOADS);
     const resource = await resourceService.getResourceById(
       c.req.param("resourceId"),
+      project.id,
     );
-    if (!resource || resource.projectId !== project.id) {
+    if (!resource) {
       return c.json({ error: "Not found" }, 404);
     }
 
     // Reset status to pending before re-ingestion
-    await resourceService.updateResourceStatus(resource.id, "pending");
+    await resourceService.updateResourceStatus(resource.id, project.id, "pending");
 
     // Re-trigger ingestion (use waitUntil to keep isolate alive)
     if (resource.type === "webpage" && resource.url) {
@@ -1271,7 +1274,7 @@ const app = new Hono<HonoAppContext>()
           try {
             const obj = await c.env.UPLOADS.get(resource.r2Key!);
             if (!obj) {
-              await resourceService.updateResourceStatus(resource.id, "failed");
+              await resourceService.updateResourceStatus(resource.id, project.id, "failed");
               return;
             }
             const body = await obj.arrayBuffer();
@@ -1281,10 +1284,10 @@ const app = new Hono<HonoAppContext>()
                 context: `PDF document: ${resource.title}`,
               },
             });
-            await resourceService.updateResourceStatus(resource.id, "indexed");
+            await resourceService.updateResourceStatus(resource.id, project.id, "indexed");
           } catch (err) {
             console.error(`PDF reindex failed for resource ${resource.id}:`, err);
-            await resourceService.updateResourceStatus(resource.id, "failed");
+            await resourceService.updateResourceStatus(resource.id, project.id, "failed");
           }
         })(),
       );
@@ -1323,8 +1326,9 @@ const app = new Hono<HonoAppContext>()
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
     const conversation = await chatService.getConversationById(
       c.req.param("convId"),
+      project.id,
     );
-    if (!conversation || conversation.projectId !== project.id) {
+    if (!conversation) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -1349,8 +1353,9 @@ const app = new Hono<HonoAppContext>()
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
     const conversation = await chatService.getConversationById(
       c.req.param("convId"),
+      project.id,
     );
-    if (!conversation || conversation.projectId !== project.id) {
+    if (!conversation) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -1358,10 +1363,11 @@ const app = new Hono<HonoAppContext>()
       conversationId: conversation.id,
       role: "agent",
       content: parsed.data.content,
-    });
+    }, project.id);
 
     await chatService.updateConversationStatus(
       conversation.id,
+      project.id,
       "agent_replied",
     );
 
@@ -1381,13 +1387,14 @@ const app = new Hono<HonoAppContext>()
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
     const conversation = await chatService.getConversationById(
       c.req.param("convId"),
+      project.id,
     );
-    if (!conversation || conversation.projectId !== project.id) {
+    if (!conversation) {
       return c.json({ error: "Not found" }, 404);
     }
 
     // Close the conversation
-    await chatService.updateConversationStatus(conversation.id, "closed");
+    await chatService.updateConversationStatus(conversation.id, project.id, "closed");
 
     // Auto-draft canned response if enabled
     const settings = await projectService.getSettings(project.id);

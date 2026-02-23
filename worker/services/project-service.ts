@@ -46,10 +46,10 @@ export class ProjectService {
     return rows[0] ?? null;
   }
 
-  async generateUniqueSlug(userId: string, baseSlug: string): Promise<string> {
+  async generateUniqueSlug(_userId: string, baseSlug: string): Promise<string> {
     let slug = baseSlug;
     let suffix = 1;
-    while (await this.getProjectBySlug(userId, slug)) {
+    while (await this.getProjectBySlugPublic(slug)) {
       suffix++;
       slug = `${baseSlug.slice(0, 45)}-${suffix}`;
     }
@@ -69,7 +69,7 @@ export class ProjectService {
         err instanceof Error &&
         err.message.includes("UNIQUE constraint")
       ) {
-        throw new Error("A project with this name already exists");
+        throw new Error("This slug is already taken. Please choose a different project name.");
       }
       throw err;
     }

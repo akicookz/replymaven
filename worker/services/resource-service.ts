@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import {
   resources,
   type ResourceRow,
@@ -19,11 +19,14 @@ export class ResourceService {
       .where(eq(resources.projectId, projectId));
   }
 
-  async getResourceById(id: string): Promise<ResourceRow | null> {
+  async getResourceById(
+    id: string,
+    projectId: string,
+  ): Promise<ResourceRow | null> {
     const rows = await this.db
       .select()
       .from(resources)
-      .where(eq(resources.id, id))
+      .where(and(eq(resources.id, id), eq(resources.projectId, projectId)))
       .limit(1);
     return rows[0] ?? null;
   }
@@ -33,15 +36,15 @@ export class ResourceService {
   ): Promise<ResourceRow> {
     const id = crypto.randomUUID();
     await this.db.insert(resources).values({ id, ...data });
-    return (await this.getResourceById(id))!;
+    return (await this.getResourceById(id, data.projectId))!;
   }
 
   async deleteResource(
     id: string,
     projectId: string,
   ): Promise<boolean> {
-    const resource = await this.getResourceById(id);
-    if (!resource || resource.projectId !== projectId) return false;
+    const resource = await this.getResourceById(id, projectId);
+    if (!resource) return false;
 
     // Delete from R2 if there's an r2Key
     if (resource.r2Key) {
@@ -54,6 +57,7 @@ export class ResourceService {
 
   async updateResourceStatus(
     id: string,
+    projectId: string,
     status: ResourceRow["status"],
   ): Promise<void> {
     const updates: Record<string, unknown> = { status };
@@ -63,7 +67,7 @@ export class ResourceService {
     await this.db
       .update(resources)
       .set(updates)
-      .where(eq(resources.id, id));
+      .where(and(eq(resources.id, id), eq(resources.projectId, projectId)));
   }
 
   // ─── Resource Ingestion ─────────────────────────────────────────────────────
@@ -78,7 +82,7 @@ export class ResourceService {
       // Fetch the webpage content
       const response = await fetch(url);
       if (!response.ok) {
-        await this.updateResourceStatus(resourceId, "failed");
+        await this.updateResourceStatus(resourceId, projectId, "failed");
         return;
       }
 
@@ -105,10 +109,10 @@ export class ResourceService {
       await this.db
         .update(resources)
         .set({ r2Key, status: "indexed", lastIndexedAt: new Date() })
-        .where(eq(resources.id, resourceId));
+        .where(and(eq(resources.id, resourceId), eq(resources.projectId, projectId)));
     } catch (err) {
       console.error(`Webpage ingestion failed for resource ${resourceId}:`, err);
-      await this.updateResourceStatus(resourceId, "failed");
+      await this.updateResourceStatus(resourceId, projectId, "failed");
     }
   }
 
@@ -131,10 +135,10 @@ export class ResourceService {
       await this.db
         .update(resources)
         .set({ r2Key, status: "indexed", lastIndexedAt: new Date() })
-        .where(eq(resources.id, resourceId));
+        .where(and(eq(resources.id, resourceId), eq(resources.projectId, projectId)));
     } catch (err) {
       console.error(`FAQ ingestion failed for resource ${resourceId}:`, err);
-      await this.updateResourceStatus(resourceId, "failed");
+      await this.updateResourceStatus(resourceId, projectId, "failed");
     }
   }
 
@@ -157,10 +161,10 @@ export class ResourceService {
       await this.db
         .update(resources)
         .set({ r2Key, status: "indexed", lastIndexedAt: new Date() })
-        .where(eq(resources.id, resourceId));
+        .where(and(eq(resources.id, resourceId), eq(resources.projectId, projectId)));
     } catch (err) {
       console.error(`PDF ingestion failed for resource ${resourceId}:`, err);
-      await this.updateResourceStatus(resourceId, "failed");
+      await this.updateResourceStatus(resourceId, projectId, "failed");
     }
   }
 }

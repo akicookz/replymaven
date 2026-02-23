@@ -18,11 +18,16 @@ export class ChatService {
 
   // ─── Conversations ──────────────────────────────────────────────────────────
 
-  async getConversationById(id: string): Promise<ConversationRow | null> {
+  async getConversationById(
+    id: string,
+    projectId: string,
+  ): Promise<ConversationRow | null> {
     const rows = await this.db
       .select()
       .from(conversations)
-      .where(eq(conversations.id, id))
+      .where(
+        and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
+      )
       .limit(1);
     return rows[0] ?? null;
   }
@@ -48,27 +53,33 @@ export class ChatService {
     await this.db
       .insert(conversations)
       .values({ id, ...data });
-    return (await this.getConversationById(id))!;
+    return (await this.getConversationById(id, data.projectId))!;
   }
 
   async updateConversationStatus(
     id: string,
+    projectId: string,
     status: ConversationRow["status"],
   ): Promise<void> {
     await this.db
       .update(conversations)
       .set({ status })
-      .where(eq(conversations.id, id));
+      .where(
+        and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
+      );
   }
 
   async updateConversationEmail(
     id: string,
+    projectId: string,
     email: string,
   ): Promise<void> {
     await this.db
       .update(conversations)
       .set({ visitorEmail: email })
-      .where(eq(conversations.id, id));
+      .where(
+        and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
+      );
   }
 
   // ─── Messages ───────────────────────────────────────────────────────────────
@@ -83,12 +94,13 @@ export class ChatService {
 
   async addMessage(
     data: Omit<NewMessageRow, "id" | "createdAt">,
+    projectId: string,
   ): Promise<MessageRow> {
     const id = crypto.randomUUID();
     await this.db.insert(messages).values({ id, ...data });
 
     // Update KV cache
-    await this.updateKVCache(data.conversationId);
+    await this.updateKVCache(data.conversationId, projectId);
 
     const rows = await this.db
       .select()
@@ -100,12 +112,25 @@ export class ChatService {
 
   // ─── KV Cache ───────────────────────────────────────────────────────────────
 
-  async getFromCache(conversationId: string): Promise<MessageRow[] | null> {
-    const cached = await this.kv.get(`conv:${conversationId}`, "json");
+  private cacheKey(projectId: string, conversationId: string): string {
+    return `conv:${projectId}:${conversationId}`;
+  }
+
+  async getFromCache(
+    conversationId: string,
+    projectId: string,
+  ): Promise<MessageRow[] | null> {
+    const cached = await this.kv.get(
+      this.cacheKey(projectId, conversationId),
+      "json",
+    );
     return cached as MessageRow[] | null;
   }
 
-  async updateKVCache(conversationId: string): Promise<void> {
+  async updateKVCache(
+    conversationId: string,
+    projectId: string,
+  ): Promise<void> {
     const recentMessages = await this.db
       .select()
       .from(messages)
@@ -115,9 +140,11 @@ export class ChatService {
 
     // Store in reverse order (oldest first)
     const ordered = recentMessages.reverse();
-    await this.kv.put(`conv:${conversationId}`, JSON.stringify(ordered), {
-      expirationTtl: 86400, // 24 hours
-    });
+    await this.kv.put(
+      this.cacheKey(projectId, conversationId),
+      JSON.stringify(ordered),
+      { expirationTtl: 86400 },
+    );
   }
 
   // ─── Canned Responses ───────────────────────────────────────────────────────

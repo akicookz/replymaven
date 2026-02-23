@@ -33,7 +33,7 @@ export const projects = sqliteTable(
       .notNull(),
   },
   (table) => [
-    uniqueIndex("idx_projects_slug").on(table.userId, table.slug),
+    uniqueIndex("idx_projects_slug_global").on(table.slug),
     index("idx_projects_user").on(table.userId),
   ],
 );
