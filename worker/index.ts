@@ -422,9 +422,11 @@ const app = new Hono<HonoAppContext>()
   .get("/api/widget-embed.js", async (c) => {
     const obj = await c.env.UPLOADS.get("widget-embed.js");
     if (!obj) {
-      return c.text("// Widget not built yet", 200, {
-        "Content-Type": "application/javascript",
-      });
+      return c.text(
+        '// ReplyMaven widget not deployed yet. Run: bun run widget:deploy\nconsole.warn("[ReplyMaven] Widget bundle not found. Deploy it with: bun run widget:deploy");',
+        200,
+        { "Content-Type": "application/javascript" },
+      );
     }
 
     const body = await obj.text();
