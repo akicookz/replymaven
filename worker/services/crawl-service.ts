@@ -20,12 +20,12 @@ export interface CrawlMessage {
 
 interface BrowserRenderingLinksResponse {
   success: boolean;
-  result: { links: Array<{ href: string }> };
+  result: string[];
 }
 
 interface BrowserRenderingMarkdownResponse {
   success: boolean;
-  result: { markdown: string; title?: string };
+  result: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -294,8 +294,10 @@ export class CrawlService {
       },
       body: JSON.stringify({
         url,
-        waitUntil: "networkidle2",
-        rejectResourceTypes: ["image", "media", "font", "stylesheet"],
+        gotoOptions: {
+          waitUntil: "networkidle2",
+        },
+        rejectRequestPattern: ["/^.*\\.(jpg|jpeg|png|gif|svg|webp|ico|bmp|tiff|mp4|webm|ogg|mp3|wav|woff2?|ttf|eot|otf|css)$/i"],
       }),
     });
 
@@ -310,8 +312,8 @@ export class CrawlService {
     }
 
     return {
-      markdown: data.result.markdown,
-      title: data.result.title ?? "",
+      markdown: data.result,
+      title: "",
     };
   }
 
@@ -324,8 +326,11 @@ export class CrawlService {
       },
       body: JSON.stringify({
         url,
+        gotoOptions: {
+          waitUntil: "networkidle2",
+        },
         excludeExternalLinks: true,
-        rejectResourceTypes: ["image", "media", "font", "stylesheet"],
+        rejectRequestPattern: ["/^.*\\.(jpg|jpeg|png|gif|svg|webp|ico|bmp|tiff|mp4|webm|ogg|mp3|wav|woff2?|ttf|eot|otf|css)$/i"],
       }),
     });
 
@@ -339,7 +344,7 @@ export class CrawlService {
       throw new Error("Browser Rendering /links returned success=false");
     }
 
-    return data.result.links.map((l) => l.href);
+    return data.result;
   }
 
   // ─── DB Helpers ─────────────────────────────────────────────────────────

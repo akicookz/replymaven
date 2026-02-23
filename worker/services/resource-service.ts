@@ -253,7 +253,13 @@ export class ResourceService {
           Authorization: `Bearer ${apiToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ url: page.url }),
+        body: JSON.stringify({
+          url: page.url,
+          gotoOptions: {
+            waitUntil: "networkidle2",
+          },
+          rejectRequestPattern: ["/^.*\\.(jpg|jpeg|png|gif|svg|webp|ico|bmp|tiff|mp4|webm|ogg|mp3|wav|woff2?|ttf|eot|otf|css)$/i"],
+        }),
       });
 
       if (!mdResponse.ok) {
@@ -264,8 +270,8 @@ export class ResourceService {
         return false;
       }
 
-      const mdData = (await mdResponse.json()) as { success: boolean; result: { markdown: string } };
-      if (!mdData.success || !mdData.result?.markdown) {
+      const mdData = (await mdResponse.json()) as { success: boolean; result: string };
+      if (!mdData.success || !mdData.result) {
         await this.db
           .update(crawledPages)
           .set({ status: "failed" })
@@ -275,7 +281,7 @@ export class ResourceService {
 
       // Upload updated content to R2
       const r2Key = page.r2Key ?? `${projectId}/page-${crypto.randomUUID()}.md`;
-      await this.r2.put(r2Key, mdData.result.markdown, {
+      await this.r2.put(r2Key, mdData.result, {
         customMetadata: {
           context: `Crawled page: ${page.url}`,
         },
