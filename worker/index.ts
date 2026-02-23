@@ -12,6 +12,7 @@ import { GeminiService } from "./services/gemini-service";
 import { TelegramService } from "./services/telegram-service";
 import { CannedResponseService } from "./services/canned-response-service";
 import { DashboardService } from "./services/dashboard-service";
+import { CrawlService, type CrawlMessage } from "./services/crawl-service";
 import {
   createProjectSchema,
   updateProjectSchema,
@@ -643,6 +644,9 @@ const app = new Hono<HonoAppContext>()
           resource.id,
           settings.companyUrl,
           resource.title,
+          c.env.CRAWL_QUEUE,
+          c.env.CF_ACCOUNT_ID,
+          c.env.BROWSER_RENDERING_API_TOKEN,
         ),
       );
 
@@ -1191,6 +1195,9 @@ const app = new Hono<HonoAppContext>()
           resource.id,
           parsed.data.url,
           parsed.data.title,
+          c.env.CRAWL_QUEUE,
+          c.env.CF_ACCOUNT_ID,
+          c.env.BROWSER_RENDERING_API_TOKEN,
         ),
       );
     } else if (parsed.data.type === "faq" && parsed.data.content) {
@@ -1256,6 +1263,9 @@ const app = new Hono<HonoAppContext>()
           resource.id,
           resource.url,
           resource.title,
+          c.env.CRAWL_QUEUE,
+          c.env.CF_ACCOUNT_ID,
+          c.env.BROWSER_RENDERING_API_TOKEN,
         ),
       );
     } else if (resource.type === "faq" && resource.content) {
@@ -1680,5 +1690,34 @@ const app = new Hono<HonoAppContext>()
     return new Response(obj.body, { headers });
   });
 
+// ─── Queue Consumer ───────────────────────────────────────────────────────────
+
+async function handleQueue(
+  batch: MessageBatch<CrawlMessage>,
+  env: Env,
+): Promise<void> {
+  const db = drizzle(env.DB);
+
+  for (const message of batch.messages) {
+    try {
+      const crawlService = new CrawlService(
+        db,
+        env.UPLOADS,
+        env.CF_ACCOUNT_ID,
+        env.BROWSER_RENDERING_API_TOKEN,
+      );
+
+      await crawlService.processUrl(message.body, env.CRAWL_QUEUE);
+      message.ack();
+    } catch (err) {
+      console.error(`Queue message processing failed for ${message.body.url}:`, err);
+      message.retry();
+    }
+  }
+}
+
 // ─── Export ───────────────────────────────────────────────────────────────────
-export default app;
+export default {
+  fetch: app.fetch,
+  queue: handleQueue,
+};

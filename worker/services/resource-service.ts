@@ -5,6 +5,7 @@ import {
   type ResourceRow,
   type NewResourceRow,
 } from "../db";
+import { CrawlService, type CrawlMessage } from "./crawl-service";
 
 export class ResourceService {
   constructor(
@@ -76,10 +77,26 @@ export class ResourceService {
     projectId: string,
     resourceId: string,
     url: string,
-    title: string,
+    _title: string,
+    crawlQueue?: Queue<CrawlMessage>,
+    accountId?: string,
+    apiToken?: string,
   ): Promise<void> {
+    // If crawl queue is available, delegate to the crawl service for deep crawling
+    if (crawlQueue && accountId && apiToken) {
+      try {
+        const crawlService = new CrawlService(this.db, this.r2, accountId, apiToken);
+        await crawlService.startCrawl(projectId, resourceId, url, crawlQueue);
+        return;
+      } catch (err) {
+        console.error(`Crawl initiation failed for resource ${resourceId}:`, err);
+        await this.updateResourceStatus(resourceId, projectId, "failed");
+        return;
+      }
+    }
+
+    // Fallback: simple single-page fetch if crawl queue is not configured
     try {
-      // Fetch the webpage content
       const response = await fetch(url);
       if (!response.ok) {
         await this.updateResourceStatus(resourceId, projectId, "failed");
@@ -96,16 +113,14 @@ export class ResourceService {
         .replace(/\s+/g, " ")
         .trim();
 
-      // Upload as markdown to R2 under project folder
       const r2Key = `${projectId}/${resourceId}.md`;
-      const markdown = `# ${title}\n\nSource: ${url}\n\n${text}`;
+      const markdown = `# ${_title}\n\nSource: ${url}\n\n${text}`;
       await this.r2.put(r2Key, markdown, {
         customMetadata: {
-          context: `Web page: ${title} (${url})`,
+          context: `Web page: ${_title} (${url})`,
         },
       });
 
-      // Update resource record
       await this.db
         .update(resources)
         .set({ r2Key, status: "indexed", lastIndexedAt: new Date() })

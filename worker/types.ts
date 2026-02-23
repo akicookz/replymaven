@@ -11,9 +11,12 @@ export interface AppEnv extends Env {
   RESEND_API_KEY: string;
   ENCRYPTION_KEY: string;
   GEMINI_API_KEY: string;
+  BROWSER_RENDERING_API_TOKEN: string;
+  CF_ACCOUNT_ID: string;
   UPLOADS: R2Bucket;
   CONVERSATIONS_CACHE: KVNamespace;
   AI: Ai;
+  CRAWL_QUEUE: Queue<CrawlMessage>;
 }
 
 export interface HonoAppContext {

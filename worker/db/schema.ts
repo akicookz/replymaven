@@ -205,7 +205,9 @@ export const resources = sqliteTable(
     url: text("url"),
     r2Key: text("r2_key"),
     content: text("content"),
-    status: text("status", { enum: ["pending", "indexed", "failed"] })
+    status: text("status", {
+      enum: ["pending", "crawling", "indexed", "failed"],
+    })
       .notNull()
       .default("pending"),
     lastIndexedAt: integer("last_indexed_at", { mode: "timestamp" }),
@@ -225,6 +227,41 @@ export const resources = sqliteTable(
 
 export type ResourceRow = typeof resources.$inferSelect;
 export type NewResourceRow = typeof resources.$inferInsert;
+
+// ─── Crawled Pages ────────────────────────────────────────────────────────────
+
+export const crawledPages = sqliteTable(
+  "crawled_pages",
+  {
+    id: text("id").primaryKey(),
+    resourceId: text("resource_id")
+      .notNull()
+      .references(() => resources.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    r2Key: text("r2_key"),
+    status: text("status", { enum: ["pending", "crawled", "failed"] })
+      .notNull()
+      .default("pending"),
+    depth: integer("depth").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_crawled_pages_resource_url").on(
+      table.resourceId,
+      table.url,
+    ),
+    index("idx_crawled_pages_resource").on(table.resourceId),
+    index("idx_crawled_pages_project").on(table.projectId),
+  ],
+);
+
+export type CrawledPageRow = typeof crawledPages.$inferSelect;
+export type NewCrawledPageRow = typeof crawledPages.$inferInsert;
 
 // ─── Conversations ────────────────────────────────────────────────────────────
 
@@ -355,6 +392,7 @@ export const schema = {
   quickActions,
   quickTopics,
   resources,
+  crawledPages,
   conversations,
   messages,
   cannedResponses,

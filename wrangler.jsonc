@@ -39,13 +39,30 @@
     "binding": "AI",
     "remote": true,
   },
+  "queues": {
+    "consumers": [
+      {
+        "queue": "replymaven-crawl",
+        "max_batch_timeout": 30,
+        "max_batch_size": 5,
+      },
+    ],
+    "producers": [
+      {
+        "queue": "replymaven-crawl",
+        "binding": "CRAWL_QUEUE",
+      },
+    ],
+  },
   "vars": {
     "BETTER_AUTH_URL": "https://replymaven.com",
+    "CF_ACCOUNT_ID": "35bc7a4522237728214ba9d54c36002e",
   },
   "env": {
     "production": {
       "vars": {
         "BETTER_AUTH_URL": "https://replymaven.com",
+        "CF_ACCOUNT_ID": "35bc7a4522237728214ba9d54c36002e",
       },
     },
   },
