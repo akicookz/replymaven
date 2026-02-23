@@ -53,7 +53,7 @@ export class GeminiService {
     prompt += "- If you don't know the answer, say so honestly and offer to connect the visitor with a human agent.\n";
     prompt += "- Keep responses concise and helpful.\n";
     prompt += "- Do not make up information.\n";
-    prompt += '- If the visitor asks to speak to a human, respond with exactly: "[HANDOFF_REQUESTED]"\n\n';
+    prompt += '- If the visitor asks to speak to a human or requests a handoff, respond with ONLY the exact text "[HANDOFF_REQUESTED]" and nothing else.\n\n';
 
     if (settings.companyContext) {
       prompt += "COMPANY CONTEXT:\n";

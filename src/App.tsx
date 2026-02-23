@@ -1,4 +1,5 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 
 import Layout from "./components/Layout";
 import AuthGuard from "./components/AuthGuard";
@@ -17,6 +18,26 @@ import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
 import TelegramConfig from "./pages/TelegramConfig";
 import AuthCallback from "./pages/AuthCallback";
+
+// ─── Redirect /app to first project's dashboard ──────────────────────────────
+function DashboardRedirect() {
+  const { data: projects, isLoading } = useQuery<{ id: string }[]>({
+    queryKey: ["projects"],
+    queryFn: async () => {
+      const res = await fetch("/api/projects");
+      if (!res.ok) throw new Error("Failed to fetch projects");
+      return res.json();
+    },
+  });
+
+  if (isLoading) return null;
+
+  if (!projects || projects.length === 0) {
+    return <Navigate to="/app/onboarding" replace />;
+  }
+
+  return <Navigate to={`/app/projects/${projects[0].id}`} replace />;
+}
 
 function App() {
   return (
@@ -41,7 +62,7 @@ function App() {
         }
       />
 
-      {/* Dashboard -- with sidebar layout and onboarding guard */}
+      {/* /app index -- redirect to first project dashboard */}
       <Route
         path="/app"
         element={
@@ -54,8 +75,12 @@ function App() {
           </ErrorBoundary>
         }
       >
-        <Route index element={<Dashboard />} />
+        <Route index element={<DashboardRedirect />} />
         <Route path="new-project" element={<Onboarding />} />
+        <Route
+          path="projects/:projectId"
+          element={<Dashboard />}
+        />
         <Route
           path="projects/:projectId/conversations"
           element={<Conversations />}

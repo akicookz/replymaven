@@ -19,6 +19,7 @@ import {
   updateWidgetConfigSchema,
   createQuickActionSchema,
   createQuickTopicSchema,
+  createHomeLinkSchema,
   createResourceSchema,
   createConversationSchema,
   sendMessageSchema,
@@ -29,6 +30,7 @@ import {
   onboardingStep1Schema,
   onboardingContextSchema,
   onboardingWidgetSchema,
+  updateVisitorEmailSchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -187,9 +189,19 @@ const app = new Hono<HonoAppContext>()
         return c.json({ error: "Rate limit exceeded" }, 429);
       }
 
+      const slug = c.req.param("projectSlug");
       const conversationId = c.req.param("id");
       const db = drizzle(c.env.DB);
+
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectBySlugPublic(slug);
+      if (!project) return c.json({ error: "Project not found" }, 404);
+
       const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+      const conversation = await chatService.getConversationById(conversationId);
+      if (!conversation || conversation.projectId !== project.id) {
+        return c.json({ error: "Conversation not found" }, 404);
+      }
 
       // Try KV cache first
       const cached = await chatService.getFromCache(conversationId);
@@ -333,6 +345,16 @@ const app = new Hono<HonoAppContext>()
                 "[HANDOFF_REQUESTED]",
                 "I'll connect you with a human agent right away. They'll be with you shortly!",
               );
+
+              // Send handoff event to widget with visitor email for smart handoff UX
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    handoff: true,
+                    visitorEmail: conversation.visitorEmail ?? null,
+                  })}\n\n`,
+                ),
+              );
             }
 
             // Store bot message in DB
@@ -370,6 +392,38 @@ const app = new Hono<HonoAppContext>()
     },
   )
 
+  // ─── Update Visitor Email (for handoff flow) ─────────────────────────────────
+  .post(
+    "/api/widget/:projectSlug/conversations/:id/email",
+    async (c) => {
+      const ip = getClientIp(c);
+      if (!checkRateLimit(`email:${ip}`, 10, 60_000)) {
+        return c.json({ error: "Rate limit exceeded" }, 429);
+      }
+
+      const slug = c.req.param("projectSlug");
+      const conversationId = c.req.param("id");
+      const db = drizzle(c.env.DB);
+
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectBySlugPublic(slug);
+      if (!project) return c.json({ error: "Project not found" }, 404);
+
+      const body = await c.req.json();
+      const parsed = validate(updateVisitorEmailSchema, body);
+      if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+      const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+      const conversation = await chatService.getConversationById(conversationId);
+      if (!conversation || conversation.projectId !== project.id) {
+        return c.json({ error: "Conversation not found" }, 404);
+      }
+
+      await chatService.updateConversationEmail(conversationId, parsed.data.email);
+      return c.json({ ok: true });
+    },
+  )
+
   // ─── Telegram Webhook ───────────────────────────────────────────────────────
   .post("/api/telegram/webhook/:projectId", async (c) => {
     const ip = getClientIp(c);
@@ -400,7 +454,9 @@ const app = new Hono<HonoAppContext>()
     const conversationId = convMatch[1];
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
     const conversation = await chatService.getConversationById(conversationId);
-    if (!conversation) return c.json({ ok: true });
+    if (!conversation || conversation.projectId !== projectId) {
+      return c.json({ ok: true });
+    }
 
     // Store agent reply
     await chatService.addMessage({
@@ -700,8 +756,9 @@ const app = new Hono<HonoAppContext>()
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     const db = c.get("db");
+    const projectId = c.req.query("projectId");
     const dashboardService = new DashboardService(db);
-    const stats = await dashboardService.getStats(user.id);
+    const stats = await dashboardService.getStats(user.id, projectId);
     return c.json(stats);
   })
 
@@ -970,6 +1027,71 @@ const app = new Hono<HonoAppContext>()
     const widgetService = new WidgetService(db);
     const deleted = await widgetService.deleteQuickTopic(
       c.req.param("topicId"),
+      project.id,
+    );
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+
+  // ─── Home Links ─────────────────────────────────────────────────────────────
+  .get("/api/projects/:id/home-links", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const links = await widgetService.getHomeLinks(project.id);
+    return c.json(links);
+  })
+  .post("/api/projects/:id/home-links", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(createHomeLinkSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const widgetService = new WidgetService(db);
+
+    // Enforce max 5 home links
+    const existing = await widgetService.getHomeLinks(project.id);
+    if (existing.length >= 5) {
+      return c.json({ error: "Maximum of 5 home links allowed" }, 400);
+    }
+
+    const link = await widgetService.createHomeLink({
+      projectId: project.id,
+      ...parsed.data,
+    });
+    return c.json(link, 201);
+  })
+  .delete("/api/projects/:id/home-links/:linkId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const deleted = await widgetService.deleteHomeLink(
+      c.req.param("linkId"),
       project.id,
     );
     if (!deleted) return c.json({ error: "Not found" }, 404);

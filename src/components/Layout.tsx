@@ -1,4 +1,5 @@
-import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Outlet, Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
@@ -12,9 +13,15 @@ import {
   LogOut,
   ChevronDown,
   Plus,
+  Check,
 } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 interface Project {
   id: string;
@@ -25,7 +32,9 @@ interface Project {
 function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const params = useParams<{ projectId?: string }>();
   const { data: session } = useSession();
+  const [selectorOpen, setSelectorOpen] = useState(false);
 
   const { data: projects } = useQuery<Project[]>({
     queryKey: ["projects"],
@@ -36,13 +45,24 @@ function Layout() {
     },
   });
 
-  const currentProject = projects?.[0];
+  // Derive current project strictly from URL param
+  const currentProject = params.projectId
+    ? projects?.find((p) => p.id === params.projectId)
+    : projects?.[0];
+
+  // Redirect to first project if URL projectId is invalid (stale bookmark, deleted project)
+  useEffect(() => {
+    if (!projects || projects.length === 0) return;
+    if (params.projectId && !projects.find((p) => p.id === params.projectId)) {
+      navigate(`/app/projects/${projects[0].id}`, { replace: true });
+    }
+  }, [params.projectId, projects, navigate]);
 
   const navItems = currentProject
     ? [
         {
           label: "Dashboard",
-          href: "/app",
+          href: `/app/projects/${currentProject.id}`,
           icon: LayoutDashboard,
         },
         {
@@ -83,6 +103,23 @@ function Layout() {
       ]
     : [];
 
+  function switchProject(project: Project) {
+    setSelectorOpen(false);
+
+    // Navigate to the same sub-page for the new project
+    // e.g. /app/projects/OLD_ID/conversations -> /app/projects/NEW_ID/conversations
+    if (params.projectId) {
+      const newPath = location.pathname.replace(
+        `/projects/${params.projectId}`,
+        `/projects/${project.id}`,
+      );
+      navigate(newPath);
+    } else {
+      // On non-project page, go to dashboard for the selected project
+      navigate(`/app/projects/${project.id}`);
+    }
+  }
+
   async function handleSignOut() {
     await signOut();
     navigate("/login");
@@ -105,21 +142,64 @@ function Layout() {
         </div>
 
         {/* Project Selector */}
-        {currentProject && (
+        {currentProject && projects && (
           <div className="p-3 border-b border-sidebar-border">
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-sidebar-accent text-sidebar-accent-foreground text-sm">
-              <span className="truncate font-medium">
-                {currentProject.name}
-              </span>
-              <ChevronDown className="w-4 h-4 ml-auto shrink-0 opacity-50" />
-            </div>
+            <Popover open={selectorOpen} onOpenChange={setSelectorOpen}>
+              <PopoverTrigger asChild>
+                <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-sidebar-accent text-sidebar-accent-foreground text-sm hover:bg-sidebar-accent/80 transition-colors">
+                  <span className="truncate font-medium flex-1 text-left">
+                    {currentProject.name}
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      "w-4 h-4 shrink-0 opacity-50 transition-transform",
+                      selectorOpen && "rotate-180",
+                    )}
+                  />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-56 p-1">
+                <div className="space-y-0.5">
+                  {projects.map((project) => (
+                    <button
+                      key={project.id}
+                      onClick={() => switchProject(project)}
+                      className={cn(
+                        "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
+                        project.id === currentProject.id
+                          ? "bg-accent text-accent-foreground font-medium"
+                          : "text-foreground hover:bg-accent/50",
+                      )}
+                    >
+                      <span className="flex-1 truncate">{project.name}</span>
+                      {project.id === currentProject.id && (
+                        <Check className="w-4 h-4 shrink-0 text-primary" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <div className="border-t border-border mt-1 pt-1">
+                  <Link
+                    to="/app/new-project"
+                    onClick={() => setSelectorOpen(false)}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    New Project
+                  </Link>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         )}
 
         {/* Navigation */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.href;
+            const isActive =
+              item.label === "Dashboard"
+                ? location.pathname === item.href
+                : location.pathname.startsWith(item.href);
             return (
               <Link
                 key={item.href}

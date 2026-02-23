@@ -7,7 +7,7 @@ import {
   Plus,
   Clock,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useParams, Navigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   BarChart,
@@ -34,6 +34,7 @@ interface ConversationsByStatus {
 
 interface RecentConversation {
   id: string;
+  projectId: string;
   visitorId: string;
   visitorName: string | null;
   status: string;
@@ -41,7 +42,7 @@ interface RecentConversation {
 }
 
 interface DashboardData {
-  totalProjects: number;
+  totalProjects?: number;
   totalConversations: number;
   activeConversations: number;
   totalMessages: number;
@@ -109,14 +110,22 @@ function fillDailyData(data: ConversationsByDay[]): ConversationsByDay[] {
 }
 
 function Dashboard() {
+  const { projectId } = useParams<{ projectId: string }>();
+
   const { data, isLoading } = useQuery<DashboardData>({
-    queryKey: ["dashboard"],
+    queryKey: ["dashboard", projectId],
     queryFn: async () => {
-      const res = await fetch("/api/dashboard");
+      const res = await fetch(`/api/dashboard?projectId=${projectId}`);
       if (!res.ok) throw new Error("Failed to fetch dashboard");
       return res.json();
     },
+    enabled: !!projectId,
   });
+
+  // Redirect if no projectId in URL (shouldn't happen with routing, but safety net)
+  if (!projectId) {
+    return <Navigate to="/app" replace />;
+  }
 
   if (isLoading) {
     return (
@@ -138,7 +147,7 @@ function Dashboard() {
     );
   }
 
-  if (!data || data.totalProjects === 0) {
+  if (!data || data.totalConversations === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6">
         <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
@@ -149,15 +158,23 @@ function Dashboard() {
             Welcome to ReplyMaven
           </h1>
           <p className="text-muted-foreground">
-            Create your first project to get started
+            No conversations yet. Add resources and embed the widget to get started.
           </p>
         </div>
-        <Link to="/app/onboarding">
-          <Button>
-            <Plus className="w-4 h-4 mr-2" />
-            Get Started
-          </Button>
-        </Link>
+        <div className="flex gap-3">
+          <Link to={`/app/projects/${projectId}/resources`}>
+            <Button variant="outline">
+              <FolderOpen className="w-4 h-4 mr-2" />
+              Add Resources
+            </Button>
+          </Link>
+          <Link to={`/app/projects/${projectId}/widget`}>
+            <Button>
+              <Plus className="w-4 h-4 mr-2" />
+              Configure Widget
+            </Button>
+          </Link>
+        </div>
       </div>
     );
   }
@@ -312,8 +329,9 @@ function Dashboard() {
         {data.recentConversations.length > 0 ? (
           <div className="space-y-2">
             {data.recentConversations.map((convo) => (
-              <div
+              <Link
                 key={convo.id}
+                to={`/app/projects/${projectId}/conversations?id=${convo.id}`}
                 className="flex items-center gap-3 py-2 px-3 rounded-xl hover:bg-muted/30 transition-colors"
               >
                 <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
@@ -336,7 +354,7 @@ function Dashboard() {
                 >
                   {convo.status.replace("_", " ")}
                 </span>
-              </div>
+              </Link>
             ))}
           </div>
         ) : (

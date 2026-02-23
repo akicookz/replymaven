@@ -11,12 +11,17 @@ import {
 export class DashboardService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
 
-  async getStats(userId: string) {
-    // Get all user projects
-    const userProjects = await this.db
-      .select({ id: projects.id })
-      .from(projects)
-      .where(eq(projects.userId, userId));
+  async getStats(userId: string, projectId?: string) {
+    // Get user projects (all or filtered by projectId)
+    const userProjects = projectId
+      ? await this.db
+          .select({ id: projects.id })
+          .from(projects)
+          .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+      : await this.db
+          .select({ id: projects.id })
+          .from(projects)
+          .where(eq(projects.userId, userId));
 
     if (userProjects.length === 0) {
       return {
@@ -138,7 +143,7 @@ export class DashboardService {
       .limit(5);
 
     return {
-      totalProjects: userProjects.length,
+      totalProjects: projectId ? undefined : userProjects.length,
       totalConversations: conversationCounts[0]?.total ?? 0,
       activeConversations: conversationCounts[0]?.active ?? 0,
       totalMessages: messageCounts[0]?.total ?? 0,

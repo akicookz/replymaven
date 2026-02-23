@@ -41,6 +41,17 @@ export const updateWidgetConfigSchema = z.object({
   borderRadius: z.number().min(0).max(50).optional(),
   fontFamily: z.string().max(100).optional(),
   customCss: z.string().max(5000).nullable().optional(),
+  bannerUrl: z.string().max(500).nullable().optional(),
+  homeTitle: z.string().min(1).max(200).optional(),
+  homeSubtitle: z.string().max(500).nullable().optional(),
+});
+
+// ─── Home Links ───────────────────────────────────────────────────────────────
+export const createHomeLinkSchema = z.object({
+  label: z.string().min(1, "Label is required").max(100),
+  url: z.string().min(1, "URL is required").max(2048),
+  icon: z.string().max(50).optional(),
+  sortOrder: z.number().int().min(0).optional(),
 });
 
 // ─── Quick Actions ────────────────────────────────────────────────────────────
@@ -76,6 +87,10 @@ export const createConversationSchema = z.object({
 
 export const sendMessageSchema = z.object({
   content: z.string().min(1, "Message cannot be empty").max(5000),
+});
+
+export const updateVisitorEmailSchema = z.object({
+  email: z.string().email("Please enter a valid email address"),
 });
 
 // ─── Agent Reply ──────────────────────────────────────────────────────────────

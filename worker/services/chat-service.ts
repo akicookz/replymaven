@@ -61,6 +61,16 @@ export class ChatService {
       .where(eq(conversations.id, id));
   }
 
+  async updateConversationEmail(
+    id: string,
+    email: string,
+  ): Promise<void> {
+    await this.db
+      .update(conversations)
+      .set({ visitorEmail: email })
+      .where(eq(conversations.id, id));
+  }
+
   // ─── Messages ───────────────────────────────────────────────────────────────
 
   async getMessages(conversationId: string): Promise<MessageRow[]> {

@@ -4,12 +4,15 @@ import {
   widgetConfig,
   quickActions,
   quickTopics,
+  homeLinks,
   projectSettings,
   type WidgetConfigRow,
   type QuickActionRow,
   type NewQuickActionRow,
   type QuickTopicRow,
   type NewQuickTopicRow,
+  type HomeLinkRow,
+  type NewHomeLinkRow,
 } from "../db";
 
 export class WidgetService {
@@ -40,6 +43,9 @@ export class WidgetService {
         | "borderRadius"
         | "fontFamily"
         | "customCss"
+        | "bannerUrl"
+        | "homeTitle"
+        | "homeSubtitle"
       >
     >,
   ): Promise<WidgetConfigRow | null> {
@@ -127,13 +133,52 @@ export class WidgetService {
     return true;
   }
 
+  // ─── Home Links ──────────────────────────────────────────────────────────────
+
+  async getHomeLinks(projectId: string): Promise<HomeLinkRow[]> {
+    return this.db
+      .select()
+      .from(homeLinks)
+      .where(eq(homeLinks.projectId, projectId))
+      .orderBy(asc(homeLinks.sortOrder));
+  }
+
+  async createHomeLink(
+    data: Omit<NewHomeLinkRow, "id" | "createdAt">,
+  ): Promise<HomeLinkRow> {
+    const id = crypto.randomUUID();
+    await this.db.insert(homeLinks).values({ id, ...data });
+    const rows = await this.db
+      .select()
+      .from(homeLinks)
+      .where(eq(homeLinks.id, id))
+      .limit(1);
+    return rows[0]!;
+  }
+
+  async deleteHomeLink(
+    id: string,
+    projectId: string,
+  ): Promise<boolean> {
+    const rows = await this.db
+      .select()
+      .from(homeLinks)
+      .where(eq(homeLinks.id, id))
+      .limit(1);
+    if (!rows[0] || rows[0].projectId !== projectId) return false;
+
+    await this.db.delete(homeLinks).where(eq(homeLinks.id, id));
+    return true;
+  }
+
   // ─── Full Widget Config for Embed ───────────────────────────────────────────
 
   async getFullWidgetConfig(projectId: string) {
-    const [config, actions, topics, settings] = await Promise.all([
+    const [config, actions, topics, links, settings] = await Promise.all([
       this.getWidgetConfig(projectId),
       this.getQuickActions(projectId),
       this.getQuickTopics(projectId),
+      this.getHomeLinks(projectId),
       this.db
         .select()
         .from(projectSettings)
@@ -145,6 +190,7 @@ export class WidgetService {
       widget: config,
       quickActions: actions,
       quickTopics: topics,
+      homeLinks: links,
       introMessage: settings[0]?.introMessage ?? "Hi there! How can I help you today?",
     };
   }

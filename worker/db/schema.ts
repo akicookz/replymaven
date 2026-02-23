@@ -106,6 +106,9 @@ export const widgetConfig = sqliteTable(
     borderRadius: real("border_radius").notNull().default(16),
     fontFamily: text("font_family").notNull().default("system-ui"),
     customCss: text("custom_css"),
+    bannerUrl: text("banner_url"),
+    homeTitle: text("home_title").notNull().default("How can we help?"),
+    homeSubtitle: text("home_subtitle"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -119,6 +122,29 @@ export const widgetConfig = sqliteTable(
 
 export type WidgetConfigRow = typeof widgetConfig.$inferSelect;
 export type NewWidgetConfigRow = typeof widgetConfig.$inferInsert;
+
+// ─── Home Links ───────────────────────────────────────────────────────────────
+
+export const homeLinks = sqliteTable(
+  "home_links",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    url: text("url").notNull(),
+    icon: text("icon").notNull().default("link"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [index("idx_home_links_project").on(table.projectId)],
+);
+
+export type HomeLinkRow = typeof homeLinks.$inferSelect;
+export type NewHomeLinkRow = typeof homeLinks.$inferInsert;
 
 // ─── Quick Actions ────────────────────────────────────────────────────────────
 
