@@ -90,6 +90,24 @@ export class CrawlService {
     // Normalize URL
     const normalizedUrl = this.normalizeUrl(url);
 
+    // Delete old crawled pages for this resource (supports re-crawl / reindex)
+    const oldPages = await this.db
+      .select({ r2Key: crawledPages.r2Key })
+      .from(crawledPages)
+      .where(eq(crawledPages.resourceId, resourceId));
+
+    // Clean up old R2 objects
+    for (const page of oldPages) {
+      if (page.r2Key) {
+        await this.r2.delete(page.r2Key);
+      }
+    }
+
+    // Remove old crawled page records
+    await this.db
+      .delete(crawledPages)
+      .where(eq(crawledPages.resourceId, resourceId));
+
     // Insert seed page into crawled_pages
     const id = crypto.randomUUID();
     await this.db.insert(crawledPages).values({
@@ -147,11 +165,13 @@ export class CrawlService {
       if (robot && robot.isDisallowed(url, USER_AGENT)) {
         // Mark page as failed (disallowed by robots.txt)
         await this.markPageStatus(resourceId, url, "failed");
+        await this.checkAndFinalizeResource(resourceId, projectId);
         return;
       }
     } catch {
       // Invalid URL, skip
       await this.markPageStatus(resourceId, url, "failed");
+      await this.checkAndFinalizeResource(resourceId, projectId);
       return;
     }
 
@@ -165,12 +185,14 @@ export class CrawlService {
     } catch (err) {
       console.error(`Browser Rendering /markdown failed for ${url}:`, err);
       await this.markPageStatus(resourceId, url, "failed");
+      await this.checkAndFinalizeResource(resourceId, projectId);
       return;
     }
 
     // Skip if content is too thin
     if (markdown.trim().length < 50) {
       await this.markPageStatus(resourceId, url, "failed");
+      await this.checkAndFinalizeResource(resourceId, projectId);
       return;
     }
 
@@ -311,9 +333,13 @@ export class CrawlService {
       throw new Error("Browser Rendering /markdown returned success=false");
     }
 
+    // Extract title from first heading in markdown
+    const titleMatch = data.result.match(/^#\s+(.+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : "";
+
     return {
       markdown: data.result,
-      title: "",
+      title,
     };
   }
 
