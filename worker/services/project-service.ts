@@ -46,12 +46,33 @@ export class ProjectService {
     return rows[0] ?? null;
   }
 
+  async generateUniqueSlug(userId: string, baseSlug: string): Promise<string> {
+    let slug = baseSlug;
+    let suffix = 1;
+    while (await this.getProjectBySlug(userId, slug)) {
+      suffix++;
+      slug = `${baseSlug.slice(0, 45)}-${suffix}`;
+    }
+    return slug;
+  }
+
   async createProject(
     data: Omit<NewProjectRow, "id" | "createdAt" | "updatedAt">,
   ): Promise<ProjectRow> {
     const id = crypto.randomUUID();
     const row: NewProjectRow = { id, ...data };
-    await this.db.insert(projects).values(row);
+
+    try {
+      await this.db.insert(projects).values(row);
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message.includes("UNIQUE constraint")
+      ) {
+        throw new Error("A project with this name already exists");
+      }
+      throw err;
+    }
 
     // Create default project settings
     await this.db.insert(projectSettings).values({

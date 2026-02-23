@@ -122,3 +122,17 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Color input swatch styling — ensure the browser's internal swatch
+   respects the border-radius of its container */
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: calc(var(--radius) - 4px);
+}
+input[type="color"]::-moz-color-swatch {
+  border: none;
+  border-radius: calc(var(--radius) - 4px);
+}

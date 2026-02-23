@@ -126,7 +126,7 @@ function QuickActions() {
   });
 
   return (
-    <div className="space-y-8 max-w-2xl">
+    <div className="space-y-8 max-w-4xl mx-auto">
       {/* Quick Actions */}
       <div className="space-y-4">
         <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">

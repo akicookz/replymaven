@@ -15,6 +15,14 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ColorPicker } from "@/components/ui/color-picker";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -159,20 +167,23 @@ function Step1({
           <label className="text-sm font-medium text-foreground">
             Industry
           </label>
-          <select
+          <Select
             value={data.industry}
-            onChange={(e) =>
-              onChange({ ...data, industry: e.target.value })
+            onValueChange={(val) =>
+              onChange({ ...data, industry: val })
             }
-            className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           >
-            <option value="">Select your industry</option>
-            {INDUSTRIES.map((industry) => (
-              <option key={industry} value={industry}>
-                {industry}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger>
+              <SelectValue placeholder="Select your industry" />
+            </SelectTrigger>
+            <SelectContent>
+              {INDUSTRIES.map((industry) => (
+                <SelectItem key={industry} value={industry}>
+                  {industry}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -456,20 +467,16 @@ function Step3({
                   )}
                 </button>
               ))}
-              <div className="relative">
-                <input
-                  type="color"
-                  value={style.primaryColor}
-                  onChange={(e) =>
-                    onChange({
-                      ...style,
-                      primaryColor: e.target.value,
-                    })
-                  }
-                  className="w-8 h-8 rounded-lg border border-input cursor-pointer"
-                  title="Custom color"
-                />
-              </div>
+              <ColorPicker
+                value={style.primaryColor}
+                onChange={(color) =>
+                  onChange({
+                    ...style,
+                    primaryColor: color,
+                  })
+                }
+                className="w-8 h-8 gap-0 px-0 border-dashed [&>span:first-child]:size-full [&>span:first-child]:rounded-lg [&>span:nth-child(2)]:hidden [&>svg]:hidden"
+              />
             </div>
           </div>
 
@@ -502,19 +509,23 @@ function Step3({
             <label className="text-sm font-medium text-foreground">
               Font Family
             </label>
-            <select
+            <Select
               value={style.fontFamily}
-              onChange={(e) =>
-                onChange({ ...style, fontFamily: e.target.value })
+              onValueChange={(val) =>
+                onChange({ ...style, fontFamily: val })
               }
-              className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              {FONT_OPTIONS.map((font) => (
-                <option key={font.value} value={font.value}>
-                  {font.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a font" />
+              </SelectTrigger>
+              <SelectContent>
+                {FONT_OPTIONS.map((font) => (
+                  <SelectItem key={font.value} value={font.value}>
+                    {font.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -868,11 +879,40 @@ function ProgressBar({ currentStep }: { currentStep: number }) {
 
 // ─── Main Onboarding Component ────────────────────────────────────────────────
 
+interface ExistingProject {
+  id: string;
+  slug: string;
+  name: string;
+  onboarded: boolean;
+}
+
 function Onboarding() {
   const [step, setStep] = useState(0);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectSlug, setProjectSlug] = useState<string | null>(null);
   const [step1Error, setStep1Error] = useState<string | null>(null);
+
+  // Check for existing projects to resume incomplete onboarding
+  const { data: existingProjects } = useQuery<ExistingProject[]>({
+    queryKey: ["projects"],
+    queryFn: async () => {
+      const res = await fetch("/api/projects");
+      if (!res.ok) throw new Error("Failed to fetch projects");
+      return res.json();
+    },
+  });
+
+  useEffect(() => {
+    if (!existingProjects) return;
+
+    // If there's an incomplete project, resume it at step 1
+    const incomplete = existingProjects.find((p) => !p.onboarded);
+    if (incomplete && !projectId) {
+      setProjectId(incomplete.id);
+      setProjectSlug(incomplete.slug);
+      setStep(1);
+    }
+  }, [existingProjects, projectId]);
 
   // Step 1 state
   const [step1Data, setStep1Data] = useState<Step1Data>({

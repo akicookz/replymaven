@@ -472,7 +472,7 @@ const app = new Hono<HonoAppContext>()
     const projectService = new ProjectService(db);
 
     // Generate slug from website name
-    const slug = slugify(parsed.data.websiteName);
+    const baseSlug = slugify(parsed.data.websiteName);
 
     // Extract domain from URL
     let domain: string | undefined;
@@ -481,6 +481,21 @@ const app = new Hono<HonoAppContext>()
     } catch {
       domain = undefined;
     }
+
+    // Check if this user already has a project with this slug (idempotent re-entry)
+    const existing = await projectService.getProjectBySlug(user.id, baseSlug);
+    if (existing) {
+      // Reuse the existing project — update its settings and return it
+      await projectService.updateSettings(existing.id, {
+        companyName: parsed.data.companyName,
+        companyUrl: parsed.data.websiteUrl,
+        industry: parsed.data.industry,
+      });
+      return c.json({ projectId: existing.id, slug: existing.slug }, 200);
+    }
+
+    // Generate a unique slug (appends -2, -3, etc. if needed)
+    const slug = await projectService.generateUniqueSlug(user.id, baseSlug);
 
     // Create the project
     const project = await projectService.createProject({
@@ -720,7 +735,8 @@ const app = new Hono<HonoAppContext>()
 
     const db = c.get("db");
     const service = new ProjectService(db);
-    const slug = slugify(parsed.data.name);
+    const baseSlug = slugify(parsed.data.name);
+    const slug = await service.generateUniqueSlug(user.id, baseSlug);
     const project = await service.createProject({
       userId: user.id,
       name: parsed.data.name,

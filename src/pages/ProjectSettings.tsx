@@ -82,7 +82,7 @@ function ProjectSettings() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 max-w-2xl">
+      <div className="space-y-6 max-w-4xl mx-auto">
         <h1 className="text-2xl font-bold text-foreground">Settings</h1>
         <div className="h-24 rounded-2xl bg-muted/50 animate-pulse" />
         <div className="h-32 rounded-2xl bg-muted/50 animate-pulse" />
@@ -94,7 +94,7 @@ function ProjectSettings() {
   }
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground">Settings</h1>
         <Button onClick={() => save.mutate()} disabled={save.isPending}>

@@ -3,6 +3,14 @@ import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Palette, Save, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ColorPicker } from "@/components/ui/color-picker";
 
 interface WidgetConfigData {
   id: string;
@@ -99,39 +107,33 @@ function WidgetConfig() {
               <label className="text-xs font-medium text-muted-foreground">
                 Primary
               </label>
-              <input
-                type="color"
+              <ColorPicker
                 value={form.primaryColor ?? "#2563eb"}
-                onChange={(e) =>
-                  setForm({ ...form, primaryColor: e.target.value })
+                onChange={(color) =>
+                  setForm({ ...form, primaryColor: color })
                 }
-                className="w-full h-10 rounded-lg border border-input cursor-pointer"
               />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">
                 Background
               </label>
-              <input
-                type="color"
+              <ColorPicker
                 value={form.backgroundColor ?? "#ffffff"}
-                onChange={(e) =>
-                  setForm({ ...form, backgroundColor: e.target.value })
+                onChange={(color) =>
+                  setForm({ ...form, backgroundColor: color })
                 }
-                className="w-full h-10 rounded-lg border border-input cursor-pointer"
               />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">
                 Text
               </label>
-              <input
-                type="color"
+              <ColorPicker
                 value={form.textColor ?? "#1f2937"}
-                onChange={(e) =>
-                  setForm({ ...form, textColor: e.target.value })
+                onChange={(color) =>
+                  setForm({ ...form, textColor: color })
                 }
-                className="w-full h-10 rounded-lg border border-input cursor-pointer"
               />
             </div>
           </div>
@@ -154,19 +156,23 @@ function WidgetConfig() {
             <label className="text-sm font-medium text-foreground">
               Position
             </label>
-            <select
+            <Select
               value={form.position ?? "bottom-right"}
-              onChange={(e) =>
+              onValueChange={(val) =>
                 setForm({
                   ...form,
-                  position: e.target.value as "bottom-right" | "bottom-left",
+                  position: val as "bottom-right" | "bottom-left",
                 })
               }
-              className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              <option value="bottom-right">Bottom Right</option>
-              <option value="bottom-left">Bottom Left</option>
-            </select>
+              <SelectTrigger>
+                <SelectValue placeholder="Select position" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bottom-right">Bottom Right</SelectItem>
+                <SelectItem value="bottom-left">Bottom Left</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-2">
