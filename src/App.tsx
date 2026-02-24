@@ -17,6 +17,7 @@ import ProjectSettings from "./pages/ProjectSettings";
 import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
 import TelegramConfig from "./pages/TelegramConfig";
+import ContactForm from "./pages/ContactForm";
 import AuthCallback from "./pages/AuthCallback";
 
 // ─── Redirect /app to first project's dashboard ──────────────────────────────
@@ -108,6 +109,10 @@ function App() {
         <Route
           path="projects/:projectId/telegram"
           element={<TelegramConfig />}
+        />
+        <Route
+          path="projects/:projectId/contact-form"
+          element={<ContactForm />}
         />
       </Route>
     </Routes>

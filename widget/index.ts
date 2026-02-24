@@ -853,6 +853,184 @@
       height: 11px;
     }
 
+    /* ─── Contact Form ────────────────────────────────────────────────────── */
+    .rm-form-view {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .rm-form-view.active {
+      display: flex;
+    }
+    .rm-form-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      background: #fafafa;
+    }
+    .rm-form-body::-webkit-scrollbar {
+      width: 4px;
+    }
+    .rm-form-body::-webkit-scrollbar-thumb {
+      background: rgba(0,0,0,0.12);
+      border-radius: 4px;
+    }
+    .rm-form-description {
+      font-size: 14px;
+      color: #6b7280;
+      line-height: 1.5;
+      text-align: center;
+      padding: 8px 0;
+    }
+    .rm-form-field {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .rm-form-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: #374151;
+    }
+    .rm-form-label .rm-required {
+      color: #ef4444;
+      margin-left: 2px;
+    }
+    .rm-form-input {
+      padding: 10px 14px;
+      border: 1px solid rgba(0,0,0,0.12);
+      border-radius: 10px;
+      font-size: 14px;
+      outline: none;
+      font-family: inherit;
+      color: #1f2937;
+      background: #ffffff;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .rm-form-input:focus {
+      border-color: rgba(0,0,0,0.25);
+      box-shadow: 0 0 0 3px rgba(37,99,235,0.08);
+    }
+    .rm-form-input::placeholder {
+      color: #9ca3af;
+    }
+    .rm-form-textarea {
+      padding: 10px 14px;
+      border: 1px solid rgba(0,0,0,0.12);
+      border-radius: 10px;
+      font-size: 14px;
+      outline: none;
+      font-family: inherit;
+      color: #1f2937;
+      background: #ffffff;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      resize: vertical;
+      min-height: 80px;
+    }
+    .rm-form-textarea:focus {
+      border-color: rgba(0,0,0,0.25);
+      box-shadow: 0 0 0 3px rgba(37,99,235,0.08);
+    }
+    .rm-form-textarea::placeholder {
+      color: #9ca3af;
+    }
+    .rm-form-submit {
+      padding: 12px 24px;
+      border-radius: 12px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      color: white;
+      transition: opacity 0.2s, transform 0.15s;
+      font-family: inherit;
+      margin-top: 4px;
+    }
+    .rm-form-submit:hover {
+      opacity: 0.9;
+    }
+    .rm-form-submit:active {
+      transform: scale(0.98);
+    }
+    .rm-form-submit:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .rm-form-error {
+      font-size: 12px;
+      color: #ef4444;
+      text-align: center;
+    }
+    .rm-form-success {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 40px 20px;
+      text-align: center;
+      flex: 1;
+      background: #fafafa;
+    }
+    .rm-form-success-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .rm-form-success-icon svg {
+      width: 24px;
+      height: 24px;
+    }
+    .rm-form-success-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1f2937;
+    }
+    .rm-form-success-subtitle {
+      font-size: 13px;
+      color: #6b7280;
+      line-height: 1.4;
+    }
+
+    /* Quick action bar in home */
+    .rm-home-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .rm-home-action-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 16px;
+      border-radius: 20px;
+      border: 1px solid rgba(0,0,0,0.08);
+      background: #ffffff;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+      color: #374151;
+      font-family: inherit;
+    }
+    .rm-home-action-btn:hover {
+      background: #f0f0f0;
+      border-color: rgba(0,0,0,0.15);
+    }
+    .rm-home-action-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
     /* ─── Animations ──────────────────────────────────────────────────────── */
     @keyframes rm-message-in {
       from {
@@ -946,6 +1124,61 @@
 
   homeView.appendChild(homeBanner);
   homeView.appendChild(homeBody);
+
+  // Home actions container (for "Leave a message" quick action)
+  const homeActionsContainer = document.createElement("div");
+  homeActionsContainer.className = "rm-home-actions";
+  homeActionsContainer.style.display = "none";
+
+  homeBody.appendChild(homeActionsContainer);
+
+  // ─── Contact Form View ──────────────────────────────────────────────────────
+  const formView = document.createElement("div");
+  formView.className = "rm-form-view";
+
+  // Form header (reuses chat header pattern)
+  const formHeader = document.createElement("div");
+  formHeader.className = "rm-header";
+
+  const formHeaderBack = document.createElement("button");
+  formHeaderBack.className = "rm-header-back";
+  formHeaderBack.innerHTML = ICONS.backArrow;
+  formHeaderBack.onclick = () => showHomeScreen();
+
+  const formHeaderIcon = document.createElement("div");
+  formHeaderIcon.className = "rm-header-avatar";
+  formHeaderIcon.innerHTML = ICONS.mail;
+
+  const formHeaderInfo = document.createElement("div");
+  formHeaderInfo.className = "rm-header-info";
+
+  const formHeaderTitle = document.createElement("div");
+  formHeaderTitle.className = "rm-header-title";
+  formHeaderTitle.textContent = "Leave a message";
+
+  const formHeaderSubtitle = document.createElement("div");
+  formHeaderSubtitle.className = "rm-header-subtitle";
+  formHeaderSubtitle.textContent = "We'll get back to you soon";
+
+  formHeaderInfo.appendChild(formHeaderTitle);
+  formHeaderInfo.appendChild(formHeaderSubtitle);
+
+  const formCloseBtn = document.createElement("button");
+  formCloseBtn.className = "rm-header-close";
+  formCloseBtn.innerHTML = ICONS.close;
+  formCloseBtn.onclick = () => closeChatWidget();
+
+  formHeader.appendChild(formHeaderBack);
+  formHeader.appendChild(formHeaderIcon);
+  formHeader.appendChild(formHeaderInfo);
+  formHeader.appendChild(formCloseBtn);
+
+  // Form body (scrollable area with fields)
+  const formBody = document.createElement("div");
+  formBody.className = "rm-form-body";
+
+  formView.appendChild(formHeader);
+  formView.appendChild(formBody);
 
   // ─── Chat View (header + messages + input) ──────────────────────────────────
   const chatView = document.createElement("div");
@@ -1041,6 +1274,7 @@
 
   // Assemble chat window
   chatWindow.appendChild(homeView);
+  chatWindow.appendChild(formView);
   chatWindow.appendChild(chatView);
   chatWindow.appendChild(powered);
 
@@ -1062,11 +1296,12 @@
   document.body.appendChild(container);
 
   // ─── View State ──────────────────────────────────────────────────────────────
-  let currentView: "home" | "chat" = "home";
+  let currentView: "home" | "chat" | "form" = "home";
 
   function showChatScreen() {
     currentView = "chat";
     homeView.classList.add("hidden");
+    formView.classList.remove("active");
     chatView.classList.add("active");
     setTimeout(() => input.focus(), 100);
   }
@@ -1074,7 +1309,15 @@
   function showHomeScreen() {
     currentView = "home";
     homeView.classList.remove("hidden");
+    formView.classList.remove("active");
     chatView.classList.remove("active");
+  }
+
+  function showFormScreen() {
+    currentView = "form";
+    homeView.classList.add("hidden");
+    chatView.classList.remove("active");
+    formView.classList.add("active");
   }
 
   // ─── Event Handlers ─────────────────────────────────────────────────────────
@@ -1361,6 +1604,174 @@
         a.appendChild(arrowEl);
         homeLinksContainer.appendChild(a);
       });
+
+      // ─── Contact Form (Leave a Message) ─────────────────────────────────────
+      if (loadedConfig.contactForm) {
+        const cf = loadedConfig.contactForm as {
+          description: string | null;
+          fields: Array<{ label: string; type: string; required: boolean }>;
+        };
+
+        // Show "Leave a message" button on home screen
+        homeActionsContainer.style.display = "flex";
+        const leaveMessageBtn = document.createElement("button");
+        leaveMessageBtn.className = "rm-home-action-btn";
+        leaveMessageBtn.innerHTML = ICONS.mail + " Leave a message";
+        leaveMessageBtn.onclick = () => showFormScreen();
+        homeActionsContainer.appendChild(leaveMessageBtn);
+
+        // Apply primary color to form header
+        const primary = loadedConfig.widget?.primaryColor || "#2563eb";
+        formHeader.style.backgroundColor = primary;
+
+        // Build form fields
+        formBody.innerHTML = "";
+
+        if (cf.description) {
+          const desc = document.createElement("div");
+          desc.className = "rm-form-description";
+          desc.textContent = cf.description;
+          formBody.appendChild(desc);
+        }
+
+        const fieldInputs: Array<{
+          label: string;
+          input: HTMLInputElement | HTMLTextAreaElement;
+          required: boolean;
+        }> = [];
+
+        for (const field of cf.fields) {
+          const fieldContainer = document.createElement("div");
+          fieldContainer.className = "rm-form-field";
+
+          const label = document.createElement("label");
+          label.className = "rm-form-label";
+          label.textContent = field.label;
+          if (field.required) {
+            const req = document.createElement("span");
+            req.className = "rm-required";
+            req.textContent = "*";
+            label.appendChild(req);
+          }
+          fieldContainer.appendChild(label);
+
+          if (field.type === "textarea") {
+            const textarea = document.createElement("textarea");
+            textarea.className = "rm-form-textarea";
+            textarea.placeholder = field.label;
+            if (field.required) textarea.required = true;
+            fieldContainer.appendChild(textarea);
+            fieldInputs.push({
+              label: field.label,
+              input: textarea,
+              required: field.required,
+            });
+          } else {
+            const inp = document.createElement("input");
+            inp.className = "rm-form-input";
+            inp.type = "text";
+            inp.placeholder = field.label;
+            if (field.required) inp.required = true;
+            fieldContainer.appendChild(inp);
+            fieldInputs.push({
+              label: field.label,
+              input: inp,
+              required: field.required,
+            });
+          }
+
+          formBody.appendChild(fieldContainer);
+        }
+
+        // Error message
+        const formError = document.createElement("div");
+        formError.className = "rm-form-error";
+        formError.style.display = "none";
+        formBody.appendChild(formError);
+
+        // Submit button
+        const submitBtn2 = document.createElement("button");
+        submitBtn2.className = "rm-form-submit";
+        submitBtn2.style.backgroundColor = primary;
+        submitBtn2.textContent = "Send message";
+        formBody.appendChild(submitBtn2);
+
+        submitBtn2.onclick = async () => {
+          // Validate required fields
+          for (const fi of fieldInputs) {
+            if (fi.required && !fi.input.value.trim()) {
+              formError.textContent = `${fi.label} is required`;
+              formError.style.display = "block";
+              fi.input.focus();
+              return;
+            }
+          }
+          formError.style.display = "none";
+
+          submitBtn2.disabled = true;
+          submitBtn2.textContent = "Sending...";
+
+          const data: Record<string, string> = {};
+          for (const fi of fieldInputs) {
+            if (fi.input.value.trim()) {
+              data[fi.label] = fi.input.value.trim();
+            }
+          }
+
+          try {
+            const res = await fetch(
+              `${baseUrl}/api/widget/${projectSlug}/contact-form`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ visitorId, data }),
+              },
+            );
+
+            if (!res.ok) {
+              const err = await res.json().catch(() => null);
+              formError.textContent =
+                (err as { error?: string })?.error ||
+                "Something went wrong. Please try again.";
+              formError.style.display = "block";
+              submitBtn2.disabled = false;
+              submitBtn2.textContent = "Send message";
+              return;
+            }
+
+            // Show success state
+            formView.removeChild(formBody);
+            const success = document.createElement("div");
+            success.className = "rm-form-success";
+
+            const successIcon = document.createElement("div");
+            successIcon.className = "rm-form-success-icon";
+            successIcon.style.backgroundColor = primary + "15";
+            successIcon.style.color = primary;
+            successIcon.innerHTML = ICONS.check;
+
+            const successTitle = document.createElement("div");
+            successTitle.className = "rm-form-success-title";
+            successTitle.textContent = "Message sent!";
+
+            const successSubtitle = document.createElement("div");
+            successSubtitle.className = "rm-form-success-subtitle";
+            successSubtitle.textContent =
+              cf.description || "We'll get back to you soon.";
+
+            success.appendChild(successIcon);
+            success.appendChild(successTitle);
+            success.appendChild(successSubtitle);
+            formView.appendChild(success);
+          } catch {
+            formError.textContent =
+              "Couldn't send message. Please check your connection.";
+            formError.style.display = "block";
+            submitBtn2.disabled = false;
+            submitBtn2.textContent = "Send message";
+          }
+        };
+      }
 
       // Intro message
       if (loadedConfig.introMessage) {

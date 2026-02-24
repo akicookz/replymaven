@@ -186,8 +186,8 @@ function WidgetConfig() {
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-foreground">Widget Config</h1>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="h-80 rounded-2xl bg-muted/50 animate-pulse" />
-          <div className="h-80 rounded-2xl bg-muted/50 animate-pulse" />
+          <div className="h-80 rounded-2xl bg-muted animate-pulse" />
+          <div className="h-80 rounded-2xl bg-muted animate-pulse" />
         </div>
       </div>
     );
@@ -545,7 +545,7 @@ function WidgetConfig() {
                 {Array.from({ length: 2 }).map((_, i) => (
                   <div
                     key={i}
-                    className="h-14 rounded-xl bg-muted/50 animate-pulse"
+                    className="h-14 rounded-xl bg-muted animate-pulse"
                   />
                 ))}
               </div>

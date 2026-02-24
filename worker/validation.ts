@@ -172,3 +172,24 @@ export const onboardingWidgetSchema = z.object({
   borderRadius: z.number().min(0).max(50),
   fontFamily: z.string().max(100),
 });
+
+// ─── Contact Form ─────────────────────────────────────────────────────────
+export const contactFormFieldSchema = z.object({
+  label: z.string().min(1, "Label is required").max(100),
+  type: z.enum(["text", "textarea"]),
+  required: z.boolean().default(false),
+});
+
+export const updateContactFormConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  description: z.string().max(500).nullable().optional(),
+  fields: z
+    .array(contactFormFieldSchema)
+    .max(10, "Maximum 10 fields allowed")
+    .optional(),
+});
+
+export const submitContactFormSchema = z.object({
+  visitorId: z.string().min(1).max(100).optional(),
+  data: z.record(z.string(), z.string().max(5000)),
+});

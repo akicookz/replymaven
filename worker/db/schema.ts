@@ -360,6 +360,61 @@ export const cannedResponses = sqliteTable(
 export type CannedResponseRow = typeof cannedResponses.$inferSelect;
 export type NewCannedResponseRow = typeof cannedResponses.$inferInsert;
 
+// ─── Contact Form Config ──────────────────────────────────────────────────
+
+export const contactFormConfig = sqliteTable(
+  "contact_form_config",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    description: text("description").default(
+      "We'll get back to you within 1-2 hours.",
+    ),
+    fields: text("fields").notNull().default("[]"), // JSON array of { label, type, required }
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_contact_form_config_project").on(table.projectId),
+  ],
+);
+
+export type ContactFormConfigRow = typeof contactFormConfig.$inferSelect;
+export type NewContactFormConfigRow = typeof contactFormConfig.$inferInsert;
+
+// ─── Contact Form Submissions ─────────────────────────────────────────────
+
+export const contactFormSubmissions = sqliteTable(
+  "contact_form_submissions",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    visitorId: text("visitor_id"),
+    data: text("data").notNull(), // JSON object of { fieldLabel: value }
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    index("idx_contact_form_submissions_project").on(table.projectId),
+  ],
+);
+
+export type ContactFormSubmissionRow =
+  typeof contactFormSubmissions.$inferSelect;
+export type NewContactFormSubmissionRow =
+  typeof contactFormSubmissions.$inferInsert;
+
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
 export const apiKeys = sqliteTable(
@@ -396,5 +451,7 @@ export const schema = {
   conversations,
   messages,
   cannedResponses,
+  contactFormConfig,
+  contactFormSubmissions,
   apiKeys,
 } as const;

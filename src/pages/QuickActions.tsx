@@ -179,7 +179,7 @@ function QuickActions() {
             {Array.from({ length: 2 }).map((_, i) => (
               <div
                 key={i}
-                className="h-14 rounded-xl bg-muted/50 animate-pulse"
+                className="h-14 rounded-xl bg-muted animate-pulse"
               />
             ))}
           </div>
@@ -273,7 +273,7 @@ function QuickActions() {
             {Array.from({ length: 2 }).map((_, i) => (
               <div
                 key={i}
-                className="h-14 rounded-xl bg-muted/50 animate-pulse"
+                className="h-14 rounded-xl bg-muted animate-pulse"
               />
             ))}
           </div>

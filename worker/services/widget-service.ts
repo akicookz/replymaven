@@ -6,6 +6,8 @@ import {
   quickTopics,
   homeLinks,
   projectSettings,
+  contactFormConfig,
+  contactFormSubmissions,
   type WidgetConfigRow,
   type QuickActionRow,
   type NewQuickActionRow,
@@ -13,6 +15,8 @@ import {
   type NewQuickTopicRow,
   type HomeLinkRow,
   type NewHomeLinkRow,
+  type ContactFormConfigRow,
+  type ContactFormSubmissionRow,
 } from "../db";
 
 export class WidgetService {
@@ -171,27 +175,120 @@ export class WidgetService {
     return true;
   }
 
+  // ─── Contact Form Config ─────────────────────────────────────────────────
+
+  async getContactFormConfig(
+    projectId: string,
+  ): Promise<ContactFormConfigRow | null> {
+    const rows = await this.db
+      .select()
+      .from(contactFormConfig)
+      .where(eq(contactFormConfig.projectId, projectId))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async upsertContactFormConfig(
+    projectId: string,
+    updates: {
+      enabled?: boolean;
+      description?: string | null;
+      fields?: Array<{ label: string; type: string; required: boolean }>;
+    },
+  ): Promise<ContactFormConfigRow> {
+    const existing = await this.getContactFormConfig(projectId);
+
+    if (existing) {
+      const setData: Record<string, unknown> = {};
+      if (updates.enabled !== undefined) setData.enabled = updates.enabled;
+      if (updates.description !== undefined)
+        setData.description = updates.description;
+      if (updates.fields !== undefined)
+        setData.fields = JSON.stringify(updates.fields);
+
+      await this.db
+        .update(contactFormConfig)
+        .set(setData)
+        .where(eq(contactFormConfig.projectId, projectId));
+
+      return (await this.getContactFormConfig(projectId))!;
+    }
+
+    const id = crypto.randomUUID();
+    await this.db.insert(contactFormConfig).values({
+      id,
+      projectId,
+      enabled: updates.enabled ?? false,
+      description:
+        updates.description ?? "We'll get back to you within 1-2 hours.",
+      fields: updates.fields ? JSON.stringify(updates.fields) : "[]",
+    });
+    return (await this.getContactFormConfig(projectId))!;
+  }
+
+  // ─── Contact Form Submissions ───────────────────────────────────────────
+
+  async createContactFormSubmission(
+    projectId: string,
+    visitorId: string | undefined,
+    data: Record<string, string>,
+  ): Promise<ContactFormSubmissionRow> {
+    const id = crypto.randomUUID();
+    await this.db.insert(contactFormSubmissions).values({
+      id,
+      projectId,
+      visitorId: visitorId ?? null,
+      data: JSON.stringify(data),
+    });
+    const rows = await this.db
+      .select()
+      .from(contactFormSubmissions)
+      .where(eq(contactFormSubmissions.id, id))
+      .limit(1);
+    return rows[0]!;
+  }
+
+  async getContactFormSubmissions(
+    projectId: string,
+  ): Promise<ContactFormSubmissionRow[]> {
+    return this.db
+      .select()
+      .from(contactFormSubmissions)
+      .where(eq(contactFormSubmissions.projectId, projectId))
+      .orderBy(asc(contactFormSubmissions.createdAt));
+  }
+
   // ─── Full Widget Config for Embed ───────────────────────────────────────────
 
   async getFullWidgetConfig(projectId: string) {
-    const [config, actions, topics, links, settings] = await Promise.all([
-      this.getWidgetConfig(projectId),
-      this.getQuickActions(projectId),
-      this.getQuickTopics(projectId),
-      this.getHomeLinks(projectId),
-      this.db
-        .select()
-        .from(projectSettings)
-        .where(eq(projectSettings.projectId, projectId))
-        .limit(1),
-    ]);
+    const [config, actions, topics, links, settings, formConfig] =
+      await Promise.all([
+        this.getWidgetConfig(projectId),
+        this.getQuickActions(projectId),
+        this.getQuickTopics(projectId),
+        this.getHomeLinks(projectId),
+        this.db
+          .select()
+          .from(projectSettings)
+          .where(eq(projectSettings.projectId, projectId))
+          .limit(1),
+        this.getContactFormConfig(projectId),
+      ]);
 
     return {
       widget: config,
       quickActions: actions,
       quickTopics: topics,
       homeLinks: links,
-      introMessage: settings[0]?.introMessage ?? "Hi there! How can I help you today?",
+      introMessage:
+        settings[0]?.introMessage ?? "Hi there! How can I help you today?",
+      contactForm:
+        formConfig?.enabled
+          ? {
+              description: formConfig.description,
+              fields: JSON.parse(formConfig.fields || "[]"),
+            }
+          : null,
     };
   }
 }

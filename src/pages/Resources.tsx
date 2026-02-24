@@ -342,7 +342,7 @@ function Resources() {
           {Array.from({ length: 3 }).map((_, i) => (
             <div
               key={i}
-              className="h-16 rounded-xl bg-muted/50 animate-pulse"
+              className="h-16 rounded-xl bg-muted animate-pulse"
             />
           ))}
         </div>

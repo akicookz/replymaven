@@ -36,6 +36,8 @@ import {
   onboardingContextSchema,
   onboardingWidgetSchema,
   updateVisitorEmailSchema,
+  updateContactFormConfigSchema,
+  submitContactFormSchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -171,15 +173,26 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(createConversationSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
+    // Enrich metadata with geo data from Cloudflare headers
+    const cf = c.req.raw.cf as CfProperties | undefined;
+    const geoMeta: Record<string, string> = {
+      ...(parsed.data.metadata ?? {}),
+    };
+    if (cf?.country) geoMeta.country = String(cf.country);
+    if (cf?.city) geoMeta.city = String(cf.city);
+    if (cf?.region) geoMeta.region = String(cf.region);
+    if (cf?.timezone) geoMeta.timezone = String(cf.timezone);
+    if (ip !== "unknown") geoMeta.ip = ip;
+    const userAgent = c.req.header("user-agent");
+    if (userAgent) geoMeta.userAgent = userAgent;
+
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
     const conversation = await chatService.createConversation({
       projectId: project.id,
       visitorId: parsed.data.visitorId,
       visitorName: parsed.data.visitorName,
       visitorEmail: parsed.data.visitorEmail,
-      metadata: parsed.data.metadata
-        ? JSON.stringify(parsed.data.metadata)
-        : null,
+      metadata: JSON.stringify(geoMeta),
     });
 
     return c.json(conversation, 201);
@@ -458,6 +471,59 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     },
   )
+
+  // ─── Contact Form Submit (public) ────────────────────────────────────────
+  .post("/api/widget/:projectSlug/contact-form", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`cform:${ip}`, 5, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const slug = c.req.param("projectSlug");
+    const db = drizzle(c.env.DB);
+
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const body = await c.req.json();
+    const parsed = validate(submitContactFormSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const widgetService = new WidgetService(db);
+
+    // Verify contact form is enabled
+    const formConfig = await widgetService.getContactFormConfig(project.id);
+    if (!formConfig?.enabled) {
+      return c.json({ error: "Contact form is not enabled" }, 400);
+    }
+
+    const submission = await widgetService.createContactFormSubmission(
+      project.id,
+      parsed.data.visitorId,
+      parsed.data.data,
+    );
+
+    // Notify via Telegram if configured
+    const settings = await projectService.getSettings(project.id);
+    if (settings?.telegramBotToken && settings?.telegramChatId) {
+      const telegramService = new TelegramService(db);
+      const fields = Object.entries(parsed.data.data)
+        .map(([key, val]) => `${key}: ${val}`)
+        .join("\n");
+      c.executionCtx.waitUntil(
+        telegramService.sendMessage(
+          settings.telegramBotToken,
+          settings.telegramChatId,
+          `New contact form submission:\n\n${fields}`,
+        ).catch(() => {
+          // Silently ignore Telegram errors
+        }),
+      );
+    }
+
+    return c.json(submission, 201);
+  })
 
   // ─── Telegram Webhook ───────────────────────────────────────────────────────
   .post("/api/telegram/webhook/:projectId", async (c) => {
@@ -1135,6 +1201,82 @@ const app = new Hono<HonoAppContext>()
     );
     if (!deleted) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
+  })
+
+  // ─── Contact Form Config (Dashboard) ─────────────────────────────────────
+  .get("/api/projects/:id/contact-form", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const config = await widgetService.getContactFormConfig(project.id);
+    if (!config) {
+      return c.json({
+        enabled: false,
+        description: "We'll get back to you within 1-2 hours.",
+        fields: [],
+      });
+    }
+    return c.json({
+      enabled: config.enabled,
+      description: config.description,
+      fields: JSON.parse(config.fields || "[]"),
+    });
+  })
+  .put("/api/projects/:id/contact-form", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateContactFormConfigSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const config = await widgetService.upsertContactFormConfig(
+      project.id,
+      parsed.data,
+    );
+    return c.json({
+      enabled: config.enabled,
+      description: config.description,
+      fields: JSON.parse(config.fields || "[]"),
+    });
+  })
+  .get("/api/projects/:id/contact-form/submissions", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const submissions = await widgetService.getContactFormSubmissions(
+      project.id,
+    );
+    return c.json(
+      submissions.map((s) => ({
+        ...s,
+        data: JSON.parse(s.data || "{}"),
+      })),
+    );
   })
 
   // ─── Resources ─────────────────────────────────────────────────────────────

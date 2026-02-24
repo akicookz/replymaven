@@ -151,7 +151,7 @@ function CannedResponses() {
           {Array.from({ length: 3 }).map((_, i) => (
             <div
               key={i}
-              className="h-20 rounded-xl bg-muted/50 animate-pulse"
+              className="h-20 rounded-xl bg-muted animate-pulse"
             />
           ))}
         </div>

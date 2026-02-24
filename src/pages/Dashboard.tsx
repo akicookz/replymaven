@@ -5,9 +5,15 @@ import {
   Users,
   Bot,
   Plus,
-  Clock,
+  Palette,
+  Zap,
+  Send,
+  Settings,
+  ArrowUpRight,
+  ArrowDownRight,
 } from "lucide-react";
 import { Link, useParams, Navigate } from "react-router-dom";
+import { useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import {
   BarChart,
@@ -21,6 +27,8 @@ import {
   Cell,
 } from "recharts";
 import { cn } from "@/lib/utils";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ConversationsByDay {
   day: string;
@@ -53,11 +61,13 @@ interface DashboardData {
   recentConversations: RecentConversation[];
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const STATUS_COLORS: Record<string, string> = {
   active: "#22c55e",
   waiting_agent: "#eab308",
   agent_replied: "#3b82f6",
-  closed: "#a1a1aa",
+  closed: "#94a3b8",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -67,31 +77,88 @@ const STATUS_LABELS: Record<string, string> = {
   closed: "Closed",
 };
 
+const STATUS_BADGE_STYLES: Record<string, string> = {
+  active: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  waiting_agent: "bg-amber-50 text-amber-700 border-amber-200",
+  agent_replied: "bg-blue-50 text-blue-700 border-blue-200",
+  closed: "bg-slate-50 text-slate-500 border-slate-200",
+};
+
+// ─── Stat Card ────────────────────────────────────────────────────────────────
+
 function StatCard({
   label,
   value,
   icon: Icon,
+  change,
 }: {
   label: string;
   value: number;
   icon: React.ComponentType<{ className?: string }>;
+  change?: { value: number; positive: boolean };
 }) {
   return (
-    <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">{label}</p>
-          <p className="text-3xl font-bold text-card-foreground mt-1">
-            {value}
-          </p>
+    <div className="bg-card rounded-xl border border-border p-5 flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center">
+          <Icon className="w-[18px] h-[18px] text-muted-foreground" />
         </div>
-        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-          <Icon className="w-5 h-5 text-primary" />
-        </div>
+        <span className="text-[13px] text-muted-foreground font-medium">
+          {label}
+        </span>
+      </div>
+      <div className="flex items-end justify-between">
+        <span className="text-3xl font-bold text-foreground tracking-tight">
+          {value.toLocaleString()}
+        </span>
+        {change && (
+          <span
+            className={cn(
+              "text-[13px] font-medium flex items-center gap-0.5",
+              change.positive ? "text-emerald-600" : "text-red-500",
+            )}
+          >
+            {change.positive ? (
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            ) : (
+              <ArrowDownRight className="w-3.5 h-3.5" />
+            )}
+            {change.positive ? "+" : ""}
+            {change.value}%
+          </span>
+        )}
       </div>
     </div>
   );
 }
+
+// ─── Quick Action Card ────────────────────────────────────────────────────────
+
+function QuickActionCard({
+  label,
+  icon: Icon,
+  href,
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  href: string;
+}) {
+  return (
+    <Link
+      to={href}
+      className="bg-card rounded-xl border border-border p-5 flex flex-col items-center justify-center gap-3 hover:border-primary/30 hover:bg-primary/3 transition-all group"
+    >
+      <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+        <Icon className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+      </div>
+      <span className="text-[13px] font-medium text-foreground text-center">
+        {label}
+      </span>
+    </Link>
+  );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fillDailyData(data: ConversationsByDay[]): ConversationsByDay[] {
   const filled: ConversationsByDay[] = [];
@@ -102,15 +169,32 @@ function fillDailyData(data: ConversationsByDay[]): ConversationsByDay[] {
     const dayStr = d.toISOString().split("T")[0];
     const existing = data.find((item) => item.day === dayStr);
     filled.push({
-      day: d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }),
+      day: d.toLocaleDateString("en-US", { weekday: "short" }),
       count: existing?.count ?? 0,
     });
   }
   return filled;
 }
 
+function formatTimeAgo(dateStr: string): string {
+  const now = new Date();
+  const date = new Date(dateStr);
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+
 function Dashboard() {
   const { projectId } = useParams<{ projectId: string }>();
+  const { data: session } = useSession();
+  const userName = session?.user?.name ?? "there";
 
   const { data, isLoading } = useQuery<DashboardData>({
     queryKey: ["dashboard", projectId],
@@ -122,30 +206,48 @@ function Dashboard() {
     enabled: !!projectId,
   });
 
-  // Redirect if no projectId in URL (shouldn't happen with routing, but safety net)
   if (!projectId) {
     return <Navigate to="/app" replace />;
   }
 
+  // ─── Loading State ────────────────────────────────────────────────────────
+
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+        {/* Greeting */}
+        <div>
+          <h1 className="text-lg font-semibold text-foreground">
+            Hello, {userName.split(" ")[0]}
+          </h1>
+          <p className="text-[13px] text-muted-foreground">
+            What are you working on?
+          </p>
+        </div>
+        {/* Stat cards skeleton */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="h-28 rounded-2xl bg-muted/50 animate-pulse"
+              className="h-[104px] rounded-xl bg-card border border-border animate-pulse"
             />
           ))}
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="h-64 rounded-2xl bg-muted/50 animate-pulse" />
-          <div className="h-64 rounded-2xl bg-muted/50 animate-pulse" />
+        {/* Chart + actions skeleton */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 h-[340px] rounded-xl bg-card border border-border animate-pulse" />
+          <div className="h-[340px] rounded-xl bg-card border border-border animate-pulse" />
+        </div>
+        {/* Table + status skeleton */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 h-[280px] rounded-xl bg-card border border-border animate-pulse" />
+          <div className="h-[280px] rounded-xl bg-card border border-border animate-pulse" />
         </div>
       </div>
     );
   }
+
+  // ─── Empty State ──────────────────────────────────────────────────────────
 
   if (!data || data.totalConversations === 0) {
     return (
@@ -154,23 +256,23 @@ function Dashboard() {
           <MessageSquare className="w-8 h-8 text-primary" />
         </div>
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold text-foreground">
+          <h2 className="text-xl font-semibold text-foreground">
             Welcome to ReplyMaven
-          </h1>
-          <p className="text-muted-foreground">
-            No conversations yet. Add resources and embed the widget to get started.
+          </h2>
+          <p className="text-sm text-muted-foreground max-w-md">
+            No conversations yet. Add knowledge resources and embed the chat widget on your site to get started.
           </p>
         </div>
         <div className="flex gap-3">
           <Link to={`/app/projects/${projectId}/resources`}>
-            <Button variant="outline">
-              <FolderOpen className="w-4 h-4 mr-2" />
+            <Button variant="outline" className="gap-2">
+              <FolderOpen className="w-4 h-4" />
               Add Resources
             </Button>
           </Link>
           <Link to={`/app/projects/${projectId}/widget`}>
-            <Button>
-              <Plus className="w-4 h-4 mr-2" />
+            <Button className="gap-2">
+              <Plus className="w-4 h-4" />
               Configure Widget
             </Button>
           </Link>
@@ -179,23 +281,39 @@ function Dashboard() {
     );
   }
 
+  // ─── Data Preparation ─────────────────────────────────────────────────────
+
   const dailyData = fillDailyData(data.conversationsByDay);
   const statusData = data.conversationsByStatus.map((item) => ({
     name: STATUS_LABELS[item.status] ?? item.status,
     value: item.count,
-    color: STATUS_COLORS[item.status] ?? "#a1a1aa",
+    color: STATUS_COLORS[item.status] ?? "#94a3b8",
   }));
 
-  const statusBadgeColors: Record<string, string> = {
-    active: "bg-green-100 text-green-700",
-    waiting_agent: "bg-yellow-100 text-yellow-700",
-    agent_replied: "bg-blue-100 text-blue-700",
-    closed: "bg-muted text-muted-foreground",
-  };
+  const totalStatusCount = statusData.reduce((acc, item) => acc + item.value, 0);
+
+  const quickActions = [
+    { label: "Add a resource", icon: FolderOpen, href: `/app/projects/${projectId}/resources` },
+    { label: "Configure widget", icon: Palette, href: `/app/projects/${projectId}/widget` },
+    { label: "Quick actions", icon: Zap, href: `/app/projects/${projectId}/quick-actions` },
+    { label: "Canned responses", icon: Bot, href: `/app/projects/${projectId}/canned-responses` },
+    { label: "Telegram setup", icon: Send, href: `/app/projects/${projectId}/telegram` },
+    { label: "Project settings", icon: Settings, href: `/app/projects/${projectId}/settings` },
+  ];
+
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+      {/* Greeting */}
+      <div>
+        <h1 className="text-lg font-semibold text-foreground">
+          Hello, {userName.split(" ")[0]}
+        </h1>
+        <p className="text-[13px] text-muted-foreground">
+          What are you working on?
+        </p>
+      </div>
 
       {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -221,66 +339,155 @@ function Dashboard() {
         />
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Conversations Over Time */}
-        <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6">
-          <h2 className="text-sm font-medium text-foreground mb-4">
-            Conversations (Last 7 Days)
-          </h2>
+      {/* Chart + Quick Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Conversations Chart */}
+        <div className="lg:col-span-2 bg-card rounded-xl border border-border p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-sm font-semibold text-foreground">
+              Conversations over time
+            </h2>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-4 text-[12px] text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-primary" />
+                  Conversations
+                </span>
+              </div>
+            </div>
+          </div>
           {dailyData.some((d) => d.count > 0) ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={dailyData}>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={dailyData} barSize={32}>
                 <XAxis
                   dataKey="day"
-                  tick={{ fontSize: 11 }}
+                  tick={{ fontSize: 12, fill: "oklch(55% 0.01 60)" }}
                   tickLine={false}
                   axisLine={false}
                 />
                 <YAxis
-                  tick={{ fontSize: 11 }}
+                  tick={{ fontSize: 12, fill: "oklch(55% 0.01 60)" }}
                   tickLine={false}
                   axisLine={false}
                   allowDecimals={false}
+                  width={30}
                 />
                 <Tooltip
+                  cursor={{ fill: "oklch(95% 0.003 80)" }}
                   contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "0.75rem",
+                    backgroundColor: "white",
+                    border: "1px solid oklch(92% 0.003 80)",
+                    borderRadius: "8px",
                     fontSize: "12px",
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
                   }}
                 />
                 <Bar
                   dataKey="count"
                   name="Conversations"
-                  fill="hsl(var(--primary))"
-                  radius={[6, 6, 0, 0]}
+                  fill="oklch(42% 0.1 152)"
+                  radius={[4, 4, 0, 0]}
                 />
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="flex items-center justify-center h-[200px] text-sm text-muted-foreground">
+            <div className="flex items-center justify-center h-[240px] text-sm text-muted-foreground">
               No conversations this week
             </div>
           )}
         </div>
 
-        {/* Status Breakdown */}
-        <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6">
-          <h2 className="text-sm font-medium text-foreground mb-4">
-            Conversation Status
-          </h2>
+        {/* Quick Actions Grid */}
+        <div className="grid grid-cols-2 gap-3">
+          {quickActions.map((action) => (
+            <QuickActionCard
+              key={action.label}
+              label={action.label}
+              icon={action.icon}
+              href={action.href}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Recent Conversations + Status Breakdown */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Recent Conversations Table */}
+        <div className="lg:col-span-2 bg-card rounded-xl">
+          <div className="flex items-center justify-between px-6 py-4">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-foreground">
+                Recent Conversations
+              </h2>
+              <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-medium">
+                {data.recentConversations.length}
+              </span>
+            </div>
+            <Link
+              to={`/app/projects/${projectId}/conversations`}
+              className="text-[13px] text-muted-foreground hover:text-foreground transition-colors font-medium"
+            >
+              See all
+            </Link>
+          </div>
+
+          {data.recentConversations.length > 0 ? (
+            <div className="">
+              {/* Table rows */}
+              {data.recentConversations.map((convo) => (
+                <Link
+                  key={convo.id}
+                  to={`/app/projects/${projectId}/conversations?id=${convo.id}`}
+                  className="grid grid-cols-[1fr_100px_100px] items-center px-6 py-3 hover:bg-accent/50 transition-colors group"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                      <Users className="w-3.5 h-3.5 text-muted-foreground" />
+                    </div>
+                    <span className="text-[13px] font-medium text-foreground truncate">
+                      {convo.visitorName ?? convo.visitorId.slice(0, 12)}
+                    </span>
+                  </div>
+                  <span
+                    className={cn(
+                      "text-[11px] font-medium px-2 py-0.5 rounded-full border w-fit capitalize",
+                      STATUS_BADGE_STYLES[convo.status] ??
+                      "bg-slate-50 text-slate-500 border-slate-200",
+                    )}
+                  >
+                    {STATUS_LABELS[convo.status] ?? convo.status.replace("_", " ")}
+                  </span>
+                  <span className="text-[12px] text-muted-foreground text-right">
+                    {formatTimeAgo(convo.updatedAt)}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 text-sm text-muted-foreground">
+              No conversations yet
+            </div>
+          )}
+        </div>
+
+        {/* Conversation Status */}
+        <div className="bg-card rounded-xl border border-border p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-sm font-semibold text-foreground">
+              By Status
+            </h2>
+          </div>
           {statusData.length > 0 ? (
-            <div className="flex items-center gap-6">
+            <div className="flex flex-col items-center gap-5">
               <ResponsiveContainer width={160} height={160}>
                 <PieChart>
                   <Pie
                     data={statusData}
-                    innerRadius={45}
-                    outerRadius={70}
+                    innerRadius={48}
+                    outerRadius={72}
                     paddingAngle={3}
                     dataKey="value"
+                    strokeWidth={0}
                   >
                     {statusData.map((entry, idx) => (
                       <Cell key={idx} fill={entry.color} />
@@ -288,26 +495,32 @@ function Dashboard() {
                   </Pie>
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "0.75rem",
+                      backgroundColor: "white",
+                      border: "1px solid oklch(92% 0.003 80)",
+                      borderRadius: "8px",
                       fontSize: "12px",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
                     }}
                   />
                 </PieChart>
               </ResponsiveContainer>
-              <div className="flex flex-col gap-2">
+              <div className="w-full space-y-2.5">
                 {statusData.map((item) => (
-                  <div key={item.name} className="flex items-center gap-2">
+                  <div key={item.name} className="flex items-center gap-3">
                     <div
-                      className="w-3 h-3 rounded-full"
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
                       style={{ backgroundColor: item.color }}
                     />
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-[13px] text-muted-foreground flex-1">
                       {item.name}
                     </span>
-                    <span className="text-sm font-medium text-foreground ml-auto">
+                    <span className="text-[13px] font-semibold text-foreground">
                       {item.value}
+                    </span>
+                    <span className="text-[12px] text-muted-foreground w-10 text-right">
+                      {totalStatusCount > 0
+                        ? `${Math.round((item.value / totalStatusCount) * 100)}%`
+                        : "0%"}
                     </span>
                   </div>
                 ))}
@@ -319,49 +532,6 @@ function Dashboard() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* Recent Conversations */}
-      <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6">
-        <h2 className="text-sm font-medium text-foreground mb-4">
-          Recent Conversations
-        </h2>
-        {data.recentConversations.length > 0 ? (
-          <div className="space-y-2">
-            {data.recentConversations.map((convo) => (
-              <Link
-                key={convo.id}
-                to={`/app/projects/${projectId}/conversations?id=${convo.id}`}
-                className="flex items-center gap-3 py-2 px-3 rounded-xl hover:bg-muted/30 transition-colors"
-              >
-                <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                  <Users className="w-4 h-4 text-muted-foreground" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">
-                    {convo.visitorName ?? convo.visitorId.slice(0, 12)}
-                  </p>
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Clock className="w-3 h-3" />
-                    {new Date(convo.updatedAt).toLocaleString()}
-                  </div>
-                </div>
-                <span
-                  className={cn(
-                    "text-xs px-2 py-0.5 rounded-full whitespace-nowrap",
-                    statusBadgeColors[convo.status] ?? "bg-muted text-muted-foreground",
-                  )}
-                >
-                  {convo.status.replace("_", " ")}
-                </span>
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-8 text-sm text-muted-foreground">
-            No conversations yet
-          </div>
-        )}
       </div>
     </div>
   );

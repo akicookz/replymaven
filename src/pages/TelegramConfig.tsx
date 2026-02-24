@@ -64,9 +64,9 @@ function TelegramConfig() {
     return (
       <div className="space-y-6 max-w-4xl mx-auto">
         <h1 className="text-2xl font-bold text-foreground">Telegram</h1>
-        <div className="h-16 rounded-xl bg-muted/50 animate-pulse" />
-        <div className="h-16 rounded-xl bg-muted/50 animate-pulse" />
-        <div className="h-10 w-40 rounded-xl bg-muted/50 animate-pulse" />
+        <div className="h-16 rounded-xl bg-muted animate-pulse" />
+        <div className="h-16 rounded-xl bg-muted animate-pulse" />
+        <div className="h-10 w-40 rounded-xl bg-muted animate-pulse" />
       </div>
     );
   }

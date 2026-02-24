@@ -84,11 +84,11 @@ function ProjectSettings() {
     return (
       <div className="space-y-6 max-w-4xl mx-auto">
         <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <div className="h-24 rounded-2xl bg-muted/50 animate-pulse" />
-        <div className="h-32 rounded-2xl bg-muted/50 animate-pulse" />
-        <div className="h-28 rounded-2xl bg-muted/50 animate-pulse" />
-        <div className="h-20 rounded-2xl bg-muted/50 animate-pulse" />
-        <div className="h-16 rounded-2xl bg-muted/50 animate-pulse" />
+        <div className="h-24 rounded-2xl bg-muted animate-pulse" />
+        <div className="h-32 rounded-2xl bg-muted animate-pulse" />
+        <div className="h-28 rounded-2xl bg-muted animate-pulse" />
+        <div className="h-20 rounded-2xl bg-muted animate-pulse" />
+        <div className="h-16 rounded-2xl bg-muted animate-pulse" />
       </div>
     );
   }
