@@ -16,6 +16,7 @@ import {
   Check,
   PanelLeftClose,
   Mail,
+  CalendarClock,
 } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
@@ -98,6 +99,11 @@ function Layout() {
           label: "Canned Responses",
           href: `/app/projects/${currentProject.id}/canned-responses`,
           icon: Bot,
+        },
+        {
+          label: "Bookings",
+          href: `/app/projects/${currentProject.id}/bookings`,
+          icon: CalendarClock,
         },
         {
           label: "Contact Form",

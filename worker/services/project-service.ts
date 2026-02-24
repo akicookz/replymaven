@@ -4,6 +4,7 @@ import {
   projects,
   projectSettings,
   widgetConfig,
+  users,
   type ProjectRow,
   type NewProjectRow,
   type ProjectSettingsRow,
@@ -150,5 +151,15 @@ export class ProjectService {
       .update(projects)
       .set({ onboarded: true })
       .where(eq(projects.id, projectId));
+  }
+
+  async getOwnerEmail(projectId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ email: users.email })
+      .from(projects)
+      .innerJoin(users, eq(projects.userId, users.id))
+      .where(eq(projects.id, projectId))
+      .limit(1);
+    return rows[0]?.email ?? null;
   }
 }

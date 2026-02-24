@@ -162,6 +162,8 @@
     external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
     paperclip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
   } as Record<string, string>;
 
   // ─── Styles ─────────────────────────────────────────────────────────────────
@@ -1265,6 +1267,307 @@
     }
 
     /* ─── Responsive ──────────────────────────────────────────────────────── */
+    /* ─── Booking View ─────────────────────────────────────────────────────── */
+    .rm-booking-view {
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      background: #fafafa;
+    }
+    .rm-booking-view.active {
+      display: flex;
+    }
+    .rm-booking-dates {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 12px 16px;
+      background: #fff;
+      border-bottom: 1px solid #e5e7eb;
+      overflow: hidden;
+    }
+    .rm-booking-dates-scroll {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      flex: 1;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      scroll-behavior: smooth;
+    }
+    .rm-booking-dates-scroll::-webkit-scrollbar { display: none; }
+    .rm-booking-date-pill {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 12px;
+      border: 1px solid #e5e7eb;
+      background: #fff;
+      cursor: pointer;
+      min-width: 60px;
+      transition: all 0.15s ease;
+      flex-shrink: 0;
+    }
+    .rm-booking-date-pill:hover {
+      border-color: #d1d5db;
+      background: #f9fafb;
+    }
+    .rm-booking-date-pill.selected {
+      border-color: var(--rm-primary, #2563eb);
+      background: var(--rm-primary, #2563eb);
+      color: #fff;
+    }
+    .rm-booking-date-pill.selected .rm-date-weekday,
+    .rm-booking-date-pill.selected .rm-date-day {
+      color: #fff;
+    }
+    .rm-booking-date-pill.today {
+      border-color: var(--rm-primary, #2563eb);
+    }
+    .rm-date-weekday {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: #6b7280;
+      letter-spacing: 0.5px;
+    }
+    .rm-date-day {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1f2937;
+      line-height: 1.2;
+    }
+    .rm-date-month {
+      font-size: 10px;
+      color: #9ca3af;
+    }
+    .rm-booking-date-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1px solid #e5e7eb;
+      background: #fff;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .rm-booking-date-arrow:hover { background: #f3f4f6; }
+    .rm-booking-date-arrow svg { width: 14px; height: 14px; color: #6b7280; }
+    .rm-booking-slots {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    .rm-booking-slots-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 16px;
+      color: #9ca3af;
+      font-size: 13px;
+    }
+    .rm-booking-slot {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 16px;
+      margin-bottom: 8px;
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      background: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      color: #1f2937;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .rm-booking-slot:hover {
+      border-color: var(--rm-primary, #2563eb);
+      background: rgba(37,99,235,0.04);
+    }
+    .rm-booking-slot.selected {
+      border-color: var(--rm-primary, #2563eb);
+      background: var(--rm-primary, #2563eb);
+      color: #fff;
+    }
+    .rm-booking-slot.unavailable {
+      opacity: 0.4;
+      cursor: not-allowed;
+      text-decoration: line-through;
+      pointer-events: none;
+    }
+    .rm-booking-footer {
+      padding: 12px 16px;
+      border-top: 1px solid #e5e7eb;
+      background: #fff;
+    }
+    .rm-booking-footer-info {
+      font-size: 12px;
+      color: #6b7280;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .rm-booking-continue-btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .rm-booking-continue-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .rm-booking-continue-btn:not(:disabled):hover {
+      opacity: 0.9;
+    }
+    /* ─── Booking Details Form ──────────────────────────────────────────── */
+    .rm-booking-form {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 16px;
+    }
+    .rm-booking-form-summary {
+      padding: 12px 16px;
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .rm-booking-form-summary-date {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1f2937;
+    }
+    .rm-booking-form-summary-time {
+      font-size: 13px;
+      color: #6b7280;
+      margin-top: 2px;
+    }
+    .rm-booking-field {
+      margin-bottom: 14px;
+    }
+    .rm-booking-field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 5px;
+    }
+    .rm-booking-field label .rm-required {
+      color: #ef4444;
+      margin-left: 2px;
+    }
+    .rm-booking-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 14px;
+      color: #1f2937;
+      background: #fff;
+      outline: none;
+      transition: border-color 0.15s;
+      box-sizing: border-box;
+      font-family: inherit;
+    }
+    .rm-booking-input:focus {
+      border-color: var(--rm-primary, #2563eb);
+      box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+    }
+    .rm-booking-textarea {
+      resize: vertical;
+      min-height: 60px;
+    }
+    /* ─── Booking Confirmation ─────────────────────────────────────────── */
+    .rm-booking-confirmed {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      padding: 40px 24px;
+      text-align: center;
+    }
+    .rm-booking-confirmed-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+    .rm-booking-confirmed-icon svg {
+      width: 28px;
+      height: 28px;
+      color: #fff;
+    }
+    .rm-booking-confirmed h3 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1f2937;
+      margin: 0 0 12px;
+    }
+    .rm-booking-confirmed-details {
+      font-size: 14px;
+      font-weight: 500;
+      color: #374151;
+      margin-bottom: 4px;
+    }
+    .rm-booking-confirmed-time {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 16px;
+    }
+    .rm-booking-confirmed-email {
+      font-size: 13px;
+      color: #6b7280;
+      line-height: 1.5;
+    }
+    .rm-booking-confirmed-email strong {
+      color: #374151;
+    }
+    .rm-booking-back-btn {
+      margin-top: 24px;
+      padding: 10px 24px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      background: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      color: #374151;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .rm-booking-back-btn:hover { background: #f9fafb; }
+    .rm-booking-no-slots {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 16px;
+      text-align: center;
+      color: #9ca3af;
+      font-size: 13px;
+    }
+    .rm-booking-no-slots svg {
+      width: 32px;
+      height: 32px;
+      margin-bottom: 8px;
+      opacity: 0.4;
+    }
+
     @media (max-width: 480px) {
       .rm-chat-window {
         width: calc(100vw - 24px);
@@ -1525,9 +1828,38 @@
   powered.className = "rm-powered";
   powered.innerHTML = 'Powered by <a href="https://replymaven.com" target="_blank" rel="noopener">ReplyMaven</a>';
 
+  // ─── Booking View ────────────────────────────────────────────────────────────
+  const bookingView = document.createElement("div");
+  bookingView.className = "rm-booking-view";
+
+  // Booking header (reuses the .rm-header style)
+  const bookingHeader = document.createElement("div");
+  bookingHeader.className = "rm-header";
+  const bookingHeaderBack = document.createElement("button");
+  bookingHeaderBack.className = "rm-header-back";
+  bookingHeaderBack.innerHTML = ICONS.backArrow;
+  bookingHeaderBack.onclick = () => showHomeScreen();
+  const bookingHeaderTitle = document.createElement("div");
+  bookingHeaderTitle.style.cssText = "flex:1;min-width:0;";
+  bookingHeaderTitle.innerHTML = '<div style="font-weight:600;font-size:14px;">Book a Meeting</div>';
+  const bookingHeaderClose = document.createElement("button");
+  bookingHeaderClose.className = "rm-header-close";
+  bookingHeaderClose.innerHTML = ICONS.close;
+  bookingHeaderClose.onclick = () => toggleChatWidget();
+  bookingHeader.appendChild(bookingHeaderBack);
+  bookingHeader.appendChild(bookingHeaderTitle);
+  bookingHeader.appendChild(bookingHeaderClose);
+  bookingView.appendChild(bookingHeader);
+
+  // Booking content container (swapped between step1/step2/step3)
+  const bookingContent = document.createElement("div");
+  bookingContent.style.cssText = "display:flex;flex-direction:column;flex:1;overflow:hidden;";
+  bookingView.appendChild(bookingContent);
+
   // Assemble chat window
   chatWindow.appendChild(homeView);
   chatWindow.appendChild(formView);
+  chatWindow.appendChild(bookingView);
   chatWindow.appendChild(chatView);
   chatWindow.appendChild(powered);
 
@@ -1553,12 +1885,13 @@
   document.body.appendChild(container);
 
   // ─── View State ──────────────────────────────────────────────────────────────
-  let currentView: "home" | "chat" | "form" = "home";
+  let currentView: "home" | "chat" | "form" | "booking" = "home";
 
   function showChatScreen() {
     currentView = "chat";
     homeView.classList.add("hidden");
     formView.classList.remove("active");
+    bookingView.classList.remove("active");
     chatView.classList.add("active");
     setTimeout(() => input.focus(), 100);
   }
@@ -1567,6 +1900,7 @@
     currentView = "home";
     homeView.classList.remove("hidden");
     formView.classList.remove("active");
+    bookingView.classList.remove("active");
     chatView.classList.remove("active");
   }
 
@@ -1574,7 +1908,17 @@
     currentView = "form";
     homeView.classList.add("hidden");
     chatView.classList.remove("active");
+    bookingView.classList.remove("active");
     formView.classList.add("active");
+  }
+
+  function showBookingScreen() {
+    currentView = "booking";
+    homeView.classList.add("hidden");
+    chatView.classList.remove("active");
+    formView.classList.remove("active");
+    bookingView.classList.add("active");
+    initBookingView();
   }
 
   // ─── Visibility Tracking ─────────────────────────────────────────────────────
@@ -1755,6 +2099,453 @@
     flushParagraph();
 
     return result.join("");
+  }
+
+  // ─── Booking Logic ───────────────────────────────────────────────────────────
+
+  let bookingConfig: { enabled: boolean; timezone?: string; slotDuration?: number; bookingWindowDays?: number } | null = null;
+  let bookingSelectedDate: string | null = null;
+  let bookingSelectedSlot: { startTime: string; endTime: string; startTimeLocal: string; endTimeLocal: string } | null = null;
+  let bookingStep: "slots" | "form" | "confirmed" = "slots";
+
+  function getVisitorTimezone(): string {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      return "America/New_York";
+    }
+  }
+
+  function getBookingDates(): Array<{ dateStr: string; label: string; weekday: string; day: number; month: string; isToday: boolean }> {
+    const dates: Array<{ dateStr: string; label: string; weekday: string; day: number; month: string; isToday: boolean }> = [];
+    const today = new Date();
+    const windowDays = bookingConfig?.bookingWindowDays ?? 14;
+    for (let i = 0; i < windowDays; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      const dateStr = `${year}-${month}-${day}`;
+      const weekday = d.toLocaleDateString("en-US", { weekday: "short" });
+      const monthLabel = d.toLocaleDateString("en-US", { month: "short" });
+      dates.push({
+        dateStr,
+        label: `${monthLabel} ${d.getDate()}`,
+        weekday,
+        day: d.getDate(),
+        month: monthLabel,
+        isToday: i === 0,
+      });
+    }
+    return dates;
+  }
+
+  async function fetchBookingConfig(): Promise<void> {
+    try {
+      const res = await fetch(`${baseUrl}/api/widget/${projectSlug}/booking/config`);
+      if (res.ok) {
+        bookingConfig = await res.json();
+      }
+    } catch {
+      // Silently fail
+    }
+  }
+
+  async function fetchSlots(dateStr: string): Promise<Array<{ startTime: string; endTime: string; startTimeLocal: string; endTimeLocal: string; available: boolean }>> {
+    try {
+      const tz = encodeURIComponent(getVisitorTimezone());
+      const res = await fetch(`${baseUrl}/api/widget/${projectSlug}/booking/slots?date=${dateStr}&timezone=${tz}`);
+      if (res.ok) {
+        const data = await res.json();
+        return data.slots || [];
+      }
+    } catch {
+      // Silently fail
+    }
+    return [];
+  }
+
+  async function submitBooking(data: {
+    visitorName: string;
+    visitorEmail: string;
+    visitorPhone?: string;
+    notes?: string;
+    startTime: string;
+    timezone: string;
+    conversationId?: string;
+  }): Promise<boolean> {
+    try {
+      const res = await fetch(`${baseUrl}/api/widget/${projectSlug}/booking`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  function initBookingView() {
+    bookingStep = "slots";
+    bookingSelectedSlot = null;
+    const dates = getBookingDates();
+    if (dates.length > 0 && !bookingSelectedDate) {
+      bookingSelectedDate = dates[0].dateStr;
+    }
+    renderBookingSlots();
+  }
+
+  function renderBookingSlots() {
+    const primary = config?.widget?.primaryColor || "#2563eb";
+    bookingContent.innerHTML = "";
+
+    // ── Date strip ───────────────────────────────────────────────────────────
+    const dateStrip = document.createElement("div");
+    dateStrip.className = "rm-booking-dates";
+
+    const leftArrow = document.createElement("button");
+    leftArrow.className = "rm-booking-date-arrow";
+    leftArrow.innerHTML = ICONS.chevronLeft;
+
+    const scrollContainer = document.createElement("div");
+    scrollContainer.className = "rm-booking-dates-scroll";
+
+    const rightArrow = document.createElement("button");
+    rightArrow.className = "rm-booking-date-arrow";
+    rightArrow.innerHTML = ICONS.chevronRight;
+
+    leftArrow.onclick = () => { scrollContainer.scrollBy({ left: -180, behavior: "smooth" }); };
+    rightArrow.onclick = () => { scrollContainer.scrollBy({ left: 180, behavior: "smooth" }); };
+
+    const dates = getBookingDates();
+    dates.forEach((d) => {
+      const pill = document.createElement("div");
+      pill.className = "rm-booking-date-pill";
+      if (d.dateStr === bookingSelectedDate) pill.classList.add("selected");
+      if (d.isToday) pill.classList.add("today");
+      pill.style.setProperty("--rm-primary", primary);
+
+      const weekday = document.createElement("span");
+      weekday.className = "rm-date-weekday";
+      weekday.textContent = d.weekday;
+
+      const day = document.createElement("span");
+      day.className = "rm-date-day";
+      day.textContent = String(d.day);
+
+      const month = document.createElement("span");
+      month.className = "rm-date-month";
+      month.textContent = d.month;
+
+      pill.appendChild(weekday);
+      pill.appendChild(day);
+      pill.appendChild(month);
+
+      pill.onclick = () => {
+        bookingSelectedDate = d.dateStr;
+        bookingSelectedSlot = null;
+        renderBookingSlots();
+      };
+      scrollContainer.appendChild(pill);
+    });
+
+    dateStrip.appendChild(leftArrow);
+    dateStrip.appendChild(scrollContainer);
+    dateStrip.appendChild(rightArrow);
+    bookingContent.appendChild(dateStrip);
+
+    // ── Slots area ──────────────────────────────────────────────────────────
+    const slotsArea = document.createElement("div");
+    slotsArea.className = "rm-booking-slots";
+
+    const loading = document.createElement("div");
+    loading.className = "rm-booking-slots-loading";
+    loading.textContent = "Loading available times...";
+    slotsArea.appendChild(loading);
+    bookingContent.appendChild(slotsArea);
+
+    // ── Footer ──────────────────────────────────────────────────────────────
+    const footer = document.createElement("div");
+    footer.className = "rm-booking-footer";
+    footer.style.display = "none";
+
+    const footerInfo = document.createElement("div");
+    footerInfo.className = "rm-booking-footer-info";
+
+    const continueBtn = document.createElement("button");
+    continueBtn.className = "rm-booking-continue-btn";
+    continueBtn.style.backgroundColor = primary;
+    continueBtn.textContent = "Finalize Details →";
+    continueBtn.disabled = true;
+    continueBtn.onclick = () => renderBookingForm();
+
+    footer.appendChild(footerInfo);
+    footer.appendChild(continueBtn);
+    bookingContent.appendChild(footer);
+
+    // ── Fetch and render slots ──────────────────────────────────────────────
+    if (bookingSelectedDate) {
+      fetchSlots(bookingSelectedDate).then((slots) => {
+        slotsArea.innerHTML = "";
+
+        if (slots.length === 0) {
+          const noSlots = document.createElement("div");
+          noSlots.className = "rm-booking-no-slots";
+          noSlots.innerHTML = ICONS.calendar;
+          const noSlotsText = document.createElement("span");
+          noSlotsText.textContent = "No available times on this date";
+          noSlots.appendChild(noSlotsText);
+          slotsArea.appendChild(noSlots);
+          return;
+        }
+
+        const hasAvailable = slots.some((s) => s.available);
+        if (!hasAvailable) {
+          const noSlots = document.createElement("div");
+          noSlots.className = "rm-booking-no-slots";
+          noSlots.innerHTML = ICONS.clock;
+          const noSlotsText = document.createElement("span");
+          noSlotsText.textContent = "All times are booked for this date";
+          noSlots.appendChild(noSlotsText);
+          slotsArea.appendChild(noSlots);
+          return;
+        }
+
+        footer.style.display = "block";
+
+        slots.forEach((slot) => {
+          const el = document.createElement("div");
+          el.className = "rm-booking-slot";
+          el.style.setProperty("--rm-primary", primary);
+          el.textContent = `${slot.startTimeLocal} - ${slot.endTimeLocal}`;
+
+          if (!slot.available) {
+            el.classList.add("unavailable");
+          } else {
+            if (bookingSelectedSlot?.startTime === slot.startTime) {
+              el.classList.add("selected");
+              continueBtn.disabled = false;
+              footerInfo.textContent = `${slot.startTimeLocal} - ${slot.endTimeLocal}`;
+            }
+            el.onclick = () => {
+              bookingSelectedSlot = {
+                startTime: slot.startTime,
+                endTime: slot.endTime,
+                startTimeLocal: slot.startTimeLocal,
+                endTimeLocal: slot.endTimeLocal,
+              };
+              // Update selection UI
+              slotsArea.querySelectorAll(".rm-booking-slot").forEach((s) => s.classList.remove("selected"));
+              el.classList.add("selected");
+              continueBtn.disabled = false;
+              footerInfo.textContent = `${slot.startTimeLocal} - ${slot.endTimeLocal}`;
+            };
+          }
+          slotsArea.appendChild(el);
+        });
+      });
+    }
+
+    // Scroll to selected date
+    setTimeout(() => {
+      const selected = scrollContainer.querySelector(".selected");
+      if (selected) {
+        selected.scrollIntoView({ inline: "center", block: "nearest" });
+      }
+    }, 50);
+  }
+
+  function renderBookingForm() {
+    if (!bookingSelectedSlot || !bookingSelectedDate) return;
+    bookingStep = "form";
+
+    const primary = config?.widget?.primaryColor || "#2563eb";
+    bookingContent.innerHTML = "";
+    bookingHeaderTitle.innerHTML = '<div style="font-weight:600;font-size:14px;">Finalize Details</div>';
+    bookingHeaderBack.onclick = () => {
+      bookingHeaderTitle.innerHTML = '<div style="font-weight:600;font-size:14px;">Book a Meeting</div>';
+      bookingHeaderBack.onclick = () => showHomeScreen();
+      bookingStep = "slots";
+      renderBookingSlots();
+    };
+
+    const form = document.createElement("div");
+    form.className = "rm-booking-form";
+
+    // Summary card
+    const summary = document.createElement("div");
+    summary.className = "rm-booking-form-summary";
+    const selectedDate = new Date(bookingSelectedDate + "T12:00:00");
+    const dateLabel = selectedDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+    summary.innerHTML = `
+      <div class="rm-booking-form-summary-date">${dateLabel}</div>
+      <div class="rm-booking-form-summary-time">${bookingSelectedSlot.startTimeLocal} - ${bookingSelectedSlot.endTimeLocal}</div>
+    `;
+    form.appendChild(summary);
+
+    // Fields
+    const fields: Array<{ key: string; label: string; required: boolean; type: "text" | "email" | "tel" | "textarea" }> = [
+      { key: "name", label: "Name", required: true, type: "text" },
+      { key: "email", label: "Email", required: true, type: "email" },
+      { key: "phone", label: "Phone", required: false, type: "tel" },
+      { key: "notes", label: "Notes", required: false, type: "textarea" },
+    ];
+
+    const inputs: Record<string, HTMLInputElement | HTMLTextAreaElement> = {};
+
+    fields.forEach((field) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "rm-booking-field";
+
+      const label = document.createElement("label");
+      label.innerHTML = field.label + (field.required ? '<span class="rm-required">*</span>' : "");
+
+      wrapper.appendChild(label);
+
+      if (field.type === "textarea") {
+        const ta = document.createElement("textarea");
+        ta.className = "rm-booking-input rm-booking-textarea";
+        ta.placeholder = "Any additional details...";
+        ta.rows = 3;
+        inputs[field.key] = ta;
+        wrapper.appendChild(ta);
+      } else {
+        const inp = document.createElement("input");
+        inp.className = "rm-booking-input";
+        inp.type = field.type;
+        inp.placeholder = field.label;
+        inp.style.setProperty("--rm-primary", primary);
+
+        // Pre-fill from visitor info
+        if (field.key === "name" && visitorInfo.name) inp.value = visitorInfo.name;
+        if (field.key === "email" && visitorInfo.email) inp.value = visitorInfo.email;
+
+        inputs[field.key] = inp;
+        wrapper.appendChild(inp);
+      }
+
+      form.appendChild(wrapper);
+    });
+
+    bookingContent.appendChild(form);
+
+    // Footer with submit button
+    const footer = document.createElement("div");
+    footer.className = "rm-booking-footer";
+
+    const submitBtn = document.createElement("button");
+    submitBtn.className = "rm-booking-continue-btn";
+    submitBtn.style.backgroundColor = primary;
+    submitBtn.textContent = "Confirm Booking →";
+
+    const errorEl = document.createElement("div");
+    errorEl.style.cssText = "color:#ef4444;font-size:12px;text-align:center;margin-top:8px;display:none;";
+
+    submitBtn.onclick = async () => {
+      const name = inputs.name.value.trim();
+      const email = inputs.email.value.trim();
+      const phone = (inputs.phone as HTMLInputElement).value.trim();
+      const notes = (inputs.notes as HTMLTextAreaElement).value.trim();
+
+      if (!name || !email) {
+        errorEl.textContent = "Name and email are required";
+        errorEl.style.display = "block";
+        return;
+      }
+
+      // Basic email validation
+      if (!email.includes("@") || !email.includes(".")) {
+        errorEl.textContent = "Please enter a valid email address";
+        errorEl.style.display = "block";
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Booking...";
+      errorEl.style.display = "none";
+
+      const success = await submitBooking({
+        visitorName: name,
+        visitorEmail: email,
+        visitorPhone: phone || undefined,
+        notes: notes || undefined,
+        startTime: bookingSelectedSlot!.startTime,
+        timezone: getVisitorTimezone(),
+        conversationId: conversationId || undefined,
+      });
+
+      if (success) {
+        renderBookingConfirmation(name, email);
+      } else {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Confirm Booking →";
+        errorEl.textContent = "This time slot may no longer be available. Please try another time.";
+        errorEl.style.display = "block";
+      }
+    };
+
+    footer.appendChild(submitBtn);
+    footer.appendChild(errorEl);
+    bookingContent.appendChild(footer);
+  }
+
+  function renderBookingConfirmation(name: string, email: string) {
+    bookingStep = "confirmed";
+    const primary = config?.widget?.primaryColor || "#2563eb";
+
+    bookingContent.innerHTML = "";
+    bookingHeaderTitle.innerHTML = '<div style="font-weight:600;font-size:14px;">Booking Confirmed</div>';
+    bookingHeaderBack.onclick = () => showHomeScreen();
+
+    const confirmed = document.createElement("div");
+    confirmed.className = "rm-booking-confirmed";
+
+    const icon = document.createElement("div");
+    icon.className = "rm-booking-confirmed-icon";
+    icon.style.backgroundColor = primary;
+    icon.innerHTML = ICONS.check;
+
+    const h3 = document.createElement("h3");
+    h3.textContent = "Booking Confirmed!";
+
+    if (bookingSelectedDate && bookingSelectedSlot) {
+      const selectedDate = new Date(bookingSelectedDate + "T12:00:00");
+      const dateLabel = selectedDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+
+      const details = document.createElement("div");
+      details.className = "rm-booking-confirmed-details";
+      details.textContent = dateLabel;
+
+      const time = document.createElement("div");
+      time.className = "rm-booking-confirmed-time";
+      time.textContent = `${bookingSelectedSlot.startTimeLocal} - ${bookingSelectedSlot.endTimeLocal}`;
+
+      const emailMsg = document.createElement("div");
+      emailMsg.className = "rm-booking-confirmed-email";
+      emailMsg.innerHTML = `We'll send a calendar invite to<br><strong>${email}</strong>`;
+
+      const backBtn = document.createElement("button");
+      backBtn.className = "rm-booking-back-btn";
+      backBtn.textContent = "Back to Chat";
+      backBtn.onclick = () => {
+        bookingSelectedDate = null;
+        bookingSelectedSlot = null;
+        bookingHeaderTitle.innerHTML = '<div style="font-weight:600;font-size:14px;">Book a Meeting</div>';
+        bookingHeaderBack.onclick = () => showHomeScreen();
+        showHomeScreen();
+      };
+
+      confirmed.appendChild(icon);
+      confirmed.appendChild(h3);
+      confirmed.appendChild(details);
+      confirmed.appendChild(time);
+      confirmed.appendChild(emailMsg);
+      confirmed.appendChild(backBtn);
+    }
+
+    bookingContent.appendChild(confirmed);
   }
 
   async function loadConfig() {
@@ -2094,6 +2885,37 @@
         };
       }
 
+      // ─── Booking Link on Home Screen ─────────────────────────────────────
+      if (loadedConfig.bookingEnabled) {
+        fetchBookingConfig(); // Pre-load booking config
+
+        const bookLink = document.createElement("div");
+        bookLink.className = "rm-home-link";
+        bookLink.style.cursor = "pointer";
+        bookLink.onclick = () => showBookingScreen();
+
+        const bookLinkIcon = document.createElement("span");
+        bookLinkIcon.className = "rm-home-link-icon";
+        bookLinkIcon.innerHTML = ICONS.calendar;
+
+        const bookLinkLabel = document.createElement("span");
+        bookLinkLabel.className = "rm-home-link-label";
+        bookLinkLabel.textContent = "Book a meeting";
+
+        const bookLinkArrow = document.createElement("span");
+        bookLinkArrow.className = "rm-home-link-arrow";
+        bookLinkArrow.innerHTML = ICONS.chevronRight;
+
+        bookLink.appendChild(bookLinkIcon);
+        bookLink.appendChild(bookLinkLabel);
+        bookLink.appendChild(bookLinkArrow);
+        homeLinksContainer.appendChild(bookLink);
+
+        // Apply primary color to booking header
+        const bookingPrimary = loadedConfig.widget?.primaryColor || "#2563eb";
+        bookingHeader.style.backgroundColor = bookingPrimary;
+      }
+
       // Intro message
       if (loadedConfig.introMessage) {
         addMessageToUI("bot", loadedConfig.introMessage);
@@ -2271,6 +3093,19 @@
                 continue;
               }
 
+              if (data.booking) {
+                // Bot detected scheduling intent -> open booking UI
+                if (botMessageEl) {
+                  botMessageEl.closest(".rm-message-row")?.remove();
+                  botMessageEl = null;
+                }
+                hideTyping();
+                if (bookingConfig?.enabled) {
+                  showBookingScreen();
+                }
+                continue;
+              }
+
               if (data.text) {
                 botMessage += data.text;
 
@@ -2285,6 +3120,20 @@
                   }
                   hideTyping();
                   botMessage = "";
+                  continue;
+                }
+
+                // Client-side filter: if [BOOKING_REQUESTED] appears, open booking UI
+                if (botMessage.includes("[BOOKING_REQUESTED]")) {
+                  if (botMessageEl) {
+                    botMessageEl.closest(".rm-message-row")?.remove();
+                    botMessageEl = null;
+                  }
+                  hideTyping();
+                  botMessage = "";
+                  if (bookingConfig?.enabled) {
+                    showBookingScreen();
+                  }
                   continue;
                 }
 

@@ -57,6 +57,13 @@
       "when": 1771969049540,
       "tag": "0007_lumpy_tigra",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1771972978357,
+      "tag": "0008_noisy_ricochet",
+      "breakpoints": true
     }
   ]
 }

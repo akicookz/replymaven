@@ -13,6 +13,8 @@ import { TelegramService } from "./services/telegram-service";
 import { CannedResponseService } from "./services/canned-response-service";
 import { DashboardService } from "./services/dashboard-service";
 import { CrawlService, type CrawlMessage } from "./services/crawl-service";
+import { BookingService } from "./services/booking-service";
+import { EmailService } from "./services/email-service";
 import {
   createProjectSchema,
   updateProjectSchema,
@@ -39,6 +41,9 @@ import {
   updateConversationPublicSchema,
   updateContactFormConfigSchema,
   submitContactFormSchema,
+  updateBookingConfigSchema,
+  setAvailabilityRulesSchema,
+  createBookingSchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -462,6 +467,11 @@ const app = new Hono<HonoAppContext>()
         parsed.data.content,
       );
 
+      // Check if booking is enabled for this project
+      const bookingService = new BookingService(db);
+      const bookingCfg = await bookingService.getBookingConfig(project.id);
+      const bookingEnabled = bookingCfg?.enabled ?? false;
+
       // Build system prompt and stream response
       const systemPrompt = geminiService.buildSystemPrompt(
         settings ?? { toneOfVoice: "professional", customTonePrompt: null, companyContext: null },
@@ -469,6 +479,7 @@ const app = new Hono<HonoAppContext>()
         ragContext,
         cannedMatch ? cannedMatch.response : null,
         conversationSummary,
+        { bookingEnabled },
       );
 
       // Stream via SSE
@@ -524,6 +535,21 @@ const app = new Hono<HonoAppContext>()
                     handoff: true,
                     visitorEmail: conversation.visitorEmail ?? null,
                   })}\n\n`,
+                ),
+              );
+            }
+
+            // Check if booking was requested
+            if (fullResponse.includes("[BOOKING_REQUESTED]")) {
+              fullResponse = fullResponse.replace(
+                "[BOOKING_REQUESTED]",
+                "I'd be happy to help you schedule a meeting! Let me open our booking calendar for you.",
+              );
+
+              // Send booking event to widget
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ booking: true })}\n\n`,
                 ),
               );
             }
@@ -716,6 +742,142 @@ const app = new Hono<HonoAppContext>()
     }
 
     return c.json(submission, 201);
+  })
+
+  // ─── Booking Config (public - for widget) ──────────────────────────────────
+  .get("/api/widget/:projectSlug/booking/config", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`bconf:${ip}`, 30, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const slug = c.req.param("projectSlug");
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const bookingService = new BookingService(db);
+    const config = await bookingService.getBookingConfig(project.id);
+
+    if (!config || !config.enabled) {
+      return c.json({ enabled: false });
+    }
+
+    return c.json({
+      enabled: true,
+      timezone: config.timezone,
+      slotDuration: config.slotDuration,
+      bookingWindowDays: config.bookingWindowDays,
+    });
+  })
+
+  // ─── Available Slots (public - for widget) ────────────────────────────────
+  .get("/api/widget/:projectSlug/booking/slots", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`bslots:${ip}`, 60, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const slug = c.req.param("projectSlug");
+    const date = c.req.query("date"); // YYYY-MM-DD
+    const visitorTimezone = c.req.query("timezone") ?? "America/New_York";
+
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return c.json({ error: "Valid date parameter required (YYYY-MM-DD)" }, 400);
+    }
+
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const bookingService = new BookingService(db);
+    const slots = await bookingService.getAvailableSlots(
+      project.id,
+      date,
+      visitorTimezone,
+    );
+
+    return c.json({ slots });
+  })
+
+  // ─── Create Booking (public - from widget) ────────────────────────────────
+  .post("/api/widget/:projectSlug/booking", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`book:${ip}`, 5, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const slug = c.req.param("projectSlug");
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const body = await c.req.json();
+    const parsed = validate(createBookingSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const bookingService = new BookingService(db);
+
+    let booking;
+    try {
+      booking = await bookingService.createBooking({
+        projectId: project.id,
+        visitorName: parsed.data.visitorName,
+        visitorEmail: parsed.data.visitorEmail,
+        visitorPhone: parsed.data.visitorPhone,
+        notes: parsed.data.notes,
+        startTime: parsed.data.startTime,
+        timezone: parsed.data.timezone,
+        conversationId: parsed.data.conversationId,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Booking failed";
+      return c.json({ error: message }, 409);
+    }
+
+    // Send confirmation emails in background
+    if (c.env.RESEND_API_KEY) {
+      const emailService = new EmailService(c.env.RESEND_API_KEY);
+      const bookingConfig = await bookingService.getBookingConfig(project.id);
+      const settings = await projectService.getSettings(project.id);
+
+      // Get project owner email
+      const ownerEmail = await projectService.getOwnerEmail(project.id);
+
+      c.executionCtx.waitUntil(
+        Promise.all([
+          emailService.sendBookingConfirmation({
+            visitorName: booking.visitorName,
+            visitorEmail: booking.visitorEmail,
+            visitorPhone: booking.visitorPhone,
+            notes: booking.notes,
+            startTime: new Date(booking.startTime),
+            endTime: new Date(booking.endTime),
+            timezone: booking.timezone,
+            projectName: settings?.companyName ?? project.name,
+          }),
+          emailService.sendBookingNotification({
+            visitorName: booking.visitorName,
+            visitorEmail: booking.visitorEmail,
+            visitorPhone: booking.visitorPhone,
+            notes: booking.notes,
+            startTime: new Date(booking.startTime),
+            endTime: new Date(booking.endTime),
+            timezone: booking.timezone,
+            projectName: settings?.companyName ?? project.name,
+            ownerEmail: ownerEmail ?? undefined,
+            ownerTimezone: bookingConfig?.timezone,
+          }),
+        ]).catch((err) => {
+          console.error("Booking email failed:", err);
+        }),
+      );
+    }
+
+    return c.json(booking, 201);
   })
 
   // ─── Telegram Webhook ───────────────────────────────────────────────────────
@@ -2181,6 +2343,124 @@ const app = new Hono<HonoAppContext>()
     );
 
     return c.json({ ok: success });
+  })
+
+  // ─── Booking Config (Dashboard) ──────────────────────────────────────────────
+  .get("/api/projects/:id/booking/config", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const bookingService = new BookingService(db);
+    const [config, rules] = await Promise.all([
+      bookingService.getBookingConfig(project.id),
+      bookingService.getAvailabilityRules(project.id),
+    ]);
+
+    return c.json({
+      config: config ?? {
+        enabled: false,
+        timezone: "America/New_York",
+        slotDuration: 30,
+        bufferTime: 0,
+        bookingWindowDays: 14,
+        minAdvanceHours: 1,
+      },
+      rules,
+    });
+  })
+  .put("/api/projects/:id/booking/config", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateBookingConfigSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const bookingService = new BookingService(db);
+    const config = await bookingService.upsertBookingConfig(
+      project.id,
+      parsed.data,
+    );
+    return c.json(config);
+  })
+
+  // ─── Availability Rules (Dashboard) ────────────────────────────────────────
+  .put("/api/projects/:id/booking/availability", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(setAvailabilityRulesSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const bookingService = new BookingService(db);
+    const rules = await bookingService.setAvailabilityRules(
+      project.id,
+      parsed.data.rules,
+    );
+    return c.json(rules);
+  })
+
+  // ─── Bookings List (Dashboard) ─────────────────────────────────────────────
+  .get("/api/projects/:id/bookings", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const status = c.req.query("status");
+    const bookingService = new BookingService(db);
+    const bookings = await bookingService.getBookings(project.id, {
+      status: status || undefined,
+    });
+    return c.json(bookings);
+  })
+
+  // ─── Cancel Booking (Dashboard) ────────────────────────────────────────────
+  .patch("/api/projects/:id/bookings/:bookingId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const bookingService = new BookingService(db);
+    const booking = await bookingService.cancelBooking(
+      c.req.param("bookingId"),
+      project.id,
+    );
+    if (!booking) return c.json({ error: "Not found" }, 404);
+    return c.json(booking);
   })
 
   // ─── Widget Bundle Upload to R2 ─────────────────────────────────────────────

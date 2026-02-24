@@ -8,6 +8,7 @@ import {
   projectSettings,
   contactFormConfig,
   contactFormSubmissions,
+  bookingConfig,
   type WidgetConfigRow,
   type QuickActionRow,
   type NewQuickActionRow,
@@ -261,7 +262,7 @@ export class WidgetService {
   // ─── Full Widget Config for Embed ───────────────────────────────────────────
 
   async getFullWidgetConfig(projectId: string) {
-    const [config, actions, topics, links, settings, formConfig] =
+    const [config, actions, topics, links, settings, formConfig, booking] =
       await Promise.all([
         this.getWidgetConfig(projectId),
         this.getQuickActions(projectId),
@@ -273,6 +274,11 @@ export class WidgetService {
           .where(eq(projectSettings.projectId, projectId))
           .limit(1),
         this.getContactFormConfig(projectId),
+        this.db
+          .select()
+          .from(bookingConfig)
+          .where(eq(bookingConfig.projectId, projectId))
+          .limit(1),
       ]);
 
     return {
@@ -289,6 +295,7 @@ export class WidgetService {
               fields: JSON.parse(formConfig.fields || "[]"),
             }
           : null,
+      bookingEnabled: booking[0]?.enabled ?? false,
     };
   }
 }
