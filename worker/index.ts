@@ -322,32 +322,67 @@ const app = new Hono<HonoAppContext>()
         (await chatService.getFromCache(conversationId, project.id)) ??
         (await chatService.getMessages(conversationId));
 
-      // Query AI Search for relevant context
+      const conversationHistory = history
+        .filter((m) => m.role !== "bot" || m.content)
+        .slice(-20) // Last 20 messages for context
+        .map((m) => ({
+          role: m.role as "visitor" | "bot" | "agent",
+          content: m.content,
+        }));
+
+      // Reformulate the visitor's message into a standalone search query using
+      // conversation context. This fixes follow-up questions like "where do I
+      // send the email?" which are meaningless without prior conversation.
+      const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
+      const searchQuery = await geminiService.reformulateQuery(
+        conversationHistory,
+        parsed.data.content,
+      );
+
+      // Query AI Search for relevant context with improved retrieval settings
       let ragContext = "";
       const ragFilenames: string[] = [];
       try {
         const searchResults = await c.env.AI.autorag("supportbot").search({
-          query: parsed.data.content,
+          query: searchQuery,
+          rewrite_query: true,
           filters: {
             type: "eq",
             key: "folder",
             value: `${project.id}/`,
           },
           max_num_results: 5,
-          ranking_options: { score_threshold: 0.3 },
+          ranking_options: { score_threshold: 0.5 },
+          reranking: {
+            enabled: true,
+            model: "@cf/baai/bge-reranker-base",
+          },
         });
 
         if (searchResults?.data?.length > 0) {
+          // Track the top result score for confidence assessment
+          const topScore = (searchResults.data[0] as { score?: number }).score ?? 0;
+          const ragConfident = topScore >= 0.6;
+
           ragContext = searchResults.data
             .map(
-              (item: { filename?: string; content?: Array<{ text?: string }> }) => {
-                if (item.filename) ragFilenames.push(item.filename);
-                return `<source file="${item.filename}">\n${item.content
+              (item: { filename?: string; score?: number; content?: Array<{ text?: string }> }) => {
+                // Only collect filenames for source citations from high-relevance results
+                if (item.filename && (item.score ?? 0) >= 0.6) {
+                  ragFilenames.push(item.filename);
+                }
+                const relevance = ((item.score ?? 0) * 100).toFixed(0);
+                return `<source file="${item.filename}" relevance="${relevance}%">\n${item.content
                   ?.map((chunk) => chunk.text)
                   .join("\n")}\n</source>`;
               },
             )
             .join("\n\n");
+
+          // Warn the model when results may not be directly relevant
+          if (!ragConfident) {
+            ragContext = `NOTE: The following knowledge base results may not be directly relevant to the visitor's question. Only use them if they genuinely answer what the visitor asked. If none are relevant, tell the visitor you don't have that information.\n\n${ragContext}`;
+          }
         }
       } catch (err) {
         console.error("AI Search query failed:", err);
@@ -360,20 +395,11 @@ const app = new Hono<HonoAppContext>()
       );
 
       // Build system prompt and stream response
-      const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
       const systemPrompt = geminiService.buildSystemPrompt(
         settings ?? { toneOfVoice: "professional", customTonePrompt: null, companyContext: null },
         ragContext,
         cannedMatch ? cannedMatch.response : null,
       );
-
-      const conversationHistory = history
-        .filter((m) => m.role !== "bot" || m.content)
-        .slice(-20) // Last 20 messages for context
-        .map((m) => ({
-          role: m.role as "visitor" | "bot" | "agent",
-          content: m.content,
-        }));
 
       // Stream via SSE
       const stream = new ReadableStream({

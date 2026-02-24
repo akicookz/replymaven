@@ -31,7 +31,7 @@ interface BrowserRenderingMarkdownResponse {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MAX_PAGES_DEFAULT = 50;
-const MAX_DEPTH_DEFAULT = 2;
+const MAX_DEPTH_DEFAULT = 1;
 const USER_AGENT = "ReplyMaven Bot/1.0 (https://replymaven.com)";
 
 // ─── Robots.txt cache (per-isolate, keyed by origin) ──────────────────────────
@@ -148,6 +148,40 @@ export class CrawlService {
     const existing = await this.getCrawledPage(resourceId, url);
     if (existing && existing.status !== "pending") {
       return; // Already processed
+    }
+
+    // 1b. Cross-resource dedup: skip non-seed pages already crawled by another resource
+    if (depth > 0) {
+      const alreadyCrawledElsewhere = await this.isUrlCrawledInProject(
+        projectId,
+        url,
+        resourceId,
+      );
+      if (alreadyCrawledElsewhere) {
+        // Mark as skipped so it shows in UI
+        if (existing) {
+          await this.db
+            .update(crawledPages)
+            .set({ status: "skipped" })
+            .where(
+              and(
+                eq(crawledPages.resourceId, resourceId),
+                eq(crawledPages.url, url),
+              ),
+            );
+        } else {
+          await this.db.insert(crawledPages).values({
+            id: crypto.randomUUID(),
+            resourceId,
+            projectId,
+            url,
+            status: "skipped",
+            depth,
+          });
+        }
+        await this.checkAndFinalizeResource(resourceId, projectId);
+        return;
+      }
     }
 
     // 2. Check page count limit
@@ -269,9 +303,28 @@ export class CrawlService {
         for (const newUrl of newUrls) {
           if (enqueued >= remaining) break;
 
-          // Check if already in crawled_pages
+          // Check if already in crawled_pages for this resource
           const alreadyExists = await this.getCrawledPage(resourceId, newUrl);
           if (alreadyExists) continue;
+
+          // Cross-resource dedup: skip if already crawled by another resource in this project
+          const crawledElsewhere = await this.isUrlCrawledInProject(
+            projectId,
+            newUrl,
+            resourceId,
+          );
+          if (crawledElsewhere) {
+            // Record as skipped so it shows in the UI
+            await this.db.insert(crawledPages).values({
+              id: crypto.randomUUID(),
+              resourceId,
+              projectId,
+              url: newUrl,
+              status: "skipped",
+              depth: depth + 1,
+            });
+            continue;
+          }
 
           // Insert as pending
           await this.db.insert(crawledPages).values({
@@ -390,6 +443,31 @@ export class CrawlService {
       )
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  private async isUrlCrawledInProject(
+    projectId: string,
+    url: string,
+    excludeResourceId?: string,
+  ): Promise<CrawledPageRow | null> {
+    const rows = await this.db
+      .select()
+      .from(crawledPages)
+      .where(
+        and(
+          eq(crawledPages.projectId, projectId),
+          eq(crawledPages.url, url),
+          eq(crawledPages.status, "crawled"),
+        ),
+      )
+      .limit(1);
+
+    const match = rows[0] ?? null;
+    // If we found a match but it belongs to the same resource we're crawling, ignore it
+    if (match && excludeResourceId && match.resourceId === excludeResourceId) {
+      return null;
+    }
+    return match;
   }
 
   private async getCrawledPageCount(resourceId: string): Promise<number> {

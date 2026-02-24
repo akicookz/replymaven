@@ -11,6 +11,7 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  SkipForward,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -21,7 +22,7 @@ interface CrawledPage {
   projectId: string;
   url: string;
   r2Key: string | null;
-  status: "pending" | "crawled" | "failed";
+  status: "pending" | "crawled" | "failed" | "skipped";
   depth: number;
   createdAt: string;
 }
@@ -89,7 +90,18 @@ function WebpageResourceDetail({
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Globe className="w-3.5 h-3.5" />
           <span>
-            {pages.length} page{pages.length !== 1 ? "s" : ""} crawled from{" "}
+            {pages.filter((p) => p.status === "crawled").length} page
+            {pages.filter((p) => p.status === "crawled").length !== 1
+              ? "s"
+              : ""}{" "}
+            crawled
+            {pages.filter((p) => p.status === "skipped").length > 0 && (
+              <span className="text-muted-foreground">
+                {", "}
+                {pages.filter((p) => p.status === "skipped").length} skipped
+              </span>
+            )}{" "}
+            from{" "}
             <span className="font-medium text-foreground">{resourceUrl}</span>
           </span>
         </div>
@@ -219,6 +231,7 @@ function CrawledPageItem({
     pending: <Clock className="w-3.5 h-3.5 text-yellow-500" />,
     crawled: <CheckCircle className="w-3.5 h-3.5 text-green-500" />,
     failed: <XCircle className="w-3.5 h-3.5 text-red-500" />,
+    skipped: <SkipForward className="w-3.5 h-3.5 text-muted-foreground" />,
   };
 
   return (
@@ -236,35 +249,37 @@ function CrawledPageItem({
         <span className="text-sm font-mono text-foreground truncate flex-1">
           {displayPath}
         </span>
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              refreshMutation.mutate();
-            }}
-            disabled={refreshMutation.isPending}
-            className="p-1 rounded hover:bg-muted text-muted-foreground disabled:opacity-50"
-            title="Refresh this page"
-          >
-            <RefreshCw
-              className={cn(
-                "w-3.5 h-3.5",
-                refreshMutation.isPending && "animate-spin",
-              )}
-            />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              deleteMutation.mutate();
-            }}
-            disabled={deleteMutation.isPending}
-            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive disabled:opacity-50"
-            title="Delete this page"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        {page.status !== "skipped" && (
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                refreshMutation.mutate();
+              }}
+              disabled={refreshMutation.isPending}
+              className="p-1 rounded hover:bg-muted text-muted-foreground disabled:opacity-50"
+              title="Refresh this page"
+            >
+              <RefreshCw
+                className={cn(
+                  "w-3.5 h-3.5",
+                  refreshMutation.isPending && "animate-spin",
+                )}
+              />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                deleteMutation.mutate();
+              }}
+              disabled={deleteMutation.isPending}
+              className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive disabled:opacity-50"
+              title="Delete this page"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {expanded && (
@@ -272,6 +287,12 @@ function CrawledPageItem({
           {page.status === "pending" && (
             <p className="text-sm text-muted-foreground">
               This page is still being crawled...
+            </p>
+          )}
+          {page.status === "skipped" && (
+            <p className="text-sm text-muted-foreground">
+              Skipped — this page is already indexed by another resource in this
+              project.
             </p>
           )}
           {page.status === "failed" && (

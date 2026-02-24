@@ -23,6 +23,69 @@ export class GeminiService {
     this.model = model;
   }
 
+  // ─── Reformulate Query ───────────────────────────────────────────────────────
+
+  /**
+   * Uses Gemini to rewrite the visitor's latest message into a standalone search
+   * query that incorporates conversation context. This dramatically improves RAG
+   * retrieval for follow-up questions like "where do I send the email?" which are
+   * meaningless without the prior conversation.
+   *
+   * Skips reformulation for the first message in a conversation (no context needed).
+   * Falls back to the raw message if the API call fails.
+   */
+  async reformulateQuery(
+    conversationHistory: Array<{ role: string; content: string }>,
+    currentMessage: string,
+  ): Promise<string> {
+    // First message or very short conversations don't need reformulation
+    if (conversationHistory.length <= 1) return currentMessage;
+
+    const recentHistory = conversationHistory.slice(-6);
+    const transcript = recentHistory
+      .map((m) => `${m.role}: ${m.content}`)
+      .join("\n");
+
+    const prompt = `Given the conversation below, rewrite the user's latest message into a standalone search query that captures the full intent. The query should be self-contained and optimized for searching a knowledge base.
+
+CONVERSATION:
+${transcript}
+
+LATEST MESSAGE: ${currentMessage}
+
+Output ONLY the rewritten search query, nothing else. If the latest message is already a clear standalone question, return it as-is.`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 128,
+          },
+        }),
+      });
+
+      if (!response.ok) return currentMessage;
+
+      const data = (await response.json()) as {
+        candidates?: Array<{
+          content?: { parts?: Array<{ text?: string }> };
+        }>;
+      };
+
+      const rewritten = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      return rewritten || currentMessage;
+    } catch {
+      // Fall back to raw message if reformulation fails
+      return currentMessage;
+    }
+  }
+
   // ─── Build System Prompt ────────────────────────────────────────────────────
 
   buildSystemPrompt(
@@ -55,7 +118,8 @@ export class GeminiService {
     prompt += "- If multiple solutions are possible, present the most likely one first, then briefly mention alternatives.\n";
     prompt += "- Keep responses concise but complete. Use short paragraphs and bullet points for clarity.\n";
     prompt += "- Only answer based on the provided context and knowledge base. Do not make up information.\n";
-    prompt += "- If you genuinely cannot find the answer in the knowledge base, say so honestly and offer to connect the visitor with a human agent.\n";
+    prompt += "- NEVER suggest topics, features, or information that the visitor did not ask about. If the knowledge base results are not directly relevant to the visitor's question, ignore them entirely.\n";
+    prompt += '- If you cannot answer the visitor\'s specific question from the knowledge base, say "I don\'t have that specific information. Would you like me to connect you with a human agent who can help?" Do NOT pad your response with unrelated information or suggest other topics.\n';
     prompt += "- Do NOT include raw URLs or markdown-style links in your response. Source links are handled separately by the system.\n";
     prompt += '- If the visitor asks to speak to a human or requests a handoff, respond with ONLY the exact text "[HANDOFF_REQUESTED]" and nothing else.\n';
     prompt += "- Format your response using markdown: use **bold** for emphasis, bullet points for lists, and short paragraphs. Do NOT use headings (#).\n\n";
@@ -68,6 +132,7 @@ export class GeminiService {
 
     if (ragContext) {
       prompt += "KNOWLEDGE BASE CONTEXT:\n";
+      prompt += "Use ONLY the sources below that are directly relevant to the visitor's question. Sources include a relevance percentage -- higher percentages are more likely to contain the answer. Ignore low-relevance sources that do not address the visitor's actual question.\n";
       prompt += ragContext;
       prompt += "\n\n";
     }

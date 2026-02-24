@@ -242,7 +242,7 @@ export const crawledPages = sqliteTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     url: text("url").notNull(),
     r2Key: text("r2_key"),
-    status: text("status", { enum: ["pending", "crawled", "failed"] })
+    status: text("status", { enum: ["pending", "crawled", "failed", "skipped"] })
       .notNull()
       .default("pending"),
     depth: integer("depth").notNull().default(0),
