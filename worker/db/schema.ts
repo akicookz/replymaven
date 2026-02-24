@@ -241,6 +241,7 @@ export const crawledPages = sqliteTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     url: text("url").notNull(),
+    pageTitle: text("page_title"),
     r2Key: text("r2_key"),
     status: text("status", { enum: ["pending", "crawled", "failed", "skipped"] })
       .notNull()
@@ -311,6 +312,7 @@ export const messages = sqliteTable(
       .references(() => conversations.id, { onDelete: "cascade" }),
     role: text("role", { enum: ["visitor", "bot", "agent"] }).notNull(),
     content: text("content").notNull(),
+    imageUrl: text("image_url"),
     sources: text("sources"), // JSON string of RAG source references
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)

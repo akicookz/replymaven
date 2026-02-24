@@ -43,6 +43,9 @@
   const renderedMessageIds = new Set<string>();
   let unreadCount = 0;
 
+  // Send guard -- prevents duplicate message sends
+  let isSending = false;
+
   // Notification state
   let notificationPermission: NotificationPermission = "default";
 
@@ -157,6 +160,8 @@
     folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
     globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
     external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+    paperclip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
+    x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
   } as Record<string, string>;
 
   // ─── Styles ─────────────────────────────────────────────────────────────────
@@ -420,6 +425,9 @@
     .rm-message-avatar.hidden {
       visibility: hidden;
     }
+    .rm-message-row.rm-role-change {
+      margin-top: 8px;
+    }
 
     /* ─── Message Bubble ──────────────────────────────────────────────────── */
     .rm-message {
@@ -561,6 +569,86 @@
     .rm-send-btn svg {
       width: 18px;
       height: 18px;
+    }
+
+    /* ─── Image Upload ─────────────────────────────────────────────────────── */
+    .rm-attach-btn {
+      width: 36px;
+      height: 36px;
+      min-width: 36px;
+      border-radius: 50%;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #9ca3af;
+      transition: color 0.2s, background 0.2s;
+      padding: 0;
+    }
+    .rm-attach-btn:hover {
+      color: #6b7280;
+      background: rgba(0,0,0,0.04);
+    }
+    .rm-attach-btn svg {
+      width: 18px;
+      height: 18px;
+    }
+    .rm-image-preview {
+      padding: 8px 16px 0;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      background: #ffffff;
+    }
+    .rm-image-preview.visible {
+      display: flex;
+    }
+    .rm-image-preview img {
+      width: 48px;
+      height: 48px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid rgba(0,0,0,0.08);
+    }
+    .rm-image-preview-name {
+      flex: 1;
+      font-size: 12px;
+      color: #6b7280;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .rm-image-preview-remove {
+      width: 24px;
+      height: 24px;
+      min-width: 24px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(0,0,0,0.06);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #6b7280;
+      padding: 0;
+    }
+    .rm-image-preview-remove:hover {
+      background: rgba(0,0,0,0.1);
+    }
+    .rm-image-preview-remove svg {
+      width: 12px;
+      height: 12px;
+    }
+    .rm-message-image {
+      max-width: 100%;
+      border-radius: 10px;
+      margin-bottom: 4px;
+      cursor: pointer;
+    }
+    .rm-message-image:hover {
+      opacity: 0.9;
     }
 
     /* ─── Powered By ──────────────────────────────────────────────────────── */
@@ -815,45 +903,53 @@
       padding: 0;
     }
     .rm-home-links {
-      margin-top: 20px;
+      margin-top: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
     .rm-home-link {
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 14px 0;
-      border-top: 1px solid rgba(0,0,0,0.06);
+      padding: 10px 12px;
+      border: 1px solid rgba(0,0,0,0.07);
+      border-radius: 10px;
       cursor: pointer;
       text-decoration: none;
       color: inherit;
-      transition: opacity 0.2s;
-    }
-    .rm-home-link:first-child {
-      border-top: none;
+      transition: background 0.2s, border-color 0.2s;
     }
     .rm-home-link:hover {
-      opacity: 0.7;
+      background: rgba(0,0,0,0.02);
+      border-color: rgba(0,0,0,0.12);
     }
     .rm-home-link-icon {
-      width: 20px;
-      height: 20px;
-      color: #9ca3af;
+      width: 34px;
+      height: 34px;
+      min-width: 34px;
+      border-radius: 8px;
+      background: #f3f4f6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #6b7280;
       flex-shrink: 0;
     }
     .rm-home-link-icon svg {
-      width: 20px;
-      height: 20px;
+      width: 16px;
+      height: 16px;
     }
     .rm-home-link-label {
       flex: 1;
-      font-size: 14px;
+      font-size: 13.5px;
       font-weight: 500;
       color: #374151;
     }
     .rm-home-link-arrow {
       width: 16px;
       height: 16px;
-      color: #9ca3af;
+      color: #c0c4cc;
       flex-shrink: 0;
     }
     .rm-home-link-arrow svg {
@@ -925,48 +1021,31 @@
 
     /* ─── Source Links ────────────────────────────────────────────────────── */
     .rm-sources {
-      margin-top: 8px;
-      padding-top: 8px;
-      border-top: 1px solid rgba(0,0,0,0.06);
+      margin-top: 6px;
       display: flex;
       flex-direction: column;
-      gap: 0;
+      gap: 2px;
     }
     .rm-source-link {
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 6px 0;
+      gap: 4px;
       text-decoration: none;
-      color: inherit;
+      font-size: 11px;
       transition: opacity 0.2s;
     }
     .rm-source-link:hover {
-      opacity: 0.7;
+      opacity: 0.8;
+    }
+    .rm-source-link svg {
+      width: 11px;
+      height: 11px;
+      flex-shrink: 0;
     }
     .rm-source-title {
-      font-size: 12px;
-      font-weight: 500;
-      color: #374151;
-      flex: 1;
-      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-    .rm-source-action {
-      font-size: 11px;
-      font-weight: 500;
-      white-space: nowrap;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      gap: 3px;
-    }
-    .rm-source-action svg {
-      width: 11px;
-      height: 11px;
     }
 
     /* ─── Contact Form ────────────────────────────────────────────────────── */
@@ -1362,9 +1441,35 @@
   const quickTopicsContainer = document.createElement("div");
   quickTopicsContainer.className = "rm-quick-topics";
 
+  // Image preview bar (shown above input when an image is selected)
+  const imagePreview = document.createElement("div");
+  imagePreview.className = "rm-image-preview";
+  const imagePreviewImg = document.createElement("img");
+  imagePreviewImg.alt = "Preview";
+  const imagePreviewName = document.createElement("span");
+  imagePreviewName.className = "rm-image-preview-name";
+  const imagePreviewRemove = document.createElement("button");
+  imagePreviewRemove.className = "rm-image-preview-remove";
+  imagePreviewRemove.innerHTML = ICONS.x;
+  imagePreview.appendChild(imagePreviewImg);
+  imagePreview.appendChild(imagePreviewName);
+  imagePreview.appendChild(imagePreviewRemove);
+
   // Input area
   const inputArea = document.createElement("div");
   inputArea.className = "rm-input-area";
+
+  // Hidden file input for image selection
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = "image/jpeg,image/png,image/webp";
+  fileInput.style.display = "none";
+
+  // Paperclip button
+  const attachBtn = document.createElement("button");
+  attachBtn.className = "rm-attach-btn";
+  attachBtn.innerHTML = ICONS.paperclip;
+  attachBtn.type = "button";
 
   const input = document.createElement("input");
   input.className = "rm-input";
@@ -1374,13 +1479,19 @@
   sendBtn.className = "rm-send-btn";
   sendBtn.innerHTML = ICONS.send;
 
+  inputArea.appendChild(fileInput);
+  inputArea.appendChild(attachBtn);
   inputArea.appendChild(input);
   inputArea.appendChild(sendBtn);
+
+  // Track pending image file
+  let pendingImageFile: File | null = null;
 
   // Assemble chat view
   chatView.appendChild(header);
   chatView.appendChild(messagesContainer);
   chatView.appendChild(quickTopicsContainer);
+  chatView.appendChild(imagePreview);
   chatView.appendChild(inputArea);
 
   // Powered by
@@ -1447,14 +1558,17 @@
 
   // ─── Event Handlers ─────────────────────────────────────────────────────────
 
-  // Home screen ask input: focus/click switches to chat view
+  // Home screen ask box: clicking anywhere in the bordered area opens chat
+  homeAsk.addEventListener("click", () => {
+    showChatScreen();
+  });
   homeAskInput.addEventListener("focus", () => {
     showChatScreen();
   });
 
   // Also handle typing directly in the home ask input
   homeAskInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && homeAskInput.value.trim()) {
+    if (e.key === "Enter" && !isSending && homeAskInput.value.trim()) {
       const text = homeAskInput.value.trim();
       homeAskInput.value = "";
       showChatScreen();
@@ -1463,17 +1577,58 @@
   });
 
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && input.value.trim()) {
+    if (e.key === "Enter" && !isSending && (input.value.trim() || pendingImageFile)) {
       handleSendMessage(input.value.trim());
       input.value = "";
     }
   });
 
   sendBtn.addEventListener("click", () => {
-    if (input.value.trim()) {
+    if (!isSending && (input.value.trim() || pendingImageFile)) {
       handleSendMessage(input.value.trim());
       input.value = "";
     }
+  });
+
+  // ─── Image Upload Handlers ──────────────────────────────────────────────────
+
+  attachBtn.addEventListener("click", () => {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+
+    // Validate file type and size
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowedTypes.includes(file.type)) {
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      return;
+    }
+
+    pendingImageFile = file;
+
+    // Show preview
+    const reader = new FileReader();
+    reader.onload = () => {
+      imagePreviewImg.src = reader.result as string;
+      imagePreviewName.textContent = file.name;
+      imagePreview.classList.add("visible");
+    };
+    reader.readAsDataURL(file);
+
+    // Reset file input so the same file can be re-selected
+    fileInput.value = "";
+  });
+
+  imagePreviewRemove.addEventListener("click", () => {
+    pendingImageFile = null;
+    imagePreview.classList.remove("visible");
+    imagePreviewImg.src = "";
+    imagePreviewName.textContent = "";
   });
 
   // ─── Functions ──────────────────────────────────────────────────────────────
@@ -1737,13 +1892,28 @@
           fields: Array<{ label: string; type: string; required: boolean }>;
         };
 
-        // Show "Leave a message" button on home screen
-        homeActionsContainer.style.display = "flex";
-        const leaveMessageBtn = document.createElement("button");
-        leaveMessageBtn.className = "rm-home-action-btn";
-        leaveMessageBtn.innerHTML = ICONS.mail + " Leave a message";
-        leaveMessageBtn.onclick = () => showFormScreen();
-        homeActionsContainer.appendChild(leaveMessageBtn);
+        // Render "Leave a message" as a home link row (consistent with other links)
+        const leaveLink = document.createElement("div");
+        leaveLink.className = "rm-home-link";
+        leaveLink.style.cursor = "pointer";
+        leaveLink.onclick = () => showFormScreen();
+
+        const leaveLinkIcon = document.createElement("span");
+        leaveLinkIcon.className = "rm-home-link-icon";
+        leaveLinkIcon.innerHTML = ICONS.mail;
+
+        const leaveLinkLabel = document.createElement("span");
+        leaveLinkLabel.className = "rm-home-link-label";
+        leaveLinkLabel.textContent = "Leave a message";
+
+        const leaveLinkArrow = document.createElement("span");
+        leaveLinkArrow.className = "rm-home-link-arrow";
+        leaveLinkArrow.innerHTML = ICONS.chevronRight;
+
+        leaveLink.appendChild(leaveLinkIcon);
+        leaveLink.appendChild(leaveLinkLabel);
+        leaveLink.appendChild(leaveLinkArrow);
+        homeLinksContainer.appendChild(leaveLink);
 
         // Apply primary color to form header
         const primary = loadedConfig.widget?.primaryColor || "#2563eb";
@@ -1910,6 +2080,7 @@
           btn.className = "rm-quick-topic";
           btn.textContent = topic.label;
           btn.onclick = () => {
+            if (isSending) return;
             handleSendMessage(topic.prompt);
             quickTopicsContainer.style.display = "none";
           };
@@ -1963,6 +2134,13 @@
   }
 
   async function handleSendMessage(text: string) {
+    // Prevent duplicate sends
+    if (isSending) return;
+    isSending = true;
+    sendBtn.disabled = true;
+    input.disabled = true;
+
+    try {
     // Switch to chat view if on home screen
     if (currentView === "home") {
       showChatScreen();
@@ -1972,20 +2150,58 @@
     if (!conversationId) await createConversation();
     if (!conversationId) return;
 
-    addMessageToUI("visitor", text);
+    // Capture and clear any pending image
+    const imageFile = pendingImageFile;
+    let uploadedImageUrl: string | null = null;
+    let localPreviewUrl: string | null = null;
+
+    if (imageFile) {
+      localPreviewUrl = imagePreviewImg.src; // data: URL from FileReader
+      pendingImageFile = null;
+      imagePreview.classList.remove("visible");
+      imagePreviewImg.src = "";
+      imagePreviewName.textContent = "";
+    }
+
+    // Use a default message if only an image was sent
+    const messageText = text || (imageFile ? "Sent an image" : "");
+    if (!messageText && !imageFile) return;
+
+    addMessageToUI("visitor", messageText, undefined, localPreviewUrl ?? undefined);
     quickTopicsContainer.style.display = "none";
     lastMessageTimestamp = Date.now();
+
+    // Upload image to R2 if present
+    if (imageFile) {
+      try {
+        const formData = new FormData();
+        formData.append("file", imageFile);
+        const uploadRes = await fetch(
+          `${baseUrl}/api/widget/${projectSlug}/upload`,
+          { method: "POST", body: formData },
+        );
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          uploadedImageUrl = uploadData.url;
+        }
+      } catch (err) {
+        console.error("[ReplyMaven] Image upload failed:", err);
+      }
+    }
 
     // Show typing indicator
     showTyping();
 
     try {
+      const body: Record<string, string> = { content: messageText };
+      if (uploadedImageUrl) body.imageUrl = uploadedImageUrl;
+
       const res = await fetch(
         `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: text }),
+          body: JSON.stringify(body),
         },
       );
 
@@ -2102,12 +2318,18 @@
         "Sorry, I couldn't connect. Please check your internet connection.",
       );
     }
+    } finally {
+      isSending = false;
+      sendBtn.disabled = false;
+      input.disabled = false;
+      input.focus();
+    }
   }
 
   // Track previous message role for avatar grouping
   let lastMessageRole: string | null = null;
 
-  function addMessageToUI(role: string, content: string, messageId?: string): HTMLElement {
+  function addMessageToUI(role: string, content: string, messageId?: string, imageUrl?: string): HTMLElement {
     // Track rendered message IDs for deduplication (polling)
     if (messageId) {
       if (renderedMessageIds.has(messageId)) {
@@ -2158,17 +2380,38 @@
     const msgEl = document.createElement("div");
     msgEl.className = "rm-message";
 
+    // Render image inside bubble if present
+    if (imageUrl) {
+      const img = document.createElement("img");
+      img.className = "rm-message-image";
+      img.src = imageUrl.startsWith("data:") ? imageUrl : resolveUrl(imageUrl);
+      img.alt = "Attached image";
+      img.onclick = () => window.open(img.src, "_blank");
+      msgEl.appendChild(img);
+    }
+
     if (role === "visitor") {
       // Visitor messages: plain text, styled with primary color
-      msgEl.textContent = content;
+      if (content && content !== "Sent an image") {
+        const textNode = document.createElement("span");
+        textNode.textContent = content;
+        msgEl.appendChild(textNode);
+      }
       msgEl.style.backgroundColor = primaryColor;
       msgEl.style.color = "#ffffff";
     } else {
       // Bot/agent messages: render markdown
-      msgEl.innerHTML = renderMarkdown(content);
+      const textContainer = document.createElement("div");
+      textContainer.innerHTML = renderMarkdown(content);
+      msgEl.appendChild(textContainer);
     }
 
     row.appendChild(msgEl);
+
+    // Add extra spacing when switching between roles (role-aware grouping)
+    if (lastMessageRole !== null && lastMessageRole !== role) {
+      row.classList.add("rm-role-change");
+    }
 
     // Insert before typing indicator (which is always last child)
     messagesContainer.insertBefore(row, typingRow);
@@ -2195,18 +2438,18 @@
       link.href = source.url;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
+      link.style.color = primaryColor + "80";
+
+      // FileText icon
+      const iconEl = document.createElement("span");
+      iconEl.innerHTML = ICONS.docs;
 
       const titleEl = document.createElement("span");
       titleEl.className = "rm-source-title";
       titleEl.textContent = source.title;
 
-      const actionEl = document.createElement("span");
-      actionEl.className = "rm-source-action";
-      actionEl.style.color = primaryColor;
-      actionEl.innerHTML = "Read more " + ICONS.chevronRight;
-
+      link.appendChild(iconEl);
       link.appendChild(titleEl);
-      link.appendChild(actionEl);
       sourcesContainer.appendChild(link);
     }
 
@@ -2616,7 +2859,7 @@
         showChatScreen();
 
         for (const msg of msgs) {
-          const el = addMessageToUI(msg.role, msg.content, msg.id);
+          const el = addMessageToUI(msg.role, msg.content, msg.id, msg.imageUrl ?? undefined);
           // Render markdown for bot/agent messages
           if ((msg.role === "bot" || msg.role === "agent") && el.parentElement) {
             el.innerHTML = renderMarkdown(msg.content);

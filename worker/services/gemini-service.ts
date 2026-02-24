@@ -1,8 +1,12 @@
 import { type ProjectSettingsRow } from "../db";
 
+type GeminiPart =
+  | { text: string }
+  | { inline_data: { mime_type: string; data: string } };
+
 interface GeminiMessage {
   role: "user" | "model";
-  parts: Array<{ text: string }>;
+  parts: GeminiPart[];
 }
 
 interface GeminiStreamChunk {
@@ -18,7 +22,7 @@ export class GeminiService {
   private apiKey: string;
   private model: string;
 
-  constructor(apiKey: string, model = "gemini-2.0-flash") {
+  constructor(apiKey: string, model = "gemini-3-flash-preview") {
     this.apiKey = apiKey;
     this.model = model;
   }
@@ -86,6 +90,59 @@ Output ONLY the rewritten search query, nothing else. If the latest message is a
     }
   }
 
+  // ─── Summarize Conversation ──────────────────────────────────────────────────
+
+  /**
+   * Generates a brief 1-2 sentence summary of what a conversation is about.
+   * Only called for conversations with 6+ messages to keep the model grounded
+   * on the topic in multi-turn conversations. Returns null for short
+   * conversations or on failure.
+   */
+  async summarizeConversation(
+    conversationHistory: Array<{ role: string; content: string }>,
+  ): Promise<string | null> {
+    if (conversationHistory.length < 6) return null;
+
+    const transcript = conversationHistory
+      .map((m) => `${m.role}: ${m.content}`)
+      .join("\n");
+
+    const prompt = `Summarize this customer support conversation in 1-2 sentences. Focus on: what the visitor needs help with and what has been discussed so far. Be factual and concise.
+
+CONVERSATION:
+${transcript}
+
+SUMMARY:`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 128,
+          },
+        }),
+      });
+
+      if (!response.ok) return null;
+
+      const data = (await response.json()) as {
+        candidates?: Array<{
+          content?: { parts?: Array<{ text?: string }> };
+        }>;
+      };
+
+      return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
   // ─── Build System Prompt ────────────────────────────────────────────────────
 
   buildSystemPrompt(
@@ -93,55 +150,70 @@ Output ONLY the rewritten search query, nothing else. If the latest message is a
       ProjectSettingsRow,
       "toneOfVoice" | "customTonePrompt" | "companyContext"
     >,
+    projectName: string,
     ragContext: string,
     cannedHint: string | null,
+    conversationSummary: string | null,
   ): string {
+    // ── 1. Identity and tone ──────────────────────────────────────────────────
     const toneInstructions: Record<string, string> = {
       professional:
-        "You are a professional and helpful customer support agent. Be concise, clear, and solution-oriented.",
+        "Be concise, clear, and solution-oriented.",
       friendly:
-        "You are a friendly and approachable customer support agent. Be warm, empathetic, and helpful.",
+        "Be warm, empathetic, and helpful while staying informative.",
       casual:
-        "You are a casual and relaxed customer support agent. Keep things light and easy to understand.",
+        "Keep things light and easy to understand.",
       formal:
-        "You are a formal and courteous customer support agent. Use proper language and be respectful.",
-      custom: settings.customTonePrompt ?? "You are a helpful customer support agent.",
+        "Use proper language and be respectful and courteous.",
+      custom: settings.customTonePrompt ?? "Be helpful and informative.",
     };
 
     const tone = toneInstructions[settings.toneOfVoice] ?? toneInstructions.professional;
 
-    let prompt = `${tone}\n\n`;
-    prompt += "IMPORTANT RULES:\n";
-    prompt += "- Be solution-oriented. When a user has a problem, analyze the knowledge base to find the specific steps, settings, or actions that will fix their issue. Walk them through the solution clearly.\n";
-    prompt += "- Do NOT just list article titles or point users to documentation pages. Instead, extract the actual answer from the knowledge base and present it directly.\n";
-    prompt += "- Use the knowledge base context to provide specific, actionable guidance. If a troubleshooting guide exists, give the user the relevant steps rather than telling them a guide exists.\n";
-    prompt += "- If multiple solutions are possible, present the most likely one first, then briefly mention alternatives.\n";
-    prompt += "- Keep responses concise but complete. Use short paragraphs and bullet points for clarity.\n";
-    prompt += "- Only answer based on the provided context and knowledge base. Do not make up information.\n";
-    prompt += "- NEVER suggest topics, features, or information that the visitor did not ask about. If the knowledge base results are not directly relevant to the visitor's question, ignore them entirely.\n";
-    prompt += '- If you cannot answer the visitor\'s specific question from the knowledge base, say "I don\'t have that specific information. Would you like me to connect you with a human agent who can help?" Do NOT pad your response with unrelated information or suggest other topics.\n';
-    prompt += "- Do NOT include raw URLs or markdown-style links in your response. Source links are handled separately by the system.\n";
-    prompt += '- If the visitor asks to speak to a human or requests a handoff, respond with ONLY the exact text "[HANDOFF_REQUESTED]" and nothing else.\n';
-    prompt += "- Format your response using markdown: use **bold** for emphasis, bullet points for lists, and short paragraphs. Do NOT use headings (#).\n\n";
+    let prompt = `You are the support assistant for **${projectName}**. ${tone}\n\n`;
 
+    // ── 2. Company context (general background) ───────────────────────────────
     if (settings.companyContext) {
       prompt += "COMPANY CONTEXT:\n";
+      prompt += "This is general background about the company. Use it to understand what the business does and to provide informed answers when the knowledge base doesn't cover a specific topic.\n";
       prompt += settings.companyContext;
       prompt += "\n\n";
     }
 
+    // ── 3. Knowledge base context (RAG results) ──────────────────────────────
     if (ragContext) {
       prompt += "KNOWLEDGE BASE CONTEXT:\n";
-      prompt += "Use ONLY the sources below that are directly relevant to the visitor's question. Sources include a relevance percentage -- higher percentages are more likely to contain the answer. Ignore low-relevance sources that do not address the visitor's actual question.\n";
+      prompt += "These are excerpts from the company's knowledge base retrieved for this question. Each source includes a relevance percentage. Prioritize high-relevance sources. Ignore sources that clearly don't address the visitor's question.\n";
       prompt += ragContext;
       prompt += "\n\n";
     }
 
+    // ── 4. Canned response hint ──────────────────────────────────────────────
     if (cannedHint) {
-      prompt += "SUGGESTED CANNED RESPONSE (use if relevant):\n";
+      prompt += "SUGGESTED CANNED RESPONSE (use this if it matches the visitor's question):\n";
       prompt += cannedHint;
       prompt += "\n\n";
     }
+
+    // ── 5. Conversation summary (for multi-turn conversations) ───────────────
+    if (conversationSummary) {
+      prompt += "CONVERSATION SUMMARY:\n";
+      prompt += conversationSummary;
+      prompt += "\n\n";
+    }
+
+    // ── 6. Behavioral instructions ───────────────────────────────────────────
+    prompt += "INSTRUCTIONS:\n";
+    prompt += "- Extract specific answers from the knowledge base and present them directly. Walk the visitor through solutions step-by-step when applicable.\n";
+    prompt += "- If multiple solutions exist, present the most likely one first, then briefly mention alternatives.\n";
+    prompt += "- Keep responses concise but complete. Use short paragraphs and bullet points.\n";
+    prompt += "- When the knowledge base has relevant information, use it. When it doesn't but the company context covers the topic, provide a general answer based on that.\n";
+    prompt += "- If you truly cannot answer from any available context, say: \"I don't have that specific information. Would you like me to connect you with a human agent who can help?\"\n";
+    prompt += "- Do not make up information, invent features, or speculate about things not covered in the provided context.\n";
+    prompt += "- Do not suggest topics or features the visitor didn't ask about. Stay focused on their question.\n";
+    prompt += "- Do not include raw URLs in your response. Source links are handled separately by the system.\n";
+    prompt += "- If the visitor asks to speak to a human or requests a handoff, respond with ONLY the exact text \"[HANDOFF_REQUESTED]\" and nothing else.\n";
+    prompt += "- Format responses using markdown: **bold** for emphasis, bullet points for lists, short paragraphs. Do not use headings (#).\n\n";
 
     return prompt;
   }
@@ -308,6 +380,7 @@ Respond with ONLY the question, nothing else.`;
     systemPrompt: string,
     conversationHistory: Array<{ role: "visitor" | "bot" | "agent"; content: string }>,
     userMessage: string,
+    image?: { base64: string; mimeType: string } | null,
   ): AsyncGenerator<string> {
     const geminiMessages: GeminiMessage[] = [];
 
@@ -319,10 +392,16 @@ Respond with ONLY the question, nothing else.`;
       });
     }
 
-    // Add current message
+    // Add current message (with optional image)
+    const currentParts: GeminiPart[] = [{ text: userMessage }];
+    if (image) {
+      currentParts.push({
+        inline_data: { mime_type: image.mimeType, data: image.base64 },
+      });
+    }
     geminiMessages.push({
       role: "user",
-      parts: [{ text: userMessage }],
+      parts: currentParts,
     });
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:streamGenerateContent?alt=sse&key=${this.apiKey}`;
@@ -337,7 +416,7 @@ Respond with ONLY the question, nothing else.`;
         contents: geminiMessages,
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 2048,
           topP: 0.95,
         },
       }),

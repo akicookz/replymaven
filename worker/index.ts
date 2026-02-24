@@ -280,6 +280,49 @@ const app = new Hono<HonoAppContext>()
     },
   )
 
+  // ─── Widget Image Upload ──────────────────────────────────────────────────────
+  .post("/api/widget/:projectSlug/upload", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`upload:${ip}`, 10, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const slug = c.req.param("projectSlug");
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const formData = await c.req.parseBody();
+    const file = formData["file"];
+    if (!file || typeof file === "string") {
+      return c.json({ error: "No file provided" }, 400);
+    }
+
+    const fileObj = file as File;
+
+    // Only allow images
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+    if (!allowedTypes.includes(fileObj.type)) {
+      return c.json({ error: "Only JPEG, PNG, and WebP images are allowed" }, 400);
+    }
+
+    // Max 5MB
+    if (fileObj.size > 5 * 1024 * 1024) {
+      return c.json({ error: "Image too large (max 5MB)" }, 400);
+    }
+
+    const ext = fileObj.name.split(".").pop() ?? "jpg";
+    const uploadKey = `${project.id}/chat-images/${crypto.randomUUID()}.${ext}`;
+    const buffer = await fileObj.arrayBuffer();
+
+    await c.env.UPLOADS.put(uploadKey, buffer, {
+      httpMetadata: { contentType: fileObj.type },
+    });
+
+    return c.json({ url: `/api/uploads/${uploadKey}` }, 201);
+  })
+
   // ─── Send Message (SSE streaming response) ─────────────────────────────────
   .post(
     "/api/widget/:projectSlug/conversations/:id/messages",
@@ -307,12 +350,38 @@ const app = new Hono<HonoAppContext>()
         return c.json({ error: "Conversation not found" }, 404);
       }
 
-      // Store visitor message
+      // Store visitor message (with optional image)
+      const imageUrl = parsed.data.imageUrl ?? null;
       await chatService.addMessage({
         conversationId,
         role: "visitor",
         content: parsed.data.content,
+        imageUrl,
       }, project.id);
+
+      // If visitor attached an image, fetch it from R2 and base64-encode for Gemini
+      let imageBase64: string | null = null;
+      let imageMimeType: string | null = null;
+      if (imageUrl) {
+        try {
+          // imageUrl is like /api/uploads/{key} — extract the R2 key
+          const r2Key = imageUrl.replace("/api/uploads/", "");
+          const obj = await c.env.UPLOADS.get(r2Key);
+          if (obj) {
+            imageMimeType = obj.httpMetadata?.contentType ?? "image/jpeg";
+            const arrayBuffer = await obj.arrayBuffer();
+            // Convert to base64
+            const bytes = new Uint8Array(arrayBuffer);
+            let binary = "";
+            for (let i = 0; i < bytes.length; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            imageBase64 = btoa(binary);
+          }
+        } catch (err) {
+          console.error("Failed to fetch image for Gemini:", err);
+        }
+      }
 
       // Get project settings for tone and context
       const settings = await projectService.getSettings(project.id);
@@ -330,14 +399,13 @@ const app = new Hono<HonoAppContext>()
           content: m.content,
         }));
 
-      // Reformulate the visitor's message into a standalone search query using
-      // conversation context. This fixes follow-up questions like "where do I
-      // send the email?" which are meaningless without prior conversation.
+      // Reformulate the visitor's message into a standalone search query and
+      // generate a conversation summary (for multi-turn conversations) in parallel.
       const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
-      const searchQuery = await geminiService.reformulateQuery(
-        conversationHistory,
-        parsed.data.content,
-      );
+      const [searchQuery, conversationSummary] = await Promise.all([
+        geminiService.reformulateQuery(conversationHistory, parsed.data.content),
+        geminiService.summarizeConversation(conversationHistory),
+      ]);
 
       // Query AI Search for relevant context with improved retrieval settings
       let ragContext = "";
@@ -351,8 +419,8 @@ const app = new Hono<HonoAppContext>()
             key: "folder",
             value: `${project.id}/`,
           },
-          max_num_results: 5,
-          ranking_options: { score_threshold: 0.5 },
+          max_num_results: 8,
+          ranking_options: { score_threshold: 0.3 },
           reranking: {
             enabled: true,
             model: "@cf/baai/bge-reranker-base",
@@ -397,8 +465,10 @@ const app = new Hono<HonoAppContext>()
       // Build system prompt and stream response
       const systemPrompt = geminiService.buildSystemPrompt(
         settings ?? { toneOfVoice: "professional", customTonePrompt: null, companyContext: null },
+        project.name,
         ragContext,
         cannedMatch ? cannedMatch.response : null,
+        conversationSummary,
       );
 
       // Stream via SSE
@@ -412,6 +482,9 @@ const app = new Hono<HonoAppContext>()
               systemPrompt,
               conversationHistory,
               parsed.data.content,
+              imageBase64 && imageMimeType
+                ? { base64: imageBase64, mimeType: imageMimeType }
+                : null,
             )) {
               fullResponse += chunk;
               controller.enqueue(

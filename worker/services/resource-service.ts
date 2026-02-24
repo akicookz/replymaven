@@ -528,7 +528,11 @@ export class ResourceService {
     for (const filename of uniqueFilenames) {
       // Try matching as a crawled page (pattern: {projectId}/page-{uuid}.md)
       const crawledPageRows = await this.db
-        .select({ url: crawledPages.url, resourceId: crawledPages.resourceId })
+        .select({
+          url: crawledPages.url,
+          resourceId: crawledPages.resourceId,
+          pageTitle: crawledPages.pageTitle,
+        })
         .from(crawledPages)
         .where(
           and(
@@ -549,7 +553,10 @@ export class ResourceService {
 
           if (parentRows.length > 0 && parentRows[0].type === "webpage") {
             seenUrls.add(page.url);
-            sources.push({ title: parentRows[0].title, url: page.url });
+            sources.push({
+              title: page.pageTitle || parentRows[0].title,
+              url: page.url,
+            });
           }
         }
         continue;

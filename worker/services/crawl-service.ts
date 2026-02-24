@@ -247,7 +247,7 @@ export class CrawlService {
     if (existing) {
       await this.db
         .update(crawledPages)
-        .set({ status: "crawled", r2Key })
+        .set({ status: "crawled", r2Key, pageTitle })
         .where(
           and(
             eq(crawledPages.resourceId, resourceId),
@@ -261,6 +261,7 @@ export class CrawlService {
         resourceId,
         projectId,
         url,
+        pageTitle,
         r2Key,
         status: "crawled",
         depth,

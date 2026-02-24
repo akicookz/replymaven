@@ -1,0 +1,1 @@
+ALTER TABLE `crawled_pages` ADD `page_title` text;
