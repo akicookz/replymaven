@@ -19,6 +19,7 @@ import CannedResponses from "./pages/CannedResponses";
 import TelegramConfig from "./pages/TelegramConfig";
 import ContactForm from "./pages/ContactForm";
 import AuthCallback from "./pages/AuthCallback";
+import Docs from "./pages/Docs";
 
 // ─── Redirect /app to first project's dashboard ──────────────────────────────
 function DashboardRedirect() {
@@ -44,6 +45,7 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/docs" element={<Docs />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route

@@ -125,6 +125,12 @@ export const updateVisitorEmailSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
 });
 
+export const updateConversationPublicSchema = z.object({
+  visitorName: z.string().max(100).optional(),
+  visitorEmail: z.string().email().optional(),
+  metadata: z.record(z.string(), z.string()).optional(),
+});
+
 // ─── Agent Reply ──────────────────────────────────────────────────────────────
 export const agentReplySchema = z.object({
   content: z.string().min(1, "Reply cannot be empty").max(5000),

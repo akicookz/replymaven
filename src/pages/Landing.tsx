@@ -309,6 +309,12 @@ function Landing() {
             >
               FAQ
             </a>
+            <Link
+              to="/docs"
+              className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Docs
+            </Link>
           </div>
 
           {/* Spacer */}
@@ -993,6 +999,7 @@ function Landing() {
                   { label: "Features", href: "#features" },
                   { label: "Pricing", href: "#pricing" },
                   { label: "FAQ", href: "#faq" },
+                  { label: "Documentation", href: "/docs" },
                 ].map((item) => (
                   <li key={item.label}>
                     <a

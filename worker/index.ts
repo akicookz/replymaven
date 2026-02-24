@@ -36,6 +36,7 @@ import {
   onboardingContextSchema,
   onboardingWidgetSchema,
   updateVisitorEmailSchema,
+  updateConversationPublicSchema,
   updateContactFormConfigSchema,
   submitContactFormSchema,
 } from "./validation";
@@ -198,6 +199,31 @@ const app = new Hono<HonoAppContext>()
     return c.json(conversation, 201);
   })
 
+  // ─── Get Active Conversation by Visitor ────────────────────────────────────
+  .get("/api/widget/:projectSlug/conversations/active", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`actconv:${ip}`, 30, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const slug = c.req.param("projectSlug");
+    const visitorId = c.req.query("visitorId");
+    if (!visitorId) return c.json({ error: "visitorId is required" }, 400);
+
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.getActiveConversationByVisitor(
+      project.id,
+      visitorId,
+    );
+    if (!conversation) return c.json({ conversation: null });
+    return c.json({ conversation });
+  })
+
   // ─── Get Conversation Messages ──────────────────────────────────────────────
   .get(
     "/api/widget/:projectSlug/conversations/:id/messages",
@@ -221,12 +247,36 @@ const app = new Hono<HonoAppContext>()
         return c.json({ error: "Conversation not found" }, 404);
       }
 
+      // Support ?since=<timestamp> for polling
+      const sinceParam = c.req.query("since");
+      if (sinceParam) {
+        const sinceTs = parseInt(sinceParam, 10);
+        if (!isNaN(sinceTs)) {
+          const newMessages = await chatService.getMessagesSince(
+            conversationId,
+            sinceTs,
+          );
+          return c.json({
+            messages: newMessages,
+            status: conversation.status,
+          });
+        }
+      }
+
       // Try KV cache first
       const cached = await chatService.getFromCache(conversationId, project.id);
-      if (cached) return c.json(cached);
+      if (cached) {
+        return c.json({
+          messages: cached,
+          status: conversation.status,
+        });
+      }
 
-      const messages = await chatService.getMessages(conversationId);
-      return c.json(messages);
+      const msgs = await chatService.getMessages(conversationId);
+      return c.json({
+        messages: msgs,
+        status: conversation.status,
+      });
     },
   )
 
@@ -395,7 +445,7 @@ const app = new Hono<HonoAppContext>()
             }
 
             // Store bot message in DB with structured sources
-            await chatService.addMessage({
+            const botMsg = await chatService.addMessage({
               conversationId,
               role: "bot",
               content: fullResponse,
@@ -409,6 +459,7 @@ const app = new Hono<HonoAppContext>()
               encoder.encode(
                 `data: ${JSON.stringify({
                   done: true,
+                  messageId: botMsg.id,
                   sources:
                     sourceReferences.length > 0
                       ? sourceReferences
@@ -469,6 +520,49 @@ const app = new Hono<HonoAppContext>()
 
       await chatService.updateConversationEmail(conversationId, project.id, parsed.data.email);
       return c.json({ ok: true });
+    },
+  )
+
+  // ─── Update Conversation (public - for widget identity/metadata sync) ─────
+  .patch(
+    "/api/widget/:projectSlug/conversations/:id",
+    async (c) => {
+      const ip = getClientIp(c);
+      if (!checkRateLimit(`updconv:${ip}`, 20, 60_000)) {
+        return c.json({ error: "Rate limit exceeded" }, 429);
+      }
+
+      const slug = c.req.param("projectSlug");
+      const conversationId = c.req.param("id");
+      const db = drizzle(c.env.DB);
+
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectBySlugPublic(slug);
+      if (!project) return c.json({ error: "Project not found" }, 404);
+
+      const body = await c.req.json();
+      const parsed = validate(updateConversationPublicSchema, body);
+      if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+      const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+      const conversation = await chatService.getConversationById(conversationId, project.id);
+      if (!conversation) {
+        return c.json({ error: "Conversation not found" }, 404);
+      }
+
+      const updated = await chatService.updateConversation(
+        conversationId,
+        project.id,
+        {
+          visitorName: parsed.data.visitorName,
+          visitorEmail: parsed.data.visitorEmail,
+          metadata: parsed.data.metadata
+            ? JSON.stringify(parsed.data.metadata)
+            : undefined,
+        },
+      );
+
+      return c.json(updated);
     },
   )
 

@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, gt } from "drizzle-orm";
 import {
   conversations,
   messages,
@@ -82,6 +82,63 @@ export class ChatService {
       );
   }
 
+  async getActiveConversationByVisitor(
+    projectId: string,
+    visitorId: string,
+  ): Promise<ConversationRow | null> {
+    const rows = await this.db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.projectId, projectId),
+          eq(conversations.visitorId, visitorId),
+        ),
+      )
+      .orderBy(desc(conversations.updatedAt))
+      .limit(1);
+    const conv = rows[0] ?? null;
+    // Only return non-closed conversations
+    if (conv && conv.status !== "closed") return conv;
+    return null;
+  }
+
+  async updateConversation(
+    id: string,
+    projectId: string,
+    data: {
+      visitorName?: string;
+      visitorEmail?: string;
+      metadata?: string;
+    },
+  ): Promise<ConversationRow | null> {
+    const existing = await this.getConversationById(id, projectId);
+    if (!existing) return null;
+
+    const updates: Record<string, unknown> = {};
+    if (data.visitorName !== undefined) updates.visitorName = data.visitorName;
+    if (data.visitorEmail !== undefined) updates.visitorEmail = data.visitorEmail;
+    if (data.metadata !== undefined) {
+      // Merge new metadata with existing metadata
+      const existingMeta = existing.metadata
+        ? JSON.parse(existing.metadata)
+        : {};
+      const newMeta = JSON.parse(data.metadata);
+      updates.metadata = JSON.stringify({ ...existingMeta, ...newMeta });
+    }
+
+    if (Object.keys(updates).length === 0) return existing;
+
+    await this.db
+      .update(conversations)
+      .set(updates)
+      .where(
+        and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
+      );
+
+    return this.getConversationById(id, projectId);
+  }
+
   // ─── Messages ───────────────────────────────────────────────────────────────
 
   async getMessages(conversationId: string): Promise<MessageRow[]> {
@@ -89,6 +146,22 @@ export class ChatService {
       .select()
       .from(messages)
       .where(eq(messages.conversationId, conversationId))
+      .orderBy(messages.createdAt);
+  }
+
+  async getMessagesSince(
+    conversationId: string,
+    since: number,
+  ): Promise<MessageRow[]> {
+    return this.db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          gt(messages.createdAt, new Date(since)),
+        ),
+      )
       .orderBy(messages.createdAt);
   }
 

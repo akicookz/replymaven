@@ -27,18 +27,112 @@
   // ─── State ──────────────────────────────────────────────────────────────────
   let isOpen = false;
   let conversationId: string | null = null;
+  let conversationStatus: string | null = null;
   const visitorId =
     localStorage.getItem("rm_visitor_id") || generateVisitorId();
-  let visitorInfo: { name?: string; email?: string } = {};
+  let visitorInfo: { name?: string; email?: string; phone?: string } = {};
+  let customMetadata: Record<string, string> = {};
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let config: Record<string, any> | null = null;
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let _isHandedOff = false;
 
+  // Polling state
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let lastMessageTimestamp: number | null = null;
+  const renderedMessageIds = new Set<string>();
+  let unreadCount = 0;
+
+  // Notification state
+  let notificationPermission: NotificationPermission = "default";
+
+  // Visibility tracking
+  let isTabActive = !document.hidden;
+
   function generateVisitorId(): string {
     const id = "v_" + Math.random().toString(36).substring(2, 15);
     localStorage.setItem("rm_visitor_id", id);
     return id;
+  }
+
+  // ─── Device Metadata Collection ─────────────────────────────────────────────
+  function parseUserAgent(): { browser: string; os: string; device: string } {
+    const ua = navigator.userAgent;
+    let browser = "Unknown";
+    let os = "Unknown";
+    let device: "desktop" | "tablet" | "mobile" = "desktop";
+
+    // Browser detection
+    if (ua.includes("Firefox/")) {
+      const match = ua.match(/Firefox\/(\d+)/);
+      browser = `Firefox ${match?.[1] ?? ""}`.trim();
+    } else if (ua.includes("Edg/")) {
+      const match = ua.match(/Edg\/(\d+)/);
+      browser = `Edge ${match?.[1] ?? ""}`.trim();
+    } else if (ua.includes("Chrome/") && !ua.includes("Chromium/")) {
+      const match = ua.match(/Chrome\/(\d+)/);
+      browser = `Chrome ${match?.[1] ?? ""}`.trim();
+    } else if (ua.includes("Safari/") && !ua.includes("Chrome")) {
+      const match = ua.match(/Version\/(\d+)/);
+      browser = `Safari ${match?.[1] ?? ""}`.trim();
+    }
+
+    // OS detection
+    if (ua.includes("Windows")) {
+      os = ua.includes("Windows NT 10") ? "Windows 10+" : "Windows";
+    } else if (ua.includes("Mac OS X")) {
+      const match = ua.match(/Mac OS X (\d+[._]\d+)/);
+      os = `macOS ${match?.[1]?.replace(/_/g, ".") ?? ""}`.trim();
+    } else if (ua.includes("iPhone") || ua.includes("iPad")) {
+      const match = ua.match(/OS (\d+[._]\d+)/);
+      os = `iOS ${match?.[1]?.replace(/_/g, ".") ?? ""}`.trim();
+    } else if (ua.includes("Android")) {
+      const match = ua.match(/Android (\d+(\.\d+)?)/);
+      os = `Android ${match?.[1] ?? ""}`.trim();
+    } else if (ua.includes("Linux")) {
+      os = "Linux";
+    }
+
+    // Device type detection
+    if (/Mobi|Android.*Mobile|iPhone|iPod/i.test(ua)) {
+      device = "mobile";
+    } else if (/iPad|Android(?!.*Mobile)|Tablet/i.test(ua)) {
+      device = "tablet";
+    }
+
+    return { browser, os, device };
+  }
+
+  function collectDeviceMetadata(): Record<string, string> {
+    const { browser, os, device } = parseUserAgent();
+    return {
+      browser,
+      os,
+      device,
+      screenResolution: `${screen.width}x${screen.height}`,
+      language: navigator.language,
+      referrer: document.referrer || "",
+      currentPageUrl: window.location.href,
+      pageTitle: document.title,
+      online: isTabActive ? "active" : "inactive",
+    };
+  }
+
+  // ─── Conversation Persistence ───────────────────────────────────────────────
+  function getStorageKey(suffix: string): string {
+    return `rm_${projectSlug}_${suffix}`;
+  }
+
+  function persistConversationId(id: string): void {
+    localStorage.setItem(getStorageKey("conversation_id"), id);
+  }
+
+  function loadPersistedConversationId(): string | null {
+    return localStorage.getItem(getStorageKey("conversation_id"));
+  }
+
+  function clearPersistedConversation(): void {
+    localStorage.removeItem(getStorageKey("conversation_id"));
   }
 
   // ─── SVG Icons ──────────────────────────────────────────────────────────────
@@ -146,6 +240,28 @@
     .rm-trigger.active .rm-icon-close {
       opacity: 1;
       transform: scale(1) rotate(0deg);
+    }
+    .rm-trigger-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      min-width: 20px;
+      height: 20px;
+      border-radius: 10px;
+      background: #ef4444;
+      color: white;
+      font-size: 11px;
+      font-weight: 700;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 0 5px;
+      line-height: 1;
+      z-index: 1;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    .rm-trigger-badge.visible {
+      display: flex;
     }
 
     /* ─── Chat Window ─────────────────────────────────────────────────────── */
@@ -1287,8 +1403,12 @@
   const triggerCloseIcon = document.createElement("span");
   triggerCloseIcon.className = "rm-icon-close";
   triggerCloseIcon.innerHTML = ICONS.close;
+  const triggerBadge = document.createElement("span");
+  triggerBadge.className = "rm-trigger-badge";
+  triggerBadge.textContent = "0";
   trigger.appendChild(triggerChatIcon);
   trigger.appendChild(triggerCloseIcon);
+  trigger.appendChild(triggerBadge);
   trigger.onclick = () => toggleChatWidget();
 
   container.appendChild(chatWindow);
@@ -1319,6 +1439,11 @@
     chatView.classList.remove("active");
     formView.classList.add("active");
   }
+
+  // ─── Visibility Tracking ─────────────────────────────────────────────────────
+  document.addEventListener("visibilitychange", () => {
+    isTabActive = !document.hidden;
+  });
 
   // ─── Event Handlers ─────────────────────────────────────────────────────────
 
@@ -1809,6 +1934,9 @@
   async function createConversation() {
     if (conversationId) return;
     try {
+      const deviceMeta = collectDeviceMetadata();
+      const metadata = { ...deviceMeta, ...customMetadata };
+
       const res = await fetch(
         `${baseUrl}/api/widget/${projectSlug}/conversations`,
         {
@@ -1818,13 +1946,16 @@
             visitorId,
             visitorName: visitorInfo.name,
             visitorEmail: visitorInfo.email,
-            metadata: { url: window.location.href },
+            metadata,
           }),
         },
       );
       if (res.ok) {
         const data = await res.json();
         conversationId = data.id;
+        conversationStatus = data.status ?? "active";
+        persistConversationId(data.id);
+        startPolling();
       }
     } catch (err) {
       console.error("[ReplyMaven] Failed to create conversation:", err);
@@ -1843,6 +1974,7 @@
 
     addMessageToUI("visitor", text);
     quickTopicsContainer.style.display = "none";
+    lastMessageTimestamp = Date.now();
 
     // Show typing indicator
     showTyping();
@@ -1933,6 +2065,11 @@
                 if (data.sources && data.sources.length > 0 && botMessageEl) {
                   addSourcesToMessage(botMessageEl, data.sources);
                 }
+                // Track the bot message ID if provided, and update timestamp
+                if (data.messageId) {
+                  renderedMessageIds.add(data.messageId);
+                }
+                lastMessageTimestamp = Date.now();
                 scrollToBottom();
                 // Show handoff card if needed
                 if (handoffDetected) {
@@ -1970,12 +2107,22 @@
   // Track previous message role for avatar grouping
   let lastMessageRole: string | null = null;
 
-  function addMessageToUI(role: string, content: string): HTMLElement {
+  function addMessageToUI(role: string, content: string, messageId?: string): HTMLElement {
+    // Track rendered message IDs for deduplication (polling)
+    if (messageId) {
+      if (renderedMessageIds.has(messageId)) {
+        // Return a dummy element if already rendered
+        return document.createElement("div");
+      }
+      renderedMessageIds.add(messageId);
+    }
+
     const primaryColor = getPrimaryColor();
 
     // Message row (avatar + bubble)
     const row = document.createElement("div");
     row.className = `rm-message-row ${role}`;
+    if (messageId) row.dataset.messageId = messageId;
 
     // Avatar for bot/agent messages
     if (role === "bot" || role === "agent") {
@@ -2089,7 +2236,15 @@
 
   function showHandoffCard(email: string | null) {
     _isHandedOff = true;
+    conversationStatus = "waiting_agent";
     const primaryColor = getPrimaryColor();
+
+    // Request notification permission on handoff
+    requestNotificationPermission();
+
+    // Restart polling with faster interval for agent replies
+    stopPolling();
+    startPolling();
 
     const card = document.createElement("div");
     card.className = "rm-handoff-card";
@@ -2240,12 +2395,346 @@
     setTimeout(() => emailInput.focus(), 100);
   }
 
+  // ─── Polling for New Messages ──────────────────────────────────────────────
+
+  function startPolling() {
+    if (pollTimer) return; // Already polling
+    if (!conversationId) return;
+
+    // Determine poll interval based on conversation status
+    const getInterval = () => {
+      if (conversationStatus === "waiting_agent" || conversationStatus === "agent_replied") {
+        return 3000; // 3s when waiting for agent
+      }
+      return 10000; // 10s for active conversations
+    };
+
+    let currentInterval = getInterval();
+
+    function schedulePoll() {
+      pollTimer = setTimeout(async () => {
+        if (!conversationId) {
+          stopPolling();
+          return;
+        }
+        await pollMessages();
+        // Recalculate interval in case status changed
+        currentInterval = getInterval();
+        schedulePoll();
+      }, currentInterval);
+    }
+
+    schedulePoll();
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  async function pollMessages() {
+    if (!conversationId) return;
+
+    try {
+      let url = `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`;
+      if (lastMessageTimestamp) {
+        url += `?since=${lastMessageTimestamp}`;
+      }
+
+      const res = await fetch(url);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const msgs = data.messages ?? data;
+      const status = data.status;
+
+      // Update conversation status
+      if (status && status !== conversationStatus) {
+        conversationStatus = status;
+        if (status === "closed") {
+          stopPolling();
+          clearPersistedConversation();
+          return;
+        }
+      }
+
+      // Process new messages
+      let hasNewMessages = false;
+      for (const msg of msgs) {
+        if (renderedMessageIds.has(msg.id)) continue;
+
+        // Only render bot/agent messages (visitor messages are already rendered locally)
+        if (msg.role === "bot" || msg.role === "agent") {
+          hideTyping();
+          const el = addMessageToUI(msg.role, msg.content, msg.id);
+          // Render markdown for bot/agent messages
+          if (el.parentElement) {
+            el.innerHTML = renderMarkdown(msg.content);
+            if (msg.sources) {
+              try {
+                const sources = typeof msg.sources === "string"
+                  ? JSON.parse(msg.sources)
+                  : msg.sources;
+                if (Array.isArray(sources) && sources.length > 0) {
+                  addSourcesToMessage(el, sources);
+                }
+              } catch {
+                // Ignore malformed sources
+              }
+            }
+          }
+          hasNewMessages = true;
+        } else if (msg.role === "visitor") {
+          // Mark visitor messages as rendered so we don't duplicate them
+          renderedMessageIds.add(msg.id);
+        }
+
+        // Update last message timestamp
+        const msgTime = msg.createdAt instanceof Date
+          ? msg.createdAt.getTime()
+          : typeof msg.createdAt === "number"
+            ? msg.createdAt * 1000
+            : new Date(msg.createdAt).getTime();
+        if (!lastMessageTimestamp || msgTime > lastMessageTimestamp) {
+          lastMessageTimestamp = msgTime;
+        }
+      }
+
+      if (hasNewMessages) {
+        scrollToBottom();
+        // Show notification if widget is closed/minimized
+        if (!isOpen || !isTabActive) {
+          incrementUnreadBadge();
+          showBrowserNotification(msgs[msgs.length - 1]?.content ?? "New message");
+        }
+      }
+    } catch {
+      // Silently ignore polling errors
+    }
+  }
+
+  // ─── Browser Notifications ──────────────────────────────────────────────────
+
+  function requestNotificationPermission() {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "granted") {
+      notificationPermission = "granted";
+      return;
+    }
+    if (Notification.permission === "denied") {
+      notificationPermission = "denied";
+      return;
+    }
+
+    Notification.requestPermission().then((permission) => {
+      notificationPermission = permission;
+    });
+  }
+
+  function showBrowserNotification(messagePreview: string) {
+    if (!("Notification" in window)) return;
+    if (notificationPermission !== "granted") return;
+    if (isOpen && isTabActive) return; // Don't notify if widget is open and tab is active
+
+    const title = config?.widget?.headerText || "New message";
+    const avatarUrl = config?.widget?.avatarUrl
+      ? resolveUrl(config.widget.avatarUrl)
+      : undefined;
+
+    try {
+      const notification = new Notification(title, {
+        body: messagePreview.length > 100
+          ? messagePreview.substring(0, 100) + "..."
+          : messagePreview,
+        icon: avatarUrl,
+        tag: "rm-new-message", // Replaces previous notification
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        openChatWidget();
+        showChatScreen();
+        notification.close();
+      };
+
+      // Auto-close after 5 seconds
+      setTimeout(() => notification.close(), 5000);
+    } catch {
+      // Notification constructor can fail in some contexts (e.g., insecure origins)
+    }
+  }
+
+  // ─── Unread Badge ────────────────────────────────────────────────────────────
+
+  function incrementUnreadBadge() {
+    unreadCount++;
+    triggerBadge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+    triggerBadge.classList.add("visible");
+  }
+
+  function clearUnreadBadge() {
+    unreadCount = 0;
+    triggerBadge.classList.remove("visible");
+  }
+
+  // ─── Conversation History Loading ────────────────────────────────────────────
+
+  async function loadConversationHistory() {
+    if (!conversationId) return;
+
+    try {
+      const res = await fetch(
+        `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`,
+      );
+      if (!res.ok) {
+        // Conversation might not exist anymore
+        if (res.status === 404) {
+          conversationId = null;
+          conversationStatus = null;
+          clearPersistedConversation();
+        }
+        return;
+      }
+
+      const data = await res.json();
+      const msgs = data.messages ?? data;
+      conversationStatus = data.status ?? null;
+
+      // If conversation is closed, clear it and start fresh
+      if (conversationStatus === "closed") {
+        conversationId = null;
+        conversationStatus = null;
+        clearPersistedConversation();
+        return;
+      }
+
+      // Render existing messages
+      if (msgs.length > 0) {
+        // Switch to chat view since we have history
+        showChatScreen();
+
+        for (const msg of msgs) {
+          const el = addMessageToUI(msg.role, msg.content, msg.id);
+          // Render markdown for bot/agent messages
+          if ((msg.role === "bot" || msg.role === "agent") && el.parentElement) {
+            el.innerHTML = renderMarkdown(msg.content);
+            if (msg.sources) {
+              try {
+                const sources = typeof msg.sources === "string"
+                  ? JSON.parse(msg.sources)
+                  : msg.sources;
+                if (Array.isArray(sources) && sources.length > 0) {
+                  addSourcesToMessage(el, sources);
+                }
+              } catch {
+                // Ignore malformed sources
+              }
+            }
+          }
+
+          // Track timestamp
+          const msgTime = msg.createdAt instanceof Date
+            ? msg.createdAt.getTime()
+            : typeof msg.createdAt === "number"
+              ? msg.createdAt * 1000
+              : new Date(msg.createdAt).getTime();
+          if (!lastMessageTimestamp || msgTime > lastMessageTimestamp) {
+            lastMessageTimestamp = msgTime;
+          }
+        }
+
+        scrollToBottom();
+      }
+
+      // If conversation is in a handoff state, show the handoff status
+      if (conversationStatus === "waiting_agent" || conversationStatus === "agent_replied") {
+        _isHandedOff = true;
+        input.placeholder = "Add any details for the team...";
+      }
+
+      // Start polling for new messages
+      startPolling();
+    } catch (err) {
+      console.error("[ReplyMaven] Failed to load conversation history:", err);
+    }
+  }
+
+  async function restoreConversation() {
+    // First try localStorage
+    const storedId = loadPersistedConversationId();
+    if (storedId) {
+      conversationId = storedId;
+      await loadConversationHistory();
+      if (conversationId) return; // Successfully restored
+    }
+
+    // Fallback: try to find active conversation by visitorId
+    try {
+      const res = await fetch(
+        `${baseUrl}/api/widget/${projectSlug}/conversations/active?visitorId=${encodeURIComponent(visitorId)}`,
+      );
+      if (!res.ok) return;
+
+      const data = await res.json();
+      if (data.conversation) {
+        conversationId = data.conversation.id;
+        conversationStatus = data.conversation.status;
+        persistConversationId(data.conversation.id);
+        await loadConversationHistory();
+      }
+    } catch {
+      // Silently ignore
+    }
+  }
+
+  // ─── Server Sync for Identity/Metadata ──────────────────────────────────────
+
+  async function syncIdentityToServer() {
+    if (!conversationId) return;
+    try {
+      await fetch(
+        `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            visitorName: visitorInfo.name,
+            visitorEmail: visitorInfo.email,
+          }),
+        },
+      );
+    } catch {
+      // Silently ignore sync errors
+    }
+  }
+
+  async function syncMetadataToServer() {
+    if (!conversationId) return;
+    try {
+      const deviceMeta = collectDeviceMetadata();
+      const merged = { ...deviceMeta, ...customMetadata };
+      await fetch(
+        `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ metadata: merged }),
+        },
+      );
+    } catch {
+      // Silently ignore sync errors
+    }
+  }
+
   // ─── Open / Close / Toggle ──────────────────────────────────────────────────
 
   function openChatWidget() {
     isOpen = true;
     chatWindow.classList.add("open");
     trigger.classList.add("active");
+    clearUnreadBadge();
     // Don't auto-focus the chat input -- the home screen is shown first
   }
 
@@ -2273,11 +2762,29 @@
       if (!isOpen) openChatWidget();
       handleSendMessage(text);
     },
-    identify: (info: { name?: string; email?: string }) => {
-      visitorInfo = { ...visitorInfo, ...info };
+    identify: (info: { name?: string; email?: string; phone?: string; metadata?: Record<string, string> }) => {
+      visitorInfo = { ...visitorInfo, name: info.name ?? visitorInfo.name, email: info.email ?? visitorInfo.email, phone: info.phone ?? visitorInfo.phone };
+      if (info.metadata) {
+        customMetadata = { ...customMetadata, ...info.metadata };
+      }
+      // Sync retroactively if conversation already exists
+      if (conversationId) {
+        syncIdentityToServer();
+        if (info.metadata) syncMetadataToServer();
+      }
+    },
+    setMetadata: (meta: Record<string, string>) => {
+      customMetadata = { ...customMetadata, ...meta };
+      if (conversationId) syncMetadataToServer();
+    },
+    requestNotifications: () => {
+      requestNotificationPermission();
     },
   };
 
   // ─── Initialize ─────────────────────────────────────────────────────────────
-  loadConfig();
+  loadConfig().then(() => {
+    // After config is loaded, try to restore an existing conversation
+    restoreConversation();
+  });
 })();
