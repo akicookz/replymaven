@@ -46,26 +46,21 @@ export const updateWidgetConfigSchema = z.object({
   homeSubtitle: z.string().max(500).nullable().optional(),
 });
 
-// ─── Home Links ───────────────────────────────────────────────────────────────
-export const createHomeLinkSchema = z.object({
-  label: z.string().min(1, "Label is required").max(100),
-  url: z.string().min(1, "URL is required").max(2048),
-  icon: z.string().max(50).optional(),
-  sortOrder: z.number().int().min(0).optional(),
-});
-
 // ─── Quick Actions ────────────────────────────────────────────────────────────
 export const createQuickActionSchema = z.object({
-  label: z.string().min(1, "Label is required").max(50),
-  action: z.string().min(1, "Action is required").max(500),
-  icon: z.string().max(50).nullable().optional(),
+  type: z.enum(["prompt", "link", "contact_form", "booking"]),
+  label: z.string().min(1, "Label is required").max(100),
+  action: z.string().max(2048).optional().default(""),
+  icon: z.string().max(50).optional().default("link"),
+  showOnHome: z.boolean().optional().default(false),
   sortOrder: z.number().int().min(0).optional(),
 });
 
-// ─── Quick Topics ─────────────────────────────────────────────────────────────
-export const createQuickTopicSchema = z.object({
-  label: z.string().min(1, "Label is required").max(100),
-  prompt: z.string().min(1, "Prompt is required").max(500),
+export const updateQuickActionSchema = z.object({
+  label: z.string().min(1).max(100).optional(),
+  action: z.string().max(2048).optional(),
+  icon: z.string().max(50).optional(),
+  showOnHome: z.boolean().optional(),
   sortOrder: z.number().int().min(0).optional(),
 });
 

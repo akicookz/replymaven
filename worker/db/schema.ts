@@ -123,29 +123,6 @@ export const widgetConfig = sqliteTable(
 export type WidgetConfigRow = typeof widgetConfig.$inferSelect;
 export type NewWidgetConfigRow = typeof widgetConfig.$inferInsert;
 
-// ─── Home Links ───────────────────────────────────────────────────────────────
-
-export const homeLinks = sqliteTable(
-  "home_links",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    label: text("label").notNull(),
-    url: text("url").notNull(),
-    icon: text("icon").notNull().default("link"),
-    sortOrder: integer("sort_order").notNull().default(0),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .notNull(),
-  },
-  (table) => [index("idx_home_links_project").on(table.projectId)],
-);
-
-export type HomeLinkRow = typeof homeLinks.$inferSelect;
-export type NewHomeLinkRow = typeof homeLinks.$inferInsert;
-
 // ─── Quick Actions ────────────────────────────────────────────────────────────
 
 export const quickActions = sqliteTable(
@@ -155,9 +132,17 @@ export const quickActions = sqliteTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    type: text("type", {
+      enum: ["prompt", "link", "contact_form", "booking"],
+    })
+      .notNull()
+      .default("prompt"),
     label: text("label").notNull(),
-    action: text("action").notNull(),
-    icon: text("icon"),
+    action: text("action").notNull().default(""),
+    icon: text("icon").notNull().default("link"),
+    showOnHome: integer("show_on_home", { mode: "boolean" })
+      .notNull()
+      .default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
@@ -168,28 +153,6 @@ export const quickActions = sqliteTable(
 
 export type QuickActionRow = typeof quickActions.$inferSelect;
 export type NewQuickActionRow = typeof quickActions.$inferInsert;
-
-// ─── Quick Topics ─────────────────────────────────────────────────────────────
-
-export const quickTopics = sqliteTable(
-  "quick_topics",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    label: text("label").notNull(),
-    prompt: text("prompt").notNull(),
-    sortOrder: integer("sort_order").notNull().default(0),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .notNull(),
-  },
-  (table) => [index("idx_quick_topics_project").on(table.projectId)],
-);
-
-export type QuickTopicRow = typeof quickTopics.$inferSelect;
-export type NewQuickTopicRow = typeof quickTopics.$inferInsert;
 
 // ─── Resources ────────────────────────────────────────────────────────────────
 
@@ -544,7 +507,6 @@ export const schema = {
   projectSettings,
   widgetConfig,
   quickActions,
-  quickTopics,
   resources,
   crawledPages,
   conversations,

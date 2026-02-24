@@ -17,8 +17,6 @@ import ProjectSettings from "./pages/ProjectSettings";
 import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
 import TelegramConfig from "./pages/TelegramConfig";
-import ContactForm from "./pages/ContactForm";
-import Bookings from "./pages/Bookings";
 import AuthCallback from "./pages/AuthCallback";
 import Docs from "./pages/Docs";
 
@@ -112,14 +110,6 @@ function App() {
         <Route
           path="projects/:projectId/telegram"
           element={<TelegramConfig />}
-        />
-        <Route
-          path="projects/:projectId/bookings"
-          element={<Bookings />}
-        />
-        <Route
-          path="projects/:projectId/contact-form"
-          element={<ContactForm />}
         />
       </Route>
     </Routes>

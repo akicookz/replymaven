@@ -164,6 +164,7 @@
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
     chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
     clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    aiSparkle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/><path d="M19 2l.5 1.5L21 4l-1.5.5L19 6l-.5-1.5L17 4l1.5-.5L19 2z"/></svg>',
   } as Record<string, string>;
 
   // ─── Styles ─────────────────────────────────────────────────────────────────
@@ -1649,13 +1650,6 @@
   homeView.appendChild(homeBanner);
   homeView.appendChild(homeBody);
 
-  // Home actions container (for "Leave a message" quick action)
-  const homeActionsContainer = document.createElement("div");
-  homeActionsContainer.className = "rm-home-actions";
-  homeActionsContainer.style.display = "none";
-
-  homeBody.appendChild(homeActionsContainer);
-
   // ─── Contact Form View ──────────────────────────────────────────────────────
   const formView = document.createElement("div");
   formView.className = "rm-form-view";
@@ -2670,67 +2664,92 @@
         }
       }
 
-      // ─── Home Links ──────────────────────────────────────────────────────────
+      // ─── Quick Actions on Home Screen ────────────────────────────────────────
       homeLinksContainer.innerHTML = "";
-      const links: Array<{ label: string; url: string; icon: string }> =
-        loadedConfig.homeLinks?.length > 0
-          ? loadedConfig.homeLinks
-          : [{ label: "Visit website", url: "#", icon: "globe" }];
+      const allActions: Array<{
+        id: string;
+        type: string;
+        label: string;
+        action: string;
+        icon: string;
+        showOnHome: boolean;
+      }> = loadedConfig.quickActions || [];
 
-      links.forEach((link: { label: string; url: string; icon: string }) => {
-        const a = document.createElement("a");
-        a.className = "rm-home-link";
-        a.href = link.url;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
+      const homeActions = allActions.filter((a) => a.showOnHome);
 
-        const iconEl = document.createElement("span");
-        iconEl.className = "rm-home-link-icon";
-        iconEl.innerHTML = ICONS[link.icon] || ICONS.link;
+      if (homeActions.length > 0) {
+        homeActions.forEach((qa) => {
+          const row = document.createElement("div");
+          row.className = "rm-home-link";
+          row.style.cursor = "pointer";
 
-        const labelEl = document.createElement("span");
-        labelEl.className = "rm-home-link-label";
-        labelEl.textContent = link.label;
+          // Left icon
+          const iconEl = document.createElement("span");
+          iconEl.className = "rm-home-link-icon";
+          iconEl.innerHTML = ICONS[qa.icon] || ICONS.link;
 
-        const arrowEl = document.createElement("span");
-        arrowEl.className = "rm-home-link-arrow";
-        arrowEl.innerHTML = ICONS.externalLink;
+          // Label
+          const labelEl = document.createElement("span");
+          labelEl.className = "rm-home-link-label";
+          labelEl.textContent = qa.label;
 
-        a.appendChild(iconEl);
-        a.appendChild(labelEl);
-        a.appendChild(arrowEl);
-        homeLinksContainer.appendChild(a);
-      });
+          // Right icon based on type
+          const arrowEl = document.createElement("span");
+          arrowEl.className = "rm-home-link-arrow";
+          if (qa.type === "link") {
+            arrowEl.innerHTML = ICONS.externalLink;
+          } else if (qa.type === "contact_form" || qa.type === "booking") {
+            arrowEl.innerHTML = ICONS.chevronRight;
+          } else {
+            // prompt type
+            arrowEl.innerHTML = ICONS.aiSparkle;
+          }
 
-      // ─── Contact Form (Leave a Message) ─────────────────────────────────────
+          row.appendChild(iconEl);
+          row.appendChild(labelEl);
+          row.appendChild(arrowEl);
+
+          // Click behavior based on type
+          row.onclick = () => {
+            if (qa.type === "link") {
+              window.open(qa.action, "_blank", "noopener,noreferrer");
+            } else if (qa.type === "contact_form") {
+              showFormScreen();
+            } else if (qa.type === "booking") {
+              showBookingScreen();
+            } else if (qa.type === "prompt") {
+              showChatScreen();
+              setTimeout(() => {
+                if (!isSending) {
+                  handleSendMessage(qa.action);
+                }
+              }, 100);
+            }
+          };
+
+          // For link type, use an <a> tag for accessibility
+          if (qa.type === "link") {
+            const a = document.createElement("a");
+            a.className = "rm-home-link";
+            a.href = qa.action;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.appendChild(iconEl);
+            a.appendChild(labelEl);
+            a.appendChild(arrowEl);
+            homeLinksContainer.appendChild(a);
+          } else {
+            homeLinksContainer.appendChild(row);
+          }
+        });
+      }
+
+      // ─── Contact Form Setup (build form fields if enabled) ──────────────────
       if (loadedConfig.contactForm) {
         const cf = loadedConfig.contactForm as {
           description: string | null;
           fields: Array<{ label: string; type: string; required: boolean }>;
         };
-
-        // Render "Leave a message" as a home link row (consistent with other links)
-        const leaveLink = document.createElement("div");
-        leaveLink.className = "rm-home-link";
-        leaveLink.style.cursor = "pointer";
-        leaveLink.onclick = () => showFormScreen();
-
-        const leaveLinkIcon = document.createElement("span");
-        leaveLinkIcon.className = "rm-home-link-icon";
-        leaveLinkIcon.innerHTML = ICONS.mail;
-
-        const leaveLinkLabel = document.createElement("span");
-        leaveLinkLabel.className = "rm-home-link-label";
-        leaveLinkLabel.textContent = "Leave a message";
-
-        const leaveLinkArrow = document.createElement("span");
-        leaveLinkArrow.className = "rm-home-link-arrow";
-        leaveLinkArrow.innerHTML = ICONS.chevronRight;
-
-        leaveLink.appendChild(leaveLinkIcon);
-        leaveLink.appendChild(leaveLinkLabel);
-        leaveLink.appendChild(leaveLinkArrow);
-        homeLinksContainer.appendChild(leaveLink);
 
         // Apply primary color to form header
         const primary = loadedConfig.widget?.primaryColor || "#2563eb";
@@ -2885,31 +2904,9 @@
         };
       }
 
-      // ─── Booking Link on Home Screen ─────────────────────────────────────
+      // ─── Booking Setup ──────────────────────────────────────────────────────
       if (loadedConfig.bookingEnabled) {
         fetchBookingConfig(); // Pre-load booking config
-
-        const bookLink = document.createElement("div");
-        bookLink.className = "rm-home-link";
-        bookLink.style.cursor = "pointer";
-        bookLink.onclick = () => showBookingScreen();
-
-        const bookLinkIcon = document.createElement("span");
-        bookLinkIcon.className = "rm-home-link-icon";
-        bookLinkIcon.innerHTML = ICONS.calendar;
-
-        const bookLinkLabel = document.createElement("span");
-        bookLinkLabel.className = "rm-home-link-label";
-        bookLinkLabel.textContent = "Book a meeting";
-
-        const bookLinkArrow = document.createElement("span");
-        bookLinkArrow.className = "rm-home-link-arrow";
-        bookLinkArrow.innerHTML = ICONS.chevronRight;
-
-        bookLink.appendChild(bookLinkIcon);
-        bookLink.appendChild(bookLinkLabel);
-        bookLink.appendChild(bookLinkArrow);
-        homeLinksContainer.appendChild(bookLink);
 
         // Apply primary color to booking header
         const bookingPrimary = loadedConfig.widget?.primaryColor || "#2563eb";
@@ -2921,15 +2918,16 @@
         addMessageToUI("bot", loadedConfig.introMessage);
       }
 
-      // Quick topics
-      if (loadedConfig.quickTopics?.length > 0) {
-        loadedConfig.quickTopics.forEach((topic: { label: string; prompt: string }) => {
+      // ─── Prompt-type Quick Actions as Chat Pills ────────────────────────────
+      const promptActions = allActions.filter((a) => a.type === "prompt");
+      if (promptActions.length > 0) {
+        promptActions.forEach((qa) => {
           const btn = document.createElement("button");
           btn.className = "rm-quick-topic";
-          btn.textContent = topic.label;
+          btn.textContent = qa.label;
           btn.onclick = () => {
             if (isSending) return;
-            handleSendMessage(topic.prompt);
+            handleSendMessage(qa.action);
             quickTopicsContainer.style.display = "none";
           };
           quickTopicsContainer.appendChild(btn);

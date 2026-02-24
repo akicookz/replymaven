@@ -21,8 +21,7 @@ import {
   updateProjectSettingsSchema,
   updateWidgetConfigSchema,
   createQuickActionSchema,
-  createQuickTopicSchema,
-  createHomeLinkSchema,
+  updateQuickActionSchema,
   createResourceSchema,
   createFaqResourceSchema,
   updateFaqResourceSchema,
@@ -1409,11 +1408,56 @@ const app = new Hono<HonoAppContext>()
     }
 
     const widgetService = new WidgetService(db);
+
+    // Enforce max 1 contact_form and max 1 booking action per project
+    if (parsed.data.type === "contact_form" || parsed.data.type === "booking") {
+      const existing = await widgetService.getQuickActionsByType(
+        project.id,
+        parsed.data.type,
+      );
+      if (existing.length > 0) {
+        return c.json(
+          { error: `Only one ${parsed.data.type.replace("_", " ")} action allowed per project` },
+          400,
+        );
+      }
+    }
+
+    // Enforce max 20 actions per project
+    const allActions = await widgetService.getQuickActions(project.id);
+    if (allActions.length >= 20) {
+      return c.json({ error: "Maximum of 20 quick actions allowed" }, 400);
+    }
+
     const action = await widgetService.createQuickAction({
       projectId: project.id,
       ...parsed.data,
     });
     return c.json(action, 201);
+  })
+  .patch("/api/projects/:id/quick-actions/:actionId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateQuickActionSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const updated = await widgetService.updateQuickAction(
+      c.req.param("actionId"),
+      project.id,
+      parsed.data,
+    );
+    if (!updated) return c.json({ error: "Not found" }, 404);
+    return c.json(updated);
   })
   .delete("/api/projects/:id/quick-actions/:actionId", async (c) => {
     const user = c.get("user");
@@ -1429,129 +1473,6 @@ const app = new Hono<HonoAppContext>()
     const widgetService = new WidgetService(db);
     const deleted = await widgetService.deleteQuickAction(
       c.req.param("actionId"),
-      project.id,
-    );
-    if (!deleted) return c.json({ error: "Not found" }, 404);
-    return c.json({ ok: true });
-  })
-
-  // ─── Quick Topics ───────────────────────────────────────────────────────────
-  .get("/api/projects/:id/quick-topics", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const widgetService = new WidgetService(db);
-    const topics = await widgetService.getQuickTopics(project.id);
-    return c.json(topics);
-  })
-  .post("/api/projects/:id/quick-topics", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const body = await c.req.json();
-    const parsed = validate(createQuickTopicSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const widgetService = new WidgetService(db);
-    const topic = await widgetService.createQuickTopic({
-      projectId: project.id,
-      ...parsed.data,
-    });
-    return c.json(topic, 201);
-  })
-  .delete("/api/projects/:id/quick-topics/:topicId", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const widgetService = new WidgetService(db);
-    const deleted = await widgetService.deleteQuickTopic(
-      c.req.param("topicId"),
-      project.id,
-    );
-    if (!deleted) return c.json({ error: "Not found" }, 404);
-    return c.json({ ok: true });
-  })
-
-  // ─── Home Links ─────────────────────────────────────────────────────────────
-  .get("/api/projects/:id/home-links", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const widgetService = new WidgetService(db);
-    const links = await widgetService.getHomeLinks(project.id);
-    return c.json(links);
-  })
-  .post("/api/projects/:id/home-links", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const body = await c.req.json();
-    const parsed = validate(createHomeLinkSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
-    const widgetService = new WidgetService(db);
-
-    // Enforce max 5 home links
-    const existing = await widgetService.getHomeLinks(project.id);
-    if (existing.length >= 5) {
-      return c.json({ error: "Maximum of 5 home links allowed" }, 400);
-    }
-
-    const link = await widgetService.createHomeLink({
-      projectId: project.id,
-      ...parsed.data,
-    });
-    return c.json(link, 201);
-  })
-  .delete("/api/projects/:id/home-links/:linkId", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const widgetService = new WidgetService(db);
-    const deleted = await widgetService.deleteHomeLink(
-      c.req.param("linkId"),
       project.id,
     );
     if (!deleted) return c.json({ error: "Not found" }, 404);

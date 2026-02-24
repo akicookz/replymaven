@@ -64,6 +64,13 @@
       "when": 1771972978357,
       "tag": "0008_noisy_ricochet",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1771975928203,
+      "tag": "0009_thin_the_fallen",
+      "breakpoints": true
     }
   ]
 }

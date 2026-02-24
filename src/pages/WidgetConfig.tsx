@@ -9,16 +9,6 @@ import {
   Upload,
   Image,
   Type,
-  Link as LinkIcon,
-  Plus,
-  Trash2,
-  FileText,
-  Mail,
-  Calendar,
-  Bell,
-  Folder,
-  ExternalLink,
-  Globe,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -47,30 +37,6 @@ interface WidgetConfigData {
   homeSubtitle: string | null;
 }
 
-interface HomeLink {
-  id: string;
-  label: string;
-  url: string;
-  icon: string;
-  sortOrder: number;
-}
-
-const ICON_OPTIONS = [
-  { value: "link", label: "Link", Icon: LinkIcon },
-  { value: "docs", label: "Docs", Icon: FileText },
-  { value: "mail", label: "Mail", Icon: Mail },
-  { value: "calendar", label: "Calendar", Icon: Calendar },
-  { value: "bell", label: "Bell", Icon: Bell },
-  { value: "folder", label: "Folder", Icon: Folder },
-  { value: "globe", label: "Globe", Icon: Globe },
-  { value: "external", label: "External", Icon: ExternalLink },
-];
-
-function getIconComponent(icon: string) {
-  const found = ICON_OPTIONS.find((o) => o.value === icon);
-  return found?.Icon ?? LinkIcon;
-}
-
 function WidgetConfig() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
@@ -79,11 +45,6 @@ function WidgetConfig() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
 
-  // Home links state
-  const [linkLabel, setLinkLabel] = useState("");
-  const [linkUrl, setLinkUrl] = useState("");
-  const [linkIcon, setLinkIcon] = useState("link");
-
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
 
@@ -91,18 +52,6 @@ function WidgetConfig() {
     queryKey: ["widget-config", projectId],
     queryFn: async () => {
       const res = await fetch(`/api/projects/${projectId}/widget-config`);
-      if (!res.ok) throw new Error("Failed to fetch");
-      return res.json();
-    },
-  });
-
-  const {
-    data: homeLinksData,
-    isLoading: linksLoading,
-  } = useQuery<HomeLink[]>({
-    queryKey: ["home-links", projectId],
-    queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/home-links`);
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
@@ -124,40 +73,6 @@ function WidgetConfig() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["widget-config", projectId] });
-    },
-  });
-
-  const addLink = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/home-links`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: linkLabel, url: linkUrl, icon: linkIcon }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to add link");
-      }
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["home-links", projectId] });
-      setLinkLabel("");
-      setLinkUrl("");
-      setLinkIcon("link");
-    },
-  });
-
-  const deleteLink = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/home-links/${id}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) throw new Error("Failed to delete");
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["home-links", projectId] });
     },
   });
 
@@ -470,122 +385,7 @@ function WidgetConfig() {
             </div>
           </div>
 
-          {/* Home Links */}
-          <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
-              <LinkIcon className="w-5 h-5" />
-              Home Links
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Navigation buttons shown on the widget home screen. Maximum 5 links.
-            </p>
 
-            {/* Add form */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                addLink.mutate();
-              }}
-              className="space-y-3"
-            >
-              <div className="flex gap-2">
-                <Select value={linkIcon} onValueChange={setLinkIcon}>
-                  <SelectTrigger className="w-28">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ICON_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        <span className="flex items-center gap-1.5">
-                          <opt.Icon className="w-3.5 h-3.5" />
-                          {opt.label}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <input
-                  type="text"
-                  value={linkLabel}
-                  onChange={(e) => setLinkLabel(e.target.value)}
-                  placeholder="Label"
-                  required
-                  className="flex-1 px-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="url"
-                  value={linkUrl}
-                  onChange={(e) => setLinkUrl(e.target.value)}
-                  placeholder="https://example.com"
-                  required
-                  className="flex-1 px-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={addLink.isPending || (homeLinksData?.length ?? 0) >= 5}
-                >
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
-            </form>
-
-            {addLink.isError && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                {addLink.error.message}
-              </div>
-            )}
-
-            {/* List */}
-            {linksLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 2 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="h-14 rounded-xl bg-muted animate-pulse"
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {homeLinksData?.map((link) => {
-                  const IconComp = getIconComponent(link.icon);
-                  return (
-                    <div
-                      key={link.id}
-                      className="flex items-center gap-3 px-4 py-2.5 bg-card/50 rounded-xl border border-border"
-                    >
-                      <IconComp className="w-4 h-4 text-muted-foreground shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground">
-                          {link.label}
-                        </p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {link.url}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => deleteLink.mutate(link.id)}
-                        disabled={deleteLink.isPending}
-                        className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive disabled:opacity-50"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  );
-                })}
-                {homeLinksData?.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    No home links yet. A default &quot;Visit website&quot; link will
-                    be shown.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
         </div>
 
         {/* ─── Right Column: Live Preview ────────────────────────── */}
@@ -668,33 +468,11 @@ function WidgetConfig() {
                   <div className="text-xs opacity-30">Ask a question...</div>
                 </div>
 
-                {/* Home Links preview */}
+                {/* Quick actions preview placeholder */}
                 <div className="mt-4 space-y-0">
-                  {(homeLinksData && homeLinksData.length > 0
-                    ? homeLinksData
-                    : [{ id: "default", label: "Visit website", url: "#", icon: "globe" }]
-                  ).map((link, i) => {
-                    const IconComp = getIconComponent(link.icon);
-                    return (
-                      <div
-                        key={link.id}
-                        className="flex items-center gap-3 py-3"
-                        style={
-                          i > 0
-                            ? { borderTop: "1px solid rgba(0,0,0,0.06)" }
-                            : {}
-                        }
-                      >
-                        <IconComp
-                          className="w-4 h-4 shrink-0 opacity-40"
-                        />
-                        <span className="flex-1 text-xs font-medium">
-                          {link.label}
-                        </span>
-                        <ExternalLink className="w-3 h-3 opacity-30" />
-                      </div>
-                    );
-                  })}
+                  <p className="text-[11px] text-muted-foreground/50 text-center py-2">
+                    Quick actions configured on the Quick Actions page
+                  </p>
                 </div>
               </div>
 

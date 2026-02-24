@@ -1,10 +1,8 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, and } from "drizzle-orm";
 import {
   widgetConfig,
   quickActions,
-  quickTopics,
-  homeLinks,
   projectSettings,
   contactFormConfig,
   contactFormSubmissions,
@@ -12,10 +10,6 @@ import {
   type WidgetConfigRow,
   type QuickActionRow,
   type NewQuickActionRow,
-  type QuickTopicRow,
-  type NewQuickTopicRow,
-  type HomeLinkRow,
-  type NewHomeLinkRow,
   type ContactFormConfigRow,
   type ContactFormSubmissionRow,
 } from "../db";
@@ -85,6 +79,31 @@ export class WidgetService {
     return rows[0]!;
   }
 
+  async updateQuickAction(
+    id: string,
+    projectId: string,
+    updates: Partial<Pick<QuickActionRow, "label" | "action" | "icon" | "showOnHome" | "sortOrder">>,
+  ): Promise<QuickActionRow | null> {
+    const rows = await this.db
+      .select()
+      .from(quickActions)
+      .where(eq(quickActions.id, id))
+      .limit(1);
+    if (!rows[0] || rows[0].projectId !== projectId) return null;
+
+    await this.db
+      .update(quickActions)
+      .set(updates)
+      .where(eq(quickActions.id, id));
+
+    const updated = await this.db
+      .select()
+      .from(quickActions)
+      .where(eq(quickActions.id, id))
+      .limit(1);
+    return updated[0] ?? null;
+  }
+
   async deleteQuickAction(
     id: string,
     projectId: string,
@@ -100,80 +119,19 @@ export class WidgetService {
     return true;
   }
 
-  // ─── Quick Topics ───────────────────────────────────────────────────────────
-
-  async getQuickTopics(projectId: string): Promise<QuickTopicRow[]> {
+  async getQuickActionsByType(
+    projectId: string,
+    type: "prompt" | "link" | "contact_form" | "booking",
+  ): Promise<QuickActionRow[]> {
     return this.db
       .select()
-      .from(quickTopics)
-      .where(eq(quickTopics.projectId, projectId))
-      .orderBy(asc(quickTopics.sortOrder));
-  }
-
-  async createQuickTopic(
-    data: Omit<NewQuickTopicRow, "id" | "createdAt">,
-  ): Promise<QuickTopicRow> {
-    const id = crypto.randomUUID();
-    await this.db.insert(quickTopics).values({ id, ...data });
-    const rows = await this.db
-      .select()
-      .from(quickTopics)
-      .where(eq(quickTopics.id, id))
-      .limit(1);
-    return rows[0]!;
-  }
-
-  async deleteQuickTopic(
-    id: string,
-    projectId: string,
-  ): Promise<boolean> {
-    const rows = await this.db
-      .select()
-      .from(quickTopics)
-      .where(eq(quickTopics.id, id))
-      .limit(1);
-    if (!rows[0] || rows[0].projectId !== projectId) return false;
-
-    await this.db.delete(quickTopics).where(eq(quickTopics.id, id));
-    return true;
-  }
-
-  // ─── Home Links ──────────────────────────────────────────────────────────────
-
-  async getHomeLinks(projectId: string): Promise<HomeLinkRow[]> {
-    return this.db
-      .select()
-      .from(homeLinks)
-      .where(eq(homeLinks.projectId, projectId))
-      .orderBy(asc(homeLinks.sortOrder));
-  }
-
-  async createHomeLink(
-    data: Omit<NewHomeLinkRow, "id" | "createdAt">,
-  ): Promise<HomeLinkRow> {
-    const id = crypto.randomUUID();
-    await this.db.insert(homeLinks).values({ id, ...data });
-    const rows = await this.db
-      .select()
-      .from(homeLinks)
-      .where(eq(homeLinks.id, id))
-      .limit(1);
-    return rows[0]!;
-  }
-
-  async deleteHomeLink(
-    id: string,
-    projectId: string,
-  ): Promise<boolean> {
-    const rows = await this.db
-      .select()
-      .from(homeLinks)
-      .where(eq(homeLinks.id, id))
-      .limit(1);
-    if (!rows[0] || rows[0].projectId !== projectId) return false;
-
-    await this.db.delete(homeLinks).where(eq(homeLinks.id, id));
-    return true;
+      .from(quickActions)
+      .where(
+        and(
+          eq(quickActions.projectId, projectId),
+          eq(quickActions.type, type),
+        ),
+      );
   }
 
   // ─── Contact Form Config ─────────────────────────────────────────────────
@@ -262,12 +220,10 @@ export class WidgetService {
   // ─── Full Widget Config for Embed ───────────────────────────────────────────
 
   async getFullWidgetConfig(projectId: string) {
-    const [config, actions, topics, links, settings, formConfig, booking] =
+    const [config, actions, settings, formConfig, booking] =
       await Promise.all([
         this.getWidgetConfig(projectId),
         this.getQuickActions(projectId),
-        this.getQuickTopics(projectId),
-        this.getHomeLinks(projectId),
         this.db
           .select()
           .from(projectSettings)
@@ -284,8 +240,6 @@ export class WidgetService {
     return {
       widget: config,
       quickActions: actions,
-      quickTopics: topics,
-      homeLinks: links,
       introMessage:
         settings[0]?.introMessage ?? "Hi there! How can I help you today?",
       contactForm:
