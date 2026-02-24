@@ -508,6 +508,86 @@ export class ResourceService {
     }
   }
 
+  // ─── Source Resolution ───────────────────────────────────────────────────────
+
+  /**
+   * Given a list of R2 filenames from AI Search results, resolve them to
+   * display-ready source references (title + URL). Only returns webpage-type
+   * resources, as FAQs and PDFs are excluded from source citations.
+   */
+  async resolveSourcesFromFilenames(
+    projectId: string,
+    filenames: string[],
+  ): Promise<Array<{ title: string; url: string }>> {
+    if (filenames.length === 0) return [];
+
+    const uniqueFilenames = [...new Set(filenames)];
+    const sources: Array<{ title: string; url: string }> = [];
+    const seenUrls = new Set<string>();
+
+    for (const filename of uniqueFilenames) {
+      // Try matching as a crawled page (pattern: {projectId}/page-{uuid}.md)
+      const crawledPageRows = await this.db
+        .select({ url: crawledPages.url, resourceId: crawledPages.resourceId })
+        .from(crawledPages)
+        .where(
+          and(
+            eq(crawledPages.r2Key, filename),
+            eq(crawledPages.projectId, projectId),
+          ),
+        )
+        .limit(1);
+
+      if (crawledPageRows.length > 0) {
+        const page = crawledPageRows[0];
+        if (page.url && !seenUrls.has(page.url)) {
+          const parentRows = await this.db
+            .select({ type: resources.type, title: resources.title })
+            .from(resources)
+            .where(eq(resources.id, page.resourceId))
+            .limit(1);
+
+          if (parentRows.length > 0 && parentRows[0].type === "webpage") {
+            seenUrls.add(page.url);
+            sources.push({ title: parentRows[0].title, url: page.url });
+          }
+        }
+        continue;
+      }
+
+      // Try matching as a direct resource (pattern: {projectId}/{resourceId}.md)
+      const resourceRows = await this.db
+        .select({
+          type: resources.type,
+          title: resources.title,
+          url: resources.url,
+        })
+        .from(resources)
+        .where(
+          and(
+            eq(resources.r2Key, filename),
+            eq(resources.projectId, projectId),
+          ),
+        )
+        .limit(1);
+
+      if (resourceRows.length > 0) {
+        const resource = resourceRows[0];
+        if (
+          resource.type === "webpage" &&
+          resource.url &&
+          !seenUrls.has(resource.url)
+        ) {
+          seenUrls.add(resource.url);
+          sources.push({ title: resource.title, url: resource.url });
+        }
+      }
+      // PDFs and FAQs are intentionally skipped
+    }
+
+    return sources;
+  }
+
   // ─── Helpers ────────────────────────────────────────────────────────────────
 
   private faqPairsToMarkdown(title: string, pairs: FaqPair[]): string {

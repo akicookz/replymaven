@@ -96,9 +96,14 @@
       align-items: center;
       justify-content: center;
       box-shadow: 0 4px 14px rgba(0,0,0,0.16);
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease;
       position: relative;
       color: white;
+      opacity: 0;
+      overflow: hidden;
+    }
+    .rm-trigger.ready {
+      opacity: 1;
     }
     .rm-trigger:hover {
       transform: scale(1.05);
@@ -107,6 +112,12 @@
     .rm-trigger svg {
       width: 26px;
       height: 26px;
+    }
+    .rm-trigger-avatar {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      object-fit: cover;
     }
     .rm-trigger .rm-icon-chat,
     .rm-trigger .rm-icon-close {
@@ -753,6 +764,52 @@
       height: 16px;
     }
 
+    /* ─── Source Links ────────────────────────────────────────────────────── */
+    .rm-sources {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(0,0,0,0.06);
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .rm-source-link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 0;
+      text-decoration: none;
+      color: inherit;
+      transition: opacity 0.2s;
+    }
+    .rm-source-link:hover {
+      opacity: 0.7;
+    }
+    .rm-source-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: #374151;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .rm-source-action {
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .rm-source-action svg {
+      width: 11px;
+      height: 11px;
+    }
+
     /* ─── Animations ──────────────────────────────────────────────────────── */
     @keyframes rm-message-in {
       from {
@@ -1014,10 +1071,20 @@
     return config?.widget?.primaryColor ?? "#2563eb";
   }
 
+  function resolveUrl(url: string): string {
+    if (!url) return url;
+    if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) return url;
+    return baseUrl + url;
+  }
+
   async function loadConfig() {
     try {
       const res = await fetch(`${baseUrl}/api/widget/${projectSlug}/config`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        trigger.style.backgroundColor = "#2563eb";
+        trigger.classList.add("ready");
+        return;
+      }
       const loadedConfig = await res.json();
       config = loadedConfig;
 
@@ -1053,35 +1120,72 @@
           chatWindow.className = "rm-chat-window bottom-left";
         }
 
-        // Typing indicator colors
-        typingAvatar.style.backgroundColor = primary + "15";
-        typingAvatar.style.color = primary;
+        // Typing indicator avatar
+        if (w.avatarUrl) {
+          typingAvatar.innerHTML = "";
+          typingAvatar.style.backgroundColor = "transparent";
+          const typingImg = document.createElement("img");
+          typingImg.src = resolveUrl(w.avatarUrl);
+          typingImg.alt = "";
+          typingImg.style.width = "100%";
+          typingImg.style.height = "100%";
+          typingImg.style.borderRadius = "50%";
+          typingImg.style.objectFit = "cover";
+          typingAvatar.appendChild(typingImg);
+        } else {
+          typingAvatar.style.backgroundColor = primary + "15";
+          typingAvatar.style.color = primary;
+        }
 
         // Font family
         if (w.fontFamily && w.fontFamily !== "system-ui") {
           container.style.fontFamily = w.fontFamily + ", -apple-system, BlinkMacSystemFont, sans-serif";
         }
 
+        // ─── Avatar (trigger, header, home screen) ────────────────────────────
+
+        if (w.avatarUrl) {
+          const avatarSrc = resolveUrl(w.avatarUrl);
+
+          // Trigger button: show avatar instead of chat icon
+          triggerChatIcon.innerHTML = "";
+          const triggerImg = document.createElement("img");
+          triggerImg.src = avatarSrc;
+          triggerImg.alt = "Chat";
+          triggerImg.className = "rm-trigger-avatar";
+          triggerChatIcon.appendChild(triggerImg);
+
+          // Header avatar
+          headerAvatar.innerHTML = "";
+          headerAvatar.style.backgroundColor = "transparent";
+          const headerImg = document.createElement("img");
+          headerImg.src = avatarSrc;
+          headerImg.alt = "Avatar";
+          headerImg.style.width = "100%";
+          headerImg.style.height = "100%";
+          headerImg.style.borderRadius = "50%";
+          headerImg.style.objectFit = "cover";
+          headerAvatar.appendChild(headerImg);
+
+          // Home screen avatar
+          homeAvatar.innerHTML = "";
+          homeAvatar.style.backgroundColor = "#ffffff";
+          const homeImg = document.createElement("img");
+          homeImg.src = avatarSrc;
+          homeImg.alt = "Avatar";
+          homeAvatar.appendChild(homeImg);
+        } else {
+          homeAvatar.style.backgroundColor = primary;
+          homeAvatar.style.color = "#ffffff";
+        }
+
         // ─── Home Screen Config ──────────────────────────────────────────────
 
         // Banner
         if (w.bannerUrl) {
-          homeBanner.style.backgroundImage = `url(${w.bannerUrl})`;
+          homeBanner.style.backgroundImage = `url(${resolveUrl(w.bannerUrl)})`;
         } else {
           homeBanner.style.backgroundColor = primary;
-        }
-
-        // Avatar
-        if (w.avatarUrl) {
-          homeAvatar.innerHTML = "";
-          homeAvatar.style.backgroundColor = "#ffffff";
-          const img = document.createElement("img");
-          img.src = w.avatarUrl;
-          img.alt = "Avatar";
-          homeAvatar.appendChild(img);
-        } else {
-          homeAvatar.style.backgroundColor = primary;
-          homeAvatar.style.color = "#ffffff";
         }
 
         // Home title & subtitle
@@ -1146,8 +1250,14 @@
       } else {
         quickTopicsContainer.style.display = "none";
       }
+
+      // Fade in the trigger button now that config is applied
+      trigger.classList.add("ready");
     } catch (err) {
       console.error("[ReplyMaven] Failed to load config:", err);
+      // Still show the trigger with default styling on error
+      trigger.style.backgroundColor = "#2563eb";
+      trigger.classList.add("ready");
     }
   }
 
@@ -1270,7 +1380,12 @@
               }
 
               if (data.done) {
-                // Stream complete -- show handoff card if needed
+                // Stream complete -- add source links if present
+                if (data.sources && data.sources.length > 0 && botMessageEl) {
+                  addSourcesToMessage(botMessageEl, data.sources);
+                  scrollToBottom();
+                }
+                // Show handoff card if needed
                 if (handoffDetected) {
                   showHandoffCard(handoffEmail);
                 }
@@ -1317,9 +1432,23 @@
     if (role === "bot" || role === "agent") {
       const avatar = document.createElement("div");
       avatar.className = "rm-message-avatar";
-      avatar.style.backgroundColor = primaryColor + "12";
-      avatar.style.color = primaryColor;
-      avatar.innerHTML = ICONS.bot;
+
+      const avatarUrl = config?.widget?.avatarUrl;
+      if (avatarUrl) {
+        avatar.style.backgroundColor = "transparent";
+        const avatarImg = document.createElement("img");
+        avatarImg.src = resolveUrl(avatarUrl);
+        avatarImg.alt = "Bot";
+        avatarImg.style.width = "100%";
+        avatarImg.style.height = "100%";
+        avatarImg.style.borderRadius = "50%";
+        avatarImg.style.objectFit = "cover";
+        avatar.appendChild(avatarImg);
+      } else {
+        avatar.style.backgroundColor = primaryColor + "12";
+        avatar.style.color = primaryColor;
+        avatar.innerHTML = ICONS.bot;
+      }
 
       // Hide avatar if this is a consecutive message from the same role
       if (lastMessageRole === role) {
@@ -1348,6 +1477,42 @@
 
     lastMessageRole = role;
     return msgEl;
+  }
+
+  function addSourcesToMessage(
+    msgEl: HTMLElement,
+    sources: Array<{ title: string; url: string }>,
+  ): void {
+    if (!sources || sources.length === 0) return;
+
+    const primaryColor = getPrimaryColor();
+
+    const sourcesContainer = document.createElement("div");
+    sourcesContainer.className = "rm-sources";
+
+    for (const source of sources) {
+      const link = document.createElement("a");
+      link.className = "rm-source-link";
+      link.href = source.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+
+      const titleEl = document.createElement("span");
+      titleEl.className = "rm-source-title";
+      titleEl.textContent = source.title;
+
+      const actionEl = document.createElement("span");
+      actionEl.className = "rm-source-action";
+      actionEl.style.color = primaryColor;
+      actionEl.innerHTML = "Read more " + ICONS.chevronRight;
+
+      link.appendChild(titleEl);
+      link.appendChild(actionEl);
+      sourcesContainer.appendChild(link);
+    }
+
+    // Append sources inside the message bubble, after the text
+    msgEl.appendChild(sourcesContainer);
   }
 
   function showTyping() {

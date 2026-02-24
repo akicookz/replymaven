@@ -261,6 +261,7 @@ const app = new Hono<HonoAppContext>()
 
       // Query AI Search for relevant context
       let ragContext = "";
+      const ragFilenames: string[] = [];
       try {
         const searchResults = await c.env.AI.autorag("supportbot").search({
           query: parsed.data.content,
@@ -276,10 +277,12 @@ const app = new Hono<HonoAppContext>()
         if (searchResults?.data?.length > 0) {
           ragContext = searchResults.data
             .map(
-              (item: { filename?: string; content?: Array<{ text?: string }> }) =>
-                `<source file="${item.filename}">\n${item.content
+              (item: { filename?: string; content?: Array<{ text?: string }> }) => {
+                if (item.filename) ragFilenames.push(item.filename);
+                return `<source file="${item.filename}">\n${item.content
                   ?.map((chunk) => chunk.text)
-                  .join("\n")}\n</source>`,
+                  .join("\n")}\n</source>`;
+              },
             )
             .join("\n\n");
         }
@@ -363,16 +366,42 @@ const app = new Hono<HonoAppContext>()
               );
             }
 
-            // Store bot message in DB
+            // Resolve source references from AI Search filenames
+            let sourceReferences: Array<{ title: string; url: string }> = [];
+            if (ragFilenames.length > 0) {
+              try {
+                const resourceService = new ResourceService(db, c.env.UPLOADS);
+                sourceReferences =
+                  await resourceService.resolveSourcesFromFilenames(
+                    project.id,
+                    ragFilenames,
+                  );
+              } catch (err) {
+                console.error("Source resolution failed:", err);
+              }
+            }
+
+            // Store bot message in DB with structured sources
             await chatService.addMessage({
               conversationId,
               role: "bot",
               content: fullResponse,
-              sources: ragContext ? JSON.stringify(ragContext) : null,
+              sources:
+                sourceReferences.length > 0
+                  ? JSON.stringify(sourceReferences)
+                  : null,
             }, project.id);
 
             controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`),
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  done: true,
+                  sources:
+                    sourceReferences.length > 0
+                      ? sourceReferences
+                      : undefined,
+                })}\n\n`,
+              ),
             );
           } catch (err) {
             const errorMessage =
