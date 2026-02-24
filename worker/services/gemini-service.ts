@@ -49,11 +49,16 @@ export class GeminiService {
 
     let prompt = `${tone}\n\n`;
     prompt += "IMPORTANT RULES:\n";
-    prompt += "- Only answer questions based on the provided context and knowledge base.\n";
-    prompt += "- If you don't know the answer, say so honestly and offer to connect the visitor with a human agent.\n";
-    prompt += "- Keep responses concise and helpful.\n";
-    prompt += "- Do not make up information.\n";
-    prompt += '- If the visitor asks to speak to a human or requests a handoff, respond with ONLY the exact text "[HANDOFF_REQUESTED]" and nothing else.\n\n';
+    prompt += "- Be solution-oriented. When a user has a problem, analyze the knowledge base to find the specific steps, settings, or actions that will fix their issue. Walk them through the solution clearly.\n";
+    prompt += "- Do NOT just list article titles or point users to documentation pages. Instead, extract the actual answer from the knowledge base and present it directly.\n";
+    prompt += "- Use the knowledge base context to provide specific, actionable guidance. If a troubleshooting guide exists, give the user the relevant steps rather than telling them a guide exists.\n";
+    prompt += "- If multiple solutions are possible, present the most likely one first, then briefly mention alternatives.\n";
+    prompt += "- Keep responses concise but complete. Use short paragraphs and bullet points for clarity.\n";
+    prompt += "- Only answer based on the provided context and knowledge base. Do not make up information.\n";
+    prompt += "- If you genuinely cannot find the answer in the knowledge base, say so honestly and offer to connect the visitor with a human agent.\n";
+    prompt += "- Do NOT include raw URLs or markdown-style links in your response. Source links are handled separately by the system.\n";
+    prompt += '- If the visitor asks to speak to a human or requests a handoff, respond with ONLY the exact text "[HANDOFF_REQUESTED]" and nothing else.\n';
+    prompt += "- Format your response using markdown: use **bold** for emphasis, bullet points for lists, and short paragraphs. Do NOT use headings (#).\n\n";
 
     if (settings.companyContext) {
       prompt += "COMPANY CONTEXT:\n";

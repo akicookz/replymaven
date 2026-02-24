@@ -72,6 +72,10 @@
       position: fixed;
       z-index: 999999;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      visibility: hidden;
+    }
+    .rm-widget-container.ready {
+      visibility: visible;
     }
     .rm-widget-container * {
       box-sizing: border-box;
@@ -764,6 +768,45 @@
       height: 16px;
     }
 
+    /* ─── Markdown in Messages ───────────────────────────────────────────── */
+    .rm-message p {
+      margin: 0 0 8px 0;
+    }
+    .rm-message p:last-child {
+      margin-bottom: 0;
+    }
+    .rm-message ul, .rm-message ol {
+      margin: 4px 0 8px 0;
+      padding-left: 18px;
+    }
+    .rm-message li {
+      margin-bottom: 3px;
+    }
+    .rm-message li:last-child {
+      margin-bottom: 0;
+    }
+    .rm-message strong {
+      font-weight: 600;
+    }
+    .rm-message em {
+      font-style: italic;
+    }
+    .rm-message a {
+      color: inherit;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .rm-message a:hover {
+      opacity: 0.7;
+    }
+    .rm-message code {
+      background: rgba(0,0,0,0.06);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: 'SF Mono', Monaco, Consolas, monospace;
+    }
+
     /* ─── Source Links ────────────────────────────────────────────────────── */
     .rm-sources {
       margin-top: 8px;
@@ -1077,12 +1120,101 @@
     return baseUrl + url;
   }
 
+  /** Lightweight markdown to HTML (bold, italic, code, lists, links, paragraphs) */
+  function renderMarkdown(text: string): string {
+    // Escape HTML entities first
+    let html = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+    // Inline code (before other inline formatting)
+    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+    // Bold **text** or __text__
+    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
+
+    // Italic *text* or _text_ (but not inside words with underscores)
+    html = html.replace(/(?<!\w)\*([^*]+?)\*(?!\w)/g, "<em>$1</em>");
+    html = html.replace(/(?<!\w)_([^_]+?)_(?!\w)/g, "<em>$1</em>");
+
+    // Links [text](url)
+    html = html.replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+    );
+
+    // Split into lines for block-level processing
+    const lines = html.split("\n");
+    const output: string[] = [];
+    let inUl = false;
+    let inOl = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const ulMatch = line.match(/^[\s]*[-*]\s+(.*)/);
+      const olMatch = line.match(/^[\s]*\d+[.)]\s+(.*)/);
+
+      if (ulMatch) {
+        if (!inUl) { output.push("<ul>"); inUl = true; }
+        if (inOl) { output.push("</ol>"); inOl = false; }
+        output.push(`<li>${ulMatch[1]}</li>`);
+      } else if (olMatch) {
+        if (!inOl) { output.push("<ol>"); inOl = true; }
+        if (inUl) { output.push("</ul>"); inUl = false; }
+        output.push(`<li>${olMatch[1]}</li>`);
+      } else {
+        if (inUl) { output.push("</ul>"); inUl = false; }
+        if (inOl) { output.push("</ol>"); inOl = false; }
+        const trimmed = line.trim();
+        if (trimmed === "") {
+          // Empty line — paragraph break (only if next line has content)
+          continue;
+        }
+        output.push(trimmed);
+      }
+    }
+    if (inUl) output.push("</ul>");
+    if (inOl) output.push("</ol>");
+
+    // Group consecutive non-list lines into paragraphs
+    const result: string[] = [];
+    let paragraphLines: string[] = [];
+
+    function flushParagraph() {
+      if (paragraphLines.length > 0) {
+        result.push(`<p>${paragraphLines.join("<br>")}</p>`);
+        paragraphLines = [];
+      }
+    }
+
+    for (const item of output) {
+      if (
+        item.startsWith("<ul>") ||
+        item.startsWith("</ul>") ||
+        item.startsWith("<ol>") ||
+        item.startsWith("</ol>") ||
+        item.startsWith("<li>")
+      ) {
+        flushParagraph();
+        result.push(item);
+      } else {
+        paragraphLines.push(item);
+      }
+    }
+    flushParagraph();
+
+    return result.join("");
+  }
+
   async function loadConfig() {
     try {
       const res = await fetch(`${baseUrl}/api/widget/${projectSlug}/config`);
       if (!res.ok) {
         trigger.style.backgroundColor = "#2563eb";
         trigger.classList.add("ready");
+        container.classList.add("ready");
         return;
       }
       const loadedConfig = await res.json();
@@ -1251,13 +1383,15 @@
         quickTopicsContainer.style.display = "none";
       }
 
-      // Fade in the trigger button now that config is applied
+      // Show the widget now that config is applied
       trigger.classList.add("ready");
+      container.classList.add("ready");
     } catch (err) {
       console.error("[ReplyMaven] Failed to load config:", err);
       // Still show the trigger with default styling on error
       trigger.style.backgroundColor = "#2563eb";
       trigger.classList.add("ready");
+      container.classList.add("ready");
     }
   }
 
@@ -1380,11 +1514,15 @@
               }
 
               if (data.done) {
-                // Stream complete -- add source links if present
+                // Stream complete -- render final markdown
+                if (botMessageEl && botMessage) {
+                  botMessageEl.innerHTML = renderMarkdown(botMessage);
+                }
+                // Add source links if present
                 if (data.sources && data.sources.length > 0 && botMessageEl) {
                   addSourcesToMessage(botMessageEl, data.sources);
-                  scrollToBottom();
                 }
+                scrollToBottom();
                 // Show handoff card if needed
                 if (handoffDetected) {
                   showHandoffCard(handoffEmail);
@@ -1461,12 +1599,15 @@
     // Message bubble
     const msgEl = document.createElement("div");
     msgEl.className = "rm-message";
-    msgEl.textContent = content;
 
-    // Visitor bubble uses primary color
     if (role === "visitor") {
+      // Visitor messages: plain text, styled with primary color
+      msgEl.textContent = content;
       msgEl.style.backgroundColor = primaryColor;
       msgEl.style.color = "#ffffff";
+    } else {
+      // Bot/agent messages: render markdown
+      msgEl.innerHTML = renderMarkdown(content);
     }
 
     row.appendChild(msgEl);
