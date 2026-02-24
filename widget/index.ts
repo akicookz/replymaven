@@ -315,6 +315,9 @@
       gap: 12px;
       flex-shrink: 0;
       position: relative;
+      backdrop-filter: blur(16px) saturate(1.4);
+      -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      border-bottom: 1px solid rgba(255,255,255,0.15);
     }
     .rm-header-avatar {
       width: 36px;
@@ -515,11 +518,13 @@
     /* ─── Input Area ──────────────────────────────────────────────────────── */
     .rm-input-area {
       padding: 12px 16px;
-      border-top: 1px solid rgba(0,0,0,0.06);
+      border-top: 1px solid rgba(0,0,0,0.04);
       display: flex;
       align-items: center;
       gap: 8px;
-      background: #ffffff;
+      background: rgba(255,255,255,0.70);
+      backdrop-filter: blur(16px) saturate(1.4);
+      -webkit-backdrop-filter: blur(16px) saturate(1.4);
     }
     .rm-input {
       flex: 1;
@@ -600,7 +605,9 @@
       display: none;
       align-items: center;
       gap: 8px;
-      background: #ffffff;
+      background: rgba(255,255,255,0.70);
+      backdrop-filter: blur(16px) saturate(1.4);
+      -webkit-backdrop-filter: blur(16px) saturate(1.4);
     }
     .rm-image-preview.visible {
       display: flex;
@@ -657,7 +664,9 @@
       padding: 6px 16px 8px;
       font-size: 11px;
       color: #9ca3af;
-      background: #ffffff;
+      background: rgba(255,255,255,0.70);
+      backdrop-filter: blur(16px) saturate(1.4);
+      -webkit-backdrop-filter: blur(16px) saturate(1.4);
     }
     .rm-powered a {
       color: #6b7280;
@@ -1750,7 +1759,7 @@
 
         // Trigger & header colors
         trigger.style.backgroundColor = primary;
-        header.style.backgroundColor = primary;
+        header.style.backgroundColor = primary + "cc"; // ~80% opacity for frosted glass
         sendBtn.style.backgroundColor = primary;
 
         // Chat window
