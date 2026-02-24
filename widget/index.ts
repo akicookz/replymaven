@@ -282,6 +282,7 @@
       box-shadow: 0 5px 40px rgba(0,0,0,0.16);
       border: 1px solid rgba(0,0,0,0.06);
       background: #ffffff;
+      touch-action: manipulation;
       opacity: 0;
       visibility: hidden;
       transform: translateY(16px) scale(0.96);
@@ -315,9 +316,10 @@
       gap: 12px;
       flex-shrink: 0;
       position: relative;
+      z-index: 2;
+      margin-bottom: -24px;
       backdrop-filter: blur(16px) saturate(1.4);
       -webkit-backdrop-filter: blur(16px) saturate(1.4);
-      border-bottom: 1px solid rgba(255,255,255,0.15);
     }
     .rm-header-avatar {
       width: 36px;
@@ -378,7 +380,7 @@
     .rm-messages {
       flex: 1;
       overflow-y: auto;
-      padding: 20px 16px;
+      padding: 44px 16px 40px;
       display: flex;
       flex-direction: column;
       gap: 4px;
@@ -497,7 +499,11 @@
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      background: #fafafa;
+      background: rgba(250,250,250,0.80);
+      backdrop-filter: blur(16px) saturate(1.4);
+      -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      position: relative;
+      z-index: 2;
     }
     .rm-quick-topic {
       padding: 7px 14px;
@@ -522,21 +528,25 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      background: rgba(255,255,255,0.70);
+      background: rgba(255,255,255,0.80);
       backdrop-filter: blur(16px) saturate(1.4);
       -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      position: relative;
+      z-index: 2;
+      margin-top: -16px;
     }
     .rm-input {
       flex: 1;
       padding: 10px 16px;
       border: 1px solid rgba(0,0,0,0.10);
       border-radius: 24px;
-      font-size: 14px;
+      font-size: 16px;
       outline: none;
       background: #fafafa;
       color: #1f2937;
       transition: border-color 0.2s, box-shadow 0.2s;
       font-family: inherit;
+      touch-action: manipulation;
     }
     .rm-input:focus {
       border-color: rgba(0,0,0,0.2);
@@ -605,9 +615,11 @@
       display: none;
       align-items: center;
       gap: 8px;
-      background: rgba(255,255,255,0.70);
+      background: rgba(255,255,255,0.80);
       backdrop-filter: blur(16px) saturate(1.4);
       -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      position: relative;
+      z-index: 2;
     }
     .rm-image-preview.visible {
       display: flex;
@@ -664,9 +676,11 @@
       padding: 6px 16px 8px;
       font-size: 11px;
       color: #9ca3af;
-      background: rgba(255,255,255,0.70);
+      background: rgba(255,255,255,0.80);
       backdrop-filter: blur(16px) saturate(1.4);
       -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      position: relative;
+      z-index: 2;
     }
     .rm-powered a {
       color: #6b7280;
@@ -904,12 +918,13 @@
       width: 100%;
       border: none;
       outline: none;
-      font-size: 14px;
+      font-size: 16px;
       color: #9ca3af;
       background: transparent;
       cursor: pointer;
       font-family: inherit;
       padding: 0;
+      touch-action: manipulation;
     }
     .rm-home-links {
       margin-top: 16px;
@@ -1108,12 +1123,13 @@
       padding: 10px 14px;
       border: 1px solid rgba(0,0,0,0.12);
       border-radius: 10px;
-      font-size: 14px;
+      font-size: 16px;
       outline: none;
       font-family: inherit;
       color: #1f2937;
       background: #ffffff;
       transition: border-color 0.2s, box-shadow 0.2s;
+      touch-action: manipulation;
     }
     .rm-form-input:focus {
       border-color: rgba(0,0,0,0.25);
@@ -1126,7 +1142,7 @@
       padding: 10px 14px;
       border: 1px solid rgba(0,0,0,0.12);
       border-radius: 10px;
-      font-size: 14px;
+      font-size: 16px;
       outline: none;
       font-family: inherit;
       color: #1f2937;
@@ -1134,6 +1150,7 @@
       transition: border-color 0.2s, box-shadow 0.2s;
       resize: vertical;
       min-height: 80px;
+      touch-action: manipulation;
     }
     .rm-form-textarea:focus {
       border-color: rgba(0,0,0,0.25);
@@ -1759,7 +1776,7 @@
 
         // Trigger & header colors
         trigger.style.backgroundColor = primary;
-        header.style.backgroundColor = primary + "cc"; // ~80% opacity for frosted glass
+        header.style.backgroundColor = primary + "e8"; // ~91% opacity for frosted glass
         sendBtn.style.backgroundColor = primary;
 
         // Chat window
