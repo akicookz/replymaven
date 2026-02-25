@@ -1278,6 +1278,9 @@
     .rm-booking-view.active {
       display: flex;
     }
+    .rm-booking-view > .rm-header {
+      margin-bottom: 0;
+    }
     .rm-booking-dates {
       display: flex;
       align-items: center;
@@ -1362,6 +1365,7 @@
       flex: 1;
       overflow-y: auto;
       padding: 16px;
+      padding-bottom: 24px;
     }
     .rm-booking-slots-loading {
       display: flex;
@@ -2260,24 +2264,7 @@
     slotsArea.appendChild(loading);
     bookingContent.appendChild(slotsArea);
 
-    // ── Footer ──────────────────────────────────────────────────────────────
-    const footer = document.createElement("div");
-    footer.className = "rm-booking-footer";
-    footer.style.display = "none";
-
-    const footerInfo = document.createElement("div");
-    footerInfo.className = "rm-booking-footer-info";
-
-    const continueBtn = document.createElement("button");
-    continueBtn.className = "rm-booking-continue-btn";
-    continueBtn.style.backgroundColor = primary;
-    continueBtn.textContent = "Finalize Details →";
-    continueBtn.disabled = true;
-    continueBtn.onclick = () => renderBookingForm();
-
-    footer.appendChild(footerInfo);
-    footer.appendChild(continueBtn);
-    bookingContent.appendChild(footer);
+    // (Footer removed -- selecting a slot auto-advances to the form)
 
     // ── Fetch and render slots ──────────────────────────────────────────────
     if (bookingSelectedDate) {
@@ -2307,8 +2294,6 @@
           return;
         }
 
-        footer.style.display = "block";
-
         slots.forEach((slot) => {
           const el = document.createElement("div");
           el.className = "rm-booking-slot";
@@ -2320,8 +2305,6 @@
           } else {
             if (bookingSelectedSlot?.startTime === slot.startTime) {
               el.classList.add("selected");
-              continueBtn.disabled = false;
-              footerInfo.textContent = `${slot.startTimeLocal} - ${slot.endTimeLocal}`;
             }
             el.onclick = () => {
               bookingSelectedSlot = {
@@ -2330,11 +2313,8 @@
                 startTimeLocal: slot.startTimeLocal,
                 endTimeLocal: slot.endTimeLocal,
               };
-              // Update selection UI
-              slotsArea.querySelectorAll(".rm-booking-slot").forEach((s) => s.classList.remove("selected"));
-              el.classList.add("selected");
-              continueBtn.disabled = false;
-              footerInfo.textContent = `${slot.startTimeLocal} - ${slot.endTimeLocal}`;
+              // Auto-advance to contact form
+              renderBookingForm();
             };
           }
           slotsArea.appendChild(el);
