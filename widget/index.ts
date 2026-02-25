@@ -1085,6 +1085,9 @@
     .rm-form-view.active {
       display: flex;
     }
+    .rm-form-view > .rm-header {
+      margin-bottom: 0;
+    }
     .rm-form-body {
       flex: 1;
       overflow-y: auto;
@@ -1272,7 +1275,8 @@
     .rm-booking-view {
       display: none;
       flex-direction: column;
-      height: 100%;
+      flex: 1;
+      min-height: 0;
       background: #fafafa;
     }
     .rm-booking-view.active {
@@ -1366,6 +1370,14 @@
       overflow-y: auto;
       padding: 16px;
       padding-bottom: 24px;
+      min-height: 0;
+    }
+    .rm-booking-slots::-webkit-scrollbar {
+      width: 4px;
+    }
+    .rm-booking-slots::-webkit-scrollbar-thumb {
+      background: rgba(0,0,0,0.12);
+      border-radius: 4px;
     }
     .rm-booking-slots-loading {
       display: flex;
@@ -1440,6 +1452,14 @@
       flex: 1;
       overflow-y: auto;
       padding: 20px 16px;
+      min-height: 0;
+    }
+    .rm-booking-form::-webkit-scrollbar {
+      width: 4px;
+    }
+    .rm-booking-form::-webkit-scrollbar-thumb {
+      background: rgba(0,0,0,0.12);
+      border-radius: 4px;
     }
     .rm-booking-form-summary {
       padding: 12px 16px;
@@ -1574,21 +1594,36 @@
     }
 
     @media (max-width: 480px) {
-      .rm-chat-window {
-        width: calc(100vw - 24px);
-        max-height: calc(100vh - 100px);
-        bottom: 70px;
-      }
       .rm-widget-container.bottom-right,
       .rm-widget-container.bottom-left {
-        bottom: 12px;
-        right: 12px;
+        bottom: 16px;
+        right: 16px;
         left: auto;
+      }
+      .rm-chat-window {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100vw;
+        width: 100dvw;
+        max-height: 100vh;
+        max-height: 100dvh;
+        height: 100vh;
+        height: 100dvh;
+        border-radius: 0;
+        box-shadow: none;
+        border: none;
+        transform-origin: bottom center;
       }
       .rm-chat-window.bottom-right,
       .rm-chat-window.bottom-left {
         right: 0;
-        left: auto;
+        left: 0;
+      }
+      .rm-chat-window.open ~ .rm-trigger {
+        display: none;
       }
     }
   `;
@@ -1843,7 +1878,7 @@
   const bookingHeaderClose = document.createElement("button");
   bookingHeaderClose.className = "rm-header-close";
   bookingHeaderClose.innerHTML = ICONS.close;
-  bookingHeaderClose.onclick = () => toggleChatWidget();
+  bookingHeaderClose.onclick = () => closeChatWidget();
   bookingHeader.appendChild(bookingHeaderBack);
   bookingHeader.appendChild(bookingHeaderTitle);
   bookingHeader.appendChild(bookingHeaderClose);
@@ -1851,7 +1886,7 @@
 
   // Booking content container (swapped between step1/step2/step3)
   const bookingContent = document.createElement("div");
-  bookingContent.style.cssText = "display:flex;flex-direction:column;flex:1;overflow:hidden;";
+  bookingContent.style.cssText = "display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;";
   bookingView.appendChild(bookingContent);
 
   // Assemble chat window
@@ -3826,11 +3861,19 @@
 
   // ─── Open / Close / Toggle ──────────────────────────────────────────────────
 
+  function isMobileViewport(): boolean {
+    return window.matchMedia("(max-width: 480px)").matches;
+  }
+
   function openChatWidget() {
     isOpen = true;
     chatWindow.classList.add("open");
     trigger.classList.add("active");
     clearUnreadBadge();
+    // Lock body scroll on mobile to prevent background scrolling
+    if (isMobileViewport()) {
+      document.body.style.overflow = "hidden";
+    }
     // Don't auto-focus the chat input -- the home screen is shown first
   }
 
@@ -3838,6 +3881,10 @@
     isOpen = false;
     chatWindow.classList.remove("open");
     trigger.classList.remove("active");
+    // Restore body scroll
+    if (isMobileViewport()) {
+      document.body.style.overflow = "";
+    }
   }
 
   function toggleChatWidget() {
