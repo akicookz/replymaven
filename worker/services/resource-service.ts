@@ -512,18 +512,19 @@ export class ResourceService {
 
   /**
    * Given a list of R2 filenames from AI Search results, resolve them to
-   * display-ready source references (title + URL). Only returns webpage-type
-   * resources, as FAQs and PDFs are excluded from source citations.
+   * display-ready source references (title + URL + type). Returns sources for
+   * all resource types: webpages (clickable), PDFs (label only), and FAQs (label only).
    */
   async resolveSourcesFromFilenames(
     projectId: string,
     filenames: string[],
-  ): Promise<Array<{ title: string; url: string }>> {
+  ): Promise<Array<{ title: string; url: string | null; type: "webpage" | "pdf" | "faq" }>> {
     if (filenames.length === 0) return [];
 
     const uniqueFilenames = [...new Set(filenames)];
-    const sources: Array<{ title: string; url: string }> = [];
+    const sources: Array<{ title: string; url: string | null; type: "webpage" | "pdf" | "faq" }> = [];
     const seenUrls = new Set<string>();
+    const seenTitles = new Set<string>();
 
     for (const filename of uniqueFilenames) {
       // Try matching as a crawled page (pattern: {projectId}/page-{uuid}.md)
@@ -556,6 +557,7 @@ export class ResourceService {
             sources.push({
               title: page.pageTitle || parentRows[0].title,
               url: page.url,
+              type: "webpage",
             });
           }
         }
@@ -586,10 +588,15 @@ export class ResourceService {
           !seenUrls.has(resource.url)
         ) {
           seenUrls.add(resource.url);
-          sources.push({ title: resource.title, url: resource.url });
+          sources.push({ title: resource.title, url: resource.url, type: "webpage" });
+        } else if (resource.type === "pdf" && !seenTitles.has(resource.title)) {
+          seenTitles.add(resource.title);
+          sources.push({ title: resource.title, url: null, type: "pdf" });
+        } else if (resource.type === "faq" && !seenTitles.has(resource.title)) {
+          seenTitles.add(resource.title);
+          sources.push({ title: resource.title, url: null, type: "faq" });
         }
       }
-      // PDFs and FAQs are intentionally skipped
     }
 
     return sources;

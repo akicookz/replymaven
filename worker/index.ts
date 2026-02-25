@@ -439,8 +439,8 @@ const app = new Hono<HonoAppContext>()
           ragContext = searchResults.data
             .map(
               (item: { filename?: string; score?: number; content?: Array<{ text?: string }> }) => {
-                // Only collect filenames for source citations from high-relevance results
-                if (item.filename && (item.score ?? 0) >= 0.6) {
+                // Collect filenames for source citations from relevant results
+                if (item.filename && (item.score ?? 0) >= 0.45) {
                   ragFilenames.push(item.filename);
                 }
                 const relevance = ((item.score ?? 0) * 100).toFixed(0);
@@ -554,7 +554,7 @@ const app = new Hono<HonoAppContext>()
             }
 
             // Resolve source references from AI Search filenames
-            let sourceReferences: Array<{ title: string; url: string }> = [];
+            let sourceReferences: Array<{ title: string; url: string | null; type: "webpage" | "pdf" | "faq" }> = [];
             if (ragFilenames.length > 0) {
               try {
                 const resourceService = new ResourceService(db, c.env.UPLOADS);

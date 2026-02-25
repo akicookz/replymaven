@@ -165,6 +165,7 @@
     chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
     clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
     aiSparkle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/><path d="M19 2l.5 1.5L21 4l-1.5.5L19 6l-.5-1.5L17 4l1.5-.5L19 2z"/></svg>',
+    circleQuestion: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
   } as Record<string, string>;
 
   // ─── Styles ─────────────────────────────────────────────────────────────────
@@ -1048,10 +1049,12 @@
 
     /* ─── Source Links ────────────────────────────────────────────────────── */
     .rm-sources {
-      margin-top: 6px;
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(0,0,0,0.06);
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 3px;
     }
     .rm-source-link {
       display: inline-flex;
@@ -1059,15 +1062,32 @@
       gap: 4px;
       text-decoration: none;
       font-size: 11px;
+      line-height: 1.3;
       transition: opacity 0.2s;
+      max-width: 100%;
+      cursor: default;
     }
-    .rm-source-link:hover {
-      opacity: 0.8;
+    a.rm-source-link {
+      cursor: pointer;
+    }
+    a.rm-source-link:hover {
+      opacity: 0.7;
+    }
+    .rm-source-icon {
+      display: inline-flex;
+      flex-shrink: 0;
     }
     .rm-source-link svg {
-      width: 11px;
-      height: 11px;
+      width: 12px;
+      height: 12px;
       flex-shrink: 0;
+    }
+    .rm-source-type {
+      font-weight: 600;
+      flex-shrink: 0;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
     }
     .rm-source-title {
       overflow: hidden;
@@ -3311,7 +3331,7 @@
 
   function addSourcesToMessage(
     msgEl: HTMLElement,
-    sources: Array<{ title: string; url: string }>,
+    sources: Array<{ title: string; url?: string | null; type?: "webpage" | "pdf" | "faq" }>,
   ): void {
     if (!sources || sources.length === 0) return;
 
@@ -3321,24 +3341,52 @@
     sourcesContainer.className = "rm-sources";
 
     for (const source of sources) {
-      const link = document.createElement("a");
-      link.className = "rm-source-link";
-      link.href = source.url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.style.color = primaryColor + "80";
+      // Determine icon based on source type
+      const sourceType = source.type || "webpage";
+      let iconSvg: string;
+      let typeLabel: string;
+      if (sourceType === "pdf") {
+        iconSvg = ICONS.docs;
+        typeLabel = "Docs";
+      } else if (sourceType === "faq") {
+        iconSvg = ICONS.circleQuestion;
+        typeLabel = "FAQ";
+      } else {
+        iconSvg = ICONS.globe;
+        typeLabel = "Website";
+      }
 
-      // FileText icon
+      // Use <a> for clickable webpages, <span> for non-linkable PDFs/FAQs
+      const isClickable = sourceType === "webpage" && source.url;
+      const el = document.createElement(isClickable ? "a" : "span");
+      el.className = "rm-source-link";
+      el.style.color = primaryColor + "80";
+
+      if (isClickable) {
+        (el as HTMLAnchorElement).href = source.url!;
+        (el as HTMLAnchorElement).target = "_blank";
+        (el as HTMLAnchorElement).rel = "noopener noreferrer";
+      }
+
+      // Icon
       const iconEl = document.createElement("span");
-      iconEl.innerHTML = ICONS.docs;
+      iconEl.className = "rm-source-icon";
+      iconEl.innerHTML = iconSvg;
 
+      // Type label
+      const labelEl = document.createElement("span");
+      labelEl.className = "rm-source-type";
+      labelEl.textContent = typeLabel;
+
+      // Title (truncated via CSS)
       const titleEl = document.createElement("span");
       titleEl.className = "rm-source-title";
       titleEl.textContent = source.title;
 
-      link.appendChild(iconEl);
-      link.appendChild(titleEl);
-      sourcesContainer.appendChild(link);
+      el.appendChild(iconEl);
+      el.appendChild(labelEl);
+      el.appendChild(titleEl);
+      sourcesContainer.appendChild(el);
     }
 
     // Append sources inside the message bubble, after the text
