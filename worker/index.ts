@@ -16,7 +16,12 @@ import { CrawlService, type CrawlMessage } from "./services/crawl-service";
 import { BookingService } from "./services/booking-service";
 import { EmailService } from "./services/email-service";
 import { ToolService } from "./services/tool-service";
-import { encryptHeaders, decryptHeaders, maskHeaders, isEncrypted } from "./services/encryption-service";
+import {
+  encryptHeaders,
+  decryptHeaders,
+  maskHeaders,
+  isEncrypted,
+} from "./services/encryption-service";
 import {
   createProjectSchema,
   updateProjectSchema,
@@ -79,7 +84,9 @@ function checkRateLimit(
   return true;
 }
 
-function getClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
+function getClientIp(c: {
+  req: { header: (name: string) => string | undefined };
+}): string {
   return (
     c.req.header("cf-connecting-ip") ??
     c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
@@ -130,10 +137,7 @@ const app = new Hono<HonoAppContext>()
   )
   // ─── Better Auth handler ────────────────────────────────────────────────────
   .on(["POST", "GET"], "/api/auth/*", (c) => {
-    const auth = createAuth(
-      c.env,
-      c.req.raw.cf as CfProperties,
-    );
+    const auth = createAuth(c.env, c.req.raw.cf as CfProperties);
     return auth.handler(c.req.raw);
   })
   // ─── Static SPA fallback ───────────────────────────────────────────────────
@@ -234,60 +238,60 @@ const app = new Hono<HonoAppContext>()
   })
 
   // ─── Get Conversation Messages ──────────────────────────────────────────────
-  .get(
-    "/api/widget/:projectSlug/conversations/:id/messages",
-    async (c) => {
-      const ip = getClientIp(c);
-      if (!checkRateLimit(`getmsg:${ip}`, 60, 60_000)) {
-        return c.json({ error: "Rate limit exceeded" }, 429);
-      }
+  .get("/api/widget/:projectSlug/conversations/:id/messages", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`getmsg:${ip}`, 60, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
 
-      const slug = c.req.param("projectSlug");
-      const conversationId = c.req.param("id");
-      const db = drizzle(c.env.DB);
+    const slug = c.req.param("projectSlug");
+    const conversationId = c.req.param("id");
+    const db = drizzle(c.env.DB);
 
-      const projectService = new ProjectService(db);
-      const project = await projectService.getProjectBySlugPublic(slug);
-      if (!project) return c.json({ error: "Project not found" }, 404);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
 
-      const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-      const conversation = await chatService.getConversationById(conversationId, project.id);
-      if (!conversation) {
-        return c.json({ error: "Conversation not found" }, 404);
-      }
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.getConversationById(
+      conversationId,
+      project.id,
+    );
+    if (!conversation) {
+      return c.json({ error: "Conversation not found" }, 404);
+    }
 
-      // Support ?since=<timestamp> for polling
-      const sinceParam = c.req.query("since");
-      if (sinceParam) {
-        const sinceTs = parseInt(sinceParam, 10);
-        if (!isNaN(sinceTs)) {
-          const newMessages = await chatService.getMessagesSince(
-            conversationId,
-            sinceTs,
-          );
-          return c.json({
-            messages: newMessages,
-            status: conversation.status,
-          });
-        }
-      }
-
-      // Try KV cache first
-      const cached = await chatService.getFromCache(conversationId, project.id);
-      if (cached) {
+    // Support ?since=<timestamp> for polling
+    const sinceParam = c.req.query("since");
+    if (sinceParam) {
+      const sinceTs = parseInt(sinceParam, 10);
+      if (!isNaN(sinceTs)) {
+        const newMessages = await chatService.getMessagesSince(
+          conversationId,
+          sinceTs,
+        );
         return c.json({
-          messages: cached,
+          messages: newMessages,
           status: conversation.status,
         });
       }
+    }
 
-      const msgs = await chatService.getMessages(conversationId);
+    // Try KV cache first
+    const cached = await chatService.getFromCache(conversationId, project.id);
+    if (cached) {
       return c.json({
-        messages: msgs,
+        messages: cached,
         status: conversation.status,
       });
-    },
-  )
+    }
+
+    const msgs = await chatService.getMessages(conversationId);
+    return c.json({
+      messages: msgs,
+      status: conversation.status,
+    });
+  })
 
   // ─── Widget Image Upload ──────────────────────────────────────────────────────
   .post("/api/widget/:projectSlug/upload", async (c) => {
@@ -313,7 +317,10 @@ const app = new Hono<HonoAppContext>()
     // Only allow images
     const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
     if (!allowedTypes.includes(fileObj.type)) {
-      return c.json({ error: "Only JPEG, PNG, and WebP images are allowed" }, 400);
+      return c.json(
+        { error: "Only JPEG, PNG, and WebP images are allowed" },
+        400,
+      );
     }
 
     // Max 5MB
@@ -333,368 +340,416 @@ const app = new Hono<HonoAppContext>()
   })
 
   // ─── Send Message (SSE streaming response) ─────────────────────────────────
-  .post(
-    "/api/widget/:projectSlug/conversations/:id/messages",
-    async (c) => {
-      const ip = getClientIp(c);
-      if (!checkRateLimit(`msg:${ip}`, 30, 60_000)) {
-        return c.json({ error: "Rate limit exceeded" }, 429);
-      }
+  .post("/api/widget/:projectSlug/conversations/:id/messages", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`msg:${ip}`, 30, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
 
-      const slug = c.req.param("projectSlug");
-      const conversationId = c.req.param("id");
-      const db = drizzle(c.env.DB);
+    const slug = c.req.param("projectSlug");
+    const conversationId = c.req.param("id");
+    const db = drizzle(c.env.DB);
 
-      const projectService = new ProjectService(db);
-      const project = await projectService.getProjectBySlugPublic(slug);
-      if (!project) return c.json({ error: "Project not found" }, 404);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
 
-      const body = await c.req.json();
-      const parsed = validate(sendMessageSchema, body);
-      if (!parsed.success) return c.json({ error: parsed.error }, 400);
+    const body = await c.req.json();
+    const parsed = validate(sendMessageSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-      const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-      const conversation = await chatService.getConversationById(conversationId, project.id);
-      if (!conversation) {
-        return c.json({ error: "Conversation not found" }, 404);
-      }
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.getConversationById(
+      conversationId,
+      project.id,
+    );
+    if (!conversation) {
+      return c.json({ error: "Conversation not found" }, 404);
+    }
 
-      // Store visitor message (with optional image)
-      const imageUrl = parsed.data.imageUrl ?? null;
-      await chatService.addMessage({
+    // Store visitor message (with optional image)
+    const imageUrl = parsed.data.imageUrl ?? null;
+    await chatService.addMessage(
+      {
         conversationId,
         role: "visitor",
         content: parsed.data.content,
         imageUrl,
-      }, project.id);
+      },
+      project.id,
+    );
 
-      // If visitor attached an image, fetch it from R2 and base64-encode for Gemini
-      let imageBase64: string | null = null;
-      let imageMimeType: string | null = null;
-      if (imageUrl) {
-        try {
-          // imageUrl is like /api/uploads/{key} — extract the R2 key
-          const r2Key = imageUrl.replace("/api/uploads/", "");
-          const obj = await c.env.UPLOADS.get(r2Key);
-          if (obj) {
-            imageMimeType = obj.httpMetadata?.contentType ?? "image/jpeg";
-            const arrayBuffer = await obj.arrayBuffer();
-            // Convert to base64
-            const bytes = new Uint8Array(arrayBuffer);
-            let binary = "";
-            for (let i = 0; i < bytes.length; i++) {
-              binary += String.fromCharCode(bytes[i]);
-            }
-            imageBase64 = btoa(binary);
-          }
-        } catch (err) {
-          console.error("Failed to fetch image for Gemini:", err);
-        }
-      }
-
-      // Get project settings for tone and context
-      const settings = await projectService.getSettings(project.id);
-
-      // Get conversation history from cache or DB
-      const history =
-        (await chatService.getFromCache(conversationId, project.id)) ??
-        (await chatService.getMessages(conversationId));
-
-      const conversationHistory = history
-        .filter((m) => m.role !== "bot" || m.content)
-        .slice(-20) // Last 20 messages for context
-        .map((m) => ({
-          role: m.role as "visitor" | "bot" | "agent",
-          content: m.content,
-        }));
-
-      // Reformulate the visitor's message into a standalone search query and
-      // generate a conversation summary (for multi-turn conversations) in parallel.
-      const aiService = new AiService({
-        model: c.env.AI_MODEL,
-        geminiApiKey: c.env.GEMINI_API_KEY,
-        openaiApiKey: c.env.OPENAI_API_KEY,
-      });
-      const [searchQuery, conversationSummary] = await Promise.all([
-        aiService.reformulateQuery(conversationHistory, parsed.data.content),
-        aiService.summarizeConversation(conversationHistory),
-      ]);
-
-      // Query AI Search for relevant context with improved retrieval settings
-      let ragContext = "";
-      const ragFilenames: string[] = [];
+    // If visitor attached an image, fetch it from R2 and base64-encode for Gemini
+    let imageBase64: string | null = null;
+    let imageMimeType: string | null = null;
+    if (imageUrl) {
       try {
-        const searchResults = await c.env.AI.autorag("supportbot").search({
-          query: searchQuery,
-          rewrite_query: true,
-          filters: {
-            type: "eq",
-            key: "folder",
-            value: `${project.id}/`,
+        // imageUrl is like /api/uploads/{key} — extract the R2 key
+        const r2Key = imageUrl.replace("/api/uploads/", "");
+        const obj = await c.env.UPLOADS.get(r2Key);
+        if (obj) {
+          imageMimeType = obj.httpMetadata?.contentType ?? "image/jpeg";
+          const arrayBuffer = await obj.arrayBuffer();
+          // Convert to base64
+          const bytes = new Uint8Array(arrayBuffer);
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          imageBase64 = btoa(binary);
+        }
+      } catch (err) {
+        console.error("Failed to fetch image for Gemini:", err);
+      }
+    }
+
+    // Get project settings for tone and context
+    const settings = await projectService.getSettings(project.id);
+
+    // Get conversation history from cache or DB
+    const history =
+      (await chatService.getFromCache(conversationId, project.id)) ??
+      (await chatService.getMessages(conversationId));
+
+    const conversationHistory = history
+      .filter((m) => m.role !== "bot" || m.content)
+      .slice(-20) // Last 20 messages for context
+      .map((m) => ({
+        role: m.role as "visitor" | "bot" | "agent",
+        content: m.content,
+      }));
+
+    // Reformulate the visitor's message into a standalone search query and
+    // generate a conversation summary (for multi-turn conversations) in parallel.
+    const aiService = new AiService({
+      model: c.env.AI_MODEL,
+      geminiApiKey: c.env.GEMINI_API_KEY,
+      openaiApiKey: c.env.OPENAI_API_KEY,
+    });
+    const [searchQuery, conversationSummary] = await Promise.all([
+      aiService.reformulateQuery(conversationHistory, parsed.data.content),
+      aiService.summarizeConversation(conversationHistory),
+    ]);
+
+    // Query AI Search for relevant context with improved retrieval settings
+    let ragContext = "";
+    const ragFilenames: string[] = [];
+    try {
+      const searchResults = await c.env.AI.aiSearch.get("supportbot").search({
+        messages: [{ role: "user", content: searchQuery }],
+        ai_search_options: {
+          retrieval: {
+            filters: {
+              type: "eq",
+              key: "folder",
+              value: `${project.id}/`,
+            },
+            max_num_results: 8,
+            match_threshold: 0.3,
           },
-          max_num_results: 8,
-          ranking_options: { score_threshold: 0.3 },
+          query_rewrite: {
+            enabled: true,
+          },
           reranking: {
             enabled: true,
             model: "@cf/baai/bge-reranker-base",
           },
-        });
+        },
+      });
 
-        if (searchResults?.data?.length > 0) {
-          // Track the top result score for confidence assessment
-          const topScore = (searchResults.data[0] as { score?: number }).score ?? 0;
-          const ragConfident = topScore >= 0.6;
+      if (searchResults?.chunks?.length > 0) {
+        // Track the top result score for confidence assessment
+        const topScore =
+          (searchResults.chunks[0] as { score?: number }).score ?? 0;
+        const ragConfident = topScore >= 0.6;
 
-          ragContext = searchResults.data
-            .map(
-              (item: { filename?: string; score?: number; content?: Array<{ text?: string }> }) => {
-                // Collect filenames for source citations from relevant results
-                if (item.filename && (item.score ?? 0) >= 0.45) {
-                  ragFilenames.push(item.filename);
-                }
-                const relevance = ((item.score ?? 0) * 100).toFixed(0);
-                return `<source file="${item.filename}" relevance="${relevance}%">\n${item.content
-                  ?.map((chunk) => chunk.text)
-                  .join("\n")}\n</source>`;
-              },
-            )
-            .join("\n\n");
+        ragContext = searchResults.chunks
+          .map(
+            (item: {
+              item?: { key?: string };
+              score?: number;
+              text?: string;
+            }) => {
+              const filename = item.item?.key;
+              // Collect filenames for source citations from relevant results
+              if (filename && (item.score ?? 0) >= 0.45) {
+                ragFilenames.push(filename);
+              }
+              const relevance = ((item.score ?? 0) * 100).toFixed(0);
+              return `<source file="${filename}" relevance="${relevance}%">\n${item.text ?? ""}\n</source>`;
+            },
+          )
+          .join("\n\n");
 
-          // Warn the model when results may not be directly relevant
-          if (!ragConfident) {
-            ragContext = `NOTE: The following knowledge base results may not be directly relevant to the visitor's question. Only use them if they genuinely answer what the visitor asked. If none are relevant, tell the visitor you don't have that information.\n\n${ragContext}`;
-          }
+        // Warn the model when results may not be directly relevant
+        if (!ragConfident) {
+          ragContext = `NOTE: The following knowledge base results may not be directly relevant to the visitor's question. Only use them if they genuinely answer what the visitor asked. If none are relevant, tell the visitor you don't have that information.\n\n${ragContext}`;
         }
-      } catch (err) {
-        console.error("AI Search query failed:", err);
+        console.log("Search Query:", searchQuery);
+        console.log("RAG Context:", ragContext);
+      }
+    } catch (err) {
+      console.error("AI Search query failed:", err);
+    }
+
+    // Check canned responses
+    const cannedMatch = await chatService.findCannedResponse(
+      project.id,
+      parsed.data.content,
+    );
+
+    // Check if booking is enabled and load enabled tools in parallel
+    const bookingService = new BookingService(db);
+    const toolService = new ToolService(db);
+    const [bookingCfg, enabledTools] = await Promise.all([
+      bookingService.getBookingConfig(project.id),
+      toolService.getEnabledTools(project.id),
+    ]);
+    const bookingEnabled = bookingCfg?.enabled ?? false;
+
+    // Per-project rate limit for tool-enabled conversations (100 tool-bearing messages per minute)
+    if (enabledTools.length > 0) {
+      if (!checkRateLimit(`toolmsg:${project.id}`, 100, 60_000)) {
+        return c.json(
+          {
+            error:
+              "Tool execution rate limit exceeded. Please try again shortly.",
+          },
+          429,
+        );
       }
 
-      // Check canned responses
-      const cannedMatch = await chatService.findCannedResponse(
-        project.id,
-        parsed.data.content,
-      );
-
-      // Check if booking is enabled and load enabled tools in parallel
-      const bookingService = new BookingService(db);
-      const toolService = new ToolService(db);
-      const [bookingCfg, enabledTools] = await Promise.all([
-        bookingService.getBookingConfig(project.id),
-        toolService.getEnabledTools(project.id),
-      ]);
-      const bookingEnabled = bookingCfg?.enabled ?? false;
-
-      // Per-project rate limit for tool-enabled conversations (100 tool-bearing messages per minute)
-      if (enabledTools.length > 0) {
-        if (!checkRateLimit(`toolmsg:${project.id}`, 100, 60_000)) {
-          return c.json({ error: "Tool execution rate limit exceeded. Please try again shortly." }, 429);
-        }
-
-        // Decrypt encrypted headers before passing to Gemini tool execution
-        for (const t of enabledTools) {
-          if (t.headers && isEncrypted(t.headers)) {
-            try {
-              const decrypted = await decryptHeaders(t.headers, c.env.ENCRYPTION_KEY);
-              t.headers = JSON.stringify(decrypted);
-            } catch {
-              // If decryption fails, clear headers to prevent passing corrupted data
-              t.headers = null;
-            }
+      // Decrypt encrypted headers before passing to Gemini tool execution
+      for (const t of enabledTools) {
+        if (t.headers && isEncrypted(t.headers)) {
+          try {
+            const decrypted = await decryptHeaders(
+              t.headers,
+              c.env.ENCRYPTION_KEY,
+            );
+            t.headers = JSON.stringify(decrypted);
+          } catch {
+            // If decryption fails, clear headers to prevent passing corrupted data
+            t.headers = null;
           }
         }
       }
+    }
 
-      // Build system prompt and stream response
-      const systemPrompt = aiService.buildSystemPrompt(
-        settings ?? { toneOfVoice: "professional", customTonePrompt: null, companyContext: null },
-        project.name,
-        ragContext,
-        cannedMatch ? cannedMatch.response : null,
-        conversationSummary,
-        { bookingEnabled, hasTools: enabledTools.length > 0 },
-      );
+    // Build system prompt and stream response
+    const systemPrompt = aiService.buildSystemPrompt(
+      settings ?? {
+        toneOfVoice: "professional",
+        customTonePrompt: null,
+        companyContext: null,
+      },
+      project.name,
+      ragContext,
+      cannedMatch ? cannedMatch.response : null,
+      conversationSummary,
+      { bookingEnabled, hasTools: enabledTools.length > 0 },
+    );
 
-      // Stream via SSE using Vercel AI SDK
-      const streamResult = aiService.streamChat({
-        systemPrompt,
-        conversationHistory,
-        userMessage: parsed.data.content,
-        image: imageBase64 && imageMimeType
+    // Stream via SSE using Vercel AI SDK
+    const streamResult = aiService.streamChat({
+      systemPrompt,
+      conversationHistory,
+      userMessage: parsed.data.content,
+      image:
+        imageBase64 && imageMimeType
           ? { base64: imageBase64, mimeType: imageMimeType }
           : null,
-        tools: enabledTools.length > 0 ? enabledTools : undefined,
-        onToolCallStart: (info) => {
-          console.log(`Tool call started: ${info.toolName}`, info.input);
-        },
-        onToolCallFinish: (info) => {
-          // Log tool execution asynchronously (fire-and-forget)
-          const matchedTool = enabledTools.find((t) => t.name === info.toolName);
-          if (matchedTool) {
-            toolService.logExecution({
+      tools: enabledTools.length > 0 ? enabledTools : undefined,
+      onToolCallStart: (info) => {
+        console.log(`Tool call started: ${info.toolName}`, info.input);
+      },
+      onToolCallFinish: (info) => {
+        // Log tool execution asynchronously (fire-and-forget)
+        const matchedTool = enabledTools.find((t) => t.name === info.toolName);
+        if (matchedTool) {
+          toolService
+            .logExecution({
               toolId: matchedTool.id,
               conversationId,
-              input: info.input as Record<string, unknown> ?? {},
+              input: (info.input as Record<string, unknown>) ?? {},
               output: info.output,
               status: info.success ? "success" : "error",
               duration: info.durationMs,
               errorMessage: info.error ? String(info.error) : null,
-            }).catch((err) => console.error("Failed to log tool execution:", err));
-          }
-        },
-      });
+            })
+            .catch((err) =>
+              console.error("Failed to log tool execution:", err),
+            );
+        }
+      },
+    });
 
-      const stream = new ReadableStream({
-        async start(controller) {
-          const encoder = new TextEncoder();
-          let fullResponse = "";
-          const emittedToolCalls = new Set<string>(); // Deduplicate across retry steps
-          let hadToolCalls = false;
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        let fullResponse = "";
+        const emittedToolCalls = new Set<string>(); // Deduplicate across retry steps
+        let hadToolCalls = false;
 
-          let lastToolOutput: unknown = null;
-          let lastToolError: string | null = null;
-          let stepCount = 0;
+        let lastToolOutput: unknown = null;
+        let lastToolError: string | null = null;
+        let stepCount = 0;
 
-          try {
-            // Use fullStream to get all event types (text, tool-call, tool-result, etc.)
-            for await (const part of streamResult.fullStream) {
-              if (part.type === "text-delta") {
-                fullResponse += part.text;
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ text: part.text })}\n\n`),
-                );
-              } else if (part.type === "tool-call") {
-                hadToolCalls = true;
-                // Only emit the first call per tool name (skip retries from multi-step loops)
-                if (!emittedToolCalls.has(part.toolName)) {
-                  emittedToolCalls.add(part.toolName);
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({
-                        toolCall: { name: part.toolName },
-                      })}\n\n`,
-                    ),
-                  );
-                }
-              } else if (part.type === "tool-result") {
-                const output = part.output as Record<string, unknown> | null;
-                const hasError = !!output?.error;
-                const errorMessage = hasError ? String(output!.error) : null;
-
-                // Track last tool output/error for fallback diagnostics
-                lastToolOutput = output;
-                lastToolError = errorMessage;
-
-                // Emit tool result with error details when applicable
-                controller.enqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({
-                      toolResult: {
-                        name: part.toolName,
-                        success: !hasError,
-                        ...(errorMessage ? { errorMessage } : {}),
-                      },
-                    })}\n\n`,
-                  ),
-                );
-              } else if (part.type === "finish-step") {
-                stepCount++;
-                console.log(`[Tool Debug] Step ${stepCount} finished — reason: ${part.finishReason}, text so far: ${fullResponse.length} chars, tool calls: ${hadToolCalls}`);
-              }
-            }
-
-            // If the model exhausted all steps on tool calls without producing text, add a fallback
-            if (hadToolCalls && !fullResponse.trim()) {
-              console.log(`[Tool Debug] Fallback triggered — steps: ${stepCount}, lastToolError: ${lastToolError}, lastToolOutput: ${JSON.stringify(lastToolOutput)?.slice(0, 500)}`);
-
-              // If the tool itself errored, show that to the user via SSE
-              if (lastToolError) {
-                controller.enqueue(
-                  encoder.encode(
-                    `data: ${JSON.stringify({
-                      toolError: {
-                        message: "The tool encountered an error while processing your request.",
-                        detail: lastToolError,
-                      },
-                    })}\n\n`,
-                  ),
-                );
-                fullResponse = "I tried to look that up but the tool encountered an error. Could you try again?";
-              } else {
-                fullResponse = "I found some information but had trouble processing it. Could you try rephrasing your question?";
-              }
+        try {
+          // Use fullStream to get all event types (text, tool-call, tool-result, etc.)
+          for await (const part of streamResult.fullStream) {
+            if (part.type === "text-delta") {
+              fullResponse += part.text;
               controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ text: fullResponse })}\n\n`),
+                encoder.encode(
+                  `data: ${JSON.stringify({ text: part.text })}\n\n`,
+                ),
               );
-            }
-
-            // Check if handoff was requested
-            if (fullResponse.includes("[HANDOFF_REQUESTED]")) {
-              await chatService.updateConversationStatus(
-                conversationId,
-                project.id,
-                "waiting_agent",
-              );
-
-              // Notify via Telegram if configured
-              if (settings?.telegramBotToken && settings?.telegramChatId) {
-                const telegramService = new TelegramService(db);
-                await telegramService.notifyHandoff(
-                  settings.telegramBotToken,
-                  settings.telegramChatId,
-                  conversationId,
-                  conversation.visitorName,
-                  parsed.data.content,
+            } else if (part.type === "tool-call") {
+              hadToolCalls = true;
+              // Only emit the first call per tool name (skip retries from multi-step loops)
+              if (!emittedToolCalls.has(part.toolName)) {
+                emittedToolCalls.add(part.toolName);
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      toolCall: { name: part.toolName },
+                    })}\n\n`,
+                  ),
                 );
               }
+            } else if (part.type === "tool-result") {
+              const output = part.output as Record<string, unknown> | null;
+              const hasError = !!output?.error;
+              const errorMessage = hasError ? String(output!.error) : null;
 
-              fullResponse = fullResponse.replace(
-                "[HANDOFF_REQUESTED]",
-                "I'll connect you with a human agent right away. They'll be with you shortly!",
-              );
+              // Track last tool output/error for fallback diagnostics
+              lastToolOutput = output;
+              lastToolError = errorMessage;
 
-              // Send handoff event to widget with visitor email for smart handoff UX
+              // Emit tool result with error details when applicable
               controller.enqueue(
                 encoder.encode(
                   `data: ${JSON.stringify({
-                    handoff: true,
-                    visitorEmail: conversation.visitorEmail ?? null,
+                    toolResult: {
+                      name: part.toolName,
+                      success: !hasError,
+                      ...(errorMessage ? { errorMessage } : {}),
+                    },
                   })}\n\n`,
                 ),
               );
-            }
-
-            // Check if booking was requested
-            if (fullResponse.includes("[BOOKING_REQUESTED]")) {
-              fullResponse = fullResponse.replace(
-                "[BOOKING_REQUESTED]",
-                "I'd be happy to help you schedule a meeting! Let me open our booking calendar for you.",
+            } else if (part.type === "finish-step") {
+              stepCount++;
+              console.log(
+                `[Tool Debug] Step ${stepCount} finished — reason: ${part.finishReason}, text so far: ${fullResponse.length} chars, tool calls: ${hadToolCalls}`,
               );
+            }
+          }
 
-              // Send booking event to widget
+          // If the model exhausted all steps on tool calls without producing text, add a fallback
+          if (hadToolCalls && !fullResponse.trim()) {
+            console.log(
+              `[Tool Debug] Fallback triggered — steps: ${stepCount}, lastToolError: ${lastToolError}, lastToolOutput: ${JSON.stringify(lastToolOutput)?.slice(0, 500)}`,
+            );
+
+            // If the tool itself errored, show that to the user via SSE
+            if (lastToolError) {
               controller.enqueue(
                 encoder.encode(
-                  `data: ${JSON.stringify({ booking: true })}\n\n`,
+                  `data: ${JSON.stringify({
+                    toolError: {
+                      message:
+                        "The tool encountered an error while processing your request.",
+                      detail: lastToolError,
+                    },
+                  })}\n\n`,
                 ),
+              );
+              fullResponse =
+                "I tried to look that up but the tool encountered an error. Could you try again?";
+            } else {
+              fullResponse =
+                "I found some information but had trouble processing it. Could you try rephrasing your question?";
+            }
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ text: fullResponse })}\n\n`,
+              ),
+            );
+          }
+
+          // Check if handoff was requested
+          if (fullResponse.includes("[HANDOFF_REQUESTED]")) {
+            await chatService.updateConversationStatus(
+              conversationId,
+              project.id,
+              "waiting_agent",
+            );
+
+            // Notify via Telegram if configured
+            if (settings?.telegramBotToken && settings?.telegramChatId) {
+              const telegramService = new TelegramService(db);
+              await telegramService.notifyHandoff(
+                settings.telegramBotToken,
+                settings.telegramChatId,
+                conversationId,
+                conversation.visitorName,
+                parsed.data.content,
               );
             }
 
-            // Resolve source references from AI Search filenames
-            let sourceReferences: Array<{ title: string; url: string | null; type: "webpage" | "pdf" | "faq" }> = [];
-            if (ragFilenames.length > 0) {
-              try {
-                const resourceService = new ResourceService(db, c.env.UPLOADS);
-                sourceReferences =
-                  await resourceService.resolveSourcesFromFilenames(
-                    project.id,
-                    ragFilenames,
-                  );
-              } catch (err) {
-                console.error("Source resolution failed:", err);
-              }
-            }
+            fullResponse = fullResponse.replace(
+              "[HANDOFF_REQUESTED]",
+              "I'll connect you with a human agent right away. They'll be with you shortly!",
+            );
 
-            // Store bot message in DB with structured sources
-            const botMsg = await chatService.addMessage({
+            // Send handoff event to widget with visitor email for smart handoff UX
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  handoff: true,
+                  visitorEmail: conversation.visitorEmail ?? null,
+                })}\n\n`,
+              ),
+            );
+          }
+
+          // Check if booking was requested
+          if (fullResponse.includes("[BOOKING_REQUESTED]")) {
+            fullResponse = fullResponse.replace(
+              "[BOOKING_REQUESTED]",
+              "I'd be happy to help you schedule a meeting! Let me open our booking calendar for you.",
+            );
+
+            // Send booking event to widget
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ booking: true })}\n\n`),
+            );
+          }
+
+          // Resolve source references from AI Search filenames
+          let sourceReferences: Array<{
+            title: string;
+            url: string | null;
+            type: "webpage" | "pdf" | "faq";
+          }> = [];
+          if (ragFilenames.length > 0) {
+            try {
+              const resourceService = new ResourceService(db, c.env.UPLOADS);
+              sourceReferences =
+                await resourceService.resolveSourcesFromFilenames(
+                  project.id,
+                  ragFilenames,
+                );
+            } catch (err) {
+              console.error("Source resolution failed:", err);
+            }
+          }
+
+          // Store bot message in DB with structured sources
+          const botMsg = await chatService.addMessage(
+            {
               conversationId,
               role: "bot",
               content: fullResponse,
@@ -702,118 +757,121 @@ const app = new Hono<HonoAppContext>()
                 sourceReferences.length > 0
                   ? JSON.stringify(sourceReferences)
                   : null,
-            }, project.id);
+            },
+            project.id,
+          );
 
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  done: true,
-                  messageId: botMsg.id,
-                  sources:
-                    sourceReferences.length > 0
-                      ? sourceReferences
-                      : undefined,
-                })}\n\n`,
-              ),
-            );
-          } catch (err) {
-            const errorMessage =
-              err instanceof Error ? err.message : "Unknown error";
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ error: errorMessage })}\n\n`,
-              ),
-            );
-          } finally {
-            controller.close();
-          }
-        },
-      });
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                done: true,
+                messageId: botMsg.id,
+                sources:
+                  sourceReferences.length > 0 ? sourceReferences : undefined,
+              })}\n\n`,
+            ),
+          );
+        } catch (err) {
+          const errorMessage =
+            err instanceof Error ? err.message : "Unknown error";
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ error: errorMessage })}\n\n`,
+            ),
+          );
+        } finally {
+          controller.close();
+        }
+      },
+    });
 
-      return new Response(stream, {
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-        },
-      });
-    },
-  )
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  })
 
   // ─── Update Visitor Email (for handoff flow) ─────────────────────────────────
-  .post(
-    "/api/widget/:projectSlug/conversations/:id/email",
-    async (c) => {
-      const ip = getClientIp(c);
-      if (!checkRateLimit(`email:${ip}`, 10, 60_000)) {
-        return c.json({ error: "Rate limit exceeded" }, 429);
-      }
+  .post("/api/widget/:projectSlug/conversations/:id/email", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`email:${ip}`, 10, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
 
-      const slug = c.req.param("projectSlug");
-      const conversationId = c.req.param("id");
-      const db = drizzle(c.env.DB);
+    const slug = c.req.param("projectSlug");
+    const conversationId = c.req.param("id");
+    const db = drizzle(c.env.DB);
 
-      const projectService = new ProjectService(db);
-      const project = await projectService.getProjectBySlugPublic(slug);
-      if (!project) return c.json({ error: "Project not found" }, 404);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
 
-      const body = await c.req.json();
-      const parsed = validate(updateVisitorEmailSchema, body);
-      if (!parsed.success) return c.json({ error: parsed.error }, 400);
+    const body = await c.req.json();
+    const parsed = validate(updateVisitorEmailSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-      const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-      const conversation = await chatService.getConversationById(conversationId, project.id);
-      if (!conversation) {
-        return c.json({ error: "Conversation not found" }, 404);
-      }
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.getConversationById(
+      conversationId,
+      project.id,
+    );
+    if (!conversation) {
+      return c.json({ error: "Conversation not found" }, 404);
+    }
 
-      await chatService.updateConversationEmail(conversationId, project.id, parsed.data.email);
-      return c.json({ ok: true });
-    },
-  )
+    await chatService.updateConversationEmail(
+      conversationId,
+      project.id,
+      parsed.data.email,
+    );
+    return c.json({ ok: true });
+  })
 
   // ─── Update Conversation (public - for widget identity/metadata sync) ─────
-  .patch(
-    "/api/widget/:projectSlug/conversations/:id",
-    async (c) => {
-      const ip = getClientIp(c);
-      if (!checkRateLimit(`updconv:${ip}`, 20, 60_000)) {
-        return c.json({ error: "Rate limit exceeded" }, 429);
-      }
+  .patch("/api/widget/:projectSlug/conversations/:id", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`updconv:${ip}`, 20, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
 
-      const slug = c.req.param("projectSlug");
-      const conversationId = c.req.param("id");
-      const db = drizzle(c.env.DB);
+    const slug = c.req.param("projectSlug");
+    const conversationId = c.req.param("id");
+    const db = drizzle(c.env.DB);
 
-      const projectService = new ProjectService(db);
-      const project = await projectService.getProjectBySlugPublic(slug);
-      if (!project) return c.json({ error: "Project not found" }, 404);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
 
-      const body = await c.req.json();
-      const parsed = validate(updateConversationPublicSchema, body);
-      if (!parsed.success) return c.json({ error: parsed.error }, 400);
+    const body = await c.req.json();
+    const parsed = validate(updateConversationPublicSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-      const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-      const conversation = await chatService.getConversationById(conversationId, project.id);
-      if (!conversation) {
-        return c.json({ error: "Conversation not found" }, 404);
-      }
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.getConversationById(
+      conversationId,
+      project.id,
+    );
+    if (!conversation) {
+      return c.json({ error: "Conversation not found" }, 404);
+    }
 
-      const updated = await chatService.updateConversation(
-        conversationId,
-        project.id,
-        {
-          visitorName: parsed.data.visitorName,
-          visitorEmail: parsed.data.visitorEmail,
-          metadata: parsed.data.metadata
-            ? JSON.stringify(parsed.data.metadata)
-            : undefined,
-        },
-      );
+    const updated = await chatService.updateConversation(
+      conversationId,
+      project.id,
+      {
+        visitorName: parsed.data.visitorName,
+        visitorEmail: parsed.data.visitorEmail,
+        metadata: parsed.data.metadata
+          ? JSON.stringify(parsed.data.metadata)
+          : undefined,
+      },
+    );
 
-      return c.json(updated);
-    },
-  )
+    return c.json(updated);
+  })
 
   // ─── Contact Form Submit (public) ────────────────────────────────────────
   .post("/api/widget/:projectSlug/contact-form", async (c) => {
@@ -855,13 +913,15 @@ const app = new Hono<HonoAppContext>()
         .map(([key, val]) => `${key}: ${val}`)
         .join("\n");
       c.executionCtx.waitUntil(
-        telegramService.sendMessage(
-          settings.telegramBotToken,
-          settings.telegramChatId,
-          `New contact form submission:\n\n${fields}`,
-        ).catch(() => {
-          // Silently ignore Telegram errors
-        }),
+        telegramService
+          .sendMessage(
+            settings.telegramBotToken,
+            settings.telegramChatId,
+            `New contact form submission:\n\n${fields}`,
+          )
+          .catch(() => {
+            // Silently ignore Telegram errors
+          }),
       );
     }
 
@@ -908,7 +968,10 @@ const app = new Hono<HonoAppContext>()
     const visitorTimezone = c.req.query("timezone") ?? "America/New_York";
 
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return c.json({ error: "Valid date parameter required (YYYY-MM-DD)" }, 400);
+      return c.json(
+        { error: "Valid date parameter required (YYYY-MM-DD)" },
+        400,
+      );
     }
 
     const db = drizzle(c.env.DB);
@@ -1033,17 +1096,23 @@ const app = new Hono<HonoAppContext>()
 
     const conversationId = convMatch[1];
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-    const conversation = await chatService.getConversationById(conversationId, projectId);
+    const conversation = await chatService.getConversationById(
+      conversationId,
+      projectId,
+    );
     if (!conversation) {
       return c.json({ ok: true });
     }
 
     // Store agent reply
-    await chatService.addMessage({
-      conversationId,
-      role: "agent",
-      content: message.text,
-    }, projectId);
+    await chatService.addMessage(
+      {
+        conversationId,
+        role: "agent",
+        content: message.text,
+      },
+      projectId,
+    );
 
     // Update conversation status
     await chatService.updateConversationStatus(
@@ -1080,10 +1149,7 @@ const app = new Hono<HonoAppContext>()
     const db = drizzle(c.env.DB);
     c.set("db", db);
 
-    const auth = createAuth(
-      c.env,
-      c.req.raw.cf as CfProperties,
-    );
+    const auth = createAuth(c.env, c.req.raw.cf as CfProperties);
     const session = await auth.api.getSession({
       headers: c.req.raw.headers,
     });
@@ -1161,7 +1227,9 @@ const app = new Hono<HonoAppContext>()
 
     const db = c.get("db");
     const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("projectId"));
+    const project = await projectService.getProjectById(
+      c.req.param("projectId"),
+    );
     if (!project || project.userId !== user.id) {
       return c.json({ error: "Not found" }, 404);
     }
@@ -1262,7 +1330,9 @@ const app = new Hono<HonoAppContext>()
 
     const db = c.get("db");
     const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("projectId"));
+    const project = await projectService.getProjectById(
+      c.req.param("projectId"),
+    );
     if (!project || project.userId !== user.id) {
       return c.json({ error: "Not found" }, 404);
     }
@@ -1285,7 +1355,9 @@ const app = new Hono<HonoAppContext>()
 
     const db = c.get("db");
     const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("projectId"));
+    const project = await projectService.getProjectById(
+      c.req.param("projectId"),
+    );
     if (!project || project.userId !== user.id) {
       return c.json({ error: "Not found" }, 404);
     }
@@ -1303,7 +1375,9 @@ const app = new Hono<HonoAppContext>()
 
     const db = c.get("db");
     const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("projectId"));
+    const project = await projectService.getProjectById(
+      c.req.param("projectId"),
+    );
     if (!project || project.userId !== user.id) {
       return c.json({ error: "Not found" }, 404);
     }
@@ -1328,7 +1402,9 @@ const app = new Hono<HonoAppContext>()
 
     const db = c.get("db");
     const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("projectId"));
+    const project = await projectService.getProjectById(
+      c.req.param("projectId"),
+    );
     if (!project || project.userId !== user.id) {
       return c.json({ error: "Not found" }, 404);
     }
@@ -1550,7 +1626,9 @@ const app = new Hono<HonoAppContext>()
       );
       if (existing.length > 0) {
         return c.json(
-          { error: `Only one ${parsed.data.type.replace("_", " ")} action allowed per project` },
+          {
+            error: `Only one ${parsed.data.type.replace("_", " ")} action allowed per project`,
+          },
           400,
         );
       }
@@ -1635,7 +1713,7 @@ const app = new Hono<HonoAppContext>()
           try {
             const decrypted = isEncrypted(t.headers)
               ? await decryptHeaders(t.headers, c.env.ENCRYPTION_KEY)
-              : JSON.parse(t.headers) as Record<string, string>;
+              : (JSON.parse(t.headers) as Record<string, string>);
             maskedHeaders = maskHeaders(decrypted);
           } catch {
             maskedHeaders = null;
@@ -1679,7 +1757,10 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Check for duplicate name
-    const existing = await toolService.getToolByName(parsed.data.name, project.id);
+    const existing = await toolService.getToolByName(
+      parsed.data.name,
+      project.id,
+    );
     if (existing) {
       return c.json({ error: "A tool with this name already exists" }, 400);
     }
@@ -1687,7 +1768,10 @@ const app = new Hono<HonoAppContext>()
     // Encrypt headers if provided (contains auth tokens, API keys)
     let encryptedHeaders: string | null = null;
     if (parsed.data.headers && Object.keys(parsed.data.headers).length > 0) {
-      encryptedHeaders = await encryptHeaders(parsed.data.headers, c.env.ENCRYPTION_KEY);
+      encryptedHeaders = await encryptHeaders(
+        parsed.data.headers,
+        c.env.ENCRYPTION_KEY,
+      );
     }
 
     const created = await toolService.createTool({
@@ -1707,18 +1791,22 @@ const app = new Hono<HonoAppContext>()
     });
 
     // Return masked headers to frontend (never expose raw values)
-    const maskedHeaders = parsed.data.headers && Object.keys(parsed.data.headers).length > 0
-      ? maskHeaders(parsed.data.headers)
-      : null;
+    const maskedHeaders =
+      parsed.data.headers && Object.keys(parsed.data.headers).length > 0
+        ? maskHeaders(parsed.data.headers)
+        : null;
 
-    return c.json({
-      ...created,
-      parameters: JSON.parse(created.parameters),
-      headers: maskedHeaders,
-      responseMapping: created.responseMapping
-        ? JSON.parse(created.responseMapping)
-        : null,
-    }, 201);
+    return c.json(
+      {
+        ...created,
+        parameters: JSON.parse(created.parameters),
+        headers: maskedHeaders,
+        responseMapping: created.responseMapping
+          ? JSON.parse(created.responseMapping)
+          : null,
+      },
+      201,
+    );
   })
 
   .patch("/api/projects/:id/tools/:toolId", async (c) => {
@@ -1740,13 +1828,19 @@ const app = new Hono<HonoAppContext>()
 
     // Build the update object, JSON-stringifying complex fields
     const updates: Record<string, unknown> = {};
-    if (parsed.data.displayName !== undefined) updates.displayName = parsed.data.displayName;
-    if (parsed.data.description !== undefined) updates.description = parsed.data.description;
-    if (parsed.data.endpoint !== undefined) updates.endpoint = parsed.data.endpoint;
+    if (parsed.data.displayName !== undefined)
+      updates.displayName = parsed.data.displayName;
+    if (parsed.data.description !== undefined)
+      updates.description = parsed.data.description;
+    if (parsed.data.endpoint !== undefined)
+      updates.endpoint = parsed.data.endpoint;
     if (parsed.data.method !== undefined) updates.method = parsed.data.method;
     if (parsed.data.headers !== undefined) {
       if (parsed.data.headers && Object.keys(parsed.data.headers).length > 0) {
-        updates.headers = await encryptHeaders(parsed.data.headers, c.env.ENCRYPTION_KEY);
+        updates.headers = await encryptHeaders(
+          parsed.data.headers,
+          c.env.ENCRYPTION_KEY,
+        );
       } else {
         updates.headers = null;
       }
@@ -1759,9 +1853,12 @@ const app = new Hono<HonoAppContext>()
         ? JSON.stringify(parsed.data.responseMapping)
         : null;
     }
-    if (parsed.data.enabled !== undefined) updates.enabled = parsed.data.enabled;
-    if (parsed.data.timeout !== undefined) updates.timeout = parsed.data.timeout;
-    if (parsed.data.sortOrder !== undefined) updates.sortOrder = parsed.data.sortOrder;
+    if (parsed.data.enabled !== undefined)
+      updates.enabled = parsed.data.enabled;
+    if (parsed.data.timeout !== undefined)
+      updates.timeout = parsed.data.timeout;
+    if (parsed.data.sortOrder !== undefined)
+      updates.sortOrder = parsed.data.sortOrder;
 
     const updated = await toolService.updateTool(
       c.req.param("toolId"),
@@ -1776,7 +1873,7 @@ const app = new Hono<HonoAppContext>()
       try {
         const decrypted = isEncrypted(updated.headers)
           ? await decryptHeaders(updated.headers, c.env.ENCRYPTION_KEY)
-          : JSON.parse(updated.headers) as Record<string, string>;
+          : (JSON.parse(updated.headers) as Record<string, string>);
         maskedResponseHeaders = maskHeaders(decrypted);
       } catch {
         maskedResponseHeaders = null;
@@ -1826,7 +1923,10 @@ const app = new Hono<HonoAppContext>()
 
     // Rate limit tool tests: 20 per minute per project
     if (!checkRateLimit(`tooltest:${project.id}`, 20, 60_000)) {
-      return c.json({ error: "Tool test rate limit exceeded. Please try again shortly." }, 429);
+      return c.json(
+        { error: "Tool test rate limit exceeded. Please try again shortly." },
+        429,
+      );
     }
 
     const body = await c.req.json();
@@ -1834,13 +1934,19 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const toolService = new ToolService(db);
-    const toolDef = await toolService.getToolById(c.req.param("toolId"), project.id);
+    const toolDef = await toolService.getToolById(
+      c.req.param("toolId"),
+      project.id,
+    );
     if (!toolDef) return c.json({ error: "Tool not found" }, 404);
 
     // Decrypt encrypted headers before test execution
     if (toolDef.headers && isEncrypted(toolDef.headers)) {
       try {
-        const decrypted = await decryptHeaders(toolDef.headers, c.env.ENCRYPTION_KEY);
+        const decrypted = await decryptHeaders(
+          toolDef.headers,
+          c.env.ENCRYPTION_KEY,
+        );
         toolDef.headers = JSON.stringify(decrypted);
       } catch {
         toolDef.headers = null;
@@ -1856,7 +1962,11 @@ const app = new Hono<HonoAppContext>()
     const toolSet = aiService.buildToolSet([toolDef]);
     const toolFn = toolSet[toolDef.name];
 
-    if (!toolFn || !("execute" in toolFn) || typeof toolFn.execute !== "function") {
+    if (
+      !toolFn ||
+      !("execute" in toolFn) ||
+      typeof toolFn.execute !== "function"
+    ) {
       return c.json({ error: "Tool has no execute function" }, 500);
     }
 
@@ -1874,7 +1984,9 @@ const app = new Hono<HonoAppContext>()
         toolId: toolDef.id,
         input: parsed.data.params as Record<string, unknown>,
         output: result,
-        status: (result as Record<string, unknown>)?.error ? "error" : "success",
+        status: (result as Record<string, unknown>)?.error
+          ? "error"
+          : "success",
         duration,
       });
 
@@ -2006,7 +2118,7 @@ const app = new Hono<HonoAppContext>()
     const resources = await resourceService.getResourcesByProject(project.id);
     return c.json(resources);
   })
-   .post("/api/projects/:id/resources", async (c) => {
+  .post("/api/projects/:id/resources", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
@@ -2165,7 +2277,11 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Reset status to pending before re-ingestion
-    await resourceService.updateResourceStatus(resource.id, project.id, "pending");
+    await resourceService.updateResourceStatus(
+      resource.id,
+      project.id,
+      "pending",
+    );
 
     // Re-trigger ingestion (use waitUntil to keep isolate alive)
     if (resource.type === "webpage" && resource.url) {
@@ -2196,7 +2312,11 @@ const app = new Hono<HonoAppContext>()
           try {
             const obj = await c.env.UPLOADS.get(resource.r2Key!);
             if (!obj) {
-              await resourceService.updateResourceStatus(resource.id, project.id, "failed");
+              await resourceService.updateResourceStatus(
+                resource.id,
+                project.id,
+                "failed",
+              );
               return;
             }
             const body = await obj.arrayBuffer();
@@ -2206,10 +2326,21 @@ const app = new Hono<HonoAppContext>()
                 context: `PDF document: ${resource.title}`,
               },
             });
-            await resourceService.updateResourceStatus(resource.id, project.id, "indexed");
+            await resourceService.updateResourceStatus(
+              resource.id,
+              project.id,
+              "indexed",
+            );
           } catch (err) {
-            console.error(`PDF reindex failed for resource ${resource.id}:`, err);
-            await resourceService.updateResourceStatus(resource.id, project.id, "failed");
+            console.error(
+              `PDF reindex failed for resource ${resource.id}:`,
+              err,
+            );
+            await resourceService.updateResourceStatus(
+              resource.id,
+              project.id,
+              "failed",
+            );
           }
         })(),
       );
@@ -2308,29 +2439,35 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const pages = await resourceService.getCrawledPages(resource.id, project.id);
-    return c.json(pages);
-  })
-  .get("/api/projects/:id/resources/:resourceId/pages/:pageId/content", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const resourceService = new ResourceService(db, c.env.UPLOADS);
-    const content = await resourceService.getCrawledPageContent(
-      c.req.param("pageId"),
-      c.req.param("resourceId"),
+    const pages = await resourceService.getCrawledPages(
+      resource.id,
       project.id,
     );
-    if (content === null) return c.json({ error: "Not found" }, 404);
-    return c.json({ content });
+    return c.json(pages);
   })
+  .get(
+    "/api/projects/:id/resources/:resourceId/pages/:pageId/content",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      const db = c.get("db");
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectById(c.req.param("id"));
+      if (!project || project.userId !== user.id) {
+        return c.json({ error: "Not found" }, 404);
+      }
+
+      const resourceService = new ResourceService(db, c.env.UPLOADS);
+      const content = await resourceService.getCrawledPageContent(
+        c.req.param("pageId"),
+        c.req.param("resourceId"),
+        project.id,
+      );
+      if (content === null) return c.json({ error: "Not found" }, 404);
+      return c.json({ content });
+    },
+  )
   .put("/api/projects/:id/resources/:resourceId/pages/:pageId", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -2356,50 +2493,56 @@ const app = new Hono<HonoAppContext>()
     if (!updated) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
   })
-  .delete("/api/projects/:id/resources/:resourceId/pages/:pageId", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
+  .delete(
+    "/api/projects/:id/resources/:resourceId/pages/:pageId",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
+      const db = c.get("db");
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectById(c.req.param("id"));
+      if (!project || project.userId !== user.id) {
+        return c.json({ error: "Not found" }, 404);
+      }
 
-    const resourceService = new ResourceService(db, c.env.UPLOADS);
-    const deleted = await resourceService.deleteCrawledPage(
-      c.req.param("pageId"),
-      c.req.param("resourceId"),
-      project.id,
-    );
-    if (!deleted) return c.json({ error: "Not found" }, 404);
-    return c.json({ ok: true });
-  })
-  .post("/api/projects/:id/resources/:resourceId/pages/:pageId/refresh", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const resourceService = new ResourceService(db, c.env.UPLOADS);
-    c.executionCtx.waitUntil(
-      resourceService.refreshCrawledPage(
+      const resourceService = new ResourceService(db, c.env.UPLOADS);
+      const deleted = await resourceService.deleteCrawledPage(
         c.req.param("pageId"),
         c.req.param("resourceId"),
         project.id,
-        c.env.CF_ACCOUNT_ID,
-        c.env.BROWSER_RENDERING_API_TOKEN,
-      ),
-    );
+      );
+      if (!deleted) return c.json({ error: "Not found" }, 404);
+      return c.json({ ok: true });
+    },
+  )
+  .post(
+    "/api/projects/:id/resources/:resourceId/pages/:pageId/refresh",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    return c.json({ ok: true, message: "Refresh started" });
-  })
+      const db = c.get("db");
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectById(c.req.param("id"));
+      if (!project || project.userId !== user.id) {
+        return c.json({ error: "Not found" }, 404);
+      }
+
+      const resourceService = new ResourceService(db, c.env.UPLOADS);
+      c.executionCtx.waitUntil(
+        resourceService.refreshCrawledPage(
+          c.req.param("pageId"),
+          c.req.param("resourceId"),
+          project.id,
+          c.env.CF_ACCOUNT_ID,
+          c.env.BROWSER_RENDERING_API_TOKEN,
+        ),
+      );
+
+      return c.json({ ok: true, message: "Refresh started" });
+    },
+  )
 
   // ─── Conversations (Dashboard) ──────────────────────────────────────────────
   .get("/api/projects/:id/conversations", async (c) => {
@@ -2464,11 +2607,14 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const message = await chatService.addMessage({
-      conversationId: conversation.id,
-      role: "agent",
-      content: parsed.data.content,
-    }, project.id);
+    const message = await chatService.addMessage(
+      {
+        conversationId: conversation.id,
+        role: "agent",
+        content: parsed.data.content,
+      },
+      project.id,
+    );
 
     await chatService.updateConversationStatus(
       conversation.id,
@@ -2499,7 +2645,11 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Close the conversation
-    await chatService.updateConversationStatus(conversation.id, project.id, "closed");
+    await chatService.updateConversationStatus(
+      conversation.id,
+      project.id,
+      "closed",
+    );
 
     // Auto-draft canned response if enabled
     const settings = await projectService.getSettings(project.id);
@@ -2927,7 +3077,10 @@ async function handleQueue(
       await crawlService.processUrl(message.body, env.CRAWL_QUEUE);
       message.ack();
     } catch (err) {
-      console.error(`Queue message processing failed for ${message.body.url}:`, err);
+      console.error(
+        `Queue message processing failed for ${message.body.url}:`,
+        err,
+      );
       message.retry();
     }
   }
