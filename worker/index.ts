@@ -8,7 +8,7 @@ import { ProjectService } from "./services/project-service";
 import { WidgetService } from "./services/widget-service";
 import { ChatService } from "./services/chat-service";
 import { ResourceService } from "./services/resource-service";
-import { GeminiService } from "./services/gemini-service";
+import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
 import { CannedResponseService } from "./services/canned-response-service";
 import { DashboardService } from "./services/dashboard-service";
@@ -410,10 +410,14 @@ const app = new Hono<HonoAppContext>()
 
       // Reformulate the visitor's message into a standalone search query and
       // generate a conversation summary (for multi-turn conversations) in parallel.
-      const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
+      const aiService = new AiService({
+        model: c.env.AI_MODEL,
+        geminiApiKey: c.env.GEMINI_API_KEY,
+        openaiApiKey: c.env.OPENAI_API_KEY,
+      });
       const [searchQuery, conversationSummary] = await Promise.all([
-        geminiService.reformulateQuery(conversationHistory, parsed.data.content),
-        geminiService.summarizeConversation(conversationHistory),
+        aiService.reformulateQuery(conversationHistory, parsed.data.content),
+        aiService.summarizeConversation(conversationHistory),
       ]);
 
       // Query AI Search for relevant context with improved retrieval settings
@@ -501,7 +505,7 @@ const app = new Hono<HonoAppContext>()
       }
 
       // Build system prompt and stream response
-      const systemPrompt = geminiService.buildSystemPrompt(
+      const systemPrompt = aiService.buildSystemPrompt(
         settings ?? { toneOfVoice: "professional", customTonePrompt: null, companyContext: null },
         project.name,
         ragContext,
@@ -511,7 +515,7 @@ const app = new Hono<HonoAppContext>()
       );
 
       // Stream via SSE using Vercel AI SDK
-      const streamResult = geminiService.streamChat({
+      const streamResult = aiService.streamChat({
         systemPrompt,
         conversationHistory,
         userMessage: parsed.data.content,
@@ -1224,9 +1228,13 @@ const app = new Hono<HonoAppContext>()
         ),
       );
 
-      // Summarize via Gemini
-      const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
-      const context = await geminiService.summarizeWebsite(rawText);
+      // Summarize via AI
+      const aiService = new AiService({
+        model: c.env.AI_MODEL,
+        geminiApiKey: c.env.GEMINI_API_KEY,
+        openaiApiKey: c.env.OPENAI_API_KEY,
+      });
+      const context = await aiService.summarizeWebsite(rawText);
 
       if (!context) {
         return c.json({ context: "", scraped: false });
@@ -1303,8 +1311,12 @@ const app = new Hono<HonoAppContext>()
     const settings = await projectService.getSettings(project.id);
     const context = settings?.companyContext ?? `${project.name} website`;
 
-    const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
-    const question = await geminiService.generateSampleQuestion(context);
+    const aiService = new AiService({
+      model: c.env.AI_MODEL,
+      geminiApiKey: c.env.GEMINI_API_KEY,
+      openaiApiKey: c.env.OPENAI_API_KEY,
+    });
+    const question = await aiService.generateSampleQuestion(context);
 
     return c.json({ question });
   })
@@ -1835,9 +1847,13 @@ const app = new Hono<HonoAppContext>()
       }
     }
 
-    // Use GeminiService's HTTP execution logic via a test harness
-    const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
-    const toolSet = geminiService.buildToolSet([toolDef]);
+    // Use AiService's HTTP execution logic via a test harness
+    const aiService = new AiService({
+      model: c.env.AI_MODEL,
+      geminiApiKey: c.env.GEMINI_API_KEY,
+      openaiApiKey: c.env.OPENAI_API_KEY,
+    });
+    const toolSet = aiService.buildToolSet([toolDef]);
     const toolFn = toolSet[toolDef.name];
 
     if (!toolFn || !("execute" in toolFn) || typeof toolFn.execute !== "function") {
@@ -2491,8 +2507,12 @@ const app = new Hono<HonoAppContext>()
       // Run in background -- don't block the response
       const msgs = await chatService.getMessages(conversation.id);
       if (msgs.length >= 2) {
-        const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
-        geminiService
+        const aiService = new AiService({
+          model: c.env.AI_MODEL,
+          geminiApiKey: c.env.GEMINI_API_KEY,
+          openaiApiKey: c.env.OPENAI_API_KEY,
+        });
+        aiService
           .generateCannedDraft(
             msgs.map((m) => ({ role: m.role, content: m.content })),
           )

@@ -4,7 +4,7 @@ This file is the operating guide for agents/contributors working in this repo.
 
 ## Product Overview
 
-ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbot platform built on Cloudflare Workers. Users sign up, create a project/bot, customize its appearance and behavior, add knowledge resources (web pages, PDFs, FAQs), and embed a lightweight chat widget on their website. The bot uses Google Gemini (3.x Flash) for AI responses, Cloudflare AI Search for RAG over user-uploaded resources, and supports Telegram-based live agent handoff when the bot cannot confidently answer.
+ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbot platform built on Cloudflare Workers. Users sign up, create a project/bot, customize its appearance and behavior, add knowledge resources (web pages, PDFs, FAQs), and embed a lightweight chat widget on their website. The bot uses configurable AI models (Google Gemini 3 Flash or OpenAI GPT-5, controlled via the `AI_MODEL` env var) for AI responses, Cloudflare AI Search for RAG over user-uploaded resources, and supports Telegram-based live agent handoff when the bot cannot confidently answer.
 
 ### Core Features
 
@@ -36,7 +36,7 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 | Cache | **Cloudflare KV** (active conversation cache) |
 | File Storage | **Cloudflare R2** (PDFs, uploads, widget bundle) |
 | RAG | **Cloudflare AI Search** (managed indexing + search) |
-| AI Model | **Google Gemini 3 Flash** (server-side, SSE streaming) |
+| AI Model | **Google Gemini 3 Flash** or **OpenAI GPT-5** (configurable via `AI_MODEL` env var, server-side, SSE streaming) |
 | Auth | **Better Auth** + `better-auth-cloudflare` (Google/GitHub OAuth) |
 | Validation | **Zod** |
 | Email | **Resend** |
@@ -107,7 +107,7 @@ replymaven/
 │       ├── widget-service.ts
 │       ├── telegram-service.ts
 │       ├── canned-response-service.ts
-│       ├── gemini-service.ts
+│       ├── ai-service.ts
 │       ├── email-service.ts
 │       └── dashboard-service.ts
 ├── widget/                          # Chat widget (separate build)
@@ -643,6 +643,7 @@ After a conversation closes:
 
 Defined in `wrangler.jsonc` vars:
 - `BETTER_AUTH_URL` -- auth base URL (`http://localhost:5173` in dev, `https://replymaven.com` in prod)
+- `AI_MODEL` -- AI model identifier (`gemini-3-flash-preview` or `gpt-5-chat-latest`, default `gemini-3-flash-preview`)
 
 Secrets (via `.dev.vars` locally, `wrangler secret put` for production):
 - `BETTER_AUTH_SECRET`
@@ -650,6 +651,8 @@ Secrets (via `.dev.vars` locally, `wrangler secret put` for production):
 - `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`
 - `RESEND_API_KEY`
 - `ENCRYPTION_KEY` -- for AES-GCM encryption of stored API keys/tokens
+- `GEMINI_API_KEY` -- Google Gemini API key (required when `AI_MODEL` is a Gemini model)
+- `OPENAI_API_KEY` -- OpenAI API key (required when `AI_MODEL` is a GPT model)
 
 ---
 

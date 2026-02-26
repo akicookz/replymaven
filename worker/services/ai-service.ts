@@ -1,4 +1,5 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOpenAI } from "@ai-sdk/openai";
 import { generateText, streamText, tool, stepCountIs, type ToolSet, type ModelMessage } from "ai";
 import { type ProjectSettingsRow } from "../db";
 import { z } from "zod";
@@ -62,12 +63,23 @@ function isUrlBlocked(urlStr: string): boolean {
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
-export class GeminiService {
+interface AiServiceConfig {
+  model: string;
+  geminiApiKey: string;
+  openaiApiKey: string;
+}
+
+export class AiService {
   private model;
 
-  constructor(apiKey: string, modelId = "gemini-3-flash-preview") {
-    const provider = createGoogleGenerativeAI({ apiKey });
-    this.model = provider(modelId);
+  constructor(config: AiServiceConfig) {
+    if (config.model.startsWith("gpt")) {
+      const provider = createOpenAI({ apiKey: config.openaiApiKey });
+      this.model = provider(config.model);
+    } else {
+      const provider = createGoogleGenerativeAI({ apiKey: config.geminiApiKey });
+      this.model = provider(config.model);
+    }
   }
 
   // ─── Reformulate Query ───────────────────────────────────────────────────────
