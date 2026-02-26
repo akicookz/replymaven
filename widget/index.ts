@@ -46,6 +46,9 @@
   // Send guard -- prevents duplicate message sends
   let isSending = false;
 
+  // Streaming guard -- prevents polling from creating duplicate messages during SSE
+  let isStreaming = false;
+
   // Notification state
   let notificationPermission: NotificationPermission = "default";
 
@@ -3124,6 +3127,10 @@
     // Show typing indicator
     showTyping();
 
+    // Pause polling during SSE streaming to prevent duplicate messages
+    isStreaming = true;
+    stopPolling();
+
     try {
       const body: Record<string, string> = { content: messageText };
       if (uploadedImageUrl) body.imageUrl = uploadedImageUrl;
@@ -3152,13 +3159,21 @@
       let botMessageEl: HTMLElement | null = null;
       let handoffDetected = false;
       let handoffEmail: string | null = null;
+      let sseBuffer = "";
+
+      // Timeout to prevent the stream from hanging forever (90s)
+      const streamTimeout = setTimeout(() => {
+        try { reader.cancel(); } catch { /* ignore */ }
+      }, 90_000);
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split("\n");
+        // Keep the last (possibly incomplete) line in the buffer
+        sseBuffer = lines.pop() ?? "";
 
         for (const line of lines) {
           if (line.startsWith("data: ")) {
@@ -3253,7 +3268,7 @@
                   hideTyping();
                   botMessageEl = addMessageToUI("bot", botMessage);
                 } else {
-                  botMessageEl.textContent = botMessage;
+                  botMessageEl.innerHTML = renderMarkdown(botMessage);
                 }
                 scrollToBottom();
               }
@@ -3298,6 +3313,7 @@
       if (handoffDetected && !document.querySelector(".rm-handoff-card")) {
         showHandoffCard(handoffEmail);
       }
+      clearTimeout(streamTimeout);
     } catch {
       hideTyping();
       addMessageToUI(
@@ -3306,6 +3322,8 @@
       );
     }
     } finally {
+      isStreaming = false;
+      startPolling();
       isSending = false;
       sendBtn.disabled = false;
       input.disabled = false;
@@ -3742,6 +3760,7 @@
 
   async function pollMessages() {
     if (!conversationId) return;
+    if (isStreaming) return; // Don't poll during active SSE stream
 
     try {
       let url = `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`;
