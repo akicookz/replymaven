@@ -466,16 +466,53 @@
       padding: 4px 16px;
     }
     .rm-typing-row.visible {
-      display: block;
+      display: flex;
+      align-items: baseline;
     }
     .rm-status-text {
       font-size: 13px;
-      color: #94a3b8;
-      animation: rm-pulse 1.8s ease-in-out infinite;
+      font-weight: 500;
+      background: linear-gradient(
+        90deg,
+        #94a3b8 0%,
+        #94a3b8 35%,
+        #cbd5e1 50%,
+        #94a3b8 65%,
+        #94a3b8 100%
+      );
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: rm-shimmer 2s ease-in-out infinite;
     }
-    @keyframes rm-pulse {
-      0%, 100% { opacity: 0.4; }
-      50% { opacity: 1; }
+    .rm-status-dots::after {
+      content: '';
+      font-size: 13px;
+      font-weight: 500;
+      background: linear-gradient(
+        90deg,
+        #94a3b8 0%,
+        #94a3b8 35%,
+        #cbd5e1 50%,
+        #94a3b8 65%,
+        #94a3b8 100%
+      );
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: rm-shimmer 2s ease-in-out infinite, rm-dots 1.5s steps(4, end) infinite;
+    }
+    @keyframes rm-shimmer {
+      0% { background-position: 100% 0; }
+      100% { background-position: -100% 0; }
+    }
+    @keyframes rm-dots {
+      0% { content: ''; }
+      25% { content: '.'; }
+      50% { content: '..'; }
+      75% { content: '...'; }
     }
 
     /* ─── Quick Topics ────────────────────────────────────────────────────── */
@@ -1789,9 +1826,13 @@
 
   const statusText = document.createElement("span");
   statusText.className = "rm-status-text";
-  statusText.textContent = "Thinking...";
+  statusText.textContent = "Thinking";
+
+  const statusDots = document.createElement("span");
+  statusDots.className = "rm-status-dots";
 
   typingRow.appendChild(statusText);
+  typingRow.appendChild(statusDots);
   messagesContainer.appendChild(typingRow);
 
   // Quick topics
@@ -3100,15 +3141,14 @@
               // Handle tool execution events
               if (data.toolCall) {
                 const displayName = data.toolCall.name.replace(/_/g, " ");
-                // Capitalize first letter
                 const label = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-                showTyping(`Looking up ${label}...`);
+                showTyping(`Fetching ${label}`);
                 continue;
               }
 
               if (data.toolResult) {
-                // After tool result, show "Thinking..." while model processes the result
-                showTyping("Thinking...");
+                // After tool result, show "Thinking" while model processes the result
+                showTyping("Thinking");
                 continue;
               }
 
@@ -3368,14 +3408,14 @@
   }
 
   function showTyping(message?: string) {
-    statusText.textContent = message ?? "Thinking...";
+    statusText.textContent = message ?? "Thinking";
     typingRow.classList.add("visible");
     scrollToBottom();
   }
 
   function hideTyping() {
     typingRow.classList.remove("visible");
-    statusText.textContent = "Thinking...";
+    statusText.textContent = "Thinking";
   }
 
   function scrollToBottom() {
