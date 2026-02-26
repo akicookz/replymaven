@@ -281,11 +281,12 @@
       position: absolute;
       bottom: 74px;
       width: 400px;
+      min-height: 600px;
       max-height: 620px;
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      border-radius: 16px;
+      border-radius: var(--rm-chat-radius, 16px);
       box-shadow: 0 5px 40px rgba(0,0,0,0.16);
       border: 1px solid rgba(0,0,0,0.06);
       background: #ffffff;
@@ -578,8 +579,8 @@
       line-height: 1.3;
     }
     .rm-quick-topic:hover {
-      background: #f0f0f0;
-      border-color: rgba(0,0,0,0.15);
+      background: rgba(var(--rm-primary-rgb, 0,0,0), 0.05);
+      border-color: rgba(var(--rm-primary-rgb, 0,0,0), 0.18);
     }
 
     /* ─── Input Area ──────────────────────────────────────────────────────── */
@@ -610,8 +611,8 @@
       touch-action: manipulation;
     }
     .rm-input:focus {
-      border-color: rgba(0,0,0,0.2);
-      box-shadow: 0 0 0 3px rgba(37,99,235,0.08);
+      border-color: var(--rm-primary, rgba(0,0,0,0.2));
+      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
       background: #ffffff;
     }
     .rm-input::placeholder {
@@ -846,7 +847,8 @@
       transition: border-color 0.2s;
     }
     .rm-handoff-email-input:focus {
-      border-color: rgba(0,0,0,0.25);
+      border-color: var(--rm-primary, rgba(0,0,0,0.25));
+      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
       background: #ffffff;
     }
     .rm-handoff-email-input::placeholder {
@@ -960,15 +962,15 @@
       transition: border-color 0.2s, box-shadow 0.2s;
     }
     .rm-home-ask:hover {
-      border-color: rgba(0,0,0,0.15);
-      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+      border-color: rgba(var(--rm-primary-rgb, 0,0,0), 0.25);
+      box-shadow: 0 1px 4px rgba(var(--rm-primary-rgb, 0,0,0), 0.08);
     }
     .rm-home-ask-label {
       display: flex;
       align-items: center;
       gap: 6px;
       font-size: 12px;
-      color: #6b7280;
+      color: var(--rm-primary, #6b7280);
       margin-bottom: 8px;
     }
     .rm-home-ask-label svg {
@@ -980,12 +982,15 @@
       border: none;
       outline: none;
       font-size: 16px;
-      color: #9ca3af;
+      color: inherit;
       background: transparent;
       cursor: pointer;
       font-family: inherit;
       padding: 0;
       touch-action: manipulation;
+    }
+    .rm-home-ask-input::placeholder {
+      color: #9ca3af;
     }
     .rm-home-links {
       margin-top: 16px;
@@ -1014,11 +1019,11 @@
       height: 34px;
       min-width: 34px;
       border-radius: 8px;
-      background: #f3f4f6;
+      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #6b7280;
+      color: var(--rm-primary, #6b7280);
       flex-shrink: 0;
     }
     .rm-home-link-icon svg {
@@ -1164,6 +1169,9 @@
     }
     .rm-form-view > .rm-header {
       margin-bottom: 0;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      background-color: var(--rm-primary, #2563eb);
     }
     .rm-form-body {
       flex: 1;
@@ -1215,8 +1223,8 @@
       touch-action: manipulation;
     }
     .rm-form-input:focus {
-      border-color: rgba(0,0,0,0.25);
-      box-shadow: 0 0 0 3px rgba(37,99,235,0.08);
+      border-color: var(--rm-primary, rgba(0,0,0,0.25));
+      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
     }
     .rm-form-input::placeholder {
       color: #9ca3af;
@@ -1236,8 +1244,8 @@
       touch-action: manipulation;
     }
     .rm-form-textarea:focus {
-      border-color: rgba(0,0,0,0.25);
-      box-shadow: 0 0 0 3px rgba(37,99,235,0.08);
+      border-color: var(--rm-primary, rgba(0,0,0,0.25));
+      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
     }
     .rm-form-textarea::placeholder {
       color: #9ca3af;
@@ -1361,6 +1369,9 @@
     }
     .rm-booking-view > .rm-header {
       margin-bottom: 0;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      background-color: var(--rm-primary, #2563eb);
     }
     .rm-booking-dates {
       display: flex;
@@ -1482,7 +1493,7 @@
     }
     .rm-booking-slot:hover {
       border-color: var(--rm-primary, #2563eb);
-      background: rgba(37,99,235,0.04);
+      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.04);
     }
     .rm-booking-slot.selected {
       border-color: var(--rm-primary, #2563eb);
@@ -1585,7 +1596,7 @@
     }
     .rm-booking-input:focus {
       border-color: var(--rm-primary, #2563eb);
-      box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.1);
     }
     .rm-booking-textarea {
       resize: vertical;
@@ -1677,6 +1688,9 @@
         right: 16px;
         left: auto;
       }
+      .rm-widget-container {
+        --rm-chat-radius: 0px !important;
+      }
       .rm-chat-window {
         position: fixed;
         top: 0;
@@ -1685,11 +1699,11 @@
         bottom: 0;
         width: 100vw;
         width: 100dvw;
+        min-height: 0;
         max-height: 100vh;
         max-height: 100dvh;
         height: 100vh;
         height: 100dvh;
-        border-radius: 0;
         box-shadow: none;
         border: none;
         transform-origin: bottom center;
@@ -2116,6 +2130,12 @@
 
   function getPrimaryColor(): string {
     return config?.widget?.primaryColor ?? "#2563eb";
+  }
+
+  function hexToRgb(hex: string): string {
+    const h = hex.replace("#", "");
+    const bigint = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
+    return `${(bigint >> 16) & 255}, ${(bigint >> 8) & 255}, ${bigint & 255}`;
   }
 
   function resolveUrl(url: string): string {
@@ -2652,6 +2672,10 @@
         const w = loadedConfig.widget;
         const primary = w.primaryColor || "#2563eb";
 
+        // Set CSS custom properties for theming
+        container.style.setProperty("--rm-primary", primary);
+        container.style.setProperty("--rm-primary-rgb", hexToRgb(primary));
+
         // Trigger & header colors
         trigger.style.backgroundColor = primary;
         header.style.backgroundColor = primary + "e8"; // ~91% opacity for frosted glass
@@ -2667,7 +2691,7 @@
           homeTitle.style.color = w.textColor;
         }
         if (w.borderRadius) {
-          chatWindow.style.borderRadius = w.borderRadius + "px";
+          container.style.setProperty("--rm-chat-radius", w.borderRadius + "px");
         }
 
         // Header text
@@ -2827,9 +2851,7 @@
           fields: Array<{ label: string; type: string; required: boolean }>;
         };
 
-        // Apply primary color to form header
         const primary = loadedConfig.widget?.primaryColor || "#2563eb";
-        formHeader.style.backgroundColor = primary;
 
         // Build form fields
         formBody.innerHTML = "";
@@ -2984,9 +3006,7 @@
       if (loadedConfig.bookingEnabled) {
         fetchBookingConfig(); // Pre-load booking config
 
-        // Apply primary color to booking header
-        const bookingPrimary = loadedConfig.widget?.primaryColor || "#2563eb";
-        bookingHeader.style.backgroundColor = bookingPrimary;
+        // Booking primary color already applied via CSS var(--rm-primary)
       }
 
       // Intro message
