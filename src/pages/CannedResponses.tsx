@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bot, Plus, Check, X, Trash2, AlertCircle } from "lucide-react";
+import { Bot, Plus, Check, X, Trash2, AlertCircle, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface CannedResponse {
@@ -12,12 +12,41 @@ interface CannedResponse {
   createdAt: string;
 }
 
+interface ProjectSettingsData {
+  autoCannedDraft: boolean;
+}
+
 function CannedResponses() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [trigger, setTrigger] = useState("");
   const [response, setResponse] = useState("");
+
+  const { data: projectSettings } = useQuery<ProjectSettingsData>({
+    queryKey: ["project-settings", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/settings`);
+      if (!res.ok) throw new Error("Failed to fetch project settings");
+      return res.json();
+    },
+  });
+
+  const toggleAutoDraft = useMutation({
+    mutationFn: async () => {
+      const nextValue = !(projectSettings?.autoCannedDraft ?? true);
+      const res = await fetch(`/api/projects/${projectId}/settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoCannedDraft: nextValue }),
+      });
+      if (!res.ok) throw new Error("Failed to update auto-draft setting");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project-settings", projectId] });
+    },
+  });
 
   const {
     data: cannedResponses,
@@ -96,6 +125,36 @@ function CannedResponses() {
           <Plus className="w-4 h-4 mr-2" />
           Add Response
         </Button>
+      </div>
+
+      <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
+              <Sparkles className="w-5 h-5" />
+              Auto-Draft Canned Responses
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Automatically create draft canned responses from closed conversations.
+            </p>
+          </div>
+          <button
+            onClick={() => toggleAutoDraft.mutate()}
+            disabled={toggleAutoDraft.isPending}
+            className={`w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${
+              (projectSettings?.autoCannedDraft ?? true) ? "bg-primary" : "bg-muted"
+            }`}
+            title="Toggle auto-draft"
+          >
+            <div
+              className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                (projectSettings?.autoCannedDraft ?? true)
+                  ? "translate-x-5"
+                  : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -239,8 +298,7 @@ function CannedResponses() {
             ))}
             {approved.length === 0 && (
               <p className="text-sm text-muted-foreground text-center py-8">
-                No canned responses yet. Add them manually or enable
-                auto-drafting in settings.
+                No canned responses yet. Add them manually or enable auto-drafting above.
               </p>
             )}
           </div>

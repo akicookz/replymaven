@@ -13,7 +13,6 @@ import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
 import Resources from "./pages/Resources";
 import WidgetConfig from "./pages/WidgetConfig";
-import ProjectSettings from "./pages/ProjectSettings";
 import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
 import TelegramConfig from "./pages/TelegramConfig";
@@ -89,16 +88,20 @@ function App() {
           element={<Conversations />}
         />
         <Route
-          path="projects/:projectId/resources"
+          path="projects/:projectId/knowledgebase"
           element={<Resources />}
+        />
+        <Route
+          path="projects/:projectId/resources"
+          element={<Navigate to="../knowledgebase" replace />}
+        />
+        <Route
+          path="projects/:projectId/settings"
+          element={<Navigate to="../knowledgebase" replace />}
         />
         <Route
           path="projects/:projectId/widget"
           element={<WidgetConfig />}
-        />
-        <Route
-          path="projects/:projectId/settings"
-          element={<ProjectSettings />}
         />
         <Route
           path="projects/:projectId/quick-actions"

@@ -6,7 +6,6 @@ import {
   MessageSquare,
   FolderOpen,
   Palette,
-  Settings,
   Bot,
   Send,
   Wrench,
@@ -75,8 +74,8 @@ function Layout() {
           icon: MessageSquare,
         },
         {
-          label: "Resources",
-          href: `/app/projects/${currentProject.id}/resources`,
+          label: "Knowledgebase",
+          href: `/app/projects/${currentProject.id}/knowledgebase`,
           icon: FolderOpen,
         },
       ]
@@ -108,16 +107,6 @@ function Layout() {
           label: "Tools",
           href: `/app/projects/${currentProject.id}/tools`,
           icon: Wrench,
-        },
-      ]
-    : [];
-
-  const adminNav = currentProject
-    ? [
-        {
-          label: "Settings",
-          href: `/app/projects/${currentProject.id}/settings`,
-          icon: Settings,
         },
       ]
     : [];
@@ -292,18 +281,6 @@ function Layout() {
             </Link>
           )}
         </nav>
-
-        {/* Admin section at bottom */}
-        <div className="px-3 pb-2 space-y-1">
-          {!collapsed && adminNav.length > 0 && (
-            <p className="px-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Administration
-            </p>
-          )}
-          {adminNav.map((item) => (
-            <NavLink key={item.href} item={item} />
-          ))}
-        </div>
 
         {/* User */}
         <div className="px-3 pb-3 pt-2 border-t border-sidebar-border">

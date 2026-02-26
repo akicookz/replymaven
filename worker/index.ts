@@ -120,6 +120,132 @@ function slugify(text: string): string {
     .slice(0, 50);
 }
 
+interface BrowserRenderingMarkdownResponse {
+  success: boolean;
+  result: string;
+}
+
+const CONTEXT_SOURCE_MAX_CHARS = 45_000;
+const CONTEXT_MAX_WEB_PAGES_PER_RESOURCE = 8;
+
+function truncateForContextSource(input: string, remaining: number): string {
+  if (remaining <= 0) return "";
+  if (input.length <= remaining) return input;
+  return `${input.slice(0, remaining)}...`;
+}
+
+function normalizeFaqContent(content: string | null): string {
+  if (!content) return "";
+  try {
+    const parsed = JSON.parse(content) as Array<{
+      question?: string;
+      answer?: string;
+    }>;
+    if (!Array.isArray(parsed)) return content;
+    const lines = parsed
+      .filter((pair) => pair.question && pair.answer)
+      .map((pair) => `- Q: ${pair.question}\n  A: ${pair.answer}`);
+    return lines.length > 0 ? lines.join("\n") : content;
+  } catch {
+    return content;
+  }
+}
+
+async function buildContextSourceFromResources(
+  projectId: string,
+  resourceService: ResourceService,
+  resources: Array<{
+    id: string;
+    type: "webpage" | "pdf" | "faq";
+    title: string;
+    url: string | null;
+    content: string | null;
+  }>,
+): Promise<string> {
+  const sections: string[] = [];
+  let remaining = CONTEXT_SOURCE_MAX_CHARS;
+
+  for (const resource of resources) {
+    if (remaining < 250) break;
+    let section = "";
+
+    if (resource.type === "faq") {
+      const faqContent = normalizeFaqContent(resource.content);
+      if (faqContent) {
+        section = `## FAQ Resource: ${resource.title}\n${faqContent}`;
+      }
+    } else if (resource.type === "pdf") {
+      if (resource.content) {
+        section = `## PDF Resource: ${resource.title}\n${resource.content}`;
+      }
+    } else if (resource.type === "webpage") {
+      const pages = await resourceService.getCrawledPages(resource.id, projectId);
+      const crawledPages = pages
+        .filter((page) => page.status === "crawled")
+        .slice(0, CONTEXT_MAX_WEB_PAGES_PER_RESOURCE);
+      const pageSections: string[] = [];
+
+      for (const page of crawledPages) {
+        const pageContent = await resourceService.getCrawledPageContent(
+          page.id,
+          resource.id,
+          projectId,
+        );
+        if (!pageContent) continue;
+        pageSections.push(
+          `### ${page.pageTitle ?? page.url}\nURL: ${page.url}\n\n${pageContent}`,
+        );
+      }
+
+      if (pageSections.length > 0) {
+        section = `## Website Resource: ${resource.title}\n${pageSections.join("\n\n")}`;
+      } else if (resource.url) {
+        section = `## Website Resource: ${resource.title}\nURL: ${resource.url}`;
+      }
+    }
+
+    if (!section.trim()) continue;
+    const clipped = truncateForContextSource(section, remaining);
+    sections.push(clipped);
+    remaining -= clipped.length;
+  }
+
+  return sections.join("\n\n---\n\n");
+}
+
+async function fetchWebsiteMarkdownWithBrowserApi(
+  websiteUrl: string,
+  env: Env,
+): Promise<string | null> {
+  try {
+    const browserApiBase = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/browser-rendering`;
+    const response = await fetch(`${browserApiBase}/markdown`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.BROWSER_RENDERING_API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url: websiteUrl,
+        gotoOptions: {
+          waitUntil: "networkidle2",
+        },
+        rejectRequestPattern: ["/^.*\\.(jpg|jpeg|png|gif|svg|webp|ico|bmp|tiff|mp4|webm|ogg|mp3|wav|woff2?|ttf|eot|otf|css)$/i"],
+      }),
+    });
+
+    if (!response.ok) return null;
+    const data = (await response.json()) as BrowserRenderingMarkdownResponse;
+    if (!data.success || !data.result) return null;
+
+    const markdown = data.result.trim();
+    if (markdown.length < 100) return null;
+    return markdown;
+  } catch {
+    return null;
+  }
+}
+
 // ─── RAG Retrieval Helpers ────────────────────────────────────────────────────
 interface PreparedRagChunk {
   key: string;
@@ -1655,6 +1781,81 @@ const app = new Hono<HonoAppContext>()
       parsed.data,
     );
     return c.json(settings);
+  })
+  .post("/api/projects/:id/context/refresh", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    try {
+      const resourceService = new ResourceService(db, c.env.UPLOADS);
+      const resources = await resourceService.getResourcesByProject(project.id);
+
+      const aiService = new AiService({
+        model: c.env.AI_MODEL,
+        geminiApiKey: c.env.GEMINI_API_KEY,
+        openaiApiKey: c.env.OPENAI_API_KEY,
+      });
+
+      let contextSource = "";
+      let sourceType: "resources" | "website" = "resources";
+
+      if (resources.length > 0) {
+        contextSource = await buildContextSourceFromResources(
+          project.id,
+          resourceService,
+          resources,
+        );
+        if (!contextSource.trim()) {
+          return c.json(
+            { error: "Could not build enough context from current resources" },
+            422,
+          );
+        }
+      } else {
+        sourceType = "website";
+        const settings = await projectService.getSettings(project.id);
+        if (!settings?.companyUrl) {
+          return c.json(
+            { error: "Set a company website URL or add resources first" },
+            400,
+          );
+        }
+
+        const markdown = await fetchWebsiteMarkdownWithBrowserApi(
+          settings.companyUrl,
+          c.env,
+        );
+        if (!markdown) {
+          return c.json(
+            { error: "Could not extract enough context from the website" },
+            422,
+          );
+        }
+        contextSource = markdown;
+      }
+
+      const context = await aiService.generateStructuredCompanyContext(
+        contextSource,
+      );
+      if (!context) {
+        return c.json({ error: "Failed to generate company context" }, 500);
+      }
+
+      await projectService.updateSettings(project.id, {
+        companyContext: context,
+      });
+      return c.json({ context, refreshed: true, source: sourceType });
+    } catch (err) {
+      console.error(`Context refresh failed for project ${project.id}:`, err);
+      return c.json({ error: "Failed to refresh company context" }, 500);
+    }
   })
 
   // ─── Widget Config ──────────────────────────────────────────────────────────

@@ -8,7 +8,6 @@ import {
   Palette,
   Zap,
   Send,
-  Settings,
   ArrowUpRight,
   ArrowDownRight,
 } from "lucide-react";
@@ -264,10 +263,10 @@ function Dashboard() {
           </p>
         </div>
         <div className="flex gap-3">
-          <Link to={`/app/projects/${projectId}/resources`}>
+          <Link to={`/app/projects/${projectId}/knowledgebase`}>
             <Button variant="outline" className="gap-2">
               <FolderOpen className="w-4 h-4" />
-              Add Resources
+              Add Knowledge
             </Button>
           </Link>
           <Link to={`/app/projects/${projectId}/widget`}>
@@ -293,12 +292,11 @@ function Dashboard() {
   const totalStatusCount = statusData.reduce((acc, item) => acc + item.value, 0);
 
   const quickActions = [
-    { label: "Add a resource", icon: FolderOpen, href: `/app/projects/${projectId}/resources` },
+    { label: "Add knowledge", icon: FolderOpen, href: `/app/projects/${projectId}/knowledgebase` },
     { label: "Configure widget", icon: Palette, href: `/app/projects/${projectId}/widget` },
     { label: "Quick actions", icon: Zap, href: `/app/projects/${projectId}/quick-actions` },
     { label: "Canned responses", icon: Bot, href: `/app/projects/${projectId}/canned-responses` },
     { label: "Telegram setup", icon: Send, href: `/app/projects/${projectId}/telegram` },
-    { label: "Project settings", icon: Settings, href: `/app/projects/${projectId}/settings` },
   ];
 
   // ─── Render ───────────────────────────────────────────────────────────────

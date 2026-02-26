@@ -637,6 +637,44 @@ Write it as a factual reference document (not marketing copy). Keep it under 200
     }
   }
 
+  // ─── Generate Structured Company Context ────────────────────────────────────
+
+  async generateStructuredCompanyContext(sourceText: string): Promise<string> {
+    const truncated = sourceText.slice(0, 45000);
+
+    try {
+      const { text } = await generateText({
+        model: this.model,
+        prompt: `You are creating a structured internal company context document for a customer support AI assistant.
+
+SOURCE MATERIAL:
+${truncated}
+
+Write a concise, factual markdown document using exactly these section headings:
+## What The Company Is
+## Value Propositions
+## Main Features
+## Pricing
+## Contact
+## FAQs
+## Testimonials And Reviews
+
+Rules:
+- Use only facts supported by the source material.
+- Do not invent details.
+- If a section is missing in the source, write: "Not found in source material."
+- Use bullet points where useful.
+- Keep it concise but complete enough for support answers.`,
+        temperature: 0.2,
+        maxOutputTokens: 1800,
+      });
+
+      return text.trim();
+    } catch {
+      return "";
+    }
+  }
+
   // ─── Generate Sample Customer Question ──────────────────────────────────────
 
   async generateSampleQuestion(companyContext: string): Promise<string> {

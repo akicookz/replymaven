@@ -6,6 +6,7 @@ import {
   Save,
   AlertCircle,
   CheckCircle2,
+  Copy,
   Upload,
   Image,
   Type,
@@ -47,6 +48,15 @@ function WidgetConfig() {
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: project } = useQuery<{ slug: string }>({
+    queryKey: ["project", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}`);
+      if (!res.ok) throw new Error("Failed to fetch project");
+      return res.json();
+    },
+  });
 
   const { data, isLoading } = useQuery<WidgetConfigData>({
     queryKey: ["widget-config", projectId],
@@ -108,6 +118,8 @@ function WidgetConfig() {
     );
   }
 
+  const embedSnippet = `<script src="${window.location.origin}/api/widget-embed.js" data-project="${project?.slug ?? "your-project"}"></script>`;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -130,7 +142,6 @@ function WidgetConfig() {
           Failed to save widget config. Please try again.
         </div>
       )}
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* ─── Left Column: Config Forms ─────────────────────────── */}
         <div className="space-y-6">
@@ -393,7 +404,23 @@ function WidgetConfig() {
           <h2 className="text-lg font-semibold text-card-foreground mb-4">
             Preview
           </h2>
-          <div className="relative bg-muted/30 rounded-xl p-4 min-h-[500px] flex items-end justify-end">
+          <p className="text-sm text-muted-foreground">
+            Add this script tag to your website to embed the chat widget.
+          </p>
+          <div className="relative">
+            <pre className="bg-muted/50 rounded-xl p-4 text-xs font-mono overflow-x-auto">
+              {embedSnippet}
+            </pre>
+            <button
+              onClick={() => navigator.clipboard.writeText(embedSnippet)}
+              className="absolute top-2 right-2 p-1.5 rounded-lg bg-background border border-border hover:bg-muted"
+              title="Copy"
+            >
+              <Copy className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="relative  rounded-xl p-4 min-h-full flex items-center justify-center">
             {/* Widget preview */}
             <div
               className="w-[340px] shadow-xl overflow-hidden flex flex-col"
@@ -410,10 +437,10 @@ function WidgetConfig() {
                 style={
                   form.bannerUrl
                     ? {
-                        backgroundImage: `url(${form.bannerUrl})`,
-                        backgroundSize: "cover",
-                        backgroundPosition: "center",
-                      }
+                      backgroundImage: `url(${form.bannerUrl})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
+                    }
                     : { backgroundColor: form.primaryColor ?? "#2563eb" }
                 }
               >

@@ -19,6 +19,9 @@ export const updateProjectSettingsSchema = z.object({
   customTonePrompt: z.string().max(2000).nullable().optional(),
   introMessage: z.string().max(1000).optional(),
   autoCannedDraft: z.boolean().optional(),
+  companyName: z.string().max(200).nullable().optional(),
+  companyUrl: z.string().url("Must be a valid URL").max(2048).nullable().optional(),
+  companyContext: z.string().max(10000).nullable().optional(),
 });
 
 // ─── Widget Config ────────────────────────────────────────────────────────────
