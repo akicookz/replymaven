@@ -678,7 +678,7 @@ const app = new Hono<HonoAppContext>()
     let ragContext = "";
     const ragFilenames: string[] = [];
     try {
-      const searchResults = await c.env.AI.aiSearch.get("supportbot").search({
+      const searchResults = await c.env.AI.aiSearch().get("supportbot").search({
         messages: [{ role: "user", content: searchQuery }],
         ai_search_options: {
           retrieval: {
