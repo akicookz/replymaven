@@ -546,6 +546,10 @@ const app = new Hono<HonoAppContext>()
           const emittedToolCalls = new Set<string>(); // Deduplicate across retry steps
           let hadToolCalls = false;
 
+          let lastToolOutput: unknown = null;
+          let lastToolError: string | null = null;
+          let stepCount = 0;
+
           try {
             // Use fullStream to get all event types (text, tool-call, tool-result, etc.)
             for await (const part of streamResult.fullStream) {
@@ -568,24 +572,52 @@ const app = new Hono<HonoAppContext>()
                   );
                 }
               } else if (part.type === "tool-result") {
-                // Always emit the latest result (overwrites previous status in widget)
+                const output = part.output as Record<string, unknown> | null;
+                const hasError = !!output?.error;
+                const errorMessage = hasError ? String(output!.error) : null;
+
+                // Track last tool output/error for fallback diagnostics
+                lastToolOutput = output;
+                lastToolError = errorMessage;
+
+                // Emit tool result with error details when applicable
                 controller.enqueue(
                   encoder.encode(
                     `data: ${JSON.stringify({
                       toolResult: {
                         name: part.toolName,
-                        success: !(part.output as Record<string, unknown>)?.error,
+                        success: !hasError,
+                        ...(errorMessage ? { errorMessage } : {}),
                       },
                     })}\n\n`,
                   ),
                 );
+              } else if (part.type === "finish-step") {
+                stepCount++;
+                console.log(`[Tool Debug] Step ${stepCount} finished — reason: ${part.finishReason}, text so far: ${fullResponse.length} chars, tool calls: ${hadToolCalls}`);
               }
-              // Other part types (step-start, step-finish, finish, etc.) are handled internally by the SDK
             }
 
             // If the model exhausted all steps on tool calls without producing text, add a fallback
             if (hadToolCalls && !fullResponse.trim()) {
-              fullResponse = "I found some information but had trouble processing it. Could you try rephrasing your question?";
+              console.log(`[Tool Debug] Fallback triggered — steps: ${stepCount}, lastToolError: ${lastToolError}, lastToolOutput: ${JSON.stringify(lastToolOutput)?.slice(0, 500)}`);
+
+              // If the tool itself errored, show that to the user via SSE
+              if (lastToolError) {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      toolError: {
+                        message: "The tool encountered an error while processing your request.",
+                        detail: lastToolError,
+                      },
+                    })}\n\n`,
+                  ),
+                );
+                fullResponse = "I tried to look that up but the tool encountered an error. Could you try again?";
+              } else {
+                fullResponse = "I found some information but had trouble processing it. Could you try rephrasing your question?";
+              }
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ text: fullResponse })}\n\n`),
               );

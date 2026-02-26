@@ -390,7 +390,6 @@
       gap: 4px;
       min-height: 300px;
       background: #fafafa;
-      scroll-behavior: smooth;
     }
     .rm-messages::-webkit-scrollbar {
       width: 4px;
@@ -461,13 +460,19 @@
 
     /* ─── Typing Indicator ────────────────────────────────────────────────── */
     .rm-typing-row {
-      display: none;
-      align-self: flex-start;
-      padding: 4px 16px;
-    }
-    .rm-typing-row.visible {
       display: flex;
       align-items: baseline;
+      align-self: flex-start;
+      padding: 0 16px;
+      max-height: 0;
+      opacity: 0;
+      overflow: hidden;
+      transition: max-height 0.15s ease-out, opacity 0.15s ease-out, padding 0.15s ease-out;
+    }
+    .rm-typing-row.visible {
+      max-height: 28px;
+      opacity: 1;
+      padding: 4px 16px;
     }
     .rm-status-text {
       font-size: 13px;
@@ -485,6 +490,11 @@
       background-clip: text;
       -webkit-text-fill-color: transparent;
       animation: rm-shimmer 2s ease-in-out infinite;
+    }
+    .rm-status-dots {
+      display: inline-block;
+      min-width: 1.2em;
+      text-align: left;
     }
     .rm-status-dots::after {
       content: '';
@@ -513,6 +523,48 @@
       25% { content: '.'; }
       50% { content: '..'; }
       75% { content: '...'; }
+    }
+
+    /* ─── Tool Error ─────────────────────────────────────────────────────── */
+    .rm-tool-error {
+      align-self: flex-start;
+      padding: 0 16px;
+      margin: 2px 0;
+      max-width: 88%;
+    }
+    .rm-tool-error-header {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      color: #dc2626;
+      user-select: none;
+    }
+    .rm-tool-error-header svg {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+      transition: transform 0.15s ease;
+    }
+    .rm-tool-error.expanded .rm-tool-error-header svg {
+      transform: rotate(180deg);
+    }
+    .rm-tool-error-detail {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.2s ease-out;
+      font-size: 11px;
+      color: #991b1b;
+      background: #fef2f2;
+      border-radius: 6px;
+      padding: 0;
+      margin-top: 0;
+    }
+    .rm-tool-error.expanded .rm-tool-error-detail {
+      max-height: 200px;
+      padding: 6px 8px;
+      margin-top: 4px;
     }
 
     /* ─── Quick Topics ────────────────────────────────────────────────────── */
@@ -3147,8 +3199,21 @@
               }
 
               if (data.toolResult) {
-                // After tool result, show "Thinking" while model processes the result
-                showTyping("Thinking");
+                if (data.toolResult.success === false && data.toolResult.errorMessage) {
+                  // Show inline error for failed tool calls
+                  hideTyping();
+                  addToolErrorToUI(data.toolResult.name, data.toolResult.errorMessage);
+                } else {
+                  // After successful tool result, show "Thinking" while model processes the result
+                  showTyping("Thinking");
+                }
+                continue;
+              }
+
+              if (data.toolError) {
+                // Show expandable error from fallback path
+                hideTyping();
+                addToolErrorToUI(null, data.toolError.detail || data.toolError.message);
                 continue;
               }
 
@@ -3416,12 +3481,61 @@
   function hideTyping() {
     typingRow.classList.remove("visible");
     statusText.textContent = "Thinking";
+    scrollToBottom();
   }
 
+  let _scrollDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   function scrollToBottom() {
-    requestAnimationFrame(() => {
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    if (_scrollDebounceTimer) clearTimeout(_scrollDebounceTimer);
+    _scrollDebounceTimer = setTimeout(() => {
+      _scrollDebounceTimer = null;
+      requestAnimationFrame(() => {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      });
+    }, 50);
+  }
+
+  // ─── Tool Error Display ────────────────────────────────────────────────────
+
+  function addToolErrorToUI(toolName: string | null, detail: string) {
+    const container = document.createElement("div");
+    container.className = "rm-tool-error";
+
+    const header = document.createElement("div");
+    header.className = "rm-tool-error-header";
+
+    // Chevron-down SVG icon
+    const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    chevron.setAttribute("viewBox", "0 0 24 24");
+    chevron.setAttribute("fill", "none");
+    chevron.setAttribute("stroke", "currentColor");
+    chevron.setAttribute("stroke-width", "2");
+    chevron.setAttribute("stroke-linecap", "round");
+    chevron.setAttribute("stroke-linejoin", "round");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "m6 9 6 6 6-6");
+    chevron.appendChild(path);
+
+    const label = document.createElement("span");
+    const displayName = toolName ? toolName.replace(/_/g, " ") : "Tool";
+    label.textContent = `${displayName} failed`;
+
+    header.appendChild(chevron);
+    header.appendChild(label);
+
+    const detailEl = document.createElement("div");
+    detailEl.className = "rm-tool-error-detail";
+    detailEl.textContent = detail;
+
+    container.appendChild(header);
+    container.appendChild(detailEl);
+
+    header.addEventListener("click", () => {
+      container.classList.toggle("expanded");
     });
+
+    messagesContainer.insertBefore(container, typingRow);
+    scrollToBottom();
   }
 
   // ─── Handoff Card ───────────────────────────────────────────────────────────
