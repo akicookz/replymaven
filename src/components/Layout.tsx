@@ -9,6 +9,7 @@ import {
   Settings,
   Bot,
   Send,
+  Wrench,
   Zap,
   LogOut,
   ChevronDown,
@@ -102,6 +103,11 @@ function Layout() {
           label: "Telegram",
           href: `/app/projects/${currentProject.id}/telegram`,
           icon: Send,
+        },
+        {
+          label: "Tools",
+          href: `/app/projects/${currentProject.id}/tools`,
+          icon: Wrench,
         },
       ]
     : [];

@@ -477,6 +477,77 @@ export const bookings = sqliteTable(
 export type BookingRow = typeof bookings.$inferSelect;
 export type NewBookingRow = typeof bookings.$inferInsert;
 
+// ─── Tools ────────────────────────────────────────────────────────────────────
+
+export const tools = sqliteTable(
+  "tools",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(), // Machine-friendly: check_order_status
+    displayName: text("display_name").notNull(), // Human-friendly: Check Order Status
+    description: text("description").notNull(), // Used by Gemini to decide when to call
+    endpoint: text("endpoint").notNull(), // HTTP URL
+    method: text("method", { enum: ["GET", "POST"] }).notNull().default("POST"),
+    headers: text("headers"), // JSON string, encrypted sensitive values
+    parameters: text("parameters").notNull().default("[]"), // JSON array of param definitions
+    responseMapping: text("response_mapping"), // JSON: { resultPath, summaryTemplate }
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    timeout: integer("timeout").notNull().default(10000), // ms, max 30000
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("idx_tools_project").on(table.projectId),
+    uniqueIndex("idx_tools_project_name").on(table.projectId, table.name),
+  ],
+);
+
+export type ToolRow = typeof tools.$inferSelect;
+export type NewToolRow = typeof tools.$inferInsert;
+
+// ─── Tool Executions ──────────────────────────────────────────────────────────
+
+export const toolExecutions = sqliteTable(
+  "tool_executions",
+  {
+    id: text("id").primaryKey(),
+    toolId: text("tool_id")
+      .notNull()
+      .references(() => tools.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").references(
+      () => conversations.id,
+      { onDelete: "set null" },
+    ),
+    messageId: text("message_id"), // The bot message that triggered this
+    input: text("input"), // JSON: parameters sent to endpoint
+    output: text("output"), // JSON: response from endpoint (truncated)
+    status: text("status", { enum: ["success", "error", "timeout"] }).notNull(),
+    httpStatus: integer("http_status"),
+    duration: integer("duration"), // ms
+    errorMessage: text("error_message"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    index("idx_tool_executions_tool").on(table.toolId),
+    index("idx_tool_executions_conversation").on(table.conversationId),
+    index("idx_tool_executions_created").on(table.createdAt),
+  ],
+);
+
+export type ToolExecutionRow = typeof toolExecutions.$inferSelect;
+export type NewToolExecutionRow = typeof toolExecutions.$inferInsert;
+
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
 export const apiKeys = sqliteTable(
@@ -518,4 +589,6 @@ export const schema = {
   availabilityRules,
   bookings,
   apiKeys,
+  tools,
+  toolExecutions,
 } as const;

@@ -236,3 +236,61 @@ export const createBookingSchema = z.object({
   timezone: z.string().min(1, "Timezone is required").max(100),
   conversationId: z.string().max(100).optional(),
 });
+
+// ─── Tools ────────────────────────────────────────────────────────────────────
+
+const toolParameterSchema = z.object({
+  name: z.string().min(1, "Parameter name is required").max(100),
+  type: z.enum(["string", "number", "boolean"]),
+  description: z.string().max(500).default(""),
+  required: z.boolean().default(true),
+  enum: z.array(z.string().max(100)).max(20).optional(),
+});
+
+const responseMappingSchema = z
+  .object({
+    resultPath: z.string().max(200).optional(),
+    summaryTemplate: z.string().max(500).optional(),
+  })
+  .optional()
+  .nullable();
+
+export const createToolSchema = z.object({
+  name: z
+    .string()
+    .min(1, "Name is required")
+    .max(100)
+    .regex(
+      /^[a-z][a-z0-9_]*$/,
+      "Must start with a letter and contain only lowercase letters, numbers, and underscores",
+    ),
+  displayName: z.string().min(1, "Display name is required").max(100),
+  description: z
+    .string()
+    .min(1, "Description is required")
+    .max(500),
+  endpoint: z.string().url("Must be a valid URL").max(2048),
+  method: z.enum(["GET", "POST"]).default("POST"),
+  headers: z.record(z.string(), z.string().max(2048)).optional(),
+  parameters: z.array(toolParameterSchema).max(10).default([]),
+  responseMapping: responseMappingSchema,
+  enabled: z.boolean().default(true),
+  timeout: z.number().int().min(1000).max(30000).default(10000),
+});
+
+export const updateToolSchema = z.object({
+  displayName: z.string().min(1).max(100).optional(),
+  description: z.string().min(1).max(500).optional(),
+  endpoint: z.string().url().max(2048).optional(),
+  method: z.enum(["GET", "POST"]).optional(),
+  headers: z.record(z.string(), z.string().max(2048)).optional().nullable(),
+  parameters: z.array(toolParameterSchema).max(10).optional(),
+  responseMapping: responseMappingSchema,
+  enabled: z.boolean().optional(),
+  timeout: z.number().int().min(1000).max(30000).optional(),
+  sortOrder: z.number().int().min(0).optional(),
+});
+
+export const testToolSchema = z.object({
+  params: z.record(z.string(), z.unknown()),
+});

@@ -461,40 +461,21 @@
 
     /* ─── Typing Indicator ────────────────────────────────────────────────── */
     .rm-typing-row {
-      display: flex;
-      gap: 8px;
-      align-items: flex-end;
-      align-self: flex-start;
-      max-width: 88%;
       display: none;
+      align-self: flex-start;
+      padding: 4px 16px;
     }
     .rm-typing-row.visible {
-      display: flex;
+      display: block;
     }
-    .rm-typing-bubble {
-      padding: 12px 16px;
-      border-radius: 18px 18px 18px 4px;
-      background: #ffffff;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+    .rm-status-text {
+      font-size: 13px;
+      color: #94a3b8;
+      animation: rm-pulse 1.8s ease-in-out infinite;
     }
-    .rm-typing-dots {
-      display: flex;
-      gap: 5px;
-      align-items: center;
-    }
-    .rm-typing-dots span {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: #94a3b8;
-      animation: rm-bounce 1.4s infinite ease-in-out;
-    }
-    .rm-typing-dots span:nth-child(1) { animation-delay: 0s; }
-    .rm-typing-dots span:nth-child(2) { animation-delay: 0.2s; }
-    .rm-typing-dots span:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes rm-bounce {
-      0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
-      40% { opacity: 1; transform: translateY(-4px); }
+    @keyframes rm-pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
     }
 
     /* ─── Quick Topics ────────────────────────────────────────────────────── */
@@ -1802,21 +1783,15 @@
   const messagesContainer = document.createElement("div");
   messagesContainer.className = "rm-messages";
 
-  // Typing indicator (lives inside messagesContainer)
+  // Status indicator (lives inside messagesContainer — replaces typing dots)
   const typingRow = document.createElement("div");
   typingRow.className = "rm-typing-row";
 
-  const typingAvatar = document.createElement("div");
-  typingAvatar.className = "rm-message-avatar";
-  typingAvatar.innerHTML = ICONS.bot;
+  const statusText = document.createElement("span");
+  statusText.className = "rm-status-text";
+  statusText.textContent = "Thinking...";
 
-  const typingBubble = document.createElement("div");
-  typingBubble.className = "rm-typing-bubble";
-  typingBubble.innerHTML =
-    '<div class="rm-typing-dots"><span></span><span></span><span></span></div>';
-
-  typingRow.appendChild(typingAvatar);
-  typingRow.appendChild(typingBubble);
+  typingRow.appendChild(statusText);
   messagesContainer.appendChild(typingRow);
 
   // Quick topics
@@ -2621,23 +2596,6 @@
           chatWindow.className = "rm-chat-window bottom-left";
         }
 
-        // Typing indicator avatar
-        if (w.avatarUrl) {
-          typingAvatar.innerHTML = "";
-          typingAvatar.style.backgroundColor = "transparent";
-          const typingImg = document.createElement("img");
-          typingImg.src = resolveUrl(w.avatarUrl);
-          typingImg.alt = "";
-          typingImg.style.width = "100%";
-          typingImg.style.height = "100%";
-          typingImg.style.borderRadius = "50%";
-          typingImg.style.objectFit = "cover";
-          typingAvatar.appendChild(typingImg);
-        } else {
-          typingAvatar.style.backgroundColor = primary + "15";
-          typingAvatar.style.color = primary;
-        }
-
         // Font family
         if (w.fontFamily && w.fontFamily !== "system-ui") {
           container.style.fontFamily = w.fontFamily + ", -apple-system, BlinkMacSystemFont, sans-serif";
@@ -3139,6 +3097,21 @@
                 continue;
               }
 
+              // Handle tool execution events
+              if (data.toolCall) {
+                const displayName = data.toolCall.name.replace(/_/g, " ");
+                // Capitalize first letter
+                const label = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+                showTyping(`Looking up ${label}...`);
+                continue;
+              }
+
+              if (data.toolResult) {
+                // After tool result, show "Thinking..." while model processes the result
+                showTyping("Thinking...");
+                continue;
+              }
+
               if (data.text) {
                 botMessage += data.text;
 
@@ -3181,6 +3154,7 @@
               }
 
               if (data.done) {
+                hideTyping();
                 // Stream complete -- render final markdown
                 if (botMessageEl && botMessage) {
                   botMessageEl.innerHTML = renderMarkdown(botMessage);
@@ -3393,16 +3367,15 @@
     msgEl.appendChild(sourcesContainer);
   }
 
-  function showTyping() {
+  function showTyping(message?: string) {
+    statusText.textContent = message ?? "Thinking...";
     typingRow.classList.add("visible");
-    const primaryColor = getPrimaryColor();
-    typingAvatar.style.backgroundColor = primaryColor + "12";
-    typingAvatar.style.color = primaryColor;
     scrollToBottom();
   }
 
   function hideTyping() {
     typingRow.classList.remove("visible");
+    statusText.textContent = "Thinking...";
   }
 
   function scrollToBottom() {

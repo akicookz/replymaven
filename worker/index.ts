@@ -15,6 +15,8 @@ import { DashboardService } from "./services/dashboard-service";
 import { CrawlService, type CrawlMessage } from "./services/crawl-service";
 import { BookingService } from "./services/booking-service";
 import { EmailService } from "./services/email-service";
+import { ToolService } from "./services/tool-service";
+import { encryptHeaders, decryptHeaders, maskHeaders, isEncrypted } from "./services/encryption-service";
 import {
   createProjectSchema,
   updateProjectSchema,
@@ -43,6 +45,9 @@ import {
   updateBookingConfigSchema,
   setAvailabilityRulesSchema,
   createBookingSchema,
+  createToolSchema,
+  updateToolSchema,
+  testToolSchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -466,10 +471,34 @@ const app = new Hono<HonoAppContext>()
         parsed.data.content,
       );
 
-      // Check if booking is enabled for this project
+      // Check if booking is enabled and load enabled tools in parallel
       const bookingService = new BookingService(db);
-      const bookingCfg = await bookingService.getBookingConfig(project.id);
+      const toolService = new ToolService(db);
+      const [bookingCfg, enabledTools] = await Promise.all([
+        bookingService.getBookingConfig(project.id),
+        toolService.getEnabledTools(project.id),
+      ]);
       const bookingEnabled = bookingCfg?.enabled ?? false;
+
+      // Per-project rate limit for tool-enabled conversations (100 tool-bearing messages per minute)
+      if (enabledTools.length > 0) {
+        if (!checkRateLimit(`toolmsg:${project.id}`, 100, 60_000)) {
+          return c.json({ error: "Tool execution rate limit exceeded. Please try again shortly." }, 429);
+        }
+
+        // Decrypt encrypted headers before passing to Gemini tool execution
+        for (const t of enabledTools) {
+          if (t.headers && isEncrypted(t.headers)) {
+            try {
+              const decrypted = await decryptHeaders(t.headers, c.env.ENCRYPTION_KEY);
+              t.headers = JSON.stringify(decrypted);
+            } catch {
+              // If decryption fails, clear headers to prevent passing corrupted data
+              t.headers = null;
+            }
+          }
+        }
+      }
 
       // Build system prompt and stream response
       const systemPrompt = geminiService.buildSystemPrompt(
@@ -478,27 +507,87 @@ const app = new Hono<HonoAppContext>()
         ragContext,
         cannedMatch ? cannedMatch.response : null,
         conversationSummary,
-        { bookingEnabled },
+        { bookingEnabled, hasTools: enabledTools.length > 0 },
       );
 
-      // Stream via SSE
+      // Stream via SSE using Vercel AI SDK
+      const streamResult = geminiService.streamChat({
+        systemPrompt,
+        conversationHistory,
+        userMessage: parsed.data.content,
+        image: imageBase64 && imageMimeType
+          ? { base64: imageBase64, mimeType: imageMimeType }
+          : null,
+        tools: enabledTools.length > 0 ? enabledTools : undefined,
+        onToolCallStart: (info) => {
+          console.log(`Tool call started: ${info.toolName}`, info.input);
+        },
+        onToolCallFinish: (info) => {
+          // Log tool execution asynchronously (fire-and-forget)
+          const matchedTool = enabledTools.find((t) => t.name === info.toolName);
+          if (matchedTool) {
+            toolService.logExecution({
+              toolId: matchedTool.id,
+              conversationId,
+              input: info.input as Record<string, unknown> ?? {},
+              output: info.output,
+              status: info.success ? "success" : "error",
+              duration: info.durationMs,
+              errorMessage: info.error ? String(info.error) : null,
+            }).catch((err) => console.error("Failed to log tool execution:", err));
+          }
+        },
+      });
+
       const stream = new ReadableStream({
         async start(controller) {
           const encoder = new TextEncoder();
           let fullResponse = "";
+          const emittedToolCalls = new Set<string>(); // Deduplicate across retry steps
+          let hadToolCalls = false;
 
           try {
-            for await (const chunk of geminiService.streamChat(
-              systemPrompt,
-              conversationHistory,
-              parsed.data.content,
-              imageBase64 && imageMimeType
-                ? { base64: imageBase64, mimeType: imageMimeType }
-                : null,
-            )) {
-              fullResponse += chunk;
+            // Use fullStream to get all event types (text, tool-call, tool-result, etc.)
+            for await (const part of streamResult.fullStream) {
+              if (part.type === "text-delta") {
+                fullResponse += part.text;
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ text: part.text })}\n\n`),
+                );
+              } else if (part.type === "tool-call") {
+                hadToolCalls = true;
+                // Only emit the first call per tool name (skip retries from multi-step loops)
+                if (!emittedToolCalls.has(part.toolName)) {
+                  emittedToolCalls.add(part.toolName);
+                  controller.enqueue(
+                    encoder.encode(
+                      `data: ${JSON.stringify({
+                        toolCall: { name: part.toolName },
+                      })}\n\n`,
+                    ),
+                  );
+                }
+              } else if (part.type === "tool-result") {
+                // Always emit the latest result (overwrites previous status in widget)
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      toolResult: {
+                        name: part.toolName,
+                        success: !(part.output as Record<string, unknown>)?.error,
+                      },
+                    })}\n\n`,
+                  ),
+                );
+              }
+              // Other part types (step-start, step-finish, finish, etc.) are handled internally by the SDK
+            }
+
+            // If the model exhausted all steps on tool calls without producing text, add a fallback
+            if (hadToolCalls && !fullResponse.trim()) {
+              fullResponse = "I found some information but had trouble processing it. Could you try rephrasing your question?";
               controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`),
+                encoder.encode(`data: ${JSON.stringify({ text: fullResponse })}\n\n`),
               );
             }
 
@@ -1477,6 +1566,304 @@ const app = new Hono<HonoAppContext>()
     );
     if (!deleted) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
+  })
+
+  // ─── Tools (Dashboard) ───────────────────────────────────────────────────
+  .get("/api/projects/:id/tools", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const toolService = new ToolService(db);
+    const projectTools = await toolService.getTools(project.id);
+
+    // Decrypt and mask headers for each tool (never expose raw secrets)
+    const toolsWithMaskedHeaders = await Promise.all(
+      projectTools.map(async (t) => {
+        let maskedHeaders: Record<string, string> | null = null;
+        if (t.headers) {
+          try {
+            const decrypted = isEncrypted(t.headers)
+              ? await decryptHeaders(t.headers, c.env.ENCRYPTION_KEY)
+              : JSON.parse(t.headers) as Record<string, string>;
+            maskedHeaders = maskHeaders(decrypted);
+          } catch {
+            maskedHeaders = null;
+          }
+        }
+        return {
+          ...t,
+          parameters: JSON.parse(t.parameters),
+          headers: maskedHeaders,
+          responseMapping: t.responseMapping
+            ? JSON.parse(t.responseMapping)
+            : null,
+        };
+      }),
+    );
+
+    return c.json(toolsWithMaskedHeaders);
+  })
+
+  .post("/api/projects/:id/tools", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(createToolSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const toolService = new ToolService(db);
+
+    // Enforce max 20 tools per project
+    const count = await toolService.getToolCount(project.id);
+    if (count >= 20) {
+      return c.json({ error: "Maximum 20 tools per project" }, 400);
+    }
+
+    // Check for duplicate name
+    const existing = await toolService.getToolByName(parsed.data.name, project.id);
+    if (existing) {
+      return c.json({ error: "A tool with this name already exists" }, 400);
+    }
+
+    // Encrypt headers if provided (contains auth tokens, API keys)
+    let encryptedHeaders: string | null = null;
+    if (parsed.data.headers && Object.keys(parsed.data.headers).length > 0) {
+      encryptedHeaders = await encryptHeaders(parsed.data.headers, c.env.ENCRYPTION_KEY);
+    }
+
+    const created = await toolService.createTool({
+      projectId: project.id,
+      name: parsed.data.name,
+      displayName: parsed.data.displayName,
+      description: parsed.data.description,
+      endpoint: parsed.data.endpoint,
+      method: parsed.data.method,
+      headers: encryptedHeaders,
+      parameters: JSON.stringify(parsed.data.parameters),
+      responseMapping: parsed.data.responseMapping
+        ? JSON.stringify(parsed.data.responseMapping)
+        : null,
+      enabled: parsed.data.enabled,
+      timeout: parsed.data.timeout,
+    });
+
+    // Return masked headers to frontend (never expose raw values)
+    const maskedHeaders = parsed.data.headers && Object.keys(parsed.data.headers).length > 0
+      ? maskHeaders(parsed.data.headers)
+      : null;
+
+    return c.json({
+      ...created,
+      parameters: JSON.parse(created.parameters),
+      headers: maskedHeaders,
+      responseMapping: created.responseMapping
+        ? JSON.parse(created.responseMapping)
+        : null,
+    }, 201);
+  })
+
+  .patch("/api/projects/:id/tools/:toolId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(updateToolSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const toolService = new ToolService(db);
+
+    // Build the update object, JSON-stringifying complex fields
+    const updates: Record<string, unknown> = {};
+    if (parsed.data.displayName !== undefined) updates.displayName = parsed.data.displayName;
+    if (parsed.data.description !== undefined) updates.description = parsed.data.description;
+    if (parsed.data.endpoint !== undefined) updates.endpoint = parsed.data.endpoint;
+    if (parsed.data.method !== undefined) updates.method = parsed.data.method;
+    if (parsed.data.headers !== undefined) {
+      if (parsed.data.headers && Object.keys(parsed.data.headers).length > 0) {
+        updates.headers = await encryptHeaders(parsed.data.headers, c.env.ENCRYPTION_KEY);
+      } else {
+        updates.headers = null;
+      }
+    }
+    if (parsed.data.parameters !== undefined) {
+      updates.parameters = JSON.stringify(parsed.data.parameters);
+    }
+    if (parsed.data.responseMapping !== undefined) {
+      updates.responseMapping = parsed.data.responseMapping
+        ? JSON.stringify(parsed.data.responseMapping)
+        : null;
+    }
+    if (parsed.data.enabled !== undefined) updates.enabled = parsed.data.enabled;
+    if (parsed.data.timeout !== undefined) updates.timeout = parsed.data.timeout;
+    if (parsed.data.sortOrder !== undefined) updates.sortOrder = parsed.data.sortOrder;
+
+    const updated = await toolService.updateTool(
+      c.req.param("toolId"),
+      project.id,
+      updates,
+    );
+    if (!updated) return c.json({ error: "Not found" }, 404);
+
+    // Decrypt headers for masking in the response
+    let maskedResponseHeaders: Record<string, string> | null = null;
+    if (updated.headers) {
+      try {
+        const decrypted = isEncrypted(updated.headers)
+          ? await decryptHeaders(updated.headers, c.env.ENCRYPTION_KEY)
+          : JSON.parse(updated.headers) as Record<string, string>;
+        maskedResponseHeaders = maskHeaders(decrypted);
+      } catch {
+        maskedResponseHeaders = null;
+      }
+    }
+
+    return c.json({
+      ...updated,
+      parameters: JSON.parse(updated.parameters),
+      headers: maskedResponseHeaders,
+      responseMapping: updated.responseMapping
+        ? JSON.parse(updated.responseMapping)
+        : null,
+    });
+  })
+
+  .delete("/api/projects/:id/tools/:toolId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const toolService = new ToolService(db);
+    const deleted = await toolService.deleteTool(
+      c.req.param("toolId"),
+      project.id,
+    );
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+
+  .post("/api/projects/:id/tools/:toolId/test", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    // Rate limit tool tests: 20 per minute per project
+    if (!checkRateLimit(`tooltest:${project.id}`, 20, 60_000)) {
+      return c.json({ error: "Tool test rate limit exceeded. Please try again shortly." }, 429);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(testToolSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const toolService = new ToolService(db);
+    const toolDef = await toolService.getToolById(c.req.param("toolId"), project.id);
+    if (!toolDef) return c.json({ error: "Tool not found" }, 404);
+
+    // Decrypt encrypted headers before test execution
+    if (toolDef.headers && isEncrypted(toolDef.headers)) {
+      try {
+        const decrypted = await decryptHeaders(toolDef.headers, c.env.ENCRYPTION_KEY);
+        toolDef.headers = JSON.stringify(decrypted);
+      } catch {
+        toolDef.headers = null;
+      }
+    }
+
+    // Use GeminiService's HTTP execution logic via a test harness
+    const geminiService = new GeminiService(c.env.GEMINI_API_KEY);
+    const toolSet = geminiService.buildToolSet([toolDef]);
+    const toolFn = toolSet[toolDef.name];
+
+    if (!toolFn || !("execute" in toolFn) || typeof toolFn.execute !== "function") {
+      return c.json({ error: "Tool has no execute function" }, 500);
+    }
+
+    const startTime = Date.now();
+    try {
+      const result = await toolFn.execute(parsed.data.params, {
+        toolCallId: "test",
+        messages: [],
+        abortSignal: AbortSignal.timeout(toolDef.timeout),
+      });
+      const duration = Date.now() - startTime;
+
+      // Log the test execution
+      await toolService.logExecution({
+        toolId: toolDef.id,
+        input: parsed.data.params as Record<string, unknown>,
+        output: result,
+        status: (result as Record<string, unknown>)?.error ? "error" : "success",
+        duration,
+      });
+
+      return c.json({ success: true, result, duration });
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      return c.json({
+        success: false,
+        error: err instanceof Error ? err.message : "Test execution failed",
+        duration,
+      });
+    }
+  })
+
+  .get("/api/projects/:id/tool-executions", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const toolId = c.req.query("toolId");
+    const limit = parseInt(c.req.query("limit") ?? "50", 10);
+    const offset = parseInt(c.req.query("offset") ?? "0", 10);
+
+    const toolService = new ToolService(db);
+    const executions = await toolService.getExecutions(project.id, {
+      toolId: toolId ?? undefined,
+      limit: Math.min(limit, 100),
+      offset,
+    });
+
+    return c.json(executions);
   })
 
   // ─── Contact Form Config (Dashboard) ─────────────────────────────────────

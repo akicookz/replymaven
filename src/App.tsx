@@ -17,6 +17,7 @@ import ProjectSettings from "./pages/ProjectSettings";
 import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
 import TelegramConfig from "./pages/TelegramConfig";
+import Tools from "./pages/Tools";
 import AuthCallback from "./pages/AuthCallback";
 import Docs from "./pages/Docs";
 
@@ -110,6 +111,10 @@ function App() {
         <Route
           path="projects/:projectId/telegram"
           element={<TelegramConfig />}
+        />
+        <Route
+          path="projects/:projectId/tools"
+          element={<Tools />}
         />
       </Route>
     </Routes>

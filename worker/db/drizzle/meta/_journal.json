@@ -71,6 +71,13 @@
       "when": 1771975928203,
       "tag": "0009_thin_the_fallen",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1772073512196,
+      "tag": "0010_long_black_widow",
+      "breakpoints": true
     }
   ]
 }
