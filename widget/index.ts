@@ -614,10 +614,10 @@
     }
     .rm-input {
       flex: 1;
-      padding: 10px 16px;
+      padding: 8px 14px;
       border: 1px solid rgba(0,0,0,0.10);
       border-radius: 24px;
-      font-size: 16px;
+      font-size: 14px;
       outline: none;
       background: #fafafa;
       color: #1f2937;
@@ -634,9 +634,9 @@
       color: #9ca3af;
     }
     .rm-send-btn {
-      width: 40px;
-      height: 40px;
-      min-width: 40px;
+      width: 36px;
+      height: 36px;
+      min-width: 36px;
       border-radius: 50%;
       border: none;
       cursor: pointer;
