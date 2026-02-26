@@ -464,68 +464,52 @@
     /* ─── Typing Indicator ────────────────────────────────────────────────── */
     .rm-typing-row {
       display: flex;
-      align-items: baseline;
+      align-items: center;
       align-self: flex-start;
+      gap: 8px;
       padding: 0 16px;
       max-height: 0;
       opacity: 0;
       overflow: hidden;
-      transition: max-height 0.15s ease-out, opacity 0.15s ease-out, padding 0.15s ease-out;
+      transition: max-height 0.2s ease-out, opacity 0.2s ease-out, padding 0.2s ease-out;
     }
     .rm-typing-row.visible {
-      max-height: 28px;
+      max-height: 40px;
       opacity: 1;
-      padding: 4px 16px;
+      padding: 6px 16px;
+    }
+    .rm-typing-dots {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .rm-typing-dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #94a3b8;
+      animation: rm-bounce 1.4s ease-in-out infinite;
+    }
+    .rm-typing-dots span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+    .rm-typing-dots span:nth-child(3) {
+      animation-delay: 0.4s;
     }
     .rm-status-text {
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
-      background: linear-gradient(
-        90deg,
-        #94a3b8 0%,
-        #94a3b8 35%,
-        #cbd5e1 50%,
-        #94a3b8 65%,
-        #94a3b8 100%
-      );
-      background-size: 200% 100%;
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      animation: rm-shimmer 2s ease-in-out infinite;
+      color: #94a3b8;
     }
-    .rm-status-dots {
-      display: inline-block;
-      min-width: 1.2em;
-      text-align: left;
-    }
-    .rm-status-dots::after {
-      content: '';
-      font-size: 13px;
-      font-weight: 500;
-      background: linear-gradient(
-        90deg,
-        #94a3b8 0%,
-        #94a3b8 35%,
-        #cbd5e1 50%,
-        #94a3b8 65%,
-        #94a3b8 100%
-      );
-      background-size: 200% 100%;
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      animation: rm-shimmer 2s ease-in-out infinite, rm-dots 1.5s steps(4, end) infinite;
-    }
-    @keyframes rm-shimmer {
-      0% { background-position: 100% 0; }
-      100% { background-position: -100% 0; }
-    }
-    @keyframes rm-dots {
-      0% { content: ''; }
-      25% { content: '.'; }
-      50% { content: '..'; }
-      75% { content: '...'; }
+    @keyframes rm-bounce {
+      0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.4;
+      }
+      30% {
+        transform: translateY(-4px);
+        opacity: 1;
+      }
     }
 
     /* ─── Tool Error ─────────────────────────────────────────────────────── */
@@ -1875,19 +1859,22 @@
   const messagesContainer = document.createElement("div");
   messagesContainer.className = "rm-messages";
 
-  // Status indicator (lives inside messagesContainer — replaces typing dots)
+  // Typing indicator (lives inside messagesContainer — always last child)
   const typingRow = document.createElement("div");
   typingRow.className = "rm-typing-row";
+
+  const typingDots = document.createElement("div");
+  typingDots.className = "rm-typing-dots";
+  for (let i = 0; i < 3; i++) {
+    typingDots.appendChild(document.createElement("span"));
+  }
 
   const statusText = document.createElement("span");
   statusText.className = "rm-status-text";
   statusText.textContent = "Thinking";
 
-  const statusDots = document.createElement("span");
-  statusDots.className = "rm-status-dots";
-
+  typingRow.appendChild(typingDots);
   typingRow.appendChild(statusText);
-  typingRow.appendChild(statusDots);
   messagesContainer.appendChild(typingRow);
 
   // Quick topics
