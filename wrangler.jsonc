@@ -57,14 +57,14 @@
   "vars": {
     "BETTER_AUTH_URL": "https://replymaven.com",
     "CF_ACCOUNT_ID": "35bc7a4522237728214ba9d54c36002e",
-    "AI_MODEL": "gemini-3-flash-preview",
+    "AI_MODEL": "gpt-5-chat-latest",
   },
   "env": {
     "production": {
       "vars": {
         "BETTER_AUTH_URL": "https://replymaven.com",
         "CF_ACCOUNT_ID": "35bc7a4522237728214ba9d54c36002e",
-        "AI_MODEL": "gemini-3-flash-preview",
+        "AI_MODEL": "gpt-5-chat-latest",
       },
     },
   },
