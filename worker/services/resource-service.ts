@@ -74,10 +74,16 @@ export class ResourceService {
       }
     } else if (resource.r2Key) {
       await this.r2.delete(resource.r2Key);
-      // Also delete the text companion for PDFs
       if (resource.type === "pdf") {
+        // Clean up both legacy and canonical PDF artifacts.
         const textKey = `${projectId}/${id}-text.md`;
-        await this.r2.delete(textKey);
+        const legacyPdfKey = `${projectId}/${id}.pdf`;
+        if (resource.r2Key !== textKey) {
+          await this.r2.delete(textKey);
+        }
+        if (resource.r2Key !== legacyPdfKey) {
+          await this.r2.delete(legacyPdfKey);
+        }
       }
     }
 
@@ -365,7 +371,7 @@ export class ResourceService {
 
       await this.db
         .update(resources)
-        .set({ status: "indexed", lastIndexedAt: new Date() })
+        .set({ r2Key, status: "indexed", lastIndexedAt: new Date() })
         .where(and(eq(resources.id, id), eq(resources.projectId, projectId)));
     }
 
@@ -462,8 +468,8 @@ export class ResourceService {
   ): Promise<void> {
     try {
       // Upload PDF directly to R2 under project folder
-      const r2Key = `${projectId}/${resourceId}.pdf`;
-      await this.r2.put(r2Key, file, {
+      const pdfR2Key = `${projectId}/${resourceId}.pdf`;
+      await this.r2.put(pdfR2Key, file, {
         httpMetadata: { contentType: "application/pdf" },
         customMetadata: {
           context: `PDF document: ${title}`,
@@ -481,7 +487,7 @@ export class ResourceService {
 
       // Store extracted text in content column for editing
       const updates: Record<string, unknown> = {
-        r2Key,
+        r2Key: pdfR2Key,
         status: "indexed",
         lastIndexedAt: new Date(),
       };
@@ -496,6 +502,8 @@ export class ResourceService {
             context: `PDF document: ${title}`,
           },
         });
+        // Canonical key for retrieval/source mapping should point to text.
+        updates.r2Key = textR2Key;
       }
 
       await this.db
@@ -562,6 +570,41 @@ export class ResourceService {
           }
         }
         continue;
+      }
+
+      // Try matching as a direct resource (pattern: {projectId}/{resourceId}.md)
+      const projectPrefix = `${projectId}/`;
+
+      // Handle canonical PDF text companion keys ({projectId}/{resourceId}-text.md).
+      if (
+        filename.startsWith(projectPrefix) &&
+        filename.endsWith("-text.md")
+      ) {
+        const resourceId = filename
+          .slice(projectPrefix.length, -"-text.md".length)
+          .trim();
+        if (resourceId) {
+          const pdfRows = await this.db
+            .select({ type: resources.type, title: resources.title })
+            .from(resources)
+            .where(
+              and(
+                eq(resources.id, resourceId),
+                eq(resources.projectId, projectId),
+              ),
+            )
+            .limit(1);
+
+          if (
+            pdfRows.length > 0 &&
+            pdfRows[0].type === "pdf" &&
+            !seenTitles.has(pdfRows[0].title)
+          ) {
+            seenTitles.add(pdfRows[0].title);
+            sources.push({ title: pdfRows[0].title, url: null, type: "pdf" });
+            continue;
+          }
+        }
       }
 
       // Try matching as a direct resource (pattern: {projectId}/{resourceId}.md)

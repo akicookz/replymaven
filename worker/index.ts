@@ -120,6 +120,122 @@ function slugify(text: string): string {
     .slice(0, 50);
 }
 
+// ─── RAG Retrieval Helpers ────────────────────────────────────────────────────
+interface PreparedRagChunk {
+  key: string;
+  score: number;
+  text: string;
+}
+
+const RAG_MAX_CONTEXT_CHARS = 12_000;
+const RAG_MAX_CHUNKS = 6;
+const RAG_MAX_CHUNKS_PER_SOURCE = 2;
+const RAG_MAX_CHUNK_CHARS = 1_600;
+const RAG_HARD_MIN_SCORE = 0.2;
+const RAG_PREFERRED_MIN_SCORE = 0.35;
+
+function prepareRagChunks(
+  chunks: Array<{ item?: { key?: string }; score?: number; text?: string }>,
+  projectId: string,
+): { chunks: PreparedRagChunk[]; droppedCrossTenant: number } {
+  const projectPrefix = `${projectId}/`;
+  const normalized: PreparedRagChunk[] = [];
+
+  for (const chunk of chunks) {
+    const key = chunk.item?.key;
+    const text = (chunk.text ?? "").trim();
+    if (!key || !text) continue;
+    normalized.push({
+      key,
+      score: chunk.score ?? 0,
+      text,
+    });
+  }
+
+  const tenantChunks: PreparedRagChunk[] = [];
+  for (const chunk of normalized) {
+    if (chunk.key.startsWith(projectPrefix)) {
+      tenantChunks.push(chunk);
+    }
+  }
+  const droppedCrossTenant = normalized.length - tenantChunks.length;
+
+  // Prefer markdown sources to avoid duplicate/competing PDF raw extraction chunks.
+  const nonPdfChunks = tenantChunks.filter((chunk) => !chunk.key.endsWith(".pdf"));
+  const preferredChunks = nonPdfChunks.length > 0 ? nonPdfChunks : tenantChunks;
+  preferredChunks.sort((a, b) => b.score - a.score);
+
+  return { chunks: preferredChunks, droppedCrossTenant };
+}
+
+function buildRagContext(chunks: PreparedRagChunk[]): {
+  context: string;
+  topScore: number;
+  filenames: string[];
+} {
+  const selected: Array<{ key: string; score: number; text: string }> = [];
+  const sourceCounts = new Map<string, number>();
+  const seenText = new Set<string>();
+  const sourceFilenames = new Set<string>();
+  let contextChars = 0;
+
+  for (const chunk of chunks) {
+    if (selected.length >= RAG_MAX_CHUNKS) break;
+    if (chunk.score < RAG_HARD_MIN_SCORE) continue;
+    if (selected.length >= 2 && chunk.score < RAG_PREFERRED_MIN_SCORE) continue;
+
+    const perSource = sourceCounts.get(chunk.key) ?? 0;
+    if (perSource >= RAG_MAX_CHUNKS_PER_SOURCE) continue;
+
+    const normalizedPrefix = chunk.text.slice(0, 220).toLowerCase();
+    const dedupeKey = `${chunk.key}:${normalizedPrefix}`;
+    if (seenText.has(dedupeKey)) continue;
+
+    const clippedText =
+      chunk.text.length > RAG_MAX_CHUNK_CHARS
+        ? `${chunk.text.slice(0, RAG_MAX_CHUNK_CHARS)}...`
+        : chunk.text;
+
+    if (contextChars >= RAG_MAX_CONTEXT_CHARS) break;
+    let finalText = clippedText;
+    if (contextChars + finalText.length > RAG_MAX_CONTEXT_CHARS) {
+      const remaining = RAG_MAX_CONTEXT_CHARS - contextChars;
+      if (remaining < 250) break;
+      finalText = `${finalText.slice(0, remaining)}...`;
+    }
+
+    selected.push({
+      key: chunk.key,
+      score: chunk.score,
+      text: finalText,
+    });
+    sourceCounts.set(chunk.key, perSource + 1);
+    seenText.add(dedupeKey);
+    contextChars += finalText.length;
+
+    if (chunk.score >= 0.45) {
+      sourceFilenames.add(chunk.key);
+    }
+  }
+
+  if (selected.length === 0) {
+    return { context: "", topScore: 0, filenames: [] };
+  }
+
+  const context = selected
+    .map((chunk) => {
+      const relevance = (chunk.score * 100).toFixed(0);
+      return `<source file="${chunk.key}" relevance="${relevance}%">\n${chunk.text}\n</source>`;
+    })
+    .join("\n\n");
+
+  return {
+    context,
+    topScore: selected[0]?.score ?? 0,
+    filenames: [...sourceFilenames],
+  };
+}
+
 const app = new Hono<HonoAppContext>()
   // ─── Global CORS ────────────────────────────────────────────────────────────
   .use("*", cors())
@@ -430,6 +546,7 @@ const app = new Hono<HonoAppContext>()
       aiService.reformulateQuery(conversationHistory, parsed.data.content),
       aiService.summarizeConversation(conversationHistory),
     ]);
+    const isMultiTurnConversation = conversationHistory.length > 1;
 
     // Query AI Search for relevant context with improved retrieval settings
     let ragContext = "";
@@ -439,16 +556,18 @@ const app = new Hono<HonoAppContext>()
         messages: [{ role: "user", content: searchQuery }],
         ai_search_options: {
           retrieval: {
+            retrieval_type: "hybrid",
             filters: {
               type: "eq",
               key: "folder",
               value: `${project.id}/`,
             },
-            max_num_results: 8,
-            match_threshold: 0.3,
+            max_num_results: 12,
+            match_threshold: 0.2,
           },
           query_rewrite: {
-            enabled: true,
+            // Avoid double rewriting in multi-turn chats since we already reformulate.
+            enabled: !isMultiTurnConversation,
           },
           reranking: {
             enabled: true,
@@ -457,29 +576,21 @@ const app = new Hono<HonoAppContext>()
         },
       });
 
-      if (searchResults?.chunks?.length > 0) {
+      const prepared = prepareRagChunks(searchResults?.chunks ?? [], project.id);
+      if (prepared.droppedCrossTenant > 0) {
+        console.warn(
+          `Dropped ${prepared.droppedCrossTenant} cross-tenant retrieval chunks for project ${project.id}`,
+        );
+      }
+
+      const ragSelection = buildRagContext(prepared.chunks);
+      if (ragSelection.context) {
         // Track the top result score for confidence assessment
-        const topScore =
-          (searchResults.chunks[0] as { score?: number }).score ?? 0;
+        const topScore = ragSelection.topScore;
         const ragConfident = topScore >= 0.6;
 
-        ragContext = searchResults.chunks
-          .map(
-            (item: {
-              item?: { key?: string };
-              score?: number;
-              text?: string;
-            }) => {
-              const filename = item.item?.key;
-              // Collect filenames for source citations from relevant results
-              if (filename && (item.score ?? 0) >= 0.45) {
-                ragFilenames.push(filename);
-              }
-              const relevance = ((item.score ?? 0) * 100).toFixed(0);
-              return `<source file="${filename}" relevance="${relevance}%">\n${item.text ?? ""}\n</source>`;
-            },
-          )
-          .join("\n\n");
+        ragContext = ragSelection.context;
+        ragFilenames.push(...ragSelection.filenames);
 
         // Warn the model when results may not be directly relevant
         if (!ragConfident) {
@@ -2305,13 +2416,42 @@ const app = new Hono<HonoAppContext>()
           resource.content,
         ),
       );
-    } else if (resource.type === "pdf" && resource.r2Key) {
-      // Re-put the existing R2 object to trigger AI Search re-indexing
+    } else if (resource.type === "pdf") {
+      // Keep PDF text companion in sync when editable text exists.
       c.executionCtx.waitUntil(
         (async () => {
           try {
-            const obj = await c.env.UPLOADS.get(resource.r2Key!);
-            if (!obj) {
+            if (resource.content) {
+              const updated = await resourceService.updateResourceContent(
+                resource.id,
+                project.id,
+                resource.title,
+                resource.content,
+              );
+              if (!updated) {
+                throw new Error("Failed to update PDF text companion");
+              }
+              return;
+            }
+
+            const candidateKeys = [
+              resource.r2Key,
+              `${project.id}/${resource.id}.pdf`,
+              `${project.id}/${resource.id}-text.md`,
+            ].filter((key): key is string => Boolean(key));
+
+            let selectedKey: string | null = null;
+            let selectedBody: ArrayBuffer | null = null;
+            for (const key of candidateKeys) {
+              const obj = await c.env.UPLOADS.get(key);
+              if (obj) {
+                selectedKey = key;
+                selectedBody = await obj.arrayBuffer();
+                break;
+              }
+            }
+
+            if (!selectedKey || !selectedBody) {
               await resourceService.updateResourceStatus(
                 resource.id,
                 project.id,
@@ -2319,13 +2459,21 @@ const app = new Hono<HonoAppContext>()
               );
               return;
             }
-            const body = await obj.arrayBuffer();
-            await c.env.UPLOADS.put(resource.r2Key!, body, {
-              httpMetadata: { contentType: "application/pdf" },
-              customMetadata: {
-                context: `PDF document: ${resource.title}`,
-              },
-            });
+
+            if (selectedKey.endsWith(".pdf")) {
+              await c.env.UPLOADS.put(selectedKey, selectedBody, {
+                httpMetadata: { contentType: "application/pdf" },
+                customMetadata: {
+                  context: `PDF document: ${resource.title}`,
+                },
+              });
+            } else {
+              await c.env.UPLOADS.put(selectedKey, selectedBody, {
+                customMetadata: {
+                  context: `PDF document: ${resource.title}`,
+                },
+              });
+            }
             await resourceService.updateResourceStatus(
               resource.id,
               project.id,
