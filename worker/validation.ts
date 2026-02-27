@@ -40,7 +40,7 @@ export const updateWidgetConfigSchema = z.object({
     .optional(),
   headerText: z.string().min(1).max(200).optional(),
   avatarUrl: z.string().max(500).nullable().optional(),
-  position: z.enum(["bottom-right", "bottom-left"]).optional(),
+  position: z.enum(["bottom-right", "bottom-left", "center-inline"]).optional(),
   borderRadius: z.number().min(0).max(50).optional(),
   fontFamily: z.string().max(100).optional(),
   customCss: z.string().max(5000).nullable().optional(),

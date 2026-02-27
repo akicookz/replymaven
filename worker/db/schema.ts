@@ -100,7 +100,7 @@ export const widgetConfig = sqliteTable(
     textColor: text("text_color").notNull().default("#1f2937"),
     headerText: text("header_text").notNull().default("Chat with us"),
     avatarUrl: text("avatar_url"),
-    position: text("position", { enum: ["bottom-right", "bottom-left"] })
+    position: text("position", { enum: ["bottom-right", "bottom-left", "center-inline"] })
       .notNull()
       .default("bottom-right"),
     borderRadius: real("border_radius").notNull().default(16),

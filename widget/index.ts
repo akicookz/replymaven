@@ -233,6 +233,7 @@
     .rm-trigger .rm-icon-chat,
     .rm-trigger .rm-icon-close {
       position: absolute;
+      inset: 0;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -910,11 +911,13 @@
       display: flex;
     }
     .rm-home-banner {
+      width: 100%;
       height: 120px;
       position: relative;
       flex-shrink: 0;
       background-size: cover;
-      background-position: center;
+      background-position: center center;
+      background-repeat: no-repeat;
     }
     .rm-home-avatar {
       position: absolute;
@@ -1727,6 +1730,334 @@
         display: none;
       }
     }
+
+    /* ─── Center Inline Bar ──────────────────────────────────────────────── */
+    @property --rm-glow-angle {
+      syntax: "<angle>";
+      initial-value: 0deg;
+      inherits: false;
+    }
+    @keyframes rm-glow-spin {
+      to { --rm-glow-angle: 360deg; }
+    }
+    @keyframes rm-topic-slide-up {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .rm-inline-bar {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 320px;
+      max-width: calc(100vw - 40px);
+      z-index: 999999;
+      border-radius: 28px;
+      padding: 2px;
+      background: conic-gradient(
+        from var(--rm-glow-angle, 0deg),
+        var(--rm-primary, #2563eb),
+        color-mix(in srgb, var(--rm-primary, #2563eb), #ffffff 40%),
+        var(--rm-primary, #2563eb),
+        color-mix(in srgb, var(--rm-primary, #2563eb), #000000 30%),
+        var(--rm-primary, #2563eb)
+      );
+      animation: rm-glow-spin 4s linear infinite;
+      transition: width 0.35s cubic-bezier(0.4,0,0.2,1);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      visibility: hidden;
+    }
+    .rm-inline-bar.ready {
+      visibility: visible;
+    }
+    .rm-inline-bar.hidden {
+      display: none;
+    }
+    .rm-inline-bar.expanded {
+      width: 560px;
+    }
+    .rm-inline-bar-inner {
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 85%);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-radius: 26px;
+      display: flex;
+      align-items: center;
+      padding: 6px 8px 6px 20px;
+      gap: 8px;
+      position: relative;
+    }
+    .rm-inline-bar-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #ffffff;
+      font-size: 15px;
+      line-height: 1.4;
+      min-width: 0;
+      caret-color: #ffffff;
+    }
+    .rm-inline-bar-input::placeholder {
+      color: rgba(255, 255, 255, 0.5);
+    }
+    .rm-inline-bar-placeholder {
+      position: absolute;
+      left: 20px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 15px;
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: calc(100% - 64px);
+      transition: opacity 0.3s ease;
+    }
+    .rm-inline-bar-placeholder.fade-out {
+      opacity: 0;
+    }
+    .rm-inline-bar-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: none;
+      background: var(--rm-primary, #2563eb);
+      color: #ffffff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: transform 0.2s ease, background 0.2s ease;
+      position: relative;
+    }
+    .rm-inline-bar-btn:hover {
+      transform: scale(1.05);
+    }
+    .rm-inline-bar-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+    .rm-inline-bar-btn .rm-ib-icon-send,
+    .rm-inline-bar-btn .rm-ib-icon-close {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+    .rm-inline-bar-btn .rm-ib-icon-send {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .rm-inline-bar-btn .rm-ib-icon-close {
+      opacity: 0;
+      transform: scale(0.5);
+    }
+    .rm-inline-bar-btn.show-close .rm-ib-icon-send {
+      opacity: 0;
+      transform: scale(0.5);
+    }
+    .rm-inline-bar-btn.show-close .rm-ib-icon-close {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    /* Topics panel above the bar */
+    .rm-inline-bar-topics {
+      position: absolute;
+      bottom: calc(100% + 10px);
+      left: 0;
+      right: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 0 4px;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(8px);
+      transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
+      pointer-events: none;
+    }
+    .rm-inline-bar.expanded .rm-inline-bar-topics {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    .rm-inline-bar-topic {
+      display: inline-flex;
+      align-self: flex-start;
+      padding: 10px 18px;
+      border-radius: 22px;
+      border: none;
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: #ffffff;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s ease, transform 0.1s ease;
+      line-height: 1.3;
+      text-align: left;
+    }
+    .rm-inline-bar-topic:hover {
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 55%);
+      transform: translateX(4px);
+    }
+    .rm-inline-bar.expanded .rm-inline-bar-topic {
+      animation: rm-topic-slide-up 0.3s ease forwards;
+    }
+    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(1) { animation-delay: 0s; }
+    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(2) { animation-delay: 0.05s; }
+    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(3) { animation-delay: 0.1s; }
+    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(4) { animation-delay: 0.15s; }
+    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(5) { animation-delay: 0.2s; }
+
+    /* Center-inline: chat window — transparent, no header, centered */
+    .rm-widget-container.center-inline {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      top: 0;
+      pointer-events: none;
+    }
+    .rm-widget-container.center-inline .rm-trigger {
+      display: none;
+    }
+    .rm-widget-container.center-inline .rm-chat-window {
+      position: fixed;
+      bottom: 72px;
+      left: 50%;
+      transform: translateX(-50%) translateY(16px) scale(0.96);
+      right: auto;
+      transform-origin: bottom center;
+      pointer-events: auto;
+      background: transparent;
+      box-shadow: none;
+      border: none;
+    }
+    .rm-widget-container.center-inline .rm-chat-window.open {
+      transform: translateX(-50%) translateY(0) scale(1);
+    }
+    .rm-widget-container.center-inline .rm-chat-window.bottom-right,
+    .rm-widget-container.center-inline .rm-chat-window.bottom-left {
+      right: auto;
+      left: 50%;
+      transform-origin: bottom center;
+    }
+    .rm-widget-container.center-inline .rm-chat-window.bottom-right.open,
+    .rm-widget-container.center-inline .rm-chat-window.bottom-left.open {
+      transform: translateX(-50%) translateY(0) scale(1);
+    }
+    /* Hide header in center-inline mode */
+    .rm-widget-container.center-inline .rm-header {
+      display: none;
+    }
+    /* Transparent messages area */
+    .rm-widget-container.center-inline .rm-messages {
+      background: transparent;
+    }
+    /* Message bubbles need readable backgrounds */
+    .rm-widget-container.center-inline .rm-message-row.bot .rm-message {
+      background: rgba(20, 20, 20, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: #ffffff;
+    }
+    .rm-widget-container.center-inline .rm-message-row.bot .rm-message a {
+      color: #93c5fd;
+    }
+    .rm-widget-container.center-inline .rm-message-row.visitor .rm-message {
+      background: rgba(255, 255, 255, 0.15) !important;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: #ffffff !important;
+    }
+    /* Input area transparent */
+    .rm-widget-container.center-inline .rm-input-area {
+      background: transparent;
+      border-top: none;
+    }
+    .rm-widget-container.center-inline .rm-input {
+      background: rgba(20, 20, 20, 0.9);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 10px 14px;
+      color: #ffffff !important;
+    }
+    .rm-widget-container.center-inline .rm-input::placeholder {
+      color: rgba(255, 255, 255, 0.4);
+    }
+    /* Quick topics in center-inline */
+    .rm-widget-container.center-inline .rm-quick-topics {
+      background: transparent;
+      backdrop-filter: none;
+    }
+    .rm-widget-container.center-inline .rm-quick-topic {
+      background: rgba(60, 60, 60, 0.8);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+    /* Powered-by footer */
+    .rm-widget-container.center-inline .rm-powered {
+      background: transparent;
+    }
+    /* Home view hidden in center-inline */
+    .rm-widget-container.center-inline .rm-home {
+      display: none;
+    }
+    /* Sources styling */
+    .rm-widget-container.center-inline .rm-source-link {
+      background: rgba(40, 40, 40, 0.8);
+      color: #ffffff !important;
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+    /* Typing indicator */
+    .rm-widget-container.center-inline .rm-typing-row {
+      background: rgba(20, 20, 20, 0.85);
+      border-radius: 12px;
+    }
+
+    /* Center-inline: mobile overrides */
+    @media (max-width: 480px) {
+      .rm-inline-bar {
+        bottom: 16px;
+        width: 280px;
+      }
+      .rm-inline-bar.expanded {
+        width: calc(100vw - 32px);
+      }
+      .rm-inline-bar-topic {
+        font-size: 13px;
+        padding: 8px 14px;
+      }
+      .rm-widget-container.center-inline .rm-chat-window {
+        bottom: 0;
+        left: 0;
+        right: 0;
+        top: 0;
+        width: 100vw;
+        width: 100dvw;
+        transform: translateY(16px) scale(0.96);
+        transform-origin: bottom center;
+      }
+      .rm-widget-container.center-inline .rm-chat-window.open {
+        transform: translateY(0) scale(1);
+      }
+      .rm-widget-container.center-inline .rm-chat-window.bottom-right.open,
+      .rm-widget-container.center-inline .rm-chat-window.bottom-left.open {
+        transform: translateY(0) scale(1);
+        left: 0;
+      }
+    }
   `;
   document.head.appendChild(styles);
 
@@ -2018,6 +2349,158 @@
   container.appendChild(chatWindow);
   container.appendChild(trigger);
   document.body.appendChild(container);
+
+  // ─── Inline Bar DOM (created once, shown only for inline-bar variant) ───────
+  const inlineBar = document.createElement("div");
+  inlineBar.className = "rm-inline-bar";
+
+  const inlineBarTopics = document.createElement("div");
+  inlineBarTopics.className = "rm-inline-bar-topics";
+
+  const inlineBarInner = document.createElement("div");
+  inlineBarInner.className = "rm-inline-bar-inner";
+
+  const inlineBarPlaceholder = document.createElement("span");
+  inlineBarPlaceholder.className = "rm-inline-bar-placeholder";
+  inlineBarPlaceholder.textContent = "Ask a question...";
+
+  const inlineBarInput = document.createElement("input");
+  inlineBarInput.className = "rm-inline-bar-input";
+  inlineBarInput.type = "text";
+
+  const inlineBarBtn = document.createElement("button");
+  inlineBarBtn.className = "rm-inline-bar-btn";
+
+  const ibSendIcon = document.createElement("span");
+  ibSendIcon.className = "rm-ib-icon-send";
+  ibSendIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+
+  const ibCloseIcon = document.createElement("span");
+  ibCloseIcon.className = "rm-ib-icon-close";
+  ibCloseIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+  inlineBarBtn.appendChild(ibSendIcon);
+  inlineBarBtn.appendChild(ibCloseIcon);
+
+  inlineBarInner.appendChild(inlineBarPlaceholder);
+  inlineBarInner.appendChild(inlineBarInput);
+  inlineBarInner.appendChild(inlineBarBtn);
+
+  inlineBar.appendChild(inlineBarTopics);
+  inlineBar.appendChild(inlineBarInner);
+
+  // Not appended to body yet — only when variant is "inline-bar" in loadConfig
+
+  // ─── Inline Bar State ───────────────────────────────────────────────────────
+  let isInlineBarVariant = false;
+  let inlineBarExpanded = false;
+  let placeholderTexts: string[] = ["Ask a question..."];
+  let placeholderIndex = 0;
+  let placeholderInterval: ReturnType<typeof setInterval> | null = null;
+
+  function expandInlineBar() {
+    if (inlineBarExpanded) return;
+    inlineBarExpanded = true;
+    inlineBar.classList.add("expanded");
+    inlineBarPlaceholder.style.display = "none";
+    inlineBarInput.placeholder = "Ask a question...";
+    inlineBarInput.focus();
+    stopPlaceholderRotation();
+    updateInlineBarBtn();
+  }
+
+  function collapseInlineBar() {
+    if (!inlineBarExpanded) return;
+    inlineBarExpanded = false;
+    inlineBar.classList.remove("expanded");
+    inlineBarInput.value = "";
+    inlineBarInput.placeholder = "";
+    inlineBarInput.blur();
+    inlineBarPlaceholder.style.display = "";
+    startPlaceholderRotation();
+    updateInlineBarBtn();
+  }
+
+  function updateInlineBarBtn() {
+    if (inlineBarExpanded && inlineBarInput.value.trim() === "") {
+      inlineBarBtn.classList.add("show-close");
+    } else {
+      inlineBarBtn.classList.remove("show-close");
+    }
+  }
+
+  function startPlaceholderRotation() {
+    if (placeholderInterval) return;
+    if (placeholderTexts.length <= 1) {
+      inlineBarPlaceholder.textContent = placeholderTexts[0] || "Ask a question...";
+      return;
+    }
+    placeholderIndex = 0;
+    inlineBarPlaceholder.textContent = placeholderTexts[0];
+    inlineBarPlaceholder.classList.remove("fade-out");
+
+    placeholderInterval = setInterval(() => {
+      inlineBarPlaceholder.classList.add("fade-out");
+      setTimeout(() => {
+        placeholderIndex = (placeholderIndex + 1) % placeholderTexts.length;
+        inlineBarPlaceholder.textContent = placeholderTexts[placeholderIndex];
+        inlineBarPlaceholder.classList.remove("fade-out");
+      }, 300);
+    }, 3000);
+  }
+
+  function stopPlaceholderRotation() {
+    if (placeholderInterval) {
+      clearInterval(placeholderInterval);
+      placeholderInterval = null;
+    }
+  }
+
+  function sendFromInlineBar() {
+    const text = inlineBarInput.value.trim();
+    if (!text || isSending) return;
+    inlineBarInput.value = "";
+    collapseInlineBar();
+    inlineBar.classList.add("hidden");
+    showChatScreen();
+    openChatWidget();
+    setTimeout(() => handleSendMessage(text), 100);
+  }
+
+  // Inline bar event listeners
+  inlineBarInput.addEventListener("focus", () => {
+    expandInlineBar();
+  });
+
+  inlineBarInput.addEventListener("input", () => {
+    updateInlineBarBtn();
+  });
+
+  inlineBarInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      sendFromInlineBar();
+    }
+  });
+
+  inlineBarBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (inlineBarInput.value.trim()) {
+      sendFromInlineBar();
+    } else if (inlineBarExpanded) {
+      collapseInlineBar();
+    } else {
+      expandInlineBar();
+    }
+  });
+
+  // Click outside to collapse
+  document.addEventListener("click", (e) => {
+    if (!isInlineBarVariant || !inlineBarExpanded) return;
+    if (!inlineBar.contains(e.target as Node)) {
+      collapseInlineBar();
+    }
+  });
 
   // ─── View State ──────────────────────────────────────────────────────────────
   let currentView: "home" | "chat" | "form" | "booking" = "home";
@@ -2668,6 +3151,9 @@
         const w = loadedConfig.widget;
         const primary = w.primaryColor || "#2563eb";
 
+        // Determine position mode early so styling can be conditional
+        const isCenterInline = w.position === "center-inline";
+
         // Set CSS custom properties for theming
         container.style.setProperty("--rm-primary", primary);
         container.style.setProperty("--rm-primary-rgb", hexToRgb(primary));
@@ -2677,11 +3163,12 @@
         header.style.backgroundColor = primary + "e8"; // ~91% opacity for frosted glass
         sendBtn.style.backgroundColor = primary;
 
-        // Chat window
-        if (w.backgroundColor) {
+        // Chat window -- skip inline background/text styles for center-inline
+        // (CSS rules handle transparent bg and white text for that mode)
+        if (w.backgroundColor && !isCenterInline) {
           chatWindow.style.background = w.backgroundColor;
         }
-        if (w.textColor) {
+        if (w.textColor && !isCenterInline) {
           chatWindow.style.color = w.textColor;
           input.style.color = w.textColor;
           homeTitle.style.color = w.textColor;
@@ -2694,7 +3181,11 @@
         headerTitle.textContent = w.headerText || "Chat with us";
 
         // Position
-        if (w.position === "bottom-left") {
+        if (isCenterInline) {
+          isInlineBarVariant = true;
+          container.className = "rm-widget-container center-inline";
+          chatWindow.className = "rm-chat-window center-inline";
+        } else if (w.position === "bottom-left") {
           container.className = "rm-widget-container bottom-left";
           chatWindow.className = "rm-chat-window bottom-left";
         }
@@ -3026,6 +3517,40 @@
         });
       } else {
         quickTopicsContainer.style.display = "none";
+      }
+
+      // ─── Inline Bar Variant Setup ──────────────────────────────────────────
+      if (isInlineBarVariant) {
+        // Apply brand color CSS variables to inline bar (it lives on document.body, not inside container)
+        const inlinePrimary = loadedConfig.widget?.primaryColor || "#2563eb";
+        inlineBar.style.setProperty("--rm-primary", inlinePrimary);
+        inlineBar.style.setProperty("--rm-primary-rgb", hexToRgb(inlinePrimary));
+
+        // Populate inline bar topics from prompt-type quick actions
+        inlineBarTopics.innerHTML = "";
+        if (promptActions.length > 0) {
+          placeholderTexts = promptActions.map((qa) => qa.label);
+          promptActions.forEach((qa) => {
+            const topicBtn = document.createElement("button");
+            topicBtn.className = "rm-inline-bar-topic";
+            topicBtn.textContent = qa.label;
+            topicBtn.onclick = (e) => {
+              e.stopPropagation();
+              if (isSending) return;
+              collapseInlineBar();
+              inlineBar.classList.add("hidden");
+              showChatScreen();
+              openChatWidget();
+              setTimeout(() => handleSendMessage(qa.action), 100);
+            };
+            inlineBarTopics.appendChild(topicBtn);
+          });
+        }
+
+        // Append inline bar to body and start placeholder rotation
+        document.body.appendChild(inlineBar);
+        startPlaceholderRotation();
+        inlineBar.classList.add("ready");
       }
 
       // Show the widget now that config is applied
@@ -3405,8 +3930,10 @@
         textNode.textContent = content;
         msgEl.appendChild(textNode);
       }
-      msgEl.style.backgroundColor = primaryColor;
-      msgEl.style.color = "#ffffff";
+      if (!isInlineBarVariant) {
+        msgEl.style.backgroundColor = primaryColor;
+        msgEl.style.color = "#ffffff";
+      }
     } else {
       // Bot/agent messages: render markdown
       const textContainer = document.createElement("div");
@@ -3460,7 +3987,9 @@
       const isClickable = sourceType === "webpage" && source.url;
       const el = document.createElement(isClickable ? "a" : "span");
       el.className = "rm-source-link";
-      el.style.color = primaryColor + "80";
+      if (!isInlineBarVariant) {
+        el.style.color = primaryColor + "80";
+      }
 
       if (isClickable) {
         (el as HTMLAnchorElement).href = source.url!;
@@ -4071,6 +4600,12 @@
     if (isMobileViewport()) {
       document.body.style.overflow = "hidden";
     }
+    // For center-inline: hide the bar and skip home screen
+    if (isInlineBarVariant) {
+      inlineBar.classList.add("hidden");
+      stopPlaceholderRotation();
+      showChatScreen();
+    }
     // Don't auto-focus the chat input -- the home screen is shown first
   }
 
@@ -4081,6 +4616,11 @@
     // Restore body scroll
     if (isMobileViewport()) {
       document.body.style.overflow = "";
+    }
+    // For center-inline: re-show the bar and reset state
+    if (isInlineBarVariant) {
+      inlineBar.classList.remove("hidden");
+      collapseInlineBar();
     }
   }
 

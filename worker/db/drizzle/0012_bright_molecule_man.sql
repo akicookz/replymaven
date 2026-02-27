@@ -1,0 +1,1 @@
+ALTER TABLE `widget_config` DROP COLUMN `variant`;

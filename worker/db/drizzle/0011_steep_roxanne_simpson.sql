@@ -1,0 +1,1 @@
+ALTER TABLE `widget_config` ADD `variant` text DEFAULT 'floating' NOT NULL;
