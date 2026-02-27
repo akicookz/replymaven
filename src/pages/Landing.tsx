@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import {
   MessageSquare,
@@ -18,6 +18,13 @@ import {
   Zap,
   Twitter,
   Linkedin,
+  Calendar,
+  ClipboardList,
+  Wrench,
+  Phone,
+  Mail,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -110,6 +117,41 @@ const pricingPlans = [
   },
 ];
 
+// ─── Chat Animation Data ──────────────────────────────────────────────────────
+
+interface ChatMessage {
+  role: "bot" | "visitor";
+  content: string;
+  source?: string;
+}
+
+const chatSequence: ChatMessage[] = [
+  {
+    role: "bot",
+    content: "Hi there! How can I help you today?",
+  },
+  {
+    role: "visitor",
+    content: "How do I integrate the widget on my site?",
+  },
+  {
+    role: "bot",
+    content:
+      "Just add a single script tag to your HTML. It takes about 30 seconds to set up!",
+    source: "Getting Started Guide",
+  },
+  {
+    role: "visitor",
+    content: "Can I customize the colors?",
+  },
+  {
+    role: "bot",
+    content:
+      "Absolutely! You can match colors, fonts, position, and tone of voice from the dashboard.",
+    source: "Widget Customization Docs",
+  },
+];
+
 // ─── FAQ Accordion Item ───────────────────────────────────────────────────────
 
 function FaqItem({
@@ -122,24 +164,24 @@ function FaqItem({
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="border-b border-border last:border-b-0">
+    <div className="border-b border-white/[0.06] last:border-b-0">
       <button
         type="button"
         onClick={() => setOpen(!open)}
         className="w-full flex items-center justify-between py-5 text-left cursor-pointer group"
       >
-        <span className="font-medium text-foreground text-[15px] pr-4 group-hover:text-primary transition-colors">
+        <span className="font-normal text-[#e8f0ea] text-[15px] pr-4 group-hover:text-[#4ade80] transition-colors">
           {question}
         </span>
         <ChevronDown
-          className={`w-5 h-5 text-muted-foreground shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          className={`w-5 h-5 text-[#5a7a62] shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
         />
       </button>
       <div
         className={`grid transition-all duration-200 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
       >
         <div className="overflow-hidden">
-          <p className="pb-5 text-sm text-muted-foreground leading-relaxed">
+          <p className="pb-5 text-sm text-[#7a9a82] leading-relaxed">
             {answer}
           </p>
         </div>
@@ -148,116 +190,511 @@ function FaqItem({
   );
 }
 
-// ─── Mock Chat Widget (compact for hero) ──────────────────────────────────────
+// ─── Typing Indicator ─────────────────────────────────────────────────────────
 
-function MockChatWidget() {
+function TypingIndicator() {
   return (
-    <div className="w-full max-w-[340px] bg-white/70 backdrop-blur-xl rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.08)] overflow-hidden border border-white/50">
-      {/* Header */}
-      <div className="bg-[#2d5a2d] px-4 py-3.5 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
-          <Bot className="w-4 h-4 text-white" />
-        </div>
-        <div>
-          <p className="text-white text-sm font-semibold leading-tight">
-            Support Assistant
-          </p>
-          <p className="text-white/60 text-[11px]">Typically replies instantly</p>
-        </div>
+    <div className="flex items-end gap-2">
+      <div className="w-6 h-6 rounded-full bg-[#1a3a22] flex items-center justify-center shrink-0">
+        <Bot className="w-3 h-3 text-[#4ade80]" />
       </div>
-
-      {/* Messages */}
-      <div className="bg-[#fafaf9] p-4 space-y-3">
-        <div className="flex items-end gap-2">
-          <div className="w-6 h-6 rounded-full bg-[#2d5a2d] flex items-center justify-center shrink-0">
-            <Bot className="w-3 h-3 text-white" />
-          </div>
-          <div className="bg-white rounded-[16px_16px_16px_4px] px-3.5 py-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] max-w-[230px]">
-            <p className="text-[13px] text-[#1f2937] leading-snug">
-              Hi there! How can I help you today?
-            </p>
-          </div>
-        </div>
-
-        <div className="flex justify-end">
-          <div className="bg-[#2d5a2d] rounded-[16px_16px_4px_16px] px-3.5 py-2.5 max-w-[230px]">
-            <p className="text-[13px] text-white leading-snug">
-              How do I integrate the widget?
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-end gap-2">
-          <div className="w-6 h-6 rounded-full bg-[#2d5a2d] flex items-center justify-center shrink-0">
-            <Bot className="w-3 h-3 text-white" />
-          </div>
-          <div className="bg-white rounded-[16px_16px_16px_4px] px-3.5 py-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] max-w-[230px]">
-            <p className="text-[13px] text-[#1f2937] leading-snug">
-              Just add a single script tag to your HTML. It takes about 30 seconds!
-            </p>
-            <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-[#2d5a2d]/50">
-              <FileText className="w-2.5 h-2.5" />
-              <span>From: Getting Started Guide</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Input */}
-      <div className="bg-white border-t border-gray-100 px-3 py-2.5 flex items-center gap-2">
-        <div className="flex-1 bg-[#f5f5f4] rounded-full px-3.5 py-2 text-[13px] text-gray-400">
-          Type a message...
-        </div>
-        <div className="w-8 h-8 rounded-full bg-[#2d5a2d] flex items-center justify-center">
-          <Send className="w-3.5 h-3.5 text-white" />
+      <div className="bg-[#162e1c] rounded-[16px_16px_16px_4px] px-4 py-3">
+        <div className="flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#4ade80]/60 animate-[typingDot_1.4s_ease-in-out_infinite]" />
+          <span className="w-1.5 h-1.5 rounded-full bg-[#4ade80]/60 animate-[typingDot_1.4s_ease-in-out_0.2s_infinite]" />
+          <span className="w-1.5 h-1.5 rounded-full bg-[#4ade80]/60 animate-[typingDot_1.4s_ease-in-out_0.4s_infinite]" />
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Mock Dashboard Preview (for feature section) ─────────────────────────────
+// ─── Animated Mock Chat Widget (Hero) ─────────────────────────────────────────
 
-function MockDashboardPreview() {
+function AnimatedChatWidget() {
+  const [visibleMessages, setVisibleMessages] = useState<ChatMessage[]>([]);
+  const [isTyping, setIsTyping] = useState(false);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    function showNext(index: number) {
+      if (index >= chatSequence.length) {
+        timeoutRef.current = setTimeout(() => {
+          setVisibleMessages([]);
+          setIsTyping(false);
+          showNext(0);
+        }, 4000);
+        return;
+      }
+
+      const msg = chatSequence[index];
+
+      if (msg.role === "bot") {
+        setIsTyping(true);
+        timeoutRef.current = setTimeout(() => {
+          setIsTyping(false);
+          setVisibleMessages((prev) => [...prev, msg]);
+          timeoutRef.current = setTimeout(
+            () => showNext(index + 1),
+            1200
+          );
+        }, 1500);
+      } else {
+        timeoutRef.current = setTimeout(() => {
+          setVisibleMessages((prev) => [...prev, msg]);
+          timeoutRef.current = setTimeout(
+            () => showNext(index + 1),
+            800
+          );
+        }, 1000);
+      }
+    }
+
+    timeoutRef.current = setTimeout(() => showNext(0), 800);
+
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [visibleMessages, isTyping]);
+
   return (
-    <div className="bg-white/60 backdrop-blur-xl rounded-xl border border-white/50 p-5 space-y-4 shadow-[0_8px_60px_rgba(0,0,0,0.06)]">
-      <p className="text-sm font-semibold text-foreground">Conversations</p>
-      <div className="grid grid-cols-2 gap-4">
+    <div className="w-[420px] h-[520px] flex flex-col bg-[#0d1f12]/80 backdrop-blur-2xl rounded-2xl shadow-[0_8px_60px_rgba(0,0,0,0.4),0_0_80px_rgba(74,222,128,0.06)] overflow-hidden border border-white/[0.08]">
+      {/* Header */}
+      <div className="bg-[#0a1a0f] px-4 py-3.5 flex items-center gap-3 border-b border-white/[0.06] shrink-0">
+        <div className="w-8 h-8 rounded-full bg-[#4ade80]/15 flex items-center justify-center">
+          <Bot className="w-4 h-4 text-[#4ade80]" />
+        </div>
+        <div className="flex-1">
+          <p className="text-[#e8f0ea] text-sm font-medium leading-tight">
+            Support Assistant
+          </p>
+          <p className="text-[#5a7a62] text-[11px]">
+            Typically replies instantly
+          </p>
+        </div>
+        <div className="w-2 h-2 rounded-full bg-[#4ade80] animate-pulse" />
+      </div>
+
+      {/* Messages */}
+      <div ref={messagesContainerRef} className="p-4 space-y-3 flex-1 overflow-y-auto scrollbar-none">
+        {visibleMessages.map((msg, i) => (
+          <div
+            key={`${i}-${msg.content.slice(0, 10)}`}
+            className="animate-[messageIn_0.3s_ease-out_forwards]"
+          >
+            {msg.role === "bot" ? (
+              <div className="flex items-end gap-2">
+                <div className="w-6 h-6 rounded-full bg-[#1a3a22] flex items-center justify-center shrink-0">
+                  <Bot className="w-3 h-3 text-[#4ade80]" />
+                </div>
+                <div className="bg-[#162e1c] rounded-[16px_16px_16px_4px] px-3.5 py-2.5 max-w-[240px] border border-white/[0.04]">
+                  <p className="text-[13px] text-[#c8dece] leading-snug">
+                    {msg.content}
+                  </p>
+                  {msg.source && (
+                    <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-[#4ade80]/50">
+                      <FileText className="w-2.5 h-2.5" />
+                      <span>From: {msg.source}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex justify-end">
+                <div className="bg-[#4ade80]/15 border border-[#4ade80]/20 rounded-[16px_16px_4px_16px] px-3.5 py-2.5 max-w-[240px]">
+                  <p className="text-[13px] text-[#e8f0ea] leading-snug">
+                    {msg.content}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+        {isTyping && (
+          <div className="animate-[messageIn_0.3s_ease-out_forwards]">
+            <TypingIndicator />
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <div className="bg-[#0a1a0f] border-t border-white/[0.06] px-3 py-2.5 flex items-center gap-2 shrink-0">
+        <div className="flex-1 bg-white/[0.05] rounded-full px-3.5 py-2 text-[13px] text-[#5a7a62] border border-white/[0.06]">
+          Type a message...
+        </div>
+        <div className="w-8 h-8 rounded-full bg-[#4ade80]/15 flex items-center justify-center">
+          <Send className="w-3.5 h-3.5 text-[#4ade80]" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Mock Booking UI ──────────────────────────────────────────────────────────
+
+function MockBookingUI() {
+  const days = [
+    { day: "Mon", date: "12", month: "Jan" },
+    { day: "Tue", date: "13", month: "Jan", selected: true },
+    { day: "Wed", date: "14", month: "Jan" },
+    { day: "Thu", date: "15", month: "Jan" },
+    { day: "Fri", date: "16", month: "Jan" },
+  ];
+
+  const slots = [
+    { time: "9:00 AM", available: true },
+    { time: "9:30 AM", available: true, selected: true },
+    { time: "10:00 AM", available: false },
+    { time: "10:30 AM", available: true },
+    { time: "11:00 AM", available: true },
+    { time: "11:30 AM", available: true },
+  ];
+
+  return (
+    <div className="w-full bg-[#0d1f12]/80 backdrop-blur-2xl rounded-2xl shadow-[0_8px_60px_rgba(0,0,0,0.4),0_0_80px_rgba(74,222,128,0.06)] overflow-hidden border border-white/[0.08]">
+      {/* Header */}
+      <div className="bg-[#0a1a0f] px-5 py-4 flex items-center gap-3 border-b border-white/[0.06]">
+        <div className="w-9 h-9 rounded-full bg-[#4ade80]/15 flex items-center justify-center">
+          <Calendar className="w-4.5 h-4.5 text-[#4ade80]" />
+        </div>
         <div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
-              <MessageSquare className="w-4 h-4 text-muted-foreground" />
+          <p className="text-[#e8f0ea] text-[15px] font-medium leading-tight">
+            Book a Meeting
+          </p>
+          <p className="text-[#5a7a62] text-[12px]">
+            30 min · Select a date & time
+          </p>
+        </div>
+      </div>
+
+      {/* Date picker */}
+      <div className="px-5 pt-4 pb-3">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[12px] text-[#7a9a82]">January 2026</span>
+          <div className="flex gap-1">
+            <div className="w-6 h-6 rounded-md bg-white/[0.05] flex items-center justify-center border border-white/[0.06]">
+              <ChevronLeft className="w-3 h-3 text-[#5a7a62]" />
             </div>
-            <div>
-              <p className="text-lg font-bold text-foreground">247</p>
-              <p className="text-[11px] text-muted-foreground">Today</p>
+            <div className="w-6 h-6 rounded-md bg-white/[0.05] flex items-center justify-center border border-white/[0.06]">
+              <ChevronRight className="w-3 h-3 text-[#5a7a62]" />
             </div>
           </div>
         </div>
+        <div className="flex gap-2">
+          {days.map((d) => (
+            <div
+              key={d.date}
+              className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 rounded-xl border text-center transition-colors ${
+                d.selected
+                  ? "bg-[#4ade80]/15 border-[#4ade80]/25"
+                  : "bg-white/[0.02] border-white/[0.06]"
+              }`}
+            >
+              <span className={`text-[10px] ${d.selected ? "text-[#4ade80]" : "text-[#5a7a62]"}`}>
+                {d.day}
+              </span>
+              <span className={`text-[15px] font-medium ${d.selected ? "text-[#4ade80]" : "text-[#e8f0ea]"}`}>
+                {d.date}
+              </span>
+              <span className={`text-[9px] ${d.selected ? "text-[#4ade80]/60" : "text-[#5a7a62]"}`}>
+                {d.month}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Time slots */}
+      <div className="px-5 pb-3">
+        <p className="text-[11px] text-[#5a7a62] mb-2 uppercase tracking-wider">
+          Available times
+        </p>
+        <div className="grid grid-cols-3 gap-1.5">
+          {slots.map((s) => (
+            <div
+              key={s.time}
+              className={`py-2 rounded-lg text-center text-[12px] border transition-colors ${
+                s.selected
+                  ? "bg-[#4ade80]/15 border-[#4ade80]/25 text-[#4ade80]"
+                  : s.available
+                    ? "bg-white/[0.02] border-white/[0.06] text-[#c8dece]"
+                    : "bg-white/[0.01] border-white/[0.03] text-[#3a5a42] line-through"
+              }`}
+            >
+              {s.time}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Quick form */}
+      <div className="px-5 pb-5 space-y-2.5">
+        <div className="bg-white/[0.03] rounded-lg border border-white/[0.06] px-3 py-2 flex items-center gap-2.5">
+          <Mail className="w-3.5 h-3.5 text-[#5a7a62] shrink-0" />
+          <span className="text-[12px] text-[#7a9a82]">sarah@example.com</span>
+        </div>
+        <div className="bg-white/[0.03] rounded-lg border border-white/[0.06] px-3 py-2 flex items-center gap-2.5">
+          <Phone className="w-3.5 h-3.5 text-[#5a7a62] shrink-0" />
+          <span className="text-[12px] text-[#5a7a62]">Phone (optional)</span>
+        </div>
+        <div className="bg-[#4ade80]/15 border border-[#4ade80]/25 rounded-lg py-2.5 text-center text-[13px] text-[#4ade80] font-medium">
+          Confirm Booking
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Mock Contact Form UI ─────────────────────────────────────────────────────
+
+function MockContactFormUI() {
+  return (
+    <div className="w-full bg-[#0d1f12]/80 backdrop-blur-2xl rounded-2xl shadow-[0_8px_60px_rgba(0,0,0,0.4),0_0_80px_rgba(74,222,128,0.06)] overflow-hidden border border-white/[0.08]">
+      {/* Header */}
+      <div className="bg-[#0a1a0f] px-5 py-4 flex items-center gap-3 border-b border-white/[0.06]">
+        <div className="w-9 h-9 rounded-full bg-[#4ade80]/15 flex items-center justify-center">
+          <ClipboardList className="w-4.5 h-4.5 text-[#4ade80]" />
+        </div>
         <div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
-              <Users className="w-4 h-4 text-muted-foreground" />
+          <p className="text-[#e8f0ea] text-[15px] font-medium leading-tight">
+            Contact Us
+          </p>
+          <p className="text-[#5a7a62] text-[12px]">
+            We'll get back to you within 1-2 hours.
+          </p>
+        </div>
+      </div>
+
+      {/* Form fields */}
+      <div className="px-5 py-5 space-y-3.5">
+        {/* Name */}
+        <div className="space-y-1.5">
+          <label className="text-[11px] text-[#7a9a82] uppercase tracking-wider flex items-center gap-1">
+            Name <span className="text-red-400">*</span>
+          </label>
+          <div className="bg-white/[0.03] rounded-lg border border-white/[0.06] px-3.5 py-2.5">
+            <span className="text-[13px] text-[#c8dece]">Sarah Johnson</span>
+          </div>
+        </div>
+
+        {/* Email */}
+        <div className="space-y-1.5">
+          <label className="text-[11px] text-[#7a9a82] uppercase tracking-wider flex items-center gap-1">
+            Email <span className="text-red-400">*</span>
+          </label>
+          <div className="bg-white/[0.03] rounded-lg border border-white/[0.06] px-3.5 py-2.5">
+            <span className="text-[13px] text-[#c8dece]">sarah@example.com</span>
+          </div>
+        </div>
+
+        {/* Company */}
+        <div className="space-y-1.5">
+          <label className="text-[11px] text-[#7a9a82] uppercase tracking-wider">
+            Company
+          </label>
+          <div className="bg-white/[0.03] rounded-lg border border-white/[0.06] px-3.5 py-2.5">
+            <span className="text-[13px] text-[#c8dece]">Acme Inc</span>
+          </div>
+        </div>
+
+        {/* Message */}
+        <div className="space-y-1.5">
+          <label className="text-[11px] text-[#7a9a82] uppercase tracking-wider flex items-center gap-1">
+            Message <span className="text-red-400">*</span>
+          </label>
+          <div className="bg-white/[0.03] rounded-lg border border-white/[0.06] px-3.5 py-2.5 min-h-[72px]">
+            <span className="text-[13px] text-[#c8dece] leading-relaxed">
+              I'd like to learn more about the enterprise plan and SSO integration options.
+            </span>
+          </div>
+        </div>
+
+        {/* Submit */}
+        <div className="bg-[#4ade80]/15 border border-[#4ade80]/25 rounded-lg py-3 text-center text-[13px] text-[#4ade80] font-medium mt-1">
+          Send Message
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Mock Tool Call UI ────────────────────────────────────────────────────────
+
+function MockToolCallUI() {
+  return (
+    <div className="w-full space-y-3">
+      {/* Chat context - visitor question */}
+      <div className="flex justify-end">
+        <div className="bg-[#4ade80]/15 border border-[#4ade80]/20 rounded-[16px_16px_4px_16px] px-4 py-3 max-w-[300px]">
+          <p className="text-[13px] text-[#e8f0ea] leading-snug">
+            What's the status of order #48291?
+          </p>
+        </div>
+      </div>
+
+      {/* Tool call card */}
+      <div className="bg-[#0d1f12]/80 backdrop-blur-2xl rounded-2xl border border-white/[0.08] overflow-hidden shadow-[0_8px_60px_rgba(0,0,0,0.4)]">
+        {/* Tool header */}
+        <div className="px-4 py-3 border-b border-white/[0.06] flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-[#4ade80]/10 flex items-center justify-center">
+            <Wrench className="w-3.5 h-3.5 text-[#4ade80]" />
+          </div>
+          <div className="flex-1">
+            <p className="text-[12px] text-[#e8f0ea] font-medium">Calling tool</p>
+            <p className="text-[11px] text-[#5a7a62]">get_order_status</p>
+          </div>
+          <span className="text-[10px] bg-[#4ade80]/10 text-[#4ade80] px-2 py-0.5 rounded-full">
+            GET
+          </span>
+        </div>
+
+        {/* Params */}
+        <div className="px-4 py-3 border-b border-white/[0.06]">
+          <p className="text-[10px] text-[#5a7a62] uppercase tracking-wider mb-2">Parameters</p>
+          <div className="bg-[#020804] rounded-lg p-3 font-mono text-[11px] text-[#7a9a82] border border-white/[0.04]">
+            <span className="text-[#5a7a62]">{"{"}</span>
+            {"\n"}
+            {"  "}<span className="text-[#4ade80]/70">"order_id"</span>: <span className="text-amber-400/80">"48291"</span>
+            {"\n"}
+            <span className="text-[#5a7a62]">{"}"}</span>
+          </div>
+        </div>
+
+        {/* Result */}
+        <div className="px-4 py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <p className="text-[10px] text-[#5a7a62] uppercase tracking-wider">Result</p>
+            <div className="flex items-center gap-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-[#4ade80]" />
+              <span className="text-[10px] text-[#4ade80]">200 OK</span>
             </div>
-            <div>
-              <p className="text-lg font-bold text-foreground">89%</p>
-              <p className="text-[11px] text-muted-foreground">Resolved by AI</p>
-            </div>
+            <span className="text-[10px] text-[#5a7a62]">· 142ms</span>
+          </div>
+          <div className="bg-[#020804] rounded-lg p-3 font-mono text-[11px] text-[#7a9a82] border border-white/[0.04]">
+            <span className="text-[#5a7a62]">{"{"}</span>
+            {"\n"}
+            {"  "}<span className="text-[#4ade80]/70">"status"</span>: <span className="text-amber-400/80">"shipped"</span>,{"\n"}
+            {"  "}<span className="text-[#4ade80]/70">"eta"</span>: <span className="text-amber-400/80">"Jan 15, 2026"</span>{"\n"}
+            <span className="text-[#5a7a62]">{"}"}</span>
           </div>
         </div>
       </div>
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between text-[11px]">
-          <span className="text-muted-foreground">Analytics</span>
-          <span className="text-emerald-600 font-medium">+12.5%</span>
+
+      {/* AI response using tool result */}
+      <div className="flex items-end gap-2">
+        <div className="w-7 h-7 rounded-full bg-[#1a3a22] flex items-center justify-center shrink-0">
+          <Bot className="w-3.5 h-3.5 text-[#4ade80]" />
         </div>
-        <div className="flex gap-1 items-end h-12">
-          {[35, 55, 40, 70, 50, 65, 80, 55, 75, 90, 60, 85].map((h, i) => (
-            <div
-              key={i}
-              className="flex-1 bg-primary/15 rounded-t-sm"
-              style={{ height: `${h}%` }}
-            />
+        <div className="bg-[#162e1c] rounded-[16px_16px_16px_4px] px-4 py-3 max-w-[320px] border border-white/[0.04]">
+          <p className="text-[13px] text-[#c8dece] leading-snug">
+            Your order #48291 has been <span className="text-[#4ade80]">shipped</span> and is estimated to arrive by <span className="text-[#e8f0ea]">January 15, 2026</span>.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Mock Dashboard Preview (bigger) ──────────────────────────────────────────
+
+function MockDashboardPreview() {
+  return (
+    <div className="w-full bg-[#0d1f12]/80 backdrop-blur-2xl rounded-2xl border border-white/[0.08] overflow-hidden shadow-[0_8px_60px_rgba(0,0,0,0.4),0_0_80px_rgba(74,222,128,0.06)]">
+      {/* Header */}
+      <div className="bg-[#0a1a0f] px-5 py-4 border-b border-white/[0.06]">
+        <p className="text-[15px] font-medium text-[#e8f0ea]">Dashboard</p>
+        <p className="text-[12px] text-[#5a7a62]">Last 7 days</p>
+      </div>
+
+      <div className="p-5 space-y-5">
+        {/* Stats row */}
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <MessageSquare className="w-3.5 h-3.5 text-[#5a7a62]" />
+              <span className="text-[10px] text-[#5a7a62] uppercase tracking-wider">Conversations</span>
+            </div>
+            <p className="text-xl font-semibold text-[#e8f0ea]">1,247</p>
+            <p className="text-[11px] text-[#4ade80]">+18.2%</p>
+          </div>
+          <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Bot className="w-3.5 h-3.5 text-[#5a7a62]" />
+              <span className="text-[10px] text-[#5a7a62] uppercase tracking-wider">AI Resolved</span>
+            </div>
+            <p className="text-xl font-semibold text-[#e8f0ea]">89%</p>
+            <p className="text-[11px] text-[#4ade80]">+3.1%</p>
+          </div>
+          <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Clock className="w-3.5 h-3.5 text-[#5a7a62]" />
+              <span className="text-[10px] text-[#5a7a62] uppercase tracking-wider">Avg. Time</span>
+            </div>
+            <p className="text-xl font-semibold text-[#e8f0ea]">1.2s</p>
+            <p className="text-[11px] text-[#4ade80]">-0.3s</p>
+          </div>
+        </div>
+
+        {/* Chart */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-[#5a7a62]">Message volume</span>
+            <span className="text-[11px] text-[#4ade80] font-medium">+12.5%</span>
+          </div>
+          <div className="flex gap-1 items-end h-20">
+            {[35, 55, 40, 70, 50, 65, 80, 55, 75, 90, 60, 85, 45, 70, 95, 68, 82, 58, 73, 88].map((h, i) => (
+              <div
+                key={i}
+                className="flex-1 bg-[#4ade80]/15 rounded-t-sm hover:bg-[#4ade80]/25 transition-colors"
+                style={{ height: `${h}%` }}
+              />
+            ))}
+          </div>
+          <div className="flex justify-between text-[9px] text-[#5a7a62]">
+            <span>Mon</span>
+            <span>Tue</span>
+            <span>Wed</span>
+            <span>Thu</span>
+            <span>Fri</span>
+            <span>Sat</span>
+            <span>Sun</span>
+          </div>
+        </div>
+
+        {/* Recent conversations mini-list */}
+        <div className="space-y-2">
+          <p className="text-[11px] text-[#5a7a62] uppercase tracking-wider">Recent</p>
+          {[
+            { name: "Alex K.", topic: "Billing question", status: "resolved" },
+            { name: "Maria S.", topic: "Widget setup help", status: "resolved" },
+            { name: "James L.", topic: "API integration", status: "agent" },
+          ].map((c) => (
+            <div key={c.name} className="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-b-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-6 h-6 rounded-full bg-white/[0.05] flex items-center justify-center text-[10px] text-[#7a9a82]">
+                  {c.name[0]}
+                </div>
+                <div>
+                  <p className="text-[12px] text-[#c8dece]">{c.name}</p>
+                  <p className="text-[10px] text-[#5a7a62]">{c.topic}</p>
+                </div>
+              </div>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                c.status === "resolved"
+                  ? "bg-[#4ade80]/10 text-[#4ade80]"
+                  : "bg-blue-500/10 text-blue-400"
+              }`}>
+                {c.status === "resolved" ? "AI resolved" : "Agent"}
+              </span>
+            </div>
           ))}
         </div>
       </div>
@@ -265,20 +702,485 @@ function MockDashboardPreview() {
   );
 }
 
+// ─── Feature Section: Bento Grid ──────────────────────────────────────────────
+
+function FeatureBentoGrid() {
+  return (
+    <section id="features" className="min-h-screen flex items-center py-24">
+      <div className="max-w-7xl mx-auto px-6 w-full">
+        <div className="text-center mb-16">
+          <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider mb-4">
+            Features
+          </p>
+          <h2 className="text-3xl sm:text-[2.75rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+            Built for support teams,
+            <br />
+            powered by simplicity
+          </h2>
+        </div>
+
+        {/* Bento grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {/* Top row: Big left card + 3 stacked right cards */}
+          <div className="lg:row-span-3 bg-white/[0.03] rounded-2xl border border-white/[0.06] p-8 flex flex-col">
+            <div className="w-10 h-10 rounded-xl bg-[#4ade80]/[0.1] flex items-center justify-center mb-4">
+              <Sparkles className="w-5 h-5 text-[#4ade80]" />
+            </div>
+            <h3 className="text-xl font-medium text-[#e8f0ea] leading-snug mb-3">
+              Smart answers, grounded in your docs
+            </h3>
+            <p className="text-sm text-[#7a9a82] leading-relaxed mb-6">
+              <span className="font-medium text-[#e8f0ea]">Retrieval-augmented generation</span> searches your docs, FAQs, and web pages. Every response is backed by your content -- no hallucination.
+            </p>
+            {/* Large mock: knowledge base + AI response */}
+            <div className="flex-1 bg-white/[0.02] rounded-xl border border-white/[0.06] p-5 space-y-4">
+              {/* Resource list */}
+              <div className="space-y-2.5">
+                <p className="text-[11px] text-[#5a7a62] uppercase tracking-wider">Indexed resources</p>
+                {[
+                  { icon: Globe, name: "docs.example.com", status: "Indexed", color: "text-blue-400" },
+                  { icon: FileText, name: "product-guide.pdf", status: "Indexed", color: "text-red-400" },
+                  { icon: MessageSquare, name: "24 FAQ entries", status: "Indexed", color: "text-[#4ade80]" },
+                  { icon: Globe, name: "help.example.com", status: "Pending", color: "text-blue-400" },
+                ].map((r) => (
+                  <div key={r.name} className="flex items-center justify-between py-1.5">
+                    <div className="flex items-center gap-2.5">
+                      <r.icon className={`w-3.5 h-3.5 ${r.color}`} />
+                      <span className="text-[12px] text-[#c8dece]">{r.name}</span>
+                    </div>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                      r.status === "Indexed"
+                        ? "bg-[#4ade80]/10 text-[#4ade80]"
+                        : "bg-amber-500/10 text-amber-400"
+                    }`}>
+                      {r.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {/* AI response using sources */}
+              <div className="border-t border-white/[0.06] pt-4">
+                <div className="flex items-start gap-2.5">
+                  <div className="w-7 h-7 rounded-full bg-[#4ade80]/[0.1] flex items-center justify-center shrink-0 mt-0.5">
+                    <Sparkles className="w-3.5 h-3.5 text-[#4ade80]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="text-[13px] text-[#c8dece] leading-snug">
+                      You can customize widget colors, position, and tone of voice from the dashboard settings.
+                    </p>
+                    <p className="text-[10px] text-[#5a7a62] flex items-center gap-1">
+                      <FileText className="w-3 h-3" />
+                      Source: Widget Documentation
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right column: 3 stacked cards */}
+          <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-6 flex items-center gap-4">
+            <div className="flex items-start gap-4 flex-1 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-[#4ade80]/[0.1] flex items-center justify-center shrink-0">
+                <Code className="w-5 h-5 text-[#4ade80]" />
+              </div>
+              <div>
+                <h3 className="text-base font-medium text-[#e8f0ea] mb-1.5">
+                  One-line embed
+                </h3>
+                <p className="text-sm text-[#7a9a82] leading-relaxed">
+                  Add a single script tag to any website. Works with React, WordPress, Shopify, Webflow, or plain HTML.
+                </p>
+              </div>
+            </div>
+            {/* Mini code snippet */}
+            <div className="hidden lg:block w-[170px] shrink-0 bg-[#020804] rounded-xl p-3 border border-white/[0.04]">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#ff5f57]" />
+                <div className="w-1.5 h-1.5 rounded-full bg-[#febc2e]" />
+                <div className="w-1.5 h-1.5 rounded-full bg-[#28c840]" />
+              </div>
+              <code className="text-[9px] leading-relaxed text-[#4ade80] font-mono whitespace-pre">{'<script\n  src="replymaven.com\n  /widget-embed.js"\n/>'}</code>
+            </div>
+          </div>
+
+          <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-6 flex items-center gap-4">
+            <div className="flex items-start gap-4 flex-1 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-[#4ade80]/[0.1] flex items-center justify-center shrink-0">
+                <Palette className="w-5 h-5 text-[#4ade80]" />
+              </div>
+              <div>
+                <h3 className="text-base font-medium text-[#e8f0ea] mb-1.5">
+                  Full customization
+                </h3>
+                <p className="text-sm text-[#7a9a82] leading-relaxed">
+                  Colors, fonts, position, tone of voice, intro messages, quick actions, and custom CSS. Native to your brand.
+                </p>
+              </div>
+            </div>
+            {/* Mini customization panel */}
+            <div className="hidden lg:block w-[170px] shrink-0 bg-white/[0.02] rounded-xl p-3 border border-white/[0.06] space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-[#5a7a62]">Colors</span>
+                <div className="flex gap-1">
+                  <div className="w-4 h-4 rounded-full bg-[#4ade80] ring-1 ring-[#4ade80]/30 ring-offset-1 ring-offset-[#0a1a0f]" />
+                  <div className="w-4 h-4 rounded-full bg-blue-500" />
+                  <div className="w-4 h-4 rounded-full bg-violet-500" />
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-[#5a7a62]">Tone</span>
+                <span className="text-[9px] bg-[#4ade80]/[0.1] text-[#4ade80] px-2 py-0.5 rounded-full">Friendly</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-[#5a7a62]">Position</span>
+                <span className="text-[9px] bg-white/[0.05] text-[#7a9a82] px-2 py-0.5 rounded-full">Bottom-right</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-6 flex items-center gap-4">
+            <div className="flex items-start gap-4 flex-1 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-[#4ade80]/[0.1] flex items-center justify-center shrink-0">
+                <Wrench className="w-5 h-5 text-[#4ade80]" />
+              </div>
+              <div>
+                <h3 className="text-base font-medium text-[#e8f0ea] mb-1.5">
+                  Tool calls
+                </h3>
+                <p className="text-sm text-[#7a9a82] leading-relaxed">
+                  Connect your AI to any external API. The bot can look up orders, check inventory, or trigger workflows -- autonomously.
+                </p>
+              </div>
+            </div>
+            {/* Mini API call graphic */}
+            <div className="hidden lg:block w-[170px] shrink-0 bg-[#020804] rounded-xl p-3 border border-white/[0.04] space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] bg-[#4ade80]/15 text-[#4ade80] px-1.5 py-0.5 rounded font-mono">GET</span>
+                <span className="text-[9px] text-[#5a7a62] font-mono truncate">/api/orders</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#4ade80]" />
+                <span className="text-[9px] text-[#4ade80] font-mono">200 OK</span>
+                <span className="text-[9px] text-[#5a7a62]">· 142ms</span>
+              </div>
+              <div className="text-[8px] text-[#5a7a62] font-mono bg-white/[0.03] rounded px-1.5 py-1 mt-1">
+                {"{"} "status": "shipped" {"}"}
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom row: 2 half-width cards */}
+          <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-6 space-y-4">
+            <div className="w-10 h-10 rounded-xl bg-[#4ade80]/[0.1] flex items-center justify-center">
+              <Send className="w-5 h-5 text-[#4ade80]" />
+            </div>
+            <h3 className="text-base font-medium text-[#e8f0ea]">
+              Live agent handoff
+            </h3>
+            <div className="bg-white/[0.02] rounded-xl border border-white/[0.06] p-3.5 space-y-2.5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-6 h-6 rounded-full bg-amber-500/10 flex items-center justify-center">
+                  <Clock className="w-3 h-3 text-amber-400" />
+                </div>
+                <span className="text-[12px] text-[#7a9a82]">AI confidence is low</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="w-6 h-6 rounded-full bg-blue-500/10 flex items-center justify-center">
+                  <Send className="w-3 h-3 text-blue-400" />
+                </div>
+                <span className="text-[12px] text-[#7a9a82]">Notifying agent via Telegram</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <div className="w-6 h-6 rounded-full bg-[#4ade80]/10 flex items-center justify-center">
+                  <Check className="w-3 h-3 text-[#4ade80]" />
+                </div>
+                <span className="text-[12px] text-[#e8f0ea]">Agent replied in chat</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-6 space-y-4">
+            <div className="w-10 h-10 rounded-xl bg-[#4ade80]/[0.1] flex items-center justify-center">
+              <BarChart3 className="w-5 h-5 text-[#4ade80]" />
+            </div>
+            <h3 className="text-base font-medium text-[#e8f0ea]">
+              Conversation analytics
+            </h3>
+            <div className="bg-white/[0.02] rounded-xl border border-white/[0.06] p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] text-[#5a7a62]">Resolution rate</span>
+                <span className="text-[12px] text-[#4ade80] font-medium">89%</span>
+              </div>
+              <div className="w-full bg-white/[0.05] rounded-full h-1.5">
+                <div className="bg-[#4ade80]/30 h-1.5 rounded-full" style={{ width: "89%" }} />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] text-[#5a7a62]">Avg. response time</span>
+                <span className="text-[12px] text-[#e8f0ea]">1.2s</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] text-[#5a7a62]">Auto-drafted responses</span>
+                <span className="text-[12px] text-[#e8f0ea]">34 drafts</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Feature Section: Booking ─────────────────────────────────────────────────
+
+function FeatureBooking() {
+  return (
+    <section className="min-h-screen flex items-center py-24 bg-white/[0.015]">
+      <div className="max-w-7xl mx-auto px-6 w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          {/* Copy */}
+          <div className="space-y-5">
+            <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider">
+              Booking
+            </p>
+            <h2 className="text-3xl sm:text-[2.5rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+              Let visitors book meetings,
+              <br />
+              right from the chat
+            </h2>
+            <p className="text-[#7a9a82] leading-relaxed max-w-lg">
+              <span className="font-medium text-[#e8f0ea]">Built-in scheduling</span> with configurable availability, time zones, slot durations, and buffer times. The AI can detect booking intent and open the scheduler automatically -- or visitors can trigger it from a quick action button.
+            </p>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              {[
+                { icon: Calendar, label: "Date & time picker" },
+                { icon: Globe, label: "Timezone support" },
+                { icon: Mail, label: "Email confirmations" },
+                { icon: Zap, label: "AI-triggered" },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-white/[0.06] bg-white/[0.03] text-sm"
+                >
+                  <item.icon className="w-4 h-4 text-[#5a7a62]" />
+                  <span className="text-[#e8f0ea] font-medium">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Visual */}
+          <div className="relative">
+            <div className="absolute -inset-8 bg-[#4ade80]/[0.02] rounded-[2rem] blur-3xl" />
+            <div className="relative">
+              <MockBookingUI />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Feature Section: Contact Form ────────────────────────────────────────────
+
+function FeatureContactForm() {
+  return (
+    <section className="min-h-screen flex items-center py-24">
+      <div className="max-w-7xl mx-auto px-6 w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          {/* Visual */}
+          <div className="relative order-2 lg:order-1">
+            <div className="absolute -inset-8 bg-[#4ade80]/[0.02] rounded-[2rem] blur-3xl" />
+            <div className="relative">
+              <MockContactFormUI />
+            </div>
+          </div>
+
+          {/* Copy */}
+          <div className="space-y-5 order-1 lg:order-2">
+            <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider">
+              Contact Forms
+            </p>
+            <h2 className="text-3xl sm:text-[2.5rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+              Capture leads with
+              <br />
+              built-in contact forms
+            </h2>
+            <p className="text-[#7a9a82] leading-relaxed max-w-lg">
+              <span className="font-medium text-[#e8f0ea]">Dynamic form builder</span> with custom fields -- text inputs, textareas, required field validation, and a configurable description message. Submissions are stored, show up in your dashboard, and notify your team via Telegram.
+            </p>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              {[
+                { icon: ClipboardList, label: "Custom fields" },
+                { icon: Check, label: "Validation" },
+                { icon: Send, label: "Telegram alerts" },
+                { icon: Users, label: "Lead capture" },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-white/[0.06] bg-white/[0.03] text-sm"
+                >
+                  <item.icon className="w-4 h-4 text-[#5a7a62]" />
+                  <span className="text-[#e8f0ea] font-medium">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Feature Section: Tool Calls ──────────────────────────────────────────────
+
+function FeatureToolCalls() {
+  return (
+    <section className="min-h-screen flex items-center py-24 bg-white/[0.015]">
+      <div className="max-w-7xl mx-auto px-6 w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          {/* Copy */}
+          <div className="space-y-5">
+            <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider">
+              Tool Calls
+            </p>
+            <h2 className="text-3xl sm:text-[2.5rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+              Connect your AI
+              <br />
+              to any API
+            </h2>
+            <p className="text-[#7a9a82] leading-relaxed max-w-lg">
+              <span className="font-medium text-[#e8f0ea]">Define external tools</span> with endpoints, parameters, and response mappings. The AI decides when to call them, executes HTTP requests, and weaves the results into natural conversation. Up to 20 tools per project with full execution logging.
+            </p>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              {[
+                { icon: Wrench, label: "GET & POST" },
+                { icon: Zap, label: "AI-autonomous" },
+                { icon: BarChart3, label: "Execution logs" },
+                { icon: Code, label: "Response mapping" },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-white/[0.06] bg-white/[0.03] text-sm"
+                >
+                  <item.icon className="w-4 h-4 text-[#5a7a62]" />
+                  <span className="text-[#e8f0ea] font-medium">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Visual */}
+          <div className="relative">
+            <div className="absolute -inset-8 bg-[#4ade80]/[0.02] rounded-[2rem] blur-3xl" />
+            <div className="relative">
+              <MockToolCallUI />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Feature Section: Analytics ───────────────────────────────────────────────
+
+function FeatureAnalytics() {
+  return (
+    <section className="min-h-screen flex items-center py-24">
+      <div className="max-w-7xl mx-auto px-6 w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          {/* Visual */}
+          <div className="relative order-2 lg:order-1">
+            <div className="absolute -inset-8 bg-[#4ade80]/[0.02] rounded-[2rem] blur-3xl" />
+            <div className="relative">
+              <MockDashboardPreview />
+            </div>
+          </div>
+
+          {/* Copy */}
+          <div className="space-y-5 order-1 lg:order-2">
+            <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider">
+              Analytics & Insights
+            </p>
+            <h2 className="text-3xl sm:text-[2.5rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+              Track performance,
+              <br />
+              improve over time
+            </h2>
+            <p className="text-[#7a9a82] leading-relaxed max-w-lg">
+              <span className="font-medium text-[#e8f0ea]">Conversation analytics</span>, response quality tracking, and auto-generated canned response drafts. See what your visitors are asking and how well your bot is performing.
+            </p>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              {[
+                { icon: BarChart3, label: "Analytics" },
+                { icon: Bot, label: "Auto-drafts" },
+                { icon: MessageSquare, label: "Conversations" },
+                { icon: Zap, label: "Quick Actions" },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-white/[0.06] bg-white/[0.03] text-sm"
+                >
+                  <item.icon className="w-4 h-4 text-[#5a7a62]" />
+                  <span className="text-[#e8f0ea] font-medium">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ─── Landing Page ─────────────────────────────────────────────────────────────
 
 function Landing() {
   return (
-    <div className="min-h-screen bg-background scroll-smooth">
+    <div className="min-h-screen bg-[#060e08] scroll-smooth">
+      {/* Inline keyframes for animations */}
+      <style>{`
+        @keyframes messageIn {
+          from {
+            opacity: 0;
+            transform: translateY(8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes typingDot {
+          0%, 60%, 100% {
+            opacity: 0.3;
+            transform: translateY(0);
+          }
+          30% {
+            opacity: 1;
+            transform: translateY(-3px);
+          }
+        }
+        @keyframes glowPulse {
+          0%, 100% {
+            opacity: 0.4;
+          }
+          50% {
+            opacity: 0.7;
+          }
+        }
+      `}</style>
+
       {/* ── Floating Header ──────────────────────────────────────────────── */}
       <header className="fixed top-0 left-0 right-0 z-50 flex justify-center pt-4 px-4">
-        <nav className="flex items-center gap-1 bg-white/60 backdrop-blur-xl border border-white/50 rounded-full px-2 py-1.5 shadow-[0_4px_30px_rgba(0,0,0,0.06)]">
+        <nav className="flex items-center gap-1 bg-[#0a1a0f]/70 backdrop-blur-2xl border border-white/[0.08] rounded-full px-2 py-1.5 shadow-[0_4px_30px_rgba(0,0,0,0.3)]">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 pl-3 pr-4">
-            <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
-              <MessageSquare className="w-3.5 h-3.5 text-primary-foreground" />
+            <div className="w-7 h-7 rounded-lg bg-[#4ade80]/15 flex items-center justify-center">
+              <MessageSquare className="w-3.5 h-3.5 text-[#4ade80]" />
             </div>
-            <span className="font-semibold text-foreground text-[15px] tracking-tight">
+            <span className="font-medium text-[#e8f0ea] text-[15px] tracking-tight">
               ReplyMaven
             </span>
           </Link>
@@ -287,31 +1189,31 @@ function Landing() {
           <div className="hidden md:flex items-center">
             <a
               href="#features"
-              className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="px-4 py-2 text-sm text-[#7a9a82] hover:text-[#e8f0ea] transition-colors"
             >
               Features
             </a>
             <a
               href="#benefits"
-              className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="px-4 py-2 text-sm text-[#7a9a82] hover:text-[#e8f0ea] transition-colors"
             >
               Benefits
             </a>
             <a
               href="#pricing"
-              className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="px-4 py-2 text-sm text-[#7a9a82] hover:text-[#e8f0ea] transition-colors"
             >
               Pricing
             </a>
             <a
               href="#faq"
-              className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="px-4 py-2 text-sm text-[#7a9a82] hover:text-[#e8f0ea] transition-colors"
             >
               FAQ
             </a>
             <Link
               to="/docs"
-              className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="px-4 py-2 text-sm text-[#7a9a82] hover:text-[#e8f0ea] transition-colors"
             >
               Docs
             </Link>
@@ -322,7 +1224,7 @@ function Landing() {
 
           {/* CTA */}
           <Link to="/signup">
-            <Button className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90 px-5 h-9 text-[13px] font-medium">
+            <Button className="rounded-full bg-black text-white hover:bg-black/80 px-5 h-9 text-[13px] font-medium border border-white/[0.08]">
               Try ReplyMaven free
             </Button>
           </Link>
@@ -330,100 +1232,79 @@ function Landing() {
       </header>
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <section className="pt-32 pb-20 lg:pt-40 lg:pb-28">
-        <div className="max-w-4xl mx-auto px-6 text-center">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-primary/[0.06] border border-primary/10 text-sm text-primary mb-8">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span className="font-medium">AI-powered support in minutes</span>
-          </div>
-
-          <h1 className="text-[2.75rem] sm:text-[3.5rem] lg:text-[4.25rem] font-bold text-foreground tracking-tight leading-[1.08] mb-6">
-            Resolve support tickets,
-            <br />
-            <span className="text-muted-foreground">powered by your docs</span>
-          </h1>
-
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed mb-10">
-            An AI chatbot that actually knows your product. It learns from your docs,
-            matches your brand, and embeds on your site in one line of code.
-            When it can't help, it hands off to your team.
-          </p>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
-            <Link to="/signup">
-              <Button className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90 px-8 h-12 text-[15px] font-medium">
-                Start Free
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </Button>
-            </Link>
-            <a href="#how-it-works">
-              <Button
-                variant="outline"
-                className="rounded-full px-8 h-12 text-[15px]"
-              >
-                See How It Works
-              </Button>
-            </a>
-          </div>
-
-          <div className="flex items-center justify-center gap-6 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-primary" />
-              No credit card required
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-primary" />
-              5-minute setup
-            </span>
-          </div>
+      <section className="relative min-h-screen flex items-center pt-24 pb-20 overflow-hidden">
+        {/* Background effects */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-[#4ade80]/[0.03] rounded-full blur-[120px] animate-[glowPulse_6s_ease-in-out_infinite]" />
+          <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-[#22c55e]/[0.02] rounded-full blur-[100px] animate-[glowPulse_8s_ease-in-out_2s_infinite]" />
         </div>
 
-        {/* Hero visual - widget in browser mockup */}
-        <div className="max-w-5xl mx-auto px-6 mt-16">
-          <div className="relative">
-            <div className="absolute -inset-4 bg-primary/[0.03] rounded-[2rem] blur-2xl" />
-            <div className="relative bg-white/60 backdrop-blur-xl rounded-2xl shadow-[0_8px_60px_rgba(0,0,0,0.06)] border border-white/50 p-6 pt-10">
-              {/* Browser dots */}
-              <div className="absolute top-3 left-5 flex gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
-                <div className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
-                <div className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
-              </div>
-              <div className="absolute top-2.5 left-1/2 -translate-x-1/2 bg-white/50 backdrop-blur-sm rounded-lg px-12 py-1.5 text-[11px] text-muted-foreground border border-white/40">
-                yoursite.com
+        <div className="max-w-7xl mx-auto px-6 relative w-full">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_460px] gap-12 lg:gap-20 items-center">
+            {/* Left - Copy */}
+            <div>
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#4ade80]/[0.08] border border-[#4ade80]/15 text-sm text-[#4ade80] mb-8">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span className="font-medium">
+                  Your AI support agent, live in minutes
+                </span>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8 items-start">
-                {/* Fake page content */}
-                <div className="space-y-4 opacity-20 py-4">
-                  <div className="h-6 bg-gray-200 rounded-lg w-2/3" />
-                  <div className="h-3 bg-gray-200 rounded-full w-full" />
-                  <div className="h-3 bg-gray-200 rounded-full w-4/5" />
-                  <div className="h-3 bg-gray-200 rounded-full w-3/4" />
-                  <div className="h-32 bg-gray-100 rounded-xl w-full mt-4" />
-                  <div className="h-3 bg-gray-200 rounded-full w-2/3" />
-                  <div className="h-3 bg-gray-200 rounded-full w-1/2" />
-                  <div className="h-3 bg-gray-200 rounded-full w-5/6" />
-                  <div className="h-20 bg-gray-100 rounded-xl w-full" />
-                </div>
+              <h1 className="text-[2.75rem] sm:text-[3.5rem] lg:text-[4.5rem] font-medium text-[#f0f5f1] tracking-tight leading-[1.06] mb-6">
+                Turn your docs into
+                <br />
+                <span className="text-[#7a9a82]">
+                  an always-on support team
+                </span>
+              </h1>
 
-                {/* Widget */}
-                <div className="flex justify-end">
-                  <MockChatWidget />
-                </div>
+              <p className="text-lg text-[#7a9a82] max-w-xl leading-relaxed mb-10">
+                ReplyMaven reads your knowledge base and answers customer
+                questions instantly. When it can't, it hands off to your team
+                -- seamlessly. One script tag to go live.
+              </p>
+
+              <div className="flex flex-col sm:flex-row items-start gap-4 mb-8">
+                <Link to="/signup">
+                  <Button className="rounded-full bg-black text-white hover:bg-black/80 px-8 h-12 text-[15px] font-medium border border-white/[0.1] shadow-[0_0_30px_rgba(0,0,0,0.5)]">
+                    Start Free
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </Button>
+                </Link>
+                <a href="#how-it-works">
+                  <Button className="rounded-full bg-transparent text-[#e8f0ea] hover:bg-white/[0.05] px-8 h-12 text-[15px] border border-white/[0.1]">
+                    See How It Works
+                  </Button>
+                </a>
               </div>
+
+              <div className="flex items-center gap-6 text-sm text-[#5a7a62]">
+                <span className="flex items-center gap-1.5">
+                  <Check className="w-4 h-4 text-[#4ade80]" />
+                  No credit card required
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Check className="w-4 h-4 text-[#4ade80]" />
+                  5-minute setup
+                </span>
+              </div>
+            </div>
+
+            {/* Right - Animated Widget */}
+            <div className="flex justify-center lg:justify-end">
+              <AnimatedChatWidget />
             </div>
           </div>
         </div>
       </section>
 
       {/* ── Social Proof Bar ─────────────────────────────────────────────── */}
-      <section className="py-12 border-t border-border/40">
-        <div className="max-w-5xl mx-auto px-6">
-          <p className="text-center text-sm text-muted-foreground mb-8">
+      <section className="py-12 border-t border-white/[0.04]">
+        <div className="max-w-7xl mx-auto px-6">
+          <p className="text-center text-sm text-[#5a7a62] mb-8">
             Powering customer support for fast-growing teams
           </p>
-          <div className="flex items-center justify-center gap-10 md:gap-16 flex-wrap opacity-30">
+          <div className="flex items-center justify-center gap-10 md:gap-16 flex-wrap opacity-20">
             {[
               "Acme Corp",
               "Nebula",
@@ -434,7 +1315,7 @@ function Landing() {
             ].map((name) => (
               <span
                 key={name}
-                className="text-sm font-bold tracking-tight text-foreground"
+                className="text-sm font-medium tracking-tight text-[#e8f0ea]"
               >
                 {name}
               </span>
@@ -444,111 +1325,126 @@ function Landing() {
       </section>
 
       {/* ── How It Works ─────────────────────────────────────────────────── */}
-      <section id="how-it-works" className="py-24">
-        <div className="max-w-5xl mx-auto px-6">
+      <section id="how-it-works" className="min-h-screen flex items-center py-24">
+        <div className="max-w-7xl mx-auto px-6 w-full">
           <div className="text-center mb-16">
-            <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+            <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider mb-4">
               How It Works
             </p>
-            <h2 className="text-3xl sm:text-[2.75rem] font-bold text-foreground tracking-tight leading-tight">
+            <h2 className="text-3xl sm:text-[2.75rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
               Live in three simple steps
             </h2>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Step 1 */}
-            <div className="bg-card rounded-2xl border border-border p-7 space-y-4">
-              <div className="w-10 h-10 rounded-xl bg-primary/[0.08] flex items-center justify-center">
-                <FileText className="w-5 h-5 text-primary" />
+            <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-7 space-y-4">
+              <div className="w-10 h-10 rounded-xl bg-[#4ade80]/[0.1] flex items-center justify-center">
+                <FileText className="w-5 h-5 text-[#4ade80]" />
               </div>
-              <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-foreground text-background text-xs font-bold">
+              <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#e8f0ea] text-[#060e08] text-xs font-semibold">
                 1
               </div>
-              <h3 className="text-lg font-semibold text-foreground">
+              <h3 className="text-lg font-medium text-[#e8f0ea]">
                 Add your knowledge
               </h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Upload docs, paste URLs, or write FAQs. We index everything automatically for AI retrieval.
+              <p className="text-sm text-[#7a9a82] leading-relaxed">
+                Upload docs, paste URLs, or write FAQs. We index everything
+                automatically for AI retrieval.
               </p>
               {/* Mini resource list */}
-              <div className="bg-background rounded-xl border border-border p-3 space-y-2">
+              <div className="bg-white/[0.02] rounded-xl border border-white/[0.06] p-3 space-y-2">
                 <div className="flex items-center gap-2">
-                  <Globe className="w-3.5 h-3.5 text-primary" />
-                  <span className="text-[12px] text-foreground truncate flex-1">docs.example.com</span>
-                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                  <Globe className="w-3.5 h-3.5 text-[#4ade80]" />
+                  <span className="text-[12px] text-[#c8dece] truncate flex-1">
+                    docs.example.com
+                  </span>
+                  <Check className="w-3.5 h-3.5 text-[#4ade80]" />
                 </div>
                 <div className="flex items-center gap-2">
-                  <FileText className="w-3.5 h-3.5 text-primary" />
-                  <span className="text-[12px] text-foreground truncate flex-1">product-guide.pdf</span>
-                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                  <FileText className="w-3.5 h-3.5 text-[#4ade80]" />
+                  <span className="text-[12px] text-[#c8dece] truncate flex-1">
+                    product-guide.pdf
+                  </span>
+                  <Check className="w-3.5 h-3.5 text-[#4ade80]" />
                 </div>
                 <div className="flex items-center gap-2">
-                  <MessageSquare className="w-3.5 h-3.5 text-primary" />
-                  <span className="text-[12px] text-foreground truncate flex-1">12 FAQ entries</span>
-                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                  <MessageSquare className="w-3.5 h-3.5 text-[#4ade80]" />
+                  <span className="text-[12px] text-[#c8dece] truncate flex-1">
+                    12 FAQ entries
+                  </span>
+                  <Check className="w-3.5 h-3.5 text-[#4ade80]" />
                 </div>
               </div>
             </div>
 
             {/* Step 2 */}
-            <div className="bg-card rounded-2xl border border-border p-7 space-y-4">
-              <div className="w-10 h-10 rounded-xl bg-primary/[0.08] flex items-center justify-center">
-                <Palette className="w-5 h-5 text-primary" />
+            <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-7 space-y-4">
+              <div className="w-10 h-10 rounded-xl bg-[#4ade80]/[0.1] flex items-center justify-center">
+                <Palette className="w-5 h-5 text-[#4ade80]" />
               </div>
-              <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-foreground text-background text-xs font-bold">
+              <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#e8f0ea] text-[#060e08] text-xs font-semibold">
                 2
               </div>
-              <h3 className="text-lg font-semibold text-foreground">
+              <h3 className="text-lg font-medium text-[#e8f0ea]">
                 Customize your bot
               </h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Match your brand colors, set the tone of voice, and configure quick actions. Make it yours.
+              <p className="text-sm text-[#7a9a82] leading-relaxed">
+                Match your brand colors, set the tone of voice, and configure
+                quick actions. Make it yours.
               </p>
               {/* Mini customization panel */}
-              <div className="bg-background rounded-xl border border-border p-3 space-y-3">
+              <div className="bg-white/[0.02] rounded-xl border border-white/[0.06] p-3 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[12px] text-muted-foreground">Colors</span>
+                  <span className="text-[12px] text-[#5a7a62]">Colors</span>
                   <div className="flex gap-1.5">
-                    <div className="w-5 h-5 rounded-full bg-[#2d5a2d] ring-2 ring-primary ring-offset-1" />
-                    <div className="w-5 h-5 rounded-full bg-blue-600" />
-                    <div className="w-5 h-5 rounded-full bg-violet-600" />
+                    <div className="w-5 h-5 rounded-full bg-[#4ade80] ring-2 ring-[#4ade80]/30 ring-offset-1 ring-offset-[#0a1a0f]" />
+                    <div className="w-5 h-5 rounded-full bg-blue-500" />
+                    <div className="w-5 h-5 rounded-full bg-violet-500" />
                     <div className="w-5 h-5 rounded-full bg-orange-500" />
                   </div>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[12px] text-muted-foreground">Tone</span>
-                  <span className="text-[12px] bg-primary/[0.08] text-primary px-2.5 py-0.5 rounded-full font-medium">Friendly</span>
+                  <span className="text-[12px] text-[#5a7a62]">Tone</span>
+                  <span className="text-[12px] bg-[#4ade80]/[0.1] text-[#4ade80] px-2.5 py-0.5 rounded-full font-medium">
+                    Friendly
+                  </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[12px] text-muted-foreground">Position</span>
-                  <span className="text-[12px] bg-muted px-2.5 py-0.5 rounded-full text-muted-foreground">Bottom-right</span>
+                  <span className="text-[12px] text-[#5a7a62]">Position</span>
+                  <span className="text-[12px] bg-white/[0.05] px-2.5 py-0.5 rounded-full text-[#7a9a82]">
+                    Bottom-right
+                  </span>
                 </div>
               </div>
             </div>
 
             {/* Step 3 */}
-            <div className="bg-card rounded-2xl border border-border p-7 space-y-4">
-              <div className="w-10 h-10 rounded-xl bg-primary/[0.08] flex items-center justify-center">
-                <Code className="w-5 h-5 text-primary" />
+            <div className="bg-white/[0.03] rounded-2xl border border-white/[0.06] p-7 space-y-4">
+              <div className="w-10 h-10 rounded-xl bg-[#4ade80]/[0.1] flex items-center justify-center">
+                <Code className="w-5 h-5 text-[#4ade80]" />
               </div>
-              <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-foreground text-background text-xs font-bold">
+              <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#e8f0ea] text-[#060e08] text-xs font-semibold">
                 3
               </div>
-              <h3 className="text-lg font-semibold text-foreground">
+              <h3 className="text-lg font-medium text-[#e8f0ea]">
                 Embed & go live
               </h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Copy one script tag into your site. That's it. Your AI support bot is live and ready.
+              <p className="text-sm text-[#7a9a82] leading-relaxed">
+                Copy one script tag into your site. That's it. Your AI support
+                bot is live and ready.
               </p>
               {/* Mini code snippet */}
-              <div className="bg-[#1a1a2e] rounded-xl p-3 overflow-x-auto">
+              <div className="bg-[#020804] rounded-xl p-3 overflow-x-auto border border-white/[0.04]">
                 <div className="flex items-center gap-1.5 mb-2">
                   <div className="w-2 h-2 rounded-full bg-[#ff5f57]" />
                   <div className="w-2 h-2 rounded-full bg-[#febc2e]" />
                   <div className="w-2 h-2 rounded-full bg-[#28c840]" />
                 </div>
-                <code className="text-[11px] leading-relaxed text-emerald-400 font-mono whitespace-pre">
-                  {'<script\n  src="replymaven.com/\n    widget-embed.js"\n  data-project="my-bot"\n></script>'}
+                <code className="text-[11px] leading-relaxed text-[#4ade80] font-mono whitespace-pre">
+                  {
+                    '<script\n  src="replymaven.com/\n    widget-embed.js"\n  data-project="my-bot"\n></script>'
+                  }
                 </code>
               </div>
             </div>
@@ -556,245 +1452,23 @@ function Landing() {
         </div>
       </section>
 
-      {/* ── Feature Showcase (2-col wide cards) ──────────────────────────── */}
-      <section id="features" className="py-24">
-        <div className="max-w-5xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-              Features
-            </p>
-            <h2 className="text-3xl sm:text-[2.75rem] font-bold text-foreground tracking-tight leading-tight">
-              Built for support teams,
-              <br />
-              powered by simplicity
-            </h2>
-          </div>
+      {/* ── Feature Bento Grid ───────────────────────────────────────────── */}
+      <FeatureBentoGrid />
 
-          {/* 2 wide feature cards */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            {/* Smart AI - with customization visual */}
-            <div className="bg-card rounded-2xl border border-border p-8 space-y-5">
-              <h3 className="text-xl font-semibold text-foreground leading-snug max-w-xs">
-                Smart, accurate, and built around your knowledge base
-              </h3>
-              {/* Visual: AI response mock */}
-              <div className="bg-background rounded-xl border border-border p-4 space-y-3">
-                <div className="flex items-start gap-2.5">
-                  <div className="w-7 h-7 rounded-full bg-primary/[0.08] flex items-center justify-center shrink-0 mt-0.5">
-                    <Sparkles className="w-3.5 h-3.5 text-primary" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <p className="text-[13px] text-foreground leading-snug">
-                      Yes! You can customize the widget colors, position, and tone of voice from the dashboard settings.
-                    </p>
-                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                      <FileText className="w-3 h-3" />
-                      Source: Widget Documentation
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                <span className="font-semibold text-foreground">Retrieval-augmented generation</span>. The AI searches your docs, FAQs, and web pages to provide grounded answers. No hallucination -- every response is backed by your content.
-              </p>
-            </div>
-
-            {/* Live Agent Handoff */}
-            <div className="bg-card rounded-2xl border border-border p-8 space-y-5">
-              <h3 className="text-xl font-semibold text-foreground leading-snug max-w-xs">
-                Seamless handoff to your team when AI can't help
-              </h3>
-              {/* Visual: handoff flow */}
-              <div className="bg-background rounded-xl border border-border p-4 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-7 h-7 rounded-full bg-amber-500/10 flex items-center justify-center">
-                    <Clock className="w-3.5 h-3.5 text-amber-600" />
-                  </div>
-                  <span className="text-[13px] text-muted-foreground">AI confidence is low</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-7 h-7 rounded-full bg-blue-500/10 flex items-center justify-center">
-                    <Send className="w-3.5 h-3.5 text-blue-600" />
-                  </div>
-                  <span className="text-[13px] text-muted-foreground">Notifying agent via Telegram</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-7 h-7 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  </div>
-                  <span className="text-[13px] text-foreground font-medium">Agent replied in chat</span>
-                </div>
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                <span className="font-semibold text-foreground">Seamless escalation</span>. When the bot isn't confident, conversations are relayed to your team via Telegram. Full context is preserved -- no repetition needed.
-              </p>
-            </div>
-          </div>
-
-          {/* 3 smaller benefit cards */}
-          <div id="benefits" className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-card rounded-2xl border border-border p-7 space-y-4">
-              <div className="w-10 h-10 rounded-xl bg-primary/[0.08] flex items-center justify-center">
-                <Code className="w-5 h-5 text-primary" />
-              </div>
-              <h3 className="text-base font-semibold text-foreground">
-                One-line embed
-              </h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Add a single script tag to any website. Works with React, WordPress, Shopify, Webflow, or plain HTML.
-              </p>
-            </div>
-
-            <div className="bg-card rounded-2xl border border-border p-7 space-y-4">
-              <div className="w-10 h-10 rounded-xl bg-primary/[0.08] flex items-center justify-center">
-                <Palette className="w-5 h-5 text-primary" />
-              </div>
-              <h3 className="text-base font-semibold text-foreground">
-                Full customization
-              </h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Colors, fonts, position, tone of voice, intro messages, quick actions, and custom CSS. The widget looks native to your brand.
-              </p>
-            </div>
-
-            <div className="bg-card rounded-2xl border border-border p-7 space-y-4">
-              <div className="w-10 h-10 rounded-xl bg-primary/[0.08] flex items-center justify-center">
-                <BarChart3 className="w-5 h-5 text-primary" />
-              </div>
-              <h3 className="text-base font-semibold text-foreground">
-                Conversation analytics
-              </h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Track conversations, response quality, and resolution rates. Auto-generated canned response drafts save time.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Feature Detail Sections (alternating layout) ─────────────────── */}
-
-      {/* Knowledge Management */}
-      <section className="py-24 bg-muted/30">
-        <div className="max-w-5xl mx-auto px-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
-            {/* Visual */}
-            <div className="relative">
-              <div className="absolute -inset-4 bg-gradient-to-br from-primary/[0.06] to-blue-100/30 rounded-[2rem] backdrop-blur-3xl" />
-              <div className="relative bg-white/60 backdrop-blur-xl rounded-2xl shadow-[0_8px_60px_rgba(0,0,0,0.06)] border border-white/50 p-6">
-                <p className="text-sm font-semibold text-foreground mb-4">Knowledge Base</p>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between py-2.5 border-b border-border/50">
-                    <div className="flex items-center gap-3">
-                      <Globe className="w-4 h-4 text-blue-500" />
-                      <span className="text-[13px] text-foreground">docs.example.com</span>
-                    </div>
-                    <span className="text-[11px] text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full font-medium">Indexed</span>
-                  </div>
-                  <div className="flex items-center justify-between py-2.5 border-b border-border/50">
-                    <div className="flex items-center gap-3">
-                      <FileText className="w-4 h-4 text-red-400" />
-                      <span className="text-[13px] text-foreground">product-guide.pdf</span>
-                    </div>
-                    <span className="text-[11px] text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full font-medium">Indexed</span>
-                  </div>
-                  <div className="flex items-center justify-between py-2.5 border-b border-border/50">
-                    <div className="flex items-center gap-3">
-                      <MessageSquare className="w-4 h-4 text-primary" />
-                      <span className="text-[13px] text-foreground">14 FAQ entries</span>
-                    </div>
-                    <span className="text-[11px] text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full font-medium">Indexed</span>
-                  </div>
-                  <div className="flex items-center justify-between py-2.5">
-                    <div className="flex items-center gap-3">
-                      <Globe className="w-4 h-4 text-blue-500" />
-                      <span className="text-[13px] text-foreground">help.example.com</span>
-                    </div>
-                    <span className="text-[11px] text-amber-600 bg-amber-500/10 px-2 py-0.5 rounded-full font-medium">Pending</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Copy */}
-            <div className="space-y-5">
-              <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                Knowledge Management
-              </p>
-              <h2 className="text-3xl sm:text-[2.5rem] font-bold text-foreground tracking-tight leading-tight">
-                Keep your bot's
-                <br />
-                knowledge fresh
-              </h2>
-              <p className="text-muted-foreground leading-relaxed">
-                <span className="font-semibold text-foreground">Web pages, PDFs, and FAQs</span> -- all automatically indexed and searchable. Add a URL and we'll crawl it. Upload a PDF and we'll extract the content. Your bot always has the latest information.
-              </p>
-              <Link to="/signup">
-                <Button className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90 px-6 h-11 text-sm font-medium mt-2">
-                  Try ReplyMaven free
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Analytics */}
-      <section className="py-24">
-        <div className="max-w-5xl mx-auto px-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
-            {/* Copy */}
-            <div className="space-y-5 order-2 lg:order-1">
-              <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                Analytics & Insights
-              </p>
-              <h2 className="text-3xl sm:text-[2.5rem] font-bold text-foreground tracking-tight leading-tight">
-                Track performance,
-                <br />
-                improve over time
-              </h2>
-              <p className="text-muted-foreground leading-relaxed">
-                <span className="font-semibold text-foreground">Conversation analytics</span>, response quality tracking, and auto-generated canned response drafts. See what your visitors are asking and how well your bot is performing.
-              </p>
-
-              {/* Feature pills */}
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                {[
-                  { icon: BarChart3, label: "Analytics" },
-                  { icon: Bot, label: "Auto-drafts" },
-                  { icon: MessageSquare, label: "Conversations" },
-                  { icon: Zap, label: "Quick Actions" },
-                ].map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-border bg-card text-sm"
-                  >
-                    <item.icon className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-foreground font-medium">{item.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Visual */}
-            <div className="relative order-1 lg:order-2">
-              <div className="absolute -inset-4 bg-gradient-to-br from-primary/[0.06] to-blue-100/30 rounded-[2rem] backdrop-blur-3xl" />
-              <div className="relative">
-                <MockDashboardPreview />
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      {/* ── Feature Detail Sections ──────────────────────────────────────── */}
+      <FeatureBooking />
+      <FeatureContactForm />
+      <FeatureToolCalls />
+      <FeatureAnalytics />
 
       {/* ── Pricing ──────────────────────────────────────────────────────── */}
-      <section id="pricing" className="py-24 bg-muted/30">
-        <div className="max-w-5xl mx-auto px-6">
+      <section id="pricing" className="min-h-screen flex items-center py-24 bg-white/[0.015]">
+        <div className="max-w-7xl mx-auto px-6 w-full">
           <div className="text-center mb-16">
-            <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+            <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider mb-4">
               Pricing
             </p>
-            <h2 className="text-3xl sm:text-[2.75rem] font-bold text-foreground tracking-tight leading-tight">
+            <h2 className="text-3xl sm:text-[2.75rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
               Simple plans
               <br />
               for serious support
@@ -805,32 +1479,32 @@ function Landing() {
             {pricingPlans.map((plan) => (
               <div
                 key={plan.name}
-                className={`relative bg-card rounded-2xl border flex flex-col ${
+                className={`relative rounded-2xl border flex flex-col ${
                   plan.highlighted
-                    ? "border-primary/20 shadow-lg shadow-primary/5 bg-gradient-to-b from-primary/[0.04] to-card"
-                    : "border-border"
+                    ? "bg-white/[0.05] border-[#4ade80]/20 shadow-[0_0_40px_rgba(74,222,128,0.06)]"
+                    : "bg-white/[0.03] border-white/[0.06]"
                 }`}
               >
                 <div className="p-7 pb-0 space-y-4">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm text-muted-foreground">{plan.name}</h3>
+                    <h3 className="text-sm text-[#7a9a82]">{plan.name}</h3>
                     {plan.highlighted && plan.badge && (
-                      <span className="text-[11px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+                      <span className="text-[11px] bg-[#4ade80]/10 text-[#4ade80] px-2 py-0.5 rounded-full font-medium">
                         {plan.badge}
                       </span>
                     )}
                   </div>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-4xl font-bold text-foreground tracking-tight">
+                    <span className="text-4xl font-semibold text-[#f0f5f1] tracking-tight">
                       {plan.price}
                     </span>
                     {plan.period && (
-                      <span className="text-muted-foreground text-sm">
+                      <span className="text-[#5a7a62] text-sm">
                         {plan.period}
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm text-[#7a9a82]">
                     {plan.description}
                   </p>
                 </div>
@@ -841,8 +1515,8 @@ function Landing() {
                       key={feature}
                       className="flex items-start gap-2.5 text-sm"
                     >
-                      <Check className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                      <span className="text-foreground">{feature}</span>
+                      <Check className="w-4 h-4 text-[#4ade80] shrink-0 mt-0.5" />
+                      <span className="text-[#c8dece]">{feature}</span>
                     </li>
                   ))}
                 </ul>
@@ -852,10 +1526,9 @@ function Landing() {
                     <Button
                       className={`w-full rounded-xl h-11 text-sm font-medium ${
                         plan.highlighted
-                          ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                          : "bg-muted text-foreground hover:bg-muted/80"
+                          ? "bg-black text-white hover:bg-black/80 border border-white/[0.08]"
+                          : "bg-white/[0.05] text-[#e8f0ea] hover:bg-white/[0.08] border border-white/[0.06]"
                       }`}
-                      variant={plan.highlighted ? "default" : "secondary"}
                     >
                       {plan.cta}
                     </Button>
@@ -866,19 +1539,20 @@ function Landing() {
           </div>
 
           {/* Enterprise card */}
-          <div className="mt-8 bg-card rounded-2xl border border-border p-8">
+          <div className="mt-8 bg-white/[0.03] rounded-2xl border border-white/[0.06] p-8">
             <div className="flex flex-col md:flex-row md:items-center gap-6">
               <div className="space-y-2 md:max-w-xs shrink-0">
                 <div className="flex items-center gap-3">
-                  <h3 className="text-xl font-semibold text-foreground">
+                  <h3 className="text-xl font-medium text-[#e8f0ea]">
                     Enterprise
                   </h3>
-                  <span className="text-[11px] bg-primary/10 text-primary px-2.5 py-1 rounded-full font-medium">
+                  <span className="text-[11px] bg-[#4ade80]/10 text-[#4ade80] px-2.5 py-1 rounded-full font-medium">
                     Custom Pricing
                   </span>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  For organizations with advanced needs. Unlimited everything with dedicated support.
+                <p className="text-sm text-[#7a9a82]">
+                  For organizations with advanced needs. Unlimited everything
+                  with dedicated support.
                 </p>
               </div>
 
@@ -891,19 +1565,16 @@ function Landing() {
                 ].map((feature) => (
                   <span
                     key={feature}
-                    className="flex items-center gap-2 text-sm text-foreground"
+                    className="flex items-center gap-2 text-sm text-[#c8dece]"
                   >
-                    <Check className="w-4 h-4 text-primary shrink-0" />
+                    <Check className="w-4 h-4 text-[#4ade80] shrink-0" />
                     {feature}
                   </span>
                 ))}
               </div>
 
               <Link to="/signup" className="shrink-0">
-                <Button
-                  variant="outline"
-                  className="rounded-xl h-11 px-6"
-                >
+                <Button className="rounded-xl h-11 px-6 bg-white/[0.05] text-[#e8f0ea] hover:bg-white/[0.08] border border-white/[0.06]">
                   Contact Sales
                   <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
@@ -917,10 +1588,10 @@ function Landing() {
       <section id="faq" className="py-24">
         <div className="max-w-3xl mx-auto px-6">
           <div className="text-center mb-12">
-            <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+            <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider mb-4">
               FAQ
             </p>
-            <h2 className="text-3xl sm:text-[2.75rem] font-bold text-foreground tracking-tight leading-tight">
+            <h2 className="text-3xl sm:text-[2.75rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
               Frequently asked questions
             </h2>
           </div>
@@ -938,17 +1609,23 @@ function Landing() {
       </section>
 
       {/* ── Final CTA ────────────────────────────────────────────────────── */}
-      <section className="py-24">
-        <div className="max-w-3xl mx-auto px-6 text-center">
-          <h2 className="text-3xl sm:text-[2.75rem] font-bold text-foreground tracking-tight leading-tight mb-5">
+      <section className="py-24 relative overflow-hidden">
+        {/* Background glow */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] bg-[#4ade80]/[0.03] rounded-full blur-[100px]" />
+        </div>
+
+        <div className="max-w-3xl mx-auto px-6 text-center relative">
+          <h2 className="text-3xl sm:text-[2.75rem] font-medium text-[#f0f5f1] tracking-tight leading-tight mb-5">
             Ready to get started
           </h2>
-          <p className="text-muted-foreground text-lg mb-10">
+          <p className="text-[#7a9a82] text-lg mb-10">
             Set up ReplyMaven for free. No credit card required.
           </p>
           <Link to="/signup">
-            <Button className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90 px-8 h-12 text-[15px] font-medium">
+            <Button className="rounded-full bg-black text-white hover:bg-black/80 px-8 h-12 text-[15px] font-medium border border-white/[0.1] shadow-[0_0_30px_rgba(0,0,0,0.5)]">
               Try ReplyMaven free
+              <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           </Link>
         </div>
@@ -956,41 +1633,42 @@ function Landing() {
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className="pb-8 px-6">
-        <div className="max-w-5xl mx-auto bg-card rounded-2xl border border-border p-10">
+        <div className="max-w-7xl mx-auto bg-white/[0.03] rounded-2xl border border-white/[0.06] p-10">
           <div className="grid grid-cols-1 md:grid-cols-[1.5fr_1fr_1fr] gap-10 mb-10">
             {/* Brand */}
             <div className="space-y-4">
               <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
-                  <MessageSquare className="w-3.5 h-3.5 text-primary-foreground" />
+                <div className="w-7 h-7 rounded-lg bg-[#4ade80]/15 flex items-center justify-center">
+                  <MessageSquare className="w-3.5 h-3.5 text-[#4ade80]" />
                 </div>
-                <span className="font-semibold text-foreground text-[15px] tracking-tight">
+                <span className="font-medium text-[#e8f0ea] text-[15px] tracking-tight">
                   ReplyMaven
                 </span>
               </div>
-              <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
-                AI-powered customer support that knows your product. Built for startups and growing teams.
+              <p className="text-sm text-[#7a9a82] leading-relaxed max-w-xs">
+                AI-powered customer support that knows your product. Built for
+                startups and growing teams.
               </p>
               {/* Social icons */}
               <div className="flex items-center gap-2 pt-1">
                 <a
                   href="#"
-                  className="w-9 h-9 rounded-full bg-primary flex items-center justify-center hover:bg-primary/80 transition-colors"
+                  className="w-9 h-9 rounded-full bg-white/[0.05] flex items-center justify-center hover:bg-white/[0.1] transition-colors border border-white/[0.06]"
                 >
-                  <Linkedin className="w-4 h-4 text-primary-foreground" />
+                  <Linkedin className="w-4 h-4 text-[#7a9a82]" />
                 </a>
                 <a
                   href="#"
-                  className="w-9 h-9 rounded-full bg-primary flex items-center justify-center hover:bg-primary/80 transition-colors"
+                  className="w-9 h-9 rounded-full bg-white/[0.05] flex items-center justify-center hover:bg-white/[0.1] transition-colors border border-white/[0.06]"
                 >
-                  <Twitter className="w-4 h-4 text-primary-foreground" />
+                  <Twitter className="w-4 h-4 text-[#7a9a82]" />
                 </a>
               </div>
             </div>
 
             {/* Pages */}
             <div className="space-y-4">
-              <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              <h4 className="text-[11px] font-medium text-[#5a7a62] uppercase tracking-wider">
                 Pages
               </h4>
               <ul className="space-y-2.5">
@@ -1004,7 +1682,7 @@ function Landing() {
                   <li key={item.label}>
                     <a
                       href={item.href}
-                      className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                      className="text-sm text-[#7a9a82] hover:text-[#e8f0ea] transition-colors"
                     >
                       {item.label}
                     </a>
@@ -1015,34 +1693,33 @@ function Landing() {
 
             {/* Information */}
             <div className="space-y-4">
-              <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+              <h4 className="text-[11px] font-medium text-[#5a7a62] uppercase tracking-wider">
                 Information
               </h4>
               <ul className="space-y-2.5">
-                {[
-                  "Contact",
-                  "Privacy Policy",
-                  "Terms of Service",
-                ].map((item) => (
-                  <li key={item}>
-                    <a
-                      href="#"
-                      className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      {item}
-                    </a>
-                  </li>
-                ))}
+                {["Contact", "Privacy Policy", "Terms of Service"].map(
+                  (item) => (
+                    <li key={item}>
+                      <a
+                        href="#"
+                        className="text-sm text-[#7a9a82] hover:text-[#e8f0ea] transition-colors"
+                      >
+                        {item}
+                      </a>
+                    </li>
+                  )
+                )}
               </ul>
             </div>
           </div>
 
           {/* Copyright bar */}
-          <div className="pt-6 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">
-              &copy; {new Date().getFullYear()} ReplyMaven. All rights reserved.
+          <div className="pt-6 border-t border-white/[0.06] flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="text-sm text-[#5a7a62]">
+              &copy; {new Date().getFullYear()} ReplyMaven. All rights
+              reserved.
             </p>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-[#5a7a62]">
               Built on Cloudflare Workers
             </p>
           </div>
