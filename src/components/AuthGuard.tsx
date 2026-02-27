@@ -13,7 +13,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   if (!session) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/?show_auth=true" replace />;
   }
 
   return <>{children}</>;

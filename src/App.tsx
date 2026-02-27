@@ -6,8 +6,7 @@ import AuthGuard from "./components/AuthGuard";
 import OnboardingGuard from "./components/OnboardingGuard";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Landing from "./pages/Landing";
-import Login from "./pages/Login";
-import Signup from "./pages/Signup";
+
 import Dashboard from "./pages/Dashboard";
 import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
@@ -45,8 +44,7 @@ function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/docs" element={<Docs />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
+
       <Route
         path="/api/auth/callback/:provider"
         element={<AuthCallback />}

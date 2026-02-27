@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import AuthModal from "@/components/AuthModal";
 import {
   MessageSquare,
   Globe,
@@ -417,7 +418,7 @@ function MockBookingUI() {
         <p className="text-[11px] text-[#5a7a62] mb-2 uppercase tracking-wider">
           Available times
         </p>
-        <div className="grid grid-cols-3 gap-1.5">
+        <div className="grid grid-cols-2 gap-1.5">
           {slots.map((s) => (
             <div
               key={s.time}
@@ -708,11 +709,11 @@ function FeatureBentoGrid() {
   return (
     <section id="features" className="min-h-screen flex items-center py-24">
       <div className="max-w-7xl mx-auto px-6 w-full">
-        <div className="text-center mb-16">
+        <div className="mb-16">
           <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider mb-4">
             Features
           </p>
-          <h2 className="text-3xl sm:text-[2.75rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+          <h2 className="text-3xl sm:text-[2.75rem] font-light text-[#f0f5f1] tracking-tight leading-tight">
             Built for support teams,
             <br />
             powered by simplicity
@@ -943,7 +944,7 @@ function FeatureBooking() {
             <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider">
               Booking
             </p>
-            <h2 className="text-3xl sm:text-[2.5rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+            <h2 className="text-3xl sm:text-[2.5rem] font-light text-[#f0f5f1] tracking-tight leading-tight">
               Let visitors book meetings,
               <br />
               right from the chat
@@ -1002,7 +1003,7 @@ function FeatureContactForm() {
             <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider">
               Contact Forms
             </p>
-            <h2 className="text-3xl sm:text-[2.5rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+            <h2 className="text-3xl sm:text-[2.5rem] font-light text-[#f0f5f1] tracking-tight leading-tight">
               Capture leads with
               <br />
               built-in contact forms
@@ -1045,7 +1046,7 @@ function FeatureToolCalls() {
             <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider">
               Tool Calls
             </p>
-            <h2 className="text-3xl sm:text-[2.5rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+            <h2 className="text-3xl sm:text-[2.5rem] font-light text-[#f0f5f1] tracking-tight leading-tight">
               Connect your AI
               <br />
               to any API
@@ -1104,7 +1105,7 @@ function FeatureAnalytics() {
             <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider">
               Analytics & Insights
             </p>
-            <h2 className="text-3xl sm:text-[2.5rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+            <h2 className="text-3xl sm:text-[2.5rem] font-light text-[#f0f5f1] tracking-tight leading-tight">
               Track performance,
               <br />
               improve over time
@@ -1138,6 +1139,19 @@ function FeatureAnalytics() {
 // ─── Landing Page ─────────────────────────────────────────────────────────────
 
 function Landing() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [authOpen, setAuthOpen] = useState(false);
+
+  // Auto-open auth modal when ?show_auth=true is in the URL
+  useEffect(() => {
+    if (searchParams.get("show_auth") === "true") {
+      setAuthOpen(true);
+      // Clean up the URL param
+      searchParams.delete("show_auth");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
   return (
     <div className="min-h-screen bg-[#060e08] scroll-smooth">
       {/* Inline keyframes for animations */}
@@ -1223,11 +1237,12 @@ function Landing() {
           <div className="hidden md:block w-16" />
 
           {/* CTA */}
-          <Link to="/signup">
-            <Button className="rounded-full bg-black text-white hover:bg-black/80 px-5 h-9 text-[13px] font-medium border border-white/[0.08]">
-              Try ReplyMaven free
-            </Button>
-          </Link>
+          <Button
+            onClick={() => setAuthOpen(true)}
+            className="rounded-full bg-black text-white hover:bg-black/80 px-5 h-9 text-[13px] font-medium border border-white/[0.08]"
+          >
+            Try ReplyMaven free
+          </Button>
         </nav>
       </header>
 
@@ -1250,11 +1265,11 @@ function Landing() {
                 </span>
               </div>
 
-              <h1 className="text-[2.75rem] sm:text-[3.5rem] lg:text-[4.5rem] font-medium text-[#f0f5f1] tracking-tight leading-[1.06] mb-6">
-                Turn your docs into
+              <h1 className="text-[2.75rem] sm:text-[3.5rem] lg:text-[4.5rem] font-light text-[#f0f5f1] tracking-tight leading-[1.06] mb-6">
+                AI product expert agents
                 <br />
                 <span className="text-[#7a9a82]">
-                  an always-on support team
+                  for customer support
                 </span>
               </h1>
 
@@ -1265,12 +1280,13 @@ function Landing() {
               </p>
 
               <div className="flex flex-col sm:flex-row items-start gap-4 mb-8">
-                <Link to="/signup">
-                  <Button className="rounded-full bg-black text-white hover:bg-black/80 px-8 h-12 text-[15px] font-medium border border-white/[0.1] shadow-[0_0_30px_rgba(0,0,0,0.5)]">
-                    Start Free
-                    <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
-                </Link>
+                <Button
+                  onClick={() => setAuthOpen(true)}
+                  className="rounded-full bg-black text-white hover:bg-black/80 px-8 h-12 text-[15px] font-medium border border-white/[0.1] shadow-[0_0_30px_rgba(0,0,0,0.5)]"
+                >
+                  Start Free
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
                 <a href="#how-it-works">
                   <Button className="rounded-full bg-transparent text-[#e8f0ea] hover:bg-white/[0.05] px-8 h-12 text-[15px] border border-white/[0.1]">
                     See How It Works
@@ -1327,11 +1343,11 @@ function Landing() {
       {/* ── How It Works ─────────────────────────────────────────────────── */}
       <section id="how-it-works" className="min-h-screen flex items-center py-24">
         <div className="max-w-7xl mx-auto px-6 w-full">
-          <div className="text-center mb-16">
+          <div className="mb-16">
             <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider mb-4">
               How It Works
             </p>
-            <h2 className="text-3xl sm:text-[2.75rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+            <h2 className="text-3xl sm:text-[2.75rem] font-light text-[#f0f5f1] tracking-tight leading-tight">
               Live in three simple steps
             </h2>
           </div>
@@ -1464,11 +1480,11 @@ function Landing() {
       {/* ── Pricing ──────────────────────────────────────────────────────── */}
       <section id="pricing" className="min-h-screen flex items-center py-24 bg-white/[0.015]">
         <div className="max-w-7xl mx-auto px-6 w-full">
-          <div className="text-center mb-16">
+          <div className="mb-16">
             <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider mb-4">
               Pricing
             </p>
-            <h2 className="text-3xl sm:text-[2.75rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+            <h2 className="text-3xl sm:text-[2.75rem] font-light text-[#f0f5f1] tracking-tight leading-tight">
               Simple plans
               <br />
               for serious support
@@ -1522,17 +1538,16 @@ function Landing() {
                 </ul>
 
                 <div className="p-7 pt-0">
-                  <Link to="/signup" className="block">
-                    <Button
-                      className={`w-full rounded-xl h-11 text-sm font-medium ${
-                        plan.highlighted
-                          ? "bg-black text-white hover:bg-black/80 border border-white/[0.08]"
-                          : "bg-white/[0.05] text-[#e8f0ea] hover:bg-white/[0.08] border border-white/[0.06]"
-                      }`}
-                    >
-                      {plan.cta}
-                    </Button>
-                  </Link>
+                  <Button
+                    onClick={() => setAuthOpen(true)}
+                    className={`w-full rounded-xl h-11 text-sm font-medium ${
+                      plan.highlighted
+                        ? "bg-black text-white hover:bg-black/80 border border-white/[0.08]"
+                        : "bg-white/[0.05] text-[#e8f0ea] hover:bg-white/[0.08] border border-white/[0.06]"
+                    }`}
+                  >
+                    {plan.cta}
+                  </Button>
                 </div>
               </div>
             ))}
@@ -1573,12 +1588,13 @@ function Landing() {
                 ))}
               </div>
 
-              <Link to="/signup" className="shrink-0">
-                <Button className="rounded-xl h-11 px-6 bg-white/[0.05] text-[#e8f0ea] hover:bg-white/[0.08] border border-white/[0.06]">
-                  Contact Sales
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
-              </Link>
+              <Button
+                onClick={() => setAuthOpen(true)}
+                className="shrink-0 rounded-xl h-11 px-6 bg-white/[0.05] text-[#e8f0ea] hover:bg-white/[0.08] border border-white/[0.06]"
+              >
+                Contact Sales
+                <ArrowRight className="w-4 h-4 ml-2" />
+              </Button>
             </div>
           </div>
         </div>
@@ -1587,11 +1603,11 @@ function Landing() {
       {/* ── FAQ ──────────────────────────────────────────────────────────── */}
       <section id="faq" className="py-24">
         <div className="max-w-3xl mx-auto px-6">
-          <div className="text-center mb-12">
+          <div className="mb-12">
             <p className="text-sm font-medium text-[#4ade80] uppercase tracking-wider mb-4">
               FAQ
             </p>
-            <h2 className="text-3xl sm:text-[2.75rem] font-medium text-[#f0f5f1] tracking-tight leading-tight">
+            <h2 className="text-3xl sm:text-[2.75rem] font-light text-[#f0f5f1] tracking-tight leading-tight">
               Frequently asked questions
             </h2>
           </div>
@@ -1615,19 +1631,20 @@ function Landing() {
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] bg-[#4ade80]/[0.03] rounded-full blur-[100px]" />
         </div>
 
-        <div className="max-w-3xl mx-auto px-6 text-center relative">
-          <h2 className="text-3xl sm:text-[2.75rem] font-medium text-[#f0f5f1] tracking-tight leading-tight mb-5">
+        <div className="max-w-7xl mx-auto px-6 relative">
+          <h2 className="text-3xl sm:text-[2.75rem] font-light text-[#f0f5f1] tracking-tight leading-tight mb-5">
             Ready to get started
           </h2>
           <p className="text-[#7a9a82] text-lg mb-10">
             Set up ReplyMaven for free. No credit card required.
           </p>
-          <Link to="/signup">
-            <Button className="rounded-full bg-black text-white hover:bg-black/80 px-8 h-12 text-[15px] font-medium border border-white/[0.1] shadow-[0_0_30px_rgba(0,0,0,0.5)]">
-              Try ReplyMaven free
-              <ArrowRight className="w-4 h-4 ml-2" />
-            </Button>
-          </Link>
+          <Button
+            onClick={() => setAuthOpen(true)}
+            className="rounded-full bg-black text-white hover:bg-black/80 px-8 h-12 text-[15px] font-medium border border-white/[0.1] shadow-[0_0_30px_rgba(0,0,0,0.5)]"
+          >
+            Try ReplyMaven free
+            <ArrowRight className="w-4 h-4 ml-2" />
+          </Button>
         </div>
       </section>
 
@@ -1725,6 +1742,9 @@ function Landing() {
           </div>
         </div>
       </footer>
+
+      {/* Auth Modal */}
+      <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
     </div>
   );
 }

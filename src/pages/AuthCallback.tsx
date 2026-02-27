@@ -74,10 +74,10 @@ function AuthCallback() {
           <p className="text-destructive">{error}</p>
           <button
             type="button"
-            onClick={() => navigate("/login", { replace: true })}
+            onClick={() => navigate("/?show_auth=true", { replace: true })}
             className="text-sm text-muted-foreground hover:text-foreground underline"
           >
-            Back to login
+            Back to sign in
           </button>
         </div>
       </div>

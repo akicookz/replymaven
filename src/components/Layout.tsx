@@ -126,7 +126,7 @@ function Layout() {
 
   async function handleSignOut() {
     await signOut();
-    navigate("/login");
+    navigate("/");
   }
 
   function isActive(item: { label: string; href: string }) {

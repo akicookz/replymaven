@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import AuthModal from "@/components/AuthModal";
 import {
   MessageSquare,
   Code,
@@ -307,6 +308,17 @@ function IC({ children }: { children: React.ReactNode }) {
 
 function Docs() {
   const [activeSection, setActiveSection] = useState("installation");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [authOpen, setAuthOpen] = useState(false);
+
+  // Auto-open auth modal when ?show_auth=true is in the URL
+  useEffect(() => {
+    if (searchParams.get("show_auth") === "true") {
+      setAuthOpen(true);
+      searchParams.delete("show_auth");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // Track scroll position to highlight active nav item
   useEffect(() => {
@@ -346,19 +358,19 @@ function Docs() {
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <Link to="/login">
-              <Button
-                variant="outline"
-                className="rounded-full h-8 text-[13px] px-4"
-              >
-                Log in
-              </Button>
-            </Link>
-            <Link to="/signup">
-              <Button className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90 h-8 text-[13px] px-4">
-                Get Started
-              </Button>
-            </Link>
+            <Button
+              variant="outline"
+              className="rounded-full h-8 text-[13px] px-4"
+              onClick={() => setAuthOpen(true)}
+            >
+              Log in
+            </Button>
+            <Button
+              className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90 h-8 text-[13px] px-4"
+              onClick={() => setAuthOpen(true)}
+            >
+              Get Started
+            </Button>
           </div>
         </div>
       </header>
@@ -1597,25 +1609,28 @@ style-src 'self' 'unsafe-inline';`}
                 deploy the widget in under 5 minutes.
               </p>
               <div className="flex items-center justify-center gap-3">
-                <Link to="/signup">
-                  <Button className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90 px-6">
-                    Start Free
-                    <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
-                </Link>
-                <Link to="/login">
-                  <Button
-                    variant="outline"
-                    className="rounded-full px-6"
-                  >
-                    Log in
-                  </Button>
-                </Link>
+                <Button
+                  className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90 px-6"
+                  onClick={() => setAuthOpen(true)}
+                >
+                  Start Free
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+                <Button
+                  variant="outline"
+                  className="rounded-full px-6"
+                  onClick={() => setAuthOpen(true)}
+                >
+                  Log in
+                </Button>
               </div>
             </div>
           </div>
         </main>
       </div>
+
+      {/* Auth Modal */}
+      <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
     </div>
   );
 }
