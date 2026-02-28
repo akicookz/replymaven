@@ -1938,9 +1938,11 @@
       right: auto;
       transform-origin: bottom center;
       pointer-events: auto;
-      background: transparent;
+      background: rgba(var(--rm-primary-rgb), 0.15);
+      backdrop-filter: blur(20px) saturate(1.4);
+      -webkit-backdrop-filter: blur(20px) saturate(1.4);
       box-shadow: none;
-      border: none;
+      border: 1px solid rgba(var(--rm-primary-rgb), 0.1);
     }
     .rm-widget-container.center-inline .rm-chat-window.open {
       transform: translateX(-50%) translateY(0) scale(1);
@@ -1961,6 +1963,10 @@
       backdrop-filter: blur(20px) saturate(1.4);
       -webkit-backdrop-filter: blur(20px) saturate(1.4);
       border-bottom: 1px solid rgba(var(--rm-primary-rgb), 0.1);
+    }
+    /* Hide back button in center-inline -- only X (close) button shown */
+    .rm-widget-container.center-inline .rm-header-back {
+      display: none;
     }
     /* Transparent messages area */
     .rm-widget-container.center-inline .rm-messages {
