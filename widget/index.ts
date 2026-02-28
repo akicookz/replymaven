@@ -1955,28 +1955,31 @@
     .rm-widget-container.center-inline .rm-chat-window.bottom-left.open {
       transform: translateX(-50%) translateY(0) scale(1);
     }
-    /* Hide header in center-inline mode */
+    /* Frosted glass header in center-inline mode */
     .rm-widget-container.center-inline .rm-header {
-      display: none;
+      background: rgba(var(--rm-primary-rgb), 0.15);
+      backdrop-filter: blur(20px) saturate(1.4);
+      -webkit-backdrop-filter: blur(20px) saturate(1.4);
+      border-bottom: 1px solid rgba(var(--rm-primary-rgb), 0.1);
     }
     /* Transparent messages area */
     .rm-widget-container.center-inline .rm-messages {
       background: transparent;
     }
-    /* Message bubbles need readable backgrounds */
+    /* Bot bubbles: frosted glass with primary tint */
     .rm-widget-container.center-inline .rm-message-row.bot .rm-message {
-      background: rgba(20, 20, 20, 0.85);
+      background: rgba(var(--rm-primary-rgb), 0.12);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(var(--rm-primary-rgb), 0.1);
       color: #ffffff;
     }
     .rm-widget-container.center-inline .rm-message-row.bot .rm-message a {
-      color: #93c5fd;
+      color: rgba(var(--rm-primary-rgb), 0.8);
     }
+    /* Visitor bubbles: solid primary color */
     .rm-widget-container.center-inline .rm-message-row.visitor .rm-message {
-      background: rgba(255, 255, 255, 0.15) !important;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      background: rgba(var(--rm-primary-rgb), 0.85) !important;
       color: #ffffff !important;
     }
     /* Input area transparent */
@@ -1985,16 +1988,16 @@
       border-top: none;
     }
     .rm-widget-container.center-inline .rm-input {
-      background: rgba(20, 20, 20, 0.9);
+      background: rgba(var(--rm-primary-rgb), 0.1);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(var(--rm-primary-rgb), 0.15);
       border-radius: 12px;
       padding: 10px 14px;
       color: #ffffff !important;
     }
     .rm-widget-container.center-inline .rm-input::placeholder {
-      color: rgba(255, 255, 255, 0.4);
+      color: rgba(255, 255, 255, 0.5);
     }
     /* Quick topics in center-inline */
     .rm-widget-container.center-inline .rm-quick-topics {
@@ -2002,9 +2005,11 @@
       backdrop-filter: none;
     }
     .rm-widget-container.center-inline .rm-quick-topic {
-      background: rgba(60, 60, 60, 0.8);
+      background: rgba(var(--rm-primary-rgb), 0.15);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       color: #ffffff;
-      border-color: rgba(255, 255, 255, 0.1);
+      border-color: rgba(var(--rm-primary-rgb), 0.1);
     }
     /* Powered-by footer */
     .rm-widget-container.center-inline .rm-powered {
@@ -2016,13 +2021,17 @@
     }
     /* Sources styling */
     .rm-widget-container.center-inline .rm-source-link {
-      background: rgba(40, 40, 40, 0.8);
+      background: rgba(var(--rm-primary-rgb), 0.12);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       color: #ffffff !important;
-      border-color: rgba(255, 255, 255, 0.1);
+      border-color: rgba(var(--rm-primary-rgb), 0.1);
     }
     /* Typing indicator */
     .rm-widget-container.center-inline .rm-typing-row {
-      background: rgba(20, 20, 20, 0.85);
+      background: rgba(var(--rm-primary-rgb), 0.12);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       border-radius: 12px;
     }
 
@@ -3160,18 +3169,22 @@
 
         // Trigger & header colors
         trigger.style.backgroundColor = primary;
-        header.style.backgroundColor = primary + "e8"; // ~91% opacity for frosted glass
         sendBtn.style.backgroundColor = primary;
 
-        // Chat window -- skip inline background/text styles for center-inline
-        // (CSS rules handle transparent bg and white text for that mode)
-        if (w.backgroundColor && !isCenterInline) {
-          chatWindow.style.background = w.backgroundColor;
-        }
-        if (w.textColor && !isCenterInline) {
-          chatWindow.style.color = w.textColor;
-          input.style.color = w.textColor;
-          homeTitle.style.color = w.textColor;
+        if (isCenterInline) {
+          // Center-inline: header uses frosted glass with primary tint (CSS handles it via --rm-primary-rgb)
+          // Chat window stays transparent so frosted glass shows through
+          header.style.backgroundColor = "transparent";
+        } else {
+          header.style.backgroundColor = primary + "e8"; // ~91% opacity for frosted glass
+          if (w.backgroundColor) {
+            chatWindow.style.background = w.backgroundColor;
+          }
+          if (w.textColor) {
+            chatWindow.style.color = w.textColor;
+            input.style.color = w.textColor;
+            homeTitle.style.color = w.textColor;
+          }
         }
         if (w.borderRadius) {
           container.style.setProperty("--rm-chat-radius", w.borderRadius + "px");
@@ -3930,10 +3943,8 @@
         textNode.textContent = content;
         msgEl.appendChild(textNode);
       }
-      if (!isInlineBarVariant) {
-        msgEl.style.backgroundColor = primaryColor;
-        msgEl.style.color = "#ffffff";
-      }
+      msgEl.style.backgroundColor = primaryColor;
+      msgEl.style.color = "#ffffff";
     } else {
       // Bot/agent messages: render markdown
       const textContainer = document.createElement("div");
@@ -3987,9 +3998,7 @@
       const isClickable = sourceType === "webpage" && source.url;
       const el = document.createElement(isClickable ? "a" : "span");
       el.className = "rm-source-link";
-      if (!isInlineBarVariant) {
-        el.style.color = primaryColor + "80";
-      }
+      el.style.color = primaryColor + "80";
 
       if (isClickable) {
         (el as HTMLAnchorElement).href = source.url!;

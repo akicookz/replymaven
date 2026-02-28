@@ -431,15 +431,18 @@ function WidgetConfig() {
                 <div
                   className="w-full max-w-[280px] rounded-full p-[2px]"
                   style={{
-                    background: `conic-gradient(from 0deg, #ec4899, #f97316, #a855f7, #ec4899)`,
+                    background: `conic-gradient(from 0deg, ${form.primaryColor ?? "#2563eb"}, ${form.primaryColor ?? "#2563eb"}99, ${form.primaryColor ?? "#2563eb"}55, ${form.primaryColor ?? "#2563eb"})`,
                   }}
                 >
                   <div className="flex items-center gap-2 rounded-full bg-neutral-900 px-4 py-2">
                     <span className="flex-1 text-xs text-white/50">
                       Ask a question...
                     </span>
-                    <div className="w-7 h-7 rounded-full bg-white flex items-center justify-center shrink-0">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="#1f2937" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                    <div
+                      className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: form.primaryColor ?? "#2563eb" }}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
                         <line x1="12" y1="19" x2="12" y2="5" />
                         <polyline points="5 12 12 5 19 12" />
                       </svg>
