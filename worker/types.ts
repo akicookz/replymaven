@@ -1,5 +1,33 @@
 import { type User, type Session } from "better-auth";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { type SubscriptionRow } from "./db/schema";
+
+// ─── Plan Types ───────────────────────────────────────────────────────────────
+
+export type Plan = "essential" | "pro" | "business";
+export type BillingInterval = "monthly" | "annual";
+export type SubscriptionStatus =
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "canceled"
+  | "unpaid"
+  | "incomplete";
+
+export interface PlanLimits {
+  plan: Plan;
+  maxProjects: number;
+  maxMessagesPerMonth: number;
+  maxKnowledgeSources: number;
+  maxSeats: number;
+  pdfIndexing: boolean;
+  telegram: boolean;
+  customTone: boolean;
+  autoCannedDraft: boolean;
+  customCss: boolean;
+  tools: boolean;
+  booking: boolean;
+}
 
 // Extend Env with secrets not in generated wrangler types
 export interface AppEnv extends Env {
@@ -15,6 +43,14 @@ export interface AppEnv extends Env {
   AI_MODEL: string;
   BROWSER_RENDERING_API_TOKEN: string;
   CF_ACCOUNT_ID: string;
+  STRIPE_SECRET_KEY: string;
+  STRIPE_WEBHOOK_SECRET: string;
+  STRIPE_ESSENTIAL_MONTHLY_PRICE_ID: string;
+  STRIPE_ESSENTIAL_ANNUAL_PRICE_ID: string;
+  STRIPE_PRO_MONTHLY_PRICE_ID: string;
+  STRIPE_PRO_ANNUAL_PRICE_ID: string;
+  STRIPE_BUSINESS_MONTHLY_PRICE_ID: string;
+  STRIPE_BUSINESS_ANNUAL_PRICE_ID: string;
   UPLOADS: R2Bucket;
   CONVERSATIONS_CACHE: KVNamespace;
   AI: Ai;
@@ -27,5 +63,8 @@ export interface HonoAppContext {
     user: User | null;
     session: Session | null;
     db: DrizzleD1Database<Record<string, unknown>>;
+    subscription: SubscriptionRow | null;
+    planLimits: PlanLimits | null;
+    effectiveUserId: string | null;
   };
 }

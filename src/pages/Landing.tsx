@@ -33,6 +33,7 @@ import {
   Shield,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PricingCards } from "@/components/PricingCards";
 import { cardVariants } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -68,64 +69,6 @@ const faqItems = [
     question: "Can I try it before committing?",
     answer:
       "Yes. Sign up for free and explore the full dashboard, add knowledge sources, and test the widget on your site.",
-  },
-];
-
-// ─── Pricing Data ─────────────────────────────────────────────────────────────
-
-const pricingPlans = [
-  {
-    name: "ReplyMaven Essential",
-    price: "$19",
-    period: "/mo",
-    description: "For personal projects and small sites.",
-    highlighted: false,
-    cta: "Try Essential free",
-    features: [
-      "1 project",
-      "200 messages / month",
-      "50 knowledge sources",
-      "1 seat",
-      "Web page & FAQ indexing",
-      "Widget customization",
-      "Email support",
-    ],
-  },
-  {
-    name: "ReplyMaven Pro",
-    price: "$49",
-    period: "/mo",
-    description: "For growing teams that need more power.",
-    highlighted: true,
-    badge: "Most Popular",
-    cta: "Get started",
-    features: [
-      "Everything in Essential",
-      "5 projects",
-      "500 messages / month",
-      "2 seats",
-      "50 knowledge sources",
-      "PDF indexing",
-      "Telegram live agent handoff",
-      "Custom tone of voice",
-    ],
-  },
-  {
-    name: "ReplyMaven Business",
-    price: "$99",
-    period: "/mo",
-    description: "For teams that run on customer experience.",
-    highlighted: false,
-    cta: "Contact sales",
-    features: [
-      "Everything in Startup",
-      "10 projects",
-      "500 messages / month",
-      "5 seats",
-      "Auto-drafted canned responses",
-      "Custom CSS & branding",
-      "Priority support",
-    ],
   },
 ];
 
@@ -2052,70 +1995,7 @@ function Landing() {
             </h2>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {pricingPlans.map((plan) => (
-              <div
-                key={plan.name}
-                className={cn(
-                  cardVariants({
-                    variant: plan.highlighted ? "glow-primary" : "glow-secondary",
-                  }),
-                  "relative flex flex-col rounded-3xl",
-                  plan.highlighted ? "bg-black/80 backdrop-blur-2xl border border-primary/20" : "bg-black/80 backdrop-blur-2xl border border-primary/15",
-                )}
-              >
-                <div className="p-7 pb-0 space-y-4">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm text-muted-foreground">{plan.name}</h3>
-                    {plan.highlighted && plan.badge && (
-                      <span className="text-[11px] bg-brand/10 text-brand px-2 py-0.5 rounded-full font-medium">
-                        {plan.badge}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-4xl font-semibold text-foreground tracking-tight">
-                      {plan.price}
-                    </span>
-                    {plan.period && (
-                      <span className="text-quaternary text-sm">
-                        {plan.period}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {plan.description}
-                  </p>
-                </div>
-
-                <ul className="p-7 space-y-3 flex-1">
-                  {plan.features.map((feature) => (
-                    <li
-                      key={feature}
-                      className="flex items-start gap-2.5 text-sm"
-                    >
-                      <Check className="w-4 h-4 text-brand shrink-0 mt-0.5" />
-                      <span className="text-secondary-foreground">{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-
-                <div className="p-7 pt-0">
-                  <Button
-                    variant={plan.highlighted ? "glow-primary" : "glow-secondary"}
-                    onClick={() => setAuthOpen(true)}
-                    className={cn(
-                      "w-full rounded-xl h-11 text-sm font-medium",
-                      !plan.highlighted &&
-                      "bg-white/[0.05] hover:bg-white/[0.08] border-white/[0.06]",
-                    )}
-                  >
-                    {plan.cta}
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
+          <PricingCards onCtaClick={() => setAuthOpen(true)} />
 
           {/* Enterprise card */}
           <div

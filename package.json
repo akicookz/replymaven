@@ -50,6 +50,7 @@
 		"recharts": "2.15.4",
 		"resend": "^6.9.1",
 		"robots-parser": "^3.0.1",
+		"stripe": "^20.4.0",
 		"tailwind-merge": "^3.3.0",
 		"tailwindcss": "^4.1.7",
 		"unpdf": "^1.4.0",

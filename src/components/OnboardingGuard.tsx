@@ -1,5 +1,6 @@
 import { Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { useSubscription } from "@/hooks/use-subscription";
 
 interface Project {
   id: string;
@@ -7,7 +8,7 @@ interface Project {
 }
 
 function OnboardingGuard({ children }: { children: React.ReactNode }) {
-  const { data: projects, isPending } = useQuery<Project[]>({
+  const { data: projects, isPending: projectsPending } = useQuery<Project[]>({
     queryKey: ["projects"],
     queryFn: async () => {
       const res = await fetch("/api/projects");
@@ -16,7 +17,9 @@ function OnboardingGuard({ children }: { children: React.ReactNode }) {
     },
   });
 
-  if (isPending) {
+  const { data: subData, isPending: subPending } = useSubscription();
+
+  if (projectsPending || subPending) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
         <div className="text-muted-foreground">Loading...</div>
@@ -33,6 +36,11 @@ function OnboardingGuard({ children }: { children: React.ReactNode }) {
   const hasOnboarded = projects.some((p) => p.onboarded);
   if (!hasOnboarded) {
     return <Navigate to="/app/onboarding" replace />;
+  }
+
+  // Has onboarded projects but no subscription -- go to plan selection
+  if (!subData?.subscription) {
+    return <Navigate to="/app/onboarding?step=plan" replace />;
   }
 
   return <>{children}</>;

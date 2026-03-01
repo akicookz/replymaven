@@ -13,8 +13,10 @@ import {
   Check,
   Copy,
   AlertCircle,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PricingCardsSelect, BillingToggle } from "@/components/PricingCards";
 import {
   Select,
   SelectContent,
@@ -70,7 +72,10 @@ const STEPS = [
   { label: "Context", icon: Sparkles },
   { label: "Widget", icon: Palette },
   { label: "Test", icon: MessageSquare },
+  { label: "Plan", icon: CreditCard },
 ] as const;
+
+
 
 // ─── Step 1: Company Info ─────────────────────────────────────────────────────
 
@@ -100,18 +105,44 @@ function Step1({
     data.companyName.trim() &&
     data.industry;
 
+  const continueButton = (
+    <Button
+      onClick={onNext}
+      disabled={!isValid || isPending}
+    >
+      {isPending ? (
+        <>
+          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          Creating project...
+        </>
+      ) : (
+        <>
+          Continue
+          <ArrowRight className="w-4 h-4 ml-2" />
+        </>
+      )}
+    </Button>
+  );
+
   return (
     <div className="space-y-6">
-      <div className="text-center space-y-2">
-        <div className="mx-auto w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
-          <Building2 className="w-6 h-6 text-primary" />
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+            <Building2 className="w-6 h-6 text-primary" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-bold text-foreground">
+              Tell us about your business
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              We'll use this to set up your AI support agent
+            </p>
+          </div>
         </div>
-        <h2 className="text-xl font-bold text-foreground">
-          Tell us about your business
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          We'll use this to set up your AI support agent
-        </p>
+        <div className="hidden md:block shrink-0">
+          {continueButton}
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -194,23 +225,9 @@ function Step1({
         </div>
       )}
 
-      <Button
-        onClick={onNext}
-        disabled={!isValid || isPending}
-        className="w-full"
-      >
-        {isPending ? (
-          <>
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            Creating project...
-          </>
-        ) : (
-          <>
-            Continue
-            <ArrowRight className="w-4 h-4 ml-2" />
-          </>
-        )}
-      </Button>
+      <div className="md:hidden">
+        {continueButton}
+      </div>
     </div>
   );
 }
@@ -232,7 +249,9 @@ function Step2({
 }) {
   const [scraped, setScraped] = useState<boolean | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [showManualEntry, setShowManualEntry] = useState(false);
   const hasFired = useRef(false);
+  const skippedRef = useRef(false);
 
   const scrapeMutation = useMutation({
     mutationFn: async () => {
@@ -243,12 +262,14 @@ function Step2({
       return res.json() as Promise<{ context: string; scraped: boolean }>;
     },
     onSuccess: (data) => {
+      if (skippedRef.current) return;
       setScraped(data.scraped);
       if (data.scraped && data.context) {
         setContext(data.context);
       }
     },
     onError: () => {
+      if (skippedRef.current) return;
       setScraped(false);
     },
   });
@@ -264,12 +285,30 @@ function Step2({
     },
   });
 
+  // Fire scrape on mount — skip if context is already pre-filled
   useEffect(() => {
     if (!hasFired.current) {
       hasFired.current = true;
-      scrapeMutation.mutate();
+      if (context.trim()) {
+        setScraped(true);
+      } else {
+        scrapeMutation.mutate();
+      }
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Show "Enter manually" after 10 seconds of crawling
+  useEffect(() => {
+    if (!scrapeMutation.isPending || skippedRef.current) return;
+    const timer = setTimeout(() => setShowManualEntry(true), 10_000);
+    return () => clearTimeout(timer);
+  }, [scrapeMutation.isPending]);
+
+  function handleSkipCrawl() {
+    skippedRef.current = true;
+    setScraped(false);
+    setShowManualEntry(false);
+  }
 
   function handleContinue() {
     if (isEditing || !scraped) {
@@ -279,56 +318,92 @@ function Step2({
     }
   }
 
-  // Loading state
-  if (scrapeMutation.isPending) {
+  // Loading state — skeleton UI (unless user skipped)
+  if (scrapeMutation.isPending && !skippedRef.current) {
     return (
       <div className="space-y-6">
-        <div className="text-center space-y-4 py-12">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-            <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-4 min-w-0">
+            <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+              <Globe className="w-6 h-6 text-primary" />
+            </div>
+            <div className="space-y-1">
+              <h2 className="text-xl font-bold text-foreground">
+                Analyzing your website...
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                We're crawling your site to build your agent's knowledge base
+              </p>
+              {showManualEntry && (
+                <button
+                  type="button"
+                  onClick={handleSkipCrawl}
+                  className="md:hidden text-sm text-primary hover:underline pt-1"
+                >
+                  Enter manually instead
+                </button>
+              )}
+            </div>
           </div>
-          <div className="space-y-2">
-            <h2 className="text-xl font-bold text-foreground">
-              Scanning your website...
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              We're analyzing your site to build your bot's knowledge base
-            </p>
+          {showManualEntry && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSkipCrawl}
+              className="hidden md:inline-flex shrink-0 text-primary hover:text-primary"
+            >
+              Enter manually
+            </Button>
+          )}
+        </div>
+
+        {/* Skeleton: URL bar with progress */}
+        <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-4">
+          <div className="flex items-center gap-3">
+            <Globe className="w-4 h-4 text-muted-foreground animate-pulse" />
+            <div className="h-4 w-48 rounded-md bg-muted animate-pulse" />
+            <div className="flex-1" />
+            <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
           </div>
-          <div className="flex justify-center gap-1">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="w-2 h-2 rounded-full bg-primary/40 animate-pulse"
-                style={{ animationDelay: `${i * 200}ms` }}
-              />
-            ))}
+          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+            <div className="h-full w-2/3 rounded-full bg-primary/30 animate-pulse" />
           </div>
         </div>
-        <Button variant="ghost" onClick={onBack} className="w-full">
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back
-        </Button>
+
+        {/* Skeleton: Extracted content lines */}
+        <div className="rounded-xl border border-border bg-muted/30 p-5 space-y-3">
+          <div className="h-3 w-24 rounded bg-muted animate-pulse" />
+          <div className="space-y-2.5">
+            <div className="h-3.5 w-full rounded bg-muted animate-pulse" />
+            <div className="h-3.5 w-5/6 rounded bg-muted animate-pulse" style={{ animationDelay: "100ms" }} />
+            <div className="h-3.5 w-full rounded bg-muted animate-pulse" style={{ animationDelay: "200ms" }} />
+            <div className="h-3.5 w-2/3 rounded bg-muted animate-pulse" style={{ animationDelay: "300ms" }} />
+            <div className="h-3.5 w-4/5 rounded bg-muted animate-pulse" style={{ animationDelay: "400ms" }} />
+            <div className="h-3.5 w-full rounded bg-muted animate-pulse" style={{ animationDelay: "500ms" }} />
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="text-center space-y-2">
-        <div className="mx-auto w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
+      <div className="flex items-start gap-4">
+        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
           <Sparkles className="w-6 h-6 text-primary" />
         </div>
-        <h2 className="text-xl font-bold text-foreground">
-          {scraped
-            ? "Here's what we found"
-            : "Tell us about your business"}
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          {scraped
-            ? "Review the context we built from your site. Edit if needed."
-            : "We couldn't extract much from your site. Describe your business so the bot knows how to help."}
-        </p>
+        <div className="space-y-1">
+          <h2 className="text-xl font-bold text-foreground">
+            {scraped
+              ? "Here's what we found"
+              : "Tell us about your business"}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {scraped
+              ? "Review the context we built from your site. Edit if needed."
+              : "We couldn't extract much from your site. Describe your business so your AI agent knows how to help."}
+          </p>
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -351,11 +426,11 @@ function Step2({
           onChange={(e) => setContext(e.target.value)}
           readOnly={scraped === true && !isEditing}
           rows={10}
-          placeholder="Describe what your company does, your products/services, pricing, policies, and anything your support bot should know..."
+          placeholder="Describe what your company does, your products/services, pricing, policies, and anything your AI support agent should know..."
           className="w-full px-4 py-3 rounded-xl border border-input bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
         />
         <p className="text-xs text-muted-foreground">
-          This context helps your bot answer questions accurately.
+          This context helps your AI agent answer questions accurately.
         </p>
       </div>
 
@@ -421,16 +496,18 @@ function Step3({
 
   return (
     <div className="space-y-6">
-      <div className="text-center space-y-2">
-        <div className="mx-auto w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
+      <div className="flex items-start gap-4">
+        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
           <Palette className="w-6 h-6 text-primary" />
         </div>
-        <h2 className="text-xl font-bold text-foreground">
-          Style your widget
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Match the chat widget to your brand
-        </p>
+        <div className="space-y-1">
+          <h2 className="text-xl font-bold text-foreground">
+            Style your widget
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Match the chat widget to your brand
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -632,18 +709,19 @@ function Step3({
   );
 }
 
-// ─── Step 4: Test Your Bot ────────────────────────────────────────────────────
+// ─── Step 4: Test Your Agent ──────────────────────────────────────────────────
 
 function Step4({
   projectId,
   slug,
   onBack,
+  onNext,
 }: {
   projectId: string;
   slug: string;
   onBack: () => void;
+  onNext: () => void;
 }) {
-  const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [copiedQuestion, setCopiedQuestion] = useState(false);
   const [completed, setCompleted] = useState(false);
@@ -735,25 +813,25 @@ function Step4({
     }
   }
 
-  // Success state
+  // Success state — move to plan selection
   if (completed) {
     return (
       <div className="space-y-6">
-        <div className="text-center space-y-4 py-8">
-          <div className="mx-auto w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
-            <Check className="w-8 h-8 text-green-600" />
+        <div className="flex items-start gap-4 py-8">
+          <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
+            <Check className="w-6 h-6 text-brand" />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1">
             <h2 className="text-xl font-bold text-foreground">
-              You're all set!
+              Your AI customer support agent is live
             </h2>
             <p className="text-sm text-muted-foreground">
-              Your AI support bot is live and ready to help your customers.
+              Start your free trial to go live on your website.
             </p>
           </div>
         </div>
-        <Button onClick={() => navigate("/app")} className="w-full">
-          Go to Dashboard
+        <Button onClick={onNext} className="w-full">
+          Start your free trial
           <ArrowRight className="w-4 h-4 ml-2" />
         </Button>
       </div>
@@ -762,16 +840,18 @@ function Step4({
 
   return (
     <div className="space-y-6">
-      <div className="text-center space-y-2">
-        <div className="mx-auto w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
+      <div className="flex items-start gap-4">
+        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
           <MessageSquare className="w-6 h-6 text-primary" />
         </div>
-        <h2 className="text-xl font-bold text-foreground">
-          Test your bot
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Send your first message to complete the setup
-        </p>
+        <div className="space-y-1">
+          <h2 className="text-xl font-bold text-foreground">
+            Test your AI agent
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Send a test message to see your AI agent in action
+          </p>
+        </div>
       </div>
 
       {/* Embed Code */}
@@ -839,7 +919,112 @@ function Step4({
         Waiting for your first message...
       </div>
 
-      <Button variant="outline" onClick={onBack} className="w-full">
+      <Button variant="outline" onClick={onBack} className="w-full md:w-auto">
+        <ArrowLeft className="w-4 h-4 mr-2" />
+        Back
+      </Button>
+    </div>
+  );
+}
+
+// ─── Step 5: Choose Plan ──────────────────────────────────────────────────────
+
+function Step5({
+  onBack,
+}: {
+  onBack: () => void;
+}) {
+  const navigate = useNavigate();
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const [billingInterval, setBillingInterval] = useState<"monthly" | "annual">("annual");
+
+  // Check if returning from Stripe Checkout
+  const searchParams = new URLSearchParams(window.location.search);
+  const checkoutSuccess = searchParams.get("checkout") === "success";
+
+  useEffect(() => {
+    if (checkoutSuccess) {
+      // Clean up URL params
+      const url = new URL(window.location.href);
+      url.searchParams.delete("checkout");
+      window.history.replaceState({}, "", url.pathname);
+      // Redirect to dashboard
+      navigate("/app");
+    }
+  }, [checkoutSuccess, navigate]);
+
+  async function handleSelectPlan(plan: "essential" | "pro" | "business", interval: "monthly" | "annual") {
+    setLoadingPlan(plan);
+    try {
+      const res = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan,
+          interval,
+          successUrl: `${window.location.origin}/app/onboarding?checkout=success`,
+          cancelUrl: `${window.location.origin}/app/onboarding?step=plan`,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to create checkout session");
+      }
+
+      const data = (await res.json()) as { url: string };
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch (err) {
+      console.error("Checkout error:", err);
+      setLoadingPlan(null);
+    }
+  }
+
+  if (checkoutSuccess) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-start gap-4 py-8">
+          <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
+            <Check className="w-6 h-6 text-brand" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-bold text-foreground">Welcome aboard!</h2>
+            <p className="text-sm text-muted-foreground">
+              Your trial has started. Redirecting to dashboard...
+            </p>
+            <Loader2 className="w-4 h-4 animate-spin text-muted-foreground mt-2" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Header row: icon + title left, toggle right */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+            <CreditCard className="w-6 h-6 text-primary" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-bold text-foreground">Start your free trial</h2>
+            <p className="text-sm text-muted-foreground">
+              7-day free trial, cancel anytime.
+            </p>
+          </div>
+        </div>
+        <BillingToggle interval={billingInterval} onChange={setBillingInterval} />
+      </div>
+
+      <PricingCardsSelect
+        onSelectPlan={handleSelectPlan}
+        loadingPlan={loadingPlan}
+        interval={billingInterval}
+      />
+
+      <Button variant="outline" onClick={onBack} className="w-full md:w-auto">
         <ArrowLeft className="w-4 h-4 mr-2" />
         Back
       </Button>
@@ -860,13 +1045,12 @@ function ProgressBar({ currentStep }: { currentStep: number }) {
         return (
           <div key={step.label} className="flex items-center gap-2">
             <div
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                isActive
-                  ? "bg-primary text-primary-foreground"
-                  : isCompleted
-                    ? "bg-primary/10 text-primary"
-                    : "bg-muted text-muted-foreground"
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${isActive
+                ? "bg-primary text-primary-foreground"
+                : isCompleted
+                  ? "bg-primary/10 text-primary"
+                  : "bg-muted text-muted-foreground"
+                }`}
             >
               {isCompleted ? (
                 <Check className="w-3 h-3" />
@@ -877,9 +1061,8 @@ function ProgressBar({ currentStep }: { currentStep: number }) {
             </div>
             {i < STEPS.length - 1 && (
               <div
-                className={`w-6 h-px transition-colors ${
-                  isCompleted ? "bg-primary" : "bg-border"
-                }`}
+                className={`w-6 h-px transition-colors ${isCompleted ? "bg-primary" : "bg-border"
+                  }`}
               />
             )}
           </div>
@@ -917,12 +1100,31 @@ function Onboarding() {
   useEffect(() => {
     if (!existingProjects) return;
 
+    // Check URL params for step overrides
+    const params = new URLSearchParams(window.location.search);
+    const stepParam = params.get("step");
+    const checkoutParam = params.get("checkout");
+
     // If there's an incomplete project, resume it at step 1
     const incomplete = existingProjects.find((p) => !p.onboarded);
     if (incomplete && !projectId) {
       setProjectId(incomplete.id);
       setProjectSlug(incomplete.slug);
-      setStep(1);
+
+      // Return from Stripe checkout or explicit step=plan → go to plan step
+      if (stepParam === "plan" || checkoutParam === "success") {
+        setStep(4);
+      } else {
+        setStep(1);
+      }
+    } else if (existingProjects.length > 0 && (stepParam === "plan" || checkoutParam === "success")) {
+      // User has onboarded projects but came back from Stripe
+      const latestProject = existingProjects[existingProjects.length - 1];
+      if (latestProject) {
+        setProjectId(latestProject.id);
+        setProjectSlug(latestProject.slug);
+        setStep(4);
+      }
     }
   }, [existingProjects, projectId]);
 
@@ -933,6 +1135,58 @@ function Onboarding() {
     companyName: "",
     industry: "",
   });
+
+  // Pre-fill step 1 data when resuming an existing project
+  const { data: projectData } = useQuery<{
+    name: string;
+    domain: string | null;
+  }>({
+    queryKey: ["project", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}`);
+      if (!res.ok) throw new Error("Failed to fetch project");
+      return res.json();
+    },
+    enabled: !!projectId,
+  });
+
+  const { data: settingsData } = useQuery<{
+    companyName: string | null;
+    companyUrl: string | null;
+    industry: string | null;
+    companyContext: string | null;
+  }>({
+    queryKey: ["project-settings", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/settings`);
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json();
+    },
+    enabled: !!projectId,
+  });
+
+  useEffect(() => {
+    if (!projectData || !settingsData) return;
+    const isEmpty =
+      !step1Data.websiteName &&
+      !step1Data.websiteUrl &&
+      !step1Data.companyName &&
+      !step1Data.industry;
+    if (isEmpty) {
+      setStep1Data({
+        websiteName: projectData.name ?? "",
+        websiteUrl:
+          settingsData.companyUrl ??
+          (projectData.domain ? `https://${projectData.domain}` : ""),
+        companyName: settingsData.companyName ?? "",
+        industry: settingsData.industry ?? "",
+      });
+    }
+    // Also pre-fill context if available and not already set
+    if (!context && settingsData.companyContext) {
+      setContext(settingsData.companyContext);
+    }
+  }, [projectData, settingsData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Step 2 state
   const [context, setContext] = useState("");
@@ -977,8 +1231,8 @@ function Onboarding() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <header className="border-b border-border px-6 py-4">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+      <header className="px-6 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center">
               <MessageSquare className="w-4 h-4 text-primary-foreground" />
@@ -991,43 +1245,45 @@ function Onboarding() {
 
       {/* Content */}
       <main className="flex-1 flex items-start justify-center px-6 py-12">
-        <div className="w-full max-w-xl">
-          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-8">
-            {step === 0 && (
-              <Step1
-                data={step1Data}
-                onChange={setStep1Data}
-                onNext={handleStep1Next}
-                isPending={createProjectMutation.isPending}
-                error={step1Error}
-              />
-            )}
-            {step === 1 && projectId && (
-              <Step2
-                projectId={projectId}
-                context={context}
-                setContext={setContext}
-                onNext={() => setStep(2)}
-                onBack={() => setStep(0)}
-              />
-            )}
-            {step === 2 && projectId && (
-              <Step3
-                style={widgetStyle}
-                onChange={setWidgetStyle}
-                onNext={() => setStep(3)}
-                onBack={() => setStep(1)}
-                projectId={projectId}
-              />
-            )}
-            {step === 3 && projectId && projectSlug && (
-              <Step4
-                projectId={projectId}
-                slug={projectSlug}
-                onBack={() => setStep(2)}
-              />
-            )}
-          </div>
+        <div className="w-full max-w-6xl">
+          {step === 0 && (
+            <Step1
+              data={step1Data}
+              onChange={setStep1Data}
+              onNext={handleStep1Next}
+              isPending={createProjectMutation.isPending}
+              error={step1Error}
+            />
+          )}
+          {step === 1 && projectId && (
+            <Step2
+              projectId={projectId}
+              context={context}
+              setContext={setContext}
+              onNext={() => setStep(2)}
+              onBack={() => setStep(0)}
+            />
+          )}
+          {step === 2 && projectId && (
+            <Step3
+              style={widgetStyle}
+              onChange={setWidgetStyle}
+              onNext={() => setStep(3)}
+              onBack={() => setStep(1)}
+              projectId={projectId}
+            />
+          )}
+          {step === 3 && projectId && projectSlug && (
+            <Step4
+              projectId={projectId}
+              slug={projectSlug}
+              onBack={() => setStep(2)}
+              onNext={() => setStep(4)}
+            />
+          )}
+          {step === 4 && (
+            <Step5 onBack={() => setStep(3)} />
+          )}
         </div>
       </main>
     </div>

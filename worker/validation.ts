@@ -297,3 +297,23 @@ export const updateToolSchema = z.object({
 export const testToolSchema = z.object({
   params: z.record(z.string(), z.unknown()),
 });
+
+// ─── Billing ──────────────────────────────────────────────────────────────────
+
+export const createCheckoutSchema = z.object({
+  plan: z.enum(["essential", "pro", "business"]),
+  interval: z.enum(["monthly", "annual"]),
+  successUrl: z.string().url(),
+  cancelUrl: z.string().url(),
+});
+
+// ─── Team Members ─────────────────────────────────────────────────────────────
+
+export const inviteTeamMemberSchema = z.object({
+  email: z.string().email("Must be a valid email address"),
+  role: z.enum(["admin", "member"]),
+});
+
+export const updateTeamMemberRoleSchema = z.object({
+  role: z.enum(["admin", "member"]),
+});

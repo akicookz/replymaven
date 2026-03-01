@@ -7,7 +7,6 @@ import {
   Plus,
   Palette,
   Zap,
-  Send,
   ArrowUpRight,
   ArrowDownRight,
 } from "lucide-react";

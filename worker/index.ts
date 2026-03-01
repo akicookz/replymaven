@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
 import { createAuth } from "./auth";
-import { type HonoAppContext } from "./types";
+import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
 import { WidgetService } from "./services/widget-service";
 import { ChatService } from "./services/chat-service";
@@ -22,6 +22,8 @@ import {
   maskHeaders,
   isEncrypted,
 } from "./services/encryption-service";
+import { BillingService } from "./services/billing-service";
+import { TeamService } from "./services/team-service";
 import {
   createProjectSchema,
   updateProjectSchema,
@@ -53,6 +55,9 @@ import {
   createToolSchema,
   updateToolSchema,
   testToolSchema,
+  createCheckoutSchema,
+  inviteTeamMemberSchema,
+  updateTeamMemberRoleSchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -600,6 +605,24 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(sendMessageSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
+    // Check subscription + message limits for the project owner
+    const billingService = new BillingService(db, c.env);
+    const ownerSub = await billingService.getSubscriptionByUserId(project.userId);
+    if (!ownerSub || !billingService.isSubscriptionActive(ownerSub)) {
+      return c.json({
+        error: "This chatbot is currently unavailable. Please contact the site owner.",
+        code: "subscription_inactive",
+      }, 503);
+    }
+
+    const messageCheck = await billingService.checkMessageLimit(project.userId);
+    if (!messageCheck.allowed) {
+      return c.json({
+        error: "Message limit reached. Please contact the site owner.",
+        code: "message_limit_reached",
+      }, 429);
+    }
+
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
     const conversation = await chatService.getConversationById(
       conversationId,
@@ -998,6 +1021,13 @@ const app = new Hono<HonoAppContext>()
             project.id,
           );
 
+          // Increment message usage counter for billing
+          try {
+            await billingService.incrementMessageUsage(project.userId);
+          } catch (err) {
+            console.error("Failed to increment message usage:", err);
+          }
+
           controller.enqueue(
             encoder.encode(
               `data: ${JSON.stringify({
@@ -1380,6 +1410,27 @@ const app = new Hono<HonoAppContext>()
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // STRIPE WEBHOOK (public, no auth — must be before session middleware)
+  // ═══════════════════════════════════════════════════════════════════════════
+  .post("/api/billing/webhook", async (c) => {
+    const signature = c.req.header("stripe-signature");
+    if (!signature) return c.json({ error: "Missing signature" }, 400);
+
+    const rawBody = await c.req.text();
+    const db = drizzle(c.env.DB);
+    const billingService = new BillingService(db, c.env);
+
+    try {
+      const event = billingService.constructEvent(rawBody, signature);
+      await billingService.handleWebhookEvent(event);
+      return c.json({ received: true });
+    } catch (err) {
+      console.error("Stripe webhook error:", err);
+      return c.json({ error: "Webhook verification failed" }, 400);
+    }
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // SESSION MIDDLEWARE (sets user, session, db on context)
   // ═══════════════════════════════════════════════════════════════════════════
   .use("/api/*", async (c, next) => {
@@ -1393,6 +1444,26 @@ const app = new Hono<HonoAppContext>()
 
     c.set("user", session?.user ?? null);
     c.set("session", session?.session ?? null);
+
+    // Set billing context defaults
+    c.set("subscription", null);
+    c.set("planLimits", null);
+    c.set("effectiveUserId", null);
+
+    // Resolve subscription + team membership for authenticated users
+    if (session?.user) {
+      const teamService = new TeamService(db);
+      const effectiveUserId = await teamService.getEffectiveUserId(session.user.id);
+      c.set("effectiveUserId", effectiveUserId);
+
+      const billingService = new BillingService(db, c.env);
+      const subscription = await billingService.getSubscriptionByUserId(effectiveUserId);
+      c.set("subscription", subscription);
+
+      if (subscription) {
+        c.set("planLimits", BillingService.getPlanLimits(subscription.plan as Plan));
+      }
+    }
 
     await next();
   })
@@ -1652,6 +1723,252 @@ const app = new Hono<HonoAppContext>()
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // BILLING ENDPOINTS (session-authenticated)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ─── Create Stripe Checkout Session ─────────────────────────────────────────
+  .post("/api/billing/checkout", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(createCheckoutSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const billingService = new BillingService(db, c.env);
+
+    try {
+      const session = await billingService.createCheckoutSession(
+        user.id,
+        user.email,
+        user.name,
+        parsed.data.plan,
+        parsed.data.interval,
+        parsed.data.successUrl,
+        parsed.data.cancelUrl,
+      );
+      return c.json({ url: session.url });
+    } catch (err) {
+      console.error("Checkout session error:", err);
+      return c.json({ error: "Failed to create checkout session" }, 500);
+    }
+  })
+
+  // ─── Create Stripe Customer Portal Session ─────────────────────────────────
+  .post("/api/billing/portal", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const subscription = c.get("subscription");
+    if (!subscription) {
+      return c.json({ error: "No active subscription" }, 400);
+    }
+
+    const db = c.get("db");
+    const billingService = new BillingService(db, c.env);
+
+    const body = await c.req.json().catch(() => ({})) as { returnUrl?: string };
+    const returnUrl = body.returnUrl || `${c.env.BETTER_AUTH_URL}/app/account/billing`;
+
+    try {
+      const portalSession = await billingService.createPortalSession(
+        subscription.stripeCustomerId,
+        returnUrl,
+      );
+      return c.json({ url: portalSession.url });
+    } catch (err) {
+      console.error("Portal session error:", err);
+      return c.json({ error: "Failed to create portal session" }, 500);
+    }
+  })
+
+  // ─── Get Current Subscription + Usage ───────────────────────────────────────
+  .get("/api/billing/subscription", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+    const db = c.get("db");
+    const billingService = new BillingService(db, c.env);
+    const teamService = new TeamService(db);
+
+    const subscription = await billingService.getSubscriptionByUserId(effectiveUserId);
+    const currentUsage = await billingService.getUsage(effectiveUserId);
+    const seatCount = await teamService.getSeatCount(effectiveUserId);
+    const membership = await teamService.getTeamMembership(user.id);
+
+    if (!subscription) {
+      return c.json({
+        subscription: null,
+        usage: { messagesUsed: 0 },
+        limits: null,
+        seats: { current: 1, max: 0 },
+        role: "owner",
+      });
+    }
+
+    const limits = BillingService.getPlanLimits(subscription.plan as Plan);
+
+    return c.json({
+      subscription: {
+        id: subscription.id,
+        plan: subscription.plan,
+        interval: subscription.interval,
+        status: subscription.status,
+        trialEndsAt: subscription.trialEndsAt,
+        currentPeriodStart: subscription.currentPeriodStart,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+        cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+      },
+      usage: {
+        messagesUsed: currentUsage?.messagesUsed ?? 0,
+      },
+      limits,
+      seats: {
+        current: seatCount,
+        max: limits.maxSeats,
+      },
+      role: membership ? membership.role : "owner",
+    });
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEAM ENDPOINTS (session-authenticated)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ─── List Team Members ──────────────────────────────────────────────────────
+  .get("/api/team", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const teamService = new TeamService(db);
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+
+    const members = await teamService.getAllMembers(effectiveUserId);
+    return c.json({ members, ownerId: effectiveUserId });
+  })
+
+  // ─── Invite Team Member ─────────────────────────────────────────────────────
+  .post("/api/team/invite", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    // Only owner and admin can invite
+    const db = c.get("db");
+    const teamService = new TeamService(db);
+    const membership = await teamService.getTeamMembership(user.id);
+    if (membership && membership.role === "member") {
+      return c.json({ error: "Only owners and admins can invite members" }, 403);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(inviteTeamMemberSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    // Check seat limit
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+    const subscription = c.get("subscription");
+    if (!subscription) {
+      return c.json({ error: "No active subscription" }, 403);
+    }
+
+    const limits = BillingService.getPlanLimits(subscription.plan as Plan);
+    const seatCount = await teamService.getSeatCount(effectiveUserId);
+    if (seatCount >= limits.maxSeats) {
+      return c.json({
+        error: "Seat limit reached. Upgrade your plan for more seats.",
+        code: "seat_limit_reached",
+      }, 403);
+    }
+
+    try {
+      const member = await teamService.inviteMember(
+        effectiveUserId,
+        parsed.data.email,
+        parsed.data.role,
+      );
+      return c.json(member);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to invite member";
+      return c.json({ error: message }, 400);
+    }
+  })
+
+  // ─── Accept Team Invite ─────────────────────────────────────────────────────
+  .post("/api/team/accept/:inviteId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const inviteId = c.req.param("inviteId");
+    const db = c.get("db");
+    const teamService = new TeamService(db);
+
+    try {
+      await teamService.acceptInvite(inviteId, user.id, user.email);
+      return c.json({ ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to accept invite";
+      return c.json({ error: message }, 400);
+    }
+  })
+
+  // ─── Update Team Member Role ────────────────────────────────────────────────
+  .patch("/api/team/:memberId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    // Only owner can change roles
+    const db = c.get("db");
+    const teamService = new TeamService(db);
+    const membership = await teamService.getTeamMembership(user.id);
+    if (membership) {
+      return c.json({ error: "Only the account owner can change roles" }, 403);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(updateTeamMemberRoleSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    try {
+      const member = await teamService.updateMemberRole(
+        user.id,
+        c.req.param("memberId"),
+        parsed.data.role,
+      );
+      return c.json(member);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update role";
+      return c.json({ error: message }, 400);
+    }
+  })
+
+  // ─── Remove Team Member ─────────────────────────────────────────────────────
+  .delete("/api/team/:memberId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    // Owner and admin can remove members
+    const db = c.get("db");
+    const teamService = new TeamService(db);
+    const membership = await teamService.getTeamMembership(user.id);
+    if (membership && membership.role === "member") {
+      return c.json({ error: "Only owners and admins can remove members" }, 403);
+    }
+
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+
+    try {
+      await teamService.revokeMember(effectiveUserId, c.req.param("memberId"));
+      return c.json({ ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to remove member";
+      return c.json({ error: message }, 400);
+    }
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // DASHBOARD ENDPOINTS (session-authenticated)
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1693,11 +2010,22 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
+    // Check project limit
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+    const db = c.get("db");
+    const billingService = new BillingService(db, c.env);
+    const projectCheck = await billingService.checkProjectLimit(effectiveUserId);
+    if (!projectCheck.allowed) {
+      return c.json({
+        error: `Project limit reached (${projectCheck.current}/${projectCheck.max}). Upgrade your plan.`,
+        code: "project_limit_reached",
+      }, 403);
+    }
+
     const body = await c.req.json();
     const parsed = validate(createProjectSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-    const db = c.get("db");
     const service = new ProjectService(db);
     const baseSlug = slugify(parsed.data.name);
     const slug = await service.generateUniqueSlug(user.id, baseSlug);
@@ -1768,6 +2096,15 @@ const app = new Hono<HonoAppContext>()
     const body = await c.req.json();
     const parsed = validate(updateProjectSettingsSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    // Feature gate: custom tone
+    const planLimits = c.get("planLimits");
+    if (parsed.data.toneOfVoice === "custom" && planLimits && !planLimits.customTone) {
+      return c.json({
+        error: "Custom tone is available on Pro and Business plans.",
+        code: "feature_not_available",
+      }, 403);
+    }
 
     const db = c.get("db");
     const projectService = new ProjectService(db);
@@ -1881,6 +2218,15 @@ const app = new Hono<HonoAppContext>()
     const body = await c.req.json();
     const parsed = validate(updateWidgetConfigSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    // Feature gate: custom CSS
+    const planLimits = c.get("planLimits");
+    if (parsed.data.customCss && planLimits && !planLimits.customCss) {
+      return c.json({
+        error: "Custom CSS is available on the Business plan.",
+        code: "feature_not_available",
+      }, 403);
+    }
 
     const db = c.get("db");
     const projectService = new ProjectService(db);
@@ -2048,6 +2394,15 @@ const app = new Hono<HonoAppContext>()
   .post("/api/projects/:id/tools", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    // Feature gate: tools
+    const planLimits = c.get("planLimits");
+    if (planLimits && !planLimits.tools) {
+      return c.json({
+        error: "Tools are available on Pro and Business plans.",
+        code: "feature_not_available",
+      }, 403);
+    }
 
     const db = c.get("db");
     const projectService = new ProjectService(db);
@@ -2443,6 +2798,15 @@ const app = new Hono<HonoAppContext>()
 
     const contentType = c.req.header("content-type") ?? "";
     const resourceService = new ResourceService(db, c.env.UPLOADS);
+
+    // Feature gate: PDF indexing
+    const planLimits = c.get("planLimits");
+    if (contentType.includes("multipart/form-data") && planLimits && !planLimits.pdfIndexing) {
+      return c.json({
+        error: "PDF indexing is available on Pro and Business plans.",
+        code: "feature_not_available",
+      }, 403);
+    }
 
     // ─── PDF upload via multipart form ──────────────────────────────────────
     if (contentType.includes("multipart/form-data")) {
@@ -3154,6 +3518,15 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
+    // Feature gate: telegram
+    const planLimits = c.get("planLimits");
+    if (planLimits && !planLimits.telegram) {
+      return c.json({
+        error: "Telegram integration is available on Pro and Business plans.",
+        code: "feature_not_available",
+      }, 403);
+    }
+
     const body = await c.req.json();
     const parsed = validate(updateTelegramSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
@@ -3237,6 +3610,15 @@ const app = new Hono<HonoAppContext>()
   .put("/api/projects/:id/booking/config", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    // Feature gate: booking
+    const planLimits = c.get("planLimits");
+    if (planLimits && !planLimits.booking) {
+      return c.json({
+        error: "Booking is available on Pro and Business plans.",
+        code: "feature_not_available",
+      }, 403);
+    }
 
     const body = await c.req.json();
     const parsed = validate(updateBookingConfigSchema, body);

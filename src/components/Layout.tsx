@@ -15,10 +15,14 @@ import {
   Plus,
   Check,
   PanelLeftClose,
+  CreditCard,
+  Users,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
+import { useSubscription } from "@/hooks/use-subscription";
+import { formatPlanName, getTrialDaysRemaining, usagePercent } from "@/lib/plan";
 import {
   Popover,
   PopoverContent,
@@ -37,6 +41,7 @@ function Layout() {
   const navigate = useNavigate();
   const params = useParams<{ projectId?: string }>();
   const { data: session } = useSession();
+  const { data: subData } = useSubscription();
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -274,7 +279,80 @@ function Layout() {
               {!collapsed && "Create Project"}
             </Link>
           )}
+
+          {/* Account */}
+          <div className="space-y-1">
+            {!collapsed && (
+              <p className="px-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Account
+              </p>
+            )}
+            <div className="space-y-0.5">
+              <Link
+                to="/app/account/billing"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <CreditCard className="w-[18px] h-[18px] shrink-0" />
+                {!collapsed && "Billing"}
+              </Link>
+              <Link
+                to="/app/account/members"
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <Users className="w-[18px] h-[18px] shrink-0" />
+                {!collapsed && "Members"}
+              </Link>
+            </div>
+          </div>
         </nav>
+
+        {/* Plan Status */}
+        {subData?.subscription && !collapsed && (
+          <div className="px-3 pb-1">
+            <Link
+              to="/app/account/billing"
+              className="block px-3 py-2 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  {formatPlanName(subData.subscription.plan)}
+                </span>
+                {subData.subscription.status === "trialing" && (
+                  <span className="text-[10px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">
+                    {getTrialDaysRemaining(subData.subscription.trialEndsAt)}d trial
+                  </span>
+                )}
+                {subData.subscription.status === "past_due" && (
+                  <span className="text-[10px] font-medium text-yellow-600 bg-yellow-50 px-1.5 py-0.5 rounded-full">
+                    Past due
+                  </span>
+                )}
+              </div>
+              {subData.limits && (
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 90
+                        ? "bg-destructive"
+                        : usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 70
+                          ? "bg-yellow-500"
+                          : "bg-primary",
+                    )}
+                    style={{
+                      width: `${usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth)}%`,
+                    }}
+                  />
+                </div>
+              )}
+              {subData.limits && (
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  {subData.usage.messagesUsed}/{subData.limits.maxMessagesPerMonth} messages
+                </p>
+              )}
+            </Link>
+          </div>
+        )}
 
         {/* User */}
         <div className="px-3 pb-3 pt-2 border-t border-sidebar-border">

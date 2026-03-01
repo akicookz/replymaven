@@ -548,6 +548,108 @@ export const toolExecutions = sqliteTable(
 export type ToolExecutionRow = typeof toolExecutions.$inferSelect;
 export type NewToolExecutionRow = typeof toolExecutions.$inferInsert;
 
+// ─── Subscriptions ────────────────────────────────────────────────────────────
+
+export const subscriptions = sqliteTable(
+  "subscriptions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authSchema.users.id, { onDelete: "cascade" }),
+    stripeCustomerId: text("stripe_customer_id").notNull(),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    plan: text("plan", { enum: ["essential", "pro", "business"] }).notNull(),
+    interval: text("interval", { enum: ["monthly", "annual"] }).notNull(),
+    status: text("status", {
+      enum: [
+        "trialing",
+        "active",
+        "past_due",
+        "canceled",
+        "unpaid",
+        "incomplete",
+      ],
+    }).notNull(),
+    trialEndsAt: integer("trial_ends_at", { mode: "timestamp" }),
+    currentPeriodStart: integer("current_period_start", { mode: "timestamp" }),
+    currentPeriodEnd: integer("current_period_end", { mode: "timestamp" }),
+    cancelAtPeriodEnd: integer("cancel_at_period_end", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_subscriptions_user").on(table.userId),
+    index("idx_subscriptions_stripe_customer").on(table.stripeCustomerId),
+    index("idx_subscriptions_stripe_sub").on(table.stripeSubscriptionId),
+  ],
+);
+
+export type SubscriptionRow = typeof subscriptions.$inferSelect;
+export type NewSubscriptionRow = typeof subscriptions.$inferInsert;
+
+// ─── Team Members ─────────────────────────────────────────────────────────────
+
+export const teamMembers = sqliteTable(
+  "team_members",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id")
+      .notNull()
+      .references(() => authSchema.users.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => authSchema.users.id, {
+      onDelete: "cascade",
+    }),
+    email: text("email").notNull(),
+    role: text("role", { enum: ["admin", "member"] }).notNull(),
+    status: text("status", { enum: ["pending", "accepted", "revoked"] })
+      .notNull()
+      .default("pending"),
+    invitedAt: integer("invited_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    acceptedAt: integer("accepted_at", { mode: "timestamp" }),
+  },
+  (table) => [
+    uniqueIndex("idx_team_members_owner_email").on(table.ownerId, table.email),
+    index("idx_team_members_user").on(table.userId),
+    index("idx_team_members_email").on(table.email),
+  ],
+);
+
+export type TeamMemberRow = typeof teamMembers.$inferSelect;
+export type NewTeamMemberRow = typeof teamMembers.$inferInsert;
+
+// ─── Usage ────────────────────────────────────────────────────────────────────
+
+export const usage = sqliteTable(
+  "usage",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authSchema.users.id, { onDelete: "cascade" }),
+    periodStart: integer("period_start", { mode: "timestamp" }).notNull(),
+    messagesUsed: integer("messages_used").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_usage_user_period").on(table.userId, table.periodStart),
+  ],
+);
+
+export type UsageRow = typeof usage.$inferSelect;
+export type NewUsageRow = typeof usage.$inferInsert;
+
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
 export const apiKeys = sqliteTable(
@@ -588,6 +690,9 @@ export const schema = {
   bookingConfig,
   availabilityRules,
   bookings,
+  subscriptions,
+  teamMembers,
+  usage,
   apiKeys,
   tools,
   toolExecutions,

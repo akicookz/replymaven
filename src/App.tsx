@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import Layout from "./components/Layout";
+import AccountLayout from "./components/AccountLayout";
 import AuthGuard from "./components/AuthGuard";
 import OnboardingGuard from "./components/OnboardingGuard";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -16,6 +17,8 @@ import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
 import TelegramConfig from "./pages/TelegramConfig";
 import Tools from "./pages/Tools";
+import Billing from "./pages/Billing";
+import Members from "./pages/Members";
 import AuthCallback from "./pages/AuthCallback";
 import Docs from "./pages/Docs";
 
@@ -61,6 +64,22 @@ function App() {
           </ErrorBoundary>
         }
       />
+
+      {/* Account pages -- separate layout */}
+      <Route
+        path="/app/account"
+        element={
+          <ErrorBoundary>
+            <AuthGuard>
+              <AccountLayout />
+            </AuthGuard>
+          </ErrorBoundary>
+        }
+      >
+        <Route index element={<Navigate to="billing" replace />} />
+        <Route path="billing" element={<Billing />} />
+        <Route path="members" element={<Members />} />
+      </Route>
 
       {/* /app index -- redirect to first project dashboard */}
       <Route
