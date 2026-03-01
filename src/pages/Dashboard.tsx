@@ -296,7 +296,6 @@ function Dashboard() {
     { label: "Configure widget", icon: Palette, href: `/app/projects/${projectId}/widget` },
     { label: "Quick actions", icon: Zap, href: `/app/projects/${projectId}/quick-actions` },
     { label: "Canned responses", icon: Bot, href: `/app/projects/${projectId}/canned-responses` },
-    { label: "Telegram setup", icon: Send, href: `/app/projects/${projectId}/telegram` },
   ];
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -377,7 +376,7 @@ function Dashboard() {
                     border: "1px solid var(--border)",
                     borderRadius: "8px",
                     fontSize: "12px",
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                    boxShadow: "0 4px 12px rgba(255,255,255,0.05)",
                   }}
                 />
                 <Bar
@@ -450,7 +449,7 @@ function Dashboard() {
                     className={cn(
                       "text-[11px] font-medium px-2 py-0.5 rounded-full border w-fit capitalize",
                       STATUS_BADGE_STYLES[convo.status] ??
-                        "bg-status-closed/10 text-status-closed border-status-closed/25",
+                      "bg-status-closed/10 text-status-closed border-status-closed/25",
                     )}
                   >
                     {STATUS_LABELS[convo.status] ?? convo.status.replace("_", " ")}
@@ -497,7 +496,7 @@ function Dashboard() {
                       border: "1px solid var(--border)",
                       borderRadius: "8px",
                       fontSize: "12px",
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                      boxShadow: "0 4px 12px rgba(255,255,255,0.05)",
                     }}
                   />
                 </PieChart>

@@ -144,32 +144,50 @@
   // ─── SVG Icons ──────────────────────────────────────────────────────────────
   const ICONS = {
     chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
-    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    close:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
     send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
     bot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>',
-    headset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>',
-    arrowRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>',
-    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
-    sparkle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
-    chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
-    externalLink: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
-    backArrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>',
+    headset:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>',
+    arrowRight:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>',
+    check:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    sparkle:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+    chevronRight:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
+    externalLink:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+    backArrow:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>',
     // Home link icons
     link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
     docs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
     mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
-    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    calendar:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
     bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
-    folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
-    globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
-    external: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
-    paperclip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
+    folder:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+    globe:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+    external:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+    paperclip:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
-    chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
-    clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
-    aiSparkle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/><path d="M19 2l.5 1.5L21 4l-1.5.5L19 6l-.5-1.5L17 4l1.5-.5L19 2z"/></svg>',
-    circleQuestion: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
-    phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+    chevronLeft:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
+    clock:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    aiSparkle:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/><path d="M19 2l.5 1.5L21 4l-1.5.5L19 6l-.5-1.5L17 4l1.5-.5L19 2z"/></svg>',
+    circleQuestion:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    phone:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
   } as Record<string, string>;
 
   // ─── Styles ─────────────────────────────────────────────────────────────────
@@ -342,6 +360,9 @@
       justify-content: center;
       color: white;
     }
+    .rm-header-avatar.rm-icon-avatar {
+      border-radius: 10px;
+    }
     .rm-header-avatar svg {
       width: 20px;
       height: 20px;
@@ -431,6 +452,9 @@
       justify-content: center;
       flex-shrink: 0;
       margin-bottom: 2px;
+    }
+    .rm-message-avatar.rm-icon-avatar {
+      border-radius: 8px;
     }
     .rm-message-avatar svg {
       width: 14px;
@@ -932,6 +956,9 @@
       align-items: center;
       justify-content: center;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .rm-home-avatar.rm-icon-avatar {
+      border-radius: 14px;
     }
     .rm-home-avatar img {
       width: 100%;
@@ -2218,8 +2245,8 @@
 
   // Avatar on banner
   const homeAvatar = document.createElement("div");
-  homeAvatar.className = "rm-home-avatar";
-  homeAvatar.innerHTML = ICONS.bot;
+  homeAvatar.className = "rm-home-avatar rm-icon-avatar";
+  homeAvatar.innerHTML = ICONS.aiSparkle;
   homeBanner.appendChild(homeAvatar);
 
   // Home body
@@ -2320,8 +2347,8 @@
   headerBack.onclick = () => showHomeScreen();
 
   const headerAvatar = document.createElement("div");
-  headerAvatar.className = "rm-header-avatar";
-  headerAvatar.innerHTML = ICONS.bot;
+  headerAvatar.className = "rm-header-avatar rm-icon-avatar";
+  headerAvatar.innerHTML = ICONS.aiSparkle;
 
   const headerInfo = document.createElement("div");
   headerInfo.className = "rm-header-info";
@@ -2429,7 +2456,8 @@
   // Powered by
   const powered = document.createElement("div");
   powered.className = "rm-powered";
-  powered.innerHTML = 'Powered by <a href="https://replymaven.com" target="_blank" rel="noopener">ReplyMaven</a>';
+  powered.innerHTML =
+    'Powered by <a href="https://replymaven.com" target="_blank" rel="noopener">ReplyMaven</a>';
 
   // ─── Booking View ────────────────────────────────────────────────────────────
   const bookingView = document.createElement("div");
@@ -2444,7 +2472,8 @@
   bookingHeaderBack.onclick = () => showHomeScreen();
   const bookingHeaderTitle = document.createElement("div");
   bookingHeaderTitle.style.cssText = "flex:1;min-width:0;";
-  bookingHeaderTitle.innerHTML = '<div style="font-weight:600;font-size:14px;">Book a Meeting</div><div class="rm-booking-subtitle" style="font-size:12px;opacity:0.75;margin-top:1px;">Select a date & time</div>';
+  bookingHeaderTitle.innerHTML =
+    '<div style="font-weight:600;font-size:14px;">Book a Meeting</div><div class="rm-booking-subtitle" style="font-size:12px;opacity:0.75;margin-top:1px;">Select a date & time</div>';
   const bookingHeaderClose = document.createElement("button");
   bookingHeaderClose.className = "rm-header-close";
   bookingHeaderClose.innerHTML = ICONS.close;
@@ -2456,7 +2485,8 @@
 
   // Booking content container (swapped between step1/step2/step3)
   const bookingContent = document.createElement("div");
-  bookingContent.style.cssText = "display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;";
+  bookingContent.style.cssText =
+    "display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;";
   bookingView.appendChild(bookingContent);
 
   // Assemble chat window
@@ -2510,11 +2540,13 @@
 
   const ibSendIcon = document.createElement("span");
   ibSendIcon.className = "rm-ib-icon-send";
-  ibSendIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+  ibSendIcon.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
 
   const ibCloseIcon = document.createElement("span");
   ibCloseIcon.className = "rm-ib-icon-close";
-  ibCloseIcon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+  ibCloseIcon.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 
   inlineBarBtn.appendChild(ibSendIcon);
   inlineBarBtn.appendChild(ibCloseIcon);
@@ -2540,7 +2572,9 @@
     inlineBarExpanded = true;
     inlineBar.classList.add("expanded");
     inlineBarPlaceholder.style.display = "none";
-    inlineBarInput.placeholder = conversationId ? "Type a message..." : "Ask a question...";
+    inlineBarInput.placeholder = conversationId
+      ? "Type a message..."
+      : "Ask a question...";
     inlineBarInput.focus();
     stopPlaceholderRotation();
     updateInlineBarBtn();
@@ -2574,7 +2608,8 @@
   function startPlaceholderRotation() {
     if (placeholderInterval) return;
     if (placeholderTexts.length <= 1) {
-      inlineBarPlaceholder.textContent = placeholderTexts[0] || "Ask a question...";
+      inlineBarPlaceholder.textContent =
+        placeholderTexts[0] || "Ask a question...";
       return;
     }
     placeholderIndex = 0;
@@ -2728,7 +2763,11 @@
   });
 
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !isSending && (input.value.trim() || pendingImageFile)) {
+    if (
+      e.key === "Enter" &&
+      !isSending &&
+      (input.value.trim() || pendingImageFile)
+    ) {
       handleSendMessage(input.value.trim());
       input.value = "";
     }
@@ -2790,13 +2829,26 @@
 
   function hexToRgb(hex: string): string {
     const h = hex.replace("#", "");
-    const bigint = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
+    const bigint = parseInt(
+      h.length === 3
+        ? h
+            .split("")
+            .map((c) => c + c)
+            .join("")
+        : h,
+      16,
+    );
     return `${(bigint >> 16) & 255}, ${(bigint >> 8) & 255}, ${bigint & 255}`;
   }
 
   function resolveUrl(url: string): string {
     if (!url) return url;
-    if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) return url;
+    if (
+      url.startsWith("http://") ||
+      url.startsWith("https://") ||
+      url.startsWith("data:")
+    )
+      return url;
     return baseUrl + url;
   }
 
@@ -2837,16 +2889,34 @@
       const olMatch = line.match(/^[\s]*\d+[.)]\s+(.*)/);
 
       if (ulMatch) {
-        if (!inUl) { output.push("<ul>"); inUl = true; }
-        if (inOl) { output.push("</ol>"); inOl = false; }
+        if (!inUl) {
+          output.push("<ul>");
+          inUl = true;
+        }
+        if (inOl) {
+          output.push("</ol>");
+          inOl = false;
+        }
         output.push(`<li>${ulMatch[1]}</li>`);
       } else if (olMatch) {
-        if (!inOl) { output.push("<ol>"); inOl = true; }
-        if (inUl) { output.push("</ul>"); inUl = false; }
+        if (!inOl) {
+          output.push("<ol>");
+          inOl = true;
+        }
+        if (inUl) {
+          output.push("</ul>");
+          inUl = false;
+        }
         output.push(`<li>${olMatch[1]}</li>`);
       } else {
-        if (inUl) { output.push("</ul>"); inUl = false; }
-        if (inOl) { output.push("</ol>"); inOl = false; }
+        if (inUl) {
+          output.push("</ul>");
+          inUl = false;
+        }
+        if (inOl) {
+          output.push("</ol>");
+          inOl = false;
+        }
         const trimmed = line.trim();
         if (trimmed === "") {
           // Empty line — paragraph break (only if next line has content)
@@ -2890,9 +2960,19 @@
 
   // ─── Booking Logic ───────────────────────────────────────────────────────────
 
-  let bookingConfig: { enabled: boolean; timezone?: string; slotDuration?: number; bookingWindowDays?: number } | null = null;
+  let bookingConfig: {
+    enabled: boolean;
+    timezone?: string;
+    slotDuration?: number;
+    bookingWindowDays?: number;
+  } | null = null;
   let bookingSelectedDate: string | null = null;
-  let bookingSelectedSlot: { startTime: string; endTime: string; startTimeLocal: string; endTimeLocal: string } | null = null;
+  let bookingSelectedSlot: {
+    startTime: string;
+    endTime: string;
+    startTimeLocal: string;
+    endTimeLocal: string;
+  } | null = null;
   let bookingStep: "slots" | "confirmed" = "slots";
 
   function getVisitorTimezone(): string {
@@ -2903,8 +2983,22 @@
     }
   }
 
-  function getBookingDates(): Array<{ dateStr: string; label: string; weekday: string; day: number; month: string; isToday: boolean }> {
-    const dates: Array<{ dateStr: string; label: string; weekday: string; day: number; month: string; isToday: boolean }> = [];
+  function getBookingDates(): Array<{
+    dateStr: string;
+    label: string;
+    weekday: string;
+    day: number;
+    month: string;
+    isToday: boolean;
+  }> {
+    const dates: Array<{
+      dateStr: string;
+      label: string;
+      weekday: string;
+      day: number;
+      month: string;
+      isToday: boolean;
+    }> = [];
     const today = new Date();
     const windowDays = bookingConfig?.bookingWindowDays ?? 14;
     for (let i = 0; i < windowDays; i++) {
@@ -2930,7 +3024,9 @@
 
   async function fetchBookingConfig(): Promise<void> {
     try {
-      const res = await fetch(`${baseUrl}/api/widget/${projectSlug}/booking/config`);
+      const res = await fetch(
+        `${baseUrl}/api/widget/${projectSlug}/booking/config`,
+      );
       if (res.ok) {
         bookingConfig = await res.json();
       }
@@ -2939,10 +3035,20 @@
     }
   }
 
-  async function fetchSlots(dateStr: string): Promise<Array<{ startTime: string; endTime: string; startTimeLocal: string; endTimeLocal: string; available: boolean }>> {
+  async function fetchSlots(dateStr: string): Promise<
+    Array<{
+      startTime: string;
+      endTime: string;
+      startTimeLocal: string;
+      endTimeLocal: string;
+      available: boolean;
+    }>
+  > {
     try {
       const tz = encodeURIComponent(getVisitorTimezone());
-      const res = await fetch(`${baseUrl}/api/widget/${projectSlug}/booking/slots?date=${dateStr}&timezone=${tz}`);
+      const res = await fetch(
+        `${baseUrl}/api/widget/${projectSlug}/booking/slots?date=${dateStr}&timezone=${tz}`,
+      );
       if (res.ok) {
         const data = await res.json();
         return data.slots || [];
@@ -3000,13 +3106,18 @@
     const dates = getBookingDates();
 
     // ── Month / year label row ──────────────────────────────────────────────
-    const selectedDateObj = bookingSelectedDate ? new Date(bookingSelectedDate + "T12:00:00") : new Date();
+    const selectedDateObj = bookingSelectedDate
+      ? new Date(bookingSelectedDate + "T12:00:00")
+      : new Date();
     const monthRow = document.createElement("div");
     monthRow.className = "rm-booking-month-row";
 
     const monthLabel = document.createElement("span");
     monthLabel.className = "rm-booking-month-label";
-    monthLabel.textContent = selectedDateObj.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    monthLabel.textContent = selectedDateObj.toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+    });
 
     const arrowsWrap = document.createElement("div");
     arrowsWrap.className = "rm-booking-month-arrows";
@@ -3029,8 +3140,12 @@
     const dateStrip = document.createElement("div");
     dateStrip.className = "rm-booking-dates";
 
-    leftArrow.onclick = () => { dateStrip.scrollBy({ left: -180, behavior: "smooth" }); };
-    rightArrow.onclick = () => { dateStrip.scrollBy({ left: 180, behavior: "smooth" }); };
+    leftArrow.onclick = () => {
+      dateStrip.scrollBy({ left: -180, behavior: "smooth" });
+    };
+    rightArrow.onclick = () => {
+      dateStrip.scrollBy({ left: 180, behavior: "smooth" });
+    };
 
     dates.forEach((d) => {
       const pill = document.createElement("div");
@@ -3160,11 +3275,15 @@
       });
 
       if (success) {
-        renderBookingConfirmation(visitorInfo.name || email.split("@")[0], email);
+        renderBookingConfirmation(
+          visitorInfo.name || email.split("@")[0],
+          email,
+        );
       } else {
         confirmBtn.disabled = false;
         confirmBtn.textContent = "Confirm Booking";
-        errorEl.textContent = "This time slot may no longer be available. Please try another time.";
+        errorEl.textContent =
+          "This time slot may no longer be available. Please try another time.";
         errorEl.style.display = "block";
       }
     };
@@ -3220,7 +3339,9 @@
                 endTimeLocal: slot.endTimeLocal,
               };
               // Highlight selected, deselect others
-              slotsGrid.querySelectorAll(".rm-booking-slot").forEach((s) => s.classList.remove("selected"));
+              slotsGrid
+                .querySelectorAll(".rm-booking-slot")
+                .forEach((s) => s.classList.remove("selected"));
               el.classList.add("selected");
             };
           }
@@ -3238,14 +3359,13 @@
     }, 50);
   }
 
-
-
   function renderBookingConfirmation(name: string, email: string) {
     bookingStep = "confirmed";
     const primary = config?.widget?.primaryColor || "#2563eb";
 
     bookingContent.innerHTML = "";
-    bookingHeaderTitle.innerHTML = '<div style="font-weight:600;font-size:14px;">Booking Confirmed</div>';
+    bookingHeaderTitle.innerHTML =
+      '<div style="font-weight:600;font-size:14px;">Booking Confirmed</div>';
     bookingHeaderBack.onclick = () => showHomeScreen();
 
     const confirmed = document.createElement("div");
@@ -3261,7 +3381,12 @@
 
     if (bookingSelectedDate && bookingSelectedSlot) {
       const selectedDate = new Date(bookingSelectedDate + "T12:00:00");
-      const dateLabel = selectedDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+      const dateLabel = selectedDate.toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
 
       const details = document.createElement("div");
       details.className = "rm-booking-confirmed-details";
@@ -3281,7 +3406,8 @@
       backBtn.onclick = () => {
         bookingSelectedDate = null;
         bookingSelectedSlot = null;
-        bookingHeaderTitle.innerHTML = '<div style="font-weight:600;font-size:14px;">Book a Meeting</div>';
+        bookingHeaderTitle.innerHTML =
+          '<div style="font-weight:600;font-size:14px;">Book a Meeting</div>';
         bookingHeaderBack.onclick = () => showHomeScreen();
         showHomeScreen();
       };
@@ -3327,8 +3453,14 @@
 
         if (isCenterInline) {
           // Center-inline: header uses frosted glass with primary tint (CSS handles it via --rm-primary-rgb)
-          // Chat window stays transparent so frosted glass shows through
           header.style.backgroundColor = "transparent";
+          if (w.backgroundColor) {
+            chatWindow.style.background = w.backgroundColor;
+          }
+          if (w.textColor) {
+            chatWindow.style.color = w.textColor;
+            input.style.color = w.textColor;
+          }
         } else {
           header.style.backgroundColor = primary + "e8"; // ~91% opacity for frosted glass
           if (w.backgroundColor) {
@@ -3341,7 +3473,10 @@
           }
         }
         if (w.borderRadius) {
-          container.style.setProperty("--rm-chat-radius", w.borderRadius + "px");
+          container.style.setProperty(
+            "--rm-chat-radius",
+            w.borderRadius + "px",
+          );
         }
 
         // Header text
@@ -3359,7 +3494,8 @@
 
         // Font family
         if (w.fontFamily && w.fontFamily !== "system-ui") {
-          container.style.fontFamily = w.fontFamily + ", -apple-system, BlinkMacSystemFont, sans-serif";
+          container.style.fontFamily =
+            w.fontFamily + ", -apple-system, BlinkMacSystemFont, sans-serif";
         }
 
         // ─── Avatar (trigger, header, home screen) ────────────────────────────
@@ -3377,6 +3513,7 @@
 
           // Header avatar
           headerAvatar.innerHTML = "";
+          headerAvatar.classList.remove("rm-icon-avatar");
           headerAvatar.style.backgroundColor = "transparent";
           const headerImg = document.createElement("img");
           headerImg.src = avatarSrc;
@@ -3389,12 +3526,15 @@
 
           // Home screen avatar
           homeAvatar.innerHTML = "";
+          homeAvatar.classList.remove("rm-icon-avatar");
           homeAvatar.style.backgroundColor = "#ffffff";
           const homeImg = document.createElement("img");
           homeImg.src = avatarSrc;
           homeImg.alt = "Avatar";
           homeAvatar.appendChild(homeImg);
         } else {
+          headerAvatar.classList.add("rm-icon-avatar");
+          homeAvatar.classList.add("rm-icon-avatar");
           homeAvatar.style.backgroundColor = primary;
           homeAvatar.style.color = "#ffffff";
         }
@@ -3691,7 +3831,10 @@
         // Apply brand color CSS variables to inline bar (it lives on document.body, not inside container)
         const inlinePrimary = loadedConfig.widget?.primaryColor || "#2563eb";
         inlineBar.style.setProperty("--rm-primary", inlinePrimary);
-        inlineBar.style.setProperty("--rm-primary-rgb", hexToRgb(inlinePrimary));
+        inlineBar.style.setProperty(
+          "--rm-primary-rgb",
+          hexToRgb(inlinePrimary),
+        );
 
         // Populate inline bar topics from prompt-type quick actions
         inlineBarTopics.innerHTML = "";
@@ -3774,251 +3917,273 @@
     }
 
     try {
-    // Switch to chat view if on home screen
-    if (currentView === "home") {
-      showChatScreen();
-    }
-
-    // Create conversation if needed
-    if (!conversationId) await createConversation();
-    if (!conversationId) return;
-
-    // Capture and clear any pending image
-    const imageFile = pendingImageFile;
-    let uploadedImageUrl: string | null = null;
-    let localPreviewUrl: string | null = null;
-
-    if (imageFile) {
-      localPreviewUrl = imagePreviewImg.src; // data: URL from FileReader
-      pendingImageFile = null;
-      imagePreview.classList.remove("visible");
-      imagePreviewImg.src = "";
-      imagePreviewName.textContent = "";
-    }
-
-    // Use a default message if only an image was sent
-    const messageText = text || (imageFile ? "Sent an image" : "");
-    if (!messageText && !imageFile) return;
-
-    addMessageToUI("visitor", messageText, undefined, localPreviewUrl ?? undefined);
-    quickTopicsContainer.style.display = "none";
-    lastMessageTimestamp = Date.now();
-
-    // Upload image to R2 if present
-    if (imageFile) {
-      try {
-        const formData = new FormData();
-        formData.append("file", imageFile);
-        const uploadRes = await fetch(
-          `${baseUrl}/api/widget/${projectSlug}/upload`,
-          { method: "POST", body: formData },
-        );
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
-          uploadedImageUrl = uploadData.url;
-        }
-      } catch (err) {
-        console.error("[ReplyMaven] Image upload failed:", err);
+      // Switch to chat view if on home screen
+      if (currentView === "home") {
+        showChatScreen();
       }
-    }
 
-    // Show typing indicator
-    showTyping();
+      // Create conversation if needed
+      if (!conversationId) await createConversation();
+      if (!conversationId) return;
 
-    // Pause polling during SSE streaming to prevent duplicate messages
-    isStreaming = true;
-    stopPolling();
+      // Capture and clear any pending image
+      const imageFile = pendingImageFile;
+      let uploadedImageUrl: string | null = null;
+      let localPreviewUrl: string | null = null;
 
-    try {
-      const body: Record<string, string> = { content: messageText };
-      if (uploadedImageUrl) body.imageUrl = uploadedImageUrl;
+      if (imageFile) {
+        localPreviewUrl = imagePreviewImg.src; // data: URL from FileReader
+        pendingImageFile = null;
+        imagePreview.classList.remove("visible");
+        imagePreviewImg.src = "";
+        imagePreviewName.textContent = "";
+      }
 
-      const res = await fetch(
-        `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
+      // Use a default message if only an image was sent
+      const messageText = text || (imageFile ? "Sent an image" : "");
+      if (!messageText && !imageFile) return;
+
+      addMessageToUI(
+        "visitor",
+        messageText,
+        undefined,
+        localPreviewUrl ?? undefined,
       );
+      quickTopicsContainer.style.display = "none";
+      lastMessageTimestamp = Date.now();
 
-      if (!res.ok) {
-        hideTyping();
-        addMessageToUI("bot", "Sorry, something went wrong. Please try again.");
-        return;
+      // Upload image to R2 if present
+      if (imageFile) {
+        try {
+          const formData = new FormData();
+          formData.append("file", imageFile);
+          const uploadRes = await fetch(
+            `${baseUrl}/api/widget/${projectSlug}/upload`,
+            { method: "POST", body: formData },
+          );
+          if (uploadRes.ok) {
+            const uploadData = await uploadRes.json();
+            uploadedImageUrl = uploadData.url;
+          }
+        } catch (err) {
+          console.error("[ReplyMaven] Image upload failed:", err);
+        }
       }
 
-      // Handle SSE stream
-      const reader = res.body?.getReader();
-      if (!reader) return;
+      // Show typing indicator
+      showTyping();
 
-      const decoder = new TextDecoder();
-      let botMessage = "";
-      let botMessageEl: HTMLElement | null = null;
-      let handoffDetected = false;
-      let handoffEmail: string | null = null;
-      let sseBuffer = "";
+      // Pause polling during SSE streaming to prevent duplicate messages
+      isStreaming = true;
+      stopPolling();
 
-      // Timeout to prevent the stream from hanging forever (90s)
-      const streamTimeout = setTimeout(() => {
-        try { reader.cancel(); } catch { /* ignore */ }
-      }, 90_000);
+      try {
+        const body: Record<string, string> = { content: messageText };
+        if (uploadedImageUrl) body.imageUrl = uploadedImageUrl;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        const res = await fetch(
+          `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          },
+        );
 
-        sseBuffer += decoder.decode(value, { stream: true });
-        const lines = sseBuffer.split("\n");
-        // Keep the last (possibly incomplete) line in the buffer
-        sseBuffer = lines.pop() ?? "";
+        if (!res.ok) {
+          hideTyping();
+          addMessageToUI(
+            "bot",
+            "Sorry, something went wrong. Please try again.",
+          );
+          return;
+        }
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
+        // Handle SSE stream
+        const reader = res.body?.getReader();
+        if (!reader) return;
 
-              if (data.handoff) {
-                handoffDetected = true;
-                handoffEmail = data.visitorEmail || visitorInfo.email || null;
-                // Remove any bot message bubble that was showing the [HANDOFF_REQUESTED] token
-                if (botMessageEl) {
-                  botMessageEl.closest(".rm-message-row")?.remove();
-                  botMessageEl = null;
-                }
-                hideTyping();
-                continue;
-              }
+        const decoder = new TextDecoder();
+        let botMessage = "";
+        let botMessageEl: HTMLElement | null = null;
+        let handoffDetected = false;
+        let handoffEmail: string | null = null;
+        let sseBuffer = "";
 
-              if (data.booking) {
-                // Bot detected scheduling intent -> open booking UI
-                if (botMessageEl) {
-                  botMessageEl.closest(".rm-message-row")?.remove();
-                  botMessageEl = null;
-                }
-                hideTyping();
-                if (bookingConfig?.enabled) {
-                  showBookingScreen();
-                }
-                continue;
-              }
+        // Timeout to prevent the stream from hanging forever (90s)
+        const streamTimeout = setTimeout(() => {
+          try {
+            reader.cancel();
+          } catch {
+            /* ignore */
+          }
+        }, 90_000);
 
-              // Handle tool execution events
-              if (data.toolCall) {
-                const displayName = data.toolCall.name.replace(/_/g, " ");
-                const label = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-                showTyping(`Fetching ${label}`);
-                continue;
-              }
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-              if (data.toolResult) {
-                if (data.toolResult.success === false && data.toolResult.errorMessage) {
-                  // Show inline error for failed tool calls
-                  hideTyping();
-                  addToolErrorToUI(data.toolResult.name, data.toolResult.errorMessage);
-                } else {
-                  // After successful tool result, show "Thinking" while model processes the result
-                  showTyping("Thinking");
-                }
-                continue;
-              }
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split("\n");
+          // Keep the last (possibly incomplete) line in the buffer
+          sseBuffer = lines.pop() ?? "";
 
-              if (data.toolError) {
-                // Show expandable error from fallback path
-                hideTyping();
-                addToolErrorToUI(null, data.toolError.detail || data.toolError.message);
-                continue;
-              }
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6));
 
-              if (data.text) {
-                botMessage += data.text;
-
-                // Client-side filter: if [HANDOFF_REQUESTED] appears in accumulated text,
-                // strip it and mark handoff (backup for when SSE handoff event hasn't arrived yet)
-                if (botMessage.includes("[HANDOFF_REQUESTED]")) {
+                if (data.handoff) {
                   handoffDetected = true;
-                  handoffEmail = visitorInfo.email || null;
+                  handoffEmail = data.visitorEmail || visitorInfo.email || null;
+                  // Remove any bot message bubble that was showing the [HANDOFF_REQUESTED] token
                   if (botMessageEl) {
                     botMessageEl.closest(".rm-message-row")?.remove();
                     botMessageEl = null;
                   }
                   hideTyping();
-                  botMessage = "";
                   continue;
                 }
 
-                // Client-side filter: if [BOOKING_REQUESTED] appears, open booking UI
-                if (botMessage.includes("[BOOKING_REQUESTED]")) {
+                if (data.booking) {
+                  // Bot detected scheduling intent -> open booking UI
                   if (botMessageEl) {
                     botMessageEl.closest(".rm-message-row")?.remove();
                     botMessageEl = null;
                   }
                   hideTyping();
-                  botMessage = "";
                   if (bookingConfig?.enabled) {
                     showBookingScreen();
                   }
                   continue;
                 }
 
-                // Hide typing on first text chunk, show the bot bubble
-                if (!botMessageEl) {
+                // Handle tool execution events
+                if (data.toolCall) {
+                  const displayName = data.toolCall.name.replace(/_/g, " ");
+                  const label =
+                    displayName.charAt(0).toUpperCase() + displayName.slice(1);
+                  showTyping(`Fetching ${label}`);
+                  continue;
+                }
+
+                if (data.toolResult) {
+                  if (
+                    data.toolResult.success === false &&
+                    data.toolResult.errorMessage
+                  ) {
+                    // Show inline error for failed tool calls
+                    hideTyping();
+                    addToolErrorToUI(
+                      data.toolResult.name,
+                      data.toolResult.errorMessage,
+                    );
+                  } else {
+                    // After successful tool result, show "Thinking" while model processes the result
+                    showTyping();
+                  }
+                  continue;
+                }
+
+                if (data.toolError) {
+                  // Show expandable error from fallback path
                   hideTyping();
-                  botMessageEl = addMessageToUI("bot", botMessage);
-                } else {
-                  botMessageEl.innerHTML = renderMarkdown(botMessage);
+                  addToolErrorToUI(
+                    null,
+                    data.toolError.detail || data.toolError.message,
+                  );
+                  continue;
                 }
-                scrollToBottom();
-              }
 
-              if (data.done) {
-                hideTyping();
-                // Stream complete -- render final markdown
-                if (botMessageEl && botMessage) {
-                  botMessageEl.innerHTML = renderMarkdown(botMessage);
-                }
-                // Add source links if present
-                if (data.sources && data.sources.length > 0 && botMessageEl) {
-                  addSourcesToMessage(botMessageEl, data.sources);
-                }
-                // Track the bot message ID if provided, and update timestamp
-                if (data.messageId) {
-                  renderedMessageIds.add(data.messageId);
-                }
-                lastMessageTimestamp = Date.now();
-                scrollToBottom();
-                // Show handoff card if needed
-                if (handoffDetected) {
-                  showHandoffCard(handoffEmail);
-                }
-              }
+                if (data.text) {
+                  botMessage += data.text;
 
-              if (data.error) {
-                hideTyping();
-                addMessageToUI(
-                  "bot",
-                  "Sorry, an error occurred. Please try again.",
-                );
+                  // Client-side filter: if [HANDOFF_REQUESTED] appears in accumulated text,
+                  // strip it and mark handoff (backup for when SSE handoff event hasn't arrived yet)
+                  if (botMessage.includes("[HANDOFF_REQUESTED]")) {
+                    handoffDetected = true;
+                    handoffEmail = visitorInfo.email || null;
+                    if (botMessageEl) {
+                      botMessageEl.closest(".rm-message-row")?.remove();
+                      botMessageEl = null;
+                    }
+                    hideTyping();
+                    botMessage = "";
+                    continue;
+                  }
+
+                  // Client-side filter: if [BOOKING_REQUESTED] appears, open booking UI
+                  if (botMessage.includes("[BOOKING_REQUESTED]")) {
+                    if (botMessageEl) {
+                      botMessageEl.closest(".rm-message-row")?.remove();
+                      botMessageEl = null;
+                    }
+                    hideTyping();
+                    botMessage = "";
+                    if (bookingConfig?.enabled) {
+                      showBookingScreen();
+                    }
+                    continue;
+                  }
+
+                  // Hide typing on first text chunk, show the bot bubble
+                  if (!botMessageEl) {
+                    hideTyping();
+                    botMessageEl = addMessageToUI("bot", botMessage);
+                  } else {
+                    botMessageEl.innerHTML = renderMarkdown(botMessage);
+                  }
+                  scrollToBottom();
+                }
+
+                if (data.done) {
+                  hideTyping();
+                  // Stream complete -- render final markdown
+                  if (botMessageEl && botMessage) {
+                    botMessageEl.innerHTML = renderMarkdown(botMessage);
+                  }
+                  // Add source links if present
+                  if (data.sources && data.sources.length > 0 && botMessageEl) {
+                    addSourcesToMessage(botMessageEl, data.sources);
+                  }
+                  // Track the bot message ID if provided, and update timestamp
+                  if (data.messageId) {
+                    renderedMessageIds.add(data.messageId);
+                  }
+                  lastMessageTimestamp = Date.now();
+                  scrollToBottom();
+                  // Show handoff card if needed
+                  if (handoffDetected) {
+                    showHandoffCard(handoffEmail);
+                  }
+                }
+
+                if (data.error) {
+                  hideTyping();
+                  addMessageToUI(
+                    "bot",
+                    "Sorry, an error occurred. Please try again.",
+                  );
+                }
+              } catch {
+                // Skip malformed JSON
               }
-            } catch {
-              // Skip malformed JSON
             }
           }
         }
-      }
 
-      // Edge case: stream ended without a done event but handoff was detected
-      if (handoffDetected && !document.querySelector(".rm-handoff-card")) {
-        showHandoffCard(handoffEmail);
+        // Edge case: stream ended without a done event but handoff was detected
+        if (handoffDetected && !document.querySelector(".rm-handoff-card")) {
+          showHandoffCard(handoffEmail);
+        }
+        clearTimeout(streamTimeout);
+      } catch {
+        hideTyping();
+        addMessageToUI(
+          "bot",
+          "Sorry, I couldn't connect. Please check your internet connection.",
+        );
       }
-      clearTimeout(streamTimeout);
-    } catch {
-      hideTyping();
-      addMessageToUI(
-        "bot",
-        "Sorry, I couldn't connect. Please check your internet connection.",
-      );
-    }
     } finally {
       isStreaming = false;
       startPolling();
@@ -4042,7 +4207,12 @@
   // Track previous message role for avatar grouping
   let lastMessageRole: string | null = null;
 
-  function addMessageToUI(role: string, content: string, messageId?: string, imageUrl?: string): HTMLElement {
+  function addMessageToUI(
+    role: string,
+    content: string,
+    messageId?: string,
+    imageUrl?: string,
+  ): HTMLElement {
     // Track rendered message IDs for deduplication (polling)
     if (messageId) {
       if (renderedMessageIds.has(messageId)) {
@@ -4076,9 +4246,10 @@
         avatarImg.style.objectFit = "cover";
         avatar.appendChild(avatarImg);
       } else {
+        avatar.classList.add("rm-icon-avatar");
         avatar.style.backgroundColor = primaryColor + "12";
         avatar.style.color = primaryColor;
-        avatar.innerHTML = ICONS.bot;
+        avatar.innerHTML = ICONS.aiSparkle;
       }
 
       // Hide avatar if this is a consecutive message from the same role
@@ -4136,7 +4307,11 @@
 
   function addSourcesToMessage(
     msgEl: HTMLElement,
-    sources: Array<{ title: string; url?: string | null; type?: "webpage" | "pdf" | "faq" }>,
+    sources: Array<{
+      title: string;
+      url?: string | null;
+      type?: "webpage" | "pdf" | "faq";
+    }>,
   ): void {
     if (!sources || sources.length === 0) return;
 
@@ -4199,7 +4374,7 @@
   }
 
   function showTyping(message?: string) {
-    statusText.textContent = message ?? "Thinking";
+    statusText.textContent = message ?? "";
     typingRow.classList.add("visible");
     scrollToBottom();
   }
@@ -4231,7 +4406,10 @@
     header.className = "rm-tool-error-header";
 
     // Chevron-down SVG icon
-    const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const chevron = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "svg",
+    );
     chevron.setAttribute("viewBox", "0 0 24 24");
     chevron.setAttribute("fill", "none");
     chevron.setAttribute("stroke", "currentColor");
@@ -4435,7 +4613,10 @@
 
     // Determine poll interval based on conversation status
     const getInterval = () => {
-      if (conversationStatus === "waiting_agent" || conversationStatus === "agent_replied") {
+      if (
+        conversationStatus === "waiting_agent" ||
+        conversationStatus === "agent_replied"
+      ) {
         return 3000; // 3s when waiting for agent
       }
       return 10000; // 10s for active conversations
@@ -4507,9 +4688,10 @@
             el.innerHTML = renderMarkdown(msg.content);
             if (msg.sources) {
               try {
-                const sources = typeof msg.sources === "string"
-                  ? JSON.parse(msg.sources)
-                  : msg.sources;
+                const sources =
+                  typeof msg.sources === "string"
+                    ? JSON.parse(msg.sources)
+                    : msg.sources;
                 if (Array.isArray(sources) && sources.length > 0) {
                   addSourcesToMessage(el, sources);
                 }
@@ -4525,11 +4707,12 @@
         }
 
         // Update last message timestamp
-        const msgTime = msg.createdAt instanceof Date
-          ? msg.createdAt.getTime()
-          : typeof msg.createdAt === "number"
-            ? msg.createdAt * 1000
-            : new Date(msg.createdAt).getTime();
+        const msgTime =
+          msg.createdAt instanceof Date
+            ? msg.createdAt.getTime()
+            : typeof msg.createdAt === "number"
+              ? msg.createdAt * 1000
+              : new Date(msg.createdAt).getTime();
         if (!lastMessageTimestamp || msgTime > lastMessageTimestamp) {
           lastMessageTimestamp = msgTime;
         }
@@ -4540,7 +4723,9 @@
         // Show notification if widget is closed/minimized
         if (!isOpen || !isTabActive) {
           incrementUnreadBadge();
-          showBrowserNotification(msgs[msgs.length - 1]?.content ?? "New message");
+          showBrowserNotification(
+            msgs[msgs.length - 1]?.content ?? "New message",
+          );
         }
       }
     } catch {
@@ -4578,9 +4763,10 @@
 
     try {
       const notification = new Notification(title, {
-        body: messagePreview.length > 100
-          ? messagePreview.substring(0, 100) + "..."
-          : messagePreview,
+        body:
+          messagePreview.length > 100
+            ? messagePreview.substring(0, 100) + "..."
+            : messagePreview,
         icon: avatarUrl,
         tag: "rm-new-message", // Replaces previous notification
       });
@@ -4649,15 +4835,24 @@
         showChatScreen();
 
         for (const msg of msgs) {
-          const el = addMessageToUI(msg.role, msg.content, msg.id, msg.imageUrl ?? undefined);
+          const el = addMessageToUI(
+            msg.role,
+            msg.content,
+            msg.id,
+            msg.imageUrl ?? undefined,
+          );
           // Render markdown for bot/agent messages
-          if ((msg.role === "bot" || msg.role === "agent") && el.parentElement) {
+          if (
+            (msg.role === "bot" || msg.role === "agent") &&
+            el.parentElement
+          ) {
             el.innerHTML = renderMarkdown(msg.content);
             if (msg.sources) {
               try {
-                const sources = typeof msg.sources === "string"
-                  ? JSON.parse(msg.sources)
-                  : msg.sources;
+                const sources =
+                  typeof msg.sources === "string"
+                    ? JSON.parse(msg.sources)
+                    : msg.sources;
                 if (Array.isArray(sources) && sources.length > 0) {
                   addSourcesToMessage(el, sources);
                 }
@@ -4668,11 +4863,12 @@
           }
 
           // Track timestamp
-          const msgTime = msg.createdAt instanceof Date
-            ? msg.createdAt.getTime()
-            : typeof msg.createdAt === "number"
-              ? msg.createdAt * 1000
-              : new Date(msg.createdAt).getTime();
+          const msgTime =
+            msg.createdAt instanceof Date
+              ? msg.createdAt.getTime()
+              : typeof msg.createdAt === "number"
+                ? msg.createdAt * 1000
+                : new Date(msg.createdAt).getTime();
           if (!lastMessageTimestamp || msgTime > lastMessageTimestamp) {
             lastMessageTimestamp = msgTime;
           }
@@ -4682,7 +4878,10 @@
       }
 
       // If conversation is in a handoff state, show the handoff status
-      if (conversationStatus === "waiting_agent" || conversationStatus === "agent_replied") {
+      if (
+        conversationStatus === "waiting_agent" ||
+        conversationStatus === "agent_replied"
+      ) {
         _isHandedOff = true;
         input.placeholder = "Add any details for the team...";
       }
@@ -4834,8 +5033,18 @@
       if (!isOpen) openChatWidget();
       handleSendMessage(text);
     },
-    identify: (info: { name?: string; email?: string; phone?: string; metadata?: Record<string, string> }) => {
-      visitorInfo = { ...visitorInfo, name: info.name ?? visitorInfo.name, email: info.email ?? visitorInfo.email, phone: info.phone ?? visitorInfo.phone };
+    identify: (info: {
+      name?: string;
+      email?: string;
+      phone?: string;
+      metadata?: Record<string, string>;
+    }) => {
+      visitorInfo = {
+        ...visitorInfo,
+        name: info.name ?? visitorInfo.name,
+        email: info.email ?? visitorInfo.email,
+        phone: info.phone ?? visitorInfo.phone,
+      };
       if (info.metadata) {
         customMetadata = { ...customMetadata, ...info.metadata };
       }

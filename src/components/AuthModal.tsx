@@ -1,6 +1,6 @@
-import { MessageSquare } from "lucide-react";
 import { signIn } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/Logo";
 import {
   Dialog,
   DialogContent,
@@ -26,9 +26,7 @@ function AuthModal({ open, onOpenChange }: AuthModalProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader className="text-left">
-          <div className="w-12 h-12 rounded-2xl bg-primary flex items-center justify-center mb-1">
-            <MessageSquare className="w-6 h-6 text-primary-foreground" />
-          </div>
+          <Logo size="lg" iconOnly className="mb-1" />
           <DialogTitle className="text-xl">Welcome to ReplyMaven</DialogTitle>
           <DialogDescription>
             Sign in or create an account to get started

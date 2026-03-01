@@ -980,7 +980,7 @@ function Onboarding() {
       {/* Content */}
       <main className="flex-1 flex items-start justify-center px-6 py-12">
         <div className="w-full max-w-xl">
-          <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-8">
+          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-8">
             {step === 0 && (
               <Step1
                 data={step1Data}

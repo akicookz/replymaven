@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ColorPicker } from "@/components/ui/color-picker";
+import { cn } from "@/lib/utils";
 
 interface WidgetConfigData {
   id: string;
@@ -36,6 +37,14 @@ interface WidgetConfigData {
   bannerUrl: string | null;
   homeTitle: string;
   homeSubtitle: string | null;
+}
+
+function hexToRgb(hex: string): string {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `${r}, ${g}, ${b}`;
 }
 
 function WidgetConfig() {
@@ -146,7 +155,7 @@ function WidgetConfig() {
         {/* ─── Left Column: Config Forms ─────────────────────────── */}
         <div className="space-y-6">
           {/* Appearance */}
-          <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
+          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
             <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
               <Palette className="w-5 h-5" />
               Appearance
@@ -246,7 +255,7 @@ function WidgetConfig() {
 
           {/* Home Screen (hidden for center-inline position) */}
           {form.position !== "center-inline" && (
-          <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
+          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
             <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
               <Type className="w-5 h-5" />
               Home Screen
@@ -403,7 +412,7 @@ function WidgetConfig() {
         </div>
 
         {/* ─── Right Column: Live Preview ────────────────────────── */}
-        <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6">
+        <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6">
           <h2 className="text-lg font-semibold text-card-foreground mb-4">
             Preview
           </h2>
@@ -427,6 +436,81 @@ function WidgetConfig() {
             {form.position === "center-inline" ? (
               /* ─── Center Inline Preview ──────────────────────── */
               <div className="w-full flex flex-col items-center gap-3">
+                {/* Chat container preview */}
+                <div
+                  className="w-full max-w-[280px] overflow-hidden shadow-xl"
+                  style={{
+                    background: form.backgroundColor ?? `color-mix(in srgb, ${form.primaryColor ?? "#f97316"}, #000000 85%)`,
+                    borderRadius: "16px",
+                    border: `1px solid rgba(${hexToRgb(form.primaryColor ?? "#f97316")}, 0.15)`,
+                    boxShadow: `0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(${hexToRgb(form.primaryColor ?? "#f97316")}, 0.1)`,
+                  }}
+                >
+                  {/* Header */}
+                  <div
+                    className="px-3.5 py-2.5 flex items-center gap-2"
+                    style={{
+                      background: `rgba(${hexToRgb(form.primaryColor ?? "#f97316")}, 0.12)`,
+                      borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
+                    }}
+                  >
+                    <div
+                      className="w-5 h-5 rounded-md flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: `rgba(${hexToRgb(form.primaryColor ?? "#f97316")}, 0.25)` }}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke={form.textColor ?? "white"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                        <path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z" />
+                      </svg>
+                    </div>
+                    <span className="text-[11px] font-medium truncate" style={{ color: form.textColor ?? "rgba(255,255,255,0.9)" }}>
+                      {form.headerText || "ReplyMaven"}
+                    </span>
+                  </div>
+
+                  {/* Messages */}
+                  <div className="px-3 py-3 flex flex-col gap-2.5">
+                    {/* Bot message */}
+                    <div className="flex justify-start">
+                      <div
+                        className="max-w-[85%] px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed"
+                        style={{
+                          background: `rgba(${hexToRgb(form.primaryColor ?? "#f97316")}, 0.12)`,
+                          border: "1px solid rgba(255, 255, 255, 0.06)",
+                          color: form.textColor ?? "#ffffff",
+                        }}
+                      >
+                        Hi! How can I help you today?
+                      </div>
+                    </div>
+
+                    {/* Visitor message */}
+                    <div className="flex justify-end">
+                      <div
+                        className="max-w-[85%] px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed text-white"
+                        style={{
+                          backgroundColor: form.primaryColor ?? "#f97316",
+                        }}
+                      >
+                        I have a question
+                      </div>
+                    </div>
+
+                    {/* Bot reply */}
+                    <div className="flex justify-start">
+                      <div
+                        className="max-w-[85%] px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed"
+                        style={{
+                          background: `rgba(${hexToRgb(form.primaryColor ?? "#f97316")}, 0.12)`,
+                          border: "1px solid rgba(255, 255, 255, 0.06)",
+                          color: form.textColor ?? "#ffffff",
+                        }}
+                      >
+                        Sure, I&apos;d be happy to help!
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Bar */}
                 <div
                   className="w-full max-w-[280px] rounded-full p-[2px]"
@@ -480,7 +564,10 @@ function WidgetConfig() {
                 >
                   {/* Avatar */}
                   <div
-                    className="absolute -bottom-5 left-5 w-12 h-12 rounded-full border-2 border-white overflow-hidden flex items-center justify-center"
+                    className={cn(
+                      "absolute -bottom-5 left-5 w-12 h-12 border-2 border-white overflow-hidden flex items-center justify-center",
+                      form.avatarUrl ? "rounded-full" : "rounded-xl",
+                    )}
                     style={{
                       backgroundColor: form.avatarUrl
                         ? "transparent"
@@ -498,12 +585,13 @@ function WidgetConfig() {
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="white"
-                        strokeWidth="1.5"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
                         className="w-6 h-6"
                       >
-                        <rect x="3" y="11" width="18" height="10" rx="2" />
-                        <circle cx="12" cy="5" r="2" />
-                        <path d="M12 7v4" />
+                        <path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z" />
+                        <path d="M19 2l.5 1.5L21 4l-1.5.5L19 6l-.5-1.5L17 4l1.5-.5L19 2z" />
                       </svg>
                     )}
                   </div>

@@ -308,7 +308,7 @@ function Resources() {
       </div>
 
       {/* ─── Company Info ───────────────────────────────────────────────────── */}
-      <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
+      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-foreground">Company Info</h2>
           <div className="flex gap-2">
@@ -469,7 +469,7 @@ function Resources() {
         </div>
 
         {showForm && (
-          <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
+          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
             <div className="flex gap-2">
               <Button
                 variant={formType === "webpage" ? "default" : "outline"}
@@ -625,7 +625,7 @@ function Resources() {
               return (
                 <div
                   key={resource.id}
-                  className="bg-card/50 backdrop-blur-xl rounded-xl border border-border overflow-hidden"
+                  className="bg-white/[0.04] backdrop-blur-xl rounded-xl border border-border overflow-hidden"
                 >
                   <div
                     className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"

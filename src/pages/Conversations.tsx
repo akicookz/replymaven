@@ -267,7 +267,7 @@ function Conversations() {
             ))}
           </div>
         </div>
-        <div className="flex-1 bg-muted/20 dark:bg-background" />
+        <div className="flex-1 bg-white/[0.02]" />
       </div>
     );
   }
@@ -388,7 +388,7 @@ function Conversations() {
       </div>
 
       {/* ─── Right Panel: Chat Thread ──────────────────────────────────── */}
-      <div className="flex-1 flex flex-col bg-muted/20 dark:bg-background">
+      <div className="flex-1 flex flex-col bg-white/[0.02]">
         {selectedConvo && convoDetail ? (
           <>
             {/* Chat Header */}

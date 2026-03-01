@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import AuthModal from "@/components/AuthModal";
+import { Logo } from "@/components/Logo";
 import {
   MessageSquare,
   Code,
@@ -344,14 +345,8 @@ function Docs() {
       <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-[1400px] mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-6">
-            <Link
-              to="/"
-              className="flex items-center gap-2.5 text-foreground font-bold text-[15px]"
-            >
-              <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
-                <MessageSquare className="w-3.5 h-3.5 text-primary-foreground" />
-              </div>
-              ReplyMaven
+            <Link to="/">
+              <Logo size="sm" variant="subtle" />
             </Link>
             <span className="text-sm text-muted-foreground font-medium hidden sm:block">
               Documentation
@@ -366,7 +361,7 @@ function Docs() {
               Log in
             </Button>
             <Button
-              className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90 h-8 text-[13px] px-4"
+              className="rounded-full glow-surface h-8 text-[13px] px-4"
               onClick={() => setAuthOpen(true)}
             >
               Get Started
@@ -1610,7 +1605,7 @@ style-src 'self' 'unsafe-inline';`}
               </p>
               <div className="flex items-center justify-center gap-3">
                 <Button
-                  className="rounded-full bg-primary text-primary-foreground hover:bg-primary/90 px-6"
+                  className="rounded-full glow-surface px-6"
                   onClick={() => setAuthOpen(true)}
                 >
                   Start Free

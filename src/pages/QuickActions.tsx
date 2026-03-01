@@ -354,7 +354,7 @@ function ActionsTab({
   return (
     <div className="space-y-6">
       {/* Add Action Form */}
-      <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-5 space-y-4">
+      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-5 space-y-4">
         <h3 className="text-sm font-semibold text-foreground">Add action</h3>
 
         <form

@@ -77,7 +77,7 @@ function TelegramConfig() {
         Telegram Integration
       </h1>
 
-      <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
+      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
         <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
           <Send className="w-5 h-5" />
           Live Agent Handoff

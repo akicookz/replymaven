@@ -407,7 +407,7 @@ function Tools() {
 
       {/* ─── Create / Edit Form ──────────────────────────────────────────── */}
       {activeTab === "tools" && showForm && (
-        <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-5">
+        <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">
               {editingId ? "Edit Tool" : "New Tool"}
@@ -728,7 +728,7 @@ function Tools() {
               {tools?.map((tool) => (
                 <div
                   key={tool.id}
-                  className="bg-card/50 backdrop-blur-xl rounded-xl border border-border overflow-hidden"
+                  className="bg-white/[0.04] backdrop-blur-xl rounded-xl border border-border overflow-hidden"
                 >
                   {/* Tool Row */}
                   <div
@@ -976,7 +976,7 @@ function Tools() {
                   return (
                     <div
                       key={exec.id}
-                      className="bg-card/50 backdrop-blur-xl rounded-xl border border-border px-4 py-3 flex items-center gap-4"
+                      className="bg-white/[0.04] backdrop-blur-xl rounded-xl border border-border px-4 py-3 flex items-center gap-4"
                     >
                       <StatusIcon className={cn("w-4 h-4 shrink-0", statusColor)} />
                       <div className="flex-1 min-w-0">

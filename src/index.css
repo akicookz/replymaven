@@ -36,54 +36,84 @@
   --color-status-replied: var(--status-replied);
   --color-status-closed: var(--status-closed);
 
-  /* ─── Brand / Marketing Design Language ──────────────────────────── */
+  /* ─── Brand Accent Scale ─────────────────────────────────────────── */
   --color-brand: var(--brand);
   --color-brand-dark: var(--brand-dark);
   --color-brand-soft: var(--brand-soft);
 
-  --color-marketing-surface: var(--marketing-surface);
-  --color-marketing-chrome: var(--marketing-chrome);
-  --color-marketing-elevated: var(--marketing-elevated);
-  --color-marketing-inset: var(--marketing-inset);
-  --color-marketing-code: var(--marketing-code);
+  /* ─── Extended Text Scale ────────────────────────────────────────── */
+  --color-quaternary: var(--quaternary);
+  --color-disabled: var(--disabled);
 
-  --color-marketing-heading: var(--marketing-heading);
-  --color-marketing-primary: var(--marketing-primary);
-  --color-marketing-secondary: var(--marketing-secondary);
-  --color-marketing-tertiary: var(--marketing-tertiary);
-  --color-marketing-quaternary: var(--marketing-quaternary);
-  --color-marketing-disabled: var(--marketing-disabled);
+  /* ─── Specialty Surfaces ─────────────────────────────────────────── */
+  --color-code: var(--code);
+
 
   --font-sans: "Inter", system-ui, sans-serif;
   --font-heading: "Inter", system-ui, sans-serif;
 }
 
+/* ─── Dark-First Design Language ───────────────────────────────────────────── */
+
 :root {
   --radius: 0.75rem;
-
-  /* ─── Brand / Marketing Design Language ──────────────────────────── */
 
   /* Orange accent scale */
   --brand: #f97316;
   --brand-dark: #ea580c;
   --brand-soft: #fb923c;
 
-  /* Dark surface scale */
-  --marketing-surface: #08080a;
-  --marketing-chrome: #0c0c10;
-  --marketing-elevated: #18181e;
-  --marketing-inset: #1c1c22;
-  --marketing-code: #04040a;
+  /* Surface scale (dark) */
+  --background: #08080a;
+  --foreground: #f0f0f5;
 
-  /* Marketing text scale */
-  --marketing-heading: #f0f0f5;
-  --marketing-primary: #e8e8ee;
-  --marketing-secondary: #c8c8d2;
-  --marketing-tertiary: #8a8a96;
-  --marketing-quaternary: #6b6b78;
-  --marketing-disabled: #4a4a55;
+  --card: #0c0c10;
+  --card-foreground: #e8e8ee;
 
-  /* Clean warm white / light gray palette */
+  --popover: #0c0c10;
+  --popover-foreground: #e8e8ee;
+
+  /* Brand orange primary */
+  --primary: var(--brand);
+  --primary-foreground: #ffffff;
+
+  --secondary: #18181e;
+  --secondary-foreground: #c8c8d2;
+
+  --muted: #1c1c22;
+  --muted-foreground: #8a8a96;
+
+  --accent: #18181e;
+  --accent-foreground: #e8e8ee;
+
+  --destructive: oklch(60% 0.2 25);
+
+  --success: oklch(60% 0.15 152);
+  --warning: oklch(72% 0.15 75);
+  --status-active: var(--success);
+  --status-waiting: var(--warning);
+  --status-replied: var(--primary);
+  --status-closed: var(--muted-foreground);
+
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: var(--brand);
+
+  /* Sidebar */
+  --sidebar: #0c0c10;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+
+  /* Extended text scale */
+  --quaternary: #6b6b78;
+  --disabled: #4a4a55;
+
+  /* Specialty surfaces */
+  --code: #04040a;
+}
+
+/* ─── Light Mode (for future toggle) ──────────────────────────────────────── */
+
+.light {
   --background: oklch(98.5% 0.002 80);
   --foreground: oklch(15% 0.005 60);
 
@@ -93,7 +123,6 @@
   --popover: oklch(100% 0 0);
   --popover-foreground: oklch(15% 0.005 60);
 
-  /* Brand orange primary */
   --primary: var(--brand);
   --primary-foreground: oklch(100% 0 0);
 
@@ -110,41 +139,43 @@
 
   --success: oklch(55% 0.15 152);
   --warning: oklch(70% 0.15 75);
-  --status-active: var(--success);
-  --status-waiting: var(--warning);
-  --status-replied: var(--primary);
-  --status-closed: var(--muted-foreground);
 
   --border: oklch(92% 0.003 80);
   --input: oklch(92% 0.003 80);
   --ring: var(--brand-soft);
 
-  /* Sidebar - clean white */
   --sidebar: oklch(100% 0 0);
   --sidebar-border: oklch(93% 0.003 80);
+
+  --quaternary: oklch(45% 0.01 60);
+  --disabled: oklch(65% 0.01 60);
+
+  --code: oklch(97% 0.002 80);
 }
 
+/* ─── Dark Mode (same as :root, for .dark class toggle) ───────────────────── */
+
 .dark {
-  --background: oklch(12% 0.005 60);
-  --foreground: oklch(95% 0.003 80);
+  --background: #08080a;
+  --foreground: #f0f0f5;
 
-  --card: oklch(16% 0.005 60);
-  --card-foreground: oklch(95% 0.003 80);
+  --card: #0c0c10;
+  --card-foreground: #e8e8ee;
 
-  --popover: oklch(16% 0.005 60);
-  --popover-foreground: oklch(95% 0.003 80);
+  --popover: #0c0c10;
+  --popover-foreground: #e8e8ee;
 
-  --primary: var(--brand-soft);
-  --primary-foreground: oklch(12% 0.005 60);
+  --primary: var(--brand);
+  --primary-foreground: #ffffff;
 
-  --secondary: oklch(20% 0.005 60);
-  --secondary-foreground: oklch(95% 0.003 80);
+  --secondary: #18181e;
+  --secondary-foreground: #c8c8d2;
 
-  --muted: oklch(20% 0.005 60);
-  --muted-foreground: oklch(65% 0.01 60);
+  --muted: #1c1c22;
+  --muted-foreground: #8a8a96;
 
-  --accent: oklch(20% 0.005 60);
-  --accent-foreground: oklch(95% 0.003 80);
+  --accent: #18181e;
+  --accent-foreground: #e8e8ee;
 
   --destructive: oklch(60% 0.2 25);
 
@@ -155,12 +186,17 @@
   --status-replied: var(--primary);
   --status-closed: var(--muted-foreground);
 
-  --border: oklch(22% 0.005 60);
-  --input: oklch(22% 0.005 60);
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
   --ring: var(--brand);
 
-  --sidebar: oklch(14% 0.005 60);
-  --sidebar-border: oklch(22% 0.005 60);
+  --sidebar: #0c0c10;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+
+  --quaternary: #6b6b78;
+  --disabled: #4a4a55;
+
+  --code: #04040a;
 }
 
 @layer base {
@@ -171,11 +207,30 @@
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: var(--marketing-surface);
+    background-color: var(--background);
   }
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* ─── Glow Surface Utility ─────────────────────────────────────────────────── */
+/* Reusable active/interactive glow surface for buttons, active nav, etc.     */
+.glow-surface {
+  background: rgba(249, 115, 22, 0.12);
+  border: 1px solid rgba(249, 115, 22, 0.25);
+  box-shadow: inset 0 20px 20px -12px rgba(249, 115, 22, 0.25);
+}
+.glow-surface:hover {
+  background: rgba(249, 115, 22, 0.18);
+}
+.glow-surface-subtle {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 16px 16px -12px rgba(249, 115, 22, 0.1);
+}
+.glow-surface-subtle:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 /* Color input swatch styling */

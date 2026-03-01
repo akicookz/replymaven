@@ -127,7 +127,7 @@ function CannedResponses() {
         </Button>
       </div>
 
-      <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6">
+      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6">
         <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
@@ -158,7 +158,7 @@ function CannedResponses() {
       </div>
 
       {showForm && (
-        <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-3">
+        <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-3">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -279,7 +279,7 @@ function CannedResponses() {
             {approved.map((cr) => (
               <div
                 key={cr.id}
-                className="bg-card/50 backdrop-blur-xl rounded-xl border border-border p-4 flex items-start justify-between"
+                className="bg-white/[0.04] backdrop-blur-xl rounded-xl border border-border p-4 flex items-start justify-between"
               >
                 <div className="space-y-1">
                   <p className="text-sm font-medium text-foreground">

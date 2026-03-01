@@ -16,6 +16,7 @@ import {
   Check,
   PanelLeftClose,
 } from "lucide-react";
+import { Logo } from "@/components/Logo";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import {
@@ -143,11 +144,11 @@ function Layout() {
         className={cn(
           "flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors",
           active
-            ? "bg-primary/8 text-primary"
+            ? "glow-surface-subtle text-card-foreground"
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
         )}
       >
-        <item.icon className={cn("w-[18px] h-[18px] shrink-0", active && "text-primary")} />
+        <item.icon className={cn("w-[18px] h-[18px] shrink-0", active && "text-card-foreground")} />
         {!collapsed && item.label}
       </Link>
     );
@@ -167,15 +168,8 @@ function Layout() {
       >
         {/* Logo + Collapse */}
         <div className="flex items-center justify-between px-4 h-14">
-          <Link to="/app" className="flex items-center gap-2.5 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center shrink-0">
-              <MessageSquare className="w-3.5 h-3.5 text-primary-foreground" />
-            </div>
-            {!collapsed && (
-              <span className="font-semibold text-[15px] text-foreground tracking-tight">
-                ReplyMaven
-              </span>
-            )}
+          <Link to="/app" className="min-w-0">
+            <Logo size="sm" iconOnly={collapsed} />
           </Link>
           {!collapsed && (
             <button

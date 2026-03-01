@@ -117,7 +117,7 @@ function ProjectSettings() {
       )}
 
       {/* Embed Code */}
-      <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-3">
+      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-3">
         <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
           <Code className="w-5 h-5" />
           Embed Code
@@ -140,7 +140,7 @@ function ProjectSettings() {
       </div>
 
       {/* Tone of Voice */}
-      <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-3">
+      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-3">
         <h2 className="text-lg font-semibold text-card-foreground">
           Tone of Voice
         </h2>
@@ -175,7 +175,7 @@ function ProjectSettings() {
       </div>
 
       {/* Intro Message */}
-      <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6 space-y-3">
+      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-3">
         <h2 className="text-lg font-semibold text-card-foreground">
           Intro Message
         </h2>
@@ -193,7 +193,7 @@ function ProjectSettings() {
       </div>
 
       {/* Auto Canned Drafts */}
-      <div className="bg-card/50 backdrop-blur-xl rounded-2xl border border-border p-6">
+      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-card-foreground">
