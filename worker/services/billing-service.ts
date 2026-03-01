@@ -288,6 +288,7 @@ export class BillingService {
         trial_period_days: 7,
         metadata: { userId, plan, interval },
       },
+      allow_promotion_codes: true,
       success_url: successUrl,
       cancel_url: cancelUrl,
       metadata: { userId, plan, interval },
