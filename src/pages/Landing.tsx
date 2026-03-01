@@ -1342,15 +1342,15 @@ function FeatureBooking() {
               Booking
             </p>
             <h2 className="text-3xl sm:text-[2.5rem] font-light text-foreground tracking-tight leading-tight">
-              AI agent that can new demos
+              AI agent that can book new demos
             </h2>
             <p className="text-muted-foreground leading-relaxed max-w-lg">
               <span className="font-medium text-card-foreground">Built-in scheduling</span> with configurable availability, time zones, slot durations, and buffer times. The AI can detect booking intent and open the scheduler automatically -- or visitors can trigger it from a quick action button.
             </p>
             <div className="grid grid-cols-2 gap-3 pt-2">
               {[
-                { icon: Calendar, label: "Date & time picker" },
-                { icon: Globe, label: "Timezone support" },
+                { icon: Calendar, label: "Scheduling" },
+                { icon: Globe, label: "Timezone aware" },
                 { icon: Mail, label: "Email confirmations" },
                 { icon: Zap, label: "AI-triggered" },
               ].map((item) => (
