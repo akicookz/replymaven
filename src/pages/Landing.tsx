@@ -1779,12 +1779,6 @@ function Landing() {
               Features
             </a>
             <a
-              href="#benefits"
-              className="px-4 py-2 text-sm text-marketing-tertiary hover:text-marketing-primary transition-colors"
-            >
-              Benefits
-            </a>
-            <a
               href="#pricing"
               className="px-4 py-2 text-sm text-marketing-tertiary hover:text-marketing-primary transition-colors"
             >
