@@ -167,6 +167,13 @@ export class BillingService {
     const existing = await this.getSubscriptionByUserId(userId);
     if (existing) return existing.stripeCustomerId;
 
+    // Reuse an existing Stripe customer for this user when available
+    const existingCustomerId = await this.findStripeCustomerByEmailAndUserId(
+      email,
+      userId,
+    );
+    if (existingCustomerId) return existingCustomerId;
+
     // Create a new Stripe customer
     const customer = await this.stripe.customers.create({
       email,
@@ -175,6 +182,30 @@ export class BillingService {
     });
 
     return customer.id;
+  }
+
+  private async findStripeCustomerByEmailAndUserId(
+    email: string,
+    userId: string,
+  ): Promise<string | null> {
+    let startingAfter: string | undefined;
+
+    while (true) {
+      const customers = await this.stripe.customers.list({
+        email,
+        limit: 100,
+        starting_after: startingAfter,
+      });
+
+      for (const customer of customers.data) {
+        if ("deleted" in customer && customer.deleted) continue;
+        if (customer.metadata.userId === userId) return customer.id;
+      }
+
+      if (!customers.has_more || customers.data.length === 0) return null;
+      startingAfter = customers.data[customers.data.length - 1]?.id;
+      if (!startingAfter) return null;
+    }
   }
 
   // ─── Subscription CRUD ────────────────────────────────────────────────────
