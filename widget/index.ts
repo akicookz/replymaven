@@ -1710,13 +1710,9 @@
         left: 0;
         right: 0;
         bottom: 0;
-        width: 100vw;
-        width: 100dvw;
         min-height: 0;
-        max-height: 100vh;
-        max-height: 100dvh;
-        height: 100vh;
-        height: 100dvh;
+        max-height: none;
+        height: 100%;
         box-shadow: none;
         border: none;
         transform-origin: bottom center;
@@ -1751,7 +1747,7 @@
       left: 50%;
       transform: translateX(-50%);
       width: 320px;
-      max-width: calc(100vw - 40px);
+      max-width: calc(100% - 40px);
       z-index: 999999;
       border-radius: 28px;
       padding: 2px;
@@ -1764,7 +1760,8 @@
         var(--rm-primary, #2563eb)
       );
       animation: rm-glow-spin 4s linear infinite;
-      transition: width 0.35s cubic-bezier(0.4,0,0.2,1);
+      transition: width 0.35s cubic-bezier(0.4,0,0.2,1), border-radius 0.35s cubic-bezier(0.4,0,0.2,1);
+      will-change: width;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       visibility: hidden;
     }
@@ -1889,6 +1886,13 @@
       transform: translateY(0);
       pointer-events: auto;
     }
+    /* Hide topics when chat is active — the chat window sits above the bar */
+    .rm-inline-bar.chat-active .rm-inline-bar-topics {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translateY(8px);
+    }
     .rm-inline-bar-topic {
       display: inline-flex;
       align-self: flex-start;
@@ -1918,7 +1922,7 @@
     .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(4) { animation-delay: 0.15s; }
     .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(5) { animation-delay: 0.2s; }
 
-    /* Center-inline: chat window — transparent, no header, centered */
+    /* ─── Center-Inline: chat window sits directly above the inline bar ──── */
     .rm-widget-container.center-inline {
       position: fixed;
       bottom: 0;
@@ -1932,20 +1936,35 @@
     }
     .rm-widget-container.center-inline .rm-chat-window {
       position: fixed;
-      bottom: 72px;
+      /* Sit directly above the inline bar: bar is at bottom:24px, ~50px tall + 8px gap */
+      bottom: 82px;
       left: 50%;
-      transform: translateX(-50%) translateY(16px) scale(0.96);
+      transform: translateX(-50%) translateY(12px);
       right: auto;
+      width: 560px;
+      max-width: calc(100% - 40px);
+      min-height: 0;
+      max-height: min(520px, calc(100vh - 120px));
       transform-origin: bottom center;
       pointer-events: auto;
-      background: rgba(var(--rm-primary-rgb), 0.15);
-      backdrop-filter: blur(20px) saturate(1.4);
-      -webkit-backdrop-filter: blur(20px) saturate(1.4);
-      box-shadow: none;
-      border: 1px solid rgba(var(--rm-primary-rgb), 0.1);
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 85%);
+      backdrop-filter: blur(24px) saturate(1.4);
+      -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(var(--rm-primary-rgb), 0.15);
+      border: 1px solid rgba(var(--rm-primary-rgb), 0.12);
+      border-radius: 20px;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity 0.3s cubic-bezier(0.4,0,0.2,1),
+                  transform 0.3s cubic-bezier(0.4,0,0.2,1),
+                  visibility 0.3s;
     }
     .rm-widget-container.center-inline .rm-chat-window.open {
-      transform: translateX(-50%) translateY(0) scale(1);
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(-50%) translateY(0);
+      pointer-events: auto;
     }
     .rm-widget-container.center-inline .rm-chat-window.bottom-right,
     .rm-widget-container.center-inline .rm-chat-window.bottom-left {
@@ -1955,71 +1974,86 @@
     }
     .rm-widget-container.center-inline .rm-chat-window.bottom-right.open,
     .rm-widget-container.center-inline .rm-chat-window.bottom-left.open {
-      transform: translateX(-50%) translateY(0) scale(1);
+      transform: translateX(-50%) translateY(0);
     }
-    /* Frosted glass header in center-inline mode */
+    /* Dark frosted header matching inline bar aesthetic */
     .rm-widget-container.center-inline .rm-header {
-      background: rgba(var(--rm-primary-rgb), 0.15);
+      background: rgba(var(--rm-primary-rgb), 0.12);
       backdrop-filter: blur(20px) saturate(1.4);
       -webkit-backdrop-filter: blur(20px) saturate(1.4);
-      border-bottom: 1px solid rgba(var(--rm-primary-rgb), 0.1);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      margin-bottom: 0;
+      padding: 14px 16px;
     }
     /* Hide back button in center-inline -- only X (close) button shown */
     .rm-widget-container.center-inline .rm-header-back {
       display: none;
     }
-    /* Transparent messages area */
+    .rm-widget-container.center-inline .rm-header-close {
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .rm-widget-container.center-inline .rm-header-close:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+    /* Transparent messages area with no extra padding for header overlap */
     .rm-widget-container.center-inline .rm-messages {
       background: transparent;
+      padding-top: 16px;
+      padding-bottom: 16px;
+      min-height: 120px;
     }
     /* Bot bubbles: frosted glass with primary tint */
     .rm-widget-container.center-inline .rm-message-row.bot .rm-message {
       background: rgba(var(--rm-primary-rgb), 0.12);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(var(--rm-primary-rgb), 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.06);
       color: #ffffff;
     }
     .rm-widget-container.center-inline .rm-message-row.bot .rm-message a {
-      color: rgba(var(--rm-primary-rgb), 0.8);
+      color: color-mix(in srgb, var(--rm-primary, #2563eb), #ffffff 50%);
     }
     /* Visitor bubbles: solid primary color */
     .rm-widget-container.center-inline .rm-message-row.visitor .rm-message {
-      background: rgba(var(--rm-primary-rgb), 0.85) !important;
+      background: var(--rm-primary, #2563eb) !important;
       color: #ffffff !important;
     }
-    /* Input area transparent */
+    /* Hide the chat window's own input area — the inline bar IS the input */
     .rm-widget-container.center-inline .rm-input-area {
-      background: transparent;
-      border-top: none;
+      display: none;
     }
-    .rm-widget-container.center-inline .rm-input {
-      background: rgba(var(--rm-primary-rgb), 0.1);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(var(--rm-primary-rgb), 0.15);
-      border-radius: 12px;
-      padding: 10px 14px;
-      color: #ffffff !important;
+    /* Hide image preview in chat window for center-inline (we'll handle attachments via inline bar) */
+    .rm-widget-container.center-inline .rm-image-preview {
+      display: none;
     }
-    .rm-widget-container.center-inline .rm-input::placeholder {
-      color: rgba(255, 255, 255, 0.5);
-    }
-    /* Quick topics in center-inline */
+    /* Quick topics inside the chat window */
     .rm-widget-container.center-inline .rm-quick-topics {
       background: transparent;
       backdrop-filter: none;
+      padding-bottom: 8px;
     }
     .rm-widget-container.center-inline .rm-quick-topic {
       background: rgba(var(--rm-primary-rgb), 0.15);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       color: #ffffff;
-      border-color: rgba(var(--rm-primary-rgb), 0.1);
+      border-color: rgba(255, 255, 255, 0.08);
     }
-    /* Powered-by footer */
+    .rm-widget-container.center-inline .rm-quick-topic:hover {
+      background: rgba(var(--rm-primary-rgb), 0.25);
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+    /* Powered-by footer: subtle in dark theme */
     .rm-widget-container.center-inline .rm-powered {
       background: transparent;
+      color: rgba(255, 255, 255, 0.3);
+      padding: 4px 16px 6px;
+    }
+    .rm-widget-container.center-inline .rm-powered a {
+      color: rgba(255, 255, 255, 0.4);
+    }
+    .rm-widget-container.center-inline .rm-powered a:hover {
+      color: rgba(255, 255, 255, 0.6);
     }
     /* Home view hidden in center-inline */
     .rm-widget-container.center-inline .rm-home {
@@ -2031,7 +2065,7 @@
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       color: #ffffff !important;
-      border-color: rgba(var(--rm-primary-rgb), 0.1);
+      border-color: rgba(255, 255, 255, 0.08);
     }
     /* Typing indicator */
     .rm-widget-container.center-inline .rm-typing-row {
@@ -2040,37 +2074,125 @@
       -webkit-backdrop-filter: blur(12px);
       border-radius: 12px;
     }
+    .rm-widget-container.center-inline .rm-typing-dots span {
+      background: rgba(255, 255, 255, 0.5);
+    }
+    .rm-widget-container.center-inline .rm-status-text {
+      color: rgba(255, 255, 255, 0.5);
+    }
+    /* Handoff card dark theme */
+    .rm-widget-container.center-inline .rm-handoff-card {
+      background: rgba(var(--rm-primary-rgb), 0.1);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      box-shadow: none;
+    }
+    .rm-widget-container.center-inline .rm-handoff-title {
+      color: #ffffff;
+    }
+    .rm-widget-container.center-inline .rm-handoff-subtitle {
+      color: rgba(255, 255, 255, 0.6);
+    }
+    /* Tool error dark theme */
+    .rm-widget-container.center-inline .rm-tool-error-header {
+      color: #fca5a5;
+    }
+    .rm-widget-container.center-inline .rm-tool-error-detail {
+      color: #fecaca;
+      background: rgba(220, 38, 38, 0.15);
+    }
+
+    /* When chat is active, inline bar gets a slightly different style (no glow, solid border) */
+    .rm-inline-bar.chat-active {
+      animation: none;
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
+      border-radius: 20px;
+    }
+    .rm-inline-bar.chat-active .rm-inline-bar-inner {
+      border-radius: 18px;
+    }
 
     /* Center-inline: mobile overrides */
     @media (max-width: 480px) {
       .rm-inline-bar {
         bottom: 16px;
         width: 280px;
+        max-width: calc(100% - 32px);
       }
       .rm-inline-bar.expanded {
-        width: calc(100vw - 32px);
+        left: 16px;
+        right: 16px;
+        width: auto;
+        transform: none;
       }
       .rm-inline-bar-topic {
         font-size: 13px;
         padding: 8px 14px;
       }
+      /* On mobile, chat window goes full-screen and inline bar hides */
       .rm-widget-container.center-inline .rm-chat-window {
-        bottom: 0;
+        position: fixed;
+        top: 0;
         left: 0;
         right: 0;
-        top: 0;
-        width: 100vw;
-        width: 100dvw;
-        transform: translateY(16px) scale(0.96);
+        bottom: 0;
+        width: 100%;
+        height: 100%;
+        max-width: none;
+        max-height: none;
+        min-height: 0;
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
+        transform: translateY(16px);
         transform-origin: bottom center;
       }
       .rm-widget-container.center-inline .rm-chat-window.open {
-        transform: translateY(0) scale(1);
+        transform: translateY(0);
       }
       .rm-widget-container.center-inline .rm-chat-window.bottom-right.open,
       .rm-widget-container.center-inline .rm-chat-window.bottom-left.open {
-        transform: translateY(0) scale(1);
+        transform: translateY(0);
         left: 0;
+      }
+      /* On mobile full-screen, show the input area inside the chat window */
+      .rm-widget-container.center-inline .rm-chat-window.open .rm-input-area {
+        display: flex;
+        background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 85%);
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .rm-widget-container.center-inline .rm-chat-window.open .rm-input {
+        background: rgba(var(--rm-primary-rgb), 0.1);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(var(--rm-primary-rgb), 0.15);
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-size: 16px;
+        color: #ffffff !important;
+      }
+      .rm-widget-container.center-inline .rm-chat-window.open .rm-input::placeholder {
+        color: rgba(255, 255, 255, 0.5);
+      }
+      .rm-widget-container.center-inline .rm-chat-window.open .rm-send-btn {
+        color: #ffffff;
+      }
+      .rm-widget-container.center-inline .rm-chat-window.open .rm-attach-btn {
+        color: rgba(255, 255, 255, 0.5);
+      }
+      /* Prevent iOS input zoom — all inputs must be 16px */
+      .rm-inline-bar-input {
+        font-size: 16px !important;
+      }
+      .rm-input {
+        font-size: 16px !important;
+      }
+      .rm-home-ask-input {
+        font-size: 16px !important;
+      }
+      .rm-handoff-email-input {
+        font-size: 16px !important;
       }
     }
   `;
@@ -2418,7 +2540,7 @@
     inlineBarExpanded = true;
     inlineBar.classList.add("expanded");
     inlineBarPlaceholder.style.display = "none";
-    inlineBarInput.placeholder = "Ask a question...";
+    inlineBarInput.placeholder = conversationId ? "Type a message..." : "Ask a question...";
     inlineBarInput.focus();
     stopPlaceholderRotation();
     updateInlineBarBtn();
@@ -2437,6 +2559,11 @@
   }
 
   function updateInlineBarBtn() {
+    // When chat is active, always show send icon (never the close icon)
+    if (isOpen && isInlineBarVariant) {
+      inlineBarBtn.classList.remove("show-close");
+      return;
+    }
     if (inlineBarExpanded && inlineBarInput.value.trim() === "") {
       inlineBarBtn.classList.add("show-close");
     } else {
@@ -2475,8 +2602,8 @@
     const text = inlineBarInput.value.trim();
     if (!text || isSending) return;
     inlineBarInput.value = "";
-    collapseInlineBar();
-    inlineBar.classList.add("hidden");
+    // Keep the inline bar expanded — it IS the input
+    // Open the chat window above it and send the message
     showChatScreen();
     openChatWidget();
     setTimeout(() => handleSendMessage(text), 100);
@@ -2484,7 +2611,12 @@
 
   // Inline bar event listeners
   inlineBarInput.addEventListener("focus", () => {
-    expandInlineBar();
+    if (!inlineBarExpanded) expandInlineBar();
+    // If there's a conversation to restore, open the chat window
+    if (isInlineBarVariant && !isOpen && conversationId) {
+      showChatScreen();
+      openChatWidget();
+    }
   });
 
   inlineBarInput.addEventListener("input", () => {
@@ -2494,13 +2626,27 @@
   inlineBarInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      sendFromInlineBar();
+      // If chat is already open, send directly as a chat message
+      if (isOpen && isInlineBarVariant) {
+        const text = inlineBarInput.value.trim();
+        if (!text || isSending) return;
+        inlineBarInput.value = "";
+        handleSendMessage(text);
+      } else {
+        sendFromInlineBar();
+      }
     }
   });
 
   inlineBarBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (inlineBarInput.value.trim()) {
+    // If chat is active, use inline bar as chat input
+    if (isOpen && isInlineBarVariant) {
+      const text = inlineBarInput.value.trim();
+      if (!text || isSending) return;
+      inlineBarInput.value = "";
+      handleSendMessage(text);
+    } else if (inlineBarInput.value.trim()) {
       sendFromInlineBar();
     } else if (inlineBarExpanded) {
       collapseInlineBar();
@@ -2509,9 +2655,11 @@
     }
   });
 
-  // Click outside to collapse
+  // Click outside to collapse (but not when chat is active — user may click in chat window)
   document.addEventListener("click", (e) => {
     if (!isInlineBarVariant || !inlineBarExpanded) return;
+    // Don't collapse when chat is open — the bar stays as input
+    if (isOpen) return;
     if (!inlineBar.contains(e.target as Node)) {
       collapseInlineBar();
     }
@@ -3556,8 +3704,7 @@
             topicBtn.onclick = (e) => {
               e.stopPropagation();
               if (isSending) return;
-              collapseInlineBar();
-              inlineBar.classList.add("hidden");
+              // Keep inline bar visible — it becomes the chat input
               showChatScreen();
               openChatWidget();
               setTimeout(() => handleSendMessage(qa.action), 100);
@@ -3621,6 +3768,10 @@
     isSending = true;
     sendBtn.disabled = true;
     input.disabled = true;
+    // Also disable inline bar input if in center-inline mode
+    if (isInlineBarVariant) {
+      inlineBarInput.disabled = true;
+    }
 
     try {
     // Switch to chat view if on home screen
@@ -3874,7 +4025,17 @@
       isSending = false;
       sendBtn.disabled = false;
       input.disabled = false;
-      input.focus();
+      // Re-enable and focus the correct input
+      if (isInlineBarVariant) {
+        inlineBarInput.disabled = false;
+        if (!isMobileViewport()) {
+          inlineBarInput.focus();
+        } else {
+          input.focus();
+        }
+      } else {
+        input.focus();
+      }
     }
   }
 
@@ -4614,14 +4775,28 @@
     // Lock body scroll on mobile to prevent background scrolling
     if (isMobileViewport()) {
       document.body.style.overflow = "hidden";
+      document.documentElement.style.overflow = "hidden";
     }
-    // For center-inline: hide the bar and skip home screen
+    // For center-inline: keep the bar visible as the input, skip home screen
     if (isInlineBarVariant) {
-      inlineBar.classList.add("hidden");
       stopPlaceholderRotation();
       showChatScreen();
+      // Ensure inline bar is expanded and marked as active
+      if (!inlineBarExpanded) expandInlineBar();
+      inlineBar.classList.add("chat-active");
+      updateInlineBarBtn();
+      // On mobile, hide the inline bar since chat goes full-screen with its own input
+      if (isMobileViewport()) {
+        inlineBar.classList.add("hidden");
+      }
+      // Focus the inline bar input (it's the persistent input)
+      setTimeout(() => {
+        if (!isMobileViewport()) {
+          inlineBarInput.focus();
+        }
+      }, 100);
     }
-    // Don't auto-focus the chat input -- the home screen is shown first
+    // Don't auto-focus the chat input -- the home screen is shown first (non-inline variant)
   }
 
   function closeChatWidget() {
@@ -4631,10 +4806,12 @@
     // Restore body scroll
     if (isMobileViewport()) {
       document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
     }
-    // For center-inline: re-show the bar and reset state
+    // For center-inline: collapse the bar and remove active state
     if (isInlineBarVariant) {
       inlineBar.classList.remove("hidden");
+      inlineBar.classList.remove("chat-active");
       collapseInlineBar();
     }
   }
