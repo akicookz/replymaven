@@ -1656,6 +1656,10 @@ function FeatureWidgetAndHandoff() {
 function Landing() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [authOpen, setAuthOpen] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<{
+    plan: string;
+    interval: string;
+  } | null>(null);
 
   // Auto-open auth modal when ?show_auth=true is in the URL
   useEffect(() => {
@@ -1666,6 +1670,20 @@ function Landing() {
       setSearchParams(searchParams, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  function handlePricingCta(planId: "starter" | "standard" | "business", interval: "monthly" | "annual") {
+    setSelectedPlan({ plan: planId, interval });
+    setAuthOpen(true);
+  }
+
+  function handleGenericCta() {
+    setSelectedPlan(null);
+    setAuthOpen(true);
+  }
+
+  const authCallbackUrl = selectedPlan
+    ? `/app/onboarding?plan=${selectedPlan.plan}&interval=${selectedPlan.interval}`
+    : "/app";
 
   return (
     <div className="min-h-screen bg-background scroll-smooth">
@@ -1748,7 +1766,7 @@ function Landing() {
           {/* CTA */}
           <Button
             variant="glow-primary"
-            onClick={() => setAuthOpen(true)}
+            onClick={handleGenericCta}
             className="rounded-full h-9 px-3 sm:px-5 text-[12px] sm:text-[13px] font-medium"
           >
             <span className="sm:hidden">Try free</span>
@@ -1790,7 +1808,7 @@ function Landing() {
               <div className="flex flex-col sm:flex-row items-start gap-4 mb-8">
                 <Button
                   variant="glow-primary"
-                  onClick={() => setAuthOpen(true)}
+                  onClick={handleGenericCta}
                   className="rounded-full w-full sm:w-auto px-8 h-12 text-[15px] font-medium"
                 >
                   Start Free
@@ -1995,7 +2013,7 @@ function Landing() {
             </h2>
           </div>
 
-          <PricingCards onCtaClick={() => setAuthOpen(true)} />
+          <PricingCards onCtaClick={handlePricingCta} />
 
           {/* Enterprise card */}
           <div
@@ -2039,7 +2057,7 @@ function Landing() {
 
               <Button
                 variant="glow-secondary"
-                onClick={() => setAuthOpen(true)}
+                onClick={handleGenericCta}
                 className="shrink-0 rounded-xl h-11 px-6 bg-white/[0.05] hover:bg-white/[0.08] border-white/[0.06]"
               >
                 Contact Sales
@@ -2090,7 +2108,7 @@ function Landing() {
           </p>
           <Button
             variant="glow-primary"
-            onClick={() => setAuthOpen(true)}
+            onClick={handleGenericCta}
             className="rounded-full px-8 h-12 text-[15px] font-medium"
           >
             Try ReplyMaven free
@@ -2193,7 +2211,7 @@ function Landing() {
       </footer>
 
       {/* Auth Modal */}
-      <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
+      <AuthModal open={authOpen} onOpenChange={setAuthOpen} callbackURL={authCallbackUrl} />
     </div>
   );
 }

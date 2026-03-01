@@ -4,7 +4,7 @@ import { type SubscriptionRow } from "./db/schema";
 
 // ─── Plan Types ───────────────────────────────────────────────────────────────
 
-export type Plan = "essential" | "pro" | "business";
+export type Plan = "starter" | "standard" | "business";
 export type BillingInterval = "monthly" | "annual";
 export type SubscriptionStatus =
   | "trialing"
@@ -45,10 +45,10 @@ export interface AppEnv extends Env {
   CF_ACCOUNT_ID: string;
   STRIPE_SECRET_KEY: string;
   STRIPE_WEBHOOK_SECRET: string;
-  STRIPE_ESSENTIAL_MONTHLY_PRICE_ID: string;
-  STRIPE_ESSENTIAL_ANNUAL_PRICE_ID: string;
-  STRIPE_PRO_MONTHLY_PRICE_ID: string;
-  STRIPE_PRO_ANNUAL_PRICE_ID: string;
+  STRIPE_STARTER_MONTHLY_PRICE_ID: string;
+  STRIPE_STARTER_ANNUAL_PRICE_ID: string;
+  STRIPE_STANDARD_MONTHLY_PRICE_ID: string;
+  STRIPE_STANDARD_ANNUAL_PRICE_ID: string;
   STRIPE_BUSINESS_MONTHLY_PRICE_ID: string;
   STRIPE_BUSINESS_ANNUAL_PRICE_ID: string;
   UPLOADS: R2Bucket;

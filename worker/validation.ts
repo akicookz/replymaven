@@ -20,7 +20,12 @@ export const updateProjectSettingsSchema = z.object({
   introMessage: z.string().max(1000).optional(),
   autoCannedDraft: z.boolean().optional(),
   companyName: z.string().max(200).nullable().optional(),
-  companyUrl: z.string().url("Must be a valid URL").max(2048).nullable().optional(),
+  companyUrl: z
+    .string()
+    .url("Must be a valid URL")
+    .max(2048)
+    .nullable()
+    .optional(),
   companyContext: z.string().max(10000).nullable().optional(),
 });
 
@@ -204,12 +209,7 @@ export const updateBookingConfigSchema = z.object({
   enabled: z.boolean().optional(),
   timezone: z.string().min(1).max(100).optional(),
   slotDuration: z.enum(["15", "30", "60"]).transform(Number).optional(),
-  bufferTime: z
-    .number()
-    .int()
-    .min(0)
-    .max(60)
-    .optional(),
+  bufferTime: z.number().int().min(0).max(60).optional(),
   bookingWindowDays: z.number().int().min(1).max(60).optional(),
   minAdvanceHours: z.number().int().min(0).max(168).optional(),
 });
@@ -268,10 +268,7 @@ export const createToolSchema = z.object({
       "Must start with a letter and contain only lowercase letters, numbers, and underscores",
     ),
   displayName: z.string().min(1, "Display name is required").max(100),
-  description: z
-    .string()
-    .min(1, "Description is required")
-    .max(500),
+  description: z.string().min(1, "Description is required").max(500),
   endpoint: z.string().url("Must be a valid URL").max(2048),
   method: z.enum(["GET", "POST"]).default("POST"),
   headers: z.record(z.string(), z.string().max(2048)).optional(),
@@ -301,7 +298,7 @@ export const testToolSchema = z.object({
 // ─── Billing ──────────────────────────────────────────────────────────────────
 
 export const createCheckoutSchema = z.object({
-  plan: z.enum(["essential", "pro", "business"]),
+  plan: z.enum(["starter", "standard", "business"]),
   interval: z.enum(["monthly", "annual"]),
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),

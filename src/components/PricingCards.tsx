@@ -8,8 +8,8 @@ import { cn } from "@/lib/utils";
 
 const pricingPlans = [
   {
-    id: "essential" as const,
-    name: "ReplyMaven Essential",
+    id: "starter" as const,
+    name: "ReplyMaven Starter",
     monthlyPrice: 19,
     annualPrice: 190,
     description: "For personal projects and small sites.",
@@ -25,15 +25,15 @@ const pricingPlans = [
     ],
   },
   {
-    id: "pro" as const,
-    name: "ReplyMaven Pro",
+    id: "standard" as const,
+    name: "ReplyMaven Standard",
     monthlyPrice: 49,
     annualPrice: 490,
     description: "For growing teams that need more power.",
     highlighted: true,
     badge: "Most Popular",
     features: [
-      "Everything in Essential",
+      "Everything in Starter",
       "5 projects",
       "500 messages / month",
       "3 seats",
@@ -51,7 +51,7 @@ const pricingPlans = [
     description: "For teams that run on customer experience.",
     highlighted: false,
     features: [
-      "Everything in Pro",
+      "Everything in Standard",
       "10 projects",
       "2,000 messages / month",
       "5 seats",
@@ -109,7 +109,7 @@ export function BillingToggle({
 // ─── Pricing Cards (for Landing page) ─────────────────────────────────────────
 
 interface PricingCardsProps {
-  onCtaClick: () => void;
+  onCtaClick: (planId: "starter" | "standard" | "business", interval: "monthly" | "annual") => void;
 }
 
 export function PricingCards({ onCtaClick }: PricingCardsProps) {
@@ -181,14 +181,14 @@ export function PricingCards({ onCtaClick }: PricingCardsProps) {
               <div className="p-7 pt-0">
                 <Button
                   variant={plan.highlighted ? "glow-primary" : "glow-secondary"}
-                  onClick={onCtaClick}
+                  onClick={() => onCtaClick(plan.id, interval)}
                   className={cn(
                     "w-full rounded-xl h-11 text-sm font-medium",
                     !plan.highlighted &&
                     "bg-white/[0.05] hover:bg-white/[0.08] border-white/[0.06]",
                   )}
                 >
-                  {plan.highlighted ? "Get started" : `Try ${plan.name.split(" ").pop()} free`}
+                  Start 7-day free trial
                 </Button>
               </div>
             </div>
@@ -202,7 +202,7 @@ export function PricingCards({ onCtaClick }: PricingCardsProps) {
 // ─── Pricing Cards (for Onboarding plan selection) ────────────────────────────
 
 interface PricingCardsSelectProps {
-  onSelectPlan: (plan: "essential" | "pro" | "business", interval: "monthly" | "annual") => void;
+  onSelectPlan: (plan: "starter" | "standard" | "business", interval: "monthly" | "annual") => void;
   loadingPlan: string | null;
   interval: "monthly" | "annual";
 }

@@ -78,9 +78,7 @@ export const projectSettings = sqliteTable(
       .$onUpdate(() => new Date())
       .notNull(),
   },
-  (table) => [
-    uniqueIndex("idx_project_settings_project").on(table.projectId),
-  ],
+  (table) => [uniqueIndex("idx_project_settings_project").on(table.projectId)],
 );
 
 export type ProjectSettingsRow = typeof projectSettings.$inferSelect;
@@ -100,7 +98,9 @@ export const widgetConfig = sqliteTable(
     textColor: text("text_color").notNull().default("#1f2937"),
     headerText: text("header_text").notNull().default("Chat with us"),
     avatarUrl: text("avatar_url"),
-    position: text("position", { enum: ["bottom-right", "bottom-left", "center-inline"] })
+    position: text("position", {
+      enum: ["bottom-right", "bottom-left", "center-inline"],
+    })
       .notNull()
       .default("bottom-right"),
     borderRadius: real("border_radius").notNull().default(16),
@@ -206,7 +206,9 @@ export const crawledPages = sqliteTable(
     url: text("url").notNull(),
     pageTitle: text("page_title"),
     r2Key: text("r2_key"),
-    status: text("status", { enum: ["pending", "crawled", "failed", "skipped"] })
+    status: text("status", {
+      enum: ["pending", "crawled", "failed", "skipped"],
+    })
       .notNull()
       .default("pending"),
     depth: integer("depth").notNull().default(0),
@@ -403,9 +405,7 @@ export const bookingConfig = sqliteTable(
       .$onUpdate(() => new Date())
       .notNull(),
   },
-  (table) => [
-    uniqueIndex("idx_booking_config_project").on(table.projectId),
-  ],
+  (table) => [uniqueIndex("idx_booking_config_project").on(table.projectId)],
 );
 
 export type BookingConfigRow = typeof bookingConfig.$inferSelect;
@@ -445,10 +445,9 @@ export const bookings = sqliteTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    conversationId: text("conversation_id").references(
-      () => conversations.id,
-      { onDelete: "set null" },
-    ),
+    conversationId: text("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
     visitorName: text("visitor_name").notNull(),
     visitorEmail: text("visitor_email").notNull(),
     visitorPhone: text("visitor_phone"),
@@ -490,7 +489,9 @@ export const tools = sqliteTable(
     displayName: text("display_name").notNull(), // Human-friendly: Check Order Status
     description: text("description").notNull(), // Used by Gemini to decide when to call
     endpoint: text("endpoint").notNull(), // HTTP URL
-    method: text("method", { enum: ["GET", "POST"] }).notNull().default("POST"),
+    method: text("method", { enum: ["GET", "POST"] })
+      .notNull()
+      .default("POST"),
     headers: text("headers"), // JSON string, encrypted sensitive values
     parameters: text("parameters").notNull().default("[]"), // JSON array of param definitions
     responseMapping: text("response_mapping"), // JSON: { resultPath, summaryTemplate }
@@ -523,10 +524,9 @@ export const toolExecutions = sqliteTable(
     toolId: text("tool_id")
       .notNull()
       .references(() => tools.id, { onDelete: "cascade" }),
-    conversationId: text("conversation_id").references(
-      () => conversations.id,
-      { onDelete: "set null" },
-    ),
+    conversationId: text("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
     messageId: text("message_id"), // The bot message that triggered this
     input: text("input"), // JSON: parameters sent to endpoint
     output: text("output"), // JSON: response from endpoint (truncated)
@@ -559,7 +559,7 @@ export const subscriptions = sqliteTable(
       .references(() => authSchema.users.id, { onDelete: "cascade" }),
     stripeCustomerId: text("stripe_customer_id").notNull(),
     stripeSubscriptionId: text("stripe_subscription_id"),
-    plan: text("plan", { enum: ["essential", "pro", "business"] }).notNull(),
+    plan: text("plan", { enum: ["starter", "standard", "business"] }).notNull(),
     interval: text("interval", { enum: ["monthly", "annual"] }).notNull(),
     status: text("status", {
       enum: [

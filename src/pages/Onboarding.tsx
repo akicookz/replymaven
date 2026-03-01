@@ -953,9 +953,10 @@ function Step5({
     }
   }, [checkoutSuccess, navigate]);
 
-  async function handleSelectPlan(plan: "essential" | "pro" | "business", interval: "monthly" | "annual") {
+  async function handleSelectPlan(plan: "starter" | "standard" | "business", interval: "monthly" | "annual") {
     setLoadingPlan(plan);
     try {
+
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1003,7 +1004,7 @@ function Step5({
   return (
     <div className="space-y-8">
       {/* Header row: icon + title left, toggle right */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start flex-col md:flex-row justify-between gap-4">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
             <CreditCard className="w-6 h-6 text-primary" />
@@ -1086,6 +1087,48 @@ function Onboarding() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectSlug, setProjectSlug] = useState<string | null>(null);
   const [step1Error, setStep1Error] = useState<string | null>(null);
+  const [autoCheckoutPending, setAutoCheckoutPending] = useState(false);
+
+  // Auto-fire Stripe checkout if landing page passed plan + interval params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const plan = params.get("plan");
+    const interval = params.get("interval");
+
+    if (
+      plan &&
+      interval &&
+      ["starter", "standard", "business"].includes(plan) &&
+      ["monthly", "annual"].includes(interval)
+    ) {
+      // Clean URL params immediately
+      const url = new URL(window.location.href);
+      url.searchParams.delete("plan");
+      url.searchParams.delete("interval");
+      window.history.replaceState({}, "", url.pathname);
+
+      setAutoCheckoutPending(true);
+      fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan,
+          interval,
+          successUrl: `${window.location.origin}/app/onboarding`,
+          cancelUrl: `${window.location.origin}/app/onboarding`,
+        }),
+      })
+        .then((res) => res.json() as Promise<{ url?: string }>)
+        .then((data) => {
+          if (data.url) {
+            window.location.href = data.url;
+          } else {
+            setAutoCheckoutPending(false);
+          }
+        })
+        .catch(() => setAutoCheckoutPending(false));
+    }
+  }, []);
 
   // Check for existing projects to resume incomplete onboarding
   const { data: existingProjects } = useQuery<ExistingProject[]>({
@@ -1227,6 +1270,18 @@ function Onboarding() {
   const handleStep1Next = useCallback(() => {
     createProjectMutation.mutate();
   }, [createProjectMutation]);
+
+  // Show loading screen while auto-checkout redirect is in progress
+  if (autoCheckoutPending) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Setting up your trial...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

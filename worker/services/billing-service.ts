@@ -18,8 +18,8 @@ import {
 // ─── Plan Limits Configuration ────────────────────────────────────────────────
 
 const PLAN_LIMITS: Record<Plan, PlanLimits> = {
-  essential: {
-    plan: "essential",
+  starter: {
+    plan: "starter",
     maxProjects: 1,
     maxMessagesPerMonth: 200,
     maxKnowledgeSources: 50,
@@ -32,8 +32,8 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     tools: false,
     booking: false,
   },
-  pro: {
-    plan: "pro",
+  standard: {
+    plan: "standard",
     maxProjects: 5,
     maxMessagesPerMonth: 500,
     maxKnowledgeSources: 50,
@@ -70,20 +70,51 @@ interface PriceMapping {
 }
 
 function buildPriceMaps(env: AppEnv) {
-  const entries: Array<{ priceId: string; plan: Plan; interval: BillingInterval }> = [
-    { priceId: env.STRIPE_ESSENTIAL_MONTHLY_PRICE_ID, plan: "essential", interval: "monthly" },
-    { priceId: env.STRIPE_ESSENTIAL_ANNUAL_PRICE_ID, plan: "essential", interval: "annual" },
-    { priceId: env.STRIPE_PRO_MONTHLY_PRICE_ID, plan: "pro", interval: "monthly" },
-    { priceId: env.STRIPE_PRO_ANNUAL_PRICE_ID, plan: "pro", interval: "annual" },
-    { priceId: env.STRIPE_BUSINESS_MONTHLY_PRICE_ID, plan: "business", interval: "monthly" },
-    { priceId: env.STRIPE_BUSINESS_ANNUAL_PRICE_ID, plan: "business", interval: "annual" },
+  const entries: Array<{
+    priceId: string;
+    plan: Plan;
+    interval: BillingInterval;
+  }> = [
+    {
+      priceId: env.STRIPE_STARTER_MONTHLY_PRICE_ID,
+      plan: "starter",
+      interval: "monthly",
+    },
+    {
+      priceId: env.STRIPE_STARTER_ANNUAL_PRICE_ID,
+      plan: "starter",
+      interval: "annual",
+    },
+    {
+      priceId: env.STRIPE_STANDARD_MONTHLY_PRICE_ID,
+      plan: "standard",
+      interval: "monthly",
+    },
+    {
+      priceId: env.STRIPE_STANDARD_ANNUAL_PRICE_ID,
+      plan: "standard",
+      interval: "annual",
+    },
+    {
+      priceId: env.STRIPE_BUSINESS_MONTHLY_PRICE_ID,
+      plan: "business",
+      interval: "monthly",
+    },
+    {
+      priceId: env.STRIPE_BUSINESS_ANNUAL_PRICE_ID,
+      plan: "business",
+      interval: "annual",
+    },
   ];
 
   const priceToMapping = new Map<string, PriceMapping>();
   const planIntervalToPrice = new Map<string, string>();
 
   for (const entry of entries) {
-    priceToMapping.set(entry.priceId, { plan: entry.plan, interval: entry.interval });
+    priceToMapping.set(entry.priceId, {
+      plan: entry.plan,
+      interval: entry.interval,
+    });
     planIntervalToPrice.set(`${entry.plan}:${entry.interval}`, entry.priceId);
   }
 
@@ -148,7 +179,9 @@ export class BillingService {
 
   // ─── Subscription CRUD ────────────────────────────────────────────────────
 
-  async getSubscriptionByUserId(userId: string): Promise<SubscriptionRow | null> {
+  async getSubscriptionByUserId(
+    userId: string,
+  ): Promise<SubscriptionRow | null> {
     const rows = await this.db
       .select()
       .from(subscriptions)
@@ -157,7 +190,9 @@ export class BillingService {
     return rows[0] ?? null;
   }
 
-  async getSubscriptionByStripeId(stripeSubscriptionId: string): Promise<SubscriptionRow | null> {
+  async getSubscriptionByStripeId(
+    stripeSubscriptionId: string,
+  ): Promise<SubscriptionRow | null> {
     const rows = await this.db
       .select()
       .from(subscriptions)
@@ -166,7 +201,9 @@ export class BillingService {
     return rows[0] ?? null;
   }
 
-  async getSubscriptionByStripeCustomerId(stripeCustomerId: string): Promise<SubscriptionRow | null> {
+  async getSubscriptionByStripeCustomerId(
+    stripeCustomerId: string,
+  ): Promise<SubscriptionRow | null> {
     const rows = await this.db
       .select()
       .from(subscriptions)
@@ -235,7 +272,11 @@ export class BillingService {
     successUrl: string,
     cancelUrl: string,
   ): Promise<Stripe.Checkout.Session> {
-    const stripeCustomerId = await this.getOrCreateStripeCustomer(userId, email, name);
+    const stripeCustomerId = await this.getOrCreateStripeCustomer(
+      userId,
+      email,
+      name,
+    );
     const priceId = this.getPriceIdForPlan(plan, interval);
     if (!priceId) throw new Error(`Invalid plan/interval: ${plan}/${interval}`);
 
@@ -276,24 +317,34 @@ export class BillingService {
   async handleWebhookEvent(event: Stripe.Event): Promise<void> {
     switch (event.type) {
       case "checkout.session.completed":
-        await this.handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+        await this.handleCheckoutCompleted(
+          event.data.object as Stripe.Checkout.Session,
+        );
         break;
       case "customer.subscription.updated":
-        await this.handleSubscriptionUpdated(event.data.object as Stripe.Subscription);
+        await this.handleSubscriptionUpdated(
+          event.data.object as Stripe.Subscription,
+        );
         break;
       case "customer.subscription.deleted":
-        await this.handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
+        await this.handleSubscriptionDeleted(
+          event.data.object as Stripe.Subscription,
+        );
         break;
       case "invoice.paid":
         await this.handleInvoicePaid(event.data.object as Stripe.Invoice);
         break;
       case "invoice.payment_failed":
-        await this.handleInvoicePaymentFailed(event.data.object as Stripe.Invoice);
+        await this.handleInvoicePaymentFailed(
+          event.data.object as Stripe.Invoice,
+        );
         break;
     }
   }
 
-  private async handleCheckoutCompleted(session: Stripe.Checkout.Session): Promise<void> {
+  private async handleCheckoutCompleted(
+    session: Stripe.Checkout.Session,
+  ): Promise<void> {
     const userId = session.metadata?.userId;
     const plan = session.metadata?.plan as Plan | undefined;
     const interval = session.metadata?.interval as BillingInterval | undefined;
@@ -303,7 +354,8 @@ export class BillingService {
     const stripeSubscriptionId = session.subscription as string;
 
     // Fetch the Stripe subscription for trial/status details
-    const stripeSub = await this.stripe.subscriptions.retrieve(stripeSubscriptionId);
+    const stripeSub =
+      await this.stripe.subscriptions.retrieve(stripeSubscriptionId);
 
     // In Clover API, period info is on the latest invoice
     const periodDates = await this.getSubscriptionPeriod(stripeSub);
@@ -315,7 +367,9 @@ export class BillingService {
         plan,
         interval,
         status: stripeSub.status === "trialing" ? "trialing" : "active",
-        trialEndsAt: stripeSub.trial_end ? new Date(stripeSub.trial_end * 1000) : null,
+        trialEndsAt: stripeSub.trial_end
+          ? new Date(stripeSub.trial_end * 1000)
+          : null,
         currentPeriodStart: periodDates.start,
         currentPeriodEnd: periodDates.end,
       });
@@ -327,7 +381,9 @@ export class BillingService {
         plan,
         interval,
         status: stripeSub.status === "trialing" ? "trialing" : "active",
-        trialEndsAt: stripeSub.trial_end ? new Date(stripeSub.trial_end * 1000) : null,
+        trialEndsAt: stripeSub.trial_end
+          ? new Date(stripeSub.trial_end * 1000)
+          : null,
         currentPeriodStart: periodDates.start,
         currentPeriodEnd: periodDates.end,
       });
@@ -363,7 +419,9 @@ export class BillingService {
     };
   }
 
-  private async handleSubscriptionUpdated(stripeSub: Stripe.Subscription): Promise<void> {
+  private async handleSubscriptionUpdated(
+    stripeSub: Stripe.Subscription,
+  ): Promise<void> {
     const existing = await this.getSubscriptionByStripeId(stripeSub.id);
     if (!existing) return;
 
@@ -386,14 +444,18 @@ export class BillingService {
       status: statusMap[stripeSub.status] ?? "active",
       plan: mapping?.plan ?? existing.plan,
       interval: mapping?.interval ?? existing.interval,
-      trialEndsAt: stripeSub.trial_end ? new Date(stripeSub.trial_end * 1000) : null,
+      trialEndsAt: stripeSub.trial_end
+        ? new Date(stripeSub.trial_end * 1000)
+        : null,
       currentPeriodStart: periodDates.start,
       currentPeriodEnd: periodDates.end,
       cancelAtPeriodEnd: stripeSub.cancel_at_period_end,
     });
   }
 
-  private async handleSubscriptionDeleted(stripeSub: Stripe.Subscription): Promise<void> {
+  private async handleSubscriptionDeleted(
+    stripeSub: Stripe.Subscription,
+  ): Promise<void> {
     const existing = await this.getSubscriptionByStripeId(stripeSub.id);
     if (!existing) return;
 
@@ -412,7 +474,7 @@ export class BillingService {
     if (!subDetails) return null;
     return typeof subDetails.subscription === "string"
       ? subDetails.subscription
-      : subDetails.subscription?.id ?? null;
+      : (subDetails.subscription?.id ?? null);
   }
 
   private async handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> {
@@ -423,7 +485,12 @@ export class BillingService {
     if (!existing) return;
 
     // Update period dates from the paid invoice
-    const updates: Partial<Pick<SubscriptionRow, "status" | "currentPeriodStart" | "currentPeriodEnd">> = {
+    const updates: Partial<
+      Pick<
+        SubscriptionRow,
+        "status" | "currentPeriodStart" | "currentPeriodEnd"
+      >
+    > = {
       currentPeriodStart: new Date(invoice.period_start * 1000),
       currentPeriodEnd: new Date(invoice.period_end * 1000),
     };
@@ -436,7 +503,9 @@ export class BillingService {
     await this.updateSubscription(existing.id, updates);
   }
 
-  private async handleInvoicePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
+  private async handleInvoicePaymentFailed(
+    invoice: Stripe.Invoice,
+  ): Promise<void> {
     const stripeSubscriptionId = this.getSubscriptionIdFromInvoice(invoice);
     if (!stripeSubscriptionId) return;
 
@@ -458,12 +527,7 @@ export class BillingService {
     const rows = await this.db
       .select()
       .from(usage)
-      .where(
-        and(
-          eq(usage.userId, userId),
-          eq(usage.periodStart, periodStart),
-        ),
-      )
+      .where(and(eq(usage.userId, userId), eq(usage.periodStart, periodStart)))
       .limit(1);
     return rows[0] ?? null;
   }

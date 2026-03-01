@@ -12,13 +12,14 @@ import {
 interface AuthModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  callbackURL?: string;
 }
 
-function AuthModal({ open, onOpenChange }: AuthModalProps) {
+function AuthModal({ open, onOpenChange, callbackURL = "/app" }: AuthModalProps) {
   async function handleSocialLogin(provider: "google" | "github") {
     await signIn.social({
       provider,
-      callbackURL: "/app",
+      callbackURL,
     });
   }
 
