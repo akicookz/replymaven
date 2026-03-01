@@ -653,27 +653,22 @@ window.ReplyMaven.toggle();`}
                 <tbody className="text-muted-foreground">
                   <tr className="border-b border-border">
                     <td className="px-4 py-2.5 font-medium text-foreground">
-                      Primary Color
+                      Brand Color
                     </td>
                     <td className="px-4 py-2.5">
-                      Used for the trigger button, header, send button, and
-                      accent elements. Hex format (e.g., #2563eb).
+                      Used for the trigger button, header tint, send button,
+                      visitor bubbles, and accent elements. Hex format (e.g.,
+                      #2563eb). The chat window uses a frosted glass style
+                      with this color as a tint.
                     </td>
                   </tr>
                   <tr className="border-b border-border">
                     <td className="px-4 py-2.5 font-medium text-foreground">
-                      Background Color
+                      Brand Text
                     </td>
                     <td className="px-4 py-2.5">
-                      The chat window background color.
-                    </td>
-                  </tr>
-                  <tr className="border-b border-border">
-                    <td className="px-4 py-2.5 font-medium text-foreground">
-                      Text Color
-                    </td>
-                    <td className="px-4 py-2.5">
-                      Primary text color inside the widget.
+                      Text color on branded elements (buttons, icons, header).
+                      Hex format (e.g., #ffffff).
                     </td>
                   </tr>
                   <tr className="border-b border-border">

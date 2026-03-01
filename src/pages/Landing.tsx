@@ -1018,8 +1018,8 @@ function MockWidgetAndHandoffUI() {
                   />
                 </div>
                 <div
-                  className="rounded-xl rounded-tl-sm px-3 py-2 transition-colors duration-700"
-                  style={{ backgroundColor: `${themeColor}10` }}
+                  className="rounded-xl rounded-tl-sm px-3 py-2 border border-white/[0.06]"
+                  style={{ backgroundColor: "rgba(255,255,255,0.08)" }}
                 >
                   <p className="text-[12px] text-secondary-foreground leading-snug">
                     Hi! How can I help you today?
@@ -1036,8 +1036,11 @@ function MockWidgetAndHandoffUI() {
               )}
             >
               <div className="flex justify-end">
-                <div className="bg-white/[0.06] rounded-xl rounded-tr-sm px-3 py-2 max-w-[200px]">
-                  <p className="text-[12px] text-secondary-foreground leading-snug">
+                <div
+                  className="rounded-xl rounded-tr-sm px-3 py-2 max-w-[200px] transition-colors duration-700"
+                  style={{ backgroundColor: themeColor }}
+                >
+                  <p className="text-[12px] text-white leading-snug">
                     I need help with my billing issue
                   </p>
                 </div>
@@ -1062,8 +1065,8 @@ function MockWidgetAndHandoffUI() {
                   />
                 </div>
                 <div
-                  className="rounded-xl rounded-tl-sm px-3 py-2 transition-colors duration-700"
-                  style={{ backgroundColor: `${themeColor}10` }}
+                  className="rounded-xl rounded-tl-sm px-3 py-2 border border-white/[0.06]"
+                  style={{ backgroundColor: "rgba(255,255,255,0.08)" }}
                 >
                   <p className="text-[12px] text-secondary-foreground leading-snug">
                     Let me connect you with our team.

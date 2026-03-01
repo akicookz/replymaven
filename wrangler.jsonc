@@ -13,7 +13,7 @@
     "enabled": true,
   },
   "placement": {
-    "mode": "smart",
+    "hint": "aws:us-east-1",
   },
   "d1_databases": [
     {

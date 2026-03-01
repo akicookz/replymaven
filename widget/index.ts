@@ -227,7 +227,7 @@
       box-shadow: 0 4px 14px rgba(0,0,0,0.16);
       transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease;
       position: relative;
-      color: white;
+      color: var(--rm-brand-text, #ffffff);
       opacity: 0;
       overflow: hidden;
     }
@@ -307,9 +307,12 @@
       flex-direction: column;
       overflow: hidden;
       border-radius: var(--rm-chat-radius, 16px);
-      box-shadow: 0 5px 40px rgba(0,0,0,0.16);
-      border: 1px solid rgba(0,0,0,0.06);
-      background: #ffffff;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(var(--rm-primary-rgb, 37,99,235), 0.15);
+      border: 1px solid rgba(var(--rm-primary-rgb, 37,99,235), 0.25);
+      background: rgba(0,0,0,0.18);
+      backdrop-filter: blur(24px) saturate(1.4);
+      -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      color: #ffffff;
       touch-action: manipulation;
       opacity: 0;
       visibility: hidden;
@@ -331,14 +334,14 @@
     .rm-chat-window.open {
       opacity: 1;
       visibility: visible;
-      transform: translateY(0) scale(1);
+      transform: none;
       pointer-events: auto;
     }
 
     /* ─── Header ──────────────────────────────────────────────────────────── */
     .rm-header {
       padding: 18px 20px;
-      color: white;
+      color: var(--rm-brand-text, #ffffff);
       display: flex;
       align-items: center;
       gap: 12px;
@@ -346,19 +349,19 @@
       position: relative;
       z-index: 2;
       margin-bottom: -24px;
-      backdrop-filter: blur(16px) saturate(1.4);
-      -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.3);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
     }
     .rm-header-avatar {
       width: 36px;
       height: 36px;
       min-width: 36px;
       border-radius: 50%;
-      background: rgba(255,255,255,0.2);
+      background: var(--rm-primary, #2563eb);
       display: flex;
       align-items: center;
       justify-content: center;
-      color: white;
+      color: var(--rm-brand-text, #ffffff);
     }
     .rm-header-avatar.rm-icon-avatar {
       border-radius: 10px;
@@ -386,9 +389,9 @@
       line-height: 1.3;
     }
     .rm-header-close {
-      background: rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.1);
       border: none;
-      color: white;
+      color: var(--rm-brand-text, #ffffff);
       cursor: pointer;
       width: 32px;
       height: 32px;
@@ -416,13 +419,13 @@
       flex-direction: column;
       gap: 4px;
       min-height: 300px;
-      background: #fafafa;
+      background: transparent;
     }
     .rm-messages::-webkit-scrollbar {
       width: 4px;
     }
     .rm-messages::-webkit-scrollbar-thumb {
-      background: rgba(0,0,0,0.12);
+      background: rgba(255,255,255,0.12);
       border-radius: 4px;
     }
 
@@ -476,16 +479,16 @@
       overflow-wrap: break-word;
     }
     .rm-message-row.visitor .rm-message {
-      background: #2563eb;
-      color: white;
+      background: var(--rm-primary, #2563eb);
+      color: var(--rm-brand-text, #ffffff);
       border-radius: 18px 18px 4px 18px;
     }
     .rm-message-row.bot .rm-message,
     .rm-message-row.agent .rm-message {
-      background: #ffffff;
-      color: #1f2937;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(var(--rm-primary-rgb, 37,99,235), 0.2);
+      color: #ffffff;
       border-radius: 18px 18px 18px 4px;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.06);
     }
 
     /* ─── Typing Indicator ────────────────────────────────────────────────── */
@@ -514,7 +517,7 @@
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: #94a3b8;
+      background: rgba(255,255,255,0.5);
       animation: rm-bounce 1.4s ease-in-out infinite;
     }
     .rm-typing-dots span:nth-child(2) {
@@ -526,7 +529,7 @@
     .rm-status-text {
       font-size: 12px;
       font-weight: 500;
-      color: #94a3b8;
+      color: rgba(255,255,255,0.5);
     }
     @keyframes rm-bounce {
       0%, 60%, 100% {
@@ -552,7 +555,7 @@
       gap: 4px;
       cursor: pointer;
       font-size: 12px;
-      color: #dc2626;
+      color: #fca5a5;
       user-select: none;
     }
     .rm-tool-error-header svg {
@@ -569,8 +572,8 @@
       overflow: hidden;
       transition: max-height 0.2s ease-out;
       font-size: 11px;
-      color: #991b1b;
-      background: #fef2f2;
+      color: #fecaca;
+      background: rgba(220,38,38,0.15);
       border-radius: 6px;
       padding: 0;
       margin-top: 0;
@@ -587,38 +590,34 @@
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      background: rgba(250,250,250,0.80);
-      backdrop-filter: blur(16px) saturate(1.4);
-      -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      background: transparent;
       position: relative;
       z-index: 2;
     }
     .rm-quick-topic {
       padding: 7px 14px;
       border-radius: 20px;
-      border: 1px solid rgba(0,0,0,0.08);
-      background: #ffffff;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.06);
       font-size: 13px;
       cursor: pointer;
       transition: background 0.2s, border-color 0.2s;
-      color: inherit;
+      color: #ffffff;
       line-height: 1.3;
     }
     .rm-quick-topic:hover {
-      background: rgba(var(--rm-primary-rgb, 0,0,0), 0.05);
-      border-color: rgba(var(--rm-primary-rgb, 0,0,0), 0.18);
+      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.15);
+      border-color: rgba(255,255,255,0.15);
     }
 
     /* ─── Input Area ──────────────────────────────────────────────────────── */
     .rm-input-area {
       padding: 12px 16px;
-      border-top: 1px solid rgba(0,0,0,0.04);
+      border-top: 1px solid rgba(255,255,255,0.06);
       display: flex;
       align-items: center;
       gap: 8px;
-      background: rgba(255,255,255,0.80);
-      backdrop-filter: blur(16px) saturate(1.4);
-      -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      background: transparent;
       position: relative;
       z-index: 2;
       margin-top: -16px;
@@ -626,23 +625,23 @@
     .rm-input {
       flex: 1;
       padding: 8px 14px;
-      border: 1px solid rgba(0,0,0,0.10);
+      border: 1px solid rgba(255,255,255,0.1);
       border-radius: 24px;
       font-size: 14px;
       outline: none;
-      background: #fafafa;
-      color: #1f2937;
+      background: rgba(255,255,255,0.06);
+      color: #ffffff;
       transition: border-color 0.2s, box-shadow 0.2s;
       font-family: inherit;
       touch-action: manipulation;
     }
     .rm-input:focus {
-      border-color: var(--rm-primary, rgba(0,0,0,0.2));
-      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
-      background: #ffffff;
+      border-color: var(--rm-primary, rgba(255,255,255,0.2));
+      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
+      background: rgba(255,255,255,0.08);
     }
     .rm-input::placeholder {
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
     }
     .rm-send-btn {
       width: 36px;
@@ -654,7 +653,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      color: white;
+      color: var(--rm-brand-text, #ffffff);
       transition: opacity 0.2s, transform 0.15s;
     }
     .rm-send-btn:hover {
@@ -686,13 +685,13 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
       transition: color 0.2s, background 0.2s;
       padding: 0;
     }
     .rm-attach-btn:hover {
-      color: #6b7280;
-      background: rgba(0,0,0,0.04);
+      color: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.06);
     }
     .rm-attach-btn svg {
       width: 18px;
@@ -703,9 +702,7 @@
       display: none;
       align-items: center;
       gap: 8px;
-      background: rgba(255,255,255,0.80);
-      backdrop-filter: blur(16px) saturate(1.4);
-      -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      background: transparent;
       position: relative;
       z-index: 2;
     }
@@ -717,12 +714,12 @@
       height: 48px;
       object-fit: cover;
       border-radius: 8px;
-      border: 1px solid rgba(0,0,0,0.08);
+      border: 1px solid rgba(255,255,255,0.1);
     }
     .rm-image-preview-name {
       flex: 1;
       font-size: 12px;
-      color: #6b7280;
+      color: rgba(255,255,255,0.6);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -733,16 +730,16 @@
       min-width: 24px;
       border-radius: 50%;
       border: none;
-      background: rgba(0,0,0,0.06);
+      background: rgba(255,255,255,0.08);
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #6b7280;
+      color: rgba(255,255,255,0.6);
       padding: 0;
     }
     .rm-image-preview-remove:hover {
-      background: rgba(0,0,0,0.1);
+      background: rgba(255,255,255,0.15);
     }
     .rm-image-preview-remove svg {
       width: 12px;
@@ -763,20 +760,18 @@
       text-align: center;
       padding: 6px 16px 8px;
       font-size: 11px;
-      color: #9ca3af;
-      background: rgba(255,255,255,0.80);
-      backdrop-filter: blur(16px) saturate(1.4);
-      -webkit-backdrop-filter: blur(16px) saturate(1.4);
+      color: rgba(255,255,255,0.3);
+      background: transparent;
       position: relative;
       z-index: 2;
     }
     .rm-powered a {
-      color: #6b7280;
+      color: rgba(255,255,255,0.4);
       text-decoration: none;
       font-weight: 500;
     }
     .rm-powered a:hover {
-      color: #374151;
+      color: rgba(255,255,255,0.6);
     }
 
     /* ─── Handoff Card ────────────────────────────────────────────────────── */
@@ -784,8 +779,8 @@
       margin: 8px 0;
       padding: 20px;
       border-radius: 14px;
-      background: #ffffff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.06);
       text-align: center;
       animation: rm-message-in 0.4s ease-out;
       align-self: stretch;
@@ -807,23 +802,23 @@
     .rm-handoff-title {
       font-size: 14px;
       font-weight: 600;
-      color: #1f2937;
+      color: #ffffff;
       margin-bottom: 4px;
     }
     .rm-handoff-subtitle {
       font-size: 13px;
-      color: #6b7280;
+      color: rgba(255,255,255,0.6);
       margin-bottom: 16px;
       line-height: 1.4;
     }
     .rm-handoff-email-display {
       display: inline-block;
       padding: 6px 12px;
-      background: #f4f4f5;
+      background: rgba(255,255,255,0.08);
       border-radius: 8px;
       font-size: 13px;
       font-weight: 500;
-      color: #1f2937;
+      color: #ffffff;
       margin-bottom: 14px;
     }
     .rm-handoff-actions {
@@ -846,14 +841,14 @@
       transform: scale(0.97);
     }
     .rm-handoff-btn-primary {
-      color: white;
+      color: var(--rm-brand-text, #ffffff);
     }
     .rm-handoff-btn-secondary {
-      background: #f4f4f5;
-      color: #374151;
+      background: rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.8);
     }
     .rm-handoff-btn-secondary:hover {
-      background: #e5e5e5;
+      background: rgba(255,255,255,0.12);
     }
     .rm-handoff-email-form {
       display: flex;
@@ -863,22 +858,22 @@
     .rm-handoff-email-input {
       flex: 1;
       padding: 9px 14px;
-      border: 1px solid rgba(0,0,0,0.12);
+      border: 1px solid rgba(255,255,255,0.1);
       border-radius: 10px;
       font-size: 13px;
       outline: none;
       font-family: inherit;
-      color: #1f2937;
-      background: #fafafa;
+      color: #ffffff;
+      background: rgba(255,255,255,0.06);
       transition: border-color 0.2s;
     }
     .rm-handoff-email-input:focus {
-      border-color: var(--rm-primary, rgba(0,0,0,0.25));
-      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
-      background: #ffffff;
+      border-color: var(--rm-primary, rgba(255,255,255,0.25));
+      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
+      background: rgba(255,255,255,0.08);
     }
     .rm-handoff-email-input::placeholder {
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
     }
     .rm-handoff-submit {
       width: 36px;
@@ -890,7 +885,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      color: white;
+      color: var(--rm-brand-text, #ffffff);
       transition: opacity 0.2s;
     }
     .rm-handoff-submit:hover {
@@ -906,7 +901,7 @@
       justify-content: center;
       gap: 6px;
       font-size: 13px;
-      color: #16a34a;
+      color: #4ade80;
       font-weight: 500;
       margin-top: 4px;
     }
@@ -950,12 +945,12 @@
       width: 48px;
       height: 48px;
       border-radius: 50%;
-      border: 3px solid #ffffff;
+      border: 3px solid rgba(255,255,255,0.15);
       overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
     }
     .rm-home-avatar.rm-icon-avatar {
       border-radius: 14px;
@@ -977,24 +972,24 @@
       font-size: 20px;
       font-weight: 700;
       line-height: 1.3;
-      color: #1f2937;
+      color: #ffffff;
     }
     .rm-home-subtitle {
       font-size: 13px;
-      color: #6b7280;
+      color: rgba(255,255,255,0.6);
       margin-top: 4px;
     }
     .rm-home-ask {
       margin-top: 16px;
-      border: 1px solid rgba(0,0,0,0.08);
+      border: 1px solid rgba(255,255,255,0.08);
       border-radius: 12px;
       padding: 14px;
       cursor: pointer;
       transition: border-color 0.2s, box-shadow 0.2s;
     }
     .rm-home-ask:hover {
-      border-color: rgba(var(--rm-primary-rgb, 0,0,0), 0.25);
-      box-shadow: 0 1px 4px rgba(var(--rm-primary-rgb, 0,0,0), 0.08);
+      border-color: rgba(var(--rm-primary-rgb, 37,99,235), 0.3);
+      box-shadow: 0 1px 4px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
     }
     .rm-home-ask-label {
       display: flex;
@@ -1013,7 +1008,7 @@
       border: none;
       outline: none;
       font-size: 16px;
-      color: inherit;
+      color: #ffffff;
       background: transparent;
       cursor: pointer;
       font-family: inherit;
@@ -1021,7 +1016,7 @@
       touch-action: manipulation;
     }
     .rm-home-ask-input::placeholder {
-      color: #9ca3af;
+      color: rgba(255,255,255,0.35);
     }
     .rm-home-links {
       margin-top: 16px;
@@ -1034,7 +1029,7 @@
       align-items: center;
       gap: 12px;
       padding: 10px 12px;
-      border: 1px solid rgba(0,0,0,0.07);
+      border: 1px solid rgba(255,255,255,0.08);
       border-radius: 10px;
       cursor: pointer;
       text-decoration: none;
@@ -1042,8 +1037,8 @@
       transition: background 0.2s, border-color 0.2s;
     }
     .rm-home-link:hover {
-      background: rgba(0,0,0,0.02);
-      border-color: rgba(0,0,0,0.12);
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.12);
     }
     .rm-home-link-icon {
       width: 34px;
@@ -1065,12 +1060,12 @@
       flex: 1;
       font-size: 13.5px;
       font-weight: 500;
-      color: #374151;
+      color: rgba(255,255,255,0.85);
     }
     .rm-home-link-arrow {
       width: 16px;
       height: 16px;
-      color: #c0c4cc;
+      color: rgba(255,255,255,0.3);
       flex-shrink: 0;
     }
     .rm-home-link-arrow svg {
@@ -1080,9 +1075,9 @@
 
     /* Chat header back button */
     .rm-header-back {
-      background: rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.1);
       border: none;
-      color: white;
+      color: var(--rm-brand-text, #ffffff);
       cursor: pointer;
       width: 32px;
       height: 32px;
@@ -1094,7 +1089,7 @@
       transition: background 0.2s;
     }
     .rm-header-back:hover {
-      background: rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.18);
     }
     .rm-header-back svg {
       width: 16px;
@@ -1133,7 +1128,7 @@
       opacity: 0.7;
     }
     .rm-message code {
-      background: rgba(0,0,0,0.06);
+      background: rgba(255,255,255,0.08);
       padding: 1px 5px;
       border-radius: 4px;
       font-size: 13px;
@@ -1144,7 +1139,7 @@
     .rm-sources {
       margin-top: 8px;
       padding-top: 6px;
-      border-top: 1px solid rgba(0,0,0,0.06);
+      border-top: 1px solid rgba(255,255,255,0.06);
       display: flex;
       flex-direction: column;
       gap: 3px;
@@ -1200,9 +1195,8 @@
     }
     .rm-form-view > .rm-header {
       margin-bottom: 0;
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
-      background-color: var(--rm-primary, #2563eb);
+      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.3);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
     }
     .rm-form-body {
       flex: 1;
@@ -1211,18 +1205,18 @@
       display: flex;
       flex-direction: column;
       gap: 16px;
-      background: #fafafa;
+      background: transparent;
     }
     .rm-form-body::-webkit-scrollbar {
       width: 4px;
     }
     .rm-form-body::-webkit-scrollbar-thumb {
-      background: rgba(0,0,0,0.12);
+      background: rgba(255,255,255,0.12);
       border-radius: 4px;
     }
     .rm-form-description {
       font-size: 14px;
-      color: #6b7280;
+      color: rgba(255,255,255,0.6);
       line-height: 1.5;
       text-align: center;
       padding: 8px 0;
@@ -1235,51 +1229,53 @@
     .rm-form-label {
       font-size: 13px;
       font-weight: 500;
-      color: #374151;
+      color: rgba(255,255,255,0.85);
     }
     .rm-form-label .rm-required {
-      color: #ef4444;
+      color: #f87171;
       margin-left: 2px;
     }
     .rm-form-input {
       padding: 10px 14px;
-      border: 1px solid rgba(0,0,0,0.12);
+      border: 1px solid rgba(255,255,255,0.1);
       border-radius: 10px;
       font-size: 16px;
       outline: none;
       font-family: inherit;
-      color: #1f2937;
-      background: #ffffff;
+      color: #ffffff;
+      background: rgba(255,255,255,0.06);
       transition: border-color 0.2s, box-shadow 0.2s;
       touch-action: manipulation;
     }
     .rm-form-input:focus {
-      border-color: var(--rm-primary, rgba(0,0,0,0.25));
-      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
+      border-color: var(--rm-primary, rgba(255,255,255,0.25));
+      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
+      background: rgba(255,255,255,0.08);
     }
     .rm-form-input::placeholder {
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
     }
     .rm-form-textarea {
       padding: 10px 14px;
-      border: 1px solid rgba(0,0,0,0.12);
+      border: 1px solid rgba(255,255,255,0.1);
       border-radius: 10px;
       font-size: 16px;
       outline: none;
       font-family: inherit;
-      color: #1f2937;
-      background: #ffffff;
+      color: #ffffff;
+      background: rgba(255,255,255,0.06);
       transition: border-color 0.2s, box-shadow 0.2s;
       resize: vertical;
       min-height: 80px;
       touch-action: manipulation;
     }
     .rm-form-textarea:focus {
-      border-color: var(--rm-primary, rgba(0,0,0,0.25));
-      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
+      border-color: var(--rm-primary, rgba(255,255,255,0.25));
+      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
+      background: rgba(255,255,255,0.08);
     }
     .rm-form-textarea::placeholder {
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
     }
     .rm-form-submit {
       padding: 12px 24px;
@@ -1288,7 +1284,7 @@
       font-size: 14px;
       font-weight: 600;
       cursor: pointer;
-      color: white;
+      color: var(--rm-brand-text, #ffffff);
       transition: opacity 0.2s, transform 0.15s;
       font-family: inherit;
       margin-top: 4px;
@@ -1306,7 +1302,7 @@
     }
     .rm-form-error {
       font-size: 12px;
-      color: #ef4444;
+      color: #f87171;
       text-align: center;
     }
     .rm-form-success {
@@ -1318,7 +1314,7 @@
       padding: 40px 20px;
       text-align: center;
       flex: 1;
-      background: #fafafa;
+      background: transparent;
     }
     .rm-form-success-icon {
       width: 48px;
@@ -1335,11 +1331,11 @@
     .rm-form-success-title {
       font-size: 16px;
       font-weight: 600;
-      color: #1f2937;
+      color: #ffffff;
     }
     .rm-form-success-subtitle {
       font-size: 13px;
-      color: #6b7280;
+      color: rgba(255,255,255,0.6);
       line-height: 1.4;
     }
 
@@ -1356,18 +1352,18 @@
       gap: 6px;
       padding: 9px 16px;
       border-radius: 20px;
-      border: 1px solid rgba(0,0,0,0.08);
-      background: #ffffff;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.06);
       font-size: 13px;
       font-weight: 500;
       cursor: pointer;
       transition: background 0.2s, border-color 0.2s;
-      color: #374151;
+      color: rgba(255,255,255,0.85);
       font-family: inherit;
     }
     .rm-home-action-btn:hover {
-      background: #f0f0f0;
-      border-color: rgba(0,0,0,0.15);
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.15);
     }
     .rm-home-action-btn svg {
       width: 14px;
@@ -1393,16 +1389,15 @@
       flex-direction: column;
       flex: 1;
       min-height: 0;
-      background: #fafafa;
+      background: transparent;
     }
     .rm-booking-view.active {
       display: flex;
     }
     .rm-booking-view > .rm-header {
       margin-bottom: 0;
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
-      background-color: var(--rm-primary, #2563eb);
+      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.3);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
     }
     .rm-booking-scroll {
       flex: 1;
@@ -1410,7 +1405,7 @@
       min-height: 0;
     }
     .rm-booking-scroll::-webkit-scrollbar { width: 4px; }
-    .rm-booking-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 4px; }
+    .rm-booking-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
     /* ── Month label row ─────────────────────────────────────────────────── */
     .rm-booking-month-row {
       display: flex;
@@ -1421,7 +1416,7 @@
     .rm-booking-month-label {
       font-size: 13px;
       font-weight: 600;
-      color: #374151;
+      color: rgba(255,255,255,0.85);
     }
     .rm-booking-month-arrows {
       display: flex;
@@ -1434,14 +1429,14 @@
       width: 28px;
       height: 28px;
       border-radius: 8px;
-      border: 1px solid #e5e7eb;
-      background: #fff;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.06);
       cursor: pointer;
       flex-shrink: 0;
       transition: background 0.15s;
     }
-    .rm-booking-date-arrow:hover { background: #f3f4f6; }
-    .rm-booking-date-arrow svg { width: 14px; height: 14px; color: #6b7280; }
+    .rm-booking-date-arrow:hover { background: rgba(255,255,255,0.1); }
+    .rm-booking-date-arrow svg { width: 14px; height: 14px; color: rgba(255,255,255,0.6); }
     /* ── Date strip ──────────────────────────────────────────────────────── */
     .rm-booking-dates {
       display: flex;
@@ -1459,16 +1454,16 @@
       align-items: center;
       padding: 8px 0;
       border-radius: 12px;
-      border: 1px solid #e5e7eb;
-      background: #fff;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04);
       cursor: pointer;
       min-width: 56px;
       transition: all 0.15s ease;
       flex-shrink: 0;
     }
     .rm-booking-date-pill:hover {
-      border-color: #d1d5db;
-      background: #f9fafb;
+      border-color: rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.08);
     }
     .rm-booking-date-pill.selected {
       border-color: var(--rm-primary, #2563eb);
@@ -1488,32 +1483,32 @@
       font-size: 10px;
       font-weight: 500;
       text-transform: uppercase;
-      color: #6b7280;
+      color: rgba(255,255,255,0.5);
       letter-spacing: 0.5px;
     }
     .rm-date-day {
       font-size: 16px;
       font-weight: 700;
-      color: #1f2937;
+      color: #ffffff;
       line-height: 1.3;
     }
     .rm-date-month {
       font-size: 9px;
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
       text-transform: uppercase;
       letter-spacing: 0.3px;
     }
     /* ── Slots section ───────────────────────────────────────────────────── */
     .rm-booking-slots-section {
       padding: 0 16px 12px;
-      border-top: 1px solid #e5e7eb;
+      border-top: 1px solid rgba(255,255,255,0.06);
     }
     .rm-booking-slots-label {
       font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.6px;
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
       padding: 12px 0 8px;
     }
     .rm-booking-slots-grid {
@@ -1527,7 +1522,7 @@
       align-items: center;
       justify-content: center;
       padding: 32px 16px;
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
       font-size: 13px;
     }
     .rm-booking-slot {
@@ -1536,11 +1531,11 @@
       justify-content: center;
       padding: 10px 8px;
       border-radius: 10px;
-      border: 1px solid #e5e7eb;
-      background: #fff;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04);
       font-size: 13px;
       font-weight: 500;
-      color: #1f2937;
+      color: #ffffff;
       cursor: pointer;
       transition: all 0.15s ease;
     }
@@ -1572,19 +1567,19 @@
       align-items: center;
       gap: 10px;
       padding: 10px 12px;
-      border: 1px solid #e5e7eb;
+      border: 1px solid rgba(255,255,255,0.1);
       border-radius: 10px;
-      background: #fff;
+      background: rgba(255,255,255,0.06);
       transition: border-color 0.15s;
     }
     .rm-booking-inline-field:focus-within {
       border-color: var(--rm-primary, #2563eb);
-      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
+      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
     }
     .rm-booking-inline-field svg {
       width: 16px;
       height: 16px;
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
       flex-shrink: 0;
     }
     .rm-booking-inline-field input {
@@ -1592,13 +1587,13 @@
       border: none;
       outline: none;
       font-size: 13px;
-      color: #1f2937;
+      color: #ffffff;
       background: transparent;
       font-family: inherit;
       min-width: 0;
     }
     .rm-booking-inline-field input::placeholder {
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
     }
     .rm-booking-confirm-btn {
       width: 100%;
@@ -1607,7 +1602,7 @@
       border-radius: 10px;
       font-size: 14px;
       font-weight: 600;
-      color: #fff;
+      color: var(--rm-brand-text, #ffffff);
       cursor: pointer;
       transition: opacity 0.15s;
       margin-top: 4px;
@@ -1620,7 +1615,7 @@
       opacity: 0.9;
     }
     .rm-booking-error {
-      color: #ef4444;
+      color: #f87171;
       font-size: 12px;
       text-align: center;
       margin-top: 4px;
@@ -1633,7 +1628,7 @@
       justify-content: center;
       padding: 32px 16px;
       text-align: center;
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
       font-size: 13px;
     }
     .rm-booking-no-slots svg {
@@ -1664,46 +1659,46 @@
     .rm-booking-confirmed-icon svg {
       width: 28px;
       height: 28px;
-      color: #fff;
+      color: var(--rm-brand-text, #ffffff);
     }
     .rm-booking-confirmed h3 {
       font-size: 18px;
       font-weight: 700;
-      color: #1f2937;
+      color: #ffffff;
       margin: 0 0 12px;
     }
     .rm-booking-confirmed-details {
       font-size: 14px;
       font-weight: 500;
-      color: #374151;
+      color: rgba(255,255,255,0.85);
       margin-bottom: 4px;
     }
     .rm-booking-confirmed-time {
       font-size: 13px;
-      color: #6b7280;
+      color: rgba(255,255,255,0.6);
       margin-bottom: 16px;
     }
     .rm-booking-confirmed-email {
       font-size: 13px;
-      color: #6b7280;
+      color: rgba(255,255,255,0.6);
       line-height: 1.5;
     }
     .rm-booking-confirmed-email strong {
-      color: #374151;
+      color: rgba(255,255,255,0.85);
     }
     .rm-booking-back-btn {
       margin-top: 24px;
       padding: 10px 24px;
-      border: 1px solid #d1d5db;
+      border: 1px solid rgba(255,255,255,0.12);
       border-radius: 10px;
-      background: #fff;
+      background: rgba(255,255,255,0.06);
       font-size: 13px;
       font-weight: 500;
-      color: #374151;
+      color: rgba(255,255,255,0.85);
       cursor: pointer;
       transition: background 0.15s;
     }
-    .rm-booking-back-btn:hover { background: #f9fafb; }
+    .rm-booking-back-btn:hover { background: rgba(255,255,255,0.1); }
     .rm-booking-no-slots {
       display: flex;
       flex-direction: column;
@@ -1711,7 +1706,7 @@
       justify-content: center;
       padding: 40px 16px;
       text-align: center;
-      color: #9ca3af;
+      color: rgba(255,255,255,0.4);
       font-size: 13px;
     }
     .rm-booking-no-slots svg {
@@ -1742,6 +1737,7 @@
         height: 100%;
         box-shadow: none;
         border: none;
+        border-radius: 0 !important;
         transform-origin: bottom center;
       }
       .rm-chat-window.bottom-right,
@@ -1849,7 +1845,7 @@
       border-radius: 50%;
       border: none;
       background: var(--rm-primary, #2563eb);
-      color: #ffffff;
+      color: var(--rm-brand-text, #ffffff);
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -1974,11 +1970,6 @@
       max-height: min(520px, calc(100vh - 120px));
       transform-origin: bottom center;
       pointer-events: auto;
-      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 85%);
-      backdrop-filter: blur(24px) saturate(1.4);
-      -webkit-backdrop-filter: blur(24px) saturate(1.4);
-      box-shadow: 0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(var(--rm-primary-rgb), 0.15);
-      border: 1px solid rgba(var(--rm-primary-rgb), 0.12);
       border-radius: 20px;
       opacity: 0;
       visibility: hidden;
@@ -2003,12 +1994,8 @@
     .rm-widget-container.center-inline .rm-chat-window.bottom-left.open {
       transform: translateX(-50%) translateY(0);
     }
-    /* Dark frosted header matching inline bar aesthetic */
+    /* Center-inline header tweaks */
     .rm-widget-container.center-inline .rm-header {
-      background: rgba(var(--rm-primary-rgb), 0.12);
-      backdrop-filter: blur(20px) saturate(1.4);
-      -webkit-backdrop-filter: blur(20px) saturate(1.4);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
       margin-bottom: 0;
       padding: 14px 16px;
     }
@@ -2016,34 +2003,11 @@
     .rm-widget-container.center-inline .rm-header-back {
       display: none;
     }
-    .rm-widget-container.center-inline .rm-header-close {
-      background: rgba(255, 255, 255, 0.08);
-    }
-    .rm-widget-container.center-inline .rm-header-close:hover {
-      background: rgba(255, 255, 255, 0.15);
-    }
-    /* Transparent messages area with no extra padding for header overlap */
+    /* Center-inline messages area */
     .rm-widget-container.center-inline .rm-messages {
-      background: transparent;
       padding-top: 16px;
       padding-bottom: 16px;
       min-height: 120px;
-    }
-    /* Bot bubbles: frosted glass with primary tint */
-    .rm-widget-container.center-inline .rm-message-row.bot .rm-message {
-      background: rgba(var(--rm-primary-rgb), 0.12);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      color: #ffffff;
-    }
-    .rm-widget-container.center-inline .rm-message-row.bot .rm-message a {
-      color: color-mix(in srgb, var(--rm-primary, #2563eb), #ffffff 50%);
-    }
-    /* Visitor bubbles: solid primary color */
-    .rm-widget-container.center-inline .rm-message-row.visitor .rm-message {
-      background: var(--rm-primary, #2563eb) !important;
-      color: #ffffff !important;
     }
     /* Hide the chat window's own input area — the inline bar IS the input */
     .rm-widget-container.center-inline .rm-input-area {
@@ -2053,82 +2017,18 @@
     .rm-widget-container.center-inline .rm-image-preview {
       display: none;
     }
-    /* Quick topics inside the chat window */
+    /* Center-inline quick topics */
     .rm-widget-container.center-inline .rm-quick-topics {
-      background: transparent;
-      backdrop-filter: none;
       padding-bottom: 8px;
     }
-    .rm-widget-container.center-inline .rm-quick-topic {
-      background: rgba(var(--rm-primary-rgb), 0.15);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      color: #ffffff;
-      border-color: rgba(255, 255, 255, 0.08);
-    }
-    .rm-widget-container.center-inline .rm-quick-topic:hover {
-      background: rgba(var(--rm-primary-rgb), 0.25);
-      border-color: rgba(255, 255, 255, 0.12);
-    }
-    /* Powered-by footer: subtle in dark theme */
     .rm-widget-container.center-inline .rm-powered {
-      background: transparent;
-      color: rgba(255, 255, 255, 0.3);
       padding: 4px 16px 6px;
-    }
-    .rm-widget-container.center-inline .rm-powered a {
-      color: rgba(255, 255, 255, 0.4);
-    }
-    .rm-widget-container.center-inline .rm-powered a:hover {
-      color: rgba(255, 255, 255, 0.6);
     }
     /* Home view hidden in center-inline */
     .rm-widget-container.center-inline .rm-home {
       display: none;
     }
-    /* Sources styling */
-    .rm-widget-container.center-inline .rm-source-link {
-      background: rgba(var(--rm-primary-rgb), 0.12);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      color: #ffffff !important;
-      border-color: rgba(255, 255, 255, 0.08);
-    }
-    /* Typing indicator */
-    .rm-widget-container.center-inline .rm-typing-row {
-      background: rgba(var(--rm-primary-rgb), 0.12);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border-radius: 12px;
-    }
-    .rm-widget-container.center-inline .rm-typing-dots span {
-      background: rgba(255, 255, 255, 0.5);
-    }
-    .rm-widget-container.center-inline .rm-status-text {
-      color: rgba(255, 255, 255, 0.5);
-    }
-    /* Handoff card dark theme */
-    .rm-widget-container.center-inline .rm-handoff-card {
-      background: rgba(var(--rm-primary-rgb), 0.1);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      box-shadow: none;
-    }
-    .rm-widget-container.center-inline .rm-handoff-title {
-      color: #ffffff;
-    }
-    .rm-widget-container.center-inline .rm-handoff-subtitle {
-      color: rgba(255, 255, 255, 0.6);
-    }
-    /* Tool error dark theme */
-    .rm-widget-container.center-inline .rm-tool-error-header {
-      color: #fca5a5;
-    }
-    .rm-widget-container.center-inline .rm-tool-error-detail {
-      color: #fecaca;
-      background: rgba(220, 38, 38, 0.15);
-    }
+    /* Center-inline: sources, typing, handoff, errors inherit base dark theme */
 
     /* When chat is active, inline bar gets a slightly different style (no glow, solid border) */
     .rm-inline-bar.chat-active {
@@ -2186,27 +2086,11 @@
       /* On mobile full-screen, show the input area inside the chat window */
       .rm-widget-container.center-inline .rm-chat-window.open .rm-input-area {
         display: flex;
-        background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 85%);
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
       }
       .rm-widget-container.center-inline .rm-chat-window.open .rm-input {
-        background: rgba(var(--rm-primary-rgb), 0.1);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 1px solid rgba(var(--rm-primary-rgb), 0.15);
         border-radius: 12px;
         padding: 10px 14px;
         font-size: 16px;
-        color: #ffffff !important;
-      }
-      .rm-widget-container.center-inline .rm-chat-window.open .rm-input::placeholder {
-        color: rgba(255, 255, 255, 0.5);
-      }
-      .rm-widget-container.center-inline .rm-chat-window.open .rm-send-btn {
-        color: #ffffff;
-      }
-      .rm-widget-container.center-inline .rm-chat-window.open .rm-attach-btn {
-        color: rgba(255, 255, 255, 0.5);
       }
       /* Prevent iOS input zoom — all inputs must be 16px */
       .rm-inline-bar-input {
@@ -2827,6 +2711,10 @@
     return config?.widget?.primaryColor ?? "#2563eb";
   }
 
+  function getBrandTextColor(): string {
+    return config?.widget?.textColor ?? "#ffffff";
+  }
+
   function hexToRgb(hex: string): string {
     const h = hex.replace("#", "");
     const bigint = parseInt(
@@ -3439,6 +3327,7 @@
       if (loadedConfig.widget) {
         const w = loadedConfig.widget;
         const primary = w.primaryColor || "#2563eb";
+        const brandText = w.textColor || "#ffffff";
 
         // Determine position mode early so styling can be conditional
         const isCenterInline = w.position === "center-inline";
@@ -3446,32 +3335,15 @@
         // Set CSS custom properties for theming
         container.style.setProperty("--rm-primary", primary);
         container.style.setProperty("--rm-primary-rgb", hexToRgb(primary));
+        container.style.setProperty("--rm-brand-text", brandText);
 
-        // Trigger & header colors
+        // Trigger & send button: brand colors
         trigger.style.backgroundColor = primary;
         sendBtn.style.backgroundColor = primary;
 
-        if (isCenterInline) {
-          // Center-inline: header uses frosted glass with primary tint (CSS handles it via --rm-primary-rgb)
-          header.style.backgroundColor = "transparent";
-          if (w.backgroundColor) {
-            chatWindow.style.background = w.backgroundColor;
-          }
-          if (w.textColor) {
-            chatWindow.style.color = w.textColor;
-            input.style.color = w.textColor;
-          }
-        } else {
-          header.style.backgroundColor = primary + "e8"; // ~91% opacity for frosted glass
-          if (w.backgroundColor) {
-            chatWindow.style.background = w.backgroundColor;
-          }
-          if (w.textColor) {
-            chatWindow.style.color = w.textColor;
-            input.style.color = w.textColor;
-            homeTitle.style.color = w.textColor;
-          }
-        }
+        // Header and chat window styling is handled via CSS custom properties
+        // (frosted glass with primary tint for header, dark glass for chat body)
+        void isCenterInline; // position handled below
         if (w.borderRadius) {
           container.style.setProperty(
             "--rm-chat-radius",
@@ -3536,7 +3408,7 @@
           headerAvatar.classList.add("rm-icon-avatar");
           homeAvatar.classList.add("rm-icon-avatar");
           homeAvatar.style.backgroundColor = primary;
-          homeAvatar.style.color = "#ffffff";
+          homeAvatar.style.color = brandText;
         }
 
         // ─── Home Screen Config ──────────────────────────────────────────────
@@ -3769,7 +3641,7 @@
 
             const successIcon = document.createElement("div");
             successIcon.className = "rm-form-success-icon";
-            successIcon.style.backgroundColor = primary + "15";
+            successIcon.style.backgroundColor = primary + "20";
             successIcon.style.color = primary;
             successIcon.innerHTML = ICONS.check;
 
@@ -3830,11 +3702,13 @@
       if (isInlineBarVariant) {
         // Apply brand color CSS variables to inline bar (it lives on document.body, not inside container)
         const inlinePrimary = loadedConfig.widget?.primaryColor || "#2563eb";
+        const inlineBrandText = loadedConfig.widget?.textColor || "#ffffff";
         inlineBar.style.setProperty("--rm-primary", inlinePrimary);
         inlineBar.style.setProperty(
           "--rm-primary-rgb",
           hexToRgb(inlinePrimary),
         );
+        inlineBar.style.setProperty("--rm-brand-text", inlineBrandText);
 
         // Populate inline bar topics from prompt-type quick actions
         inlineBarTopics.innerHTML = "";
@@ -4247,7 +4121,7 @@
         avatar.appendChild(avatarImg);
       } else {
         avatar.classList.add("rm-icon-avatar");
-        avatar.style.backgroundColor = primaryColor + "12";
+        avatar.style.backgroundColor = primaryColor + "20";
         avatar.style.color = primaryColor;
         avatar.innerHTML = ICONS.aiSparkle;
       }
@@ -4275,14 +4149,14 @@
     }
 
     if (role === "visitor") {
-      // Visitor messages: plain text, styled with primary color
+      // Visitor messages: plain text, styled with brand colors
       if (content && content !== "Sent an image") {
         const textNode = document.createElement("span");
         textNode.textContent = content;
         msgEl.appendChild(textNode);
       }
       msgEl.style.backgroundColor = primaryColor;
-      msgEl.style.color = "#ffffff";
+      msgEl.style.color = getBrandTextColor();
     } else {
       // Bot/agent messages: render markdown
       const textContainer = document.createElement("div");
@@ -4315,8 +4189,6 @@
   ): void {
     if (!sources || sources.length === 0) return;
 
-    const primaryColor = getPrimaryColor();
-
     const sourcesContainer = document.createElement("div");
     sourcesContainer.className = "rm-sources";
 
@@ -4340,7 +4212,7 @@
       const isClickable = sourceType === "webpage" && source.url;
       const el = document.createElement(isClickable ? "a" : "span");
       el.className = "rm-source-link";
-      el.style.color = primaryColor + "80";
+      el.style.color = "rgba(255,255,255,0.5)";
 
       if (isClickable) {
         (el as HTMLAnchorElement).href = source.url!;
@@ -4462,7 +4334,7 @@
     // Icon
     const icon = document.createElement("div");
     icon.className = "rm-handoff-icon";
-    icon.style.backgroundColor = primaryColor + "12";
+    icon.style.backgroundColor = primaryColor + "20";
     icon.style.color = primaryColor;
     icon.innerHTML = ICONS.headset;
     card.appendChild(icon);

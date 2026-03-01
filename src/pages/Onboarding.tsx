@@ -532,48 +532,60 @@ function Step3({
         {/* Mini Preview */}
         <div className="flex items-center justify-center">
           <div
-            className="w-72 shadow-xl overflow-hidden border border-border"
+            className="w-72 shadow-xl overflow-hidden"
             style={{
               borderRadius: `${style.borderRadius}px`,
               fontFamily: style.fontFamily,
+              background: "rgba(0,0,0,0.18)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              boxShadow: "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)",
             }}
           >
             <div
-              className="px-4 py-3 text-white font-medium text-sm"
-              style={{ backgroundColor: style.primaryColor }}
+              className="px-4 py-3 font-medium text-sm text-white"
+              style={{
+                background: `${style.primaryColor}4d`,
+                borderBottom: "1px solid rgba(255,255,255,0.06)",
+              }}
             >
               Chat with us
             </div>
-            <div className="bg-white p-4 space-y-3">
+            <div className="p-4 space-y-3">
               <div className="flex gap-2">
                 <div
                   className="w-6 h-6 rounded-full flex-shrink-0"
                   style={{
-                    backgroundColor: style.primaryColor,
-                    opacity: 0.2,
+                    backgroundColor: `${style.primaryColor}33`,
                   }}
                 />
                 <div
-                  className="rounded-lg px-3 py-2 text-xs max-w-[80%] text-gray-800"
+                  className="rounded-lg px-3 py-2 text-xs max-w-[80%] text-white"
                   style={{
-                    backgroundColor: `${style.primaryColor}15`,
+                    background: "rgba(255,255,255,0.08)",
+                    border: "1px solid rgba(255,255,255,0.06)",
                   }}
                 >
                   Hi there! How can I help you today?
                 </div>
               </div>
               <div className="flex gap-2 justify-end">
-                <div className="rounded-lg px-3 py-2 text-xs bg-gray-100 max-w-[80%] text-gray-800">
+                <div
+                  className="rounded-lg px-3 py-2 text-xs max-w-[80%] text-white"
+                  style={{ backgroundColor: style.primaryColor }}
+                >
                   I have a question about pricing
                 </div>
               </div>
             </div>
-            <div className="bg-white px-4 pb-3">
+            <div className="px-4 pb-3">
               <div className="flex gap-2">
                 <div
-                  className="flex-1 px-3 py-2 border text-xs text-gray-400"
+                  className="flex-1 px-3 py-2 text-xs"
                   style={{
                     borderRadius: `${Math.min(style.borderRadius, 12)}px`,
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    background: "rgba(255,255,255,0.06)",
+                    color: "rgba(255,255,255,0.35)",
                   }}
                 >
                   Type a message...
