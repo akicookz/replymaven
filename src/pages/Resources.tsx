@@ -257,10 +257,10 @@ function Resources() {
   };
 
   const statusColors: Record<string, string> = {
-    pending: "bg-yellow-100 text-yellow-700",
-    crawling: "bg-blue-100 text-blue-700",
-    indexed: "bg-green-100 text-green-700",
-    failed: "bg-red-100 text-red-700",
+    pending: "bg-status-waiting/10 text-status-waiting border-status-waiting/25",
+    crawling: "bg-status-replied/10 text-status-replied border-status-replied/25",
+    indexed: "bg-status-active/10 text-status-active border-status-active/25",
+    failed: "bg-destructive/10 text-destructive border-destructive/25",
   };
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -351,10 +351,10 @@ function Resources() {
           </div>
         )}
         {saveCompanyInfo.isSuccess && (
-          <p className="text-sm text-green-700">Company info saved.</p>
+          <p className="text-sm text-success">Company info saved.</p>
         )}
         {refreshCompanyContext.isSuccess && (
-          <p className="text-sm text-green-700">
+          <p className="text-sm text-success">
             {lastContextRefreshSource === "resources"
               ? "Company context regenerated from resources."
               : "Company context refreshed from website."}
@@ -656,7 +656,7 @@ function Resources() {
                     </div>
                     <span
                       className={cn(
-                        "text-xs px-2 py-0.5 rounded-full shrink-0",
+                        "text-xs px-2 py-0.5 rounded-full border shrink-0",
                         statusColors[resource.status] ?? statusColors.pending,
                       )}
                     >

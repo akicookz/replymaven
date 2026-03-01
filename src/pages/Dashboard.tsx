@@ -63,10 +63,10 @@ interface DashboardData {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<string, string> = {
-  active: "#22c55e",
-  waiting_agent: "#eab308",
-  agent_replied: "#3b82f6",
-  closed: "#94a3b8",
+  active: "var(--status-active)",
+  waiting_agent: "var(--status-waiting)",
+  agent_replied: "var(--status-replied)",
+  closed: "var(--status-closed)",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -77,10 +77,10 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_BADGE_STYLES: Record<string, string> = {
-  active: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  waiting_agent: "bg-amber-50 text-amber-700 border-amber-200",
-  agent_replied: "bg-blue-50 text-blue-700 border-blue-200",
-  closed: "bg-slate-50 text-slate-500 border-slate-200",
+  active: "bg-status-active/10 text-status-active border-status-active/25",
+  waiting_agent: "bg-status-waiting/10 text-status-waiting border-status-waiting/25",
+  agent_replied: "bg-status-replied/10 text-status-replied border-status-replied/25",
+  closed: "bg-status-closed/10 text-status-closed border-status-closed/25",
 };
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ function StatCard({
           <span
             className={cn(
               "text-[13px] font-medium flex items-center gap-0.5",
-              change.positive ? "text-emerald-600" : "text-red-500",
+              change.positive ? "text-success" : "text-destructive",
             )}
           >
             {change.positive ? (
@@ -286,7 +286,7 @@ function Dashboard() {
   const statusData = data.conversationsByStatus.map((item) => ({
     name: STATUS_LABELS[item.status] ?? item.status,
     value: item.count,
-    color: STATUS_COLORS[item.status] ?? "#94a3b8",
+    color: STATUS_COLORS[item.status] ?? "var(--status-closed)",
   }));
 
   const totalStatusCount = statusData.reduce((acc, item) => acc + item.value, 0);
@@ -359,22 +359,22 @@ function Dashboard() {
               <BarChart data={dailyData} barSize={32}>
                 <XAxis
                   dataKey="day"
-                  tick={{ fontSize: 12, fill: "oklch(55% 0.01 60)" }}
+                  tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
                   tickLine={false}
                   axisLine={false}
                 />
                 <YAxis
-                  tick={{ fontSize: 12, fill: "oklch(55% 0.01 60)" }}
+                  tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
                   tickLine={false}
                   axisLine={false}
                   allowDecimals={false}
                   width={30}
                 />
                 <Tooltip
-                  cursor={{ fill: "oklch(95% 0.003 80)" }}
+                  cursor={{ fill: "var(--muted)" }}
                   contentStyle={{
-                    backgroundColor: "white",
-                    border: "1px solid oklch(92% 0.003 80)",
+                    backgroundColor: "var(--card)",
+                    border: "1px solid var(--border)",
                     borderRadius: "8px",
                     fontSize: "12px",
                     boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
@@ -383,7 +383,7 @@ function Dashboard() {
                 <Bar
                   dataKey="count"
                   name="Conversations"
-                  fill="oklch(42% 0.1 152)"
+                  fill="var(--primary)"
                   radius={[4, 4, 0, 0]}
                 />
               </BarChart>
@@ -450,7 +450,7 @@ function Dashboard() {
                     className={cn(
                       "text-[11px] font-medium px-2 py-0.5 rounded-full border w-fit capitalize",
                       STATUS_BADGE_STYLES[convo.status] ??
-                      "bg-slate-50 text-slate-500 border-slate-200",
+                        "bg-status-closed/10 text-status-closed border-status-closed/25",
                     )}
                   >
                     {STATUS_LABELS[convo.status] ?? convo.status.replace("_", " ")}
@@ -493,8 +493,8 @@ function Dashboard() {
                   </Pie>
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "white",
-                      border: "1px solid oklch(92% 0.003 80)",
+                      backgroundColor: "var(--card)",
+                      border: "1px solid var(--border)",
                       borderRadius: "8px",
                       fontSize: "12px",
                       boxShadow: "0 4px 12px rgba(0,0,0,0.08)",

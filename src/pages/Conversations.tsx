@@ -112,36 +112,18 @@ function getInitial(convo: Conversation): string {
   return name.charAt(0).toUpperCase();
 }
 
-function getAvatarColor(id: string): string {
-  const colors = [
-    "bg-blue-500",
-    "bg-green-500",
-    "bg-purple-500",
-    "bg-orange-500",
-    "bg-pink-500",
-    "bg-teal-500",
-    "bg-indigo-500",
-    "bg-rose-500",
-  ];
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = id.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return colors[Math.abs(hash) % colors.length];
-}
-
 // ─── Status helpers ──────────────────────────────────────────────────────────
 
 function getStatusDot(status: string): string {
   switch (status) {
     case "active":
-      return "bg-green-400";
+      return "bg-status-active";
     case "waiting_agent":
-      return "bg-amber-400";
+      return "bg-status-waiting";
     case "agent_replied":
-      return "bg-blue-400";
+      return "bg-status-replied";
     default:
-      return "bg-gray-400";
+      return "bg-status-closed";
   }
 }
 
@@ -285,7 +267,7 @@ function Conversations() {
             ))}
           </div>
         </div>
-        <div className="flex-1 bg-[#efeae2] dark:bg-[#0b141a]" />
+        <div className="flex-1 bg-muted/20 dark:bg-background" />
       </div>
     );
   }
@@ -339,12 +321,7 @@ function Conversations() {
               >
                 {/* Avatar */}
                 <div className="relative">
-                  <div
-                    className={cn(
-                      "w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-base",
-                      getAvatarColor(convo.visitorId),
-                    )}
-                  >
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center bg-primary text-primary-foreground font-semibold text-base">
                     {getInitial(convo)}
                   </div>
                   {/* Online dot */}
@@ -386,9 +363,9 @@ function Conversations() {
                         className={cn(
                           "text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap",
                           convo.status === "waiting_agent" &&
-                            "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+                            "bg-status-waiting/10 text-status-waiting",
                           convo.status === "agent_replied" &&
-                            "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+                            "bg-status-replied/10 text-status-replied",
                         )}
                       >
                         {getStatusLabel(convo.status)}
@@ -411,20 +388,13 @@ function Conversations() {
       </div>
 
       {/* ─── Right Panel: Chat Thread ──────────────────────────────────── */}
-      <div className="flex-1 flex flex-col bg-[#efeae2] dark:bg-[#0b141a]">
+      <div className="flex-1 flex flex-col bg-muted/20 dark:bg-background">
         {selectedConvo && convoDetail ? (
           <>
             {/* Chat Header */}
             <div className="px-4 py-3 flex items-center gap-3 bg-card border-b border-border">
               {/* Avatar */}
-              <div
-                className={cn(
-                  "w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm",
-                  getAvatarColor(
-                    convoDetail.conversation.visitorId,
-                  ),
-                )}
-              >
+              <div className="w-10 h-10 rounded-full flex items-center justify-center bg-primary text-primary-foreground font-semibold text-sm">
                 {getInitial(convoDetail.conversation)}
               </div>
 
@@ -464,13 +434,13 @@ function Conversations() {
                   className={cn(
                     "text-xs px-2.5 py-1 rounded-full font-medium",
                     convoDetail.conversation.status === "active" &&
-                      "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+                      "bg-status-active/10 text-status-active",
                     convoDetail.conversation.status === "waiting_agent" &&
-                      "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+                      "bg-status-waiting/10 text-status-waiting",
                     convoDetail.conversation.status === "agent_replied" &&
-                      "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+                      "bg-status-replied/10 text-status-replied",
                     convoDetail.conversation.status === "closed" &&
-                      "bg-muted text-muted-foreground",
+                      "bg-status-closed/10 text-status-closed",
                   )}
                 >
                   {getStatusLabel(convoDetail.conversation.status)}
@@ -532,7 +502,7 @@ function Conversations() {
               {/* Date separator for first message */}
               {convoDetail.messages.length > 0 && (
                 <div className="flex justify-center mb-3">
-                  <span className="px-3 py-1 rounded-lg bg-white/80 dark:bg-white/10 text-[11px] text-muted-foreground font-medium shadow-sm">
+                  <span className="px-3 py-1 rounded-lg bg-card/80 text-[11px] text-muted-foreground font-medium shadow-sm">
                     {new Date(
                       convoDetail.messages[0].createdAt,
                     ).toLocaleDateString([], {
@@ -560,7 +530,7 @@ function Conversations() {
                   <div key={msg.id}>
                     {showDateSep && (
                       <div className="flex justify-center my-3">
-                        <span className="px-3 py-1 rounded-lg bg-white/80 dark:bg-white/10 text-[11px] text-muted-foreground font-medium shadow-sm">
+                        <span className="px-3 py-1 rounded-lg bg-card/80 text-[11px] text-muted-foreground font-medium shadow-sm">
                           {new Date(msg.createdAt).toLocaleDateString([], {
                             weekday: "long",
                             month: "long",
@@ -580,24 +550,24 @@ function Conversations() {
                         className={cn(
                           "relative max-w-[65%] rounded-lg px-3 py-2 shadow-sm",
                           isVisitor &&
-                            "bg-white dark:bg-[#202c33] text-foreground rounded-tl-none",
+                            "bg-card text-foreground rounded-tl-none",
                           isBot &&
-                            "bg-[#d9fdd3] dark:bg-[#005c4b] text-foreground rounded-tr-none",
+                            "bg-primary/10 text-foreground rounded-tr-none border border-primary/20",
                           isAgent &&
-                            "bg-[#d9fdd3] dark:bg-[#005c4b] text-foreground rounded-tr-none border-l-2 border-blue-400",
+                            "bg-primary/15 text-foreground rounded-tr-none border border-primary/20 border-l-2 border-status-replied/50",
                         )}
                       >
                         {/* Role label for bot/agent */}
                         {(isBot || isAgent) && (
                           <div className="flex items-center gap-1 mb-0.5">
                             {isBot && (
-                              <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                              <span className="text-[11px] font-semibold text-status-active flex items-center gap-0.5">
                                 <Bot className="w-3 h-3" />
                                 Bot
                               </span>
                             )}
                             {isAgent && (
-                              <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-0.5">
+                              <span className="text-[11px] font-semibold text-status-replied flex items-center gap-0.5">
                                 <Headphones className="w-3 h-3" />
                                 Agent
                               </span>
@@ -620,7 +590,7 @@ function Conversations() {
                             {formatTime(msg.createdAt)}
                           </span>
                           {!isVisitor && (
-                            <CheckCheck className="w-3.5 h-3.5 text-blue-500/60" />
+                            <CheckCheck className="w-3.5 h-3.5 text-status-replied/70" />
                           )}
                           {isVisitor && (
                             <Check className="w-3 h-3 text-muted-foreground/40" />

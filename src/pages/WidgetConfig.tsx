@@ -131,7 +131,7 @@ function WidgetConfig() {
       </div>
 
       {save.isSuccess && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-green-50 text-green-700 text-sm">
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-success/10 text-success text-sm">
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           Widget config saved successfully
         </div>
@@ -158,7 +158,7 @@ function WidgetConfig() {
                   Primary
                 </label>
                 <ColorPicker
-                  value={form.primaryColor ?? "#2563eb"}
+                  value={form.primaryColor ?? "#f97316"}
                   onChange={(color) =>
                     setForm({ ...form, primaryColor: color })
                   }
@@ -431,7 +431,7 @@ function WidgetConfig() {
                 <div
                   className="w-full max-w-[280px] rounded-full p-[2px]"
                   style={{
-                    background: `conic-gradient(from 0deg, ${form.primaryColor ?? "#2563eb"}, ${form.primaryColor ?? "#2563eb"}99, ${form.primaryColor ?? "#2563eb"}55, ${form.primaryColor ?? "#2563eb"})`,
+                    background: `conic-gradient(from 0deg, ${form.primaryColor ?? "#f97316"}, ${form.primaryColor ?? "#f97316"}99, ${form.primaryColor ?? "#f97316"}55, ${form.primaryColor ?? "#f97316"})`,
                   }}
                 >
                   <div className="flex items-center gap-2 rounded-full bg-neutral-900 px-4 py-2">
@@ -440,7 +440,7 @@ function WidgetConfig() {
                     </span>
                     <div
                       className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: form.primaryColor ?? "#2563eb" }}
+                      style={{ backgroundColor: form.primaryColor ?? "#f97316" }}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
                         <line x1="12" y1="19" x2="12" y2="5" />
@@ -475,7 +475,7 @@ function WidgetConfig() {
                         backgroundPosition: "center center",
                         backgroundRepeat: "no-repeat",
                       }
-                      : { backgroundColor: form.primaryColor ?? "#2563eb" }
+                      : { backgroundColor: form.primaryColor ?? "#f97316" }
                   }
                 >
                   {/* Avatar */}
@@ -484,7 +484,7 @@ function WidgetConfig() {
                     style={{
                       backgroundColor: form.avatarUrl
                         ? "transparent"
-                        : (form.primaryColor ?? "#2563eb"),
+                        : (form.primaryColor ?? "#f97316"),
                     }}
                   >
                     {form.avatarUrl ? (

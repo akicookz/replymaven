@@ -104,7 +104,7 @@ function ProjectSettings() {
       </div>
 
       {save.isSuccess && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-green-50 text-green-700 text-sm">
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-success/10 text-success text-sm">
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           Settings saved successfully
         </div>

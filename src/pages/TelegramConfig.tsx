@@ -136,7 +136,7 @@ function TelegramConfig() {
         </div>
 
         {save.isSuccess && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 text-green-700 text-sm">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-success/10 text-success text-sm">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
             Telegram settings saved successfully
           </div>
@@ -148,7 +148,7 @@ function TelegramConfig() {
           </div>
         )}
         {test.isSuccess && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 text-green-700 text-sm">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-success/10 text-success text-sm">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
             Connection test successful! Check your Telegram.
           </div>

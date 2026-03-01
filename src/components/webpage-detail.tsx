@@ -228,9 +228,9 @@ function CrawledPageItem({
   }
 
   const statusIcon = {
-    pending: <Clock className="w-3.5 h-3.5 text-yellow-500" />,
-    crawled: <CheckCircle className="w-3.5 h-3.5 text-green-500" />,
-    failed: <XCircle className="w-3.5 h-3.5 text-red-500" />,
+    pending: <Clock className="w-3.5 h-3.5 text-status-waiting" />,
+    crawled: <CheckCircle className="w-3.5 h-3.5 text-status-active" />,
+    failed: <XCircle className="w-3.5 h-3.5 text-destructive" />,
     skipped: <SkipForward className="w-3.5 h-3.5 text-muted-foreground" />,
   };
 

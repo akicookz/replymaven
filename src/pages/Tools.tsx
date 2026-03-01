@@ -399,7 +399,7 @@ function Tools() {
 
       {/* Tool limit warning */}
       {activeTab === "tools" && (tools?.length ?? 0) >= 20 && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm">
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-warning/10 border border-warning/25 text-warning text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
           Maximum of 20 tools reached. Delete an existing tool to add a new one.
         </div>
@@ -917,8 +917,8 @@ function Tools() {
                           className={cn(
                             "rounded-lg p-3 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto",
                             testResult.success
-                              ? "bg-green-50 border border-green-200 text-green-900"
-                              : "bg-red-50 border border-red-200 text-red-900",
+                              ? "bg-success/10 border border-success/25 text-success"
+                              : "bg-destructive/10 border border-destructive/25 text-destructive",
                           )}
                         >
                           {typeof testResult.data === "string"
@@ -968,10 +968,10 @@ function Tools() {
                         : XCircle;
                   const statusColor =
                     exec.status === "success"
-                      ? "text-green-600"
+                      ? "text-success"
                       : exec.status === "timeout"
-                        ? "text-yellow-600"
-                        : "text-red-600";
+                        ? "text-warning"
+                        : "text-destructive";
 
                   return (
                     <div

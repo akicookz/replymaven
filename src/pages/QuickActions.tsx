@@ -134,25 +134,25 @@ const TYPE_CONFIG: Record<
     label: "Prompt",
     description: "Sends a message to the AI",
     RightIcon: Sparkles,
-    iconColor: "text-violet-500",
+    iconColor: "text-primary",
   },
   link: {
     label: "External Link",
     description: "Opens a URL in a new tab",
     RightIcon: ExternalLink,
-    iconColor: "text-blue-500",
+    iconColor: "text-status-replied",
   },
   contact_form: {
     label: "Contact Form",
     description: "Opens the contact form",
     RightIcon: ChevronRight,
-    iconColor: "text-emerald-500",
+    iconColor: "text-status-active",
   },
   booking: {
     label: "Booking",
     description: "Opens the booking calendar",
     RightIcon: ChevronRight,
-    iconColor: "text-amber-500",
+    iconColor: "text-status-waiting",
   },
 };
 

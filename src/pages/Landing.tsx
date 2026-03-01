@@ -27,6 +27,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Heart,
+  Search,
+  Loader2,
+  Shield,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cardVariants } from "@/components/ui/card";
@@ -382,7 +385,7 @@ function MockBookingUI() {
         </div>
         <div>
           <p className="text-marketing-primary text-[15px] font-medium leading-tight">
-            Book a Meeting
+            Book a demo
           </p>
           <p className="text-marketing-quaternary text-[12px]">
             30 min · Select a date & time
@@ -729,6 +732,396 @@ function MockDashboardPreview() {
   );
 }
 
+// ─── Mock Docs Indexing UI (animated) ──────────────────────────────────────────
+
+function MockDocsIndexingUI() {
+  const [phase, setPhase] = useState(0);
+
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    function run() {
+      setPhase(0);
+      timers.push(setTimeout(() => setPhase(1), 600));
+      timers.push(setTimeout(() => setPhase(2), 1400));
+      timers.push(setTimeout(() => setPhase(3), 2200));
+      timers.push(setTimeout(() => setPhase(4), 3400));
+      timers.push(setTimeout(() => setPhase(5), 4400));
+      timers.push(setTimeout(() => setPhase(6), 5600));
+      timers.push(setTimeout(() => run(), 9000));
+    }
+    run();
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  const resources = [
+    { icon: Globe, name: "docs.acme.com", color: "text-blue-400" },
+    { icon: FileText, name: "product-guide.pdf", color: "text-red-400" },
+    { icon: MessageSquare, name: "18 FAQ entries", color: "text-brand" },
+  ];
+
+  function resourceStatus(idx: number) {
+    if (phase < idx + 1) return "pending";
+    if (phase === idx + 1) return "indexing";
+    return "indexed";
+  }
+
+  return (
+    <div
+      className={cn(
+        cardVariants({ variant: "glow-secondary" }),
+        "w-full overflow-hidden bg-black/80 backdrop-blur-2xl",
+      )}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-2 px-5 py-3.5 border-b border-white/[0.06]">
+        <Search className="w-4 h-4 text-marketing-quaternary" />
+        <span className="text-[13px] font-medium text-marketing-primary">
+          Knowledge Base
+        </span>
+        <span className="ml-auto text-[11px] text-marketing-quaternary">
+          {phase >= 3 ? "3/3" : `${Math.min(phase, 3)}/3`} indexed
+        </span>
+      </div>
+
+      <div className="p-5 h-[480px] flex flex-col">
+        {/* Resource list */}
+        <div className="space-y-2.5">
+          <p className="text-[11px] text-marketing-quaternary uppercase tracking-wider">
+            Resources
+          </p>
+          {resources.map((r, i) => {
+            const status = resourceStatus(i);
+            return (
+              <div
+                key={r.name}
+                className={cn(
+                  "flex items-center justify-between py-2 px-3 rounded-lg border transition-all duration-500",
+                  status === "indexed"
+                    ? "border-brand/15 bg-brand/[0.04]"
+                    : "border-white/[0.06] bg-white/[0.02]",
+                )}
+              >
+                <div className="flex items-center gap-2.5">
+                  <r.icon className={`w-3.5 h-3.5 ${r.color}`} />
+                  <span className="text-[12px] text-marketing-secondary">
+                    {r.name}
+                  </span>
+                </div>
+                <span
+                  className={cn(
+                    "text-[10px] px-2 py-0.5 rounded-full font-medium flex items-center gap-1 transition-all duration-300",
+                    status === "indexed" && "bg-brand/10 text-brand",
+                    status === "indexing" && "bg-blue-500/10 text-blue-400",
+                    status === "pending" && "bg-white/[0.05] text-marketing-quaternary",
+                  )}
+                >
+                  {status === "indexing" && (
+                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                  )}
+                  {status === "indexed" && <Check className="w-2.5 h-2.5" />}
+                  {status === "indexed"
+                    ? "Indexed"
+                    : status === "indexing"
+                      ? "Indexing"
+                      : "Pending"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Divider */}
+        <div className="border-t border-white/[0.06] my-5" />
+
+        {/* Chat area - fixed space so nothing shifts */}
+        <div className="flex-1 space-y-3">
+          {/* Visitor question */}
+          <div
+            className={cn(
+              "transition-opacity duration-500",
+              phase >= 4 ? "opacity-100" : "opacity-0",
+            )}
+          >
+            <div className="flex items-start gap-2.5">
+              <div className="w-7 h-7 rounded-full bg-white/[0.08] flex items-center justify-center shrink-0 mt-0.5">
+                <Users className="w-3.5 h-3.5 text-marketing-quaternary" />
+              </div>
+              <div className="bg-white/[0.04] rounded-xl rounded-tl-sm px-3.5 py-2.5">
+                <p className="text-[13px] text-marketing-secondary leading-snug">
+                  How do I reset my password?
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Searching indicator */}
+          <div
+            className={cn(
+              "transition-opacity duration-300",
+              phase === 5 ? "opacity-100" : "opacity-0",
+            )}
+          >
+            <div className="flex items-center gap-2 px-2">
+              <Search className="w-3.5 h-3.5 text-brand animate-pulse" />
+              <span className="text-[11px] text-marketing-quaternary">
+                Searching knowledge base...
+              </span>
+            </div>
+          </div>
+
+          {/* AI response with source */}
+          <div
+            className={cn(
+              "transition-opacity duration-500",
+              phase >= 6 ? "opacity-100" : "opacity-0",
+            )}
+          >
+            <div className="flex items-start gap-2.5">
+              <div className="w-7 h-7 rounded-full bg-brand/10 flex items-center justify-center shrink-0 mt-0.5">
+                <Sparkles className="w-3.5 h-3.5 text-brand" />
+              </div>
+              <div className="space-y-2">
+                <div className="bg-brand/[0.06] rounded-xl rounded-tl-sm px-3.5 py-2.5">
+                  <p className="text-[13px] text-marketing-secondary leading-snug">
+                    Go to Settings &rarr; Account &rarr; Reset Password. You&apos;ll receive an email with a reset link.
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 px-1">
+                  <Shield className="w-3 h-3 text-brand/60" />
+                  <span className="text-[10px] text-marketing-quaternary">
+                    Grounded in{" "}
+                    <span className="text-brand/80">docs.acme.com</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Mock Widget & Handoff UI (animated) ───────────────────────────────────────
+
+function MockWidgetAndHandoffUI() {
+  const [phase, setPhase] = useState(0);
+
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    function run() {
+      setPhase(0);
+      timers.push(setTimeout(() => setPhase(1), 800));
+      timers.push(setTimeout(() => setPhase(2), 2000));
+      timers.push(setTimeout(() => setPhase(3), 3200));
+      timers.push(setTimeout(() => setPhase(4), 4400));
+      timers.push(setTimeout(() => setPhase(5), 5600));
+      timers.push(setTimeout(() => setPhase(6), 6800));
+      timers.push(setTimeout(() => run(), 10000));
+    }
+    run();
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  const themeColor = phase >= 2 ? "#3b82f6" : "#f97316";
+
+  return (
+    <div
+      className={cn(
+        cardVariants({ variant: "glow-secondary" }),
+        "w-full overflow-hidden bg-black/80 backdrop-blur-2xl",
+      )}
+    >
+      {/* Customization toolbar */}
+      <div className="px-5 py-3.5 border-b border-white/[0.06] flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Palette className="w-4 h-4 text-marketing-quaternary" />
+          <span className="text-[13px] font-medium text-marketing-primary">
+            Widget Preview
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-marketing-quaternary">Theme</span>
+          <div className="flex gap-1.5">
+            {["#f97316", "#3b82f6", "#8b5cf6"].map((c) => (
+              <div
+                key={c}
+                className={cn(
+                  "w-4 h-4 rounded-full transition-all duration-300 cursor-pointer",
+                  themeColor === c
+                    ? "ring-2 ring-offset-1 ring-offset-marketing-chrome scale-110"
+                    : "opacity-60",
+                )}
+                style={{
+                  backgroundColor: c,
+                  boxShadow: themeColor === c ? `0 0 8px ${c}40, 0 0 0 2px var(--marketing-chrome), 0 0 0 4px ${c}` : undefined,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="p-5">
+        {/* Mini widget frame */}
+        <div className="rounded-2xl border border-white/[0.08] overflow-hidden max-w-[320px] mx-auto">
+          {/* Widget header */}
+          <div
+            className="px-4 py-3 flex items-center gap-3 transition-colors duration-700"
+            style={{ backgroundColor: `${themeColor}20` }}
+          >
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center transition-colors duration-700"
+              style={{ backgroundColor: `${themeColor}30` }}
+            >
+              <Bot
+                className="w-4 h-4 transition-colors duration-700"
+                style={{ color: themeColor }}
+              />
+            </div>
+            <div>
+              <p className="text-[12px] font-medium text-marketing-primary">
+                Acme Support
+              </p>
+              <div className="flex items-center gap-1">
+                <div
+                  className="w-1.5 h-1.5 rounded-full transition-colors duration-700"
+                  style={{ backgroundColor: themeColor }}
+                />
+                <span className="text-[10px] text-marketing-quaternary">
+                  Online
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Chat area */}
+          <div className="bg-white/[0.02] p-4 space-y-3 min-h-[200px]">
+            {/* Bot intro */}
+            <div
+              className={cn(
+                "transition-all duration-500",
+                phase >= 1 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
+              )}
+            >
+              <div className="flex items-start gap-2">
+                <div
+                  className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 transition-colors duration-700"
+                  style={{ backgroundColor: `${themeColor}20` }}
+                >
+                  <Bot
+                    className="w-3 h-3 transition-colors duration-700"
+                    style={{ color: themeColor }}
+                  />
+                </div>
+                <div
+                  className="rounded-xl rounded-tl-sm px-3 py-2 transition-colors duration-700"
+                  style={{ backgroundColor: `${themeColor}10` }}
+                >
+                  <p className="text-[12px] text-marketing-secondary leading-snug">
+                    Hi! How can I help you today?
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Visitor message */}
+            <div
+              className={cn(
+                "transition-all duration-500",
+                phase >= 3 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
+              )}
+            >
+              <div className="flex justify-end">
+                <div className="bg-white/[0.06] rounded-xl rounded-tr-sm px-3 py-2 max-w-[200px]">
+                  <p className="text-[12px] text-marketing-secondary leading-snug">
+                    I need help with my billing issue
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Bot handoff response */}
+            <div
+              className={cn(
+                "transition-all duration-500",
+                phase >= 4 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
+              )}
+            >
+              <div className="flex items-start gap-2">
+                <div
+                  className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 transition-colors duration-700"
+                  style={{ backgroundColor: `${themeColor}20` }}
+                >
+                  <Bot
+                    className="w-3 h-3 transition-colors duration-700"
+                    style={{ color: themeColor }}
+                  />
+                </div>
+                <div
+                  className="rounded-xl rounded-tl-sm px-3 py-2 transition-colors duration-700"
+                  style={{ backgroundColor: `${themeColor}10` }}
+                >
+                  <p className="text-[12px] text-marketing-secondary leading-snug">
+                    Let me connect you with our team.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Handoff indicator */}
+            <div
+              className={cn(
+                "transition-all duration-500",
+                phase >= 5 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
+              )}
+            >
+              <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-blue-500/[0.08] border border-blue-500/10">
+                <Send className="w-3 h-3 text-blue-400" />
+                <span className="text-[11px] text-blue-400">
+                  Connecting via Telegram...
+                </span>
+                {phase === 5 && (
+                  <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />
+                )}
+              </div>
+            </div>
+
+            {/* Agent reply */}
+            <div
+              className={cn(
+                "transition-all duration-500",
+                phase >= 6 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
+              )}
+            >
+              <div className="flex items-start gap-2">
+                <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                  <Users className="w-3 h-3 text-emerald-400" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-medium text-emerald-400">
+                      Agent Sarah
+                    </span>
+                    <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full">
+                      Live
+                    </span>
+                  </div>
+                  <div className="bg-emerald-500/[0.08] rounded-xl rounded-tl-sm px-3 py-2">
+                    <p className="text-[12px] text-marketing-secondary leading-snug">
+                      Hi! I can help with your billing. Let me pull up your account.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Feature Section: Bento Grid ──────────────────────────────────────────────
 
 function FeatureBentoGrid() {
@@ -991,7 +1384,7 @@ function FeatureBentoGrid() {
 
 function FeatureBooking() {
   return (
-    <section className="min-h-screen flex items-center py-24 bg-white/[0.015]">
+    <section className="min-h-screen flex items-center py-24">
       <div className="max-w-7xl mx-auto px-6 w-full">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
           {/* Copy */}
@@ -1000,9 +1393,7 @@ function FeatureBooking() {
               Booking
             </p>
             <h2 className="text-3xl sm:text-[2.5rem] font-light text-marketing-heading tracking-tight leading-tight">
-              Let visitors book meetings,
-              <br />
-              right from the chat
+              AI agent that can new demos
             </h2>
             <p className="text-marketing-tertiary leading-relaxed max-w-lg">
               <span className="font-medium text-marketing-primary">Built-in scheduling</span> with configurable availability, time zones, slot durations, and buffer times. The AI can detect booking intent and open the scheduler automatically -- or visitors can trigger it from a quick action button.
@@ -1042,7 +1433,7 @@ function FeatureBooking() {
 
 function FeatureContactForm() {
   return (
-    <section className="min-h-screen flex items-center py-24">
+    <section className="min-h-screen flex items-center py-24 bg-white/[0.015]">
       <div className="max-w-7xl mx-auto px-6 w-full">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
           {/* Visual */}
@@ -1093,7 +1484,7 @@ function FeatureContactForm() {
 
 function FeatureToolCalls() {
   return (
-    <section className="min-h-screen flex items-center py-24 bg-white/[0.015]">
+    <section className="min-h-screen flex items-center py-24">
       <div className="max-w-7xl mx-auto px-6 w-full">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
           {/* Copy */}
@@ -1102,19 +1493,19 @@ function FeatureToolCalls() {
               Tool Calls
             </p>
             <h2 className="text-3xl sm:text-[2.5rem] font-light text-marketing-heading tracking-tight leading-tight">
-              Let your AI
+              Go beyond static answers,
               <br />
-              do things
+              resolve issues in real time
             </h2>
             <p className="text-marketing-tertiary leading-relaxed max-w-lg">
-              <span className="font-medium text-marketing-primary">Define external tools</span> with endpoints, parameters, and response mappings. The AI decides when to call them, executes HTTP requests, and weaves the results into natural conversation. Up to 20 tools per project with full execution logging.
+              <span className="font-medium text-marketing-primary">Walk new users through onboarding</span> so more of them convert. Look up orders and billing details before frustration turns into a refund request. Resolve the repetitive issues that eat up your mornings -- automatically, around the clock. Connect any API and the hard part of support handles itself while you ship.
             </p>
             <div className="grid grid-cols-2 gap-3 pt-2">
               {[
-                { icon: Wrench, label: "GET & POST" },
-                { icon: Zap, label: "AI-autonomous" },
-                { icon: BarChart3, label: "Execution logs" },
-                { icon: Code, label: "Response mapping" },
+                { icon: Zap, label: "Boost activation" },
+                { icon: Shield, label: "Prevent churn" },
+                { icon: Search, label: "Secure data lookups" },
+                { icon: Clock, label: "24/7 resolution" },
               ].map((item) => (
                 <div
                   key={item.label}
@@ -1181,6 +1572,126 @@ function FeatureAnalytics() {
                 >
                   <item.icon className="w-4 h-4 text-marketing-quaternary" />
                   <span className="text-marketing-primary font-medium">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Feature Section: Docs Indexing ───────────────────────────────────────────
+
+function FeatureDocsIndexing() {
+  return (
+    <section className="min-h-screen flex items-center py-24 bg-white/[0.015]">
+      <div className="max-w-7xl mx-auto px-6 w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          {/* Copy */}
+          <div className="space-y-5">
+            <p className="text-sm font-medium text-brand uppercase tracking-wider">
+              Knowledge Base
+            </p>
+            <h2 className="text-3xl sm:text-[2.5rem] font-light text-marketing-heading tracking-tight leading-tight">
+              Index your docs,
+              <br />
+              get grounded answers
+            </h2>
+            <p className="text-marketing-tertiary leading-relaxed max-w-lg">
+              <span className="font-medium text-marketing-primary">
+                Retrieval-augmented generation
+              </span>{" "}
+              that actually works. Add web pages, upload PDFs, or create FAQ
+              entries -- they&apos;re indexed automatically and searched every
+              time a visitor asks a question. Every response cites its source, so
+              your bot never hallucinates.
+            </p>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              {[
+                { icon: Globe, label: "Web resources" },
+                { icon: FileText, label: "PDF documents" },
+                { icon: MessageSquare, label: "FAQ entries" },
+                { icon: Sparkles, label: "External tools" },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-brand/10 bg-white/[0.03] backdrop-blur-lg text-sm"
+                >
+                  <item.icon className="w-4 h-4 text-marketing-quaternary" />
+                  <span className="text-marketing-primary font-medium">
+                    {item.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Visual */}
+          <div className="relative overflow-hidden rounded-[2rem]">
+            <div className="absolute -inset-8 bg-brand/[0.03] rounded-[2rem] blur-3xl" />
+            <div className="relative">
+              <MockDocsIndexingUI />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── Feature Section: Widget & Handoff ────────────────────────────────────────
+
+function FeatureWidgetAndHandoff() {
+  return (
+    <section className="min-h-screen flex items-center py-24 bg-white/[0.015]">
+      <div className="max-w-7xl mx-auto px-6 w-full">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          {/* Visual */}
+          <div className="relative order-2 lg:order-1 overflow-hidden rounded-[2rem]">
+            <div className="absolute -inset-8 bg-brand/[0.03] rounded-[2rem] blur-3xl" />
+            <div className="relative">
+              <MockWidgetAndHandoffUI />
+            </div>
+          </div>
+
+          {/* Copy */}
+          <div className="space-y-5 order-1 lg:order-2">
+            <p className="text-sm font-medium text-brand uppercase tracking-wider">
+              Customization & Handoff
+            </p>
+            <h2 className="text-3xl sm:text-[2.5rem] font-light text-marketing-heading tracking-tight leading-tight">
+              Chat interface that blends in
+            </h2>
+            <p className="text-marketing-tertiary leading-relaxed max-w-lg">
+              <span className="font-medium text-marketing-primary">
+                Full chat interface customization
+              </span>{" "}
+              -- colors, fonts, position, tone of voice, intro messages, quick
+              actions, and custom CSS so the chat feels native to your site.
+              When the AI can&apos;t answer or a visitor requests a human, the
+              conversation is{" "}
+              <span className="font-medium text-marketing-primary">
+                relayed to your Telegram
+              </span>{" "}
+              in real time. Agent replies sync back to the widget instantly.
+            </p>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              {[
+                { icon: Palette, label: "Brand styling" },
+                { icon: Code, label: "Custom CSS" },
+                { icon: Send, label: "Telegram handoff" },
+                { icon: Users, label: "Agent takeover" },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-brand/10 bg-white/[0.03] backdrop-blur-lg text-sm"
+                >
+                  <item.icon className="w-4 h-4 text-marketing-quaternary" />
+                  <span className="text-marketing-primary font-medium">
+                    {item.label}
+                  </span>
                 </div>
               ))}
             </div>
@@ -1347,14 +1858,14 @@ function Landing() {
                   Start Free
                   <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
-                <a href="#how-it-works" className="w-full sm:w-auto">
-                  <Button
-                    variant="glow-secondary"
-                    className="rounded-full w-full sm:w-auto px-8 h-12 text-[15px]"
-                  >
-                    See How It Works
-                  </Button>
-                </a>
+                <Button
+                  variant="glow-secondary"
+                  className="rounded-full w-full sm:w-auto px-8 h-12 text-[15px]"
+                  onClick={() => { const rm = (window as unknown as Record<string, unknown>).ReplyMaven as { open?: () => void } | undefined; rm?.open?.(); }}
+                >
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  Try Interactive Demo
+                </Button>
               </div>
 
               <div className="flex items-center gap-6 text-sm text-marketing-quaternary">
@@ -1380,9 +1891,11 @@ function Landing() {
       <FeatureBentoGrid />
 
       {/* ── Feature Detail Sections ──────────────────────────────────────── */}
+      <FeatureDocsIndexing />
+      <FeatureToolCalls />
+      <FeatureWidgetAndHandoff />
       <FeatureBooking />
       <FeatureContactForm />
-      <FeatureToolCalls />
       <FeatureAnalytics />
 
       {/* ── How It Works ─────────────────────────────────────────────────── */}

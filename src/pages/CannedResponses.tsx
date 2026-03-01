@@ -236,7 +236,7 @@ function CannedResponses() {
               {drafts.map((cr) => (
                 <div
                   key={cr.id}
-                  className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 space-y-2"
+                  className="bg-warning/10 border border-warning/25 rounded-xl p-4 space-y-2"
                 >
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
@@ -251,7 +251,7 @@ function CannedResponses() {
                       <button
                         onClick={() => approveCR.mutate(cr.id)}
                         disabled={approveCR.isPending}
-                        className="p-1.5 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 disabled:opacity-50"
+                        className="p-1.5 rounded-lg bg-success/15 text-success hover:bg-success/25 disabled:opacity-50"
                         title="Approve"
                       >
                         <Check className="w-4 h-4" />
@@ -259,7 +259,7 @@ function CannedResponses() {
                       <button
                         onClick={() => deleteCR.mutate(cr.id)}
                         disabled={deleteCR.isPending}
-                        className="p-1.5 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50"
+                        className="p-1.5 rounded-lg bg-destructive/15 text-destructive hover:bg-destructive/25 disabled:opacity-50"
                         title="Reject"
                       >
                         <X className="w-4 h-4" />
