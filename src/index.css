@@ -43,12 +43,54 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
 
+  /* ─── Brand / Marketing Design Language ──────────────────────────── */
+  --color-brand: var(--brand);
+  --color-brand-dark: var(--brand-dark);
+  --color-brand-soft: var(--brand-soft);
+
+  --color-marketing-surface: var(--marketing-surface);
+  --color-marketing-chrome: var(--marketing-chrome);
+  --color-marketing-panel: var(--marketing-panel);
+  --color-marketing-elevated: var(--marketing-elevated);
+  --color-marketing-inset: var(--marketing-inset);
+  --color-marketing-code: var(--marketing-code);
+
+  --color-marketing-heading: var(--marketing-heading);
+  --color-marketing-primary: var(--marketing-primary);
+  --color-marketing-secondary: var(--marketing-secondary);
+  --color-marketing-tertiary: var(--marketing-tertiary);
+  --color-marketing-quaternary: var(--marketing-quaternary);
+  --color-marketing-disabled: var(--marketing-disabled);
+
   --font-sans: "Inter", system-ui, sans-serif;
   --font-heading: "Inter", system-ui, sans-serif;
 }
 
 :root {
   --radius: 0.75rem;
+
+  /* ─── Brand / Marketing Design Language ──────────────────────────── */
+
+  /* Orange accent scale */
+  --brand: #f97316;
+  --brand-dark: #ea580c;
+  --brand-soft: #fb923c;
+
+  /* Dark surface scale */
+  --marketing-surface: #08080a;
+  --marketing-chrome: #0c0c10;
+  --marketing-panel: #0e0e13;
+  --marketing-elevated: #18181e;
+  --marketing-inset: #1c1c22;
+  --marketing-code: #04040a;
+
+  /* Marketing text scale */
+  --marketing-heading: #f0f0f5;
+  --marketing-primary: #e8e8ee;
+  --marketing-secondary: #c8c8d2;
+  --marketing-tertiary: #8a8a96;
+  --marketing-quaternary: #6b6b78;
+  --marketing-disabled: #4a4a55;
 
   /* Clean warm white / light gray palette */
   --background: oklch(98.5% 0.002 80);
