@@ -14,7 +14,7 @@
   },
   "placement": {
     "mode": "smart",
-    "hint": "aws:us-east-1",
+    "hint": "enam",
   },
   "d1_databases": [
     {
