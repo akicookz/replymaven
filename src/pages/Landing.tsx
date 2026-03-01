@@ -26,8 +26,11 @@ import {
   Mail,
   ChevronLeft,
   ChevronRight,
+  Heart,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cardVariants } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 // ─── FAQ Data ─────────────────────────────────────────────────────────────────
 
@@ -60,7 +63,7 @@ const faqItems = [
   {
     question: "Can I try it before committing?",
     answer:
-      "Yes. Sign up for free and explore the full dashboard, add resources, and test the widget on your site. No credit card required to get started.",
+      "Yes. Sign up for free and explore the full dashboard, add knowledge sources, and test the widget on your site.",
   },
 ];
 
@@ -76,8 +79,8 @@ const pricingPlans = [
     cta: "Try Essential free",
     features: [
       "1 project",
-      "1,000 messages / month",
-      "50 knowledge resources",
+      "200 messages / month",
+      "50 knowledge sources",
       "Web page & FAQ indexing",
       "Widget customization",
       "Email support",
@@ -89,12 +92,13 @@ const pricingPlans = [
     period: "/mo",
     description: "For growing teams that need more power.",
     highlighted: true,
-    badge: "Save 20%",
+    badge: "Most Popular",
     cta: "Get started",
     features: [
       "Everything in Essential",
-      "3 projects",
-      "5,000 messages / month",
+      "5 projects",
+      "500 messages / month",
+      "50 knowledge sources",
       "PDF indexing",
       "Telegram live agent handoff",
       "Custom tone of voice",
@@ -267,18 +271,23 @@ function AnimatedChatWidget() {
   }, [visibleMessages, isTyping]);
 
   return (
-    <div className="w-[420px] h-[520px] flex flex-col bg-marketing-panel/80 backdrop-blur-2xl rounded-2xl shadow-[0_8px_60px_rgba(0,0,0,0.5),0_0_80px_rgba(249,115,22,0.08)] overflow-hidden border border-brand/10">
+    <div
+      className={cn(
+        cardVariants({ variant: "glow-secondary" }),
+        "w-full max-w-[420px] h-[520px] flex flex-col overflow-hidden",
+      )}
+    >
       {/* Header */}
-      <div className="bg-marketing-chrome px-4 py-3.5 flex items-center gap-3 border-b border-white/[0.06] shrink-0">
+      <div className="px-4 py-3.5 flex items-center gap-3 shrink-0">
         <div className="w-8 h-8 rounded-full bg-brand/15 flex items-center justify-center">
           <Bot className="w-4 h-4 text-brand" />
         </div>
         <div className="flex-1">
           <p className="text-marketing-primary text-sm font-medium leading-tight">
-            Support Assistant
+            Chat with us
           </p>
           <p className="text-marketing-quaternary text-[11px]">
-            Typically replies instantly
+            We typically reply instantly
           </p>
         </div>
         <div className="w-2 h-2 rounded-full bg-brand animate-pulse" />
@@ -327,7 +336,7 @@ function AnimatedChatWidget() {
       </div>
 
       {/* Input */}
-      <div className="bg-marketing-chrome border-t border-white/[0.06] px-3 py-2.5 flex items-center gap-2 shrink-0">
+      <div className="px-3 py-2.5 flex items-center gap-2 shrink-0">
         <div className="flex-1 bg-white/[0.05] rounded-full px-3.5 py-2 text-[13px] text-marketing-quaternary border border-white/[0.06]">
           Type a message...
         </div>
@@ -360,9 +369,14 @@ function MockBookingUI() {
   ];
 
   return (
-    <div className="w-full bg-marketing-panel/80 backdrop-blur-2xl rounded-2xl shadow-[0_8px_60px_rgba(0,0,0,0.5),0_0_80px_rgba(249,115,22,0.08)] overflow-hidden border border-brand/10">
+    <div
+      className={cn(
+        cardVariants({ variant: "glow-secondary" }),
+        "w-full overflow-hidden bg-black/80 backdrop-blur-2xl",
+      )}
+    >
       {/* Header */}
-      <div className="bg-marketing-chrome px-5 py-4 flex items-center gap-3 border-b border-white/[0.06]">
+      <div className="px-5 py-4 flex items-center gap-3 shrink-0">
         <div className="w-9 h-9 rounded-full bg-brand/15 flex items-center justify-center">
           <Calendar className="w-4.5 h-4.5 text-brand" />
         </div>
@@ -377,7 +391,7 @@ function MockBookingUI() {
       </div>
 
       {/* Date picker */}
-      <div className="px-5 pt-4 pb-3">
+      <div className="px-5 pt-4 pb-3 flex-1">
         <div className="flex items-center justify-between mb-3">
           <span className="text-[12px] text-marketing-tertiary">January 2026</span>
           <div className="flex gap-1">
@@ -393,11 +407,10 @@ function MockBookingUI() {
           {days.map((d) => (
             <div
               key={d.date}
-              className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 rounded-xl border text-center transition-colors ${
-                d.selected
-                  ? "bg-brand/15 border-brand/25"
-                  : "bg-white/[0.02] border-white/[0.06]"
-              }`}
+              className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 rounded-xl border text-center transition-colors ${d.selected
+                ? "bg-brand/15 border-brand/25"
+                : "bg-white/[0.02] border-white/[0.06]"
+                }`}
             >
               <span className={`text-[10px] ${d.selected ? "text-brand" : "text-marketing-quaternary"}`}>
                 {d.day}
@@ -414,7 +427,7 @@ function MockBookingUI() {
       </div>
 
       {/* Time slots */}
-      <div className="px-5 pb-3">
+      <div className="px-5 pb-3 flex-1">
         <p className="text-[11px] text-marketing-quaternary mb-2 uppercase tracking-wider">
           Available times
         </p>
@@ -422,13 +435,12 @@ function MockBookingUI() {
           {slots.map((s) => (
             <div
               key={s.time}
-              className={`py-2 rounded-lg text-center text-[12px] border transition-colors ${
-                s.selected
-                  ? "bg-brand/15 border-brand/25 text-brand"
-                  : s.available
-                    ? "bg-white/[0.02] border-white/[0.06] text-marketing-secondary"
-                    : "bg-white/[0.01] border-white/[0.03] text-marketing-disabled line-through"
-              }`}
+              className={`py-2 rounded-lg text-center text-[12px] border transition-colors ${s.selected
+                ? "bg-brand/15 border-brand/25 text-brand"
+                : s.available
+                  ? "bg-white/[0.02] border-white/[0.06] text-marketing-secondary"
+                  : "bg-white/[0.01] border-white/[0.03] text-marketing-disabled line-through"
+                }`}
             >
               {s.time}
             </div>
@@ -437,7 +449,7 @@ function MockBookingUI() {
       </div>
 
       {/* Quick form */}
-      <div className="px-5 pb-5 space-y-2.5">
+      <div className="px-5 pb-5 space-y-2.5 flex-1">
         <div className="bg-white/[0.03] rounded-lg border border-white/[0.06] px-3 py-2 flex items-center gap-2.5">
           <Mail className="w-3.5 h-3.5 text-marketing-quaternary shrink-0" />
           <span className="text-[12px] text-marketing-tertiary">sarah@example.com</span>
@@ -458,9 +470,14 @@ function MockBookingUI() {
 
 function MockContactFormUI() {
   return (
-    <div className="w-full bg-marketing-panel/80 backdrop-blur-2xl rounded-2xl shadow-[0_8px_60px_rgba(0,0,0,0.5),0_0_80px_rgba(249,115,22,0.08)] overflow-hidden border border-brand/10">
+    <div
+      className={cn(
+        cardVariants({ variant: "glow-secondary" }),
+        "w-full overflow-hidden bg-black/80 backdrop-blur-2xl",
+      )}
+    >
       {/* Header */}
-      <div className="bg-marketing-chrome px-5 py-4 flex items-center gap-3 border-b border-white/[0.06]">
+      <div className="px-5 py-4 flex items-center gap-3">
         <div className="w-9 h-9 rounded-full bg-brand/15 flex items-center justify-center">
           <ClipboardList className="w-4.5 h-4.5 text-brand" />
         </div>
@@ -475,7 +492,7 @@ function MockContactFormUI() {
       </div>
 
       {/* Form fields */}
-      <div className="px-5 py-5 space-y-3.5">
+      <div className="px-5 py-5 space-y-3.5 flex-1">
         {/* Name */}
         <div className="space-y-1.5">
           <label className="text-[11px] text-marketing-tertiary uppercase tracking-wider flex items-center gap-1">
@@ -542,9 +559,14 @@ function MockToolCallUI() {
       </div>
 
       {/* Tool call card */}
-      <div className="bg-marketing-panel/80 backdrop-blur-2xl rounded-2xl border border-brand/10 overflow-hidden shadow-[0_8px_60px_rgba(0,0,0,0.5),0_0_40px_rgba(249,115,22,0.06)]">
+      <div
+        className={cn(
+          cardVariants({ variant: "glow-secondary" }),
+          "overflow-hidden bg-black/80 backdrop-blur-2xl",
+        )}
+      >
         {/* Tool header */}
-        <div className="px-4 py-3 border-b border-white/[0.06] flex items-center gap-2.5">
+        <div className="px-4 py-3 flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-lg bg-brand/10 flex items-center justify-center">
             <Wrench className="w-3.5 h-3.5 text-brand" />
           </div>
@@ -558,7 +580,7 @@ function MockToolCallUI() {
         </div>
 
         {/* Params */}
-        <div className="px-4 py-3 border-b border-white/[0.06]">
+        <div className="px-4 py-3">
           <p className="text-[10px] text-marketing-quaternary uppercase tracking-wider mb-2">Parameters</p>
           <div className="bg-marketing-code rounded-lg p-3 font-mono text-[11px] text-marketing-tertiary border border-white/[0.04]">
             <span className="text-marketing-quaternary">{"{"}</span>
@@ -608,16 +630,21 @@ function MockToolCallUI() {
 
 function MockDashboardPreview() {
   return (
-    <div className="w-full bg-marketing-panel/80 backdrop-blur-2xl rounded-2xl border border-brand/10 overflow-hidden shadow-[0_8px_60px_rgba(0,0,0,0.5),0_0_80px_rgba(249,115,22,0.08)]">
+    <div
+      className={cn(
+        cardVariants({ variant: "glow-secondary" }),
+        "w-full overflow-hidden bg-black/80 backdrop-blur-2xl",
+      )}
+    >
       {/* Header */}
-      <div className="bg-marketing-chrome px-5 py-4 border-b border-white/[0.06]">
+      <div className="px-5 py-4 shrink-0">
         <p className="text-[15px] font-medium text-marketing-primary">Dashboard</p>
         <p className="text-[12px] text-marketing-quaternary">Last 7 days</p>
       </div>
 
-      <div className="p-5 space-y-5">
+      <div className="p-5 space-y-5 flex-1">
         {/* Stats row */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="bg-white/[0.03] rounded-xl border border-white/[0.06] p-3">
             <div className="flex items-center gap-2 mb-2">
               <MessageSquare className="w-3.5 h-3.5 text-marketing-quaternary" />
@@ -678,7 +705,7 @@ function MockDashboardPreview() {
             { name: "Maria S.", topic: "Widget setup help", status: "resolved" },
             { name: "James L.", topic: "API integration", status: "agent" },
           ].map((c) => (
-            <div key={c.name} className="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-b-0">
+            <div key={c.name} className="flex items-center justify-between py-1.5 last:border-b-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-6 h-6 rounded-full bg-white/[0.05] flex items-center justify-center text-[10px] text-marketing-tertiary">
                   {c.name[0]}
@@ -688,11 +715,10 @@ function MockDashboardPreview() {
                   <p className="text-[10px] text-marketing-quaternary">{c.topic}</p>
                 </div>
               </div>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                c.status === "resolved"
-                  ? "bg-brand/10 text-brand"
-                  : "bg-blue-500/10 text-blue-400"
-              }`}>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full ${c.status === "resolved"
+                ? "bg-brand/10 text-brand"
+                : "bg-blue-500/10 text-blue-400"
+                }`}>
                 {c.status === "resolved" ? "AI resolved" : "Agent"}
               </span>
             </div>
@@ -714,16 +740,21 @@ function FeatureBentoGrid() {
             Features
           </p>
           <h2 className="text-3xl sm:text-[2.75rem] font-light text-marketing-heading tracking-tight leading-tight">
-            Built for support teams,
+            The complete AI support agent
             <br />
-            powered by simplicity
+            equipped with tools and your docs
           </h2>
         </div>
 
         {/* Bento grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {/* Top row: Big left card + 3 stacked right cards */}
-          <div className="lg:row-span-3 bg-white/[0.03] backdrop-blur-xl rounded-2xl border border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)] p-8 flex flex-col">
+          <div
+            className={cn(
+              cardVariants({ variant: "glow-primary" }),
+              "lg:row-span-3 p-8 flex flex-col",
+            )}
+          >
             <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center mb-4">
               <Sparkles className="w-5 h-5 text-brand" />
             </div>
@@ -749,11 +780,10 @@ function FeatureBentoGrid() {
                       <r.icon className={`w-3.5 h-3.5 ${r.color}`} />
                       <span className="text-[12px] text-marketing-secondary">{r.name}</span>
                     </div>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                      r.status === "Indexed"
-                        ? "bg-brand/10 text-brand"
-                        : "bg-amber-500/10 text-amber-400"
-                    }`}>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${r.status === "Indexed"
+                      ? "bg-brand/10 text-brand"
+                      : "bg-amber-500/10 text-amber-400"
+                      }`}>
                       {r.status}
                     </span>
                   </div>
@@ -780,7 +810,12 @@ function FeatureBentoGrid() {
           </div>
 
           {/* Right column: 3 stacked cards */}
-          <div className="bg-white/[0.03] backdrop-blur-xl rounded-2xl border border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)] p-6 flex items-center gap-4">
+          <div
+            className={cn(
+              cardVariants({ variant: "glow-primary" }),
+              "p-6 flex items-center gap-4",
+            )}
+          >
             <div className="flex items-start gap-4 flex-1 min-w-0">
               <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center shrink-0">
                 <Code className="w-5 h-5 text-brand" />
@@ -805,7 +840,12 @@ function FeatureBentoGrid() {
             </div>
           </div>
 
-          <div className="bg-white/[0.03] backdrop-blur-xl rounded-2xl border border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)] p-6 flex items-center gap-4">
+          <div
+            className={cn(
+              cardVariants({ variant: "glow-primary" }),
+              "p-6 flex items-center gap-4",
+            )}
+          >
             <div className="flex items-start gap-4 flex-1 min-w-0">
               <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center shrink-0">
                 <Palette className="w-5 h-5 text-brand" />
@@ -840,7 +880,12 @@ function FeatureBentoGrid() {
             </div>
           </div>
 
-          <div className="bg-white/[0.03] backdrop-blur-xl rounded-2xl border border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)] p-6 flex items-center gap-4">
+          <div
+            className={cn(
+              cardVariants({ variant: "glow-primary" }),
+              "p-6 flex items-center gap-4",
+            )}
+          >
             <div className="flex items-start gap-4 flex-1 min-w-0">
               <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center shrink-0">
                 <Wrench className="w-5 h-5 text-brand" />
@@ -872,7 +917,12 @@ function FeatureBentoGrid() {
           </div>
 
           {/* Bottom row: 2 half-width cards */}
-          <div className="bg-white/[0.03] backdrop-blur-xl rounded-2xl border border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)] p-6 space-y-4">
+          <div
+            className={cn(
+              cardVariants({ variant: "glow-primary" }),
+              "p-6 space-y-4",
+            )}
+          >
             <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center">
               <Send className="w-5 h-5 text-brand" />
             </div>
@@ -901,14 +951,19 @@ function FeatureBentoGrid() {
             </div>
           </div>
 
-          <div className="bg-white/[0.03] backdrop-blur-xl rounded-2xl border border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)] p-6 space-y-4">
+          <div
+            className={cn(
+              cardVariants({ variant: "glow-primary" }),
+              "p-6 space-y-4",
+            )}
+          >
             <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center">
               <BarChart3 className="w-5 h-5 text-brand" />
             </div>
             <h3 className="text-base font-medium text-marketing-primary">
               Conversation analytics
             </h3>
-            <div className="bg-white/[0.02] rounded-xl border border-white/[0.06] p-3.5 space-y-2.5">
+            <div className="rounded-xl border border-white/[0.06] p-3.5 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-[12px] text-marketing-quaternary">Resolution rate</span>
                 <span className="text-[12px] text-brand font-medium">89%</span>
@@ -971,7 +1026,7 @@ function FeatureBooking() {
           </div>
 
           {/* Visual */}
-          <div className="relative">
+          <div className="relative overflow-hidden rounded-[2rem]">
             <div className="absolute -inset-8 bg-brand/[0.03] rounded-[2rem] blur-3xl" />
             <div className="relative">
               <MockBookingUI />
@@ -991,7 +1046,7 @@ function FeatureContactForm() {
       <div className="max-w-7xl mx-auto px-6 w-full">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
           {/* Visual */}
-          <div className="relative order-2 lg:order-1">
+          <div className="relative order-2 lg:order-1 overflow-hidden rounded-[2rem]">
             <div className="absolute -inset-8 bg-brand/[0.03] rounded-[2rem] blur-3xl" />
             <div className="relative">
               <MockContactFormUI />
@@ -1047,9 +1102,9 @@ function FeatureToolCalls() {
               Tool Calls
             </p>
             <h2 className="text-3xl sm:text-[2.5rem] font-light text-marketing-heading tracking-tight leading-tight">
-              Connect your AI
+              Let your AI
               <br />
-              to any API
+              do things
             </h2>
             <p className="text-marketing-tertiary leading-relaxed max-w-lg">
               <span className="font-medium text-marketing-primary">Define external tools</span> with endpoints, parameters, and response mappings. The AI decides when to call them, executes HTTP requests, and weaves the results into natural conversation. Up to 20 tools per project with full execution logging.
@@ -1073,7 +1128,7 @@ function FeatureToolCalls() {
           </div>
 
           {/* Visual */}
-          <div className="relative">
+          <div className="relative overflow-hidden rounded-2xl p-6">
             <div className="absolute -inset-8 bg-brand/[0.03] rounded-[2rem] blur-3xl" />
             <div className="relative">
               <MockToolCallUI />
@@ -1093,7 +1148,7 @@ function FeatureAnalytics() {
       <div className="max-w-7xl mx-auto px-6 w-full">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
           {/* Visual */}
-          <div className="relative order-2 lg:order-1">
+          <div className="relative order-2 lg:order-1 overflow-hidden rounded-[2rem]">
             <div className="absolute -inset-8 bg-brand/[0.03] rounded-[2rem] blur-3xl" />
             <div className="relative">
               <MockDashboardPreview />
@@ -1188,13 +1243,18 @@ function Landing() {
 
       {/* ── Floating Header ──────────────────────────────────────────────── */}
       <header className="fixed top-0 left-0 right-0 z-50 flex justify-center pt-4 px-4">
-        <nav className="flex items-center gap-1 bg-marketing-chrome/70 backdrop-blur-2xl border border-brand/10 rounded-full px-2 py-1.5 shadow-[0_4px_30px_rgba(0,0,0,0.3),0_0_20px_rgba(249,115,22,0.04)]">
+        <nav
+          className={cn(
+            cardVariants({ variant: "glow-secondary" }),
+            "flex max-w-full items-center gap-1 bg-marketing-chrome/70 backdrop-blur-2xl rounded-full px-2 py-1.5",
+          )}
+        >
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 pl-3 pr-4">
             <div className="w-7 h-7 rounded-lg bg-brand/15 flex items-center justify-center">
               <MessageSquare className="w-3.5 h-3.5 text-brand" />
             </div>
-            <span className="font-medium text-marketing-primary text-[15px] tracking-tight">
+            <span className="hidden sm:inline font-medium text-marketing-primary text-[15px] tracking-tight">
               ReplyMaven
             </span>
           </Link>
@@ -1238,10 +1298,12 @@ function Landing() {
 
           {/* CTA */}
           <Button
+            variant="glow-primary"
             onClick={() => setAuthOpen(true)}
-            className="rounded-full bg-black text-white hover:bg-white/[0.05] px-5 h-9 text-[13px] font-medium border border-brand/30 shadow-[0_0_20px_rgba(249,115,22,0.2)]"
+            className="rounded-full h-9 px-3 sm:px-5 text-[12px] sm:text-[13px] font-medium"
           >
-            Try ReplyMaven free
+            <span className="sm:hidden">Try free</span>
+            <span className="hidden sm:inline">Try ReplyMaven free</span>
           </Button>
         </nav>
       </header>
@@ -1258,37 +1320,38 @@ function Landing() {
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_460px] gap-12 lg:gap-20 items-center">
             {/* Left - Copy */}
             <div>
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-brand/[0.08] border border-brand/15 text-sm text-brand mb-8">
+              {/* <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-brand/[0.08] border border-brand/15 text-sm text-brand mb-8">
                 <Sparkles className="w-3.5 h-3.5" />
                 <span className="font-medium">
                   Your AI support agent, live in minutes
                 </span>
-              </div>
+              </div> */}
 
               <h1 className="text-[2.75rem] sm:text-[3.5rem] lg:text-[4.5rem] font-light text-marketing-heading tracking-tight leading-[1.06] mb-6">
-                AI product expert agents
-                <br />
+                AI agents{" "}
                 <span className="text-marketing-tertiary">
-                  for customer support
+                  for 90% of your support queries
                 </span>
               </h1>
 
               <p className="text-lg text-marketing-tertiary max-w-xl leading-relaxed mb-10">
-                ReplyMaven reads your knowledge base and answers customer
-                questions instantly. When it can't, it hands off to your team
-                -- seamlessly. One script tag to go live.
+                AI customer support agent with expert knowledge of your product to automate support queries. Go live in minutes.
               </p>
 
               <div className="flex flex-col sm:flex-row items-start gap-4 mb-8">
                 <Button
+                  variant="glow-primary"
                   onClick={() => setAuthOpen(true)}
-                  className="rounded-full bg-black text-white hover:bg-white/[0.05] px-8 h-12 text-[15px] font-medium border border-brand/30 shadow-[0_0_25px_rgba(249,115,22,0.25)]"
+                  className="rounded-full w-full sm:w-auto px-8 h-12 text-[15px] font-medium"
                 >
                   Start Free
                   <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
-                <a href="#how-it-works">
-                  <Button className="rounded-full bg-transparent text-marketing-primary hover:bg-white/[0.05] px-8 h-12 text-[15px] border border-white/[0.1]">
+                <a href="#how-it-works" className="w-full sm:w-auto">
+                  <Button
+                    variant="glow-secondary"
+                    className="rounded-full w-full sm:w-auto px-8 h-12 text-[15px]"
+                  >
                     See How It Works
                   </Button>
                 </a>
@@ -1297,7 +1360,7 @@ function Landing() {
               <div className="flex items-center gap-6 text-sm text-marketing-quaternary">
                 <span className="flex items-center gap-1.5">
                   <Check className="w-4 h-4 text-brand" />
-                  No credit card required
+                  7-day free trial
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Check className="w-4 h-4 text-brand" />
@@ -1313,32 +1376,14 @@ function Landing() {
           </div>
         </div>
       </section>
+      {/* ── Feature Bento Grid ───────────────────────────────────────────── */}
+      <FeatureBentoGrid />
 
-      {/* ── Social Proof Bar ─────────────────────────────────────────────── */}
-      <section className="py-12 border-t border-white/[0.04]">
-        <div className="max-w-7xl mx-auto px-6">
-          <p className="text-center text-sm text-marketing-quaternary mb-8">
-            Powering customer support for fast-growing teams
-          </p>
-          <div className="flex items-center justify-center gap-10 md:gap-16 flex-wrap opacity-20">
-            {[
-              "Acme Corp",
-              "Nebula",
-              "Streamline",
-              "Baseline",
-              "Keystone",
-              "Onward",
-            ].map((name) => (
-              <span
-                key={name}
-                className="text-sm font-medium tracking-tight text-marketing-primary"
-              >
-                {name}
-              </span>
-            ))}
-          </div>
-        </div>
-      </section>
+      {/* ── Feature Detail Sections ──────────────────────────────────────── */}
+      <FeatureBooking />
+      <FeatureContactForm />
+      <FeatureToolCalls />
+      <FeatureAnalytics />
 
       {/* ── How It Works ─────────────────────────────────────────────────── */}
       <section id="how-it-works" className="min-h-screen flex items-center py-24">
@@ -1348,20 +1393,25 @@ function Landing() {
               How It Works
             </p>
             <h2 className="text-3xl sm:text-[2.75rem] font-light text-marketing-heading tracking-tight leading-tight">
-              Live in three simple steps
+              Go live in minutes
             </h2>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Step 1 */}
-            <div className="bg-white/[0.03] backdrop-blur-xl rounded-2xl border border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)] p-7 space-y-4">
+            <div
+              className={cn(
+                cardVariants({ variant: "glow-secondary" }),
+                "p-7 space-y-4",
+              )}
+            >
               <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center">
                 <FileText className="w-5 h-5 text-brand" />
               </div>
-              <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-marketing-primary text-marketing-surface text-xs font-semibold">
-                1
-              </div>
-              <h3 className="text-lg font-medium text-marketing-primary">
+              <h3 className="text-lg font-medium text-marketing-primary flex items-center gap-2">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-marketing-primary text-marketing-surface text-xs font-semibold">
+                  1
+                </span>
                 Add your knowledge
               </h3>
               <p className="text-sm text-marketing-tertiary leading-relaxed">
@@ -1395,15 +1445,20 @@ function Landing() {
             </div>
 
             {/* Step 2 */}
-            <div className="bg-white/[0.03] backdrop-blur-xl rounded-2xl border border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)] p-7 space-y-4">
+            <div
+              className={cn(
+                cardVariants({ variant: "glow-secondary" }),
+                "p-7 space-y-4",
+              )}
+            >
               <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center">
                 <Palette className="w-5 h-5 text-brand" />
               </div>
-              <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-marketing-primary text-marketing-surface text-xs font-semibold">
-                2
-              </div>
-              <h3 className="text-lg font-medium text-marketing-primary">
-                Customize your bot
+
+              <h3 className="text-lg font-medium text-marketing-primary flex items-center gap-2">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-marketing-primary text-marketing-surface text-xs font-semibold">
+                  2
+                </span> Customize your bot
               </h3>
               <p className="text-sm text-marketing-tertiary leading-relaxed">
                 Match your brand colors, set the tone of voice, and configure
@@ -1436,14 +1491,19 @@ function Landing() {
             </div>
 
             {/* Step 3 */}
-            <div className="bg-white/[0.03] backdrop-blur-xl rounded-2xl border border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)] p-7 space-y-4">
+            <div
+              className={cn(
+                cardVariants({ variant: "glow-secondary" }),
+                "p-7 space-y-4",
+              )}
+            >
               <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center">
                 <Code className="w-5 h-5 text-brand" />
               </div>
-              <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-marketing-primary text-marketing-surface text-xs font-semibold">
-                3
-              </div>
-              <h3 className="text-lg font-medium text-marketing-primary">
+              <h3 className="text-lg font-medium text-marketing-primary flex items-center gap-2">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-marketing-primary text-marketing-surface text-xs font-semibold">
+                  3
+                </span>
                 Embed & go live
               </h3>
               <p className="text-sm text-marketing-tertiary leading-relaxed">
@@ -1468,14 +1528,7 @@ function Landing() {
         </div>
       </section>
 
-      {/* ── Feature Bento Grid ───────────────────────────────────────────── */}
-      <FeatureBentoGrid />
 
-      {/* ── Feature Detail Sections ──────────────────────────────────────── */}
-      <FeatureBooking />
-      <FeatureContactForm />
-      <FeatureToolCalls />
-      <FeatureAnalytics />
 
       {/* ── Pricing ──────────────────────────────────────────────────────── */}
       <section id="pricing" className="min-h-screen flex items-center py-24 bg-white/[0.015]">
@@ -1485,9 +1538,9 @@ function Landing() {
               Pricing
             </p>
             <h2 className="text-3xl sm:text-[2.75rem] font-light text-marketing-heading tracking-tight leading-tight">
-              Simple plans
+              Powerful AI support agent
               <br />
-              for serious support
+              at unbeatable price
             </h2>
           </div>
 
@@ -1495,11 +1548,13 @@ function Landing() {
             {pricingPlans.map((plan) => (
               <div
                 key={plan.name}
-                className={`relative rounded-2xl border flex flex-col backdrop-blur-xl ${
-                  plan.highlighted
-                    ? "bg-white/[0.05] border-brand/20 shadow-[0_0_40px_rgba(249,115,22,0.12)]"
-                    : "bg-white/[0.03] border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)]"
-                }`}
+                className={cn(
+                  cardVariants({
+                    variant: plan.highlighted ? "glow-primary" : "glow-secondary",
+                  }),
+                  "relative flex flex-col rounded-2xl",
+                  plan.highlighted ? "bg-black/80 backdrop-blur-2xl" : "bg-black/80 backdrop-blur-2xl",
+                )}
               >
                 <div className="p-7 pb-0 space-y-4">
                   <div className="flex items-center gap-2">
@@ -1539,12 +1594,13 @@ function Landing() {
 
                 <div className="p-7 pt-0">
                   <Button
+                    variant={plan.highlighted ? "glow-primary" : "glow-secondary"}
                     onClick={() => setAuthOpen(true)}
-                    className={`w-full rounded-xl h-11 text-sm font-medium ${
-                      plan.highlighted
-                        ? "bg-black text-white hover:bg-white/[0.05] border border-brand/30 shadow-[0_0_20px_rgba(249,115,22,0.2)]"
-                        : "bg-white/[0.05] text-marketing-primary hover:bg-white/[0.08] border border-white/[0.06]"
-                    }`}
+                    className={cn(
+                      "w-full rounded-xl h-11 text-sm font-medium",
+                      !plan.highlighted &&
+                      "bg-white/[0.05] hover:bg-white/[0.08] border-white/[0.06]",
+                    )}
                   >
                     {plan.cta}
                   </Button>
@@ -1554,7 +1610,12 @@ function Landing() {
           </div>
 
           {/* Enterprise card */}
-          <div className="mt-8 bg-white/[0.03] backdrop-blur-xl rounded-2xl border border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)] p-8">
+          <div
+            className={cn(
+              cardVariants({ variant: "glow-secondary" }),
+              "mt-8 p-8",
+            )}
+          >
             <div className="flex flex-col md:flex-row md:items-center gap-6">
               <div className="space-y-2 md:max-w-xs shrink-0">
                 <div className="flex items-center gap-3">
@@ -1589,8 +1650,9 @@ function Landing() {
               </div>
 
               <Button
+                variant="glow-secondary"
                 onClick={() => setAuthOpen(true)}
-                className="shrink-0 rounded-xl h-11 px-6 bg-white/[0.05] text-marketing-primary hover:bg-white/[0.08] border border-white/[0.06]"
+                className="shrink-0 rounded-xl h-11 px-6 bg-white/[0.05] hover:bg-white/[0.08] border-white/[0.06]"
               >
                 Contact Sales
                 <ArrowRight className="w-4 h-4 ml-2" />
@@ -1636,11 +1698,12 @@ function Landing() {
             Ready to get started
           </h2>
           <p className="text-marketing-tertiary text-lg mb-10">
-            Set up ReplyMaven for free. No credit card required.
+            Set up ReplyMaven for free and get a 7-day free trial.
           </p>
           <Button
+            variant="glow-primary"
             onClick={() => setAuthOpen(true)}
-            className="rounded-full bg-black text-white hover:bg-white/[0.05] px-8 h-12 text-[15px] font-medium border border-brand/30 shadow-[0_0_25px_rgba(249,115,22,0.25)]"
+            className="rounded-full px-8 h-12 text-[15px] font-medium"
           >
             Try ReplyMaven free
             <ArrowRight className="w-4 h-4 ml-2" />
@@ -1650,7 +1713,12 @@ function Landing() {
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className="pb-8 px-6">
-        <div className="max-w-7xl mx-auto bg-white/[0.03] backdrop-blur-xl rounded-2xl border border-brand/10 shadow-[0_0_30px_rgba(249,115,22,0.06)] p-10">
+        <div
+          className={cn(
+            cardVariants({ variant: "glow-primary" }),
+            "max-w-7xl mx-auto p-10",
+          )}
+        >
           <div className="grid grid-cols-1 md:grid-cols-[1.5fr_1fr_1fr] gap-10 mb-10">
             {/* Brand */}
             <div className="space-y-4">
@@ -1736,9 +1804,9 @@ function Landing() {
               &copy; {new Date().getFullYear()} ReplyMaven. All rights
               reserved.
             </p>
-            <p className="text-sm text-marketing-quaternary">
-              Built on Cloudflare Workers
-            </p>
+            <a href="https://launchfast.shop/" target="_blank" className="text-sm text-marketing-quaternary flex items-center gap-2 outline-brand outline-offset-4 hover:outline-brand/50 transition-all duration-300 underline decoration-dashed">
+              <Heart className="w-4 h-4 text-brand/50" /> LaunchFast.shop product
+            </a>
           </div>
         </div>
       </footer>
