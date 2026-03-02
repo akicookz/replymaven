@@ -117,18 +117,18 @@ function CannedResponses() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-foreground">
           Canned Responses
         </h1>
-        <Button onClick={() => setShowForm(!showForm)}>
+        <Button onClick={() => setShowForm(!showForm)} className="w-full sm:w-auto">
           <Plus className="w-4 h-4 mr-2" />
           Add Response
         </Button>
       </div>
 
       <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
               <Sparkles className="w-5 h-5" />

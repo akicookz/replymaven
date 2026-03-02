@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Outlet, Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -17,6 +17,8 @@ import {
   PanelLeftClose,
   CreditCard,
   Users,
+  Menu,
+  X,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { signOut, useSession } from "@/lib/auth-client";
@@ -44,6 +46,7 @@ function Layout() {
   const { data: subData } = useSubscription();
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const { data: projects } = useQuery<Project[]>({
     queryKey: ["projects"],
@@ -66,6 +69,13 @@ function Layout() {
       navigate(`/app/projects/${projects[0].id}`, { replace: true });
     }
   }, [params.projectId, projects, navigate]);
+
+  // Close mobile sidebar on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
+  const closeMobile = useCallback(() => setMobileOpen(false), []);
 
   const mainNav = currentProject
     ? [
@@ -164,11 +174,39 @@ function Layout() {
 
   return (
     <div className="flex h-screen bg-background">
+      {/* Mobile top bar */}
+      <div className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 h-14 border-b border-sidebar-border bg-sidebar md:hidden">
+        <Link to="/app">
+          <Logo size="sm" />
+        </Link>
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="p-2 rounded-lg hover:bg-accent text-muted-foreground transition-colors"
+          aria-label="Open menu"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={closeMobile}
+        />
+      )}
+
       {/* Sidebar */}
       <aside
         className={cn(
-          "flex flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-200",
-          collapsed ? "w-[68px]" : "w-60",
+          "flex flex-col border-r border-sidebar-border bg-sidebar transition-all duration-200",
+          // Desktop: static sidebar
+          "hidden md:flex",
+          collapsed ? "md:w-[68px]" : "md:w-60",
+          // Mobile: slide-out overlay
+          mobileOpen
+            ? "fixed inset-y-0 left-0 z-50 flex w-60"
+            : "fixed inset-y-0 left-0 z-50 -translate-x-full md:translate-x-0 md:relative",
         )}
       >
         {/* Logo + Collapse */}
@@ -176,10 +214,19 @@ function Layout() {
           <Link to="/app" className="min-w-0">
             <Logo size="sm" iconOnly={collapsed} />
           </Link>
+          {/* Mobile close button */}
+          <button
+            onClick={closeMobile}
+            className="p-1 rounded-md hover:bg-accent text-muted-foreground transition-colors md:hidden"
+            aria-label="Close menu"
+          >
+            <X className="w-4 h-4" />
+          </button>
+          {/* Desktop collapse button */}
           {!collapsed && (
             <button
               onClick={() => setCollapsed(true)}
-              className="p-1 rounded-md hover:bg-accent text-muted-foreground transition-colors"
+              className="hidden md:block p-1 rounded-md hover:bg-accent text-muted-foreground transition-colors"
             >
               <PanelLeftClose className="w-4 h-4" />
             </button>
@@ -384,8 +431,8 @@ function Layout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="p-8">
+      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+        <div className="p-4 md:p-8">
           <Outlet />
         </div>
       </main>

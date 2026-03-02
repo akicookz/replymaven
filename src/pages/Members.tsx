@@ -252,7 +252,7 @@ function Members() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Team Members</h1>
           <p className="text-muted-foreground mt-1">
@@ -263,6 +263,7 @@ function Members() {
           <Button
             onClick={() => setShowInvite(true)}
             disabled={seatCurrent >= seatMax}
+            className="w-full sm:w-auto"
           >
             <UserPlus className="w-4 h-4 mr-2" />
             Invite Member

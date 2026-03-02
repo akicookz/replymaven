@@ -164,22 +164,24 @@ function Billing() {
 
       {/* Past Due Banner */}
       {sub.status === "past_due" && (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-yellow-50 border border-yellow-200">
-          <AlertTriangle className="w-5 h-5 text-yellow-600 shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-yellow-900">
-              Payment failed
-            </p>
-            <p className="text-xs text-yellow-700">
-              Please update your payment method to keep your subscription active.
-            </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center px-4 py-3 rounded-xl bg-yellow-50 border border-yellow-200">
+          <div className="flex items-start gap-3 flex-1">
+            <AlertTriangle className="w-5 h-5 text-yellow-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-yellow-900">
+                Payment failed
+              </p>
+              <p className="text-xs text-yellow-700">
+                Please update your payment method to keep your subscription active.
+              </p>
+            </div>
           </div>
           <Button
             size="sm"
             variant="outline"
             onClick={() => portalMutation.mutate()}
             disabled={portalMutation.isPending}
-            className="ml-auto shrink-0"
+            className="w-full sm:w-auto shrink-0"
           >
             Update Payment
           </Button>
@@ -188,7 +190,7 @@ function Billing() {
 
       {/* Current Plan */}
       <div className="rounded-xl border border-border p-6 space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground">
               {formatPlanName(sub.plan)} Plan
@@ -205,6 +207,7 @@ function Billing() {
           onClick={() => portalMutation.mutate()}
           disabled={portalMutation.isPending}
           variant="outline"
+          className="w-full sm:w-auto"
         >
           {portalMutation.isPending ? (
             <Loader2 className="w-4 h-4 mr-2 animate-spin" />

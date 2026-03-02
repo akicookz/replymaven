@@ -8,6 +8,7 @@ import {
   Headphones,
   XCircle,
   Search,
+  ArrowLeft,
   Check,
   CheckCheck,
   Clock,
@@ -247,8 +248,8 @@ function Conversations() {
 
   if (isLoading) {
     return (
-      <div className="-m-8 h-screen flex">
-        <div className="w-[360px] border-r border-border bg-card/30">
+      <div className="-m-4 md:-m-8 h-[calc(100vh-3.5rem)] md:h-screen flex">
+        <div className="w-full md:w-[360px] border-r border-border bg-card/30">
           <div className="p-4 border-b border-border">
             <div className="h-8 w-40 rounded-lg bg-muted animate-pulse" />
           </div>
@@ -278,9 +279,15 @@ function Conversations() {
     : null;
 
   return (
-    <div className="-m-8 h-screen flex overflow-hidden">
+    <div className="-m-4 md:-m-8 h-[calc(100vh-3.5rem)] md:h-screen flex overflow-hidden">
       {/* ─── Left Panel: Conversation List ─────────────────────────────── */}
-      <div className="w-[360px] flex flex-col border-r border-border bg-card">
+      <div
+        className={cn(
+          "flex flex-col border-r border-border bg-card transition-all",
+          // On mobile: show full width when no convo selected, hide when convo selected
+          selectedConvo ? "hidden md:flex md:w-[360px]" : "w-full md:w-[360px]",
+        )}
+      >
         {/* Header */}
         <div className="px-4 pt-4 pb-2">
           <h1 className="text-lg font-bold text-foreground">Conversations</h1>
@@ -388,11 +395,25 @@ function Conversations() {
       </div>
 
       {/* ─── Right Panel: Chat Thread ──────────────────────────────────── */}
-      <div className="flex-1 flex flex-col bg-white/[0.02]">
+      <div
+        className={cn(
+          "flex-1 flex flex-col bg-white/[0.02]",
+          // On mobile: hide when no convo selected
+          !selectedConvo && "hidden md:flex",
+        )}
+      >
         {selectedConvo && convoDetail ? (
           <>
             {/* Chat Header */}
             <div className="px-4 py-3 flex items-center gap-3 bg-card border-b border-border">
+              {/* Mobile back button */}
+              <button
+                onClick={() => setSelectedConvo(null)}
+                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground md:hidden shrink-0"
+                aria-label="Back to list"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
               {/* Avatar */}
               <div className="w-10 h-10 rounded-full flex items-center justify-center bg-primary text-primary-foreground font-semibold text-sm">
                 {getInitial(convoDetail.conversation)}
@@ -463,7 +484,7 @@ function Conversations() {
 
             {/* Visitor info bar */}
             {(selectedMeta?.ip || selectedMeta?.userAgent || selectedMeta?.url) && (
-              <div className="px-4 py-1.5 bg-card/80 border-b border-border flex items-center gap-4 text-[11px] text-muted-foreground overflow-x-auto">
+              <div className="px-4 py-1.5 bg-card/80 border-b border-border flex items-center gap-4 text-[11px] text-muted-foreground overflow-x-auto scrollbar-none">
                 {selectedMeta.ip && (
                   <span className="flex items-center gap-1 whitespace-nowrap">
                     <Globe className="w-3 h-3 shrink-0" />
@@ -639,7 +660,7 @@ function Conversations() {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center">
+          <div className="flex-1 hidden md:flex items-center justify-center">
             <div className="text-center space-y-3 opacity-50">
               <MessageSquare className="w-16 h-16 mx-auto text-muted-foreground/40" />
               <p className="text-sm text-muted-foreground">

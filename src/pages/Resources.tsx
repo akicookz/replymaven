@@ -309,9 +309,9 @@ function Resources() {
 
       {/* ─── Company Info ───────────────────────────────────────────────────── */}
       <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-semibold text-foreground">Company Info</h2>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <Button
               variant="outline"
               onClick={() => refreshCompanyContext.mutate()}
@@ -460,7 +460,7 @@ function Resources() {
 
       {/* ─── Resources ──────────────────────────────────────────────────────── */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-semibold text-foreground">Resources</h2>
           <Button onClick={() => setShowForm(!showForm)}>
             <Plus className="w-4 h-4 mr-2" />

@@ -131,9 +131,9 @@ function WidgetConfig() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-foreground">Widget Config</h1>
-        <Button onClick={() => save.mutate()} disabled={save.isPending}>
+        <Button onClick={() => save.mutate()} disabled={save.isPending} className="w-full sm:w-auto">
           <Save className="w-4 h-4 mr-2" />
           {save.isPending ? "Saving..." : "Save Changes"}
         </Button>
@@ -532,7 +532,7 @@ function WidgetConfig() {
             ) : (
               /* ─── Floating Widget Preview ───────────────────── */
               <div
-                className="w-[340px] shadow-xl overflow-hidden flex flex-col"
+                className="w-full max-w-[340px] shadow-xl overflow-hidden flex flex-col"
                 style={{
                   background: "rgba(0,0,0,0.18)",
                   backdropFilter: "blur(24px)",

@@ -120,8 +120,8 @@ function TelegramConfig() {
           </div>
         </div>
 
-        <div className="flex gap-3">
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button onClick={() => save.mutate()} disabled={save.isPending} className="w-full sm:w-auto">
             <Save className="w-4 h-4 mr-2" />
             {save.isPending ? "Saving..." : "Save"}
           </Button>
@@ -129,6 +129,7 @@ function TelegramConfig() {
             variant="outline"
             onClick={() => test.mutate()}
             disabled={test.isPending || !data?.telegramBotToken}
+            className="w-full sm:w-auto"
           >
             <Zap className="w-4 h-4 mr-2" />
             {test.isPending ? "Testing..." : "Test Connection"}

@@ -348,7 +348,7 @@ function Tools() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Tools</h1>
           <p className="text-sm text-muted-foreground mt-1">
@@ -370,7 +370,7 @@ function Tools() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-muted/50 rounded-xl w-fit">
+      <div className="flex gap-1 p-1 bg-muted/50 rounded-xl w-fit overflow-x-auto">
         <button
           onClick={() => setActiveTab("tools")}
           className={cn(
@@ -426,7 +426,7 @@ function Tools() {
 
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Basic Info */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-foreground">
                   Machine Name <span className="text-destructive">*</span>
@@ -542,13 +542,13 @@ function Tools() {
               )}
               <div className="space-y-2">
                 {form.headers.map((header, i) => (
-                  <div key={i} className="flex items-center gap-2">
+                  <div key={i} className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                     <input
                       type="text"
                       value={header.key}
                       onChange={(e) => updateHeader(i, "key", e.target.value)}
                       placeholder="Header name"
-                      className="w-[180px] shrink-0 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono text-xs"
+                      className="w-full sm:w-[180px] shrink-0 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono text-xs"
                     />
                     <input
                       type="text"
@@ -593,7 +593,7 @@ function Tools() {
               <div className="space-y-2">
                 {form.parameters.map((param, i) => (
                   <div key={i} className="rounded-lg border border-border bg-background p-3 space-y-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                       <input
                         type="text"
                         value={param.name}
@@ -652,7 +652,7 @@ function Tools() {
                 <h3 className="text-sm font-semibold text-foreground">Response Mapping</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">Optional. Configure how the API response is processed.</p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Result JSON Path</label>
                   <input
@@ -756,7 +756,7 @@ function Tools() {
                       </div>
                       <p className="text-xs text-muted-foreground truncate">{tool.description}</p>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex items-center gap-1 sm:gap-3 shrink-0">
                       <Switch
                         checked={tool.enabled}
                         onCheckedChange={(checked) => {
@@ -802,7 +802,7 @@ function Tools() {
                   {/* Expanded Details */}
                   {expandedId === tool.id && (
                     <div className="border-t border-border px-4 py-4 space-y-4">
-                      <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                         <div>
                           <p className="text-xs font-medium text-muted-foreground mb-1">Machine Name</p>
                           <code className="text-xs bg-muted px-2 py-1 rounded">{tool.name}</code>
@@ -871,8 +871,8 @@ function Tools() {
                       {tool.parameters.length > 0 ? (
                         <div className="space-y-2">
                           {tool.parameters.map((param) => (
-                            <div key={param.name} className="flex items-center gap-2">
-                              <label className="text-xs font-medium text-muted-foreground w-28 shrink-0">
+                            <div key={param.name} className="flex flex-col sm:flex-row sm:items-center gap-2">
+                              <label className="text-xs font-medium text-muted-foreground w-full sm:w-28 shrink-0">
                                 {param.name}
                                 {param.required && <span className="text-destructive ml-0.5">*</span>}
                               </label>
@@ -987,7 +987,7 @@ function Tools() {
                           <p className="text-xs text-destructive truncate">{exec.errorMessage}</p>
                         )}
                       </div>
-                      <div className="flex items-center gap-4 shrink-0 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-2 sm:gap-4 shrink-0 text-xs text-muted-foreground flex-wrap">
                         {exec.httpStatus && (
                           <span>HTTP {exec.httpStatus}</span>
                         )}

@@ -261,7 +261,7 @@ function Dashboard() {
             No conversations yet. Add knowledge resources and embed the chat widget on your site to get started.
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row gap-3">
           <Link to={`/app/projects/${projectId}/knowledgebase`}>
             <Button variant="outline" className="gap-2">
               <FolderOpen className="w-4 h-4" />
@@ -410,7 +410,7 @@ function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Recent Conversations Table */}
         <div className="lg:col-span-2 bg-card rounded-xl">
-          <div className="flex items-center justify-between px-6 py-4">
+          <div className="flex items-center justify-between px-4 sm:px-6 py-4">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold text-foreground">
                 Recent Conversations
@@ -434,7 +434,7 @@ function Dashboard() {
                 <Link
                   key={convo.id}
                   to={`/app/projects/${projectId}/conversations?id=${convo.id}`}
-                  className="grid grid-cols-[1fr_100px_100px] items-center px-6 py-3 hover:bg-accent/50 transition-colors group"
+                  className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_100px_100px] items-center px-4 sm:px-6 py-3 hover:bg-accent/50 transition-colors group gap-2"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0">
@@ -453,7 +453,7 @@ function Dashboard() {
                   >
                     {STATUS_LABELS[convo.status] ?? convo.status.replace("_", " ")}
                   </span>
-                  <span className="text-[12px] text-muted-foreground text-right">
+                  <span className="hidden sm:block text-[12px] text-muted-foreground text-right">
                     {formatTimeAgo(convo.updatedAt)}
                   </span>
                 </Link>

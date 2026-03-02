@@ -95,9 +95,9 @@ function ProjectSettings() {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-        <Button onClick={() => save.mutate()} disabled={save.isPending}>
+        <Button onClick={() => save.mutate()} disabled={save.isPending} className="w-full sm:w-auto">
           <Save className="w-4 h-4 mr-2" />
           {save.isPending ? "Saving..." : "Save"}
         </Button>
@@ -144,7 +144,7 @@ function ProjectSettings() {
         <h2 className="text-lg font-semibold text-card-foreground">
           Tone of Voice
         </h2>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
           {["professional", "friendly", "casual", "formal", "custom"].map(
             (tone) => (
               <button

@@ -1085,7 +1085,7 @@ function FeatureBentoGrid() {
           </p>
           <h2 className="text-3xl sm:text-[2.75rem] font-light text-foreground tracking-tight leading-tight">
             The complete AI support agent
-            <br />
+            <br className="hidden sm:block" />
             equipped with tools and your docs
           </h2>
         </div>
@@ -1402,7 +1402,7 @@ function FeatureContactForm() {
             </p>
             <h2 className="text-3xl sm:text-[2.5rem] font-light text-foreground tracking-tight leading-tight">
               Capture leads with
-              <br />
+              <br className="hidden sm:block" />
               built-in contact forms
             </h2>
             <p className="text-muted-foreground leading-relaxed max-w-lg">
@@ -1445,7 +1445,7 @@ function FeatureToolCalls() {
             </p>
             <h2 className="text-3xl sm:text-[2.5rem] font-light text-foreground tracking-tight leading-tight">
               Go beyond static answers,
-              <br />
+              <br className="hidden sm:block" />
               resolve issues in real time
             </h2>
             <p className="text-muted-foreground leading-relaxed max-w-lg">
@@ -1504,7 +1504,7 @@ function FeatureAnalytics() {
             </p>
             <h2 className="text-3xl sm:text-[2.5rem] font-light text-foreground tracking-tight leading-tight">
               Track performance,
-              <br />
+              <br className="hidden sm:block" />
               improve over time
             </h2>
             <p className="text-muted-foreground leading-relaxed max-w-lg">
@@ -1547,7 +1547,7 @@ function FeatureDocsIndexing() {
             </p>
             <h2 className="text-3xl sm:text-[2.5rem] font-light text-foreground tracking-tight leading-tight">
               Index your docs,
-              <br />
+              <br className="hidden sm:block" />
               get grounded answers
             </h2>
             <p className="text-muted-foreground leading-relaxed max-w-lg">
@@ -1751,7 +1751,7 @@ function Landing() {
         <nav
           className={cn(
             cardVariants({ variant: "glow-secondary" }),
-            "flex max-w-full items-center gap-1 bg-card/70 backdrop-blur-2xl rounded-full px-2 py-1.5",
+            "flex w-full md:w-auto items-center gap-1 bg-card/70 backdrop-blur-2xl rounded-2xl md:rounded-full px-2 py-1.5",
           )}
         >
           {/* Logo */}
@@ -1788,6 +1788,7 @@ function Landing() {
           </div>
 
           {/* Spacer */}
+          <div className="flex-1 md:hidden" />
           <div className="hidden md:block w-16" />
 
           {/* CTA */}
@@ -1796,7 +1797,7 @@ function Landing() {
             onClick={handleGenericCta}
             className="rounded-full h-9 px-3 sm:px-5 text-[12px] sm:text-[13px] font-medium"
           >
-            <span className="sm:hidden">Try free</span>
+            <span className="sm:hidden">Start Free Trial</span>
             <span className="hidden sm:inline">Try ReplyMaven free</span>
           </Button>
         </nav>
@@ -2035,7 +2036,7 @@ function Landing() {
             </p>
             <h2 className="text-3xl sm:text-[2.75rem] font-light text-foreground tracking-tight leading-tight">
               Powerful AI support agent
-              <br />
+              <br className="hidden sm:block" />
               at unbeatable price
             </h2>
           </div>

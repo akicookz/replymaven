@@ -365,12 +365,12 @@ function ActionsTab({
           className="space-y-3"
         >
           {/* Row 1: Type + Icon */}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Select
               value={newType}
               onValueChange={(val) => setNewType(val as ActionType)}
             >
-              <SelectTrigger className="w-44">
+              <SelectTrigger className="w-full sm:w-44">
                 <SelectValue placeholder="Type" />
               </SelectTrigger>
               <SelectContent>
@@ -414,7 +414,7 @@ function ActionsTab({
             </Select>
 
             <Select value={newIcon} onValueChange={setNewIcon}>
-              <SelectTrigger className="w-28">
+              <SelectTrigger className="w-full sm:w-28">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -431,7 +431,7 @@ function ActionsTab({
           </div>
 
           {/* Row 2: Label + Action */}
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               value={newLabel}
@@ -453,7 +453,7 @@ function ActionsTab({
           </div>
 
           {/* Row 3: Show on home + submit */}
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <Checkbox
                 id="show-on-home"
@@ -969,7 +969,7 @@ function ContactFormTab({
                     }}
                     className="space-y-3 p-3 bg-muted/30 rounded-xl border border-dashed border-border"
                   >
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <Input
                         type="text"
                         value={newLabel}
@@ -983,7 +983,7 @@ function ContactFormTab({
                           setNewType(val as "text" | "textarea")
                         }
                       >
-                        <SelectTrigger className="w-[130px]">
+                        <SelectTrigger className="w-full sm:w-[130px]">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1601,7 +1601,7 @@ function BookingCard({
     >
       <div className="flex items-start justify-between">
         <div className="space-y-2">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
               <CalendarClock className="w-4 h-4 text-primary" />
               {dateStr}
@@ -1615,7 +1615,7 @@ function BookingCard({
             </Badge>
           </div>
 
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
             <span className="flex items-center gap-1">
               <User className="w-3.5 h-3.5" />
               {booking.visitorName}
