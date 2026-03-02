@@ -7,7 +7,6 @@ import {
   FolderOpen,
   Palette,
   Bot,
-  Send,
   Wrench,
   Zap,
   LogOut,
@@ -113,11 +112,6 @@ function Layout() {
           label: "Canned Responses",
           href: `/app/projects/${currentProject.id}/canned-responses`,
           icon: Bot,
-        },
-        {
-          label: "Telegram",
-          href: `/app/projects/${currentProject.id}/telegram`,
-          icon: Send,
         },
         {
           label: "Tools",

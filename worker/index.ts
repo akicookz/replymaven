@@ -116,6 +116,48 @@ function validate<T>(
   return { success: false, error: message };
 }
 
+// ─── Auto-draft canned response helper ────────────────────────────────────────
+async function triggerAutoDraftIfEnabled(opts: {
+  projectId: string;
+  conversationId: string;
+  db: import("drizzle-orm/d1").DrizzleD1Database<Record<string, unknown>>;
+  env: { AI_MODEL: string; GEMINI_API_KEY: string; OPENAI_API_KEY: string };
+  kv: KVNamespace;
+}): Promise<void> {
+  const projectService = new ProjectService(opts.db);
+  const settings = await projectService.getSettings(opts.projectId);
+  if (!settings?.autoCannedDraft) return;
+
+  const chatService = new ChatService(opts.db, opts.kv);
+  const msgs = await chatService.getMessages(opts.conversationId);
+  if (msgs.length < 2) return;
+
+  const aiService = new AiService({
+    model: opts.env.AI_MODEL,
+    geminiApiKey: opts.env.GEMINI_API_KEY,
+    openaiApiKey: opts.env.OPENAI_API_KEY,
+  });
+
+  aiService
+    .generateCannedDraft(
+      msgs.map((m) => ({ role: m.role, content: m.content })),
+    )
+    .then(async (draft) => {
+      if (draft) {
+        const cannedService = new CannedResponseService(opts.db);
+        await cannedService.createDraft(
+          opts.projectId,
+          draft.trigger,
+          draft.response,
+          opts.conversationId,
+        );
+      }
+    })
+    .catch(() => {
+      // Silently ignore auto-draft errors
+    });
+}
+
 // ─── Slug generator ──────────────────────────────────────────────────────────
 function slugify(text: string): string {
   return text
@@ -1028,6 +1070,36 @@ const app = new Hono<HonoAppContext>()
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ booking: true })}\n\n`),
             );
+          }
+
+          // Check if conversation was resolved by the bot
+          if (fullResponse.includes("[RESOLVED]")) {
+            await chatService.updateConversationStatus(
+              conversationId,
+              project.id,
+              "closed",
+            );
+
+            fullResponse = fullResponse.replace(
+              "[RESOLVED]",
+              "Glad I could help! Feel free to reach out anytime if you have more questions.",
+            );
+
+            // Send resolved event to widget
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ resolved: true })}\n\n`,
+              ),
+            );
+
+            // Auto-draft canned response in background
+            triggerAutoDraftIfEnabled({
+              projectId: project.id,
+              conversationId,
+              db,
+              env: c.env,
+              kv: c.env.CONVERSATIONS_CACHE,
+            });
           }
 
           // Resolve source references from AI Search filenames
@@ -3492,37 +3564,14 @@ const app = new Hono<HonoAppContext>()
       "closed",
     );
 
-    // Auto-draft canned response if enabled
-    const settings = await projectService.getSettings(project.id);
-    if (settings?.autoCannedDraft) {
-      // Run in background -- don't block the response
-      const msgs = await chatService.getMessages(conversation.id);
-      if (msgs.length >= 2) {
-        const aiService = new AiService({
-          model: c.env.AI_MODEL,
-          geminiApiKey: c.env.GEMINI_API_KEY,
-          openaiApiKey: c.env.OPENAI_API_KEY,
-        });
-        aiService
-          .generateCannedDraft(
-            msgs.map((m) => ({ role: m.role, content: m.content })),
-          )
-          .then(async (draft) => {
-            if (draft) {
-              const cannedService = new CannedResponseService(db);
-              await cannedService.createDraft(
-                project.id,
-                draft.trigger,
-                draft.response,
-                conversation.id,
-              );
-            }
-          })
-          .catch(() => {
-            // Silently ignore auto-draft errors
-          });
-      }
-    }
+    // Auto-draft canned response in background
+    triggerAutoDraftIfEnabled({
+      projectId: project.id,
+      conversationId: conversation.id,
+      db,
+      env: c.env,
+      kv: c.env.CONVERSATIONS_CACHE,
+    });
 
     return c.json({ ok: true });
   })

@@ -15,7 +15,6 @@ import Resources from "./pages/Resources";
 import WidgetConfig from "./pages/WidgetConfig";
 import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
-import TelegramConfig from "./pages/TelegramConfig";
 import Tools from "./pages/Tools";
 import Billing from "./pages/Billing";
 import Members from "./pages/Members";
@@ -127,10 +126,6 @@ function App() {
         <Route
           path="projects/:projectId/canned-responses"
           element={<CannedResponses />}
-        />
-        <Route
-          path="projects/:projectId/telegram"
-          element={<TelegramConfig />}
         />
         <Route
           path="projects/:projectId/tools"

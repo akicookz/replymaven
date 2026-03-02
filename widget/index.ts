@@ -4021,6 +4021,7 @@
         let botMessageEl: HTMLElement | null = null;
         let handoffDetected = false;
         let handoffEmail: string | null = null;
+        let resolvedDetected = false;
         let sseBuffer = "";
 
         // Timeout to prevent the stream from hanging forever (90s)
@@ -4068,6 +4069,17 @@
                   if (bookingConfig?.enabled) {
                     showBookingScreen();
                   }
+                  continue;
+                }
+
+                if (data.resolved) {
+                  resolvedDetected = true;
+                  // Remove any bot bubble that was showing the [RESOLVED] token
+                  if (botMessageEl) {
+                    botMessageEl.closest(".rm-message-row")?.remove();
+                    botMessageEl = null;
+                  }
+                  hideTyping();
                   continue;
                 }
 
@@ -4137,6 +4149,18 @@
                     continue;
                   }
 
+                  // Client-side filter: if [RESOLVED] appears, mark as resolved
+                  if (botMessage.includes("[RESOLVED]")) {
+                    resolvedDetected = true;
+                    if (botMessageEl) {
+                      botMessageEl.closest(".rm-message-row")?.remove();
+                      botMessageEl = null;
+                    }
+                    hideTyping();
+                    botMessage = "";
+                    continue;
+                  }
+
                   // Hide typing on first text chunk, show the bot bubble
                   if (!botMessageEl) {
                     hideTyping();
@@ -4167,6 +4191,18 @@
                   if (handoffDetected) {
                     showHandoffCard(handoffEmail);
                   }
+                  // Handle resolved -- close the conversation
+                  if (resolvedDetected) {
+                    conversationStatus = "closed";
+                    // Show the closing message as a final bot message
+                    addMessageToUI(
+                      "bot",
+                      "Glad I could help! Feel free to reach out anytime if you have more questions.",
+                    );
+                    scrollToBottom();
+                    stopPolling();
+                    clearPersistedConversation();
+                  }
                 }
 
                 if (data.error) {
@@ -4186,6 +4222,17 @@
         // Edge case: stream ended without a done event but handoff was detected
         if (handoffDetected && !document.querySelector(".rm-handoff-card")) {
           showHandoffCard(handoffEmail);
+        }
+        // Edge case: stream ended without a done event but resolved was detected
+        if (resolvedDetected && conversationStatus !== "closed") {
+          conversationStatus = "closed";
+          addMessageToUI(
+            "bot",
+            "Glad I could help! Feel free to reach out anytime if you have more questions.",
+          );
+          scrollToBottom();
+          stopPolling();
+          clearPersistedConversation();
         }
         clearTimeout(streamTimeout);
       } catch {

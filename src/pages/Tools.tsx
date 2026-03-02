@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -93,6 +94,13 @@ const emptyForm: ToolFormData = {
   timeout: 10000,
 };
 
+// ─── Telegram Preset Types ────────────────────────────────────────────────────
+
+interface TelegramData {
+  telegramBotToken: string | null;
+  telegramChatId: string | null;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 function Tools() {
@@ -110,6 +118,15 @@ function Tools() {
   const [testParams, setTestParams] = useState<Record<string, string>>({});
   const [testResult, setTestResult] = useState<{ success: boolean; data: unknown } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Telegram preset state
+  const [telegramExpanded, setTelegramExpanded] = useState(false);
+  const [telegramEditing, setTelegramEditing] = useState(false);
+  const [telegramTesting, setTelegramTesting] = useState(false);
+  const [telegramBotToken, setTelegramBotToken] = useState("");
+  const [telegramChatId, setTelegramChatId] = useState("");
+  const [telegramSaveStatus, setTelegramSaveStatus] = useState<"idle" | "success" | "error">("idle");
+  const [telegramTestResult, setTelegramTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // ─── Queries ──────────────────────────────────────────────────────────────
 
@@ -135,6 +152,19 @@ function Tools() {
     },
     enabled: activeTab === "logs",
   });
+
+  // ─── Telegram Preset Query ────────────────────────────────────────────────
+
+  const { data: telegramData } = useQuery<TelegramData>({
+    queryKey: ["telegram-config", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/telegram`);
+      if (!res.ok) throw new Error("Failed to fetch telegram config");
+      return res.json();
+    },
+  });
+
+  const telegramConfigured = !!(telegramData?.telegramBotToken && telegramData?.telegramChatId);
 
   // ─── Mutations ────────────────────────────────────────────────────────────
 
@@ -246,6 +276,56 @@ function Tools() {
     },
     onError: (err: Error) => {
       setTestResult({ success: false, data: err.message });
+    },
+  });
+
+  // ─── Telegram Mutations ────────────────────────────────────────────────────
+
+  const saveTelegram = useMutation({
+    mutationFn: async () => {
+      const body: Record<string, string> = {};
+      if (telegramBotToken) body.telegramBotToken = telegramBotToken;
+      if (telegramChatId) body.telegramChatId = telegramChatId;
+      const res = await fetch(`/api/projects/${projectId}/telegram`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed to save" }));
+        throw new Error((err as { error?: string }).error ?? "Failed to save");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      setTelegramSaveStatus("success");
+      setTelegramBotToken("");
+      setTelegramEditing(false);
+      queryClient.invalidateQueries({ queryKey: ["telegram-config", projectId] });
+      setTimeout(() => setTelegramSaveStatus("idle"), 3000);
+    },
+    onError: () => {
+      setTelegramSaveStatus("error");
+      setTimeout(() => setTelegramSaveStatus("idle"), 3000);
+    },
+  });
+
+  const testTelegram = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/telegram/test`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { error?: string }).error ?? "Test failed");
+      return data;
+    },
+    onSuccess: () => {
+      setTelegramTestResult({ success: true, message: "Test message sent successfully!" });
+      setTimeout(() => setTelegramTestResult(null), 5000);
+    },
+    onError: (err: Error) => {
+      setTelegramTestResult({ success: false, message: err.message });
+      setTimeout(() => setTelegramTestResult(null), 5000);
     },
   });
 
@@ -726,6 +806,247 @@ function Tools() {
           {/* Tool List */}
           {!isLoading && !isError && (
             <div className="space-y-2">
+              {/* ─── Telegram Preset Tool ──────────────────────────────────── */}
+              <div
+                className={cn(
+                  "bg-white/[0.04] backdrop-blur-xl rounded-xl border overflow-hidden",
+                  telegramConfigured ? "border-border" : "border-dashed border-border",
+                )}
+              >
+                {/* Telegram Row */}
+                <div
+                  className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
+                  onClick={() => {
+                    if (!telegramConfigured && !telegramEditing) {
+                      setTelegramEditing(true);
+                      setTelegramExpanded(true);
+                    } else {
+                      setTelegramExpanded(!telegramExpanded);
+                    }
+                  }}
+                >
+                  <div className="flex items-center gap-2 shrink-0">
+                    {telegramExpanded ? (
+                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                    )}
+                    <div className={cn(
+                      "w-8 h-8 rounded-lg flex items-center justify-center",
+                      telegramConfigured ? "bg-[#229ED9]/15" : "bg-muted",
+                    )}>
+                      <Send className={cn(
+                        "w-4 h-4",
+                        telegramConfigured ? "text-[#229ED9]" : "text-muted-foreground",
+                      )} />
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        Telegram Handoff
+                      </p>
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                        Preset
+                      </Badge>
+                      {!telegramConfigured && (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-warning border-warning/30">
+                          Not configured
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {telegramConfigured
+                        ? "Live agent handoff via Telegram when the bot cannot answer"
+                        : "Set up Telegram to receive live handoff notifications"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 sm:gap-3 shrink-0">
+                    {telegramConfigured && (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTelegramEditing(true);
+                            setTelegramExpanded(true);
+                          }}
+                          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
+                          title="Edit"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTelegramTesting(true);
+                            setTelegramExpanded(true);
+                            setTelegramTestResult(null);
+                          }}
+                          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
+                          title="Test"
+                        >
+                          <Play className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Telegram Expanded Details (configured, not editing) */}
+                {telegramExpanded && telegramConfigured && !telegramEditing && !telegramTesting && (
+                  <div className="border-t border-border px-4 py-4 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground mb-1">Bot Token</p>
+                        <code className="text-xs bg-muted px-2 py-1 rounded">
+                          {telegramData?.telegramBotToken ?? "Not set"}
+                        </code>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground mb-1">Chat ID</p>
+                        <code className="text-xs bg-muted px-2 py-1 rounded">
+                          {telegramData?.telegramChatId ?? "Not set"}
+                        </code>
+                      </div>
+                    </div>
+                    {telegramSaveStatus === "success" && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-success/10 text-success text-sm">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        Settings saved successfully.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Telegram Edit Form */}
+                {telegramExpanded && telegramEditing && (
+                  <div className="border-t border-border px-4 py-4 space-y-4 bg-muted/20">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-foreground">
+                        {telegramConfigured ? "Edit Telegram Configuration" : "Set Up Telegram Handoff"}
+                      </h4>
+                      <button
+                        onClick={() => {
+                          setTelegramEditing(false);
+                          if (!telegramConfigured) setTelegramExpanded(false);
+                          setTelegramBotToken("");
+                          setTelegramChatId("");
+                        }}
+                        className="p-1 rounded-lg hover:bg-muted text-muted-foreground"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      When the bot cannot answer a question or the visitor requests a human, the conversation will be forwarded to your Telegram.
+                    </p>
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          Bot Token <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          type="password"
+                          value={telegramBotToken}
+                          onChange={(e) => setTelegramBotToken(e.target.value)}
+                          placeholder={telegramConfigured ? "Enter new token to update" : "Paste your bot token from @BotFather"}
+                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          Chat ID <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={telegramChatId}
+                          onChange={(e) => setTelegramChatId(e.target.value)}
+                          placeholder={telegramData?.telegramChatId ?? "Your Telegram chat or group ID"}
+                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Send /start to your bot, then use @userinfobot to find your chat ID.
+                        </p>
+                      </div>
+                    </div>
+                    {telegramSaveStatus === "error" && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        Failed to save Telegram settings.
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => saveTelegram.mutate()}
+                        disabled={saveTelegram.isPending || (!telegramBotToken && !telegramChatId)}
+                      >
+                        {saveTelegram.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+                        {telegramConfigured ? "Update" : "Save"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setTelegramEditing(false);
+                          if (!telegramConfigured) setTelegramExpanded(false);
+                          setTelegramBotToken("");
+                          setTelegramChatId("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Telegram Test Panel */}
+                {telegramExpanded && telegramTesting && telegramConfigured && (
+                  <div className="border-t border-border px-4 py-4 space-y-3 bg-muted/20">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-foreground">Test Connection</h4>
+                      <button
+                        onClick={() => {
+                          setTelegramTesting(false);
+                          setTelegramTestResult(null);
+                        }}
+                        className="p-1 rounded-lg hover:bg-muted text-muted-foreground"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Send a test message to your configured Telegram chat to verify the connection.
+                    </p>
+                    <Button
+                      size="sm"
+                      onClick={() => testTelegram.mutate()}
+                      disabled={testTelegram.isPending}
+                    >
+                      {testTelegram.isPending ? (
+                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <Play className="w-3.5 h-3.5 mr-1.5" />
+                      )}
+                      Send Test Message
+                    </Button>
+                    {telegramTestResult && (
+                      <div
+                        className={cn(
+                          "rounded-lg p-3 text-xs max-h-48 overflow-auto",
+                          telegramTestResult.success
+                            ? "bg-success/10 border border-success/25 text-success"
+                            : "bg-destructive/10 border border-destructive/25 text-destructive",
+                        )}
+                      >
+                        {telegramTestResult.message}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ─── Custom Tools ──────────────────────────────────────────── */}
               {tools?.map((tool) => (
                 <div
                   key={tool.id}
