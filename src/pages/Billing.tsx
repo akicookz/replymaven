@@ -128,7 +128,7 @@ function Billing() {
               Choose a plan to get started with ReplyMaven.
             </p>
           </div>
-          <Button onClick={() => window.location.href = "/app/onboarding?step=plan"}>
+          <Button onClick={() => window.location.href = "/app/onboarding?step=4"}>
             Choose a Plan
           </Button>
         </div>

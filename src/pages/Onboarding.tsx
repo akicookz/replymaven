@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Globe,
@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ColorPicker } from "@/components/ui/color-picker";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -964,7 +965,7 @@ function Step5({
           plan,
           interval,
           successUrl: `${window.location.origin}/app/onboarding?checkout=success`,
-          cancelUrl: `${window.location.origin}/app/onboarding?step=plan`,
+          cancelUrl: `${window.location.origin}/app/onboarding?step=4`,
         }),
       });
 
@@ -1073,6 +1074,73 @@ function ProgressBar({ currentStep }: { currentStep: number }) {
   );
 }
 
+// ─── Onboarding Skeleton ──────────────────────────────────────────────────────
+
+function OnboardingSkeleton() {
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* Header */}
+      <header className="px-6 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center">
+              <MessageSquare className="w-4 h-4 text-primary-foreground" />
+            </div>
+            <span className="font-bold text-foreground">ReplyMaven</span>
+          </div>
+          {/* Skeleton progress bar */}
+          <div className="flex items-center gap-2">
+            {STEPS.map((s, i) => (
+              <div key={s.label} className="flex items-center gap-2">
+                <Skeleton className="h-7 w-20 rounded-full" />
+                {i < STEPS.length - 1 && (
+                  <div className="w-6 h-px bg-border" />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      {/* Content skeleton */}
+      <main className="flex-1 flex items-start justify-center px-6 py-12">
+        <div className="w-full max-w-2xl space-y-8">
+          {/* Title area */}
+          <div className="space-y-3">
+            <Skeleton className="h-8 w-64" />
+            <Skeleton className="h-5 w-96" />
+          </div>
+
+          {/* Form fields */}
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-10 w-full rounded-lg" />
+            </div>
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-10 w-full rounded-lg" />
+            </div>
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-10 w-full rounded-lg" />
+            </div>
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-10 w-full rounded-lg" />
+            </div>
+          </div>
+
+          {/* Button */}
+          <div className="flex justify-end">
+            <Skeleton className="h-10 w-32 rounded-lg" />
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 // ─── Main Onboarding Component ────────────────────────────────────────────────
 
 interface ExistingProject {
@@ -1083,11 +1151,37 @@ interface ExistingProject {
 }
 
 function Onboarding() {
-  const [step, setStep] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectSlug, setProjectSlug] = useState<string | null>(null);
   const [step1Error, setStep1Error] = useState<string | null>(null);
   const [autoCheckoutPending, setAutoCheckoutPending] = useState(false);
+
+  // ─── URL-based step tracking ──────────────────────────────────────────────
+  const rawStepParam = searchParams.get("step");
+  const parsedStep = rawStepParam !== null ? parseInt(rawStepParam, 10) : null;
+  // step is null until we've determined the correct one from data
+  const step = parsedStep !== null && !isNaN(parsedStep) && parsedStep >= 0 && parsedStep <= 4
+    ? parsedStep
+    : null;
+  // Track whether step has been resolved (either from URL or from data)
+  const [stepResolved, setStepResolved] = useState(step !== null);
+
+  const setStep = useCallback(
+    (newStep: number) => {
+      setStepResolved(true);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("step", String(newStep));
+          next.delete("checkout");
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   // Auto-fire Stripe checkout if landing page passed plan + interval params
   useEffect(() => {
@@ -1131,7 +1225,7 @@ function Onboarding() {
   }, []);
 
   // Check for existing projects to resume incomplete onboarding
-  const { data: existingProjects } = useQuery<ExistingProject[]>({
+  const { data: existingProjects, isPending: projectsLoading } = useQuery<ExistingProject[]>({
     queryKey: ["projects"],
     queryFn: async () => {
       const res = await fetch("/api/projects");
@@ -1140,27 +1234,41 @@ function Onboarding() {
     },
   });
 
+  // Determine the correct step once projects data loads
   useEffect(() => {
     if (!existingProjects) return;
+    // If step is already resolved from the URL, only handle project resumption
+    if (stepResolved) {
+      // Still need to populate projectId/slug for incomplete projects
+      const incomplete = existingProjects.find((p) => !p.onboarded);
+      if (incomplete && !projectId) {
+        setProjectId(incomplete.id);
+        setProjectSlug(incomplete.slug);
+      } else if (existingProjects.length > 0 && !projectId && step === 4) {
+        const latestProject = existingProjects[existingProjects.length - 1];
+        if (latestProject) {
+          setProjectId(latestProject.id);
+          setProjectSlug(latestProject.slug);
+        }
+      }
+      return;
+    }
 
-    // Check URL params for step overrides
-    const params = new URLSearchParams(window.location.search);
-    const stepParam = params.get("step");
-    const checkoutParam = params.get("checkout");
+    // Step not yet in URL — determine it from data
+    const checkoutParam = searchParams.get("checkout");
 
-    // If there's an incomplete project, resume it at step 1
+    // If there's an incomplete project, resume it
     const incomplete = existingProjects.find((p) => !p.onboarded);
     if (incomplete && !projectId) {
       setProjectId(incomplete.id);
       setProjectSlug(incomplete.slug);
 
-      // Return from Stripe checkout or explicit step=plan → go to plan step
-      if (stepParam === "plan" || checkoutParam === "success") {
+      if (checkoutParam === "success") {
         setStep(4);
       } else {
         setStep(1);
       }
-    } else if (existingProjects.length > 0 && (stepParam === "plan" || checkoutParam === "success")) {
+    } else if (existingProjects.length > 0 && checkoutParam === "success") {
       // User has onboarded projects but came back from Stripe
       const latestProject = existingProjects[existingProjects.length - 1];
       if (latestProject) {
@@ -1168,8 +1276,11 @@ function Onboarding() {
         setProjectSlug(latestProject.slug);
         setStep(4);
       }
+    } else {
+      // No existing projects, fresh onboarding
+      setStep(0);
     }
-  }, [existingProjects, projectId]);
+  }, [existingProjects, projectId, stepResolved, step, searchParams, setStep]);
 
   // Step 1 state
   const [step1Data, setStep1Data] = useState<Step1Data>({
@@ -1281,6 +1392,11 @@ function Onboarding() {
         </div>
       </div>
     );
+  }
+
+  // Show skeleton until projects data loads and step is determined
+  if (projectsLoading || step === null) {
+    return <OnboardingSkeleton />;
   }
 
   return (
