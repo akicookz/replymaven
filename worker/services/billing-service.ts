@@ -338,8 +338,11 @@ export class BillingService {
 
   // ─── Webhook Handling ─────────────────────────────────────────────────────
 
-  constructEvent(rawBody: string, signature: string): Stripe.Event {
-    return this.stripe.webhooks.constructEvent(
+  async constructEvent(
+    rawBody: string,
+    signature: string,
+  ): Promise<Stripe.Event> {
+    return this.stripe.webhooks.constructEventAsync(
       rawBody,
       signature,
       this.env.STRIPE_WEBHOOK_SECRET,

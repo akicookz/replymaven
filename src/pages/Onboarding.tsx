@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Globe,
@@ -935,7 +935,6 @@ function Step5({
 }: {
   onBack: () => void;
 }) {
-  const navigate = useNavigate();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const [billingInterval, setBillingInterval] = useState<"monthly" | "annual">("annual");
 
@@ -948,11 +947,10 @@ function Step5({
       // Clean up URL params
       const url = new URL(window.location.href);
       url.searchParams.delete("checkout");
-      window.history.replaceState({}, "", url.pathname);
-      // Redirect to dashboard
-      navigate("/app");
+      const nextUrl = `${url.pathname}${url.searchParams.toString() ? `?${url.searchParams.toString()}` : ""}`;
+      window.history.replaceState({}, "", nextUrl);
     }
-  }, [checkoutSuccess, navigate]);
+  }, [checkoutSuccess]);
 
   async function handleSelectPlan(plan: "starter" | "standard" | "business", interval: "monthly" | "annual") {
     setLoadingPlan(plan);
@@ -964,7 +962,7 @@ function Step5({
         body: JSON.stringify({
           plan,
           interval,
-          successUrl: `${window.location.origin}/app/onboarding?checkout=success`,
+          successUrl: `${window.location.origin}/app/onboarding?step=4&checkout=success`,
           cancelUrl: `${window.location.origin}/app/onboarding?step=4`,
         }),
       });
@@ -993,9 +991,8 @@ function Step5({
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-foreground">Welcome aboard!</h2>
             <p className="text-sm text-muted-foreground">
-              Your trial has started. Redirecting to dashboard...
+              Your trial has started. Continue to finish onboarding.
             </p>
-            <Loader2 className="w-4 h-4 animate-spin text-muted-foreground mt-2" />
           </div>
         </div>
       </div>

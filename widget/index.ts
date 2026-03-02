@@ -350,7 +350,6 @@
       z-index: 2;
       margin-bottom: -24px;
       background: rgba(var(--rm-primary-rgb, 37,99,235), 0.3);
-      border-bottom: 1px solid rgba(255,255,255,0.06);
     }
     .rm-header-avatar {
       width: 36px;
@@ -1196,7 +1195,6 @@
     .rm-form-view > .rm-header {
       margin-bottom: 0;
       background: rgba(var(--rm-primary-rgb, 37,99,235), 0.3);
-      border-bottom: 1px solid rgba(255,255,255,0.06);
     }
     .rm-form-body {
       flex: 1;
@@ -1397,7 +1395,6 @@
     .rm-booking-view > .rm-header {
       margin-bottom: 0;
       background: rgba(var(--rm-primary-rgb, 37,99,235), 0.3);
-      border-bottom: 1px solid rgba(255,255,255,0.06);
     }
     .rm-booking-scroll {
       flex: 1;

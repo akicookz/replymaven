@@ -184,7 +184,10 @@ async function buildContextSourceFromResources(
         section = `## PDF Resource: ${resource.title}\n${resource.content}`;
       }
     } else if (resource.type === "webpage") {
-      const pages = await resourceService.getCrawledPages(resource.id, projectId);
+      const pages = await resourceService.getCrawledPages(
+        resource.id,
+        projectId,
+      );
       const crawledPages = pages
         .filter((page) => page.status === "crawled")
         .slice(0, CONTEXT_MAX_WEB_PAGES_PER_RESOURCE);
@@ -235,7 +238,9 @@ async function fetchWebsiteMarkdownWithBrowserApi(
         gotoOptions: {
           waitUntil: "networkidle2",
         },
-        rejectRequestPattern: ["/^.*\\.(jpg|jpeg|png|gif|svg|webp|ico|bmp|tiff|mp4|webm|ogg|mp3|wav|woff2?|ttf|eot|otf|css)$/i"],
+        rejectRequestPattern: [
+          "/^.*\\.(jpg|jpeg|png|gif|svg|webp|ico|bmp|tiff|mp4|webm|ogg|mp3|wav|woff2?|ttf|eot|otf|css)$/i",
+        ],
       }),
     });
 
@@ -292,7 +297,9 @@ function prepareRagChunks(
   const droppedCrossTenant = normalized.length - tenantChunks.length;
 
   // Prefer markdown sources to avoid duplicate/competing PDF raw extraction chunks.
-  const nonPdfChunks = tenantChunks.filter((chunk) => !chunk.key.endsWith(".pdf"));
+  const nonPdfChunks = tenantChunks.filter(
+    (chunk) => !chunk.key.endsWith(".pdf"),
+  );
   const preferredChunks = nonPdfChunks.length > 0 ? nonPdfChunks : tenantChunks;
   preferredChunks.sort((a, b) => b.score - a.score);
 
@@ -607,20 +614,29 @@ const app = new Hono<HonoAppContext>()
 
     // Check subscription + message limits for the project owner
     const billingService = new BillingService(db, c.env);
-    const ownerSub = await billingService.getSubscriptionByUserId(project.userId);
+    const ownerSub = await billingService.getSubscriptionByUserId(
+      project.userId,
+    );
     if (!ownerSub || !billingService.isSubscriptionActive(ownerSub)) {
-      return c.json({
-        error: "This chatbot is currently unavailable. Please contact the site owner.",
-        code: "subscription_inactive",
-      }, 503);
+      return c.json(
+        {
+          error:
+            "This chatbot is currently unavailable. Please contact the site owner.",
+          code: "subscription_inactive",
+        },
+        503,
+      );
     }
 
     const messageCheck = await billingService.checkMessageLimit(project.userId);
     if (!messageCheck.allowed) {
-      return c.json({
-        error: "Message limit reached. Please contact the site owner.",
-        code: "message_limit_reached",
-      }, 429);
+      return c.json(
+        {
+          error: "Message limit reached. Please contact the site owner.",
+          code: "message_limit_reached",
+        },
+        429,
+      );
     }
 
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
@@ -701,31 +717,36 @@ const app = new Hono<HonoAppContext>()
     let ragContext = "";
     const ragFilenames: string[] = [];
     try {
-      const searchResults = await c.env.AI.aiSearch().get("supportbot").search({
-        messages: [{ role: "user", content: searchQuery }],
-        ai_search_options: {
-          retrieval: {
-            retrieval_type: "hybrid",
-            filters: {
-              type: "eq",
-              key: "folder",
-              value: `${project.id}/`,
+      const searchResults = await c.env.AI.aiSearch()
+        .get("supportbot")
+        .search({
+          messages: [{ role: "user", content: searchQuery }],
+          ai_search_options: {
+            retrieval: {
+              retrieval_type: "hybrid",
+              filters: {
+                type: "eq",
+                key: "folder",
+                value: `${project.id}/`,
+              },
+              max_num_results: 12,
+              match_threshold: 0.2,
             },
-            max_num_results: 12,
-            match_threshold: 0.2,
+            query_rewrite: {
+              // Avoid double rewriting in multi-turn chats since we already reformulate.
+              enabled: !isMultiTurnConversation,
+            },
+            reranking: {
+              enabled: true,
+              model: "@cf/baai/bge-reranker-base",
+            },
           },
-          query_rewrite: {
-            // Avoid double rewriting in multi-turn chats since we already reformulate.
-            enabled: !isMultiTurnConversation,
-          },
-          reranking: {
-            enabled: true,
-            model: "@cf/baai/bge-reranker-base",
-          },
-        },
-      });
+        });
 
-      const prepared = prepareRagChunks(searchResults?.chunks ?? [], project.id);
+      const prepared = prepareRagChunks(
+        searchResults?.chunks ?? [],
+        project.id,
+      );
       if (prepared.droppedCrossTenant > 0) {
         console.warn(
           `Dropped ${prepared.droppedCrossTenant} cross-tenant retrieval chunks for project ${project.id}`,
@@ -1421,7 +1442,7 @@ const app = new Hono<HonoAppContext>()
     const billingService = new BillingService(db, c.env);
 
     try {
-      const event = billingService.constructEvent(rawBody, signature);
+      const event = await billingService.constructEvent(rawBody, signature);
       await billingService.handleWebhookEvent(event);
       return c.json({ received: true });
     } catch (err) {
@@ -1453,15 +1474,21 @@ const app = new Hono<HonoAppContext>()
     // Resolve subscription + team membership for authenticated users
     if (session?.user) {
       const teamService = new TeamService(db);
-      const effectiveUserId = await teamService.getEffectiveUserId(session.user.id);
+      const effectiveUserId = await teamService.getEffectiveUserId(
+        session.user.id,
+      );
       c.set("effectiveUserId", effectiveUserId);
 
       const billingService = new BillingService(db, c.env);
-      const subscription = await billingService.getSubscriptionByUserId(effectiveUserId);
+      const subscription =
+        await billingService.getSubscriptionByUserId(effectiveUserId);
       c.set("subscription", subscription);
 
       if (subscription) {
-        c.set("planLimits", BillingService.getPlanLimits(subscription.plan as Plan));
+        c.set(
+          "planLimits",
+          BillingService.getPlanLimits(subscription.plan as Plan),
+        );
       }
     }
 
@@ -1768,8 +1795,11 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const billingService = new BillingService(db, c.env);
 
-    const body = await c.req.json().catch(() => ({})) as { returnUrl?: string };
-    const returnUrl = body.returnUrl || `${c.env.BETTER_AUTH_URL}/app/account/billing`;
+    const body = (await c.req.json().catch(() => ({}))) as {
+      returnUrl?: string;
+    };
+    const returnUrl =
+      body.returnUrl || `${c.env.BETTER_AUTH_URL}/app/account/billing`;
 
     try {
       const portalSession = await billingService.createPortalSession(
@@ -1793,7 +1823,8 @@ const app = new Hono<HonoAppContext>()
     const billingService = new BillingService(db, c.env);
     const teamService = new TeamService(db);
 
-    const subscription = await billingService.getSubscriptionByUserId(effectiveUserId);
+    const subscription =
+      await billingService.getSubscriptionByUserId(effectiveUserId);
     const currentUsage = await billingService.getUsage(effectiveUserId);
     const seatCount = await teamService.getSeatCount(effectiveUserId);
     const membership = await teamService.getTeamMembership(user.id);
@@ -1860,7 +1891,10 @@ const app = new Hono<HonoAppContext>()
     const teamService = new TeamService(db);
     const membership = await teamService.getTeamMembership(user.id);
     if (membership && membership.role === "member") {
-      return c.json({ error: "Only owners and admins can invite members" }, 403);
+      return c.json(
+        { error: "Only owners and admins can invite members" },
+        403,
+      );
     }
 
     const body = await c.req.json();
@@ -1877,10 +1911,13 @@ const app = new Hono<HonoAppContext>()
     const limits = BillingService.getPlanLimits(subscription.plan as Plan);
     const seatCount = await teamService.getSeatCount(effectiveUserId);
     if (seatCount >= limits.maxSeats) {
-      return c.json({
-        error: "Seat limit reached. Upgrade your plan for more seats.",
-        code: "seat_limit_reached",
-      }, 403);
+      return c.json(
+        {
+          error: "Seat limit reached. Upgrade your plan for more seats.",
+          code: "seat_limit_reached",
+        },
+        403,
+      );
     }
 
     try {
@@ -1891,7 +1928,8 @@ const app = new Hono<HonoAppContext>()
       );
       return c.json(member);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to invite member";
+      const message =
+        err instanceof Error ? err.message : "Failed to invite member";
       return c.json({ error: message }, 400);
     }
   })
@@ -1909,7 +1947,8 @@ const app = new Hono<HonoAppContext>()
       await teamService.acceptInvite(inviteId, user.id, user.email);
       return c.json({ ok: true });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to accept invite";
+      const message =
+        err instanceof Error ? err.message : "Failed to accept invite";
       return c.json({ error: message }, 400);
     }
   })
@@ -1939,7 +1978,8 @@ const app = new Hono<HonoAppContext>()
       );
       return c.json(member);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to update role";
+      const message =
+        err instanceof Error ? err.message : "Failed to update role";
       return c.json({ error: message }, 400);
     }
   })
@@ -1954,7 +1994,10 @@ const app = new Hono<HonoAppContext>()
     const teamService = new TeamService(db);
     const membership = await teamService.getTeamMembership(user.id);
     if (membership && membership.role === "member") {
-      return c.json({ error: "Only owners and admins can remove members" }, 403);
+      return c.json(
+        { error: "Only owners and admins can remove members" },
+        403,
+      );
     }
 
     const effectiveUserId = c.get("effectiveUserId") ?? user.id;
@@ -1963,7 +2006,8 @@ const app = new Hono<HonoAppContext>()
       await teamService.revokeMember(effectiveUserId, c.req.param("memberId"));
       return c.json({ ok: true });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to remove member";
+      const message =
+        err instanceof Error ? err.message : "Failed to remove member";
       return c.json({ error: message }, 400);
     }
   })
@@ -2014,12 +2058,16 @@ const app = new Hono<HonoAppContext>()
     const effectiveUserId = c.get("effectiveUserId") ?? user.id;
     const db = c.get("db");
     const billingService = new BillingService(db, c.env);
-    const projectCheck = await billingService.checkProjectLimit(effectiveUserId);
+    const projectCheck =
+      await billingService.checkProjectLimit(effectiveUserId);
     if (!projectCheck.allowed) {
-      return c.json({
-        error: `Project limit reached (${projectCheck.current}/${projectCheck.max}). Upgrade your plan.`,
-        code: "project_limit_reached",
-      }, 403);
+      return c.json(
+        {
+          error: `Project limit reached (${projectCheck.current}/${projectCheck.max}). Upgrade your plan.`,
+          code: "project_limit_reached",
+        },
+        403,
+      );
     }
 
     const body = await c.req.json();
@@ -2099,11 +2147,18 @@ const app = new Hono<HonoAppContext>()
 
     // Feature gate: custom tone
     const planLimits = c.get("planLimits");
-    if (parsed.data.toneOfVoice === "custom" && planLimits && !planLimits.customTone) {
-      return c.json({
-        error: "Custom tone is available on Pro and Business plans.",
-        code: "feature_not_available",
-      }, 403);
+    if (
+      parsed.data.toneOfVoice === "custom" &&
+      planLimits &&
+      !planLimits.customTone
+    ) {
+      return c.json(
+        {
+          error: "Custom tone is available on Pro and Business plans.",
+          code: "feature_not_available",
+        },
+        403,
+      );
     }
 
     const db = c.get("db");
@@ -2178,9 +2233,8 @@ const app = new Hono<HonoAppContext>()
         contextSource = markdown;
       }
 
-      const context = await aiService.generateStructuredCompanyContext(
-        contextSource,
-      );
+      const context =
+        await aiService.generateStructuredCompanyContext(contextSource);
       if (!context) {
         return c.json({ error: "Failed to generate company context" }, 500);
       }
@@ -2222,10 +2276,13 @@ const app = new Hono<HonoAppContext>()
     // Feature gate: custom CSS
     const planLimits = c.get("planLimits");
     if (parsed.data.customCss && planLimits && !planLimits.customCss) {
-      return c.json({
-        error: "Custom CSS is available on the Business plan.",
-        code: "feature_not_available",
-      }, 403);
+      return c.json(
+        {
+          error: "Custom CSS is available on the Business plan.",
+          code: "feature_not_available",
+        },
+        403,
+      );
     }
 
     const db = c.get("db");
@@ -2398,10 +2455,13 @@ const app = new Hono<HonoAppContext>()
     // Feature gate: tools
     const planLimits = c.get("planLimits");
     if (planLimits && !planLimits.tools) {
-      return c.json({
-        error: "Tools are available on Pro and Business plans.",
-        code: "feature_not_available",
-      }, 403);
+      return c.json(
+        {
+          error: "Tools are available on Pro and Business plans.",
+          code: "feature_not_available",
+        },
+        403,
+      );
     }
 
     const db = c.get("db");
@@ -2801,11 +2861,18 @@ const app = new Hono<HonoAppContext>()
 
     // Feature gate: PDF indexing
     const planLimits = c.get("planLimits");
-    if (contentType.includes("multipart/form-data") && planLimits && !planLimits.pdfIndexing) {
-      return c.json({
-        error: "PDF indexing is available on Pro and Business plans.",
-        code: "feature_not_available",
-      }, 403);
+    if (
+      contentType.includes("multipart/form-data") &&
+      planLimits &&
+      !planLimits.pdfIndexing
+    ) {
+      return c.json(
+        {
+          error: "PDF indexing is available on Pro and Business plans.",
+          code: "feature_not_available",
+        },
+        403,
+      );
     }
 
     // ─── PDF upload via multipart form ──────────────────────────────────────
@@ -3521,10 +3588,13 @@ const app = new Hono<HonoAppContext>()
     // Feature gate: telegram
     const planLimits = c.get("planLimits");
     if (planLimits && !planLimits.telegram) {
-      return c.json({
-        error: "Telegram integration is available on Pro and Business plans.",
-        code: "feature_not_available",
-      }, 403);
+      return c.json(
+        {
+          error: "Telegram integration is available on Pro and Business plans.",
+          code: "feature_not_available",
+        },
+        403,
+      );
     }
 
     const body = await c.req.json();
@@ -3614,10 +3684,13 @@ const app = new Hono<HonoAppContext>()
     // Feature gate: booking
     const planLimits = c.get("planLimits");
     if (planLimits && !planLimits.booking) {
-      return c.json({
-        error: "Booking is available on Pro and Business plans.",
-        code: "feature_not_available",
-      }, 403);
+      return c.json(
+        {
+          error: "Booking is available on Pro and Business plans.",
+          code: "feature_not_available",
+        },
+        403,
+      );
     }
 
     const body = await c.req.json();
