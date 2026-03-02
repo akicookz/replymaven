@@ -105,6 +105,7 @@ function Tools() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ToolFormData>(emptyForm);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testParams, setTestParams] = useState<Record<string, string>>({});
   const [testResult, setTestResult] = useState<{ success: boolean; data: unknown } | null>(null);
@@ -960,6 +961,7 @@ function Tools() {
               {executions && executions.length > 0 ? (
                 executions.map((exec) => {
                   const tool = tools?.find((t) => t.id === exec.toolId);
+                  const isLogExpanded = expandedLogId === exec.id;
                   const StatusIcon =
                     exec.status === "success"
                       ? CheckCircle2
@@ -973,31 +975,109 @@ function Tools() {
                         ? "text-warning"
                         : "text-destructive";
 
+                  let parsedInput: Record<string, unknown> | null = null;
+                  let parsedOutput: Record<string, unknown> | null = null;
+                  if (isLogExpanded) {
+                    try {
+                      parsedInput = exec.input ? JSON.parse(exec.input) : null;
+                    } catch { parsedInput = null; }
+                    try {
+                      parsedOutput = exec.output ? JSON.parse(exec.output) : null;
+                    } catch { parsedOutput = null; }
+                  }
+
                   return (
                     <div
                       key={exec.id}
-                      className="bg-white/[0.04] backdrop-blur-xl rounded-xl border border-border px-4 py-3 flex items-center gap-4"
+                      className="bg-white/[0.04] backdrop-blur-xl rounded-xl border border-border overflow-hidden"
                     >
-                      <StatusIcon className={cn("w-4 h-4 shrink-0", statusColor)} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">
-                          {tool?.displayName ?? exec.toolId}
-                        </p>
-                        {exec.errorMessage && (
-                          <p className="text-xs text-destructive truncate">{exec.errorMessage}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 sm:gap-4 shrink-0 text-xs text-muted-foreground flex-wrap">
-                        {exec.httpStatus && (
-                          <span>HTTP {exec.httpStatus}</span>
-                        )}
-                        {exec.duration != null && (
-                          <span>{exec.duration}ms</span>
-                        )}
-                        <span>
-                          {new Date(exec.createdAt).toLocaleString()}
-                        </span>
-                      </div>
+                      {/* Summary row */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedLogId(isLogExpanded ? null : exec.id)
+                        }
+                        className="w-full px-4 py-3 flex items-center gap-4 hover:bg-white/[0.02] transition-colors"
+                      >
+                        <StatusIcon className={cn("w-4 h-4 shrink-0", statusColor)} />
+                        <div className="flex-1 min-w-0 text-left">
+                          <p className="text-sm font-medium text-foreground truncate">
+                            {tool?.displayName ?? exec.toolId}
+                          </p>
+                          {exec.errorMessage && (
+                            <p className="text-xs text-destructive truncate">{exec.errorMessage}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 sm:gap-4 shrink-0 text-xs text-muted-foreground flex-wrap">
+                          {exec.httpStatus && (
+                            <span>HTTP {exec.httpStatus}</span>
+                          )}
+                          {exec.duration != null && (
+                            <span>{exec.duration}ms</span>
+                          )}
+                          <span>
+                            {new Date(exec.createdAt).toLocaleString()}
+                          </span>
+                          {isLogExpanded ? (
+                            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                          )}
+                        </div>
+                      </button>
+
+                      {/* Expanded details */}
+                      {isLogExpanded && (
+                        <div className="border-t border-border/50 px-4 py-3 space-y-3">
+                          {/* Input */}
+                          <div>
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+                              Input Parameters
+                            </p>
+                            {parsedInput && Object.keys(parsedInput).length > 0 ? (
+                              <pre className="bg-black/20 rounded-lg p-3 text-xs text-muted-foreground font-mono overflow-x-auto max-h-48 overflow-y-auto">
+                                {JSON.stringify(parsedInput, null, 2)}
+                              </pre>
+                            ) : (
+                              <p className="text-xs text-muted-foreground/50 italic">
+                                No input parameters
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Output */}
+                          <div>
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+                              Output
+                            </p>
+                            {parsedOutput ? (
+                              <pre className="bg-black/20 rounded-lg p-3 text-xs text-muted-foreground font-mono overflow-x-auto max-h-48 overflow-y-auto">
+                                {JSON.stringify(parsedOutput, null, 2)}
+                              </pre>
+                            ) : exec.output ? (
+                              <pre className="bg-black/20 rounded-lg p-3 text-xs text-muted-foreground font-mono overflow-x-auto max-h-48 overflow-y-auto">
+                                {exec.output}
+                              </pre>
+                            ) : (
+                              <p className="text-xs text-muted-foreground/50 italic">
+                                No output data
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Error message (if present and not already shown) */}
+                          {exec.errorMessage && (
+                            <div>
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+                                Error
+                              </p>
+                              <div className="bg-destructive/10 rounded-lg p-3 text-xs text-destructive">
+                                {exec.errorMessage}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })

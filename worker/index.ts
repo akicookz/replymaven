@@ -876,6 +876,9 @@ const app = new Hono<HonoAppContext>()
         let lastToolError: string | null = null;
         let stepCount = 0;
 
+        // Track tool call start times for client-side duration calculation
+        const toolCallStartTimes = new Map<string, number>();
+
         try {
           // Use fullStream to get all event types (text, tool-call, tool-result, etc.)
           for await (const part of streamResult.fullStream) {
@@ -888,13 +891,21 @@ const app = new Hono<HonoAppContext>()
               );
             } else if (part.type === "tool-call") {
               hadToolCalls = true;
+              // Track start time for duration calculation in tool-result
+              toolCallStartTimes.set(part.toolCallId, Date.now());
               // Only emit the first call per tool name (skip retries from multi-step loops)
               if (!emittedToolCalls.has(part.toolName)) {
                 emittedToolCalls.add(part.toolName);
+                // Extract input args — static tools use `args`, dynamic use `input`
+                const toolCallPart = part as Record<string, unknown>;
+                const toolArgs = toolCallPart.args ?? toolCallPart.input ?? {};
                 controller.enqueue(
                   encoder.encode(
                     `data: ${JSON.stringify({
-                      toolCall: { name: part.toolName },
+                      toolCall: {
+                        name: part.toolName,
+                        args: toolArgs,
+                      },
                     })}\n\n`,
                   ),
                 );
@@ -904,11 +915,18 @@ const app = new Hono<HonoAppContext>()
               const hasError = !!output?.error;
               const errorMessage = hasError ? String(output!.error) : null;
 
+              // Calculate duration from tracked start time
+              const startTime = toolCallStartTimes.get(part.toolCallId);
+              const duration = startTime ? Date.now() - startTime : null;
+
+              // Extract httpStatus from tool output if available
+              const httpStatus = output?.httpStatus as number | undefined;
+
               // Track last tool output/error for fallback diagnostics
               lastToolOutput = output;
               lastToolError = errorMessage;
 
-              // Emit tool result with error details when applicable
+              // Emit tool result with full details (output, status, duration)
               controller.enqueue(
                 encoder.encode(
                   `data: ${JSON.stringify({
@@ -916,6 +934,9 @@ const app = new Hono<HonoAppContext>()
                       name: part.toolName,
                       success: !hasError,
                       ...(errorMessage ? { errorMessage } : {}),
+                      output: output ?? null,
+                      ...(httpStatus ? { httpStatus } : {}),
+                      ...(duration != null ? { duration } : {}),
                     },
                   })}\n\n`,
                 ),
@@ -1047,6 +1068,15 @@ const app = new Hono<HonoAppContext>()
             await billingService.incrementMessageUsage(project.userId);
           } catch (err) {
             console.error("Failed to increment message usage:", err);
+          }
+
+          // Link any unlinked tool executions from this stream to the bot message
+          if (hadToolCalls) {
+            toolService
+              .linkExecutionsToMessage(conversationId, botMsg.id)
+              .catch((err) =>
+                console.error("Failed to link tool executions to message:", err),
+              );
           }
 
           controller.enqueue(
@@ -3360,8 +3390,39 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const msgs = await chatService.getMessages(conversation.id);
-    return c.json({ conversation, messages: msgs });
+    const toolService = new ToolService(db);
+    const [msgs, toolExecs] = await Promise.all([
+      chatService.getMessages(conversation.id),
+      toolService.getExecutionsByConversation(conversation.id),
+    ]);
+
+    // Group tool executions by messageId and attach to corresponding messages
+    const execsByMessageId = new Map<string, typeof toolExecs>();
+    for (const exec of toolExecs) {
+      const key = exec.messageId ?? "__unlinked__";
+      const arr = execsByMessageId.get(key) ?? [];
+      arr.push(exec);
+      execsByMessageId.set(key, arr);
+    }
+
+    const messagesWithTools = msgs.map((msg) => ({
+      ...msg,
+      toolExecutions: execsByMessageId.get(msg.id)?.map((ex) => ({
+        id: ex.id,
+        toolName: ex.toolName,
+        displayName: ex.displayName,
+        method: ex.method,
+        input: ex.input ? JSON.parse(ex.input) : null,
+        output: ex.output ? JSON.parse(ex.output) : null,
+        status: ex.status,
+        httpStatus: ex.httpStatus,
+        duration: ex.duration,
+        errorMessage: ex.errorMessage,
+        createdAt: ex.createdAt,
+      })) ?? [],
+    }));
+
+    return c.json({ conversation, messages: messagesWithTools });
   })
   .post("/api/projects/:id/conversations/:convId/reply", async (c) => {
     const user = c.get("user");

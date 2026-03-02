@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull, asc } from "drizzle-orm";
 import {
   tools,
   toolExecutions,
@@ -161,5 +161,60 @@ export class ToolService {
 
     // Filter to only executions belonging to this project's tools
     return rows.filter((r) => toolIds.includes(r.toolId));
+  }
+
+  // ─── Message Linking ────────────────────────────────────────────────────────
+
+  /**
+   * Link all unlinked tool executions for a conversation to a specific bot message.
+   * Called after the bot message is stored post-streaming.
+   */
+  async linkExecutionsToMessage(
+    conversationId: string,
+    messageId: string,
+  ): Promise<void> {
+    await this.db
+      .update(toolExecutions)
+      .set({ messageId })
+      .where(
+        and(
+          eq(toolExecutions.conversationId, conversationId),
+          isNull(toolExecutions.messageId),
+        ),
+      );
+  }
+
+  /**
+   * Get all tool executions for a conversation, joined with tool metadata.
+   * Ordered by creation time (ascending) for chronological display.
+   */
+  async getExecutionsByConversation(
+    conversationId: string,
+  ): Promise<
+    (ToolExecutionRow & { toolName: string; displayName: string; method: string })[]
+  > {
+    const rows = await this.db
+      .select({
+        id: toolExecutions.id,
+        toolId: toolExecutions.toolId,
+        conversationId: toolExecutions.conversationId,
+        messageId: toolExecutions.messageId,
+        input: toolExecutions.input,
+        output: toolExecutions.output,
+        status: toolExecutions.status,
+        httpStatus: toolExecutions.httpStatus,
+        duration: toolExecutions.duration,
+        errorMessage: toolExecutions.errorMessage,
+        createdAt: toolExecutions.createdAt,
+        toolName: tools.name,
+        displayName: tools.displayName,
+        method: tools.method,
+      })
+      .from(toolExecutions)
+      .innerJoin(tools, eq(toolExecutions.toolId, tools.id))
+      .where(eq(toolExecutions.conversationId, conversationId))
+      .orderBy(asc(toolExecutions.createdAt));
+
+    return rows;
   }
 }

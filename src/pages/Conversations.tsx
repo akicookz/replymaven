@@ -14,6 +14,10 @@ import {
   Clock,
   Globe,
   Monitor,
+  Wrench,
+  ChevronDown,
+  ChevronRight,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -39,11 +43,26 @@ interface Conversation {
   updatedAt: string;
 }
 
+interface ToolExecutionInfo {
+  id: string;
+  toolName: string;
+  displayName: string;
+  method: string;
+  input: Record<string, unknown> | null;
+  output: Record<string, unknown> | null;
+  status: "success" | "error" | "timeout";
+  httpStatus: number | null;
+  duration: number | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
 interface Message {
   id: string;
   role: "visitor" | "bot" | "agent";
   content: string;
   createdAt: string;
+  toolExecutions?: ToolExecutionInfo[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -151,6 +170,7 @@ function Conversations() {
   const [selectedConvo, setSelectedConvo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [expandedToolCards, setExpandedToolCards] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { data: conversations, isLoading } = useQuery<Conversation[]>({
@@ -558,6 +578,133 @@ function Conversations() {
                             day: "numeric",
                           })}
                         </span>
+                      </div>
+                    )}
+
+                    {/* Tool execution cards (shown above bot messages) */}
+                    {isBot && msg.toolExecutions && msg.toolExecutions.length > 0 && (
+                      <div className="flex justify-end mb-1">
+                        <div className="max-w-[65%] w-full space-y-1">
+                          {msg.toolExecutions.map((exec) => {
+                            const isExpanded = expandedToolCards.has(exec.id);
+                            const toggleExpand = () => {
+                              setExpandedToolCards((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(exec.id)) {
+                                  next.delete(exec.id);
+                                } else {
+                                  next.add(exec.id);
+                                }
+                                return next;
+                              });
+                            };
+
+                            const statusColor =
+                              exec.status === "success"
+                                ? "text-emerald-400"
+                                : exec.status === "timeout"
+                                  ? "text-amber-400"
+                                  : "text-red-400";
+                            const statusBg =
+                              exec.status === "success"
+                                ? "bg-emerald-500/10"
+                                : exec.status === "timeout"
+                                  ? "bg-amber-500/10"
+                                  : "bg-red-500/10";
+                            const statusLabel =
+                              exec.status === "success"
+                                ? exec.httpStatus
+                                  ? `${exec.httpStatus} OK`
+                                  : "Success"
+                                : exec.status === "timeout"
+                                  ? "Timeout"
+                                  : "Error";
+
+                            return (
+                              <div
+                                key={exec.id}
+                                className="bg-white/[0.03] backdrop-blur-sm rounded-lg border border-border/50 overflow-hidden"
+                              >
+                                {/* Card header — always visible */}
+                                <button
+                                  type="button"
+                                  onClick={toggleExpand}
+                                  className="w-full px-3 py-2 flex items-center gap-2 hover:bg-white/[0.02] transition-colors"
+                                >
+                                  <div className="w-5 h-5 rounded bg-primary/10 flex items-center justify-center shrink-0">
+                                    <Wrench className="w-3 h-3 text-primary" />
+                                  </div>
+                                  <div className="flex-1 text-left min-w-0">
+                                    <span className="text-[11px] text-muted-foreground">
+                                      Called tool
+                                    </span>
+                                    <span className="text-[11px] font-medium text-foreground ml-1.5 truncate">
+                                      {exec.displayName}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full", statusBg, statusColor)}>
+                                      {statusLabel}
+                                    </span>
+                                    {exec.duration != null && (
+                                      <span className="text-[10px] text-muted-foreground">
+                                        {exec.duration}ms
+                                      </span>
+                                    )}
+                                    {isExpanded ? (
+                                      <ChevronDown className="w-3 h-3 text-muted-foreground" />
+                                    ) : (
+                                      <ChevronRight className="w-3 h-3 text-muted-foreground" />
+                                    )}
+                                  </div>
+                                </button>
+
+                                {/* Expandable details */}
+                                {isExpanded && (
+                                  <div className="border-t border-border/30">
+                                    {/* Input parameters */}
+                                    {exec.input && Object.keys(exec.input).length > 0 && (
+                                      <div className="px-3 py-2">
+                                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
+                                          Parameters
+                                        </p>
+                                        <pre className="bg-black/20 rounded-md p-2 text-[11px] text-muted-foreground font-mono overflow-x-auto max-h-32 overflow-y-auto">
+                                          {JSON.stringify(exec.input, null, 2)}
+                                        </pre>
+                                      </div>
+                                    )}
+
+                                    {/* Output / Error */}
+                                    <div className="px-3 py-2">
+                                      <div className="flex items-center gap-2 mb-1.5">
+                                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                                          Result
+                                        </p>
+                                        {exec.status !== "success" && exec.errorMessage && (
+                                          <div className="flex items-center gap-1">
+                                            <AlertCircle className="w-3 h-3 text-red-400" />
+                                            <span className="text-[10px] text-red-400">
+                                              {exec.errorMessage}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+                                      {exec.output ? (
+                                        <pre className="bg-black/20 rounded-md p-2 text-[11px] text-muted-foreground font-mono overflow-x-auto max-h-40 overflow-y-auto">
+                                          {JSON.stringify(exec.output, null, 2)}
+                                        </pre>
+                                      ) : (
+                                        <p className="text-[11px] text-muted-foreground/60 italic">
+                                          No output data
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
 

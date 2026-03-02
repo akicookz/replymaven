@@ -541,7 +541,149 @@
       }
     }
 
-    /* ─── Tool Error ─────────────────────────────────────────────────────── */
+    /* ─── Tool Call Card ──────────────────────────────────────────────────── */
+    .rm-tool-call {
+      align-self: flex-start;
+      padding: 0 16px;
+      margin: 4px 0;
+      max-width: 88%;
+    }
+    .rm-tool-call-card {
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.03);
+      overflow: hidden;
+    }
+    .rm-tool-call-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 12px;
+      color: rgba(255,255,255,0.7);
+    }
+    .rm-tool-call-header:hover {
+      background: rgba(255,255,255,0.02);
+    }
+    .rm-tool-call-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .rm-tool-call-icon svg {
+      width: 12px;
+      height: 12px;
+    }
+    .rm-tool-call-icon.pending {
+      background: rgba(59,130,246,0.15);
+      color: #60a5fa;
+    }
+    .rm-tool-call-icon.success {
+      background: rgba(34,197,94,0.15);
+      color: #4ade80;
+    }
+    .rm-tool-call-icon.error {
+      background: rgba(239,68,68,0.15);
+      color: #f87171;
+    }
+    .rm-tool-call-name {
+      flex: 1;
+      min-width: 0;
+      font-weight: 500;
+      color: rgba(255,255,255,0.85);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rm-tool-call-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+      font-size: 10px;
+    }
+    .rm-tool-call-status {
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-weight: 500;
+      font-size: 10px;
+    }
+    .rm-tool-call-status.success {
+      background: rgba(34,197,94,0.15);
+      color: #4ade80;
+    }
+    .rm-tool-call-status.error {
+      background: rgba(239,68,68,0.15);
+      color: #f87171;
+    }
+    .rm-tool-call-status.pending {
+      background: rgba(59,130,246,0.15);
+      color: #60a5fa;
+    }
+    .rm-tool-call-duration {
+      color: rgba(255,255,255,0.4);
+    }
+    .rm-tool-call-chevron {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+      color: rgba(255,255,255,0.3);
+      transition: transform 0.15s ease;
+    }
+    .rm-tool-call.expanded .rm-tool-call-chevron {
+      transform: rotate(90deg);
+    }
+    .rm-tool-call-details {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.2s ease-out;
+    }
+    .rm-tool-call.expanded .rm-tool-call-details {
+      max-height: 400px;
+    }
+    .rm-tool-call-section {
+      padding: 6px 10px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+    .rm-tool-call-section-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: rgba(255,255,255,0.35);
+      margin-bottom: 4px;
+    }
+    .rm-tool-call-code {
+      background: rgba(0,0,0,0.25);
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-family: monospace;
+      font-size: 11px;
+      color: rgba(255,255,255,0.55);
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    .rm-tool-call-error-msg {
+      font-size: 11px;
+      color: #f87171;
+      margin-bottom: 4px;
+    }
+    @keyframes rm-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .rm-tool-call-loading {
+      animation: rm-pulse 1.5s ease-in-out infinite;
+    }
+
+    /* ─── Tool Error (legacy compat) ─────────────────────────────────────── */
     .rm-tool-error {
       align-self: flex-start;
       padding: 0 16px;
@@ -3931,26 +4073,24 @@
 
                 // Handle tool execution events
                 if (data.toolCall) {
-                  const displayName = data.toolCall.name.replace(/_/g, " ");
-                  const label =
-                    displayName.charAt(0).toUpperCase() + displayName.slice(1);
-                  showTyping(`Fetching ${label}`);
+                  hideTyping();
+                  addToolCallCardToUI(
+                    data.toolCall.name,
+                    data.toolCall.args ?? null,
+                  );
                   continue;
                 }
 
                 if (data.toolResult) {
-                  if (
-                    data.toolResult.success === false &&
-                    data.toolResult.errorMessage
-                  ) {
-                    // Show inline error for failed tool calls
-                    hideTyping();
-                    addToolErrorToUI(
-                      data.toolResult.name,
-                      data.toolResult.errorMessage,
-                    );
-                  } else {
-                    // After successful tool result, show "Thinking" while model processes the result
+                  updateToolCallCard(data.toolResult.name, {
+                    success: data.toolResult.success,
+                    output: data.toolResult.output ?? undefined,
+                    httpStatus: data.toolResult.httpStatus ?? undefined,
+                    duration: data.toolResult.duration ?? undefined,
+                    errorMessage: data.toolResult.errorMessage ?? undefined,
+                  });
+                  if (data.toolResult.success) {
+                    // Show "Thinking" while model processes the result
                     showTyping();
                   }
                   continue;
@@ -4308,6 +4448,189 @@
     });
 
     messagesContainer.insertBefore(container, typingRow);
+    scrollToBottom();
+  }
+
+  // ─── Tool Call Card ─────────────────────────────────────────────────────────
+
+  // Map of toolName -> card element for updating when result arrives
+  const activeToolCallCards = new Map<string, HTMLElement>();
+
+  function createSvgIcon(pathD: string): SVGSVGElement {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", pathD);
+    svg.appendChild(p);
+    return svg;
+  }
+
+  function addToolCallCardToUI(
+    toolName: string,
+    args: Record<string, unknown> | null,
+  ) {
+    const container = document.createElement("div");
+    container.className = "rm-tool-call";
+    container.setAttribute("data-tool", toolName);
+
+    const card = document.createElement("div");
+    card.className = "rm-tool-call-card";
+
+    // Header
+    const header = document.createElement("div");
+    header.className = "rm-tool-call-header";
+
+    const icon = document.createElement("div");
+    icon.className = "rm-tool-call-icon pending rm-tool-call-loading";
+    // Wrench icon
+    icon.appendChild(createSvgIcon("M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"));
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "rm-tool-call-name";
+    const displayName = toolName.replace(/_/g, " ");
+    nameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+
+    const meta = document.createElement("div");
+    meta.className = "rm-tool-call-meta";
+
+    const statusBadge = document.createElement("span");
+    statusBadge.className = "rm-tool-call-status pending";
+    statusBadge.textContent = "Running...";
+    meta.appendChild(statusBadge);
+
+    // Chevron-right icon
+    const chevron = createSvgIcon("m9 18 6-6-6-6");
+    chevron.classList.add("rm-tool-call-chevron");
+
+    header.appendChild(icon);
+    header.appendChild(nameEl);
+    header.appendChild(meta);
+    header.appendChild(chevron);
+
+    // Details (hidden by default)
+    const details = document.createElement("div");
+    details.className = "rm-tool-call-details";
+
+    // Input section (shown immediately if args exist)
+    if (args && Object.keys(args).length > 0) {
+      const inputSection = document.createElement("div");
+      inputSection.className = "rm-tool-call-section";
+      const inputLabel = document.createElement("div");
+      inputLabel.className = "rm-tool-call-section-label";
+      inputLabel.textContent = "Parameters";
+      const inputCode = document.createElement("div");
+      inputCode.className = "rm-tool-call-code";
+      inputCode.textContent = JSON.stringify(args, null, 2);
+      inputSection.appendChild(inputLabel);
+      inputSection.appendChild(inputCode);
+      details.appendChild(inputSection);
+    }
+
+    // Result section placeholder — will be filled by updateToolCallCard
+    const resultSection = document.createElement("div");
+    resultSection.className = "rm-tool-call-section";
+    resultSection.setAttribute("data-result", "true");
+    resultSection.style.display = "none";
+    details.appendChild(resultSection);
+
+    card.appendChild(header);
+    card.appendChild(details);
+    container.appendChild(card);
+
+    // Toggle expand on click
+    header.addEventListener("click", () => {
+      container.classList.toggle("expanded");
+    });
+
+    messagesContainer.insertBefore(container, typingRow);
+    scrollToBottom();
+
+    activeToolCallCards.set(toolName, container);
+  }
+
+  function updateToolCallCard(
+    toolName: string,
+    result: {
+      success: boolean;
+      output?: unknown;
+      httpStatus?: number;
+      duration?: number;
+      errorMessage?: string;
+    },
+  ) {
+    const container = activeToolCallCards.get(toolName);
+    if (!container) return;
+
+    // Update icon
+    const icon = container.querySelector(".rm-tool-call-icon");
+    if (icon) {
+      icon.classList.remove("pending", "rm-tool-call-loading");
+      icon.classList.add(result.success ? "success" : "error");
+    }
+
+    // Update status badge
+    const statusBadge = container.querySelector(".rm-tool-call-status");
+    if (statusBadge) {
+      statusBadge.classList.remove("pending");
+      statusBadge.classList.add(result.success ? "success" : "error");
+      if (result.success) {
+        statusBadge.textContent = result.httpStatus
+          ? `${result.httpStatus} OK`
+          : "Success";
+      } else {
+        statusBadge.textContent = "Error";
+      }
+    }
+
+    // Add duration
+    const meta = container.querySelector(".rm-tool-call-meta");
+    if (meta && result.duration != null) {
+      const durEl = document.createElement("span");
+      durEl.className = "rm-tool-call-duration";
+      durEl.textContent = `${result.duration}ms`;
+      meta.insertBefore(durEl, meta.querySelector(".rm-tool-call-chevron") ?? null);
+    }
+
+    // Fill in result section
+    const resultSection = container.querySelector('[data-result="true"]');
+    if (resultSection) {
+      resultSection.removeAttribute("style"); // show it
+
+      const resultLabel = document.createElement("div");
+      resultLabel.className = "rm-tool-call-section-label";
+      resultLabel.textContent = "Result";
+      resultSection.appendChild(resultLabel);
+
+      if (!result.success && result.errorMessage) {
+        const errEl = document.createElement("div");
+        errEl.className = "rm-tool-call-error-msg";
+        errEl.textContent = result.errorMessage;
+        resultSection.appendChild(errEl);
+      }
+
+      if (result.output) {
+        const outputCode = document.createElement("div");
+        outputCode.className = "rm-tool-call-code";
+        outputCode.textContent =
+          typeof result.output === "string"
+            ? result.output
+            : JSON.stringify(result.output, null, 2);
+        resultSection.appendChild(outputCode);
+      } else if (!result.errorMessage) {
+        const noData = document.createElement("div");
+        noData.className = "rm-tool-call-code";
+        noData.textContent = "No output data";
+        noData.style.fontStyle = "italic";
+        resultSection.appendChild(noData);
+      }
+    }
+
+    activeToolCallCards.delete(toolName);
     scrollToBottom();
   }
 
