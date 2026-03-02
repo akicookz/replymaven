@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSubscription } from "@/hooks/use-subscription";
 import {
   Globe,
   Building2,
@@ -935,12 +936,18 @@ function Step5({
 }: {
   onBack: () => void;
 }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { data: subData } = useSubscription();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const [billingInterval, setBillingInterval] = useState<"monthly" | "annual">("annual");
 
   // Check if returning from Stripe Checkout
   const searchParams = new URLSearchParams(window.location.search);
   const checkoutSuccess = searchParams.get("checkout") === "success";
+
+  const currentPlan = subData?.subscription?.plan as "starter" | "standard" | "business" | undefined;
+  const currentInterval = subData?.subscription?.interval as "monthly" | "annual" | undefined;
 
   useEffect(() => {
     if (checkoutSuccess) {
@@ -949,8 +956,17 @@ function Step5({
       url.searchParams.delete("checkout");
       const nextUrl = `${url.pathname}${url.searchParams.toString() ? `?${url.searchParams.toString()}` : ""}`;
       window.history.replaceState({}, "", nextUrl);
+
+      // Invalidate subscription cache so OnboardingGuard sees the new subscription
+      queryClient.invalidateQueries({ queryKey: ["subscription"] });
+
+      // Auto-redirect to dashboard after a brief delay
+      const timer = setTimeout(() => {
+        navigate("/app", { replace: true });
+      }, 1500);
+      return () => clearTimeout(timer);
     }
-  }, [checkoutSuccess]);
+  }, [checkoutSuccess, queryClient, navigate]);
 
   async function handleSelectPlan(plan: "starter" | "standard" | "business", interval: "monthly" | "annual") {
     setLoadingPlan(plan);
@@ -981,6 +997,10 @@ function Step5({
     }
   }
 
+  function handleManagePlan() {
+    navigate("/app/account/billing");
+  }
+
   if (checkoutSuccess) {
     return (
       <div className="space-y-6">
@@ -988,13 +1008,17 @@ function Step5({
           <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
             <Check className="w-6 h-6 text-brand" />
           </div>
-          <div className="space-y-1">
+          <div className="space-y-2">
             <h2 className="text-xl font-bold text-foreground">Welcome aboard!</h2>
             <p className="text-sm text-muted-foreground">
-              Your trial has started. Continue to finish onboarding.
+              Your trial has started. Redirecting you to the dashboard...
             </p>
           </div>
         </div>
+        <Button onClick={() => navigate("/app", { replace: true })} className="w-full md:w-auto">
+          Go to Dashboard
+          <ArrowRight className="w-4 h-4 ml-2" />
+        </Button>
       </div>
     );
   }
@@ -1008,9 +1032,13 @@ function Step5({
             <CreditCard className="w-6 h-6 text-primary" />
           </div>
           <div className="space-y-1">
-            <h2 className="text-xl font-bold text-foreground">Start your free trial</h2>
+            <h2 className="text-xl font-bold text-foreground">
+              {currentPlan ? "Your Plan" : "Start your free trial"}
+            </h2>
             <p className="text-sm text-muted-foreground">
-              7-day free trial, cancel anytime.
+              {currentPlan
+                ? "You're already subscribed. Manage or change your plan below."
+                : "7-day free trial, cancel anytime."}
             </p>
           </div>
         </div>
@@ -1021,12 +1049,22 @@ function Step5({
         onSelectPlan={handleSelectPlan}
         loadingPlan={loadingPlan}
         interval={billingInterval}
+        currentPlan={currentPlan}
+        currentInterval={currentInterval}
+        onManagePlan={handleManagePlan}
       />
 
-      <Button variant="outline" onClick={onBack} className="w-full md:w-auto">
-        <ArrowLeft className="w-4 h-4 mr-2" />
-        Back
-      </Button>
+      {currentPlan ? (
+        <Button onClick={() => navigate("/app", { replace: true })} className="w-full md:w-auto">
+          Go to Dashboard
+          <ArrowRight className="w-4 h-4 ml-2" />
+        </Button>
+      ) : (
+        <Button variant="outline" onClick={onBack} className="w-full md:w-auto">
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back
+        </Button>
+      )}
     </div>
   );
 }

@@ -4,6 +4,11 @@ import { Button } from "@/components/ui/button";
 import { cardVariants } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type PlanId = "starter" | "standard" | "business";
+type Interval = "monthly" | "annual";
+
 // ─── Pricing Data ─────────────────────────────────────────────────────────────
 
 const pricingPlans = [
@@ -64,14 +69,52 @@ const pricingPlans = [
 
 export { pricingPlans };
 
+// ─── Plan Comparison Helper ───────────────────────────────────────────────────
+
+const PLAN_RANK: Record<PlanId, number> = {
+  starter: 0,
+  standard: 1,
+  business: 2,
+};
+
+function getCtaLabel(
+  cardPlan: PlanId,
+  cardInterval: Interval,
+  currentPlan?: PlanId | null,
+  currentInterval?: Interval | null,
+): string {
+  if (!currentPlan || !currentInterval) return "Start 7-day free trial";
+
+  const isSamePlan = cardPlan === currentPlan;
+  const isSameInterval = cardInterval === currentInterval;
+
+  if (isSamePlan && isSameInterval) return "Manage Plan";
+  if (isSamePlan && !isSameInterval) {
+    return cardInterval === "annual" ? "Switch to annual" : "Switch to monthly";
+  }
+
+  const cardRank = PLAN_RANK[cardPlan];
+  const currentRank = PLAN_RANK[currentPlan];
+  return cardRank > currentRank ? "Upgrade" : "Downgrade";
+}
+
+function isCurrentPlanCard(
+  cardPlan: PlanId,
+  cardInterval: Interval,
+  currentPlan?: PlanId | null,
+  currentInterval?: Interval | null,
+): boolean {
+  return cardPlan === currentPlan && cardInterval === currentInterval;
+}
+
 // ─── Billing Toggle ───────────────────────────────────────────────────────────
 
 export function BillingToggle({
   interval,
   onChange,
 }: {
-  interval: "monthly" | "annual";
-  onChange: (interval: "monthly" | "annual") => void;
+  interval: Interval;
+  onChange: (interval: Interval) => void;
 }) {
   return (
     <div className="flex items-center gap-1 p-1 rounded-full bg-white/[0.04] border border-white/[0.06] w-fit">
@@ -109,11 +152,19 @@ export function BillingToggle({
 // ─── Pricing Cards (for Landing page) ─────────────────────────────────────────
 
 interface PricingCardsProps {
-  onCtaClick: (planId: "starter" | "standard" | "business", interval: "monthly" | "annual") => void;
+  onCtaClick: (planId: PlanId, interval: Interval) => void;
+  currentPlan?: PlanId | null;
+  currentInterval?: Interval | null;
+  onManagePlan?: () => void;
 }
 
-export function PricingCards({ onCtaClick }: PricingCardsProps) {
-  const [interval, setInterval] = useState<"monthly" | "annual">("monthly");
+export function PricingCards({
+  onCtaClick,
+  currentPlan,
+  currentInterval,
+  onManagePlan,
+}: PricingCardsProps) {
+  const [interval, setInterval] = useState<Interval>("monthly");
 
   return (
     <div className="space-y-8">
@@ -126,6 +177,9 @@ export function PricingCards({ onCtaClick }: PricingCardsProps) {
               ? plan.monthlyPrice
               : Math.floor(plan.annualPrice / 12);
 
+          const ctaLabel = getCtaLabel(plan.id, interval, currentPlan, currentInterval);
+          const isCurrent = isCurrentPlanCard(plan.id, interval, currentPlan, currentInterval);
+
           return (
             <div
               key={plan.id}
@@ -137,8 +191,17 @@ export function PricingCards({ onCtaClick }: PricingCardsProps) {
                 plan.highlighted
                   ? "bg-black/80 backdrop-blur-2xl border border-primary/20"
                   : "bg-black/80 backdrop-blur-2xl border border-primary/15",
+                isCurrent && "ring-2 ring-brand/40",
               )}
             >
+              {isCurrent && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                  <span className="text-[11px] bg-brand text-white px-3 py-1 rounded-full font-medium">
+                    Current Plan
+                  </span>
+                </div>
+              )}
+
               <div className="p-7 pb-0 space-y-4">
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm text-muted-foreground">{plan.name}</h3>
@@ -181,14 +244,20 @@ export function PricingCards({ onCtaClick }: PricingCardsProps) {
               <div className="p-7 pt-0">
                 <Button
                   variant={plan.highlighted ? "glow-primary" : "glow-secondary"}
-                  onClick={() => onCtaClick(plan.id, interval)}
+                  onClick={() => {
+                    if (ctaLabel === "Manage Plan" && onManagePlan) {
+                      onManagePlan();
+                    } else {
+                      onCtaClick(plan.id, interval);
+                    }
+                  }}
                   className={cn(
                     "w-full rounded-xl h-11 text-sm font-medium",
                     !plan.highlighted &&
                     "bg-white/[0.05] hover:bg-white/[0.08] border-white/[0.06]",
                   )}
                 >
-                  Start 7-day free trial
+                  {ctaLabel}
                 </Button>
               </div>
             </div>
@@ -202,12 +271,22 @@ export function PricingCards({ onCtaClick }: PricingCardsProps) {
 // ─── Pricing Cards (for Onboarding plan selection) ────────────────────────────
 
 interface PricingCardsSelectProps {
-  onSelectPlan: (plan: "starter" | "standard" | "business", interval: "monthly" | "annual") => void;
+  onSelectPlan: (plan: PlanId, interval: Interval) => void;
   loadingPlan: string | null;
-  interval: "monthly" | "annual";
+  interval: Interval;
+  currentPlan?: PlanId | null;
+  currentInterval?: Interval | null;
+  onManagePlan?: () => void;
 }
 
-export function PricingCardsSelect({ onSelectPlan, loadingPlan, interval }: PricingCardsSelectProps) {
+export function PricingCardsSelect({
+  onSelectPlan,
+  loadingPlan,
+  interval,
+  currentPlan,
+  currentInterval,
+  onManagePlan,
+}: PricingCardsSelectProps) {
   return (
     <div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -217,6 +296,9 @@ export function PricingCardsSelect({ onSelectPlan, loadingPlan, interval }: Pric
               ? plan.monthlyPrice
               : Math.floor(plan.annualPrice / 12);
           const isLoading = loadingPlan === plan.id;
+
+          const ctaLabel = getCtaLabel(plan.id, interval, currentPlan, currentInterval);
+          const isCurrent = isCurrentPlanCard(plan.id, interval, currentPlan, currentInterval);
 
           return (
             <div
@@ -229,8 +311,17 @@ export function PricingCardsSelect({ onSelectPlan, loadingPlan, interval }: Pric
                 plan.highlighted
                   ? "bg-black/80 backdrop-blur-2xl border border-primary/20"
                   : "bg-black/80 backdrop-blur-2xl border border-primary/15",
+                isCurrent && "ring-2 ring-brand/40",
               )}
             >
+              {isCurrent && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                  <span className="text-[11px] bg-brand text-white px-3 py-1 rounded-full font-medium">
+                    Current Plan
+                  </span>
+                </div>
+              )}
+
               <div className="p-7 pb-0 space-y-4">
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm text-muted-foreground">{plan.name}</h3>
@@ -273,8 +364,14 @@ export function PricingCardsSelect({ onSelectPlan, loadingPlan, interval }: Pric
               <div className="p-7 pt-0">
                 <Button
                   variant={plan.highlighted ? "glow-primary" : "glow-secondary"}
-                  onClick={() => onSelectPlan(plan.id, interval)}
-                  disabled={loadingPlan !== null}
+                  onClick={() => {
+                    if (ctaLabel === "Manage Plan" && onManagePlan) {
+                      onManagePlan();
+                    } else {
+                      onSelectPlan(plan.id, interval);
+                    }
+                  }}
+                  disabled={isCurrent || loadingPlan !== null}
                   className={cn(
                     "w-full rounded-xl h-11 text-sm font-medium",
                     !plan.highlighted &&
@@ -287,7 +384,7 @@ export function PricingCardsSelect({ onSelectPlan, loadingPlan, interval }: Pric
                       Redirecting...
                     </>
                   ) : (
-                    "Start 7-day free trial"
+                    ctaLabel
                   )}
                 </Button>
               </div>

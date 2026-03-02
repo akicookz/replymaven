@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import AuthModal from "@/components/AuthModal";
 import { Logo } from "@/components/Logo";
+import { useSession } from "@/lib/auth-client";
+import { useSubscription } from "@/hooks/use-subscription";
 import {
   MessageSquare,
   Globe,
@@ -1654,12 +1656,24 @@ function FeatureWidgetAndHandoff() {
 // ─── Landing Page ─────────────────────────────────────────────────────────────
 
 function Landing() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [authOpen, setAuthOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<{
     plan: string;
     interval: string;
   } | null>(null);
+
+  // Fetch session + subscription so pricing cards can show current plan
+  const { data: session } = useSession();
+  const { data: subData } = useSubscription();
+  const isLoggedIn = !!session?.user;
+  const currentPlan = isLoggedIn
+    ? (subData?.subscription?.plan as "starter" | "standard" | "business" | undefined) ?? null
+    : null;
+  const currentInterval = isLoggedIn
+    ? (subData?.subscription?.interval as "monthly" | "annual" | undefined) ?? null
+    : null;
 
   // Auto-open auth modal when ?show_auth=true is in the URL
   useEffect(() => {
@@ -1672,13 +1686,26 @@ function Landing() {
   }, [searchParams, setSearchParams]);
 
   function handlePricingCta(planId: "starter" | "standard" | "business", interval: "monthly" | "annual") {
+    // If the user is already logged in, skip the auth modal and go straight to onboarding/checkout
+    if (isLoggedIn) {
+      navigate(`/app/onboarding?plan=${planId}&interval=${interval}`);
+      return;
+    }
     setSelectedPlan({ plan: planId, interval });
     setAuthOpen(true);
   }
 
   function handleGenericCta() {
+    if (isLoggedIn) {
+      navigate("/app");
+      return;
+    }
     setSelectedPlan(null);
     setAuthOpen(true);
+  }
+
+  function handleManagePlan() {
+    navigate("/app/account/billing");
   }
 
   const authCallbackUrl = selectedPlan
@@ -2013,7 +2040,12 @@ function Landing() {
             </h2>
           </div>
 
-          <PricingCards onCtaClick={handlePricingCta} />
+          <PricingCards
+            onCtaClick={handlePricingCta}
+            currentPlan={currentPlan}
+            currentInterval={currentInterval}
+            onManagePlan={handleManagePlan}
+          />
 
           {/* Enterprise card */}
           <div
