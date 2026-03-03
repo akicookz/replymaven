@@ -198,6 +198,25 @@
       z-index: 999999;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       visibility: hidden;
+
+      /* ─── Theme tokens (light / solid default) ─────────────────────── */
+      --rm-bg: #ffffff;
+      --rm-bg-secondary: #f4f4f5;
+      --rm-bg-tertiary: #e4e4e7;
+      --rm-text: #18181b;
+      --rm-text-secondary: #52525b;
+      --rm-text-muted: #a1a1aa;
+      --rm-border: #e4e4e7;
+      --rm-border-subtle: rgba(0,0,0,0.06);
+      --rm-shadow: 0 8px 40px rgba(0,0,0,0.12);
+      --rm-input-bg: #f4f4f5;
+      --rm-input-bg-focus: #ebebec;
+      --rm-scrollbar: rgba(0,0,0,0.12);
+      --rm-bot-bg: #ffffff;
+      --rm-bot-text: #18181b;
+      --rm-bot-border: rgba(0,0,0,0.06);
+      --rm-visitor-bg: var(--rm-primary, #2563eb);
+      --rm-visitor-text: var(--rm-brand-text, #ffffff);
     }
     .rm-widget-container.ready {
       visibility: visible;
@@ -307,12 +326,10 @@
       flex-direction: column;
       overflow: hidden;
       border-radius: var(--rm-chat-radius, 16px);
-      box-shadow: 0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(var(--rm-primary-rgb, 37,99,235), 0.15);
-      border: 1px solid rgba(var(--rm-primary-rgb, 37,99,235), 0.25);
-      background: rgba(0,0,0,0.18);
-      backdrop-filter: blur(24px) saturate(1.4);
-      -webkit-backdrop-filter: blur(24px) saturate(1.4);
-      color: #ffffff;
+      box-shadow: var(--rm-shadow);
+      border: 1px solid var(--rm-border);
+      background: var(--rm-bg);
+      color: var(--rm-text);
       touch-action: manipulation;
       opacity: 0;
       visibility: hidden;
@@ -322,6 +339,27 @@
                   transform 0.3s cubic-bezier(0.4,0,0.2,1),
                   visibility 0.3s;
       transform-origin: bottom right;
+    }
+    /* ─── Background Style: Blurred (dark glassmorphism) ────────────────── */
+    .rm-chat-window[data-bg-style="blurred"] {
+      background: rgba(0,0,0,0.18);
+      backdrop-filter: blur(24px) saturate(1.4);
+      -webkit-backdrop-filter: blur(24px) saturate(1.4);
+      border: 1px solid rgba(var(--rm-primary-rgb, 37,99,235), 0.25);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(var(--rm-primary-rgb, 37,99,235), 0.15);
+      color: #ffffff;
+    }
+    /* ─── Background Style: Bordered ────────────────────────────────────── */
+    .rm-chat-window[data-bg-style="bordered"] {
+      background: rgba(255,255,255,0.95);
+      border: 2px solid var(--rm-border);
+      box-shadow: none;
+    }
+    /* ─── Background Style: Soft ────────────────────────────────────────── */
+    .rm-chat-window[data-bg-style="soft"] {
+      background: rgba(255,255,255,0.85);
+      border: 1px solid rgba(0,0,0,0.06);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.06);
     }
     .rm-chat-window.bottom-right {
       right: 0;
@@ -348,10 +386,14 @@
       flex-shrink: 0;
       position: relative;
       z-index: 2;
-      margin-bottom: -24px;
-      background: linear-gradient(to bottom, rgba(var(--rm-primary-rgb, 37,99,235), 0.3), rgba(var(--rm-primary-rgb, 37,99,235), 0.0));
+      margin-bottom: 0;
+      background: var(--rm-primary, #2563eb);
       border-bottom: none;
       box-shadow: none;
+    }
+    .rm-chat-window[data-bg-style="blurred"] .rm-header {
+      margin-bottom: -24px;
+      background: linear-gradient(to bottom, rgba(var(--rm-primary-rgb, 37,99,235), 0.3), rgba(var(--rm-primary-rgb, 37,99,235), 0.0));
     }
     .rm-header-avatar {
       width: 36px;
@@ -426,7 +468,7 @@
       width: 4px;
     }
     .rm-messages::-webkit-scrollbar-thumb {
-      background: rgba(255,255,255,0.12);
+      background: var(--rm-scrollbar);
       border-radius: 4px;
     }
 
@@ -480,15 +522,15 @@
       overflow-wrap: break-word;
     }
     .rm-message-row.visitor .rm-message {
-      background: var(--rm-primary, #2563eb);
-      color: var(--rm-brand-text, #ffffff);
+      background: var(--rm-visitor-bg, var(--rm-primary, #2563eb));
+      color: var(--rm-visitor-text, var(--rm-brand-text, #ffffff));
       border-radius: 18px 18px 4px 18px;
     }
     .rm-message-row.bot .rm-message,
     .rm-message-row.agent .rm-message {
-      background: rgba(255,255,255,0.08);
-      border: 1px solid rgba(var(--rm-primary-rgb, 37,99,235), 0.2);
-      color: #ffffff;
+      background: var(--rm-bot-bg, #ffffff);
+      border: 1px solid var(--rm-bot-border, rgba(0,0,0,0.06));
+      color: var(--rm-bot-text, #18181b);
       border-radius: 18px 18px 18px 4px;
     }
 
@@ -518,7 +560,7 @@
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: rgba(255,255,255,0.5);
+      background: var(--rm-text-muted);
       animation: rm-bounce 1.4s ease-in-out infinite;
     }
     .rm-typing-dots span:nth-child(2) {
@@ -530,7 +572,7 @@
     .rm-status-text {
       font-size: 12px;
       font-weight: 500;
-      color: rgba(255,255,255,0.5);
+      color: var(--rm-text-muted);
     }
     @keyframes rm-bounce {
       0%, 60%, 100% {
@@ -552,8 +594,8 @@
     }
     .rm-tool-call-card {
       border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.08);
-      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--rm-border-subtle);
+      background: var(--rm-bg-secondary);
       overflow: hidden;
     }
     .rm-tool-call-header {
@@ -564,10 +606,10 @@
       cursor: pointer;
       user-select: none;
       font-size: 12px;
-      color: rgba(255,255,255,0.7);
+      color: var(--rm-text-secondary);
     }
     .rm-tool-call-header:hover {
-      background: rgba(255,255,255,0.02);
+      background: var(--rm-bg-tertiary);
     }
     .rm-tool-call-icon {
       width: 20px;
@@ -598,7 +640,7 @@
       flex: 1;
       min-width: 0;
       font-weight: 500;
-      color: rgba(255,255,255,0.85);
+      color: var(--rm-text);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -629,13 +671,13 @@
       color: #60a5fa;
     }
     .rm-tool-call-duration {
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
     }
     .rm-tool-call-chevron {
       width: 12px;
       height: 12px;
       flex-shrink: 0;
-      color: rgba(255,255,255,0.3);
+      color: var(--rm-text-muted);
       transition: transform 0.15s ease;
     }
     .rm-tool-call.expanded .rm-tool-call-chevron {
@@ -651,22 +693,22 @@
     }
     .rm-tool-call-section {
       padding: 6px 10px;
-      border-top: 1px solid rgba(255,255,255,0.05);
+      border-top: 1px solid var(--rm-border-subtle);
     }
     .rm-tool-call-section-label {
       font-size: 10px;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      color: rgba(255,255,255,0.35);
+      color: var(--rm-text-muted);
       margin-bottom: 4px;
     }
     .rm-tool-call-code {
-      background: rgba(0,0,0,0.25);
+      background: var(--rm-bg-tertiary);
       border-radius: 6px;
       padding: 6px 8px;
       font-family: monospace;
       font-size: 11px;
-      color: rgba(255,255,255,0.55);
+      color: var(--rm-text-secondary);
       white-space: pre-wrap;
       word-break: break-all;
       max-height: 120px;
@@ -740,51 +782,50 @@
     .rm-quick-topic {
       padding: 7px 14px;
       border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.1);
-      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--rm-border);
+      background: var(--rm-bg-secondary);
       font-size: 13px;
       cursor: pointer;
       transition: background 0.2s, border-color 0.2s;
-      color: #ffffff;
+      color: var(--rm-text);
       line-height: 1.3;
     }
     .rm-quick-topic:hover {
       background: rgba(var(--rm-primary-rgb, 37,99,235), 0.15);
-      border-color: rgba(255,255,255,0.15);
+      border-color: rgba(var(--rm-primary-rgb, 37,99,235), 0.25);
     }
 
     /* ─── Input Area ──────────────────────────────────────────────────────── */
     .rm-input-area {
       padding: 12px 16px;
-      border-top: 1px solid rgba(255,255,255,0.06);
+      border-top: 1px solid var(--rm-border-subtle);
       display: flex;
       align-items: center;
       gap: 8px;
       background: transparent;
       position: relative;
       z-index: 2;
-      margin-top: -16px;
     }
     .rm-input {
       flex: 1;
       padding: 8px 14px;
-      border: 1px solid rgba(255,255,255,0.1);
+      border: 1px solid var(--rm-border);
       border-radius: 24px;
       font-size: 14px;
       outline: none;
-      background: rgba(255,255,255,0.06);
-      color: #ffffff;
+      background: var(--rm-input-bg);
+      color: var(--rm-text);
       transition: border-color 0.2s, box-shadow 0.2s;
       font-family: inherit;
       touch-action: manipulation;
     }
     .rm-input:focus {
-      border-color: var(--rm-primary, rgba(255,255,255,0.2));
+      border-color: var(--rm-primary, #2563eb);
       box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
-      background: rgba(255,255,255,0.08);
+      background: var(--rm-input-bg-focus);
     }
     .rm-input::placeholder {
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
     }
     .rm-send-btn {
       width: 36px;
@@ -828,13 +869,13 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
       transition: color 0.2s, background 0.2s;
       padding: 0;
     }
     .rm-attach-btn:hover {
-      color: rgba(255,255,255,0.7);
-      background: rgba(255,255,255,0.06);
+      color: var(--rm-text-secondary);
+      background: var(--rm-bg-secondary);
     }
     .rm-attach-btn svg {
       width: 18px;
@@ -857,12 +898,12 @@
       height: 48px;
       object-fit: cover;
       border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.1);
+      border: 1px solid var(--rm-border);
     }
     .rm-image-preview-name {
       flex: 1;
       font-size: 12px;
-      color: rgba(255,255,255,0.6);
+      color: var(--rm-text-secondary);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -873,16 +914,16 @@
       min-width: 24px;
       border-radius: 50%;
       border: none;
-      background: rgba(255,255,255,0.08);
+      background: var(--rm-bg-secondary);
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: rgba(255,255,255,0.6);
+      color: var(--rm-text-secondary);
       padding: 0;
     }
     .rm-image-preview-remove:hover {
-      background: rgba(255,255,255,0.15);
+      background: var(--rm-bg-tertiary);
     }
     .rm-image-preview-remove svg {
       width: 12px;
@@ -903,18 +944,18 @@
       text-align: center;
       padding: 6px 16px 8px;
       font-size: 11px;
-      color: rgba(255,255,255,0.3);
+      color: var(--rm-text-muted);
       background: transparent;
       position: relative;
       z-index: 2;
     }
     .rm-powered a {
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-secondary);
       text-decoration: none;
       font-weight: 500;
     }
     .rm-powered a:hover {
-      color: rgba(255,255,255,0.6);
+      color: var(--rm-text);
     }
 
     /* ─── Handoff Card ────────────────────────────────────────────────────── */
@@ -922,8 +963,8 @@
       margin: 8px 0;
       padding: 20px;
       border-radius: 14px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.06);
+      background: var(--rm-bg-secondary);
+      border: 1px solid var(--rm-border-subtle);
       text-align: center;
       animation: rm-message-in 0.4s ease-out;
       align-self: stretch;
@@ -945,23 +986,23 @@
     .rm-handoff-title {
       font-size: 14px;
       font-weight: 600;
-      color: #ffffff;
+      color: var(--rm-text);
       margin-bottom: 4px;
     }
     .rm-handoff-subtitle {
       font-size: 13px;
-      color: rgba(255,255,255,0.6);
+      color: var(--rm-text-secondary);
       margin-bottom: 16px;
       line-height: 1.4;
     }
     .rm-handoff-email-display {
       display: inline-block;
       padding: 6px 12px;
-      background: rgba(255,255,255,0.08);
+      background: var(--rm-bg-tertiary);
       border-radius: 8px;
       font-size: 13px;
       font-weight: 500;
-      color: #ffffff;
+      color: var(--rm-text);
       margin-bottom: 14px;
     }
     .rm-handoff-actions {
@@ -987,11 +1028,11 @@
       color: var(--rm-brand-text, #ffffff);
     }
     .rm-handoff-btn-secondary {
-      background: rgba(255,255,255,0.08);
-      color: rgba(255,255,255,0.8);
+      background: var(--rm-bg-secondary);
+      color: var(--rm-text-secondary);
     }
     .rm-handoff-btn-secondary:hover {
-      background: rgba(255,255,255,0.12);
+      background: var(--rm-bg-tertiary);
     }
     .rm-handoff-email-form {
       display: flex;
@@ -1001,22 +1042,22 @@
     .rm-handoff-email-input {
       flex: 1;
       padding: 9px 14px;
-      border: 1px solid rgba(255,255,255,0.1);
+      border: 1px solid var(--rm-border);
       border-radius: 10px;
       font-size: 13px;
       outline: none;
       font-family: inherit;
-      color: #ffffff;
-      background: rgba(255,255,255,0.06);
+      color: var(--rm-text);
+      background: var(--rm-input-bg);
       transition: border-color 0.2s;
     }
     .rm-handoff-email-input:focus {
-      border-color: var(--rm-primary, rgba(255,255,255,0.25));
+      border-color: var(--rm-primary, #2563eb);
       box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
-      background: rgba(255,255,255,0.08);
+      background: var(--rm-input-bg-focus);
     }
     .rm-handoff-email-input::placeholder {
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
     }
     .rm-handoff-submit {
       width: 36px;
@@ -1088,12 +1129,12 @@
       width: 48px;
       height: 48px;
       border-radius: 50%;
-      border: 3px solid rgba(255,255,255,0.15);
+      border: 3px solid var(--rm-border);
       overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
     .rm-home-avatar.rm-icon-avatar {
       border-radius: 14px;
@@ -1115,16 +1156,16 @@
       font-size: 20px;
       font-weight: 700;
       line-height: 1.3;
-      color: #ffffff;
+      color: var(--rm-text);
     }
     .rm-home-subtitle {
       font-size: 13px;
-      color: rgba(255,255,255,0.6);
+      color: var(--rm-text-secondary);
       margin-top: 4px;
     }
     .rm-home-ask {
       margin-top: 16px;
-      border: 1px solid rgba(255,255,255,0.08);
+      border: 1px solid var(--rm-border);
       border-radius: 12px;
       padding: 14px;
       cursor: pointer;
@@ -1151,7 +1192,7 @@
       border: none;
       outline: none;
       font-size: 16px;
-      color: #ffffff;
+      color: var(--rm-text);
       background: transparent;
       cursor: pointer;
       font-family: inherit;
@@ -1159,7 +1200,7 @@
       touch-action: manipulation;
     }
     .rm-home-ask-input::placeholder {
-      color: rgba(255,255,255,0.35);
+      color: var(--rm-text-muted);
     }
     .rm-home-links {
       margin-top: 16px;
@@ -1172,7 +1213,7 @@
       align-items: center;
       gap: 12px;
       padding: 10px 12px;
-      border: 1px solid rgba(255,255,255,0.08);
+      border: 1px solid var(--rm-border);
       border-radius: 10px;
       cursor: pointer;
       text-decoration: none;
@@ -1180,8 +1221,8 @@
       transition: background 0.2s, border-color 0.2s;
     }
     .rm-home-link:hover {
-      background: rgba(255,255,255,0.04);
-      border-color: rgba(255,255,255,0.12);
+      background: var(--rm-bg-secondary);
+      border-color: var(--rm-bg-tertiary);
     }
     .rm-home-link-icon {
       width: 34px;
@@ -1203,12 +1244,12 @@
       flex: 1;
       font-size: 13.5px;
       font-weight: 500;
-      color: rgba(255,255,255,0.85);
+      color: var(--rm-text);
     }
     .rm-home-link-arrow {
       width: 16px;
       height: 16px;
-      color: rgba(255,255,255,0.3);
+      color: var(--rm-text-muted);
       flex-shrink: 0;
     }
     .rm-home-link-arrow svg {
@@ -1218,7 +1259,7 @@
 
     /* Chat header back button */
     .rm-header-back {
-      background: rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.15);
       border: none;
       color: var(--rm-brand-text, #ffffff);
       cursor: pointer;
@@ -1232,7 +1273,7 @@
       transition: background 0.2s;
     }
     .rm-header-back:hover {
-      background: rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.25);
     }
     .rm-header-back svg {
       width: 16px;
@@ -1271,7 +1312,7 @@
       opacity: 0.7;
     }
     .rm-message code {
-      background: rgba(255,255,255,0.08);
+      background: var(--rm-bg-secondary);
       padding: 1px 5px;
       border-radius: 4px;
       font-size: 13px;
@@ -1282,7 +1323,7 @@
     .rm-sources {
       margin-top: 8px;
       padding-top: 6px;
-      border-top: 1px solid rgba(255,255,255,0.06);
+      border-top: 1px solid var(--rm-border-subtle);
       display: flex;
       flex-direction: column;
       gap: 3px;
@@ -1297,6 +1338,7 @@
       transition: opacity 0.2s;
       max-width: 100%;
       cursor: default;
+      color: var(--rm-text-muted);
     }
     a.rm-source-link {
       cursor: pointer;
@@ -1338,9 +1380,6 @@
     }
     .rm-form-view > .rm-header {
       margin-bottom: 0;
-      background: linear-gradient(to bottom, rgba(var(--rm-primary-rgb, 37,99,235), 0.3), rgba(var(--rm-primary-rgb, 37,99,235), 0.0));
-      border-bottom: none;
-      box-shadow: none;
     }
     .rm-form-body {
       flex: 1;
@@ -1355,12 +1394,12 @@
       width: 4px;
     }
     .rm-form-body::-webkit-scrollbar-thumb {
-      background: rgba(255,255,255,0.12);
+      background: var(--rm-scrollbar);
       border-radius: 4px;
     }
     .rm-form-description {
       font-size: 14px;
-      color: rgba(255,255,255,0.6);
+      color: var(--rm-text-secondary);
       line-height: 1.5;
       text-align: center;
       padding: 8px 0;
@@ -1373,7 +1412,7 @@
     .rm-form-label {
       font-size: 13px;
       font-weight: 500;
-      color: rgba(255,255,255,0.85);
+      color: var(--rm-text);
     }
     .rm-form-label .rm-required {
       color: #f87171;
@@ -1381,45 +1420,45 @@
     }
     .rm-form-input {
       padding: 10px 14px;
-      border: 1px solid rgba(255,255,255,0.1);
+      border: 1px solid var(--rm-border);
       border-radius: 10px;
       font-size: 16px;
       outline: none;
       font-family: inherit;
-      color: #ffffff;
-      background: rgba(255,255,255,0.06);
+      color: var(--rm-text);
+      background: var(--rm-input-bg);
       transition: border-color 0.2s, box-shadow 0.2s;
       touch-action: manipulation;
     }
     .rm-form-input:focus {
-      border-color: var(--rm-primary, rgba(255,255,255,0.25));
+      border-color: var(--rm-primary, #2563eb);
       box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
-      background: rgba(255,255,255,0.08);
+      background: var(--rm-input-bg-focus);
     }
     .rm-form-input::placeholder {
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
     }
     .rm-form-textarea {
       padding: 10px 14px;
-      border: 1px solid rgba(255,255,255,0.1);
+      border: 1px solid var(--rm-border);
       border-radius: 10px;
       font-size: 16px;
       outline: none;
       font-family: inherit;
-      color: #ffffff;
-      background: rgba(255,255,255,0.06);
+      color: var(--rm-text);
+      background: var(--rm-input-bg);
       transition: border-color 0.2s, box-shadow 0.2s;
       resize: vertical;
       min-height: 80px;
       touch-action: manipulation;
     }
     .rm-form-textarea:focus {
-      border-color: var(--rm-primary, rgba(255,255,255,0.25));
+      border-color: var(--rm-primary, #2563eb);
       box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
-      background: rgba(255,255,255,0.08);
+      background: var(--rm-input-bg-focus);
     }
     .rm-form-textarea::placeholder {
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
     }
     .rm-form-submit {
       padding: 12px 24px;
@@ -1475,11 +1514,11 @@
     .rm-form-success-title {
       font-size: 16px;
       font-weight: 600;
-      color: #ffffff;
+      color: var(--rm-text);
     }
     .rm-form-success-subtitle {
       font-size: 13px;
-      color: rgba(255,255,255,0.6);
+      color: var(--rm-text-secondary);
       line-height: 1.4;
     }
 
@@ -1496,18 +1535,18 @@
       gap: 6px;
       padding: 9px 16px;
       border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.1);
-      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--rm-border);
+      background: var(--rm-bg-secondary);
       font-size: 13px;
       font-weight: 500;
       cursor: pointer;
       transition: background 0.2s, border-color 0.2s;
-      color: rgba(255,255,255,0.85);
+      color: var(--rm-text);
       font-family: inherit;
     }
     .rm-home-action-btn:hover {
-      background: rgba(255,255,255,0.1);
-      border-color: rgba(255,255,255,0.15);
+      background: var(--rm-bg-tertiary);
+      border-color: var(--rm-bg-tertiary);
     }
     .rm-home-action-btn svg {
       width: 14px;
@@ -1540,9 +1579,6 @@
     }
     .rm-booking-view > .rm-header {
       margin-bottom: 0;
-      background: linear-gradient(to bottom, rgba(var(--rm-primary-rgb, 37,99,235), 0.3), rgba(var(--rm-primary-rgb, 37,99,235), 0.0));
-      border-bottom: none;
-      box-shadow: none;
     }
     .rm-booking-scroll {
       flex: 1;
@@ -1550,7 +1586,7 @@
       min-height: 0;
     }
     .rm-booking-scroll::-webkit-scrollbar { width: 4px; }
-    .rm-booking-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+    .rm-booking-scroll::-webkit-scrollbar-thumb { background: var(--rm-scrollbar); border-radius: 4px; }
     /* ── Month label row ─────────────────────────────────────────────────── */
     .rm-booking-month-row {
       display: flex;
@@ -1561,7 +1597,7 @@
     .rm-booking-month-label {
       font-size: 13px;
       font-weight: 600;
-      color: rgba(255,255,255,0.85);
+      color: var(--rm-text);
     }
     .rm-booking-month-arrows {
       display: flex;
@@ -1574,14 +1610,14 @@
       width: 28px;
       height: 28px;
       border-radius: 8px;
-      border: 1px solid rgba(255,255,255,0.1);
-      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--rm-border);
+      background: var(--rm-bg-secondary);
       cursor: pointer;
       flex-shrink: 0;
       transition: background 0.15s;
     }
-    .rm-booking-date-arrow:hover { background: rgba(255,255,255,0.1); }
-    .rm-booking-date-arrow svg { width: 14px; height: 14px; color: rgba(255,255,255,0.6); }
+    .rm-booking-date-arrow:hover { background: var(--rm-bg-tertiary); }
+    .rm-booking-date-arrow svg { width: 14px; height: 14px; color: var(--rm-text-secondary); }
     /* ── Date strip ──────────────────────────────────────────────────────── */
     .rm-booking-dates {
       display: flex;
@@ -1599,16 +1635,16 @@
       align-items: center;
       padding: 8px 0;
       border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.1);
-      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--rm-border);
+      background: var(--rm-bg-secondary);
       cursor: pointer;
       min-width: 56px;
       transition: all 0.15s ease;
       flex-shrink: 0;
     }
     .rm-booking-date-pill:hover {
-      border-color: rgba(255,255,255,0.15);
-      background: rgba(255,255,255,0.08);
+      border-color: var(--rm-bg-tertiary);
+      background: var(--rm-bg-tertiary);
     }
     .rm-booking-date-pill.selected {
       border-color: var(--rm-primary, #2563eb);
@@ -1628,32 +1664,32 @@
       font-size: 10px;
       font-weight: 500;
       text-transform: uppercase;
-      color: rgba(255,255,255,0.5);
+      color: var(--rm-text-muted);
       letter-spacing: 0.5px;
     }
     .rm-date-day {
       font-size: 16px;
       font-weight: 700;
-      color: #ffffff;
+      color: var(--rm-text);
       line-height: 1.3;
     }
     .rm-date-month {
       font-size: 9px;
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
       text-transform: uppercase;
       letter-spacing: 0.3px;
     }
     /* ── Slots section ───────────────────────────────────────────────────── */
     .rm-booking-slots-section {
       padding: 0 16px 12px;
-      border-top: 1px solid rgba(255,255,255,0.06);
+      border-top: 1px solid var(--rm-border-subtle);
     }
     .rm-booking-slots-label {
       font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.6px;
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
       padding: 12px 0 8px;
     }
     .rm-booking-slots-grid {
@@ -1667,7 +1703,7 @@
       align-items: center;
       justify-content: center;
       padding: 32px 16px;
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
       font-size: 13px;
     }
     .rm-booking-slot {
@@ -1676,11 +1712,11 @@
       justify-content: center;
       padding: 10px 8px;
       border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.1);
-      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--rm-border);
+      background: var(--rm-bg-secondary);
       font-size: 13px;
       font-weight: 500;
-      color: #ffffff;
+      color: var(--rm-text);
       cursor: pointer;
       transition: all 0.15s ease;
     }
@@ -1712,9 +1748,9 @@
       align-items: center;
       gap: 10px;
       padding: 10px 12px;
-      border: 1px solid rgba(255,255,255,0.1);
+      border: 1px solid var(--rm-border);
       border-radius: 10px;
-      background: rgba(255,255,255,0.06);
+      background: var(--rm-input-bg);
       transition: border-color 0.15s;
     }
     .rm-booking-inline-field:focus-within {
@@ -1724,7 +1760,7 @@
     .rm-booking-inline-field svg {
       width: 16px;
       height: 16px;
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
       flex-shrink: 0;
     }
     .rm-booking-inline-field input {
@@ -1732,13 +1768,13 @@
       border: none;
       outline: none;
       font-size: 13px;
-      color: #ffffff;
+      color: var(--rm-text);
       background: transparent;
       font-family: inherit;
       min-width: 0;
     }
     .rm-booking-inline-field input::placeholder {
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
     }
     .rm-booking-confirm-btn {
       width: 100%;
@@ -1773,7 +1809,7 @@
       justify-content: center;
       padding: 32px 16px;
       text-align: center;
-      color: rgba(255,255,255,0.4);
+      color: var(--rm-text-muted);
       font-size: 13px;
     }
     .rm-booking-no-slots svg {
@@ -1809,57 +1845,41 @@
     .rm-booking-confirmed h3 {
       font-size: 18px;
       font-weight: 700;
-      color: #ffffff;
+      color: var(--rm-text);
       margin: 0 0 12px;
     }
     .rm-booking-confirmed-details {
       font-size: 14px;
       font-weight: 500;
-      color: rgba(255,255,255,0.85);
+      color: var(--rm-text);
       margin-bottom: 4px;
     }
     .rm-booking-confirmed-time {
       font-size: 13px;
-      color: rgba(255,255,255,0.6);
+      color: var(--rm-text-secondary);
       margin-bottom: 16px;
     }
     .rm-booking-confirmed-email {
       font-size: 13px;
-      color: rgba(255,255,255,0.6);
+      color: var(--rm-text-secondary);
       line-height: 1.5;
     }
     .rm-booking-confirmed-email strong {
-      color: rgba(255,255,255,0.85);
+      color: var(--rm-text);
     }
     .rm-booking-back-btn {
       margin-top: 24px;
       padding: 10px 24px;
-      border: 1px solid rgba(255,255,255,0.12);
+      border: 1px solid var(--rm-border);
       border-radius: 10px;
-      background: rgba(255,255,255,0.06);
+      background: var(--rm-bg-secondary);
       font-size: 13px;
       font-weight: 500;
-      color: rgba(255,255,255,0.85);
+      color: var(--rm-text);
       cursor: pointer;
       transition: background 0.15s;
     }
-    .rm-booking-back-btn:hover { background: rgba(255,255,255,0.1); }
-    .rm-booking-no-slots {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 40px 16px;
-      text-align: center;
-      color: rgba(255,255,255,0.4);
-      font-size: 13px;
-    }
-    .rm-booking-no-slots svg {
-      width: 32px;
-      height: 32px;
-      margin-bottom: 8px;
-      opacity: 0.4;
-    }
+    .rm-booking-back-btn:hover { background: var(--rm-bg-tertiary); }
 
     @media (max-width: 480px) {
       .rm-widget-container.bottom-right,
@@ -3517,12 +3537,43 @@
         container.style.setProperty("--rm-primary-rgb", hexToRgb(primary));
         container.style.setProperty("--rm-brand-text", brandText);
 
+        // ─── Background style + theme tokens ──────────────────────────────────
+        const bgStyle = w.backgroundStyle || "solid";
+        chatWindow.dataset.bgStyle = bgStyle;
+
+        if (bgStyle === "blurred") {
+          // Dark glassmorphism: override theme tokens for dark background
+          container.style.setProperty("--rm-bg", "rgba(0,0,0,0.18)");
+          container.style.setProperty("--rm-bg-secondary", "rgba(255,255,255,0.08)");
+          container.style.setProperty("--rm-bg-tertiary", "rgba(255,255,255,0.12)");
+          container.style.setProperty("--rm-text", "#ffffff");
+          container.style.setProperty("--rm-text-secondary", "rgba(255,255,255,0.6)");
+          container.style.setProperty("--rm-text-muted", "rgba(255,255,255,0.4)");
+          container.style.setProperty("--rm-border", "rgba(255,255,255,0.1)");
+          container.style.setProperty("--rm-border-subtle", "rgba(255,255,255,0.06)");
+          container.style.setProperty("--rm-shadow", "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(" + hexToRgb(primary) + ", 0.15)");
+          container.style.setProperty("--rm-input-bg", "rgba(255,255,255,0.06)");
+          container.style.setProperty("--rm-input-bg-focus", "rgba(255,255,255,0.08)");
+          container.style.setProperty("--rm-scrollbar", "rgba(255,255,255,0.12)");
+          // Dark-friendly bot message defaults
+          container.style.setProperty("--rm-bot-bg", w.botMessageBgColor || "rgba(255,255,255,0.08)");
+          container.style.setProperty("--rm-bot-text", w.botMessageTextColor || "#ffffff");
+          container.style.setProperty("--rm-bot-border", "rgba(" + hexToRgb(primary) + ", 0.2)");
+        } else {
+          // Light themes (solid, bordered, soft): use configured or default light values
+          container.style.setProperty("--rm-bot-bg", w.botMessageBgColor || "#ffffff");
+          container.style.setProperty("--rm-bot-text", w.botMessageTextColor || "#18181b");
+          container.style.setProperty("--rm-bot-border", "rgba(0,0,0,0.06)");
+        }
+
+        // ─── Message colors ───────────────────────────────────────────────────
+        container.style.setProperty("--rm-visitor-bg", w.visitorMessageBgColor || primary);
+        container.style.setProperty("--rm-visitor-text", w.visitorMessageTextColor || brandText);
+
         // Trigger & send button: brand colors
         trigger.style.backgroundColor = primary;
         sendBtn.style.backgroundColor = primary;
 
-        // Header and chat window styling is handled via CSS custom properties
-        // (frosted glass with primary tint for header, dark glass for chat body)
         void isCenterInline; // position handled below
         if (w.borderRadius) {
           container.style.setProperty(
@@ -4386,8 +4437,8 @@
         textNode.textContent = content;
         msgEl.appendChild(textNode);
       }
-      msgEl.style.backgroundColor = primaryColor;
-      msgEl.style.color = getBrandTextColor();
+      msgEl.style.backgroundColor = config?.widget?.visitorMessageBgColor || primaryColor;
+      msgEl.style.color = config?.widget?.visitorMessageTextColor || getBrandTextColor();
     } else {
       // Bot/agent messages: render markdown
       const textContainer = document.createElement("div");
@@ -4443,7 +4494,6 @@
       const isClickable = sourceType === "webpage" && source.url;
       const el = document.createElement(isClickable ? "a" : "span");
       el.className = "rm-source-link";
-      el.style.color = "rgba(255,255,255,0.5)";
 
       if (isClickable) {
         (el as HTMLAnchorElement).href = source.url!;

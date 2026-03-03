@@ -13,6 +13,7 @@ import {
   X,
   Globe,
   Plus,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,15 +41,19 @@ interface WidgetConfigData {
   homeTitle: string;
   homeSubtitle: string | null;
   allowedPages: string | null;
+  botMessageBgColor: string;
+  botMessageTextColor: string;
+  visitorMessageBgColor: string | null;
+  visitorMessageTextColor: string | null;
+  backgroundStyle: "solid" | "blurred" | "bordered" | "soft";
 }
 
-function hexToRgb(hex: string): string {
-  const h = hex.replace("#", "");
-  const r = parseInt(h.substring(0, 2), 16);
-  const g = parseInt(h.substring(2, 4), 16);
-  const b = parseInt(h.substring(4, 6), 16);
-  return `${r}, ${g}, ${b}`;
-}
+const BACKGROUND_STYLES = [
+  { value: "solid" as const, label: "Solid", description: "Clean opaque background" },
+  { value: "blurred" as const, label: "Blurred", description: "Frosted glass effect" },
+  { value: "bordered" as const, label: "Bordered", description: "Outlined, minimal fill" },
+  { value: "soft" as const, label: "Soft", description: "Subtle translucent fill" },
+] as const;
 
 function WidgetConfig() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -190,7 +195,7 @@ function WidgetConfig() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Used for buttons, icons, and header accents. Chat uses a frosted glass style.
+              Used for buttons, icons, and header accents.
             </p>
 
             <div className="space-y-2">
@@ -246,6 +251,148 @@ function WidgetConfig() {
                   className="w-full"
                 />
               </div>
+            </div>
+          </div>
+
+          {/* Background Style */}
+          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
+              Background Style
+            </h2>
+            <div className="grid grid-cols-2 gap-2">
+              {BACKGROUND_STYLES.map((style) => (
+                <button
+                  key={style.value}
+                  type="button"
+                  onClick={() =>
+                    setForm({ ...form, backgroundStyle: style.value })
+                  }
+                  className={cn(
+                    "relative flex flex-col items-center gap-1.5 rounded-xl border-2 p-3 transition-all text-center",
+                    (form.backgroundStyle ?? "solid") === style.value
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-muted-foreground/30",
+                  )}
+                >
+                  {/* Mini preview */}
+                  <div
+                    className="w-full h-10 rounded-lg"
+                    style={
+                      style.value === "solid"
+                        ? { background: "#ffffff", boxShadow: "0 2px 8px rgba(0,0,0,0.1)", border: "1px solid #e4e4e7" }
+                        : style.value === "blurred"
+                          ? { background: "rgba(0,0,0,0.18)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.1)" }
+                          : style.value === "bordered"
+                            ? { background: "transparent", border: "2px solid #e4e4e7" }
+                            : { background: "rgba(255,255,255,0.7)", border: "1px solid rgba(0,0,0,0.04)" }
+                    }
+                  />
+                  <span className="text-xs font-medium text-foreground">
+                    {style.label}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground leading-tight">
+                    {style.description}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Message Colors */}
+          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
+              <MessageSquare className="w-5 h-5" />
+              Message Colors
+            </h2>
+
+            {/* Bot Messages */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">
+                Bot Messages
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Background
+                  </label>
+                  <ColorPicker
+                    value={form.botMessageBgColor ?? "#ffffff"}
+                    onChange={(color) =>
+                      setForm({ ...form, botMessageBgColor: color })
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Text
+                  </label>
+                  <ColorPicker
+                    value={form.botMessageTextColor ?? "#18181b"}
+                    onChange={(color) =>
+                      setForm({ ...form, botMessageTextColor: color })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Visitor Messages */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-foreground">
+                  Visitor Messages
+                </label>
+                {(form.visitorMessageBgColor || form.visitorMessageTextColor) && (
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        visitorMessageBgColor: null,
+                        visitorMessageTextColor: null,
+                      })
+                    }
+                  >
+                    Reset to brand colors
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Background
+                  </label>
+                  <ColorPicker
+                    value={
+                      form.visitorMessageBgColor ??
+                      form.primaryColor ??
+                      "#2563eb"
+                    }
+                    onChange={(color) =>
+                      setForm({ ...form, visitorMessageBgColor: color })
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Text
+                  </label>
+                  <ColorPicker
+                    value={
+                      form.visitorMessageTextColor ??
+                      form.textColor ??
+                      "#ffffff"
+                    }
+                    onChange={(color) =>
+                      setForm({ ...form, visitorMessageTextColor: color })
+                    }
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Defaults to Brand Color and Brand Text when not set.
+              </p>
             </div>
           </div>
 
@@ -543,24 +690,44 @@ function WidgetConfig() {
                 <div
                   className="w-full max-w-[280px] overflow-hidden shadow-xl"
                   style={{
-                    background: "rgba(0,0,0,0.18)",
-                    backdropFilter: "blur(24px)",
-                    borderRadius: "16px",
-                    border: `1px solid rgba(255,255,255,0.08)`,
-                    boxShadow: `0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)`,
+                    ...(form.backgroundStyle === "blurred"
+                      ? {
+                          background: "rgba(0,0,0,0.18)",
+                          backdropFilter: "blur(24px)",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                          boxShadow: "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)",
+                        }
+                      : form.backgroundStyle === "bordered"
+                        ? {
+                            background: "transparent",
+                            border: "2px solid #e4e4e7",
+                            boxShadow: "none",
+                          }
+                        : form.backgroundStyle === "soft"
+                          ? {
+                              background: "rgba(255,255,255,0.85)",
+                              border: "1px solid rgba(0,0,0,0.06)",
+                              boxShadow: "0 4px 24px rgba(0,0,0,0.06)",
+                            }
+                          : {
+                              background: "#ffffff",
+                              border: "1px solid #e4e4e7",
+                              boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
+                            }),
+                    borderRadius: `${form.borderRadius ?? 16}px`,
                   }}
                 >
                   {/* Header */}
                   <div
                     className="px-3.5 py-2.5 flex items-center gap-2"
                     style={{
-                      background: `rgba(${hexToRgb(form.primaryColor ?? "#f97316")}, 0.3)`,
-                      borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
+                      background: form.primaryColor ?? "#2563eb",
+                      borderRadius: `${(form.borderRadius ?? 16) - 1}px ${(form.borderRadius ?? 16) - 1}px 0 0`,
                     }}
                   >
                     <div
                       className="w-5 h-5 rounded-md flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: `rgba(255,255,255,0.12)` }}
+                      style={{ backgroundColor: "rgba(255,255,255,0.2)" }}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke={form.textColor ?? "#ffffff"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
                         <path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z" />
@@ -576,10 +743,11 @@ function WidgetConfig() {
                     {/* Bot message */}
                     <div className="flex justify-start">
                       <div
-                        className="max-w-[85%] px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed text-white"
+                        className="max-w-[85%] px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed"
                         style={{
-                          background: "rgba(255,255,255,0.08)",
-                          border: "1px solid rgba(255, 255, 255, 0.06)",
+                          background: form.botMessageBgColor ?? "#ffffff",
+                          color: form.botMessageTextColor ?? "#18181b",
+                          border: "1px solid rgba(0,0,0,0.06)",
                         }}
                       >
                         Hi! How can I help you today?
@@ -591,8 +759,8 @@ function WidgetConfig() {
                       <div
                         className="max-w-[85%] px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed"
                         style={{
-                          backgroundColor: form.primaryColor ?? "#f97316",
-                          color: form.textColor ?? "#ffffff",
+                          backgroundColor: form.visitorMessageBgColor ?? form.primaryColor ?? "#2563eb",
+                          color: form.visitorMessageTextColor ?? form.textColor ?? "#ffffff",
                         }}
                       >
                         I have a question
@@ -602,10 +770,11 @@ function WidgetConfig() {
                     {/* Bot reply */}
                     <div className="flex justify-start">
                       <div
-                        className="max-w-[85%] px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed text-white"
+                        className="max-w-[85%] px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed"
                         style={{
-                          background: "rgba(255,255,255,0.08)",
-                          border: "1px solid rgba(255, 255, 255, 0.06)",
+                          background: form.botMessageBgColor ?? "#ffffff",
+                          color: form.botMessageTextColor ?? "#18181b",
+                          border: "1px solid rgba(0,0,0,0.06)",
                         }}
                       >
                         Sure, I&apos;d be happy to help!
@@ -645,13 +814,33 @@ function WidgetConfig() {
               <div
                 className="w-full max-w-[340px] shadow-xl overflow-hidden flex flex-col"
                 style={{
-                  background: "rgba(0,0,0,0.18)",
-                  backdropFilter: "blur(24px)",
+                  ...(form.backgroundStyle === "blurred"
+                    ? {
+                        background: "rgba(0,0,0,0.18)",
+                        backdropFilter: "blur(24px)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        boxShadow: "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)",
+                      }
+                    : form.backgroundStyle === "bordered"
+                      ? {
+                          background: "transparent",
+                          border: "2px solid #e4e4e7",
+                          boxShadow: "none",
+                        }
+                      : form.backgroundStyle === "soft"
+                        ? {
+                            background: "rgba(255,255,255,0.85)",
+                            border: "1px solid rgba(0,0,0,0.06)",
+                            boxShadow: "0 4px 24px rgba(0,0,0,0.06)",
+                          }
+                        : {
+                            background: "#ffffff",
+                            border: "1px solid #e4e4e7",
+                            boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
+                          }),
                   borderRadius: `${form.borderRadius ?? 16}px`,
-                  color: "#ffffff",
+                  color: form.backgroundStyle === "blurred" ? "#ffffff" : "#18181b",
                   maxHeight: "480px",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  boxShadow: "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)",
                 }}
               >
                 {/* Banner */}
@@ -665,7 +854,7 @@ function WidgetConfig() {
                         backgroundPosition: "center center",
                         backgroundRepeat: "no-repeat",
                       }
-                      : { backgroundColor: form.primaryColor ?? "#f97316" }
+                      : { backgroundColor: form.primaryColor ?? "#2563eb" }
                   }
                 >
                   {/* Avatar */}
@@ -677,8 +866,8 @@ function WidgetConfig() {
                     style={{
                       backgroundColor: form.avatarUrl
                         ? "transparent"
-                        : (form.primaryColor ?? "#f97316"),
-                      borderColor: "rgba(255,255,255,0.15)",
+                        : (form.primaryColor ?? "#2563eb"),
+                      borderColor: form.backgroundStyle === "blurred" ? "rgba(255,255,255,0.15)" : "#e4e4e7",
                     }}
                   >
                     {form.avatarUrl ? (
@@ -706,35 +895,35 @@ function WidgetConfig() {
 
                 {/* Home content */}
                 <div className="px-5 pt-8 pb-4 flex-1 overflow-y-auto">
-                  <h3 className="text-lg font-bold text-white">
+                  <h3 className="text-lg font-bold">
                     {form.homeTitle || "How can we help?"}
                   </h3>
                   {form.homeSubtitle && (
-                    <p className="text-xs mt-1 text-white/60">{form.homeSubtitle}</p>
+                    <p className="text-xs mt-1 opacity-60">{form.homeSubtitle}</p>
                   )}
 
                   {/* Ask box */}
-                  <div className="mt-4 border border-white/10 rounded-xl p-3">
-                    <div className="flex items-center gap-1.5 text-xs text-white/50 mb-2">
+                  <div className="mt-4 rounded-xl p-3" style={{ border: form.backgroundStyle === "blurred" ? "1px solid rgba(255,255,255,0.1)" : "1px solid #e4e4e7" }}>
+                    <div className="flex items-center gap-1.5 text-xs opacity-50 mb-2">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
                         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                       </svg>
                       Ask our assistant anything
                     </div>
-                    <div className="text-xs text-white/30">Ask a question...</div>
+                    <div className="text-xs opacity-30">Ask a question...</div>
                   </div>
 
                   {/* Quick actions preview placeholder */}
                   <div className="mt-4 space-y-0">
-                    <p className="text-[11px] text-white/30 text-center py-2">
+                    <p className="text-[11px] opacity-30 text-center py-2">
                       Quick actions configured on the Quick Actions page
                     </p>
                   </div>
                 </div>
 
                 {/* Footer */}
-                <div className="px-4 py-2 text-center border-t border-white/10">
-                  <span className="text-[10px] text-white/30">
+                <div className="px-4 py-2 text-center" style={{ borderTop: form.backgroundStyle === "blurred" ? "1px solid rgba(255,255,255,0.1)" : "1px solid #e4e4e7" }}>
+                  <span className="text-[10px] opacity-30">
                     Powered by ReplyMaven
                   </span>
                 </div>

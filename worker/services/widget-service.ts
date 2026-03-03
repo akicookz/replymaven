@@ -46,6 +46,11 @@ export class WidgetService {
         | "homeTitle"
         | "homeSubtitle"
         | "allowedPages"
+        | "botMessageBgColor"
+        | "botMessageTextColor"
+        | "visitorMessageBgColor"
+        | "visitorMessageTextColor"
+        | "backgroundStyle"
       >
     >,
   ): Promise<WidgetConfigRow | null> {

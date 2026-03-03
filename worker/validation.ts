@@ -53,6 +53,27 @@ export const updateWidgetConfigSchema = z.object({
   homeTitle: z.string().min(1).max(200).optional(),
   homeSubtitle: z.string().max(500).nullable().optional(),
   allowedPages: z.string().max(2000).nullable().optional(),
+  botMessageBgColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid hex color")
+    .optional(),
+  botMessageTextColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid hex color")
+    .optional(),
+  visitorMessageBgColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid hex color")
+    .nullable()
+    .optional(),
+  visitorMessageTextColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid hex color")
+    .nullable()
+    .optional(),
+  backgroundStyle: z
+    .enum(["solid", "blurred", "bordered", "soft"])
+    .optional(),
 });
 
 // ─── Quick Actions ────────────────────────────────────────────────────────────

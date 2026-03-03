@@ -110,6 +110,19 @@ export const widgetConfig = sqliteTable(
     homeTitle: text("home_title").notNull().default("How can we help?"),
     homeSubtitle: text("home_subtitle"),
     allowedPages: text("allowed_pages"),
+    botMessageBgColor: text("bot_message_bg_color")
+      .notNull()
+      .default("#ffffff"),
+    botMessageTextColor: text("bot_message_text_color")
+      .notNull()
+      .default("#18181b"),
+    visitorMessageBgColor: text("visitor_message_bg_color"),
+    visitorMessageTextColor: text("visitor_message_text_color"),
+    backgroundStyle: text("background_style", {
+      enum: ["solid", "blurred", "bordered", "soft"],
+    })
+      .notNull()
+      .default("solid"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
