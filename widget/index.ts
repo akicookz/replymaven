@@ -349,7 +349,9 @@
       position: relative;
       z-index: 2;
       margin-bottom: -24px;
-      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.3);
+      background: linear-gradient(to bottom, rgba(var(--rm-primary-rgb, 37,99,235), 0.3), rgba(var(--rm-primary-rgb, 37,99,235), 0.0));
+      border-bottom: none;
+      box-shadow: none;
     }
     .rm-header-avatar {
       width: 36px;
@@ -1336,7 +1338,9 @@
     }
     .rm-form-view > .rm-header {
       margin-bottom: 0;
-      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.3);
+      background: linear-gradient(to bottom, rgba(var(--rm-primary-rgb, 37,99,235), 0.3), rgba(var(--rm-primary-rgb, 37,99,235), 0.0));
+      border-bottom: none;
+      box-shadow: none;
     }
     .rm-form-body {
       flex: 1;
@@ -1536,7 +1540,9 @@
     }
     .rm-booking-view > .rm-header {
       margin-bottom: 0;
-      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.3);
+      background: linear-gradient(to bottom, rgba(var(--rm-primary-rgb, 37,99,235), 0.3), rgba(var(--rm-primary-rgb, 37,99,235), 0.0));
+      border-bottom: none;
+      box-shadow: none;
     }
     .rm-booking-scroll {
       flex: 1;
@@ -2736,6 +2742,15 @@
   }
 
   function showHomeScreen() {
+    // In center-inline mode there is no home screen — go to chat or close
+    if (isInlineBarVariant) {
+      if (conversationId) {
+        showChatScreen();
+      } else {
+        closeChatWidget();
+      }
+      return;
+    }
     currentView = "home";
     homeView.classList.remove("hidden");
     formView.classList.remove("active");
@@ -3793,9 +3808,15 @@
             successSubtitle.textContent =
               cf.description || "We'll get back to you soon.";
 
+            const formBackBtn = document.createElement("button");
+            formBackBtn.className = "rm-booking-back-btn";
+            formBackBtn.textContent = "Back to Chat";
+            formBackBtn.onclick = () => showHomeScreen();
+
             success.appendChild(successIcon);
             success.appendChild(successTitle);
             success.appendChild(successSubtitle);
+            success.appendChild(formBackBtn);
             formView.appendChild(success);
           } catch {
             formError.textContent =
