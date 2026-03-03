@@ -672,6 +672,33 @@ export const apiKeys = sqliteTable(
 export type ApiKeyRow = typeof apiKeys.$inferSelect;
 export type NewApiKeyRow = typeof apiKeys.$inferInsert;
 
+// ─── Guidelines (SOPs) ────────────────────────────────────────────────────────
+
+export const guidelines = sqliteTable(
+  "guidelines",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    condition: text("condition").notNull(),
+    instruction: text("instruction").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [index("idx_guidelines_project").on(table.projectId)],
+);
+
+export type GuidelineRow = typeof guidelines.$inferSelect;
+export type NewGuidelineRow = typeof guidelines.$inferInsert;
+
 // ─── Unified Schema Object ────────────────────────────────────────────────────
 
 export const schema = {
@@ -696,4 +723,5 @@ export const schema = {
   apiKeys,
   tools,
   toolExecutions,
+  guidelines,
 } as const;

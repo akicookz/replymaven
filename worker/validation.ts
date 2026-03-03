@@ -314,3 +314,18 @@ export const inviteTeamMemberSchema = z.object({
 export const updateTeamMemberRoleSchema = z.object({
   role: z.enum(["admin", "member"]),
 });
+
+// ─── Guidelines (SOPs) ───────────────────────────────────────────────────────
+
+export const createGuidelineSchema = z.object({
+  condition: z.string().min(1, "Condition is required").max(500),
+  instruction: z.string().min(1, "Instruction is required").max(2000),
+  enabled: z.boolean().optional(),
+});
+
+export const updateGuidelineSchema = z.object({
+  condition: z.string().min(1).max(500).optional(),
+  instruction: z.string().min(1).max(2000).optional(),
+  enabled: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).optional(),
+});

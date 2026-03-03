@@ -1,16 +1,18 @@
-import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useRef, useState } from "react";
+import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
+  Building2,
   ChevronDown,
   ChevronRight,
+  ChevronRightIcon,
+  ClipboardList,
   FileText,
   Globe,
   HelpCircle,
   Plus,
   RefreshCw,
-  Save,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -30,124 +32,43 @@ interface Resource {
   createdAt: string;
 }
 
-type ToneOfVoice = "professional" | "friendly" | "casual" | "formal" | "custom";
-
-interface ProjectSettingsData {
+interface Guideline {
   id: string;
-  companyName: string | null;
-  companyUrl: string | null;
-  companyContext: string | null;
-  toneOfVoice: ToneOfVoice;
-  customTonePrompt: string | null;
+  condition: string;
+  instruction: string;
+  enabled: boolean;
 }
 
-const toneOptions: ToneOfVoice[] = [
-  "professional",
-  "friendly",
-  "casual",
-  "formal",
-  "custom",
-];
+interface CompanySettings {
+  companyName: string | null;
+  toneOfVoice: string;
+}
 
 function Resources() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
 
-  // ─── Company Info State ─────────────────────────────────────────────────────
-  const [companyForm, setCompanyForm] = useState({
-    companyName: "",
-    companyUrl: "",
-    companyContext: "",
-    toneOfVoice: "professional" as ToneOfVoice,
-    customTonePrompt: "",
-  });
+  // ─── Entry Card Queries ─────────────────────────────────────────────────────
 
-  const { data: settings, isLoading: isLoadingSettings } =
-    useQuery<ProjectSettingsData>({
-      queryKey: ["project-settings", projectId],
-      queryFn: async () => {
-        const res = await fetch(`/api/projects/${projectId}/settings`);
-        if (!res.ok) throw new Error("Failed to fetch project settings");
-        return res.json();
-      },
-    });
-
-  useEffect(() => {
-    if (!settings) return;
-    setCompanyForm({
-      companyName: settings.companyName ?? "",
-      companyUrl: settings.companyUrl ?? "",
-      companyContext: settings.companyContext ?? "",
-      toneOfVoice: settings.toneOfVoice ?? "professional",
-      customTonePrompt: settings.customTonePrompt ?? "",
-    });
-  }, [settings]);
-
-  const saveCompanyInfo = useMutation({
-    mutationFn: async () => {
-      const body = {
-        companyName: companyForm.companyName.trim() || null,
-        companyUrl: companyForm.companyUrl.trim() || null,
-        companyContext: companyForm.companyContext.trim() || null,
-        toneOfVoice: companyForm.toneOfVoice,
-        customTonePrompt:
-          companyForm.toneOfVoice === "custom"
-            ? companyForm.customTonePrompt.trim() || null
-            : null,
-      };
-
-      const res = await fetch(`/api/projects/${projectId}/settings`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const err = await res
-          .json()
-          .catch(() => ({ error: "Failed to save company info" }));
-        throw new Error(
-          (err as { error?: string }).error ?? "Failed to save company info",
-        );
-      }
+  const { data: guidelinesData } = useQuery<Guideline[]>({
+    queryKey: ["guidelines", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/guidelines`);
+      if (!res.ok) throw new Error("Failed to fetch guidelines");
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["project-settings", projectId] });
+  });
+
+  const { data: companySettings } = useQuery<CompanySettings>({
+    queryKey: ["project-settings", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/settings`);
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json();
     },
   });
 
-  const [lastContextRefreshSource, setLastContextRefreshSource] = useState<
-    "resources" | "website" | null
-  >(null);
-
-  const refreshCompanyContext = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/context/refresh`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const err = await res
-          .json()
-          .catch(() => ({ error: "Failed to refresh context" }));
-        throw new Error(
-          (err as { error?: string }).error ?? "Failed to refresh context",
-        );
-      }
-      return res.json() as Promise<{
-        context: string;
-        refreshed: boolean;
-        source: "resources" | "website";
-      }>;
-    },
-    onSuccess: (data) => {
-      setLastContextRefreshSource(data.source);
-      setCompanyForm((prev) => ({
-        ...prev,
-        companyContext: data.context,
-      }));
-      queryClient.invalidateQueries({ queryKey: ["project-settings", projectId] });
-    },
-  });
+  const activeGuidelineCount = guidelinesData?.filter((g) => g.enabled).length ?? 0;
 
   // ─── Resource State ─────────────────────────────────────────────────────────
   const [showForm, setShowForm] = useState(false);
@@ -171,8 +92,6 @@ function Resources() {
       },
     },
   );
-  const hasResources = (resources?.length ?? 0) > 0;
-
   const addResource = useMutation({
     mutationFn: async () => {
       setError(null);
@@ -307,155 +226,47 @@ function Resources() {
         </p>
       </div>
 
-      {/* ─── Company Info ───────────────────────────────────────────────────── */}
-      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg font-semibold text-foreground">Company Info</h2>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Button
-              variant="outline"
-              onClick={() => refreshCompanyContext.mutate()}
-              disabled={
-                refreshCompanyContext.isPending ||
-                (!hasResources && !companyForm.companyUrl.trim())
-              }
-            >
-              <RefreshCw
-                className={cn(
-                  "w-4 h-4 mr-2",
-                  refreshCompanyContext.isPending && "animate-spin",
-                )}
-              />
-              {hasResources ? "Regenerate from Resources" : "Refresh from Website"}
-            </Button>
-            <Button
-              onClick={() => saveCompanyInfo.mutate()}
-              disabled={saveCompanyInfo.isPending}
-            >
-              <Save className="w-4 h-4 mr-2" />
-              {saveCompanyInfo.isPending ? "Saving..." : "Save"}
-            </Button>
+      {/* ─── Entry Cards ──────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Link
+          to={`/app/projects/${projectId}/knowledgebase/sops`}
+          className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-5 hover:border-primary/30 hover:bg-muted/20 transition-all group"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <ClipboardList className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-foreground">SOPs</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {activeGuidelineCount > 0
+                  ? `${activeGuidelineCount} active guideline${activeGuidelineCount !== 1 ? "s" : ""}`
+                  : "Define how your bot handles specific scenarios"}
+              </p>
+            </div>
+            <ChevronRightIcon className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
           </div>
-        </div>
+        </Link>
 
-        {saveCompanyInfo.isError && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            {saveCompanyInfo.error.message}
+        <Link
+          to={`/app/projects/${projectId}/knowledgebase/company-info`}
+          className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-5 hover:border-primary/30 hover:bg-muted/20 transition-all group"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <Building2 className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-foreground">Company Information</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {companySettings?.companyName
+                  ? `${companySettings.companyName} \u2014 ${companySettings.toneOfVoice} tone`
+                  : "Set up your company context and tone of voice"}
+              </p>
+            </div>
+            <ChevronRightIcon className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
           </div>
-        )}
-        {refreshCompanyContext.isError && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            {refreshCompanyContext.error.message}
-          </div>
-        )}
-        {saveCompanyInfo.isSuccess && (
-          <p className="text-sm text-success">Company info saved.</p>
-        )}
-        {refreshCompanyContext.isSuccess && (
-          <p className="text-sm text-success">
-            {lastContextRefreshSource === "resources"
-              ? "Company context regenerated from resources."
-              : "Company context refreshed from website."}
-          </p>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Company Name
-            </label>
-            <input
-              type="text"
-              value={companyForm.companyName}
-              onChange={(e) =>
-                setCompanyForm((prev) => ({
-                  ...prev,
-                  companyName: e.target.value,
-                }))
-              }
-              placeholder="Your company name"
-              className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Website URL
-            </label>
-            <input
-              type="url"
-              value={companyForm.companyUrl}
-              onChange={(e) =>
-                setCompanyForm((prev) => ({
-                  ...prev,
-                  companyUrl: e.target.value,
-                }))
-              }
-              placeholder="https://example.com"
-              className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">
-            Tone of Voice
-          </label>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-            {toneOptions.map((tone) => (
-              <button
-                key={tone}
-                onClick={() =>
-                  setCompanyForm((prev) => ({ ...prev, toneOfVoice: tone }))
-                }
-                className={`px-4 py-2.5 rounded-xl border text-sm capitalize transition-colors ${
-                  companyForm.toneOfVoice === tone
-                    ? "border-primary bg-primary/10 text-foreground font-medium"
-                    : "border-input bg-background text-muted-foreground hover:border-primary/50"
-                }`}
-              >
-                {tone}
-              </button>
-            ))}
-          </div>
-          {companyForm.toneOfVoice === "custom" && (
-            <textarea
-              value={companyForm.customTonePrompt}
-              onChange={(e) =>
-                setCompanyForm((prev) => ({
-                  ...prev,
-                  customTonePrompt: e.target.value,
-                }))
-              }
-              rows={3}
-              placeholder="Describe the tone you want your bot to use..."
-              className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">
-            Company Context
-          </label>
-          <textarea
-            value={companyForm.companyContext}
-            onChange={(e) =>
-              setCompanyForm((prev) => ({
-                ...prev,
-                companyContext: e.target.value,
-              }))
-            }
-            rows={8}
-            placeholder="Describe your business, products, policies, and anything the assistant should know."
-            className="w-full px-4 py-3 rounded-xl border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>
-
-        {isLoadingSettings && (
-          <p className="text-xs text-muted-foreground">Loading company info...</p>
-        )}
+        </Link>
       </div>
 
       {/* ─── Resources ──────────────────────────────────────────────────────── */}

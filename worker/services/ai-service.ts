@@ -174,7 +174,11 @@ SUMMARY:`,
     ragContext: string,
     cannedHint: string | null,
     conversationSummary: string | null,
-    options?: { bookingEnabled?: boolean; hasTools?: boolean },
+    options?: {
+      bookingEnabled?: boolean;
+      hasTools?: boolean;
+      guidelines?: Array<{ condition: string; instruction: string }>;
+    },
   ): string {
     // ── 1. Tone ───────────────────────────────────────────────────────────────
     const toneInstructions: Record<string, string> = {
@@ -272,6 +276,24 @@ Rules for tool use:
 - If you need information from the visitor before calling a tool (e.g., an order ID), ask for it conversationally before making the call.
 - After receiving tool results, incorporate them naturally into your response. Don't just dump raw data — summarize and present it in a helpful way.
 </tools>
+
+`;
+    }
+
+    // Guidelines (SOPs)
+    if (options?.guidelines && options.guidelines.length > 0) {
+      const guidelineEntries = options.guidelines
+        .map(
+          (g) =>
+            `- When: ${g.condition}\n  Then: ${g.instruction}`,
+        )
+        .join("\n\n");
+
+      prompt += `<guidelines>
+These are specific standard operating procedures from the ${projectName} team. When a visitor's question matches one of these scenarios, follow the corresponding instructions precisely. These take priority over general response rules.
+
+${guidelineEntries}
+</guidelines>
 
 `;
     }

@@ -16,6 +16,8 @@ import WidgetConfig from "./pages/WidgetConfig";
 import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
 import Tools from "./pages/Tools";
+import CompanyInfo from "./pages/CompanyInfo";
+import Sops from "./pages/Sops";
 import Billing from "./pages/Billing";
 import Members from "./pages/Members";
 import AuthCallback from "./pages/AuthCallback";
@@ -106,6 +108,14 @@ function App() {
         <Route
           path="projects/:projectId/knowledgebase"
           element={<Resources />}
+        />
+        <Route
+          path="projects/:projectId/knowledgebase/company-info"
+          element={<CompanyInfo />}
+        />
+        <Route
+          path="projects/:projectId/knowledgebase/sops"
+          element={<Sops />}
         />
         <Route
           path="projects/:projectId/resources"

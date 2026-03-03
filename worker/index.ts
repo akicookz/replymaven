@@ -16,6 +16,7 @@ import { CrawlService, type CrawlMessage } from "./services/crawl-service";
 import { BookingService } from "./services/booking-service";
 import { EmailService } from "./services/email-service";
 import { ToolService } from "./services/tool-service";
+import { GuidelineService } from "./services/guideline-service";
 import {
   encryptHeaders,
   decryptHeaders,
@@ -58,6 +59,8 @@ import {
   createCheckoutSchema,
   inviteTeamMemberSchema,
   updateTeamMemberRoleSchema,
+  createGuidelineSchema,
+  updateGuidelineSchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -821,12 +824,14 @@ const app = new Hono<HonoAppContext>()
       parsed.data.content,
     );
 
-    // Check if booking is enabled and load enabled tools in parallel
+    // Check if booking is enabled, load enabled tools and guidelines in parallel
     const bookingService = new BookingService(db);
     const toolService = new ToolService(db);
-    const [bookingCfg, enabledTools] = await Promise.all([
+    const guidelineService = new GuidelineService(db);
+    const [bookingCfg, enabledTools, enabledGuidelines] = await Promise.all([
       bookingService.getBookingConfig(project.id),
       toolService.getEnabledTools(project.id),
+      guidelineService.getEnabledByProject(project.id),
     ]);
     const bookingEnabled = bookingCfg?.enabled ?? false;
 
@@ -870,7 +875,14 @@ const app = new Hono<HonoAppContext>()
       ragContext,
       cannedMatch ? cannedMatch.response : null,
       conversationSummary,
-      { bookingEnabled, hasTools: enabledTools.length > 0 },
+      {
+        bookingEnabled,
+        hasTools: enabledTools.length > 0,
+        guidelines: enabledGuidelines.map((g) => ({
+          condition: g.condition,
+          instruction: g.instruction,
+        })),
+      },
     );
 
     // Stream via SSE using Vercel AI SDK
@@ -3670,6 +3682,100 @@ const app = new Hono<HonoAppContext>()
     const service = new CannedResponseService(db);
     const deleted = await service.delete(c.req.param("crId"), project.id);
     if (!deleted) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+
+  // ─── Guidelines (SOPs) ──────────────────────────────────────────────────────
+  .get("/api/projects/:id/guidelines", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new GuidelineService(db);
+    const guidelines = await service.getByProject(project.id);
+    return c.json(guidelines);
+  })
+  .post("/api/projects/:id/guidelines", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(createGuidelineSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new GuidelineService(db);
+
+    // Enforce limit of 50 guidelines per project
+    const count = await service.countByProject(project.id);
+    if (count >= 50) {
+      return c.json(
+        { error: "Maximum 50 guidelines per project. Delete an existing one first." },
+        400,
+      );
+    }
+
+    const guideline = await service.create({
+      projectId: project.id,
+      condition: parsed.data.condition,
+      instruction: parsed.data.instruction,
+      enabled: parsed.data.enabled ?? true,
+    });
+
+    return c.json(guideline, 201);
+  })
+  .patch("/api/projects/:id/guidelines/:gId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateGuidelineSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new GuidelineService(db);
+    const updated = await service.update(
+      c.req.param("gId"),
+      project.id,
+      parsed.data,
+    );
+    if (!updated) return c.json({ error: "Not found" }, 404);
+
+    return c.json(updated);
+  })
+  .delete("/api/projects/:id/guidelines/:gId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new GuidelineService(db);
+    const deleted = await service.delete(c.req.param("gId"), project.id);
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+
     return c.json({ ok: true });
   })
 
