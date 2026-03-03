@@ -2113,6 +2113,72 @@
     .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(4) { animation-delay: 0.15s; }
     .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(5) { animation-delay: 0.2s; }
 
+    /* ─── Center Inline Quick Action Bubbles ─────────────────────────────── */
+    .rm-inline-bar-actions {
+      position: absolute;
+      bottom: calc(100% + 10px);
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(10px);
+      transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
+      pointer-events: none;
+    }
+    .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-actions.has-actions {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    .rm-inline-bar-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 18px;
+      border-radius: 22px;
+      border: 1px solid var(--rm-border);
+      background: var(--rm-bg);
+      color: var(--rm-text);
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+      line-height: 1.3;
+      white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .rm-inline-bar-action:hover {
+      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
+      border-color: rgba(var(--rm-primary-rgb, 37,99,235), 0.25);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .rm-inline-bar-action svg {
+      width: 14px;
+      height: 14px;
+      opacity: 0.6;
+      flex-shrink: 0;
+    }
+    .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-action {
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: none;
+      color: #ffffff;
+      box-shadow: none;
+    }
+    .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-action:hover {
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 55%);
+    }
+    .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-action {
+      animation: rm-topic-slide-up 0.3s ease forwards;
+    }
+    .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-action:nth-child(1) { animation-delay: 0s; }
+    .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-action:nth-child(2) { animation-delay: 0.08s; }
+
     /* ─── Center-Inline: chat window sits directly above the inline bar ──── */
     .rm-widget-container.center-inline {
       position: fixed;
@@ -2576,6 +2642,9 @@
   const inlineBar = document.createElement("div");
   inlineBar.className = "rm-inline-bar";
 
+  const inlineBarActions = document.createElement("div");
+  inlineBarActions.className = "rm-inline-bar-actions";
+
   const inlineBarTopics = document.createElement("div");
   inlineBarTopics.className = "rm-inline-bar-topics";
 
@@ -2610,6 +2679,7 @@
   inlineBarInner.appendChild(inlineBarInput);
   inlineBarInner.appendChild(inlineBarBtn);
 
+  inlineBar.appendChild(inlineBarActions);
   inlineBar.appendChild(inlineBarTopics);
   inlineBar.appendChild(inlineBarInner);
 
@@ -3590,6 +3660,7 @@
 
         // Header text
         headerTitle.textContent = w.headerText || "Chat with us";
+        headerSubtitle.textContent = w.headerSubtitle || "We typically reply instantly";
 
         // Position
         if (isCenterInline) {
@@ -3998,6 +4069,55 @@
           });
         }
 
+        // Populate inline bar action bubbles (max 2, all types, shown on focus with no history)
+        inlineBarActions.innerHTML = "";
+        const inlineActions = allActions.slice(0, 2);
+        if (inlineActions.length > 0 && !conversationId) {
+          inlineActions.forEach((qa) => {
+            const actionBtn = document.createElement("button");
+            actionBtn.className = "rm-inline-bar-action";
+
+            // Add icon for non-prompt types
+            if (qa.type === "link") {
+              actionBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+            } else if (qa.type === "contact_form") {
+              actionBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+            } else if (qa.type === "booking") {
+              actionBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+            }
+
+            const labelSpan = document.createElement("span");
+            labelSpan.textContent = qa.label;
+            actionBtn.appendChild(labelSpan);
+
+            actionBtn.onclick = (e) => {
+              e.stopPropagation();
+              if (qa.type === "link") {
+                window.open(qa.action, "_blank", "noopener,noreferrer");
+              } else if (qa.type === "contact_form") {
+                showChatScreen();
+                openChatWidget();
+                setTimeout(() => showFormScreen(), 100);
+              } else if (qa.type === "booking") {
+                showChatScreen();
+                openChatWidget();
+                setTimeout(() => showBookingScreen(), 100);
+              } else if (qa.type === "prompt") {
+                showChatScreen();
+                openChatWidget();
+                setTimeout(() => {
+                  if (!isSending) handleSendMessage(qa.action);
+                }, 100);
+              }
+              // Hide actions after click
+              inlineBarActions.classList.remove("has-actions");
+            };
+
+            inlineBarActions.appendChild(actionBtn);
+          });
+          inlineBarActions.classList.add("has-actions");
+        }
+
         // Append inline bar to body and start placeholder rotation
         document.body.appendChild(inlineBar);
         startPlaceholderRotation();
@@ -4041,6 +4161,8 @@
         conversationStatus = data.status ?? "active";
         persistConversationId(data.id);
         startPolling();
+        // Hide inline action bubbles once conversation starts
+        inlineBarActions.classList.remove("has-actions");
       }
     } catch (err) {
       console.error("[ReplyMaven] Failed to create conversation:", err);
@@ -5266,7 +5388,11 @@
     if (storedId) {
       conversationId = storedId;
       await loadConversationHistory();
-      if (conversationId) return; // Successfully restored
+      if (conversationId) {
+        // Hide inline action bubbles — conversation already exists
+        inlineBarActions.classList.remove("has-actions");
+        return; // Successfully restored
+      }
     }
 
     // Fallback: try to find active conversation by visitorId
@@ -5282,6 +5408,8 @@
         conversationStatus = data.conversation.status;
         persistConversationId(data.conversation.id);
         await loadConversationHistory();
+        // Hide inline action bubbles — conversation already exists
+        inlineBarActions.classList.remove("has-actions");
       }
     } catch {
       // Silently ignore

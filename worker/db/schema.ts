@@ -97,6 +97,7 @@ export const widgetConfig = sqliteTable(
     backgroundColor: text("background_color").notNull().default("#ffffff"),
     textColor: text("text_color").notNull().default("#1f2937"),
     headerText: text("header_text").notNull().default("Chat with us"),
+    headerSubtitle: text("header_subtitle"),
     avatarUrl: text("avatar_url"),
     position: text("position", {
       enum: ["bottom-right", "bottom-left", "center-inline"],

@@ -37,6 +37,7 @@ export class WidgetService {
         | "backgroundColor"
         | "textColor"
         | "headerText"
+        | "headerSubtitle"
         | "avatarUrl"
         | "position"
         | "borderRadius"

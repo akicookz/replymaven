@@ -32,6 +32,7 @@ interface WidgetConfigData {
   backgroundColor: string;
   textColor: string;
   headerText: string;
+  headerSubtitle: string | null;
   avatarUrl: string | null;
   position: "bottom-right" | "bottom-left" | "center-inline";
   borderRadius: number;
@@ -206,6 +207,22 @@ function WidgetConfig() {
                 onChange={(e) =>
                   setForm({ ...form, headerText: e.target.value })
                 }
+                className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">
+                Header Subtitle{" "}
+                <span className="text-muted-foreground font-normal">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={form.headerSubtitle ?? ""}
+                onChange={(e) =>
+                  setForm({ ...form, headerSubtitle: e.target.value || null })
+                }
+                placeholder="We typically reply instantly"
                 className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
@@ -729,9 +746,14 @@ function WidgetConfig() {
                         <path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z" />
                       </svg>
                     </div>
-                    <span className="text-[11px] font-medium truncate" style={{ color: form.textColor ?? "#ffffff" }}>
-                      {form.headerText || "ReplyMaven"}
-                    </span>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[11px] font-medium truncate" style={{ color: form.textColor ?? "#ffffff" }}>
+                        {form.headerText || "ReplyMaven"}
+                      </span>
+                      <span className="text-[9px] truncate" style={{ color: form.textColor ?? "#ffffff", opacity: 0.7 }}>
+                        {form.headerSubtitle || "We typically reply instantly"}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Messages */}

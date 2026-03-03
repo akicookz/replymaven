@@ -44,6 +44,7 @@ export const updateWidgetConfigSchema = z.object({
     .regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid hex color")
     .optional(),
   headerText: z.string().min(1).max(200).optional(),
+  headerSubtitle: z.string().max(200).nullable().optional(),
   avatarUrl: z.string().max(500).nullable().optional(),
   position: z.enum(["bottom-right", "bottom-left", "center-inline"]).optional(),
   borderRadius: z.number().min(0).max(50).optional(),
