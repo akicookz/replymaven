@@ -45,6 +45,7 @@ export class WidgetService {
         | "bannerUrl"
         | "homeTitle"
         | "homeSubtitle"
+        | "allowedPages"
       >
     >,
   ): Promise<WidgetConfigRow | null> {

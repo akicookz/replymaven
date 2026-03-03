@@ -11,6 +11,8 @@ import {
   Image,
   Type,
   X,
+  Globe,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +39,7 @@ interface WidgetConfigData {
   bannerUrl: string | null;
   homeTitle: string;
   homeSubtitle: string | null;
+  allowedPages: string | null;
 }
 
 function hexToRgb(hex: string): string {
@@ -54,6 +57,7 @@ function WidgetConfig() {
   const [form, setForm] = useState<Partial<WidgetConfigData>>({});
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
+  const [pageInput, setPageInput] = useState("");
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
@@ -400,6 +404,113 @@ function WidgetConfig() {
           </div>
           )}
 
+          {/* Page Targeting */}
+          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
+              <Globe className="w-5 h-5" />
+              Page Targeting
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Control which pages the widget appears on. Leave empty to show on all pages.
+            </p>
+
+            {/* Current pages as tags */}
+            {(() => {
+              const pages = (form.allowedPages ?? "")
+                .split(",")
+                .map((p) => p.trim())
+                .filter(Boolean);
+
+              function removePage(index: number) {
+                const updated = pages.filter((_, i) => i !== index);
+                setForm({
+                  ...form,
+                  allowedPages: updated.length > 0 ? updated.join(",") : null,
+                });
+              }
+
+              function addPage() {
+                const value = pageInput.trim();
+                if (!value) return;
+                // Normalize: ensure it starts with /
+                const normalized = value.startsWith("/") ? value : `/${value}`;
+                if (pages.includes(normalized)) {
+                  setPageInput("");
+                  return;
+                }
+                const updated = [...pages, normalized];
+                setForm({
+                  ...form,
+                  allowedPages: updated.join(","),
+                });
+                setPageInput("");
+              }
+
+              return (
+                <>
+                  {pages.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {pages.map((page, i) => (
+                        <span
+                          key={i}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/50 border border-border text-sm font-mono"
+                        >
+                          {page}
+                          <button
+                            type="button"
+                            onClick={() => removePage(i)}
+                            className="p-0.5 rounded hover:bg-destructive/10 hover:text-destructive transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {pages.length === 0 && (
+                    <div className="px-3 py-2 rounded-lg bg-muted/30 border border-dashed border-border text-sm text-muted-foreground">
+                      No page rules set — widget will show on all pages.
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={pageInput}
+                      onChange={(e) => setPageInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addPage();
+                        }
+                      }}
+                      placeholder="/pricing, /dashboard/*, /"
+                      className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addPage}
+                      className="px-3 h-[42px]"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p className="font-medium">Examples:</p>
+                    <ul className="list-disc list-inside space-y-0.5 text-muted-foreground/70">
+                      <li><code className="text-xs bg-muted/50 px-1 rounded">/</code> — homepage only</li>
+                      <li><code className="text-xs bg-muted/50 px-1 rounded">/pricing</code> — exact page match</li>
+                      <li><code className="text-xs bg-muted/50 px-1 rounded">/docs/*</code> — all pages under /docs</li>
+                    </ul>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
 
         </div>
 

@@ -52,6 +52,7 @@ export const updateWidgetConfigSchema = z.object({
   bannerUrl: z.string().max(500).nullable().optional(),
   homeTitle: z.string().min(1).max(200).optional(),
   homeSubtitle: z.string().max(500).nullable().optional(),
+  allowedPages: z.string().max(2000).nullable().optional(),
 });
 
 // ─── Quick Actions ────────────────────────────────────────────────────────────

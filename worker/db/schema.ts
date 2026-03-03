@@ -109,6 +109,7 @@ export const widgetConfig = sqliteTable(
     bannerUrl: text("banner_url"),
     homeTitle: text("home_title").notNull().default("How can we help?"),
     homeSubtitle: text("home_subtitle"),
+    allowedPages: text("allowed_pages"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),

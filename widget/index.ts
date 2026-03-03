@@ -3465,6 +3465,19 @@
     bookingContent.appendChild(confirmed);
   }
 
+  // ─── Page Targeting ──────────────────────────────────────────────────────────
+
+  function matchesCurrentPage(patterns: string[]): boolean {
+    const path = window.location.pathname;
+    return patterns.some((pattern) => {
+      if (pattern.endsWith("/*")) {
+        const prefix = pattern.slice(0, -2);
+        return path === prefix || path.startsWith(prefix + "/");
+      }
+      return path === pattern;
+    });
+  }
+
   async function loadConfig() {
     try {
       const res = await fetch(`${baseUrl}/api/widget/${projectSlug}/config`);
@@ -3476,6 +3489,19 @@
       }
       const loadedConfig = await res.json();
       config = loadedConfig;
+
+      // Check page targeting: if allowedPages is set, only show on matching pages
+      if (loadedConfig.widget?.allowedPages) {
+        const patterns = (loadedConfig.widget.allowedPages as string)
+          .split(",")
+          .map((p: string) => p.trim())
+          .filter(Boolean);
+        if (patterns.length > 0 && !matchesCurrentPage(patterns)) {
+          // Remove widget from DOM entirely on non-matching pages
+          container.remove();
+          return;
+        }
+      }
 
       // Apply styling
       if (loadedConfig.widget) {
