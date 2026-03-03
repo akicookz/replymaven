@@ -236,18 +236,32 @@ function WidgetConfig() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">
-                  Border Radius: {form.borderRadius ?? 16}px
+                  Border Radius
                 </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="50"
-                  value={form.borderRadius ?? 16}
-                  onChange={(e) =>
-                    setForm({ ...form, borderRadius: Number(e.target.value) })
+                <Select
+                  value={
+                    form.borderRadius === 0
+                      ? "none"
+                      : form.borderRadius === 8
+                        ? "soft"
+                        : "rounded"
                   }
-                  className="w-full"
-                />
+                  onValueChange={(v) =>
+                    setForm({
+                      ...form,
+                      borderRadius: v === "none" ? 0 : v === "soft" ? 8 : 16,
+                    })
+                  }
+                >
+                  <SelectTrigger className="bg-muted/50 border-border">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="soft">Soft</SelectItem>
+                    <SelectItem value="rounded">Rounded</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>

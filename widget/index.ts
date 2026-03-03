@@ -3558,8 +3558,8 @@
           container.style.setProperty("--rm-border", "rgba(255,255,255,0.1)");
           container.style.setProperty("--rm-border-subtle", "rgba(255,255,255,0.06)");
           container.style.setProperty("--rm-shadow", "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(" + hexToRgb(primary) + ", 0.15)");
-          container.style.setProperty("--rm-input-bg", "rgba(255,255,255,0.06)");
-          container.style.setProperty("--rm-input-bg-focus", "rgba(255,255,255,0.08)");
+          container.style.setProperty("--rm-input-bg", "rgba(255,255,255,0.12)");
+          container.style.setProperty("--rm-input-bg-focus", "rgba(255,255,255,0.18)");
           container.style.setProperty("--rm-scrollbar", "rgba(255,255,255,0.12)");
           // Dark-friendly bot message defaults
           container.style.setProperty("--rm-bot-bg", w.botMessageBgColor || "rgba(255,255,255,0.08)");
@@ -3965,6 +3965,8 @@
           inlineBar.style.setProperty("--rm-text-muted", "rgba(255,255,255,0.4)");
           inlineBar.style.setProperty("--rm-border", "rgba(255,255,255,0.1)");
           inlineBar.style.setProperty("--rm-border-subtle", "rgba(255,255,255,0.06)");
+          inlineBar.style.setProperty("--rm-input-bg", "rgba(255,255,255,0.12)");
+          inlineBar.style.setProperty("--rm-input-bg-focus", "rgba(255,255,255,0.18)");
         } else {
           inlineBar.style.setProperty("--rm-bg", "#ffffff");
           inlineBar.style.setProperty("--rm-bg-secondary", "#f4f4f5");
