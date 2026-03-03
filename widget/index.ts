@@ -2120,12 +2120,13 @@
       left: 0;
       right: 0;
       display: flex;
-      justify-content: center;
+      justify-content: flex-start;
       gap: 8px;
+      padding: 0 4px;
       opacity: 0;
       visibility: hidden;
       transform: translateY(10px);
-      transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
+      transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s;
       pointer-events: none;
     }
     .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-actions.has-actions {
@@ -2145,16 +2146,14 @@
       color: var(--rm-text);
       font-size: 14px;
       cursor: pointer;
-      transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+      transition: opacity 0.2s ease, border-color 0.2s ease;
       line-height: 1.3;
       white-space: nowrap;
       box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     }
     .rm-inline-bar-action:hover {
-      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
-      border-color: rgba(var(--rm-primary-rgb, 37,99,235), 0.25);
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      opacity: 0.8;
+      border-color: var(--rm-text-secondary, #52525b);
     }
     .rm-inline-bar-action svg {
       width: 14px;
@@ -2166,18 +2165,14 @@
       background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
-      border: none;
+      border: 1px solid rgba(255,255,255,0.1);
       color: #ffffff;
       box-shadow: none;
     }
     .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-action:hover {
-      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 55%);
+      opacity: 0.8;
+      border-color: rgba(255,255,255,0.3);
     }
-    .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-action {
-      animation: rm-topic-slide-up 0.3s ease forwards;
-    }
-    .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-action:nth-child(1) { animation-delay: 0s; }
-    .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-action:nth-child(2) { animation-delay: 0.08s; }
 
     /* ─── Center-Inline: chat window sits directly above the inline bar ──── */
     .rm-widget-container.center-inline {
