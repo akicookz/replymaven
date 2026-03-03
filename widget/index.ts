@@ -1963,9 +1963,8 @@
       width: 560px;
     }
     .rm-inline-bar-inner {
-      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 85%);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: var(--rm-bg);
+      border: 1px solid var(--rm-border);
       border-radius: 26px;
       display: flex;
       align-items: center;
@@ -1973,26 +1972,32 @@
       gap: 8px;
       position: relative;
     }
+    .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-inner {
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 85%);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: none;
+    }
     .rm-inline-bar-input {
       flex: 1;
       background: transparent;
       border: none;
       outline: none;
-      color: #ffffff;
+      color: var(--rm-text);
       font-size: 15px;
       line-height: 1.4;
       min-width: 0;
-      caret-color: #ffffff;
+      caret-color: var(--rm-text);
     }
     .rm-inline-bar-input::placeholder {
-      color: rgba(255, 255, 255, 0.5);
+      color: var(--rm-text-muted);
     }
     .rm-inline-bar-placeholder {
       position: absolute;
       left: 20px;
       top: 50%;
       transform: translateY(-50%);
-      color: rgba(255, 255, 255, 0.5);
+      color: var(--rm-text-muted);
       font-size: 15px;
       pointer-events: none;
       white-space: nowrap;
@@ -2086,20 +2091,30 @@
       align-self: flex-start;
       padding: 10px 18px;
       border-radius: 22px;
-      border: none;
-      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      color: #ffffff;
+      border: 1px solid var(--rm-border);
+      background: var(--rm-bg);
+      color: var(--rm-text);
       font-size: 14px;
       cursor: pointer;
       transition: background 0.2s ease, transform 0.1s ease;
       line-height: 1.3;
       text-align: left;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
     }
     .rm-inline-bar-topic:hover {
-      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 55%);
+      background: var(--rm-bg-secondary);
       transform: translateX(4px);
+    }
+    .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-topic {
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: none;
+      color: #ffffff;
+      box-shadow: none;
+    }
+    .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-topic:hover {
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 55%);
     }
     .rm-inline-bar.expanded .rm-inline-bar-topic {
       animation: rm-topic-slide-up 0.3s ease forwards;
@@ -2198,8 +2213,11 @@
     /* When chat is active, inline bar gets a slightly different style (no glow, solid border) */
     .rm-inline-bar.chat-active {
       animation: none;
-      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
+      background: var(--rm-border);
       border-radius: 20px;
+    }
+    .rm-inline-bar[data-bg-style="blurred"].chat-active {
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
     }
     .rm-inline-bar.chat-active .rm-inline-bar-inner {
       border-radius: 18px;
@@ -3940,12 +3958,35 @@
         // Apply brand color CSS variables to inline bar (it lives on document.body, not inside container)
         const inlinePrimary = loadedConfig.widget?.primaryColor || "#2563eb";
         const inlineBrandText = loadedConfig.widget?.textColor || "#ffffff";
+        const inlineBgStyle = loadedConfig.widget?.backgroundStyle || "solid";
         inlineBar.style.setProperty("--rm-primary", inlinePrimary);
         inlineBar.style.setProperty(
           "--rm-primary-rgb",
           hexToRgb(inlinePrimary),
         );
         inlineBar.style.setProperty("--rm-brand-text", inlineBrandText);
+        inlineBar.dataset.bgStyle = inlineBgStyle;
+
+        // Set theme tokens on the inline bar (same as container)
+        if (inlineBgStyle === "blurred") {
+          inlineBar.style.setProperty("--rm-bg", "rgba(0,0,0,0.18)");
+          inlineBar.style.setProperty("--rm-bg-secondary", "rgba(255,255,255,0.08)");
+          inlineBar.style.setProperty("--rm-bg-tertiary", "rgba(255,255,255,0.12)");
+          inlineBar.style.setProperty("--rm-text", "#ffffff");
+          inlineBar.style.setProperty("--rm-text-secondary", "rgba(255,255,255,0.6)");
+          inlineBar.style.setProperty("--rm-text-muted", "rgba(255,255,255,0.4)");
+          inlineBar.style.setProperty("--rm-border", "rgba(255,255,255,0.1)");
+          inlineBar.style.setProperty("--rm-border-subtle", "rgba(255,255,255,0.06)");
+        } else {
+          inlineBar.style.setProperty("--rm-bg", "#ffffff");
+          inlineBar.style.setProperty("--rm-bg-secondary", "#f4f4f5");
+          inlineBar.style.setProperty("--rm-bg-tertiary", "#e4e4e7");
+          inlineBar.style.setProperty("--rm-text", "#18181b");
+          inlineBar.style.setProperty("--rm-text-secondary", "#52525b");
+          inlineBar.style.setProperty("--rm-text-muted", "#a1a1aa");
+          inlineBar.style.setProperty("--rm-border", "#e4e4e7");
+          inlineBar.style.setProperty("--rm-border-subtle", "rgba(0,0,0,0.06)");
+        }
 
         // Populate inline bar topics from prompt-type quick actions
         inlineBarTopics.innerHTML = "";
