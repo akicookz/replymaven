@@ -72,7 +72,7 @@ export const updateWidgetConfigSchema = z.object({
     .nullable()
     .optional(),
   backgroundStyle: z
-    .enum(["solid", "blurred", "bordered", "soft"])
+    .enum(["solid", "blurred"])
     .optional(),
 });
 

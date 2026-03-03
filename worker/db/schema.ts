@@ -119,7 +119,7 @@ export const widgetConfig = sqliteTable(
     visitorMessageBgColor: text("visitor_message_bg_color"),
     visitorMessageTextColor: text("visitor_message_text_color"),
     backgroundStyle: text("background_style", {
-      enum: ["solid", "blurred", "bordered", "soft"],
+      enum: ["solid", "blurred"],
     })
       .notNull()
       .default("solid"),

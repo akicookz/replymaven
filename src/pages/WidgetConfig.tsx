@@ -45,14 +45,12 @@ interface WidgetConfigData {
   botMessageTextColor: string;
   visitorMessageBgColor: string | null;
   visitorMessageTextColor: string | null;
-  backgroundStyle: "solid" | "blurred" | "bordered" | "soft";
+  backgroundStyle: "solid" | "blurred";
 }
 
 const BACKGROUND_STYLES = [
   { value: "solid" as const, label: "Solid", description: "Clean opaque background" },
   { value: "blurred" as const, label: "Blurred", description: "Frosted glass effect" },
-  { value: "bordered" as const, label: "Bordered", description: "Outlined, minimal fill" },
-  { value: "soft" as const, label: "Soft", description: "Subtle translucent fill" },
 ] as const;
 
 function WidgetConfig() {
@@ -280,11 +278,7 @@ function WidgetConfig() {
                     style={
                       style.value === "solid"
                         ? { background: "#ffffff", boxShadow: "0 2px 8px rgba(0,0,0,0.1)", border: "1px solid #e4e4e7" }
-                        : style.value === "blurred"
-                          ? { background: "rgba(0,0,0,0.18)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.1)" }
-                          : style.value === "bordered"
-                            ? { background: "transparent", border: "2px solid #e4e4e7" }
-                            : { background: "rgba(255,255,255,0.7)", border: "1px solid rgba(0,0,0,0.04)" }
+                        : { background: "rgba(0,0,0,0.18)", backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.1)" }
                     }
                   />
                   <span className="text-xs font-medium text-foreground">
@@ -697,23 +691,11 @@ function WidgetConfig() {
                           border: "1px solid rgba(255,255,255,0.08)",
                           boxShadow: "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)",
                         }
-                      : form.backgroundStyle === "bordered"
-                        ? {
-                            background: "transparent",
-                            border: "2px solid #e4e4e7",
-                            boxShadow: "none",
-                          }
-                        : form.backgroundStyle === "soft"
-                          ? {
-                              background: "rgba(255,255,255,0.85)",
-                              border: "1px solid rgba(0,0,0,0.06)",
-                              boxShadow: "0 4px 24px rgba(0,0,0,0.06)",
-                            }
-                          : {
-                              background: "#ffffff",
-                              border: "1px solid #e4e4e7",
-                              boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
-                            }),
+                      : {
+                          background: "#ffffff",
+                          border: "1px solid #e4e4e7",
+                          boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
+                        }),
                     borderRadius: `${form.borderRadius ?? 16}px`,
                   }}
                 >
@@ -821,23 +803,11 @@ function WidgetConfig() {
                         border: "1px solid rgba(255,255,255,0.08)",
                         boxShadow: "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)",
                       }
-                    : form.backgroundStyle === "bordered"
-                      ? {
-                          background: "transparent",
-                          border: "2px solid #e4e4e7",
-                          boxShadow: "none",
-                        }
-                      : form.backgroundStyle === "soft"
-                        ? {
-                            background: "rgba(255,255,255,0.85)",
-                            border: "1px solid rgba(0,0,0,0.06)",
-                            boxShadow: "0 4px 24px rgba(0,0,0,0.06)",
-                          }
-                        : {
-                            background: "#ffffff",
-                            border: "1px solid #e4e4e7",
-                            boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
-                          }),
+                    : {
+                        background: "#ffffff",
+                        border: "1px solid #e4e4e7",
+                        boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
+                      }),
                   borderRadius: `${form.borderRadius ?? 16}px`,
                   color: form.backgroundStyle === "blurred" ? "#ffffff" : "#18181b",
                   maxHeight: "480px",

@@ -349,18 +349,6 @@
       box-shadow: 0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(var(--rm-primary-rgb, 37,99,235), 0.15);
       color: #ffffff;
     }
-    /* ─── Background Style: Bordered ────────────────────────────────────── */
-    .rm-chat-window[data-bg-style="bordered"] {
-      background: rgba(255,255,255,0.95);
-      border: 2px solid var(--rm-border);
-      box-shadow: none;
-    }
-    /* ─── Background Style: Soft ────────────────────────────────────────── */
-    .rm-chat-window[data-bg-style="soft"] {
-      background: rgba(255,255,255,0.85);
-      border: 1px solid rgba(0,0,0,0.06);
-      box-shadow: 0 4px 24px rgba(0,0,0,0.06);
-    }
     .rm-chat-window.bottom-right {
       right: 0;
       transform-origin: bottom right;
