@@ -2074,6 +2074,49 @@
       pointer-events: none;
       transform: translateY(8px);
     }
+
+    /* ─── Floating Intro Bubble (center-inline) ──────────────────────────── */
+    .rm-inline-bar-intro {
+      position: absolute;
+      bottom: calc(100% + 12px);
+      left: 4px;
+      max-width: 280px;
+      padding: 10px 16px;
+      border-radius: 18px 18px 18px 4px;
+      background: var(--rm-bg);
+      color: var(--rm-text);
+      font-size: 14px;
+      line-height: 1.45;
+      border: 1px solid var(--rm-border);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(8px);
+      transition: opacity 0.35s ease, transform 0.35s ease, visibility 0.35s;
+    }
+    .rm-inline-bar.ready .rm-inline-bar-intro {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+      transition-delay: 0.4s;
+    }
+    .rm-inline-bar.expanded .rm-inline-bar-intro,
+    .rm-inline-bar.chat-active .rm-inline-bar-intro {
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(8px);
+      transition-delay: 0s;
+    }
+    .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-intro {
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: none;
+      color: #ffffff;
+      box-shadow: none;
+    }
+
     .rm-inline-bar-topic {
       display: inline-flex;
       align-self: flex-start;
@@ -2107,11 +2150,11 @@
     .rm-inline-bar.expanded .rm-inline-bar-topic {
       animation: rm-topic-slide-up 0.3s ease forwards;
     }
-    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(1) { animation-delay: 0s; }
-    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(2) { animation-delay: 0.05s; }
-    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(3) { animation-delay: 0.1s; }
-    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(4) { animation-delay: 0.15s; }
-    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-child(5) { animation-delay: 0.2s; }
+    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-of-type(1) { animation-delay: 0s; }
+    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-of-type(2) { animation-delay: 0.05s; }
+    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-of-type(3) { animation-delay: 0.1s; }
+    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-of-type(4) { animation-delay: 0.15s; }
+    .rm-inline-bar.expanded .rm-inline-bar-topic:nth-of-type(5) { animation-delay: 0.2s; }
 
     /* ─── Center Inline Quick Action Bubbles ─────────────────────────────── */
     .rm-inline-bar-actions {
@@ -2683,6 +2726,8 @@
   // ─── Inline Bar State ───────────────────────────────────────────────────────
   let isInlineBarVariant = false;
   let inlineBarExpanded = false;
+  let pendingIntroMessage: string | null = null;
+  let introMessageText: string | null = null;
   let placeholderTexts: string[] = ["Ask a question..."];
   let placeholderIndex = 0;
   let placeholderInterval: ReturnType<typeof setInterval> | null = null;
@@ -2829,6 +2874,12 @@
     formView.classList.remove("active");
     bookingView.classList.remove("active");
     chatView.classList.add("active");
+    // Show intro message as the first bot message on first chat open
+    if (introMessageText) {
+      addMessageToUI("bot", introMessageText);
+      introMessageText = null;
+      pendingIntroMessage = null;
+    }
     setTimeout(() => input.focus(), 100);
   }
 
@@ -3996,9 +4047,10 @@
         // Booking primary color already applied via CSS var(--rm-primary)
       }
 
-      // Intro message
+      // Intro message — stored for lazy display on first chat open
       if (loadedConfig.introMessage) {
-        addMessageToUI("bot", loadedConfig.introMessage);
+        pendingIntroMessage = loadedConfig.introMessage;
+        introMessageText = loadedConfig.introMessage;
       }
 
       // ─── Prompt-type Quick Actions as Chat Pills ────────────────────────────
@@ -4058,6 +4110,7 @@
 
         // Populate inline bar topics from prompt-type quick actions
         inlineBarTopics.innerHTML = "";
+
         if (promptActions.length > 0) {
           placeholderTexts = promptActions.map((qa) => qa.label);
           promptActions.forEach((qa) => {
@@ -4123,6 +4176,15 @@
             inlineBarActions.appendChild(actionBtn);
           });
           inlineBarActions.classList.add("has-actions");
+        }
+
+        // Floating intro bubble (center-inline only, visible before expanding)
+        if (pendingIntroMessage) {
+          const introBubble = document.createElement("div");
+          introBubble.className = "rm-inline-bar-intro";
+          introBubble.textContent = pendingIntroMessage;
+          inlineBar.appendChild(introBubble);
+          pendingIntroMessage = null;
         }
 
         // Append inline bar to body and start placeholder rotation
@@ -5327,6 +5389,9 @@
 
       // Render existing messages
       if (msgs.length > 0) {
+        // Clear intro message — history already contains the conversation
+        introMessageText = null;
+        pendingIntroMessage = null;
         // Switch to chat view since we have history
         showChatScreen();
 
