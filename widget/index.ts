@@ -2102,12 +2102,46 @@
       transition-delay: 0.4s;
     }
     .rm-inline-bar.expanded .rm-inline-bar-intro,
-    .rm-inline-bar.chat-active .rm-inline-bar-intro {
+    .rm-inline-bar.chat-active .rm-inline-bar-intro,
+    .rm-inline-bar-intro.rm-intro-hidden {
       opacity: 0;
       visibility: hidden;
       transform: translateY(8px);
       transition-delay: 0s;
     }
+
+    /* ─── Expanded Intro Bubble (shown on focus, above topics) ────────────── */
+    .rm-inline-bar-intro-expanded {
+      max-width: 280px;
+      padding: 10px 16px;
+      border-radius: 18px 18px 18px 4px;
+      background: var(--rm-bg);
+      color: var(--rm-text);
+      font-size: 14px;
+      line-height: 1.45;
+      border: 1px solid var(--rm-border);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(8px);
+      transition: opacity 0.35s ease, transform 0.35s ease, visibility 0.35s;
+      pointer-events: none;
+      align-self: flex-start;
+    }
+    .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-intro-expanded {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+    .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-intro-expanded {
+      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: none;
+      color: #ffffff;
+      box-shadow: none;
+    }
+
     .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-intro {
       background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
       backdrop-filter: blur(12px);
@@ -2728,6 +2762,7 @@
   let inlineBarExpanded = false;
   let pendingIntroMessage: string | null = null;
   let introMessageText: string | null = null;
+  let introBubbleTimer: ReturnType<typeof setTimeout> | null = null;
   let placeholderTexts: string[] = ["Ask a question..."];
   let placeholderIndex = 0;
   let placeholderInterval: ReturnType<typeof setInterval> | null = null;
@@ -2811,6 +2846,11 @@
 
   // Inline bar event listeners
   inlineBarInput.addEventListener("focus", () => {
+    // Clear the intro bubble auto-hide timer if it hasn't fired yet
+    if (introBubbleTimer) {
+      clearTimeout(introBubbleTimer);
+      introBubbleTimer = null;
+    }
     if (!inlineBarExpanded) expandInlineBar();
     // If there's a conversation to restore, open the chat window
     if (isInlineBarVariant && !isOpen && conversationId) {
@@ -4179,13 +4219,30 @@
         }
 
         // Floating intro bubble (center-inline only, visible before expanding)
-        if (pendingIntroMessage) {
+        // Only show if showIntroBubble config is enabled (default true)
+        if (pendingIntroMessage && loadedConfig.showIntroBubble !== false) {
           const introBubble = document.createElement("div");
           introBubble.className = "rm-inline-bar-intro";
           introBubble.textContent = pendingIntroMessage;
           inlineBar.appendChild(introBubble);
-          pendingIntroMessage = null;
+
+          // Auto-hide the floating intro bubble after 3 seconds
+          introBubbleTimer = setTimeout(() => {
+            introBubble.classList.add("rm-intro-hidden");
+            introBubbleTimer = null;
+          }, 3000);
         }
+
+        // Expanded intro bubble (shown above quick actions when input is focused)
+        if (pendingIntroMessage || introMessageText) {
+          const expandedIntroBubble = document.createElement("div");
+          expandedIntroBubble.className = "rm-inline-bar-intro-expanded";
+          expandedIntroBubble.textContent = pendingIntroMessage || introMessageText || "";
+          // Prepend as first child of topics so it appears above the topic pills
+          inlineBarTopics.insertBefore(expandedIntroBubble, inlineBarTopics.firstChild);
+        }
+
+        pendingIntroMessage = null;
 
         // Append inline bar to body and start placeholder rotation
         document.body.appendChild(inlineBar);

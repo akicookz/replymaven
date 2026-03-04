@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ColorPicker } from "@/components/ui/color-picker";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 interface WidgetConfigData {
@@ -60,6 +61,7 @@ function WidgetConfig() {
 
   const [form, setForm] = useState<Partial<WidgetConfigData>>({});
   const [introMessage, setIntroMessage] = useState("Hi there! How can I help you today?");
+  const [showIntroBubble, setShowIntroBubble] = useState(true);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
   const [pageInput, setPageInput] = useState("");
@@ -85,7 +87,7 @@ function WidgetConfig() {
     },
   });
 
-  const { data: settingsData } = useQuery<{ introMessage?: string }>({
+  const { data: settingsData } = useQuery<{ introMessage?: string; showIntroBubble?: boolean }>({
     queryKey: ["project-settings", projectId],
     queryFn: async () => {
       const res = await fetch(`/api/projects/${projectId}/settings`);
@@ -102,6 +104,9 @@ function WidgetConfig() {
     if (settingsData?.introMessage != null) {
       setIntroMessage(settingsData.introMessage);
     }
+    if (settingsData?.showIntroBubble != null) {
+      setShowIntroBubble(settingsData.showIntroBubble);
+    }
   }, [settingsData]);
 
   const save = useMutation({
@@ -115,7 +120,7 @@ function WidgetConfig() {
         fetch(`/api/projects/${projectId}/settings`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ introMessage }),
+          body: JSON.stringify({ introMessage, showIntroBubble }),
         }),
       ]);
       if (!widgetRes.ok) throw new Error("Failed to save widget config");
@@ -617,6 +622,22 @@ function WidgetConfig() {
               rows={3}
               className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             />
+            {form.position === "center-inline" && (
+              <div className="flex items-center justify-between rounded-xl border border-input bg-background px-4 py-3">
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-card-foreground">
+                    Show intro bubble before focus
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Display the intro message as a floating bubble above the input bar before the visitor interacts.
+                  </p>
+                </div>
+                <Switch
+                  checked={showIntroBubble}
+                  onCheckedChange={setShowIntroBubble}
+                />
+              </div>
+            )}
           </div>
 
           {/* Page Targeting */}

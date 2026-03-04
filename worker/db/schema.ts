@@ -67,6 +67,9 @@ export const projectSettings = sqliteTable(
     introMessage: text("intro_message").default(
       "Hi there! How can I help you today?",
     ),
+    showIntroBubble: integer("show_intro_bubble", { mode: "boolean" })
+      .notNull()
+      .default(true),
     autoCannedDraft: integer("auto_canned_draft", { mode: "boolean" })
       .notNull()
       .default(true),

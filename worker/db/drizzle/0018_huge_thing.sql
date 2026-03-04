@@ -1,0 +1,1 @@
+ALTER TABLE `project_settings` ADD `show_intro_bubble` integer DEFAULT true NOT NULL;

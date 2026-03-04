@@ -249,6 +249,7 @@ export class WidgetService {
       quickActions: actions,
       introMessage:
         settings[0]?.introMessage ?? "Hi there! How can I help you today?",
+      showIntroBubble: settings[0]?.showIntroBubble ?? true,
       contactForm:
         formConfig?.enabled
           ? {
