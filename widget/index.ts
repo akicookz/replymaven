@@ -2045,15 +2045,16 @@
       transform: scale(1);
     }
 
-    /* Topics panel above the bar */
-    .rm-inline-bar-topics {
+    /* ─── Float container: stacks intro, actions, topics above the bar ────── */
+    .rm-inline-bar-float {
       position: absolute;
       bottom: calc(100% + 10px);
       left: 0;
       right: 0;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      align-items: flex-start;
+      gap: 8px;
       padding: 0 4px;
       opacity: 0;
       visibility: hidden;
@@ -2061,18 +2062,19 @@
       transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
       pointer-events: none;
     }
-    .rm-inline-bar.expanded .rm-inline-bar-topics {
+    .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-float {
       opacity: 1;
       visibility: visible;
       transform: translateY(0);
       pointer-events: auto;
     }
-    /* Hide topics when chat is active — the chat window sits above the bar */
-    .rm-inline-bar.chat-active .rm-inline-bar-topics {
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
-      transform: translateY(8px);
+
+    /* Topics panel above the bar */
+    .rm-inline-bar-topics {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
     }
 
     /* ─── Floating Intro Bubble (center-inline) ──────────────────────────── */
@@ -2121,17 +2123,7 @@
       line-height: 1.45;
       border: 1px solid var(--rm-border);
       box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-      opacity: 0;
-      visibility: hidden;
-      transform: translateY(8px);
-      transition: opacity 0.35s ease, transform 0.35s ease, visibility 0.35s;
       pointer-events: none;
-      align-self: flex-start;
-    }
-    .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-intro-expanded {
-      opacity: 1;
-      visibility: visible;
-      transform: translateY(0);
     }
     .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-intro-expanded {
       background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
@@ -2192,25 +2184,13 @@
 
     /* ─── Center Inline Quick Action Bubbles ─────────────────────────────── */
     .rm-inline-bar-actions {
-      position: absolute;
-      bottom: calc(100% + 10px);
-      left: 0;
-      right: 0;
-      display: flex;
+      display: none;
       justify-content: flex-start;
       gap: 8px;
-      padding: 0 4px;
-      opacity: 0;
-      visibility: hidden;
-      transform: translateY(10px);
-      transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s;
-      pointer-events: none;
+      width: 100%;
     }
-    .rm-inline-bar.expanded:not(.chat-active) .rm-inline-bar-actions.has-actions {
-      opacity: 1;
-      visibility: visible;
-      transform: translateY(0);
-      pointer-events: auto;
+    .rm-inline-bar-actions.has-actions {
+      display: flex;
     }
     .rm-inline-bar-action {
       display: inline-flex;
@@ -2751,8 +2731,12 @@
   inlineBarInner.appendChild(inlineBarInput);
   inlineBarInner.appendChild(inlineBarBtn);
 
-  inlineBar.appendChild(inlineBarActions);
-  inlineBar.appendChild(inlineBarTopics);
+  const inlineBarFloat = document.createElement("div");
+  inlineBarFloat.className = "rm-inline-bar-float";
+  inlineBarFloat.appendChild(inlineBarActions);
+  inlineBarFloat.appendChild(inlineBarTopics);
+
+  inlineBar.appendChild(inlineBarFloat);
   inlineBar.appendChild(inlineBarInner);
 
   // Not appended to body yet — only when variant is "inline-bar" in loadConfig
@@ -4238,8 +4222,8 @@
           const expandedIntroBubble = document.createElement("div");
           expandedIntroBubble.className = "rm-inline-bar-intro-expanded";
           expandedIntroBubble.textContent = pendingIntroMessage || introMessageText || "";
-          // Prepend as first child of topics so it appears above the topic pills
-          inlineBarTopics.insertBefore(expandedIntroBubble, inlineBarTopics.firstChild);
+          // Prepend as first child of float container so it appears above actions and topics
+          inlineBarFloat.insertBefore(expandedIntroBubble, inlineBarFloat.firstChild);
         }
 
         pendingIntroMessage = null;
