@@ -139,6 +139,19 @@ export class ChatService {
     return this.getConversationById(id, projectId);
   }
 
+  async updateTelegramThreadId(
+    id: string,
+    projectId: string,
+    threadId: string,
+  ): Promise<void> {
+    await this.db
+      .update(conversations)
+      .set({ telegramThreadId: threadId })
+      .where(
+        and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
+      );
+  }
+
   // ─── Messages ───────────────────────────────────────────────────────────────
 
   async getMessages(conversationId: string): Promise<MessageRow[]> {

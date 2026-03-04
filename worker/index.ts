@@ -705,6 +705,35 @@ const app = new Hono<HonoAppContext>()
       project.id,
     );
 
+    // ─── Agent Mode: bypass AI when agent is handling ───────────────────────
+    if (
+      conversation.status === "waiting_agent" ||
+      conversation.status === "agent_replied"
+    ) {
+      // Forward to Telegram in background if configured
+      const agentSettings = await projectService.getSettings(project.id);
+      if (agentSettings?.telegramBotToken && agentSettings?.telegramChatId) {
+        const telegramService = new TelegramService(db);
+        c.executionCtx.waitUntil(
+          telegramService
+            .forwardVisitorMessage(
+              agentSettings.telegramBotToken,
+              agentSettings.telegramChatId,
+              conversation.visitorName,
+              parsed.data.content,
+              conversation.telegramThreadId
+                ? parseInt(conversation.telegramThreadId, 10)
+                : undefined,
+            )
+            .catch((err) => {
+              console.error("Telegram forward failed:", err);
+            }),
+        );
+      }
+
+      return c.json({ ok: true, agentMode: true });
+    }
+
     // If visitor attached an image, fetch it from R2 and base64-encode for Gemini
     let imageBase64: string | null = null;
     let imageMimeType: string | null = null;
@@ -744,6 +773,41 @@ const app = new Hono<HonoAppContext>()
         role: m.role as "visitor" | "bot" | "agent",
         content: m.content,
       }));
+
+    // Notify via Telegram on first visitor message (new conversation)
+    const visitorMessages = history.filter((m) => m.role === "visitor");
+    if (
+      visitorMessages.length === 1 &&
+      settings?.telegramBotToken &&
+      settings?.telegramChatId
+    ) {
+      const telegramService = new TelegramService(db);
+      c.executionCtx.waitUntil(
+        telegramService
+          .notifyNewConversation(
+            settings.telegramBotToken,
+            settings.telegramChatId,
+            conversationId,
+            conversation.visitorName,
+            conversation.visitorEmail,
+            parsed.data.content,
+            c.env.BETTER_AUTH_URL,
+            project.id,
+          )
+          .then(async (messageId) => {
+            if (messageId) {
+              await chatService.updateTelegramThreadId(
+                conversationId,
+                project.id,
+                String(messageId),
+              );
+            }
+          })
+          .catch((err) => {
+            console.error("New conversation Telegram notification failed:", err);
+          }),
+      );
+    }
 
     // Reformulate the visitor's message into a standalone search query and
     // generate a conversation summary (for multi-turn conversations) in parallel.
@@ -864,12 +928,25 @@ const app = new Hono<HonoAppContext>()
       }
     }
 
+    // Extract agent handback instructions from conversation metadata
+    let agentHandbackInstructions: string | null = null;
+    if (conversation.metadata) {
+      try {
+        const meta = JSON.parse(conversation.metadata);
+        agentHandbackInstructions = meta.agentHandbackInstructions ?? null;
+      } catch {
+        // Ignore malformed metadata
+      }
+    }
+
     // Build system prompt and stream response
     const systemPrompt = aiService.buildSystemPrompt(
       settings ?? {
         toneOfVoice: "professional",
         customTonePrompt: null,
         companyContext: null,
+        botName: null,
+        agentName: null,
       },
       project.name,
       ragContext,
@@ -882,6 +959,7 @@ const app = new Hono<HonoAppContext>()
           condition: g.condition,
           instruction: g.instruction,
         })),
+        agentHandbackInstructions,
       },
     );
 
@@ -1046,19 +1124,33 @@ const app = new Hono<HonoAppContext>()
             // Notify via Telegram if configured
             if (settings?.telegramBotToken && settings?.telegramChatId) {
               const telegramService = new TelegramService(db);
-              await telegramService.notifyHandoff(
+              const threadId = await telegramService.notifyHandoff(
                 settings.telegramBotToken,
                 settings.telegramChatId,
                 conversationId,
                 conversation.visitorName,
                 parsed.data.content,
+                conversationHistory,
+                c.env.BETTER_AUTH_URL,
+                project.id,
+                settings.botName,
               );
+              if (threadId) {
+                await chatService.updateTelegramThreadId(
+                  conversationId,
+                  project.id,
+                  String(threadId),
+                );
+              }
             }
 
-            fullResponse = fullResponse.replace(
-              "[HANDOFF_REQUESTED]",
-              "I'll connect you with a human agent right away. They'll be with you shortly!",
-            );
+            // Strip the [HANDOFF_REQUESTED] token — the AI now says its own
+            // natural message before it (e.g. "Let me connect you with...")
+            fullResponse = fullResponse.replace("[HANDOFF_REQUESTED]", "").trim();
+            if (!fullResponse) {
+              const agentLabel = settings?.agentName ?? "a team member";
+              fullResponse = `I'll connect you with ${agentLabel}. They'll be with you shortly!`;
+            }
 
             // Send handoff event to widget with visitor email for smart handoff UX
             controller.enqueue(
@@ -1311,15 +1403,14 @@ const app = new Hono<HonoAppContext>()
     const settings = await projectService.getSettings(project.id);
     if (settings?.telegramBotToken && settings?.telegramChatId) {
       const telegramService = new TelegramService(db);
-      const fields = Object.entries(parsed.data.data)
-        .map(([key, val]) => `${key}: ${val}`)
-        .join("\n");
       c.executionCtx.waitUntil(
         telegramService
-          .sendMessage(
+          .notifyContactForm(
             settings.telegramBotToken,
             settings.telegramChatId,
-            `New contact form submission:\n\n${fields}`,
+            parsed.data.data,
+            c.env.BETTER_AUTH_URL,
+            project.id,
           )
           .catch(() => {
             // Silently ignore Telegram errors
@@ -1427,16 +1518,18 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: message }, 409);
     }
 
-    // Send confirmation emails in background
+    // Send confirmation emails and Telegram notification in background
+    const settings = await projectService.getSettings(project.id);
+    const bookingConfig = await bookingService.getBookingConfig(project.id);
+    const projectName = settings?.companyName ?? project.name;
+
+    const backgroundTasks: Promise<unknown>[] = [];
+
     if (c.env.RESEND_API_KEY) {
       const emailService = new EmailService(c.env.RESEND_API_KEY);
-      const bookingConfig = await bookingService.getBookingConfig(project.id);
-      const settings = await projectService.getSettings(project.id);
-
-      // Get project owner email
       const ownerEmail = await projectService.getOwnerEmail(project.id);
 
-      c.executionCtx.waitUntil(
+      backgroundTasks.push(
         Promise.all([
           emailService.sendBookingConfirmation({
             visitorName: booking.visitorName,
@@ -1446,7 +1539,7 @@ const app = new Hono<HonoAppContext>()
             startTime: new Date(booking.startTime),
             endTime: new Date(booking.endTime),
             timezone: booking.timezone,
-            projectName: settings?.companyName ?? project.name,
+            projectName,
           }),
           emailService.sendBookingNotification({
             visitorName: booking.visitorName,
@@ -1456,7 +1549,7 @@ const app = new Hono<HonoAppContext>()
             startTime: new Date(booking.startTime),
             endTime: new Date(booking.endTime),
             timezone: booking.timezone,
-            projectName: settings?.companyName ?? project.name,
+            projectName,
             ownerEmail: ownerEmail ?? undefined,
             ownerTimezone: bookingConfig?.timezone,
           }),
@@ -1464,6 +1557,38 @@ const app = new Hono<HonoAppContext>()
           console.error("Booking email failed:", err);
         }),
       );
+    }
+
+    // Notify via Telegram if configured
+    if (settings?.telegramBotToken && settings?.telegramChatId) {
+      const telegramService = new TelegramService(db);
+      backgroundTasks.push(
+        telegramService
+          .notifyNewBooking(
+            settings.telegramBotToken,
+            settings.telegramChatId,
+            {
+              visitorName: booking.visitorName,
+              visitorEmail: booking.visitorEmail,
+              visitorPhone: booking.visitorPhone,
+              notes: booking.notes,
+              startTime: new Date(booking.startTime),
+              endTime: new Date(booking.endTime),
+              timezone: booking.timezone,
+            },
+            projectName,
+            c.env.BETTER_AUTH_URL,
+            project.id,
+            parsed.data.conversationId,
+          )
+          .catch((err) => {
+            console.error("Booking Telegram notification failed:", err);
+          }),
+      );
+    }
+
+    if (backgroundTasks.length > 0) {
+      c.executionCtx.waitUntil(Promise.all(backgroundTasks));
     }
 
     return c.json(booking, 201);
@@ -1480,11 +1605,12 @@ const app = new Hono<HonoAppContext>()
     const db = drizzle(c.env.DB);
 
     const telegramService = new TelegramService(db);
-    const settings = await telegramService.getTelegramSettings(projectId);
-    if (!settings?.telegramBotToken || !settings?.telegramChatId) {
+    const tgSettings = await telegramService.getTelegramSettings(projectId);
+    if (!tgSettings?.telegramBotToken || !tgSettings?.telegramChatId) {
       return c.json({ error: "Telegram not configured" }, 400);
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body = (await c.req.json()) as { message?: any };
     const message = body.message;
     if (!message?.text || !message?.reply_to_message) {
@@ -1506,7 +1632,106 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    // Store agent reply
+    // Get project settings to check for botName
+    const projectService = new ProjectService(db);
+    const projectSettings = await projectService.getSettings(projectId);
+    const botName = projectSettings?.botName;
+
+    // Check if message is an @botName command
+    if (botName) {
+      const mentionPrefix = `@${botName}`;
+      if (message.text.toLowerCase().startsWith(mentionPrefix.toLowerCase())) {
+        const commandText = message.text.slice(mentionPrefix.length).trim();
+
+        if (!commandText) {
+          // Simple handback — @BotName with no text
+          await chatService.updateConversationStatus(
+            conversationId,
+            projectId,
+            "active",
+          );
+          // Clear any existing handback instructions
+          await chatService.updateConversation(conversationId, projectId, {
+            metadata: JSON.stringify({ agentHandbackInstructions: null }),
+          });
+          await telegramService.sendMessage(
+            tgSettings.telegramBotToken,
+            tgSettings.telegramChatId,
+            "Bot resumed.",
+            message.message_id,
+          );
+          return c.json({ ok: true });
+        }
+
+        // Use AI to classify: close vs handback with instructions
+        const aiService = new AiService({
+          model: c.env.AI_MODEL,
+          geminiApiKey: c.env.GEMINI_API_KEY,
+          openaiApiKey: c.env.OPENAI_API_KEY,
+        });
+
+        const result = await aiService.classifyAgentCommand(commandText);
+
+        if (result.action === "close") {
+          await chatService.updateConversationStatus(
+            conversationId,
+            projectId,
+            "closed",
+          );
+
+          // Auto-draft canned response in background
+          triggerAutoDraftIfEnabled({
+            projectId,
+            conversationId,
+            db,
+            env: c.env,
+            kv: c.env.CONVERSATIONS_CACHE,
+          });
+
+          await telegramService.sendMessage(
+            tgSettings.telegramBotToken,
+            tgSettings.telegramChatId,
+            "Conversation closed.",
+            message.message_id,
+          );
+        } else {
+          // Handback to AI
+          await chatService.updateConversationStatus(
+            conversationId,
+            projectId,
+            "active",
+          );
+
+          // Store instructions in conversation metadata if provided
+          if (result.instructions) {
+            await chatService.updateConversation(conversationId, projectId, {
+              metadata: JSON.stringify({
+                agentHandbackInstructions: result.instructions,
+              }),
+            });
+          } else {
+            // Clear any existing handback instructions
+            await chatService.updateConversation(conversationId, projectId, {
+              metadata: JSON.stringify({ agentHandbackInstructions: null }),
+            });
+          }
+
+          const confirmText = result.instructions
+            ? "Bot resumed with instructions."
+            : "Bot resumed.";
+          await telegramService.sendMessage(
+            tgSettings.telegramBotToken,
+            tgSettings.telegramChatId,
+            confirmText,
+            message.message_id,
+          );
+        }
+
+        return c.json({ ok: true });
+      }
+    }
+
+    // Normal agent reply — store and forward to visitor
     await chatService.addMessage(
       {
         conversationId,
@@ -1516,7 +1741,6 @@ const app = new Hono<HonoAppContext>()
       projectId,
     );
 
-    // Update conversation status
     await chatService.updateConversationStatus(
       conversationId,
       projectId,

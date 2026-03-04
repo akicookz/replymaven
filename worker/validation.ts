@@ -28,6 +28,20 @@ export const updateProjectSettingsSchema = z.object({
     .nullable()
     .optional(),
   companyContext: z.string().max(10000).nullable().optional(),
+  botName: z
+    .string()
+    .max(16, "Bot name must be 16 characters or less")
+    .regex(
+      /^[a-zA-Z0-9_-]+$/,
+      "Only letters, numbers, hyphens, and underscores",
+    )
+    .nullable()
+    .optional(),
+  agentName: z
+    .string()
+    .max(50, "Agent name must be 50 characters or less")
+    .nullable()
+    .optional(),
 });
 
 // ─── Widget Config ────────────────────────────────────────────────────────────

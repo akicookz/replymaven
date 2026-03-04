@@ -4373,6 +4373,15 @@
           return;
         }
 
+        // Check if this is an agent-mode JSON response (not SSE)
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          hideTyping();
+          // Message stored server-side, agent will reply via polling.
+          // No bot response expected — visitor is talking to a human.
+          return;
+        }
+
         // Handle SSE stream
         const reader = res.body?.getReader();
         if (!reader) return;

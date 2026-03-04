@@ -58,6 +58,8 @@ export const projectSettings = sqliteTable(
     companyUrl: text("company_url"),
     industry: text("industry"),
     companyContext: text("company_context"),
+    botName: text("bot_name"), // e.g. "Luna", "Alex" — no spaces, max 16 chars
+    agentName: text("agent_name"), // e.g. "a team member", "an engineer" — max 50 chars
     toneOfVoice: text("tone_of_voice", {
       enum: ["professional", "friendly", "casual", "formal", "custom"],
     })

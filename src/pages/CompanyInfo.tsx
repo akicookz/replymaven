@@ -14,6 +14,8 @@ interface ProjectSettingsData {
   companyContext: string | null;
   toneOfVoice: ToneOfVoice;
   customTonePrompt: string | null;
+  botName: string | null;
+  agentName: string | null;
 }
 
 const toneOptions: ToneOfVoice[] = [
@@ -34,6 +36,8 @@ function CompanyInfo() {
     companyContext: "",
     toneOfVoice: "professional" as ToneOfVoice,
     customTonePrompt: "",
+    botName: "",
+    agentName: "",
   });
 
   const { data: settings, isLoading } = useQuery<ProjectSettingsData>({
@@ -53,6 +57,8 @@ function CompanyInfo() {
       companyContext: settings.companyContext ?? "",
       toneOfVoice: settings.toneOfVoice ?? "professional",
       customTonePrompt: settings.customTonePrompt ?? "",
+      botName: settings.botName ?? "",
+      agentName: settings.agentName ?? "",
     });
   }, [settings]);
 
@@ -77,6 +83,8 @@ function CompanyInfo() {
           companyForm.toneOfVoice === "custom"
             ? companyForm.customTonePrompt.trim() || null
             : null,
+        botName: companyForm.botName.trim() || null,
+        agentName: companyForm.agentName.trim() || null,
       };
       const res = await fetch(`/api/projects/${projectId}/settings`, {
         method: "PUT",
@@ -242,6 +250,51 @@ function CompanyInfo() {
               placeholder="https://example.com"
               className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">
+              Assistant Name
+            </label>
+            <input
+              type="text"
+              value={companyForm.botName}
+              onChange={(e) => {
+                const val = e.target.value.replace(/[^a-zA-Z0-9_-]/g, "");
+                setCompanyForm((prev) => ({
+                  ...prev,
+                  botName: val.slice(0, 16),
+                }));
+              }}
+              placeholder="e.g. Luna, Alex, Maya"
+              className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <p className="text-xs text-muted-foreground">
+              Give your chatbot a name. No spaces, max 16 characters. Used in
+              conversations and Telegram commands.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">
+              Human Agent Label
+            </label>
+            <input
+              type="text"
+              value={companyForm.agentName}
+              onChange={(e) =>
+                setCompanyForm((prev) => ({
+                  ...prev,
+                  agentName: e.target.value.slice(0, 50),
+                }))
+              }
+              placeholder="e.g. a team member, an engineer, our support team"
+              className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <p className="text-xs text-muted-foreground">
+              What should the bot call your team when handing off to a human?
+            </p>
           </div>
         </div>
 

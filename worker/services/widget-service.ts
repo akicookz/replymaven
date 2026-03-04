@@ -250,6 +250,7 @@ export class WidgetService {
       introMessage:
         settings[0]?.introMessage ?? "Hi there! How can I help you today?",
       showIntroBubble: settings[0]?.showIntroBubble ?? true,
+      botName: settings[0]?.botName ?? null,
       contactForm:
         formConfig?.enabled
           ? {
