@@ -320,31 +320,6 @@ function Layout() {
               {!collapsed && "Create Project"}
             </Link>
           )}
-
-          {/* Account */}
-          <div className="space-y-1">
-            {!collapsed && (
-              <p className="px-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Account
-              </p>
-            )}
-            <div className="space-y-0.5">
-              <Link
-                to="/app/account/billing"
-                className="flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <CreditCard className="w-[18px] h-[18px] shrink-0" />
-                {!collapsed && "Billing"}
-              </Link>
-              <Link
-                to="/app/account/members"
-                className="flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <Users className="w-[18px] h-[18px] shrink-0" />
-                {!collapsed && "Members"}
-              </Link>
-            </div>
-          </div>
         </nav>
 
         {/* Plan Status */}
@@ -397,30 +372,49 @@ function Layout() {
 
         {/* User */}
         <div className="px-3 pb-3 pt-2 border-t border-sidebar-border">
-          <div className="flex items-center gap-3 px-2 py-2">
-            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
-              {userName.charAt(0).toUpperCase()}
-            </div>
-            {!collapsed && (
-              <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-medium text-foreground truncate">
-                  {userName}
-                </p>
-                <p className="text-[11px] text-muted-foreground truncate">
-                  {userEmail}
-                </p>
-              </div>
-            )}
-            {!collapsed && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-accent transition-colors">
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
+                  {userName.charAt(0).toUpperCase()}
+                </div>
+                {!collapsed && (
+                  <div className="flex-1 min-w-0 text-left">
+                    <p className="text-[13px] font-medium text-foreground truncate">
+                      {userName}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {userEmail}
+                    </p>
+                  </div>
+                )}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="start" className="w-52 p-1">
+              <Link
+                to="/app/account/billing"
+                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <CreditCard className="w-4 h-4 shrink-0" />
+                Billing
+              </Link>
+              <Link
+                to="/app/account/members"
+                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <Users className="w-4 h-4 shrink-0" />
+                Members
+              </Link>
+              <Separator className="my-1" />
               <button
                 onClick={handleSignOut}
-                className="p-1.5 rounded-md hover:bg-accent text-muted-foreground transition-colors"
-                title="Sign out"
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-4 h-4 shrink-0" />
+                Sign Out
               </button>
-            )}
-          </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </aside>
 

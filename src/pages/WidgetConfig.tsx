@@ -59,6 +59,7 @@ function WidgetConfig() {
   const queryClient = useQueryClient();
 
   const [form, setForm] = useState<Partial<WidgetConfigData>>({});
+  const [introMessage, setIntroMessage] = useState("Hi there! How can I help you today?");
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
   const [pageInput, setPageInput] = useState("");
@@ -84,22 +85,46 @@ function WidgetConfig() {
     },
   });
 
+  const { data: settingsData } = useQuery<{ introMessage?: string }>({
+    queryKey: ["project-settings", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/settings`);
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json();
+    },
+  });
+
   useEffect(() => {
     if (data) setForm(data);
   }, [data]);
 
+  useEffect(() => {
+    if (settingsData?.introMessage != null) {
+      setIntroMessage(settingsData.introMessage);
+    }
+  }, [settingsData]);
+
   const save = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/widget-config`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      if (!res.ok) throw new Error("Failed to save");
-      return res.json();
+      const [widgetRes, settingsRes] = await Promise.all([
+        fetch(`/api/projects/${projectId}/widget-config`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        }),
+        fetch(`/api/projects/${projectId}/settings`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ introMessage }),
+        }),
+      ]);
+      if (!widgetRes.ok) throw new Error("Failed to save widget config");
+      if (!settingsRes.ok) throw new Error("Failed to save settings");
+      return widgetRes.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["widget-config", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-settings", projectId] });
     },
   });
 
@@ -576,6 +601,24 @@ function WidgetConfig() {
           </div>
           )}
 
+          {/* Intro Message */}
+          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
+              <MessageSquare className="w-5 h-5" />
+              Intro Message
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              The first message visitors see when they open the chat widget.
+            </p>
+            <textarea
+              value={introMessage}
+              onChange={(e) => setIntroMessage(e.target.value)}
+              placeholder="Hi there! How can I help you today?"
+              rows={3}
+              className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+            />
+          </div>
+
           {/* Page Targeting */}
           <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
             <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
@@ -768,7 +811,7 @@ function WidgetConfig() {
                           border: "1px solid rgba(0,0,0,0.06)",
                         }}
                       >
-                        Hi! How can I help you today?
+                        {introMessage || "Hi there! How can I help you today?"}
                       </div>
                     </div>
 

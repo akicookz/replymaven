@@ -3010,6 +3010,18 @@
       '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
     );
 
+    // Auto-link bare URLs (not already inside <a> tags)
+    const linkPlaceholders: string[] = [];
+    html = html.replace(/<a\s[^>]*>.*?<\/a>/g, (match) => {
+      linkPlaceholders.push(match);
+      return `%%LINK${linkPlaceholders.length - 1}%%`;
+    });
+    html = html.replace(
+      /(https?:\/\/[^\s<)]+)/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>',
+    );
+    html = html.replace(/%%LINK(\d+)%%/g, (_, i) => linkPlaceholders[Number(i)]);
+
     // Split into lines for block-level processing
     const lines = html.split("\n");
     const output: string[] = [];
