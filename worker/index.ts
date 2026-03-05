@@ -960,6 +960,7 @@ const app = new Hono<HonoAppContext>()
           instruction: g.instruction,
         })),
         agentHandbackInstructions,
+        pageContext: parsed.data.pageContext,
       },
     );
 
@@ -1694,15 +1695,63 @@ const app = new Hono<HonoAppContext>()
             "Conversation closed.",
             message.message_id,
           );
-        } else {
-          // Handback to AI
+        } else if (result.action === "respond") {
+          // Bot should immediately respond to the visitor
           await chatService.updateConversationStatus(
             conversationId,
             projectId,
             "active",
           );
 
-          // Store instructions in conversation metadata if provided
+          // Store instructions in metadata (persist for future messages too)
+          await chatService.updateConversation(conversationId, projectId, {
+            metadata: JSON.stringify({
+              agentHandbackInstructions: result.instructions,
+            }),
+          });
+
+          // Generate a bot response using the agent's instruction
+          const msgs = await chatService.getMessages(conversationId);
+          const history = msgs
+            .filter((m) => m.role !== "bot" || m.content)
+            .slice(-20)
+            .map((m) => ({ role: m.role, content: m.content }));
+
+          const defaultSettings = {
+            toneOfVoice: "professional" as const,
+            customTonePrompt: null,
+            companyContext: null,
+            botName: null,
+            agentName: null,
+          };
+          const project = await projectService.getProjectById(projectId);
+          const responseText = await aiService.generateDirectedResponse(
+            projectSettings ?? defaultSettings,
+            project?.name ?? "Support",
+            history,
+            result.instructions,
+          );
+
+          // Store the bot response as a message
+          await chatService.addMessage(
+            { conversationId, role: "bot", content: responseText },
+            projectId,
+          );
+
+          await telegramService.sendMessage(
+            tgSettings.telegramBotToken,
+            tgSettings.telegramChatId,
+            "Bot responded.",
+            message.message_id,
+          );
+        } else {
+          // Handback — silent instructions for future messages
+          await chatService.updateConversationStatus(
+            conversationId,
+            projectId,
+            "active",
+          );
+
           if (result.instructions) {
             await chatService.updateConversation(conversationId, projectId, {
               metadata: JSON.stringify({
@@ -1710,7 +1759,6 @@ const app = new Hono<HonoAppContext>()
               }),
             });
           } else {
-            // Clear any existing handback instructions
             await chatService.updateConversation(conversationId, projectId, {
               metadata: JSON.stringify({ agentHandbackInstructions: null }),
             });

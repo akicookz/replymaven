@@ -32,6 +32,7 @@
     localStorage.getItem("rm_visitor_id") || generateVisitorId();
   let visitorInfo: { name?: string; email?: string; phone?: string } = {};
   let customMetadata: Record<string, string> = {};
+  let pageContext: Record<string, string> = {};
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let config: Record<string, any> | null = null;
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -4352,8 +4353,14 @@
       stopPolling();
 
       try {
-        const body: Record<string, string> = { content: messageText };
+        const body: Record<string, unknown> = { content: messageText };
         if (uploadedImageUrl) body.imageUrl = uploadedImageUrl;
+        const ctx: Record<string, string> = {
+          currentPageUrl: window.location.href,
+          pageTitle: document.title,
+          ...pageContext,
+        };
+        body.pageContext = ctx;
 
         const res = await fetch(
           `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`,
@@ -5674,6 +5681,9 @@
     setMetadata: (meta: Record<string, string>) => {
       customMetadata = { ...customMetadata, ...meta };
       if (conversationId) syncMetadataToServer();
+    },
+    setPageContext: (ctx: Record<string, string>) => {
+      pageContext = { ...ctx };
     },
     requestNotifications: () => {
       requestNotificationPermission();

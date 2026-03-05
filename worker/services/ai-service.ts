@@ -167,36 +167,106 @@ SUMMARY:`,
 
   async classifyAgentCommand(
     agentText: string,
-  ): Promise<{ action: "close" } | { action: "handback"; instructions: string }> {
+  ): Promise<
+    | { action: "close" }
+    | { action: "handback"; instructions: string }
+    | { action: "respond"; instructions: string }
+  > {
     try {
       const { text } = await generateText({
         model: this.model,
-        prompt: `A human support agent typed the following message directed at their AI assistant:
+        prompt: `A human support agent typed the following message directed at their AI assistant (chatbot). The agent is telling the bot what to do next for a customer conversation.
 
 "${agentText}"
 
-Determine the agent's intent. Respond with ONLY a valid JSON object, no other text:
+Determine the agent's intent. There are exactly three possible intents:
 
-If the agent wants to close, end, resolve, or finish the conversation:
-{"action":"close"}
+1. CLOSE — The agent is saying the conversation is done, resolved, finished, or should be closed.
+   Examples: "we're done here", "this is resolved", "all sorted, customer is happy", "close this one"
 
-If the agent wants the AI to resume handling the conversation (possibly with instructions on how to respond going forward):
-{"action":"handback","instructions":"<extracted instructions or empty string>"}
+2. HANDBACK — The agent is giving the bot private/internal instructions to follow silently going forward. The visitor should NOT see or know about these instructions. The bot should just keep them in mind for future messages.
+   Examples: "don't mention to user but if they keep complaining, cancel their account", "offer them 20% off if they ask about pricing", "be extra careful with this customer, they're a VIP"
+
+3. RESPOND — The agent wants the bot to immediately respond to the visitor with specific information or in a specific way. The visitor WILL see the bot's response.
+   Examples: "explain how the refund process works", "tell them about our pricing plans", "answer their question about shipping", "take over", "you handle it from here"
+
+Key distinction between HANDBACK and RESPOND:
+- HANDBACK = secret instructions for the bot's behavior (visitor never sees the instruction itself)
+- RESPOND = the agent wants the bot to generate a visible response to the visitor right now
+
+Respond with ONLY a valid JSON object, no other text:
+
+For CLOSE: {"action":"close"}
+For HANDBACK: {"action":"handback","instructions":"<the private instructions>"}
+For RESPOND: {"action":"respond","instructions":"<what the bot should respond about>"}
 
 JSON:`,
         temperature: 0,
-        maxOutputTokens: 128,
+        maxOutputTokens: 256,
       });
 
       const parsed = JSON.parse(text.trim());
       if (parsed.action === "close") return { action: "close" };
+      if (parsed.action === "respond") {
+        return { action: "respond", instructions: parsed.instructions ?? agentText };
+      }
       return {
         action: "handback",
         instructions: parsed.instructions ?? "",
       };
     } catch {
-      // Default to handback with the full text as instructions
-      return { action: "handback", instructions: agentText };
+      // Default to respond with the full text as instructions
+      return { action: "respond", instructions: agentText };
+    }
+  }
+
+  // ─── Generate Directed Response ─────────────────────────────────────────────
+
+  async generateDirectedResponse(
+    settings: Pick<
+      ProjectSettingsRow,
+      "toneOfVoice" | "customTonePrompt" | "companyContext" | "botName" | "agentName"
+    >,
+    projectName: string,
+    conversationHistory: Array<{ role: string; content: string }>,
+    agentInstruction: string,
+  ): Promise<string> {
+    const systemPrompt = this.buildSystemPrompt(
+      settings,
+      projectName,
+      "", // no RAG context for directed responses
+      null,
+      null,
+      { agentHandbackInstructions: agentInstruction },
+    );
+
+    const messages: Array<{ role: "user" | "assistant"; content: string }> =
+      conversationHistory.slice(-20).map((m) => ({
+        role: (m.role === "visitor" ? "user" : "assistant") as
+          | "user"
+          | "assistant",
+        content: m.content,
+      }));
+
+    // Add a synthetic user message to trigger the bot to respond
+    messages.push({
+      role: "user",
+      content:
+        "[The human agent has asked you to respond to the visitor now. Follow the agent instructions and generate your response.]",
+    });
+
+    try {
+      const { text } = await generateText({
+        model: this.model,
+        system: systemPrompt,
+        messages,
+        temperature: 0.7,
+        maxOutputTokens: 1024,
+      });
+
+      return text.trim() || "I'm here to help! What can I assist you with?";
+    } catch {
+      return "I'm here to help! What can I assist you with?";
     }
   }
 
@@ -216,6 +286,7 @@ JSON:`,
       hasTools?: boolean;
       guidelines?: Array<{ condition: string; instruction: string }>;
       agentHandbackInstructions?: string | null;
+      pageContext?: Record<string, string>;
     },
   ): string {
     // ── 1. Tone ───────────────────────────────────────────────────────────────
@@ -248,6 +319,21 @@ You help ${projectName}'s customers and website visitors with questions about ${
 </identity>
 
 `;
+
+    // Page context: what the visitor is currently looking at
+    if (options?.pageContext && Object.keys(options.pageContext).length > 0) {
+      const contextLines = Object.entries(options.pageContext)
+        .map(([key, val]) => `${key}: ${val}`)
+        .join("\n");
+
+      prompt += `<page-context>
+The visitor is currently viewing the following page/section. Use this to give contextually relevant answers.
+
+${contextLines}
+</page-context>
+
+`;
+    }
 
     // Task: what the chatbot should do
     prompt += `<task>

@@ -4,17 +4,17 @@ This file is the operating guide for agents/contributors working in this repo.
 
 ## Product Overview
 
-ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbot platform built on Cloudflare Workers. Users sign up, create a project/bot, customize its appearance and behavior, add knowledge resources (web pages, PDFs, FAQs), and embed a lightweight chat widget on their website. The bot uses configurable AI models (Google Gemini 3 Flash or OpenAI GPT-5, controlled via the `AI_MODEL` env var) for AI responses, Cloudflare AI Search for RAG over user-uploaded resources, and supports Telegram-based live agent handoff when the bot cannot confidently answer.
+ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbot platform built on Cloudflare Workers. Users sign up, create a project/bot, customize its appearance and behavior, add knowledge resources (web pages, PDFs, FAQs), and embed a lightweight chat widget on their website. The bot uses configurable AI models (Google Gemini 3 Flash or OpenAI GPT-5, controlled via the `AI_MODEL` env var) for AI responses, Cloudflare AI Search for RAG over user-uploaded resources, and supports Telegram-based live agent handoff when the bot cannot confidently answer. Users can name their bot (e.g. "Luna") and configure a human agent label (e.g. "an engineer") for personalized handoff messages. Agents interact with the bot via `@BotName` commands in Telegram to hand back control, close conversations, or instruct the bot to respond directly.
 
 ### Core Features
 
-- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation (`open`, `close`, `toggle`, `sendMessage`, `identify`). Uses SSE for streaming AI responses.
+- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation (`open`, `close`, `toggle`, `sendMessage`, `identify`, `setPageContext`, `setMetadata`, `requestNotifications`). Uses SSE for streaming AI responses. Automatically sends current page URL and title as context with each message.
 - **Dashboard** -- React SPA where users configure their bot, manage resources, review conversations, and customize the widget's look and feel.
 - **Resource management** -- users add web pages, FAQs, and PDFs as knowledge sources. These are stored in R2 and indexed via Cloudflare AI Search for RAG retrieval.
 - **Tone of voice** -- configurable AI personality (professional, friendly, casual, formal, or custom prompt).
 - **Quick actions and quick topics** -- configurable buttons and topic suggestions shown above the chat input.
 - **Intro message** -- the first bot message visitors see when they open the widget.
-- **Telegram live agent handoff** -- when the bot cannot answer or the visitor requests a human, the conversation is relayed to the user's Telegram. Agent replies in Telegram are synced back to the widget.
+- **Telegram live agent handoff** -- when the bot cannot answer or the visitor requests a human, the conversation is relayed to the user's Telegram. Agent replies in Telegram are synced back to the widget. When a conversation is in agent mode, the AI is completely silenced and visitor messages are forwarded to Telegram. Agents use `@BotName` commands to hand back to AI (with optional instructions), close conversations, or instruct the bot to respond immediately. New bookings, conversations, and contact form submissions also trigger Telegram notifications when configured.
 - **Canned response auto-drafting** -- after a conversation ends, the AI analyzes it and generates draft canned responses. Users approve or reject drafts from the dashboard.
 
 ---
@@ -477,8 +477,10 @@ projects
 
 project_settings
   id, projectId (FK projects), geminiApiKey (encrypted), aiSearchInstanceName,
-  telegramBotToken (encrypted), telegramChatId, toneOfVoice, customTonePrompt,
-  introMessage, autoCannedDraft (boolean), createdAt, updatedAt
+  telegramBotToken (encrypted), telegramChatId, companyName, companyUrl,
+  industry, companyContext, botName, agentName, toneOfVoice, customTonePrompt,
+  introMessage, showIntroBubble (boolean), autoCannedDraft (boolean),
+  createdAt, updatedAt
 
 widget_config
   id, projectId (FK projects), primaryColor, backgroundColor, textColor,
@@ -497,8 +499,10 @@ resources
 
 conversations
   id, projectId (FK projects), visitorId, visitorName, visitorEmail,
-  status (active|waiting_agent|agent_replied|closed), telegramThreadId,
-  metadata (JSON), createdAt, updatedAt
+  status (active|waiting_agent|agent_replied|closed), telegramThreadId
+  (populated on handoff/new-convo Telegram notification for reply threading),
+  metadata (JSON -- geo data, device info, agentHandbackInstructions),
+  createdAt, updatedAt
 
 messages
   id, conversationId (FK conversations), role (visitor|bot|agent),
@@ -529,7 +533,7 @@ api_keys
 | POST/GET | `/api/auth/*` | Better Auth handler |
 | GET | `/api/widget/:projectSlug/config` | Widget config + quick actions/topics |
 | POST | `/api/widget/:projectSlug/conversations` | Start a new conversation |
-| POST | `/api/widget/:projectSlug/conversations/:id/messages` | Send message (returns SSE stream) |
+| POST | `/api/widget/:projectSlug/conversations/:id/messages` | Send message (returns SSE stream, or JSON `{ agentMode: true }` when in agent mode) |
 | GET | `/api/widget/:projectSlug/conversations/:id/messages` | Get conversation history |
 | POST | `/api/telegram/webhook/:projectId` | Telegram bot webhook |
 | GET | `/api/widget-embed.js` | Serve the widget JS bundle from R2 |
@@ -576,18 +580,22 @@ window.ReplyMaven.close()
 window.ReplyMaven.toggle()
 window.ReplyMaven.sendMessage("Hello")
 window.ReplyMaven.identify({ name: "John", email: "john@example.com" })
+window.ReplyMaven.setPageContext({ page: "Pricing", plan: "Pro" })
+window.ReplyMaven.setMetadata({ internalId: "abc123" })
+window.ReplyMaven.requestNotifications()
 ```
 
 ### SSE Streaming Flow
 
 1. Visitor sends message via `POST /api/widget/:slug/conversations/:id/messages`
 2. Worker stores visitor message in D1 + updates KV cache
-3. Worker queries AI Search `search()` with project folder filter for relevant resource chunks
-4. Worker checks canned responses for exact/close matches
-5. Worker calls Gemini API with: system prompt + tone config + RAG context + conversation history + canned response hints
-6. Worker streams Gemini response back as SSE (`Content-Type: text/event-stream`)
-7. Bot message is stored in D1 after streaming completes
-8. If bot confidence is low or visitor requests a human, status changes to `waiting_agent` and a Telegram notification is sent
+3. **Agent-mode check**: If conversation status is `waiting_agent` or `agent_replied`, AI is bypassed entirely. The visitor message is forwarded to Telegram (as a reply to the thread if `telegramThreadId` exists) and the endpoint returns `{ ok: true, agentMode: true }` as JSON instead of SSE. The widget detects the JSON content type and skips SSE parsing.
+4. Worker queries AI Search `search()` with project folder filter for relevant resource chunks
+5. Worker checks canned responses for exact/close matches
+6. Worker builds system prompt with: `botName` identity, tone config, company context, RAG context, canned response hints, conversation summary, `<page-context>` (from `setPageContext` + auto-collected page URL/title), `<agent-instructions>` (from `agentHandbackInstructions` in conversation metadata if present), and guidelines/SOPs
+7. Worker streams AI response back as SSE (`Content-Type: text/event-stream`)
+8. Bot message is stored in D1 after streaming completes
+9. If bot confidence is low or visitor requests a human, the AI says a natural handoff message (e.g. "Let me connect you with an engineer!") and appends `[HANDOFF_REQUESTED]` which is stripped. Status changes to `waiting_agent`, Telegram notification is sent with recent messages + dashboard link, and `telegramThreadId` is stored for reply threading.
 
 ### AI Search (RAG) Integration
 
@@ -609,13 +617,49 @@ Resource ingestion:
 
 ### Telegram Live Agent Handoff
 
-1. User configures Telegram bot token + chat ID in dashboard settings
-2. When the bot cannot answer confidently or visitor clicks "Talk to human":
+1. User configures Telegram bot token + chat ID, `botName`, and `agentName` in dashboard settings
+2. When the bot cannot answer confidently or visitor requests a human:
    - Conversation status changes to `waiting_agent`
-   - Worker sends Telegram message via Bot API with conversation summary
-3. Agent replies in Telegram -> Telegram webhook fires -> Worker receives reply
-4. Worker stores agent message, updates conversation status, pushes to widget
-5. Conversation status changes to `agent_replied`
+   - Worker sends Telegram notification via `notifyHandoff` with recent messages (last 4), dashboard link, and `@BotName` command hints
+   - The Telegram notification's `message_id` is stored as `conversation.telegramThreadId` for reply threading
+3. While in agent mode (`waiting_agent` / `agent_replied`):
+   - AI is completely silenced -- visitor messages bypass the entire AI pipeline
+   - Visitor messages are forwarded to Telegram via `forwardVisitorMessage` (threaded using `telegramThreadId`)
+   - The widget endpoint returns `{ ok: true, agentMode: true }` JSON instead of SSE
+4. Agent replies in Telegram (not prefixed with `@BotName`) -> stored as agent message, status set to `agent_replied`, visitor sees reply via polling
+5. Agent types `@BotName` commands in Telegram -> AI classifies intent via `classifyAgentCommand()`:
+   - **`@BotName`** (no text) -- simple handback, status set to `active`, AI resumes
+   - **`@BotName <close intent>`** (e.g. "we're done here", "resolved") -- `close` action, conversation closed, auto-draft canned response triggered
+   - **`@BotName <private instructions>`** (e.g. "don't mention to user but cancel their account if they complain") -- `handback` action, instructions stored in `conversation.metadata.agentHandbackInstructions`, AI resumes and follows them silently
+   - **`@BotName <respond request>`** (e.g. "explain how pricing works", "take over") -- `respond` action, AI immediately generates a bot response via `generateDirectedResponse()`, visitor sees it via polling
+
+#### Telegram Notification Methods
+
+| Method | Trigger | Content |
+|--------|---------|---------|
+| `notifyHandoff` | AI handoff or visitor requests human | Recent messages, summary, dashboard link, command hints |
+| `notifyNewConversation` | First visitor message in a conversation | Visitor info, first message, dashboard link |
+| `notifyNewBooking` | New booking created | Booking details (name, email, time, notes), dashboard link |
+| `notifyContactForm` | Contact form submitted | Form fields, dashboard link |
+| `forwardVisitorMessage` | Visitor sends message while in agent mode | Visitor name + message content, threaded reply |
+
+### Page Context API
+
+The widget automatically sends `currentPageUrl` and `pageTitle` with every message, so the AI always knows what page the visitor is on. Site owners can enrich this with custom context via the programmatic API:
+
+```javascript
+window.ReplyMaven.setPageContext({
+  page: "Pricing",
+  plan: "Pro",
+  userTier: "free",
+  cartTotal: "$149.00",
+});
+```
+
+- Page context is sent **per-message** (not stored on the conversation) because it is transient -- the visitor may navigate pages mid-conversation.
+- The context is injected as a `<page-context>` section in the system prompt, so the AI can give contextually relevant answers.
+- Keys are freeform `Record<string, string>` -- site owners control what data is relevant.
+- Unlike `setMetadata` (which is for analytics/dashboard tracking), `setPageContext` data is actively used by the AI when generating responses.
 
 ### Canned Response Auto-Drafting
 
@@ -688,18 +732,24 @@ Secrets (via `.dev.vars` locally, `wrangler secret put` for production):
 19. Build Telegram integration config page
 20. Implement Telegram webhook + message relay
 21. Build conversation inbox for agent replies
-22. Implement live agent handoff flow
+22. Implement live agent handoff flow (AI confidence check + `[HANDOFF_REQUESTED]` token)
+23. Implement agent-mode AI bypass (silence AI when conversation is in `waiting_agent`/`agent_replied`, forward visitor messages to Telegram)
+24. Implement `@BotName` command parsing with AI intent classification (`close`, `handback`, `respond`)
+25. Implement `generateDirectedResponse()` for agent-directed bot replies
+26. Add Telegram notification methods (`notifyNewConversation`, `notifyNewBooking`, `notifyContactForm`, `forwardVisitorMessage`) with reply threading via `telegramThreadId`
+27. Add configurable `botName` and `agentName` in project settings + dashboard UI
 
 ### Phase 6 -- Canned Responses
-23. Build canned response management page
-24. Implement auto-draft generation (post-conversation Gemini analysis)
-25. Integrate canned responses into chat flow (priority matching)
+28. Build canned response management page
+29. Implement auto-draft generation (post-conversation Gemini analysis)
+30. Integrate canned responses into chat flow (priority matching)
 
 ### Phase 7 -- Polish
-26. Dashboard analytics (conversation counts, response times, topics)
-27. Widget programmatic API (`open`, `close`, `identify`)
-28. Rate limiting and abuse prevention
-29. Error handling, loading states, edge cases
+31. Dashboard analytics (conversation counts, response times, topics)
+32. Widget programmatic API (`open`, `close`, `toggle`, `identify`, `sendMessage`, `setPageContext`, `setMetadata`, `requestNotifications`)
+33. Implement `setPageContext` for per-message AI-visible page context (auto-includes `currentPageUrl` and `pageTitle`)
+34. Rate limiting and abuse prevention
+35. Error handling, loading states, edge cases
 
 ---
 
