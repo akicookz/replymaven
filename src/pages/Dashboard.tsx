@@ -10,6 +10,7 @@ import {
   Calendar,
   Mail,
   Clock,
+  Globe,
 } from "lucide-react";
 import { Link, useParams, Navigate } from "react-router-dom";
 import { useSession } from "@/lib/auth-client";
@@ -36,8 +37,34 @@ interface RecentConversation {
   projectId: string;
   visitorId: string;
   visitorName: string | null;
+  visitorEmail: string | null;
   status: string;
+  metadata: string | null;
   updatedAt: string;
+}
+
+interface ConvoMeta {
+  country?: string;
+  city?: string;
+  region?: string;
+  [key: string]: unknown;
+}
+
+function parseConvoMeta(metadata: string | null): ConvoMeta {
+  if (!metadata) return {};
+  try {
+    return JSON.parse(metadata);
+  } catch {
+    return {};
+  }
+}
+
+function countryToFlag(countryCode: string): string {
+  if (!countryCode || countryCode.length !== 2) return "";
+  const base = 0x1f1e6;
+  const first = countryCode.charCodeAt(0) - 65 + base;
+  const second = countryCode.charCodeAt(1) - 65 + base;
+  return String.fromCodePoint(first) + String.fromCodePoint(second);
 }
 
 interface RecentBooking {
@@ -493,34 +520,50 @@ function Dashboard() {
           {data.recentConversations.length > 0 ? (
             <div className="">
               {/* Table rows */}
-              {data.recentConversations.map((convo) => (
-                <Link
-                  key={convo.id}
-                  to={`/app/projects/${projectId}/conversations?id=${convo.id}`}
-                  className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_100px_100px] items-center px-4 sm:px-6 py-3 hover:bg-accent/50 transition-colors group gap-2"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0">
-                      <Users className="w-3.5 h-3.5 text-muted-foreground" />
-                    </div>
-                    <span className="text-[13px] font-medium text-foreground truncate">
-                      {convo.visitorName ?? convo.visitorId.slice(0, 12)}
-                    </span>
-                  </div>
-                  <span
-                    className={cn(
-                      "text-[11px] font-medium px-2 py-0.5 rounded-full border w-fit capitalize",
-                      STATUS_BADGE_STYLES[convo.status] ??
-                      "bg-status-closed/10 text-status-closed border-status-closed/25",
-                    )}
+              {data.recentConversations.map((convo) => {
+                const meta = parseConvoMeta(convo.metadata);
+                const displayName = convo.visitorName ?? convo.visitorEmail?.split("@")[0] ?? convo.visitorId.slice(0, 14);
+                const location = [meta.city, meta.region].filter(Boolean).join(", ");
+
+                return (
+                  <Link
+                    key={convo.id}
+                    to={`/app/projects/${projectId}/conversations?id=${convo.id}`}
+                    className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_100px_100px] items-center px-4 sm:px-6 py-3 hover:bg-accent/50 transition-colors group gap-2"
                   >
-                    {STATUS_LABELS[convo.status] ?? convo.status.replace("_", " ")}
-                  </span>
-                  <span className="hidden sm:block text-[12px] text-muted-foreground text-right">
-                    {formatTimeAgo(convo.updatedAt)}
-                  </span>
-                </Link>
-              ))}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0 text-sm">
+                        {meta.country ? countryToFlag(meta.country) : (
+                          <Users className="w-3.5 h-3.5 text-muted-foreground" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[13px] font-medium text-foreground truncate block">
+                          {displayName}
+                        </span>
+                        {location && (
+                          <span className="text-[11px] text-muted-foreground flex items-center gap-1 truncate">
+                            <Globe className="w-3 h-3 shrink-0" />
+                            {location}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span
+                      className={cn(
+                        "text-[11px] font-medium px-2 py-0.5 rounded-full border w-fit capitalize",
+                        STATUS_BADGE_STYLES[convo.status] ??
+                        "bg-status-closed/10 text-status-closed border-status-closed/25",
+                      )}
+                    >
+                      {STATUS_LABELS[convo.status] ?? convo.status.replace("_", " ")}
+                    </span>
+                    <span className="hidden sm:block text-[12px] text-muted-foreground text-right">
+                      {formatTimeAgo(convo.updatedAt)}
+                    </span>
+                  </Link>
+                );
+              })}
             </div>
           ) : (
             <div className="text-center py-12 text-sm text-muted-foreground">

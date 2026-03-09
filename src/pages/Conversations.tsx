@@ -22,6 +22,8 @@ import {
   LogOut,
   ShieldBan,
   Zap,
+  Tag,
+  Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +31,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 interface ConversationMeta {
@@ -39,6 +48,16 @@ interface ConversationMeta {
   timezone?: string;
   ip?: string;
   userAgent?: string;
+  browser?: string;
+  os?: string;
+  device?: string;
+  screenResolution?: string;
+  language?: string;
+  referrer?: string;
+  currentPageUrl?: string;
+  pageTitle?: string;
+  online?: string;
+  [key: string]: unknown;
 }
 
 interface Conversation {
@@ -91,6 +110,73 @@ function parseMeta(metadata: string | null): ConversationMeta {
   } catch {
     return {};
   }
+}
+
+const SYSTEM_META_KEYS = new Set([
+  "url",
+  "country",
+  "city",
+  "region",
+  "timezone",
+  "ip",
+  "userAgent",
+  "browser",
+  "os",
+  "device",
+  "screenResolution",
+  "language",
+  "referrer",
+  "currentPageUrl",
+  "pageTitle",
+  "online",
+  "agentHandbackInstructions",
+]);
+
+function splitMetadata(meta: ConversationMeta): {
+  system: Record<string, string>;
+  custom: Record<string, string>;
+} {
+  const system: Record<string, string> = {};
+  const custom: Record<string, string> = {};
+  for (const [key, value] of Object.entries(meta)) {
+    if (value == null || value === "") continue;
+    const strVal = String(value);
+    if (SYSTEM_META_KEYS.has(key)) {
+      system[key] = strVal;
+    } else {
+      custom[key] = strVal;
+    }
+  }
+  return { system, custom };
+}
+
+function parseBrowserName(ua?: string, browserField?: string): string {
+  if (browserField) return browserField;
+  if (!ua) return "Unknown";
+  if (ua.includes("Firefox/")) {
+    const match = ua.match(/Firefox\/([\d.]+)/);
+    return match ? `Firefox ${match[1].split(".")[0]}` : "Firefox";
+  }
+  if (ua.includes("Edg/")) {
+    const match = ua.match(/Edg\/([\d.]+)/);
+    return match ? `Edge ${match[1].split(".")[0]}` : "Edge";
+  }
+  if (ua.includes("Chrome/") && !ua.includes("Edg/")) {
+    const match = ua.match(/Chrome\/([\d.]+)/);
+    return match ? `Chrome ${match[1].split(".")[0]}` : "Chrome";
+  }
+  if (ua.includes("Safari/") && !ua.includes("Chrome/")) {
+    const match = ua.match(/Version\/([\d.]+)/);
+    return match ? `Safari ${match[1].split(".")[0]}` : "Safari";
+  }
+  return "Unknown";
+}
+
+function formatMetaKey(key: string): string {
+  return key
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (s) => s.toUpperCase())
+    .trim();
 }
 
 function countryToFlag(countryCode: string): string {
@@ -605,38 +691,133 @@ function Conversations() {
             </div>
 
             {/* Visitor info bar */}
-            {(selectedMeta?.ip || selectedMeta?.userAgent || selectedMeta?.url) && (
-              <div className="px-4 py-1.5 bg-card/80 border-b border-border flex items-center gap-4 text-[11px] text-muted-foreground overflow-x-auto scrollbar-none">
-                {selectedMeta.ip && (
-                  <span className="flex items-center gap-1 whitespace-nowrap">
-                    <Globe className="w-3 h-3 shrink-0" />
-                    {selectedMeta.ip}
-                  </span>
-                )}
-                {selectedMeta.userAgent && (
-                  <span className="flex items-center gap-1 truncate">
-                    <Monitor className="w-3 h-3 shrink-0" />
-                    {selectedMeta.userAgent.length > 60
-                      ? selectedMeta.userAgent.slice(0, 60) + "..."
-                      : selectedMeta.userAgent}
-                  </span>
-                )}
-                {selectedMeta.url && (
-                  <a
-                    href={selectedMeta.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 truncate hover:underline"
-                  >
-                    {selectedMeta.url}
-                  </a>
-                )}
-              </div>
-            )}
+            {selectedMeta && (() => {
+              const { system, custom } = splitMetadata(selectedMeta);
+              const browserName = parseBrowserName(
+                selectedMeta.userAgent as string | undefined,
+                selectedMeta.browser as string | undefined,
+              );
+              const customEntries = Object.entries(custom);
+              const hasAnyInfo = browserName !== "Unknown" || selectedMeta.url || customEntries.length > 0;
+
+              if (!hasAnyInfo) return null;
+
+              return (
+                <div className="px-4 py-1.5 bg-card/80 border-b border-border flex items-center gap-3 text-[11px] text-muted-foreground overflow-x-auto scrollbar-none">
+                  {browserName !== "Unknown" && (
+                    <span className="flex items-center gap-1 whitespace-nowrap">
+                      <Monitor className="w-3 h-3 shrink-0" />
+                      {browserName}
+                    </span>
+                  )}
+                  {selectedMeta.url && (
+                    <a
+                      href={selectedMeta.url as string}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 truncate hover:underline"
+                    >
+                      {selectedMeta.url as string}
+                    </a>
+                  )}
+                  {customEntries.slice(0, 3).map(([key, value]) => (
+                    <span
+                      key={key}
+                      className="flex items-center gap-1 whitespace-nowrap bg-primary/10 text-primary px-1.5 py-0.5 rounded-md"
+                    >
+                      <Tag className="w-2.5 h-2.5 shrink-0" />
+                      <span className="font-medium">{key}:</span> {value}
+                    </span>
+                  ))}
+                  {/* Metadata modal trigger */}
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <button
+                        className="flex items-center gap-1 whitespace-nowrap hover:text-foreground transition-colors ml-auto shrink-0"
+                        aria-label="View all metadata"
+                      >
+                        <Info className="w-3 h-3" />
+                        <span className="hidden sm:inline">Details</span>
+                      </button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle>Visitor Metadata</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-5 mt-2">
+                        {/* Custom Metadata Section */}
+                        <div>
+                          <h4 className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                            <Tag className="w-3.5 h-3.5 text-primary" />
+                            Custom Metadata
+                          </h4>
+                          {customEntries.length > 0 ? (
+                            <div className="rounded-lg border border-border overflow-hidden">
+                              {customEntries.map(([key, value], i) => (
+                                <div
+                                  key={key}
+                                  className={cn(
+                                    "flex items-start gap-3 px-3 py-2 text-sm",
+                                    i > 0 && "border-t border-border",
+                                  )}
+                                >
+                                  <span className="text-muted-foreground font-medium min-w-[100px] shrink-0">
+                                    {key}
+                                  </span>
+                                  <span className="text-foreground break-all">
+                                    {value}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground italic">
+                              No custom metadata set
+                            </p>
+                          )}
+                        </div>
+
+                        {/* System Metadata Section */}
+                        <div>
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                            <Monitor className="w-3.5 h-3.5" />
+                            System Metadata
+                          </h4>
+                          {Object.keys(system).length > 0 ? (
+                            <div className="rounded-lg border border-border overflow-hidden">
+                              {Object.entries(system).map(([key, value], i) => (
+                                <div
+                                  key={key}
+                                  className={cn(
+                                    "flex items-start gap-3 px-3 py-2 text-sm",
+                                    i > 0 && "border-t border-border",
+                                  )}
+                                >
+                                  <span className="text-muted-foreground font-medium min-w-[100px] shrink-0">
+                                    {formatMetaKey(key)}
+                                  </span>
+                                  <span className="text-foreground break-all">
+                                    {value}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground italic">
+                              No system metadata available
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              );
+            })()}
 
             {/* Messages */}
             <div
-              className="flex-1 overflow-y-auto px-4 py-4 space-y-1"
+              className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-1 min-w-0"
               style={{
                 backgroundImage:
                   'url("data:image/svg+xml,%3Csvg width=\'200\' height=\'200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cdefs%3E%3Cpattern id=\'a\' patternUnits=\'userSpaceOnUse\' width=\'40\' height=\'40\'%3E%3Cpath d=\'M0 20h40M20 0v40\' fill=\'none\' stroke=\'%23000\' stroke-opacity=\'.02\' stroke-width=\'.5\'/%3E%3C/pattern%3E%3C/defs%3E%3Crect width=\'200\' height=\'200\' fill=\'url(%23a)\'/%3E%3C/svg%3E")',
@@ -812,13 +993,13 @@ function Conversations() {
 
                     <div
                       className={cn(
-                        "flex mb-0.5",
+                        "flex mb-0.5 min-w-0",
                         isVisitor ? "justify-start" : "justify-end",
                       )}
                     >
                       <div
                         className={cn(
-                          "relative max-w-[65%] rounded-lg px-3 py-2 shadow-sm",
+                          "relative max-w-[85%] sm:max-w-[65%] rounded-lg px-3 py-2 shadow-sm overflow-hidden",
                           isVisitor &&
                             "bg-card text-foreground rounded-tl-none",
                           isBot &&
@@ -846,7 +1027,7 @@ function Conversations() {
                         )}
 
                         {/* Message content */}
-                        <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words">
+                        <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                           {msg.content}
                         </p>
 
