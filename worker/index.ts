@@ -1183,6 +1183,7 @@ const app = new Hono<HonoAppContext>()
               conversationId,
               project.id,
               "closed",
+              "bot_resolved",
             );
 
             fullResponse = fullResponse.replace(
@@ -1678,6 +1679,7 @@ const app = new Hono<HonoAppContext>()
             conversationId,
             projectId,
             "closed",
+            "resolved",
           );
 
           // Auto-draft canned response in background
@@ -3841,11 +3843,26 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
+    // Parse optional close reason from body
+    let closeReason: "resolved" | "ended" | "spam" | undefined;
+    try {
+      const body = await c.req.json();
+      if (
+        body.closeReason &&
+        ["resolved", "ended", "spam"].includes(body.closeReason)
+      ) {
+        closeReason = body.closeReason;
+      }
+    } catch {
+      // No body or invalid JSON is fine — defaults to no reason
+    }
+
     // Close the conversation
     await chatService.updateConversationStatus(
       conversation.id,
       project.id,
       "closed",
+      closeReason,
     );
 
     // Auto-draft canned response in background

@@ -18,8 +18,17 @@ import {
   ChevronDown,
   ChevronRight,
   AlertCircle,
+  CheckCircle2,
+  LogOut,
+  ShieldBan,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 interface ConversationMeta {
@@ -38,6 +47,7 @@ interface Conversation {
   visitorName: string | null;
   visitorEmail: string | null;
   status: string;
+  closeReason: string | null;
   metadata: string | null;
   createdAt: string;
   updatedAt: string;
@@ -63,6 +73,13 @@ interface Message {
   content: string;
   createdAt: string;
   toolExecutions?: ToolExecutionInfo[];
+}
+
+interface CannedResponse {
+  id: string;
+  trigger: string;
+  response: string;
+  status: "draft" | "approved" | "rejected";
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -162,6 +179,21 @@ function getStatusLabel(status: string): string {
   }
 }
 
+function getCloseReasonLabel(reason: string | null): string {
+  switch (reason) {
+    case "resolved":
+      return "Resolved";
+    case "ended":
+      return "Ended";
+    case "spam":
+      return "Spam";
+    case "bot_resolved":
+      return "Resolved by bot";
+    default:
+      return "Closed";
+  }
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 function Conversations() {
@@ -197,6 +229,19 @@ function Conversations() {
     enabled: !!selectedConvo,
   });
 
+  const { data: cannedResponses } = useQuery<CannedResponse[]>({
+    queryKey: ["canned-responses", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/canned-responses`);
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    },
+  });
+
+  const approvedCanned = cannedResponses?.filter(
+    (cr) => cr.status === "approved",
+  );
+
   const sendReply = useMutation({
     mutationFn: async () => {
       const res = await fetch(
@@ -222,10 +267,20 @@ function Conversations() {
   });
 
   const closeConversation = useMutation({
-    mutationFn: async (convId: string) => {
+    mutationFn: async ({
+      convId,
+      closeReason,
+    }: {
+      convId: string;
+      closeReason: "resolved" | "ended" | "spam";
+    }) => {
       const res = await fetch(
         `/api/projects/${projectId}/conversations/${convId}/close`,
-        { method: "POST" },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ closeReason }),
+        },
       );
       if (!res.ok) throw new Error("Failed to close conversation");
       return res.json();
@@ -484,20 +539,67 @@ function Conversations() {
                       "bg-status-closed/10 text-status-closed",
                   )}
                 >
-                  {getStatusLabel(convoDetail.conversation.status)}
+                  {convoDetail.conversation.status === "closed"
+                    ? getCloseReasonLabel(convoDetail.conversation.closeReason)
+                    : getStatusLabel(convoDetail.conversation.status)}
                 </span>
                 {convoDetail.conversation.status !== "closed" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() =>
-                      closeConversation.mutate(convoDetail.conversation.id)
-                    }
-                    disabled={closeConversation.isPending}
-                    className="text-muted-foreground hover:text-destructive h-8 px-2"
-                  >
-                    <XCircle className="w-4 h-4" />
-                  </Button>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={closeConversation.isPending}
+                        className="text-muted-foreground hover:text-destructive h-8 px-2"
+                      >
+                        <XCircle className="w-4 h-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-48 p-1">
+                      <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
+                        Close as...
+                      </div>
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-lg hover:bg-accent transition-colors"
+                        onClick={() =>
+                          closeConversation.mutate({
+                            convId: convoDetail.conversation.id,
+                            closeReason: "resolved",
+                          })
+                        }
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                        Resolved
+                      </button>
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-lg hover:bg-accent transition-colors"
+                        onClick={() =>
+                          closeConversation.mutate({
+                            convId: convoDetail.conversation.id,
+                            closeReason: "ended",
+                          })
+                        }
+                      >
+                        <LogOut className="w-4 h-4 text-muted-foreground" />
+                        Ended
+                      </button>
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-lg hover:bg-accent transition-colors"
+                        onClick={() =>
+                          closeConversation.mutate({
+                            convId: convoDetail.conversation.id,
+                            closeReason: "spam",
+                          })
+                        }
+                      >
+                        <ShieldBan className="w-4 h-4 text-destructive" />
+                        Spam
+                      </button>
+                    </PopoverContent>
+                  </Popover>
                 )}
               </div>
             </div>
@@ -777,7 +879,7 @@ function Conversations() {
               {convoDetail.conversation.status === "closed" ? (
                 <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
                   <XCircle className="w-4 h-4" />
-                  This conversation is closed
+                  {getCloseReasonLabel(convoDetail.conversation.closeReason)}
                 </div>
               ) : (
                 <form
@@ -787,6 +889,44 @@ function Conversations() {
                   }}
                   className="flex items-center gap-2"
                 >
+                  {approvedCanned && approvedCanned.length > 0 && (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-10 w-10 shrink-0 text-muted-foreground hover:text-foreground"
+                        >
+                          <Zap className="w-4 h-4" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        side="top"
+                        align="start"
+                        className="w-72 p-1 max-h-64 overflow-y-auto"
+                      >
+                        <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
+                          Canned responses
+                        </div>
+                        {approvedCanned.map((cr) => (
+                          <button
+                            key={cr.id}
+                            type="button"
+                            className="flex flex-col gap-0.5 w-full px-2 py-1.5 text-left rounded-lg hover:bg-accent transition-colors"
+                            onClick={() => setReplyText(cr.response)}
+                          >
+                            <span className="text-xs font-medium text-foreground truncate w-full">
+                              {cr.trigger}
+                            </span>
+                            <span className="text-xs text-muted-foreground line-clamp-2">
+                              {cr.response}
+                            </span>
+                          </button>
+                        ))}
+                      </PopoverContent>
+                    </Popover>
+                  )}
                   <input
                     type="text"
                     value={replyText}

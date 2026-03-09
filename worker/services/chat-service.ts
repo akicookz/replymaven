@@ -60,10 +60,15 @@ export class ChatService {
     id: string,
     projectId: string,
     status: ConversationRow["status"],
+    closeReason?: ConversationRow["closeReason"],
   ): Promise<void> {
+    const updates: Partial<ConversationRow> = { status };
+    if (status === "closed" && closeReason) {
+      updates.closeReason = closeReason;
+    }
     await this.db
       .update(conversations)
-      .set({ status })
+      .set(updates)
       .where(
         and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
       );

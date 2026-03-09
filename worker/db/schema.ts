@@ -266,6 +266,9 @@ export const conversations = sqliteTable(
     })
       .notNull()
       .default("active"),
+    closeReason: text("close_reason", {
+      enum: ["resolved", "ended", "spam", "bot_resolved"],
+    }),
     telegramThreadId: text("telegram_thread_id"),
     metadata: text("metadata"), // JSON string
     createdAt: integer("created_at", { mode: "timestamp" })

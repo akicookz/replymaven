@@ -141,6 +141,13 @@
       "when": 1772661256993,
       "tag": "0019_amusing_freak",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1773019054477,
+      "tag": "0020_worried_paper_doll",
+      "breakpoints": true
     }
   ]
 }
