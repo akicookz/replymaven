@@ -729,6 +729,7 @@ function Conversations() {
                           title={currentPage}
                         >
                           <Globe className="w-3 h-3 shrink-0" />
+                          <span className="font-medium">Page:</span>
                           {currentPage.replace(/^https?:\/\//, "").slice(0, 40)}
                         </a>
                       )}
@@ -744,6 +745,7 @@ function Conversations() {
                           title={`Referrer: ${referrer}`}
                         >
                           <ArrowLeft className="w-3 h-3 shrink-0" />
+                          <span className="font-medium">Referrer:</span>
                           {referrer.replace(/^https?:\/\//, "").slice(0, 30)}
                         </a>
                       )}
@@ -756,18 +758,21 @@ function Conversations() {
                           title={currentPage}
                         >
                           <Globe className="w-3 h-3 shrink-0" />
+                          <span className="font-medium">Page:</span>
                           {currentPage.replace(/^https?:\/\//, "").slice(0, 40)}
                         </a>
                       )}
                       {timezone && (
-                        <span className="flex items-center gap-1 whitespace-nowrap" title={`Timezone: ${timezone}`}>
+                        <span className="flex items-center gap-1 whitespace-nowrap" title={timezone}>
                           <Clock className="w-3 h-3 shrink-0" />
+                          <span className="font-medium">Timezone:</span>
                           {timezone}
                         </span>
                       )}
                       {browserName !== "Unknown" && (
                         <span className="flex items-center gap-1 whitespace-nowrap">
                           <Monitor className="w-3 h-3 shrink-0" />
+                          <span className="font-medium">Browser:</span>
                           {browserName}
                         </span>
                       )}
