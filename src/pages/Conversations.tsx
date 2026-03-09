@@ -698,37 +698,81 @@ function Conversations() {
                 selectedMeta.browser as string | undefined,
               );
               const customEntries = Object.entries(custom);
-              const hasAnyInfo = browserName !== "Unknown" || selectedMeta.url || customEntries.length > 0;
+              const currentPage = (selectedMeta.currentPageUrl ?? selectedMeta.url) as string | undefined;
+              const referrer = selectedMeta.referrer as string | undefined;
+              const timezone = selectedMeta.timezone as string | undefined;
+              const hasAnyInfo = browserName !== "Unknown" || currentPage || referrer || timezone || customEntries.length > 0;
 
               if (!hasAnyInfo) return null;
 
+              const isIdentified = customEntries.length > 0;
+
               return (
                 <div className="px-4 py-1.5 bg-card/80 border-b border-border flex items-center gap-3 text-[11px] text-muted-foreground overflow-x-auto scrollbar-none">
-                  {browserName !== "Unknown" && (
-                    <span className="flex items-center gap-1 whitespace-nowrap">
-                      <Monitor className="w-3 h-3 shrink-0" />
-                      {browserName}
-                    </span>
+                  {isIdentified ? (
+                    <>
+                      {customEntries.slice(0, 3).map(([key, value]) => (
+                        <span
+                          key={key}
+                          className="flex items-center gap-1 whitespace-nowrap bg-primary/10 text-primary px-1.5 py-0.5 rounded-md"
+                        >
+                          <Tag className="w-2.5 h-2.5 shrink-0" />
+                          <span className="font-medium">{key}:</span> {value}
+                        </span>
+                      ))}
+                      {currentPage && (
+                        <a
+                          href={currentPage}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 truncate hover:underline"
+                          title={currentPage}
+                        >
+                          <Globe className="w-3 h-3 shrink-0" />
+                          {currentPage.replace(/^https?:\/\//, "").slice(0, 40)}
+                        </a>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {referrer && (
+                        <a
+                          href={referrer}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 whitespace-nowrap truncate hover:underline"
+                          title={`Referrer: ${referrer}`}
+                        >
+                          <ArrowLeft className="w-3 h-3 shrink-0" />
+                          {referrer.replace(/^https?:\/\//, "").slice(0, 30)}
+                        </a>
+                      )}
+                      {currentPage && (
+                        <a
+                          href={currentPage}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 truncate hover:underline"
+                          title={currentPage}
+                        >
+                          <Globe className="w-3 h-3 shrink-0" />
+                          {currentPage.replace(/^https?:\/\//, "").slice(0, 40)}
+                        </a>
+                      )}
+                      {timezone && (
+                        <span className="flex items-center gap-1 whitespace-nowrap" title={`Timezone: ${timezone}`}>
+                          <Clock className="w-3 h-3 shrink-0" />
+                          {timezone}
+                        </span>
+                      )}
+                      {browserName !== "Unknown" && (
+                        <span className="flex items-center gap-1 whitespace-nowrap">
+                          <Monitor className="w-3 h-3 shrink-0" />
+                          {browserName}
+                        </span>
+                      )}
+                    </>
                   )}
-                  {selectedMeta.url && (
-                    <a
-                      href={selectedMeta.url as string}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 truncate hover:underline"
-                    >
-                      {selectedMeta.url as string}
-                    </a>
-                  )}
-                  {customEntries.slice(0, 3).map(([key, value]) => (
-                    <span
-                      key={key}
-                      className="flex items-center gap-1 whitespace-nowrap bg-primary/10 text-primary px-1.5 py-0.5 rounded-md"
-                    >
-                      <Tag className="w-2.5 h-2.5 shrink-0" />
-                      <span className="font-medium">{key}:</span> {value}
-                    </span>
-                  ))}
                   {/* Metadata modal trigger */}
                   <Dialog>
                     <DialogTrigger asChild>
