@@ -5,15 +5,22 @@ import {
   subscriptions,
   usage,
   projects,
+  projectSettings,
   type SubscriptionRow,
   type UsageRow,
 } from "../db";
+import { users } from "../db/auth.schema";
 import {
   type AppEnv,
   type Plan,
   type BillingInterval,
   type PlanLimits,
 } from "../types";
+import {
+  EmailService,
+  type SubscriptionInactiveReason,
+} from "./email-service";
+import { TelegramService } from "./telegram-service";
 
 // ─── Plan Limits Configuration ────────────────────────────────────────────────
 
@@ -475,8 +482,11 @@ export class BillingService {
 
     const periodDates = await this.getSubscriptionPeriod(stripeSub);
 
+    const newStatus = statusMap[stripeSub.status] ?? "active";
+    const wasActive = this.isSubscriptionActive(existing);
+
     await this.updateSubscription(existing.id, {
-      status: statusMap[stripeSub.status] ?? "active",
+      status: newStatus,
       plan: mapping?.plan ?? existing.plan,
       interval: mapping?.interval ?? existing.interval,
       trialEndsAt: stripeSub.trial_end
@@ -486,6 +496,20 @@ export class BillingService {
       currentPeriodEnd: periodDates.end,
       cancelAtPeriodEnd: stripeSub.cancel_at_period_end,
     });
+
+    // Notify user if subscription became inactive
+    const isNowActive = newStatus === "active" || newStatus === "trialing";
+    if (wasActive && !isNowActive) {
+      const reason: SubscriptionInactiveReason =
+        newStatus === "past_due"
+          ? "payment_failed"
+          : newStatus === "canceled"
+            ? "canceled"
+            : "other";
+      await this.notifySubscriptionInactive(existing.userId, reason);
+    } else if (!wasActive && isNowActive) {
+      await this.notifySubscriptionRecovered(existing.userId);
+    }
   }
 
   private async handleSubscriptionDeleted(
@@ -498,6 +522,8 @@ export class BillingService {
       status: "canceled",
       cancelAtPeriodEnd: false,
     });
+
+    await this.notifySubscriptionInactive(existing.userId, "canceled");
   }
 
   /**
@@ -531,11 +557,17 @@ export class BillingService {
     };
 
     // Only update to active if currently trialing or past_due
-    if (existing.status === "trialing" || existing.status === "past_due") {
+    const wasPastDue = existing.status === "past_due";
+    if (existing.status === "trialing" || wasPastDue) {
       updates.status = "active";
     }
 
     await this.updateSubscription(existing.id, updates);
+
+    // Notify recovery if subscription was past_due (payment issue resolved)
+    if (wasPastDue) {
+      await this.notifySubscriptionRecovered(existing.userId);
+    }
   }
 
   private async handleInvoicePaymentFailed(
@@ -548,6 +580,8 @@ export class BillingService {
     if (!existing) return;
 
     await this.updateSubscription(existing.id, { status: "past_due" });
+
+    await this.notifySubscriptionInactive(existing.userId, "payment_failed");
   }
 
   // ─── Usage Tracking ───────────────────────────────────────────────────────
@@ -639,5 +673,104 @@ export class BillingService {
   isSubscriptionActive(sub: SubscriptionRow | null): boolean {
     if (!sub) return false;
     return sub.status === "active" || sub.status === "trialing";
+  }
+
+  // ─── Subscription Status Notifications ──────────────────────────────────────
+
+  private async notifySubscriptionInactive(
+    userId: string,
+    reason: SubscriptionInactiveReason,
+  ): Promise<void> {
+    try {
+      const user = await this.db
+        .select({ email: users.email, name: users.name })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1)
+        .then((rows) => rows[0]);
+      if (!user) return;
+
+      // Send email
+      const emailService = new EmailService(this.env.RESEND_API_KEY);
+      await emailService.sendSubscriptionInactiveEmail(
+        user.email,
+        user.name,
+        reason,
+      );
+
+      // Send Telegram notifications to all configured projects
+      await this.notifyTelegramAllProjects(userId, reason);
+    } catch (err) {
+      console.error("Failed to send subscription inactive notification:", err);
+    }
+  }
+
+  private async notifySubscriptionRecovered(userId: string): Promise<void> {
+    try {
+      const user = await this.db
+        .select({ email: users.email, name: users.name })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1)
+        .then((rows) => rows[0]);
+      if (!user) return;
+
+      // Send email
+      const emailService = new EmailService(this.env.RESEND_API_KEY);
+      await emailService.sendSubscriptionRecoveredEmail(user.email, user.name);
+
+      // Send Telegram notifications to all configured projects
+      await this.notifyTelegramAllProjects(userId, "recovered");
+    } catch (err) {
+      console.error(
+        "Failed to send subscription recovered notification:",
+        err,
+      );
+    }
+  }
+
+  private async notifyTelegramAllProjects(
+    userId: string,
+    type: SubscriptionInactiveReason | "recovered",
+  ): Promise<void> {
+    const userProjects = await this.db
+      .select({
+        projectId: projects.id,
+        projectName: projects.name,
+        telegramBotToken: projectSettings.telegramBotToken,
+        telegramChatId: projectSettings.telegramChatId,
+      })
+      .from(projects)
+      .innerJoin(projectSettings, eq(projects.id, projectSettings.projectId))
+      .where(eq(projects.userId, userId));
+
+    const telegramService = new TelegramService(this.db);
+
+    const messages: Record<SubscriptionInactiveReason | "recovered", string> = {
+      payment_failed:
+        "⚠️ Payment failed — your chatbot is paused. Visitors will see an unavailable message until payment is resolved.",
+      canceled:
+        "⚠️ Subscription canceled — your chatbot is no longer active. Visitors will see an unavailable message.",
+      other:
+        "⚠️ Subscription inactive — your chatbot is currently unavailable to visitors.",
+      recovered:
+        "✅ Subscription active — your chatbot is back online and available to visitors.",
+    };
+
+    for (const proj of userProjects) {
+      if (!proj.telegramBotToken || !proj.telegramChatId) continue;
+      try {
+        await telegramService.sendMessage(
+          proj.telegramBotToken,
+          proj.telegramChatId,
+          `<b>${proj.projectName}</b>\n\n${messages[type]}`,
+        );
+      } catch (err) {
+        console.error(
+          `Telegram notification failed for project ${proj.projectId}:`,
+          err,
+        );
+      }
+    }
   }
 }

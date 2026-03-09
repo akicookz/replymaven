@@ -145,6 +145,61 @@ export class EmailService {
       ],
     });
   }
+
+  // ─── Subscription Status Notifications ────────────────────────────────────────
+
+  async sendSubscriptionInactiveEmail(
+    to: string,
+    name: string,
+    reason: SubscriptionInactiveReason,
+  ): Promise<void> {
+    const reasonMessages: Record<SubscriptionInactiveReason, { subject: string; body: string }> = {
+      payment_failed: {
+        subject: "Action Required: Your chatbot is paused",
+        body: `<p>Your recent payment failed and your chatbot has been paused. Visitors will not be able to use it until the issue is resolved.</p>
+               <p>Please update your payment method in your <a href="https://replymaven.com/app/billing">dashboard</a> to restore service.</p>`,
+      },
+      canceled: {
+        subject: "Your ReplyMaven subscription has been canceled",
+        body: `<p>Your subscription has been canceled and your chatbot is no longer active. Visitors will see an unavailable message.</p>
+               <p>If this was a mistake, you can resubscribe anytime from your <a href="https://replymaven.com/app/billing">dashboard</a>.</p>`,
+      },
+      other: {
+        subject: "Your chatbot is currently unavailable",
+        body: `<p>Your subscription is inactive and your chatbot is currently unavailable to visitors.</p>
+               <p>Please check your <a href="https://replymaven.com/app/billing">billing settings</a> to restore service.</p>`,
+      },
+    };
+
+    const msg = reasonMessages[reason];
+
+    await this.resend.emails.send({
+      from: "ReplyMaven <noreply@replymaven.com>",
+      to,
+      subject: msg.subject,
+      html: `
+        <h1>Hi ${name},</h1>
+        ${msg.body}
+        <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">— The ReplyMaven Team</p>
+      `,
+    });
+  }
+
+  async sendSubscriptionRecoveredEmail(
+    to: string,
+    name: string,
+  ): Promise<void> {
+    await this.resend.emails.send({
+      from: "ReplyMaven <noreply@replymaven.com>",
+      to,
+      subject: "Your chatbot is back online",
+      html: `
+        <h1>Hi ${name},</h1>
+        <p>Your subscription is active again and your chatbot is back online. Visitors can use it as normal.</p>
+        <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">— The ReplyMaven Team</p>
+      `,
+    });
+  }
 }
 
 // ─── ICS Generation ───────────────────────────────────────────────────────────
@@ -237,3 +292,10 @@ function getTimezoneAbbreviation(date: Date, timezone: string): string {
   }).formatToParts(date);
   return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
 }
+
+// ─── Subscription Status Types ────────────────────────────────────────────────
+
+export type SubscriptionInactiveReason =
+  | "payment_failed"
+  | "canceled"
+  | "other";
