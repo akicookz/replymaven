@@ -5,10 +5,11 @@ import {
   Users,
   Bot,
   Plus,
-  Palette,
-  Zap,
   ArrowUpRight,
   ArrowDownRight,
+  Calendar,
+  Mail,
+  Clock,
 } from "lucide-react";
 import { Link, useParams, Navigate } from "react-router-dom";
 import { useSession } from "@/lib/auth-client";
@@ -20,9 +21,6 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
 } from "recharts";
 import { cn } from "@/lib/utils";
 
@@ -30,11 +28,6 @@ import { cn } from "@/lib/utils";
 
 interface ConversationsByDay {
   day: string;
-  count: number;
-}
-
-interface ConversationsByStatus {
-  status: string;
   count: number;
 }
 
@@ -47,6 +40,22 @@ interface RecentConversation {
   updatedAt: string;
 }
 
+interface RecentBooking {
+  id: string;
+  visitorName: string;
+  visitorEmail: string;
+  startTime: string;
+  status: string;
+  createdAt: string;
+}
+
+interface RecentContactSubmission {
+  id: string;
+  visitorId: string | null;
+  data: string;
+  createdAt: string;
+}
+
 interface DashboardData {
   totalProjects?: number;
   totalConversations: number;
@@ -55,18 +64,12 @@ interface DashboardData {
   totalResources: number;
   pendingCannedDrafts: number;
   conversationsByDay: ConversationsByDay[];
-  conversationsByStatus: ConversationsByStatus[];
   recentConversations: RecentConversation[];
+  recentBookings: RecentBooking[];
+  recentContactSubmissions: RecentContactSubmission[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const STATUS_COLORS: Record<string, string> = {
-  active: "var(--status-active)",
-  waiting_agent: "var(--status-waiting)",
-  agent_replied: "var(--status-replied)",
-  closed: "var(--status-closed)",
-};
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Active",
@@ -127,32 +130,6 @@ function StatCard({
         )}
       </div>
     </div>
-  );
-}
-
-// ─── Quick Action Card ────────────────────────────────────────────────────────
-
-function QuickActionCard({
-  label,
-  icon: Icon,
-  href,
-}: {
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  href: string;
-}) {
-  return (
-    <Link
-      to={href}
-      className="bg-card rounded-xl border border-border p-5 flex flex-col items-center justify-center gap-3 hover:border-primary/30 hover:bg-primary/3 transition-all group"
-    >
-      <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-        <Icon className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-      </div>
-      <span className="text-[13px] font-medium text-foreground text-center">
-        {label}
-      </span>
-    </Link>
   );
 }
 
@@ -281,21 +258,51 @@ function Dashboard() {
 
   // ─── Data Preparation ─────────────────────────────────────────────────────
 
-  const dailyData = fillDailyData(data.conversationsByDay);
-  const statusData = data.conversationsByStatus.map((item) => ({
-    name: STATUS_LABELS[item.status] ?? item.status,
-    value: item.count,
-    color: STATUS_COLORS[item.status] ?? "var(--status-closed)",
-  }));
+    const dailyData = fillDailyData(data.conversationsByDay);
 
-  const totalStatusCount = statusData.reduce((acc, item) => acc + item.value, 0);
+    // ─── Build Activity Timeline ────────────────────────────────────────────
+    type TimelineItem = {
+      id: string;
+      type: "booking" | "contact_form";
+      title: string;
+      subtitle: string;
+      timestamp: string;
+      status?: string;
+    };
 
-  const quickActions = [
-    { label: "Add knowledge", icon: FolderOpen, href: `/app/projects/${projectId}/knowledgebase` },
-    { label: "Configure widget", icon: Palette, href: `/app/projects/${projectId}/widget` },
-    { label: "Quick actions", icon: Zap, href: `/app/projects/${projectId}/quick-actions` },
-    { label: "Canned responses", icon: Bot, href: `/app/projects/${projectId}/canned-responses` },
-  ];
+    const timelineItems: TimelineItem[] = [];
+
+    for (const b of data.recentBookings) {
+      const startDate = new Date(b.startTime);
+      timelineItems.push({
+        id: b.id,
+        type: "booking",
+        title: b.visitorName,
+        subtitle: `Booking for ${startDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+        timestamp: b.createdAt,
+        status: b.status,
+      });
+    }
+
+    for (const s of data.recentContactSubmissions) {
+      let parsedData: Record<string, string> = {};
+      try {
+        parsedData = JSON.parse(s.data);
+      } catch {
+        // ignore
+      }
+      const firstValue = Object.values(parsedData)[0] ?? "Unknown";
+      const fieldCount = Object.keys(parsedData).length;
+      timelineItems.push({
+        id: s.id,
+        type: "contact_form",
+        title: parsedData["Name"] ?? parsedData["name"] ?? parsedData["Email"] ?? parsedData["email"] ?? firstValue,
+        subtitle: `Contact form with ${fieldCount} field${fieldCount !== 1 ? "s" : ""}`,
+        timestamp: s.createdAt,
+      });
+    }
+
+    timelineItems.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -393,23 +400,79 @@ function Dashboard() {
           )}
         </div>
 
-        {/* Quick Actions Grid */}
-        <div className="grid grid-cols-2 gap-3">
-          {quickActions.map((action) => (
-            <QuickActionCard
-              key={action.label}
-              label={action.label}
-              icon={action.icon}
-              href={action.href}
-            />
-          ))}
+        {/* Activity Timeline */}
+        <div className="bg-card rounded-xl border border-border p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-sm font-semibold text-foreground">
+              Recent Activity
+            </h2>
+          </div>
+          {timelineItems.length > 0 ? (
+            <div className="space-y-1">
+              {timelineItems.slice(0, 8).map((item) => (
+                <Link
+                  key={item.id}
+                  to={
+                    item.type === "booking"
+                      ? `/app/projects/${projectId}/bookings`
+                      : `/app/projects/${projectId}/contact-form`
+                  }
+                  className="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-accent/50 transition-colors group"
+                >
+                  <div
+                    className={cn(
+                      "w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5",
+                      item.type === "booking"
+                        ? "bg-primary/10"
+                        : "bg-orange-500/10",
+                    )}
+                  >
+                    {item.type === "booking" ? (
+                      <Calendar className="w-3.5 h-3.5 text-primary" />
+                    ) : (
+                      <Mail className="w-3.5 h-3.5 text-orange-500" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-medium text-foreground truncate">
+                        {item.title}
+                      </span>
+                      {item.status && (
+                        <span
+                          className={cn(
+                            "text-[10px] font-medium px-1.5 py-0.5 rounded-full border capitalize shrink-0",
+                            item.status === "confirmed"
+                              ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/25"
+                              : "bg-muted text-muted-foreground border-border",
+                          )}
+                        >
+                          {item.status}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[12px] text-muted-foreground truncate">
+                      {item.subtitle}
+                    </p>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground shrink-0 mt-0.5">
+                    {formatTimeAgo(item.timestamp)}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-[200px] text-sm text-muted-foreground gap-1">
+              <Clock className="w-5 h-5 mb-1 text-muted-foreground/50" />
+              No bookings or form submissions yet
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Recent Conversations + Status Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Recent Conversations Table */}
-        <div className="lg:col-span-2 bg-card rounded-xl">
+      {/* Recent Conversations */}
+      <div>
+        <div className="bg-card rounded-xl">
           <div className="flex items-center justify-between px-4 sm:px-6 py-4">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold text-foreground">
@@ -462,69 +525,6 @@ function Dashboard() {
           ) : (
             <div className="text-center py-12 text-sm text-muted-foreground">
               No conversations yet
-            </div>
-          )}
-        </div>
-
-        {/* Conversation Status */}
-        <div className="bg-card rounded-xl border border-border p-6">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="text-sm font-semibold text-foreground">
-              By Status
-            </h2>
-          </div>
-          {statusData.length > 0 ? (
-            <div className="flex flex-col items-center gap-5">
-              <ResponsiveContainer width={160} height={160}>
-                <PieChart>
-                  <Pie
-                    data={statusData}
-                    innerRadius={48}
-                    outerRadius={72}
-                    paddingAngle={3}
-                    dataKey="value"
-                    strokeWidth={0}
-                  >
-                    {statusData.map((entry, idx) => (
-                      <Cell key={idx} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "var(--card)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "8px",
-                      fontSize: "12px",
-                      boxShadow: "0 4px 12px rgba(255,255,255,0.05)",
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="w-full space-y-2.5">
-                {statusData.map((item) => (
-                  <div key={item.name} className="flex items-center gap-3">
-                    <div
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: item.color }}
-                    />
-                    <span className="text-[13px] text-muted-foreground flex-1">
-                      {item.name}
-                    </span>
-                    <span className="text-[13px] font-semibold text-foreground">
-                      {item.value}
-                    </span>
-                    <span className="text-[12px] text-muted-foreground w-10 text-right">
-                      {totalStatusCount > 0
-                        ? `${Math.round((item.value / totalStatusCount) * 100)}%`
-                        : "0%"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-center h-[160px] text-sm text-muted-foreground">
-              No data yet
             </div>
           )}
         </div>

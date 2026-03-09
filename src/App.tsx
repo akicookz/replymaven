@@ -16,6 +16,8 @@ import WidgetConfig from "./pages/WidgetConfig";
 import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
 import Tools from "./pages/Tools";
+import Bookings from "./pages/Bookings";
+import ContactFormSubmissions from "./pages/ContactFormSubmissions";
 import CompanyInfo from "./pages/CompanyInfo";
 import Sops from "./pages/Sops";
 import Billing from "./pages/Billing";
@@ -136,6 +138,14 @@ function App() {
         <Route
           path="projects/:projectId/canned-responses"
           element={<CannedResponses />}
+        />
+        <Route
+          path="projects/:projectId/bookings"
+          element={<Bookings />}
+        />
+        <Route
+          path="projects/:projectId/contact-form"
+          element={<ContactFormSubmissions />}
         />
         <Route
           path="projects/:projectId/tools"
