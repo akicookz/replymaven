@@ -17,7 +17,7 @@ export const updateProjectSettingsSchema = z.object({
     .enum(["professional", "friendly", "casual", "formal", "custom"])
     .optional(),
   customTonePrompt: z.string().max(2000).nullable().optional(),
-  introMessage: z.string().max(1000).optional(),
+  introMessage: z.string().max(200).optional(),
   showIntroBubble: z.boolean().optional(),
   autoCannedDraft: z.boolean().optional(),
   companyName: z.string().max(200).nullable().optional(),

@@ -1802,6 +1802,27 @@ const app = new Hono<HonoAppContext>()
 
   // ─── Widget Embed JS ───────────────────────────────────────────────────────
   .get("/api/widget-embed.js", async (c) => {
+    // In local dev, serve widget from Vite dev server assets (public/ dir)
+    // instead of R2, so you can test widget changes without deploying.
+    // Run `bun run widget:build` to update the local bundle.
+    const isLocal = c.env.BETTER_AUTH_URL?.includes("localhost");
+    if (isLocal) {
+      try {
+        const res = await c.env.ASSETS.fetch(
+          new Request("http://localhost/widget-embed.js"),
+        );
+        if (res.ok) {
+          const body = await res.text();
+          return c.text(body, 200, {
+            "Content-Type": "application/javascript",
+            "Cache-Control": "no-cache",
+          });
+        }
+      } catch {
+        // fall through to R2
+      }
+    }
+
     const obj = await c.env.UPLOADS.get("widget-embed.js");
     if (!obj) {
       return c.text(

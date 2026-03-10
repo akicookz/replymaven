@@ -218,6 +218,16 @@
       --rm-bot-border: rgba(0,0,0,0.06);
       --rm-visitor-bg: var(--rm-primary, #2563eb);
       --rm-visitor-text: var(--rm-brand-text, #ffffff);
+
+      /* ─── Accent tokens (derived from primary in JS) ────────────── */
+      --rm-accent-bg: rgba(37,99,235, 0.08);
+      --rm-accent-bg-hover: rgba(37,99,235, 0.15);
+      --rm-accent-text: var(--rm-primary, #2563eb);
+
+      /* ─── Derived radius tokens ────────────────────────────────────── */
+      --rm-btn-radius: calc(var(--rm-chat-radius, 16px) * 1.25);
+      --rm-input-radius: calc(var(--rm-chat-radius, 16px) * 0.875);
+      --rm-card-radius: calc(var(--rm-chat-radius, 16px) * 1.0);
     }
     .rm-widget-container.ready {
       visibility: visible;
@@ -323,13 +333,14 @@
       display: flex;
       align-items: center;
       gap: 12px;
+      width: 300px;
+      max-width: 300px;
       padding: 10px 16px 10px 10px;
-      background: #ffffff;
-      border: 1px solid rgba(0,0,0,0.08);
-      border-radius: 50px;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      background: var(--rm-bg, #ffffff);
+      border: 1px solid var(--rm-border-subtle, rgba(0,0,0,0.08));
+      border-radius: calc(var(--rm-chat-radius, 16px) * 1.5);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.12);
       cursor: pointer;
-      white-space: nowrap;
       opacity: 0;
       transform: translateX(10px);
       transition: opacity 0.4s ease, transform 0.4s ease;
@@ -338,10 +349,12 @@
     }
     .rm-widget-container.bottom-right .rm-intro-pill {
       right: 72px;
+      border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 4px calc(var(--rm-chat-radius, 16px) * 1.5);
     }
     .rm-widget-container.bottom-left .rm-intro-pill {
       left: 72px;
       transform: translateX(-10px);
+      border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 4px;
     }
     .rm-intro-pill.visible {
       opacity: 1;
@@ -380,8 +393,8 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      background: var(--rm-primary, #18181b);
-      color: var(--rm-brand-text, #ffffff);
+      background: var(--rm-accent-bg);
+      color: var(--rm-accent-text);
     }
     .rm-intro-pill-icon svg {
       width: 20px;
@@ -396,19 +409,27 @@
     .rm-intro-pill-title {
       font-size: 14px;
       font-weight: 600;
-      color: #18181b;
+      color: var(--rm-text, #18181b);
       line-height: 1.3;
+      white-space: nowrap;
     }
     .rm-intro-pill-desc {
       font-size: 13px;
       font-weight: 400;
-      color: #71717a;
-      line-height: 1.3;
+      color: var(--rm-text-muted, #71717a);
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
       overflow: hidden;
-      text-overflow: ellipsis;
     }
     .rm-widget-container.center-inline .rm-intro-pill {
       display: none;
+    }
+    @media (max-width: 480px) {
+      .rm-intro-pill {
+        max-width: calc(100vw - 90px);
+      }
     }
 
     /* ─── Chat Window ─────────────────────────────────────────────────────── */
@@ -865,7 +886,7 @@
     }
     .rm-quick-topic {
       padding: 7px 14px;
-      border-radius: 20px;
+      border-radius: var(--rm-btn-radius);
       border: 1px solid var(--rm-border);
       background: var(--rm-bg-secondary);
       font-size: 13px;
@@ -875,8 +896,8 @@
       line-height: 1.3;
     }
     .rm-quick-topic:hover {
-      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.15);
-      border-color: rgba(var(--rm-primary-rgb, 37,99,235), 0.25);
+      background: var(--rm-accent-bg-hover);
+      border-color: var(--rm-accent-bg-hover);
     }
 
     /* ─── Input Area ──────────────────────────────────────────────────────── */
@@ -894,7 +915,7 @@
       flex: 1;
       padding: 8px 14px;
       border: 1px solid var(--rm-border);
-      border-radius: 24px;
+      border-radius: var(--rm-btn-radius);
       font-size: 14px;
       outline: none;
       background: var(--rm-input-bg);
@@ -1097,7 +1118,7 @@
     }
     .rm-handoff-btn {
       padding: 8px 18px;
-      border-radius: 20px;
+      border-radius: var(--rm-btn-radius);
       font-size: 13px;
       font-weight: 500;
       cursor: pointer;
@@ -1127,7 +1148,7 @@
       flex: 1;
       padding: 9px 14px;
       border: 1px solid var(--rm-border);
-      border-radius: 10px;
+      border-radius: var(--rm-input-radius);
       font-size: 13px;
       outline: none;
       font-family: inherit;
@@ -1250,21 +1271,21 @@
     .rm-home-ask {
       margin-top: 16px;
       border: 1px solid var(--rm-border);
-      border-radius: 12px;
+      border-radius: var(--rm-card-radius);
       padding: 14px;
       cursor: pointer;
       transition: border-color 0.2s, box-shadow 0.2s;
     }
     .rm-home-ask:hover {
-      border-color: rgba(var(--rm-primary-rgb, 37,99,235), 0.3);
-      box-shadow: 0 1px 4px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
+      border-color: var(--rm-accent-bg-hover);
+      box-shadow: 0 1px 4px var(--rm-accent-bg);
     }
     .rm-home-ask-label {
       display: flex;
       align-items: center;
       gap: 6px;
       font-size: 12px;
-      color: var(--rm-primary, #6b7280);
+      color: var(--rm-accent-text);
       margin-bottom: 8px;
     }
     .rm-home-ask-label svg {
@@ -1298,7 +1319,7 @@
       gap: 12px;
       padding: 10px 12px;
       border: 1px solid var(--rm-border);
-      border-radius: 10px;
+      border-radius: var(--rm-input-radius);
       cursor: pointer;
       text-decoration: none;
       color: inherit;
@@ -1313,11 +1334,11 @@
       height: 34px;
       min-width: 34px;
       border-radius: 8px;
-      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
+      background: var(--rm-accent-bg);
       display: flex;
       align-items: center;
       justify-content: center;
-      color: var(--rm-primary, #6b7280);
+      color: var(--rm-accent-text);
       flex-shrink: 0;
     }
     .rm-home-link-icon svg {
@@ -1505,7 +1526,7 @@
     .rm-form-input {
       padding: 10px 14px;
       border: 1px solid var(--rm-border);
-      border-radius: 10px;
+      border-radius: var(--rm-input-radius);
       font-size: 16px;
       outline: none;
       font-family: inherit;
@@ -1525,7 +1546,7 @@
     .rm-form-textarea {
       padding: 10px 14px;
       border: 1px solid var(--rm-border);
-      border-radius: 10px;
+      border-radius: var(--rm-input-radius);
       font-size: 16px;
       outline: none;
       font-family: inherit;
@@ -1546,7 +1567,7 @@
     }
     .rm-form-submit {
       padding: 12px 24px;
-      border-radius: 12px;
+      border-radius: var(--rm-card-radius);
       border: none;
       font-size: 14px;
       font-weight: 600;
@@ -1618,7 +1639,7 @@
       align-items: center;
       gap: 6px;
       padding: 9px 16px;
-      border-radius: 20px;
+      border-radius: var(--rm-btn-radius);
       border: 1px solid var(--rm-border);
       background: var(--rm-bg-secondary);
       font-size: 13px;
@@ -1732,14 +1753,14 @@
     }
     .rm-booking-date-pill.selected {
       border-color: var(--rm-primary, #2563eb);
-      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
+      background: var(--rm-accent-bg);
     }
     .rm-booking-date-pill.selected .rm-date-weekday,
     .rm-booking-date-pill.selected .rm-date-month {
-      color: var(--rm-primary, #2563eb);
+      color: var(--rm-accent-text);
     }
     .rm-booking-date-pill.selected .rm-date-day {
-      color: var(--rm-primary, #2563eb);
+      color: var(--rm-accent-text);
     }
     .rm-booking-date-pill.today:not(.selected) {
       border-color: var(--rm-primary, #2563eb);
@@ -1795,7 +1816,7 @@
       align-items: center;
       justify-content: center;
       padding: 10px 8px;
-      border-radius: 10px;
+      border-radius: var(--rm-input-radius);
       border: 1px solid var(--rm-border);
       background: var(--rm-bg-secondary);
       font-size: 13px;
@@ -1806,12 +1827,12 @@
     }
     .rm-booking-slot:hover {
       border-color: var(--rm-primary, #2563eb);
-      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.04);
+      background: var(--rm-accent-bg);
     }
     .rm-booking-slot.selected {
       border-color: var(--rm-primary, #2563eb);
-      background: rgba(var(--rm-primary-rgb, 37,99,235), 0.08);
-      color: var(--rm-primary, #2563eb);
+      background: var(--rm-accent-bg);
+      color: var(--rm-accent-text);
       font-weight: 600;
     }
     .rm-booking-slot.unavailable {
@@ -1833,7 +1854,7 @@
       gap: 10px;
       padding: 10px 12px;
       border: 1px solid var(--rm-border);
-      border-radius: 10px;
+      border-radius: var(--rm-input-radius);
       background: var(--rm-input-bg);
       transition: border-color 0.15s;
     }
@@ -1864,7 +1885,7 @@
       width: 100%;
       padding: 12px;
       border: none;
-      border-radius: 10px;
+      border-radius: var(--rm-input-radius);
       font-size: 14px;
       font-weight: 600;
       color: var(--rm-brand-text, #ffffff);
@@ -1955,7 +1976,7 @@
       margin-top: 24px;
       padding: 10px 24px;
       border: 1px solid var(--rm-border);
-      border-radius: 10px;
+      border-radius: var(--rm-input-radius);
       background: var(--rm-bg-secondary);
       font-size: 13px;
       font-weight: 500;
@@ -2473,7 +2494,7 @@
         display: flex;
       }
       .rm-widget-container.center-inline .rm-chat-window.open .rm-input {
-        border-radius: 12px;
+        border-radius: var(--rm-card-radius);
         padding: 10px 14px;
         font-size: 16px;
       }
@@ -3827,34 +3848,44 @@
         const bgStyle = w.backgroundStyle || "solid";
         chatWindow.dataset.bgStyle = bgStyle;
 
+        const pRgb = hexToRgb(primary);
+
         if (bgStyle === "blurred") {
-          // Dark glassmorphism: override theme tokens for dark background
+          // Dark glassmorphism: primary-tinted dark theme
           container.style.setProperty("--rm-bg", "rgba(0,0,0,0.18)");
-          container.style.setProperty("--rm-bg-secondary", "rgba(255,255,255,0.08)");
-          container.style.setProperty("--rm-bg-tertiary", "rgba(255,255,255,0.12)");
+          container.style.setProperty("--rm-bg-secondary", `rgba(255,255,255,0.06)`);
+          container.style.setProperty("--rm-bg-tertiary", `rgba(255,255,255,0.10)`);
           container.style.setProperty("--rm-text", "#ffffff");
-          container.style.setProperty("--rm-text-secondary", "rgba(255,255,255,0.6)");
+          container.style.setProperty("--rm-text-secondary", "rgba(255,255,255,0.7)");
           container.style.setProperty("--rm-text-muted", "rgba(255,255,255,0.4)");
-          container.style.setProperty("--rm-border", "rgba(255,255,255,0.1)");
-          container.style.setProperty("--rm-border-subtle", "rgba(255,255,255,0.06)");
-          container.style.setProperty("--rm-shadow", "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(" + hexToRgb(primary) + ", 0.15)");
-          container.style.setProperty("--rm-input-bg", "rgba(255,255,255,0.12)");
-          container.style.setProperty("--rm-input-bg-focus", "rgba(255,255,255,0.18)");
+          container.style.setProperty("--rm-border", `rgba(255,255,255,0.12)`);
+          container.style.setProperty("--rm-border-subtle", `rgba(255,255,255,0.08)`);
+          container.style.setProperty("--rm-shadow", `0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(${pRgb}, 0.15)`);
+          container.style.setProperty("--rm-input-bg", `rgba(255,255,255,0.08)`);
+          container.style.setProperty("--rm-input-bg-focus", `rgba(255,255,255,0.12)`);
           container.style.setProperty("--rm-scrollbar", "rgba(255,255,255,0.12)");
-          // Dark-friendly bot message defaults
-          container.style.setProperty("--rm-bot-bg", w.botMessageBgColor || "rgba(255,255,255,0.08)");
-          container.style.setProperty("--rm-bot-text", w.botMessageTextColor || "#ffffff");
-          container.style.setProperty("--rm-bot-border", "rgba(" + hexToRgb(primary) + ", 0.2)");
+          // Accent tokens — visible on dark surfaces
+          container.style.setProperty("--rm-accent-bg", `rgba(${pRgb}, 0.20)`);
+          container.style.setProperty("--rm-accent-bg-hover", `rgba(${pRgb}, 0.30)`);
+          container.style.setProperty("--rm-accent-text", "#ffffff");
+          // Bot/visitor messages — always derived
+          container.style.setProperty("--rm-bot-bg", "rgba(255,255,255,0.08)");
+          container.style.setProperty("--rm-bot-text", "#ffffff");
+          container.style.setProperty("--rm-bot-border", `rgba(${pRgb}, 0.2)`);
         } else {
-          // Light themes (solid, bordered, soft): use configured or default light values
-          container.style.setProperty("--rm-bot-bg", w.botMessageBgColor || "#ffffff");
-          container.style.setProperty("--rm-bot-text", w.botMessageTextColor || "#18181b");
+          // Light theme: accent tokens from primary
+          container.style.setProperty("--rm-accent-bg", `rgba(${pRgb}, 0.08)`);
+          container.style.setProperty("--rm-accent-bg-hover", `rgba(${pRgb}, 0.15)`);
+          container.style.setProperty("--rm-accent-text", primary);
+          // Bot/visitor messages — always derived
+          container.style.setProperty("--rm-bot-bg", "#ffffff");
+          container.style.setProperty("--rm-bot-text", "#18181b");
           container.style.setProperty("--rm-bot-border", "rgba(0,0,0,0.06)");
         }
 
-        // ─── Message colors ───────────────────────────────────────────────────
-        container.style.setProperty("--rm-visitor-bg", w.visitorMessageBgColor || primary);
-        container.style.setProperty("--rm-visitor-text", w.visitorMessageTextColor || brandText);
+        // ─── Message colors (always derived from primary) ─────────────────────
+        container.style.setProperty("--rm-visitor-bg", primary);
+        container.style.setProperty("--rm-visitor-text", brandText);
 
         // Trigger & send button: brand colors
         trigger.style.backgroundColor = primary;
@@ -4151,7 +4182,7 @@
 
             const successIcon = document.createElement("div");
             successIcon.className = "rm-form-success-icon";
-            successIcon.style.backgroundColor = primary + "20";
+            successIcon.style.backgroundColor = `rgba(${hexToRgb(primary)}, 0.12)`;
             successIcon.style.color = primary;
             successIcon.innerHTML = ICONS.check;
 
@@ -4220,11 +4251,11 @@
           introPill.classList.add("visible");
         }, 600);
 
-        // Auto-hide after 5 seconds
+        // Auto-hide after 15 seconds
         introPillTimer = setTimeout(() => {
           introPill.classList.add("rm-intro-hidden");
           introPillTimer = null;
-        }, 5000);
+        }, 15000);
       }
 
       // ─── Prompt-type Quick Actions as Chat Pills ────────────────────────────
@@ -4260,17 +4291,21 @@
         inlineBar.dataset.bgStyle = inlineBgStyle;
 
         // Set theme tokens on the inline bar (same as container)
+        const iPRgb = hexToRgb(inlinePrimary);
         if (inlineBgStyle === "blurred") {
           inlineBar.style.setProperty("--rm-bg", "rgba(0,0,0,0.18)");
-          inlineBar.style.setProperty("--rm-bg-secondary", "rgba(255,255,255,0.08)");
-          inlineBar.style.setProperty("--rm-bg-tertiary", "rgba(255,255,255,0.12)");
+          inlineBar.style.setProperty("--rm-bg-secondary", `rgba(255,255,255,0.06)`);
+          inlineBar.style.setProperty("--rm-bg-tertiary", `rgba(255,255,255,0.10)`);
           inlineBar.style.setProperty("--rm-text", "#ffffff");
-          inlineBar.style.setProperty("--rm-text-secondary", "rgba(255,255,255,0.6)");
+          inlineBar.style.setProperty("--rm-text-secondary", "rgba(255,255,255,0.7)");
           inlineBar.style.setProperty("--rm-text-muted", "rgba(255,255,255,0.4)");
-          inlineBar.style.setProperty("--rm-border", "rgba(255,255,255,0.1)");
-          inlineBar.style.setProperty("--rm-border-subtle", "rgba(255,255,255,0.06)");
-          inlineBar.style.setProperty("--rm-input-bg", "rgba(255,255,255,0.12)");
-          inlineBar.style.setProperty("--rm-input-bg-focus", "rgba(255,255,255,0.18)");
+          inlineBar.style.setProperty("--rm-border", `rgba(255,255,255,0.12)`);
+          inlineBar.style.setProperty("--rm-border-subtle", `rgba(255,255,255,0.08)`);
+          inlineBar.style.setProperty("--rm-input-bg", `rgba(255,255,255,0.08)`);
+          inlineBar.style.setProperty("--rm-input-bg-focus", `rgba(255,255,255,0.12)`);
+          inlineBar.style.setProperty("--rm-accent-bg", `rgba(${iPRgb}, 0.20)`);
+          inlineBar.style.setProperty("--rm-accent-bg-hover", `rgba(${iPRgb}, 0.30)`);
+          inlineBar.style.setProperty("--rm-accent-text", "#ffffff");
         } else {
           inlineBar.style.setProperty("--rm-bg", "#ffffff");
           inlineBar.style.setProperty("--rm-bg-secondary", "#f4f4f5");
@@ -4280,6 +4315,9 @@
           inlineBar.style.setProperty("--rm-text-muted", "#a1a1aa");
           inlineBar.style.setProperty("--rm-border", "#e4e4e7");
           inlineBar.style.setProperty("--rm-border-subtle", "rgba(0,0,0,0.06)");
+          inlineBar.style.setProperty("--rm-accent-bg", `rgba(${iPRgb}, 0.08)`);
+          inlineBar.style.setProperty("--rm-accent-bg-hover", `rgba(${iPRgb}, 0.15)`);
+          inlineBar.style.setProperty("--rm-accent-text", inlinePrimary);
         }
 
         // Populate inline bar topics from prompt-type quick actions
@@ -4831,7 +4869,7 @@
         avatar.appendChild(avatarImg);
       } else {
         avatar.classList.add("rm-icon-avatar");
-        avatar.style.backgroundColor = primaryColor + "20";
+        avatar.style.backgroundColor = `rgba(${hexToRgb(primaryColor)}, 0.12)`;
         avatar.style.color = primaryColor;
         avatar.innerHTML = ICONS.aiSparkle;
       }
@@ -4865,8 +4903,8 @@
         textNode.textContent = content;
         msgEl.appendChild(textNode);
       }
-      msgEl.style.backgroundColor = config?.widget?.visitorMessageBgColor || primaryColor;
-      msgEl.style.color = config?.widget?.visitorMessageTextColor || getBrandTextColor();
+      msgEl.style.backgroundColor = primaryColor;
+      msgEl.style.color = getBrandTextColor();
     } else {
       // Bot/agent messages: render markdown
       const textContainer = document.createElement("div");
@@ -5226,7 +5264,7 @@
     // Icon
     const icon = document.createElement("div");
     icon.className = "rm-handoff-icon";
-    icon.style.backgroundColor = primaryColor + "20";
+    icon.style.backgroundColor = `rgba(${hexToRgb(primaryColor)}, 0.12)`;
     icon.style.color = primaryColor;
     icon.innerHTML = ICONS.headset;
     card.appendChild(icon);

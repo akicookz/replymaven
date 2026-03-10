@@ -353,104 +353,6 @@ function WidgetConfig() {
             </div>
           </div>
 
-          {/* Message Colors */}
-          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2">
-              <MessageSquare className="w-5 h-5" />
-              Message Colors
-            </h2>
-
-            {/* Bot Messages */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">
-                Bot Messages
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Background
-                  </label>
-                  <ColorPicker
-                    value={form.botMessageBgColor ?? "#ffffff"}
-                    onChange={(color) =>
-                      setForm({ ...form, botMessageBgColor: color })
-                    }
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Text
-                  </label>
-                  <ColorPicker
-                    value={form.botMessageTextColor ?? "#18181b"}
-                    onChange={(color) =>
-                      setForm({ ...form, botMessageTextColor: color })
-                    }
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Visitor Messages */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-foreground">
-                  Visitor Messages
-                </label>
-                {(form.visitorMessageBgColor || form.visitorMessageTextColor) && (
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                    onClick={() =>
-                      setForm({
-                        ...form,
-                        visitorMessageBgColor: null,
-                        visitorMessageTextColor: null,
-                      })
-                    }
-                  >
-                    Reset to brand colors
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Background
-                  </label>
-                  <ColorPicker
-                    value={
-                      form.visitorMessageBgColor ??
-                      form.primaryColor ??
-                      "#2563eb"
-                    }
-                    onChange={(color) =>
-                      setForm({ ...form, visitorMessageBgColor: color })
-                    }
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Text
-                  </label>
-                  <ColorPicker
-                    value={
-                      form.visitorMessageTextColor ??
-                      form.textColor ??
-                      "#ffffff"
-                    }
-                    onChange={(color) =>
-                      setForm({ ...form, visitorMessageTextColor: color })
-                    }
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Defaults to Brand Color and Brand Text when not set.
-              </p>
-            </div>
-          </div>
-
           {/* Home Screen (hidden for center-inline position) */}
           {form.position !== "center-inline" && (
           <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
@@ -620,8 +522,12 @@ function WidgetConfig() {
               onChange={(e) => setIntroMessage(e.target.value)}
               placeholder="Hi there! How can I help you today?"
               rows={3}
+              maxLength={200}
               className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             />
+            <p className="text-xs text-muted-foreground text-right">
+              {introMessage.length}/200
+            </p>
             {form.position === "center-inline" && (
               <div className="flex items-center justify-between rounded-xl border border-input bg-background px-4 py-3">
                 <div className="space-y-0.5">

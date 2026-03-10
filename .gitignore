@@ -18,5 +18,8 @@ dist-widget/
 *.swo
 .DS_Store
 
+# Local widget build
+public/widget-embed.js
+
 # TypeScript
 *.tsbuildinfo
