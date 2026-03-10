@@ -330,15 +330,19 @@
     .rm-intro-pill {
       position: absolute;
       bottom: 6px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
       width: 300px;
       max-width: 300px;
-      padding: 10px 16px 10px 10px;
-      background: var(--rm-bg, #ffffff);
-      border: 1px solid var(--rm-border-subtle, rgba(0,0,0,0.08));
+      padding: 2px;
       border-radius: calc(var(--rm-chat-radius, 16px) * 1.5);
+      background: conic-gradient(
+        from var(--rm-glow-angle, 0deg),
+        var(--rm-primary, #2563eb),
+        color-mix(in srgb, var(--rm-primary, #2563eb), #ffffff 40%),
+        var(--rm-primary, #2563eb),
+        color-mix(in srgb, var(--rm-primary, #2563eb), #000000 30%),
+        var(--rm-primary, #2563eb)
+      );
+      animation: rm-glow-spin 4s linear infinite;
       box-shadow: 0 4px 16px rgba(0,0,0,0.12);
       cursor: pointer;
       opacity: 0;
@@ -356,6 +360,19 @@
       transform: translateX(-10px);
       border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 4px;
     }
+    .rm-intro-pill-inner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px 10px 10px;
+      background: var(--rm-bg, #ffffff);
+      border-radius: inherit;
+    }
+    .rm-intro-pill[data-bg-style="blurred"] .rm-intro-pill-inner {
+      background: rgba(0,0,0,0.18);
+      backdrop-filter: blur(24px) saturate(1.4);
+      -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    }
     .rm-intro-pill.visible {
       opacity: 1;
       transform: translateX(0);
@@ -371,7 +388,7 @@
       transform: translateX(-10px);
     }
     .rm-intro-pill:hover {
-      box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.18);
     }
     .rm-trigger.active ~ .rm-intro-pill {
       opacity: 0 !important;
@@ -429,6 +446,12 @@
     @media (max-width: 480px) {
       .rm-intro-pill {
         max-width: calc(100vw - 90px);
+      }
+      .rm-widget-container.bottom-right .rm-intro-pill {
+        border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 4px calc(var(--rm-chat-radius, 16px) * 1.5);
+      }
+      .rm-widget-container.bottom-left .rm-intro-pill {
+        border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 4px;
       }
     }
 
@@ -2825,11 +2848,14 @@
   const introPillDesc = document.createElement("div");
   introPillDesc.className = "rm-intro-pill-desc";
 
+  const introPillInner = document.createElement("div");
+  introPillInner.className = "rm-intro-pill-inner";
   introPillTextWrap.appendChild(introPillTitle);
   introPillTextWrap.appendChild(introPillDesc);
-  introPill.appendChild(introPillAvatar);
-  introPill.appendChild(introPillIcon);
-  introPill.appendChild(introPillTextWrap);
+  introPillInner.appendChild(introPillAvatar);
+  introPillInner.appendChild(introPillIcon);
+  introPillInner.appendChild(introPillTextWrap);
+  introPill.appendChild(introPillInner);
   introPill.onclick = () => toggleChatWidget();
 
   let introPillTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3847,6 +3873,7 @@
         // ─── Background style + theme tokens ──────────────────────────────────
         const bgStyle = w.backgroundStyle || "solid";
         chatWindow.dataset.bgStyle = bgStyle;
+        introPill.dataset.bgStyle = bgStyle;
 
         const pRgb = hexToRgb(primary);
 
