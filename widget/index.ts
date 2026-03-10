@@ -246,15 +246,15 @@
 
     /* ─── Trigger Button ──────────────────────────────────────────────────── */
     .rm-trigger {
-      width: 60px;
-      height: 60px;
+      width: 52px;
+      height: 52px;
       border-radius: 50%;
       border: none;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 4px 20px rgba(0,0,0,0.06);
+      box-shadow: 0 4px 14px 0 color-mix(in srgb, var(--rm-primary, #2563eb), transparent 55%);
       transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease;
       position: relative;
       color: var(--rm-brand-text, #ffffff);
@@ -266,11 +266,11 @@
     }
     .rm-trigger:hover {
       transform: scale(1.05);
-      box-shadow: 0 2px 10px rgba(0,0,0,0.10), 0 6px 24px rgba(0,0,0,0.08);
+      box-shadow: 0 6px 20px 0 color-mix(in srgb, var(--rm-primary, #2563eb), transparent 45%);
     }
     .rm-trigger svg {
-      width: 26px;
-      height: 26px;
+      width: 22px;
+      height: 22px;
     }
     .rm-trigger-avatar {
       width: 100%;
@@ -333,7 +333,7 @@
     }
     .rm-intro-pill {
       position: absolute;
-      bottom: 6px;
+      bottom: 12px;
       width: 300px;
       max-width: 300px;
       display: flex;
@@ -353,13 +353,13 @@
       font-family: inherit;
     }
     .rm-widget-container.bottom-right .rm-intro-pill {
-      right: 72px;
-      border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 4px calc(var(--rm-chat-radius, 16px) * 1.5);
+      right: 64px;
+      border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 12px calc(var(--rm-chat-radius, 16px) * 1.5);
     }
     .rm-widget-container.bottom-left .rm-intro-pill {
-      left: 72px;
+      left: 64px;
       transform: translateX(-10px);
-      border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 4px;
+      border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 12px;
     }
     .rm-intro-pill[data-bg-style="blurred"] {
       background: rgba(0,0,0,0.18);
@@ -441,17 +441,17 @@
         max-width: calc(100vw - 90px);
       }
       .rm-widget-container.bottom-right .rm-intro-pill {
-        border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 4px calc(var(--rm-chat-radius, 16px) * 1.5);
+        border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 12px calc(var(--rm-chat-radius, 16px) * 1.5);
       }
       .rm-widget-container.bottom-left .rm-intro-pill {
-        border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 4px;
+        border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 12px;
       }
     }
 
     /* ─── Chat Window ─────────────────────────────────────────────────────── */
     .rm-chat-window {
       position: absolute;
-      bottom: 74px;
+      bottom: 66px;
       width: 400px;
       min-height: 600px;
       max-height: 620px;
