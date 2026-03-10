@@ -2018,10 +2018,10 @@
       bottom: 24px;
       left: 50%;
       transform: translateX(-50%);
-      width: 320px;
+      width: 300px;
       max-width: calc(100% - 40px);
       z-index: 999999;
-      border-radius: 28px;
+      border-radius: 26px;
       padding: 2px;
       background: conic-gradient(
         from var(--rm-glow-angle, 0deg),
@@ -2044,15 +2044,15 @@
       display: none;
     }
     .rm-inline-bar.expanded {
-      width: 560px;
+      width: 520px;
     }
     .rm-inline-bar-inner {
       background: var(--rm-bg);
       border: 1px solid var(--rm-border);
-      border-radius: 26px;
+      border-radius: 24px;
       display: flex;
       align-items: center;
-      padding: 6px 8px 6px 20px;
+      padding: 5px 6px 5px 16px;
       gap: 8px;
       position: relative;
     }
@@ -2068,7 +2068,7 @@
       border: none;
       outline: none;
       color: var(--rm-text);
-      font-size: 15px;
+      font-size: 14px;
       line-height: 1.4;
       min-width: 0;
       caret-color: var(--rm-text);
@@ -2082,7 +2082,7 @@
       top: 50%;
       transform: translateY(-50%);
       color: var(--rm-text-muted);
-      font-size: 15px;
+      font-size: 14px;
       pointer-events: none;
       white-space: nowrap;
       overflow: hidden;
@@ -2094,8 +2094,8 @@
       opacity: 0;
     }
     .rm-inline-bar-btn {
-      width: 34px;
-      height: 34px;
+      width: 30px;
+      height: 30px;
       border-radius: 50%;
       border: none;
       background: var(--rm-primary, #2563eb);
@@ -2112,8 +2112,8 @@
       transform: scale(1.05);
     }
     .rm-inline-bar-btn svg {
-      width: 16px;
-      height: 16px;
+      width: 14px;
+      height: 14px;
     }
     .rm-inline-bar-btn .rm-ib-icon-send,
     .rm-inline-bar-btn .rm-ib-icon-close {
@@ -2178,12 +2178,12 @@
       position: absolute;
       bottom: calc(100% + 12px);
       left: 4px;
-      max-width: 280px;
-      padding: 10px 16px;
+      max-width: 260px;
+      padding: 8px 14px;
       border-radius: 18px 18px 18px 4px;
       background: var(--rm-bg);
       color: var(--rm-text);
-      font-size: 14px;
+      font-size: 13px;
       line-height: 1.45;
       border: 1px solid var(--rm-border);
       box-shadow: 0 2px 12px rgba(0,0,0,0.08);
@@ -2210,12 +2210,12 @@
 
     /* ─── Expanded Intro Bubble (shown on focus, above topics) ────────────── */
     .rm-inline-bar-intro-expanded {
-      max-width: 280px;
-      padding: 10px 16px;
+      max-width: 260px;
+      padding: 8px 14px;
       border-radius: 18px 18px 18px 4px;
       background: var(--rm-bg);
       color: var(--rm-text);
-      font-size: 14px;
+      font-size: 13px;
       line-height: 1.45;
       border: 1px solid var(--rm-border);
       box-shadow: 0 2px 12px rgba(0,0,0,0.08);
@@ -2242,12 +2242,12 @@
     .rm-inline-bar-topic {
       display: inline-flex;
       align-self: flex-start;
-      padding: 10px 18px;
-      border-radius: 22px;
+      padding: 8px 14px;
+      border-radius: 20px;
       border: 1px solid var(--rm-border);
       background: var(--rm-bg);
       color: var(--rm-text);
-      font-size: 14px;
+      font-size: 13px;
       cursor: pointer;
       transition: background 0.2s ease, transform 0.1s ease;
       line-height: 1.3;
@@ -2292,12 +2292,12 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 10px 18px;
-      border-radius: 22px;
+      padding: 8px 14px;
+      border-radius: 20px;
       border: 1px solid var(--rm-border);
       background: var(--rm-bg);
       color: var(--rm-text);
-      font-size: 14px;
+      font-size: 13px;
       cursor: pointer;
       transition: opacity 0.2s ease, border-color 0.2s ease;
       line-height: 1.3;
@@ -3892,14 +3892,6 @@
 
         if (w.avatarUrl) {
           const avatarSrc = resolveUrl(w.avatarUrl);
-
-          // Trigger button: show avatar instead of chat icon
-          triggerChatIcon.innerHTML = "";
-          const triggerImg = document.createElement("img");
-          triggerImg.src = avatarSrc;
-          triggerImg.alt = "Chat";
-          triggerImg.className = "rm-trigger-avatar";
-          triggerChatIcon.appendChild(triggerImg);
 
           // Header avatar
           headerAvatar.innerHTML = "";
