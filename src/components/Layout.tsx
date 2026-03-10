@@ -431,7 +431,7 @@ function Layout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden pt-14 md:pt-0">
         <div className="p-4 md:p-8">
           <Outlet />
         </div>

@@ -316,6 +316,101 @@
       display: flex;
     }
 
+    /* ─── Intro Pill (corner positions) ──────────────────────────────────── */
+    .rm-intro-pill {
+      position: absolute;
+      bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px 10px 10px;
+      background: #ffffff;
+      border: 1px solid rgba(0,0,0,0.08);
+      border-radius: 50px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      cursor: pointer;
+      white-space: nowrap;
+      opacity: 0;
+      transform: translateX(10px);
+      transition: opacity 0.4s ease, transform 0.4s ease;
+      pointer-events: none;
+      font-family: inherit;
+    }
+    .rm-widget-container.bottom-right .rm-intro-pill {
+      right: 72px;
+    }
+    .rm-widget-container.bottom-left .rm-intro-pill {
+      left: 72px;
+      transform: translateX(-10px);
+    }
+    .rm-intro-pill.visible {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+    .rm-intro-pill.rm-intro-hidden {
+      opacity: 0;
+      transform: translateX(10px);
+      pointer-events: none;
+      transition: opacity 0.4s ease, transform 0.4s ease;
+    }
+    .rm-widget-container.bottom-left .rm-intro-pill.rm-intro-hidden {
+      transform: translateX(-10px);
+    }
+    .rm-intro-pill:hover {
+      box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    }
+    .rm-trigger.active ~ .rm-intro-pill {
+      opacity: 0 !important;
+      pointer-events: none !important;
+      transition: opacity 0.2s ease !important;
+    }
+    .rm-intro-pill-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+    .rm-intro-pill-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--rm-primary, #18181b);
+      color: var(--rm-brand-text, #ffffff);
+    }
+    .rm-intro-pill-icon svg {
+      width: 20px;
+      height: 20px;
+    }
+    .rm-intro-pill-text {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
+    .rm-intro-pill-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #18181b;
+      line-height: 1.3;
+    }
+    .rm-intro-pill-desc {
+      font-size: 13px;
+      font-weight: 400;
+      color: #71717a;
+      line-height: 1.3;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rm-widget-container.center-inline .rm-intro-pill {
+      display: none;
+    }
+
     /* ─── Chat Window ─────────────────────────────────────────────────────── */
     .rm-chat-window {
       position: absolute;
@@ -2687,8 +2782,40 @@
   trigger.appendChild(triggerBadge);
   trigger.onclick = () => toggleChatWidget();
 
+  // ─── Intro Pill (corner positions) ──────────────────────────────────────────
+  const introPill = document.createElement("div");
+  introPill.className = "rm-intro-pill";
+
+  const introPillAvatar = document.createElement("img");
+  introPillAvatar.className = "rm-intro-pill-avatar";
+  introPillAvatar.alt = "Avatar";
+  introPillAvatar.style.display = "none";
+
+  const introPillIcon = document.createElement("div");
+  introPillIcon.className = "rm-intro-pill-icon";
+  introPillIcon.innerHTML = ICONS.chat;
+
+  const introPillTextWrap = document.createElement("div");
+  introPillTextWrap.className = "rm-intro-pill-text";
+
+  const introPillTitle = document.createElement("div");
+  introPillTitle.className = "rm-intro-pill-title";
+
+  const introPillDesc = document.createElement("div");
+  introPillDesc.className = "rm-intro-pill-desc";
+
+  introPillTextWrap.appendChild(introPillTitle);
+  introPillTextWrap.appendChild(introPillDesc);
+  introPill.appendChild(introPillAvatar);
+  introPill.appendChild(introPillIcon);
+  introPill.appendChild(introPillTextWrap);
+  introPill.onclick = () => toggleChatWidget();
+
+  let introPillTimer: ReturnType<typeof setTimeout> | null = null;
+
   container.appendChild(chatWindow);
   container.appendChild(trigger);
+  container.appendChild(introPill);
   document.body.appendChild(container);
 
   // ─── Inline Bar DOM (created once, shown only for inline-bar variant) ───────
@@ -4076,6 +4203,36 @@
       if (loadedConfig.introMessage) {
         pendingIntroMessage = loadedConfig.introMessage;
         introMessageText = loadedConfig.introMessage;
+      }
+
+      // ─── Intro Pill (corner positions) ──────────────────────────────────────
+      if (
+        !isInlineBarVariant &&
+        loadedConfig.showIntroBubble !== false &&
+        loadedConfig.introMessage
+      ) {
+        introPillTitle.textContent = loadedConfig.widget?.headerText || "Chat with us";
+        introPillDesc.textContent = loadedConfig.introMessage;
+
+        if (loadedConfig.widget?.avatarUrl) {
+          introPillAvatar.src = resolveUrl(loadedConfig.widget.avatarUrl);
+          introPillAvatar.style.display = "block";
+          introPillIcon.style.display = "none";
+        } else {
+          introPillAvatar.style.display = "none";
+          introPillIcon.style.display = "flex";
+        }
+
+        // Show with slight delay after trigger appears
+        setTimeout(() => {
+          introPill.classList.add("visible");
+        }, 600);
+
+        // Auto-hide after 5 seconds
+        introPillTimer = setTimeout(() => {
+          introPill.classList.add("rm-intro-hidden");
+          introPillTimer = null;
+        }, 5000);
       }
 
       // ─── Prompt-type Quick Actions as Chat Pills ────────────────────────────
@@ -5595,6 +5752,12 @@
     chatWindow.classList.add("open");
     trigger.classList.add("active");
     clearUnreadBadge();
+    // Hide intro pill permanently
+    if (introPillTimer) {
+      clearTimeout(introPillTimer);
+      introPillTimer = null;
+    }
+    introPill.classList.add("rm-intro-hidden");
     // Lock body scroll on mobile to prevent background scrolling
     if (isMobileViewport()) {
       document.body.style.overflow = "hidden";
