@@ -254,7 +254,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.16);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 4px 20px rgba(0,0,0,0.06);
       transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease;
       position: relative;
       color: var(--rm-brand-text, #ffffff);
@@ -266,7 +266,7 @@
     }
     .rm-trigger:hover {
       transform: scale(1.05);
-      box-shadow: 0 6px 20px rgba(0,0,0,0.22);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.10), 0 6px 24px rgba(0,0,0,0.08);
     }
     .rm-trigger svg {
       width: 26px;
@@ -327,23 +327,24 @@
     }
 
     /* ─── Intro Pill (corner positions) ──────────────────────────────────── */
+    @keyframes rm-pill-glow {
+      0%, 100% { box-shadow: 0 0 6px 0px color-mix(in srgb, var(--rm-primary, #2563eb), transparent 90%); }
+      50% { box-shadow: 0 0 10px 0px color-mix(in srgb, var(--rm-primary, #2563eb), transparent 82%); }
+    }
     .rm-intro-pill {
       position: absolute;
       bottom: 6px;
       width: 300px;
       max-width: 300px;
-      padding: 2px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 16px 10px 10px;
+      border: 0.5px solid var(--rm-glow-border, rgba(37,99,235,0.2));
       border-radius: calc(var(--rm-chat-radius, 16px) * 1.5);
-      background: conic-gradient(
-        from var(--rm-glow-angle, 0deg),
-        var(--rm-primary, #2563eb),
-        color-mix(in srgb, var(--rm-primary, #2563eb), #ffffff 40%),
-        var(--rm-primary, #2563eb),
-        color-mix(in srgb, var(--rm-primary, #2563eb), #000000 30%),
-        var(--rm-primary, #2563eb)
-      );
-      animation: rm-glow-spin 4s linear infinite;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+      background: var(--rm-bg, #ffffff);
+      animation: rm-pill-glow 4s ease-in-out infinite;
+      box-shadow: 0 0 6px 0px color-mix(in srgb, var(--rm-primary, #2563eb), transparent 90%);
       cursor: pointer;
       opacity: 0;
       transform: translateX(10px);
@@ -360,15 +361,7 @@
       transform: translateX(-10px);
       border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 4px;
     }
-    .rm-intro-pill-inner {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 16px 10px 10px;
-      background: var(--rm-bg, #ffffff);
-      border-radius: inherit;
-    }
-    .rm-intro-pill[data-bg-style="blurred"] .rm-intro-pill-inner {
+    .rm-intro-pill[data-bg-style="blurred"] {
       background: rgba(0,0,0,0.18);
       backdrop-filter: blur(24px) saturate(1.4);
       -webkit-backdrop-filter: blur(24px) saturate(1.4);
@@ -2016,7 +2009,7 @@
         right: 16px;
         left: auto;
       }
-      .rm-widget-container {
+      .rm-chat-window {
         --rm-chat-radius: 0px !important;
       }
       .rm-chat-window {
@@ -2066,16 +2059,9 @@
       max-width: calc(100% - 40px);
       z-index: 999999;
       border-radius: 26px;
-      padding: 2px;
-      background: conic-gradient(
-        from var(--rm-glow-angle, 0deg),
-        var(--rm-primary, #2563eb),
-        color-mix(in srgb, var(--rm-primary, #2563eb), #ffffff 40%),
-        var(--rm-primary, #2563eb),
-        color-mix(in srgb, var(--rm-primary, #2563eb), #000000 30%),
-        var(--rm-primary, #2563eb)
-      );
-      animation: rm-glow-spin 4s linear infinite;
+      background: transparent;
+      animation: rm-pill-glow 4s ease-in-out infinite;
+      box-shadow: 0 0 6px 0px color-mix(in srgb, var(--rm-primary, #2563eb), transparent 90%);
       transition: width 0.35s cubic-bezier(0.4,0,0.2,1), border-radius 0.35s cubic-bezier(0.4,0,0.2,1);
       will-change: width;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -2088,11 +2074,11 @@
       display: none;
     }
     .rm-inline-bar.expanded {
-      width: 520px;
+      width: 560px;
     }
     .rm-inline-bar-inner {
       background: var(--rm-bg);
-      border: 1px solid var(--rm-border);
+      border: 0.5px solid var(--rm-glow-border, rgba(37,99,235,0.2));
       border-radius: 24px;
       display: flex;
       align-items: center;
@@ -2459,13 +2445,15 @@
     /* When chat is active, inline bar gets a slightly different style (no glow, solid border) */
     .rm-inline-bar.chat-active {
       animation: none;
-      background: var(--rm-border);
+      background: transparent;
+      box-shadow: none;
       border-radius: 20px;
     }
     .rm-inline-bar[data-bg-style="blurred"].chat-active {
-      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
+      background: transparent;
     }
     .rm-inline-bar.chat-active .rm-inline-bar-inner {
+      border: 0.5px solid var(--rm-glow-border, rgba(37,99,235,0.2));
       border-radius: 18px;
     }
 
@@ -2848,14 +2836,11 @@
   const introPillDesc = document.createElement("div");
   introPillDesc.className = "rm-intro-pill-desc";
 
-  const introPillInner = document.createElement("div");
-  introPillInner.className = "rm-intro-pill-inner";
   introPillTextWrap.appendChild(introPillTitle);
   introPillTextWrap.appendChild(introPillDesc);
-  introPillInner.appendChild(introPillAvatar);
-  introPillInner.appendChild(introPillIcon);
-  introPillInner.appendChild(introPillTextWrap);
-  introPill.appendChild(introPillInner);
+  introPill.appendChild(introPillAvatar);
+  introPill.appendChild(introPillIcon);
+  introPill.appendChild(introPillTextWrap);
   introPill.onclick = () => toggleChatWidget();
 
   let introPillTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3849,10 +3834,33 @@
           .split(",")
           .map((p: string) => p.trim())
           .filter(Boolean);
-        if (patterns.length > 0 && !matchesCurrentPage(patterns)) {
-          // Remove widget from DOM entirely on non-matching pages
-          container.remove();
-          return;
+        if (patterns.length > 0) {
+          // Initial check
+          if (!matchesCurrentPage(patterns)) {
+            container.style.display = "none";
+          }
+
+          // SPA route change detection
+          const handleRouteChange = () => {
+            if (!matchesCurrentPage(patterns)) {
+              container.style.display = "none";
+            } else {
+              container.style.display = "";
+            }
+          };
+
+          window.addEventListener("popstate", handleRouteChange);
+
+          const origPush = history.pushState;
+          history.pushState = function (...args: Parameters<typeof origPush>) {
+            origPush.apply(this, args);
+            handleRouteChange();
+          };
+          const origReplace = history.replaceState;
+          history.replaceState = function (...args: Parameters<typeof origReplace>) {
+            origReplace.apply(this, args);
+            handleRouteChange();
+          };
         }
       }
 
@@ -3899,6 +3907,7 @@
           container.style.setProperty("--rm-bot-bg", "rgba(255,255,255,0.08)");
           container.style.setProperty("--rm-bot-text", "#ffffff");
           container.style.setProperty("--rm-bot-border", `rgba(${pRgb}, 0.2)`);
+          container.style.setProperty("--rm-glow-border", "rgba(255,255,255,0.12)");
         } else {
           // Light theme: accent tokens from primary
           container.style.setProperty("--rm-accent-bg", `rgba(${pRgb}, 0.08)`);
@@ -3908,6 +3917,7 @@
           container.style.setProperty("--rm-bot-bg", "#ffffff");
           container.style.setProperty("--rm-bot-text", "#18181b");
           container.style.setProperty("--rm-bot-border", "rgba(0,0,0,0.06)");
+          container.style.setProperty("--rm-glow-border", `rgba(${pRgb}, 0.2)`);
         }
 
         // ─── Message colors (always derived from primary) ─────────────────────
@@ -4333,6 +4343,7 @@
           inlineBar.style.setProperty("--rm-accent-bg", `rgba(${iPRgb}, 0.20)`);
           inlineBar.style.setProperty("--rm-accent-bg-hover", `rgba(${iPRgb}, 0.30)`);
           inlineBar.style.setProperty("--rm-accent-text", "#ffffff");
+          inlineBar.style.setProperty("--rm-glow-border", "rgba(255,255,255,0.12)");
         } else {
           inlineBar.style.setProperty("--rm-bg", "#ffffff");
           inlineBar.style.setProperty("--rm-bg-secondary", "#f4f4f5");
@@ -4345,6 +4356,7 @@
           inlineBar.style.setProperty("--rm-accent-bg", `rgba(${iPRgb}, 0.08)`);
           inlineBar.style.setProperty("--rm-accent-bg-hover", `rgba(${iPRgb}, 0.15)`);
           inlineBar.style.setProperty("--rm-accent-text", inlinePrimary);
+          inlineBar.style.setProperty("--rm-glow-border", `rgba(${iPRgb}, 0.2)`);
         }
 
         // Populate inline bar topics from prompt-type quick actions

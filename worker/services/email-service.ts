@@ -146,6 +146,70 @@ export class EmailService {
     });
   }
 
+  // ─── Handoff / Agent Request Notification (to project owner) ─────────────────
+
+  async sendHandoffNotification(details: {
+    ownerEmail: string;
+    projectName: string;
+    visitorName: string | null;
+    visitorMessage: string;
+    dashboardUrl: string;
+  }): Promise<void> {
+    const { ownerEmail, projectName, visitorName, visitorMessage, dashboardUrl } = details;
+    const displayName = visitorName ?? "A visitor";
+
+    await this.resend.emails.send({
+      from: `${projectName} <noreply@replymaven.com>`,
+      to: ownerEmail,
+      subject: `Agent requested: ${displayName} needs help`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
+          <h1 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">Agent Requested</h1>
+          <p style="color: #6b7280; margin: 0 0 24px;">${displayName} needs help from a human agent on <strong>${projectName}</strong>.</p>
+          <div style="background: #f9fafb; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+            <p style="margin: 0 0 8px; font-size: 14px; color: #6b7280;">Latest message</p>
+            <p style="margin: 0; font-size: 15px;">${escapeHtml(visitorMessage)}</p>
+          </div>
+          <a href="${dashboardUrl}" style="display: inline-block; background: #18181b; color: #fff; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500;">View Conversation</a>
+        </div>
+      `,
+    });
+  }
+
+  // ─── Contact Form Notification (to project owner) ──────────────────────────
+
+  async sendContactFormNotification(details: {
+    ownerEmail: string;
+    projectName: string;
+    formData: Record<string, string>;
+    dashboardUrl: string;
+  }): Promise<void> {
+    const { ownerEmail, projectName, formData, dashboardUrl } = details;
+
+    const fieldsHtml = Object.entries(formData)
+      .map(
+        ([key, value]) =>
+          `<p style="margin: 0 0 8px; font-size: 14px; color: #6b7280;">${escapeHtml(key)}</p>
+           <p style="margin: 0 0 16px; font-size: 15px;">${escapeHtml(String(value))}</p>`,
+      )
+      .join("");
+
+    await this.resend.emails.send({
+      from: `${projectName} <noreply@replymaven.com>`,
+      to: ownerEmail,
+      subject: `New contact form submission - ${projectName}`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
+          <h1 style="font-size: 20px; font-weight: 600; margin: 0 0 16px;">New Contact Form Submission</h1>
+          <div style="background: #f9fafb; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+            ${fieldsHtml}
+          </div>
+          <a href="${dashboardUrl}" style="display: inline-block; background: #18181b; color: #fff; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500;">View in Dashboard</a>
+        </div>
+      `,
+    });
+  }
+
   // ─── Subscription Status Notifications ────────────────────────────────────────
 
   async sendSubscriptionInactiveEmail(
@@ -200,6 +264,16 @@ export class EmailService {
       `,
     });
   }
+}
+
+// ─── HTML Helpers ─────────────────────────────────────────────────────────────
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // ─── ICS Generation ───────────────────────────────────────────────────────────

@@ -1145,6 +1145,29 @@ const app = new Hono<HonoAppContext>()
               }
             }
 
+            // Notify project owner via email if configured
+            if (c.env.RESEND_API_KEY) {
+              const emailService = new EmailService(c.env.RESEND_API_KEY);
+              const ownerEmail = await projectService.getOwnerEmail(project.id);
+              if (ownerEmail) {
+                const projectName = settings?.companyName ?? project.name;
+                const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversationId}`;
+                c.executionCtx.waitUntil(
+                  emailService
+                    .sendHandoffNotification({
+                      ownerEmail,
+                      projectName,
+                      visitorName: conversation.visitorName,
+                      visitorMessage: parsed.data.content,
+                      dashboardUrl,
+                    })
+                    .catch((err) => {
+                      console.error("Handoff email failed:", err);
+                    }),
+                );
+              }
+            }
+
             // Strip the [HANDOFF_REQUESTED] token — the AI now says its own
             // natural message before it (e.g. "Let me connect you with...")
             fullResponse = fullResponse.replace("[HANDOFF_REQUESTED]", "").trim();
@@ -1418,6 +1441,28 @@ const app = new Hono<HonoAppContext>()
             // Silently ignore Telegram errors
           }),
       );
+    }
+
+    // Notify project owner via email
+    if (c.env.RESEND_API_KEY) {
+      const emailService = new EmailService(c.env.RESEND_API_KEY);
+      const ownerEmail = await projectService.getOwnerEmail(project.id);
+      if (ownerEmail) {
+        const projectName = settings?.companyName ?? project.name;
+        const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/contact-form`;
+        c.executionCtx.waitUntil(
+          emailService
+            .sendContactFormNotification({
+              ownerEmail,
+              projectName,
+              formData: parsed.data.data,
+              dashboardUrl,
+            })
+            .catch((err) => {
+              console.error("Contact form email failed:", err);
+            }),
+        );
+      }
     }
 
     return c.json(submission, 201);

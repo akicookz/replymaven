@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -43,10 +43,6 @@ interface WidgetConfigData {
   homeTitle: string;
   homeSubtitle: string | null;
   allowedPages: string | null;
-  botMessageBgColor: string;
-  botMessageTextColor: string;
-  visitorMessageBgColor: string | null;
-  visitorMessageTextColor: string | null;
   backgroundStyle: "solid" | "blurred";
 }
 
@@ -66,8 +62,16 @@ function WidgetConfig() {
   const [bannerUploading, setBannerUploading] = useState(false);
   const [pageInput, setPageInput] = useState("");
 
+  const [previewMode, setPreviewMode] = useState<"home" | "chat">("home");
+  const [debouncedPreviewState, setDebouncedPreviewState] = useState<{
+    form: Partial<WidgetConfigData>;
+    introMessage: string;
+    showIntroBubble: boolean;
+  }>({ form: {}, introMessage: "Hi there! How can I help you today?", showIntroBubble: true });
+
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const { data: project } = useQuery<{ slug: string }>({
     queryKey: ["project", projectId],
@@ -108,6 +112,94 @@ function WidgetConfig() {
       setShowIntroBubble(settingsData.showIntroBubble);
     }
   }, [settingsData]);
+
+  // Debounce preview updates (500ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedPreviewState({ form, introMessage, showIntroBubble });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [form, introMessage, showIntroBubble]);
+
+  // Reset preview mode when position changes
+  useEffect(() => {
+    if (form.position === "center-inline") {
+      setPreviewMode("chat");
+    } else {
+      setPreviewMode("home");
+    }
+  }, [form.position]);
+
+  // Build preview HTML for iframe
+  const previewHtml = useMemo(() => {
+    const slug = project?.slug ?? "preview";
+    const f = debouncedPreviewState.form;
+    const configPayload = {
+      widget: {
+        primaryColor: f.primaryColor ?? "#2563eb",
+        backgroundColor: f.backgroundColor ?? "#ffffff",
+        textColor: f.textColor ?? "#ffffff",
+        headerText: f.headerText ?? "Chat with us",
+        headerSubtitle: f.headerSubtitle ?? "We typically reply instantly",
+        avatarUrl: f.avatarUrl ?? null,
+        position: f.position ?? "bottom-right",
+        borderRadius: f.borderRadius ?? 16,
+        fontFamily: f.fontFamily ?? "",
+        customCss: f.customCss ?? null,
+        bannerUrl: f.bannerUrl ?? null,
+        homeTitle: f.homeTitle ?? "How can we help?",
+        homeSubtitle: f.homeSubtitle ?? null,
+        backgroundStyle: f.backgroundStyle ?? "solid",
+        allowedPages: null,
+      },
+      quickActions: [],
+      introMessage: debouncedPreviewState.introMessage,
+      showIntroBubble: debouncedPreviewState.showIntroBubble,
+      botName: null,
+      contactForm: null,
+      bookingEnabled: false,
+    };
+
+    return `<!DOCTYPE html>
+<html><head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 100%; height: 100vh;
+    background: #1a1a1a;
+    background-image: radial-gradient(circle, #333 1px, transparent 1px);
+    background-size: 20px 20px;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+</style>
+</head><body>
+<script>
+  var cfg = ${JSON.stringify(configPayload)};
+  var origFetch = window.fetch;
+  window.fetch = function(url, opts) {
+    if (typeof url === 'string' && url.includes('/api/widget/') && url.includes('/config')) {
+      return Promise.resolve(new Response(JSON.stringify(cfg), {
+        headers: { 'Content-Type': 'application/json' }
+      }));
+    }
+    return origFetch.call(this, url, opts);
+  };
+</script>
+<script src="/api/widget-embed.js" data-project="${slug}"></script>
+<script>
+  var mode = "${previewMode}";
+  var waitForWidget = setInterval(function() {
+    if (window.ReplyMaven) {
+      clearInterval(waitForWidget);
+      if (mode === "chat") {
+        setTimeout(function() { window.ReplyMaven.open(); }, 300);
+      }
+    }
+  }, 100);
+</script>
+</body></html>`;
+  }, [debouncedPreviewState, previewMode, project?.slug]);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -657,254 +749,70 @@ function WidgetConfig() {
         </div>
 
         {/* ─── Right Column: Live Preview ────────────────────────── */}
-        <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6">
-          <h2 className="text-lg font-semibold text-card-foreground mb-4">
-            Preview
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Add this script tag to your website to embed the chat widget.
-          </p>
-          <div className="relative">
-            <pre className="bg-muted/50 rounded-xl p-4 text-xs font-mono overflow-x-auto">
-              {embedSnippet}
-            </pre>
-            <button
-              onClick={() => navigator.clipboard.writeText(embedSnippet)}
-              className="absolute top-2 right-2 p-1.5 rounded-lg bg-background border border-border hover:bg-muted"
-              title="Copy"
-            >
-              <Copy className="w-3.5 h-3.5" />
-            </button>
+        <div className="lg:sticky lg:top-6 lg:self-start space-y-4">
+          {/* Embed snippet */}
+          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-4">
+            <h2 className="text-sm font-semibold text-card-foreground mb-2">Embed</h2>
+            <p className="text-xs text-muted-foreground mb-2">
+              Add this script tag to your website.
+            </p>
+            <div className="relative">
+              <pre className="bg-muted/50 rounded-xl p-3 text-xs font-mono overflow-x-auto">
+                {embedSnippet}
+              </pre>
+              <button
+                onClick={() => navigator.clipboard.writeText(embedSnippet)}
+                className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-background border border-border hover:bg-muted"
+                title="Copy"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
-          <div className="relative rounded-xl p-4 min-h-full flex items-center justify-center">
-            {form.position === "center-inline" ? (
-              /* ─── Center Inline Preview ──────────────────────── */
-              <div className="w-full flex flex-col items-center gap-3">
-                {/* Chat container preview */}
-                <div
-                  className="w-full max-w-[280px] overflow-hidden shadow-xl"
-                  style={{
-                    ...(form.backgroundStyle === "blurred"
-                      ? {
-                          background: "rgba(0,0,0,0.18)",
-                          backdropFilter: "blur(24px)",
-                          border: "1px solid rgba(255,255,255,0.08)",
-                          boxShadow: "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)",
-                        }
-                      : {
-                          background: "#ffffff",
-                          border: "1px solid #e4e4e7",
-                          boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
-                        }),
-                    borderRadius: `${form.borderRadius ?? 16}px`,
-                  }}
-                >
-                  {/* Header */}
-                  <div
-                    className="px-3.5 py-2.5 flex items-center gap-2"
-                    style={{
-                      background: form.primaryColor ?? "#2563eb",
-                      borderRadius: `${(form.borderRadius ?? 16) - 1}px ${(form.borderRadius ?? 16) - 1}px 0 0`,
-                    }}
-                  >
-                    <div
-                      className="w-5 h-5 rounded-md flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: "rgba(255,255,255,0.2)" }}
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke={form.textColor ?? "#ffffff"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-                        <path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z" />
-                      </svg>
-                    </div>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-[11px] font-medium truncate" style={{ color: form.textColor ?? "#ffffff" }}>
-                        {form.headerText || "ReplyMaven"}
-                      </span>
-                      <span className="text-[9px] truncate" style={{ color: form.textColor ?? "#ffffff", opacity: 0.7 }}>
-                        {form.headerSubtitle || "We typically reply instantly"}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Messages */}
-                  <div className="px-3 py-3 flex flex-col gap-2.5">
-                    {/* Bot message */}
-                    <div className="flex justify-start">
-                      <div
-                        className="max-w-[85%] px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed"
-                        style={{
-                          background: form.botMessageBgColor ?? "#ffffff",
-                          color: form.botMessageTextColor ?? "#18181b",
-                          border: "1px solid rgba(0,0,0,0.06)",
-                        }}
-                      >
-                        {introMessage || "Hi there! How can I help you today?"}
-                      </div>
-                    </div>
-
-                    {/* Visitor message */}
-                    <div className="flex justify-end">
-                      <div
-                        className="max-w-[85%] px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed"
-                        style={{
-                          backgroundColor: form.visitorMessageBgColor ?? form.primaryColor ?? "#2563eb",
-                          color: form.visitorMessageTextColor ?? form.textColor ?? "#ffffff",
-                        }}
-                      >
-                        I have a question
-                      </div>
-                    </div>
-
-                    {/* Bot reply */}
-                    <div className="flex justify-start">
-                      <div
-                        className="max-w-[85%] px-2.5 py-1.5 rounded-xl text-[10px] leading-relaxed"
-                        style={{
-                          background: form.botMessageBgColor ?? "#ffffff",
-                          color: form.botMessageTextColor ?? "#18181b",
-                          border: "1px solid rgba(0,0,0,0.06)",
-                        }}
-                      >
-                        Sure, I&apos;d be happy to help!
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Bar */}
-                <div
-                  className="w-full max-w-[280px] rounded-full p-[2px]"
-                  style={{
-                    background: `conic-gradient(from 0deg, ${form.primaryColor ?? "#f97316"}, ${form.primaryColor ?? "#f97316"}99, ${form.primaryColor ?? "#f97316"}55, ${form.primaryColor ?? "#f97316"})`,
-                  }}
-                >
-                  <div className="flex items-center gap-2 rounded-full bg-neutral-900 px-4 py-2">
-                    <span className="flex-1 text-xs text-white/50">
-                      Ask a question...
-                    </span>
-                    <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: form.primaryColor ?? "#f97316" }}
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke={form.textColor ?? "#ffffff"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
-                        <line x1="12" y1="19" x2="12" y2="5" />
-                        <polyline points="5 12 12 5 19 12" />
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-                <p className="text-[10px] text-muted-foreground/50">
-                  Grows wider on focus. Topics rotate as placeholder.
-                </p>
-              </div>
-            ) : (
-              /* ─── Floating Widget Preview ───────────────────── */
-              <div
-                className="w-full max-w-[340px] shadow-xl overflow-hidden flex flex-col"
-                style={{
-                  ...(form.backgroundStyle === "blurred"
-                    ? {
-                        background: "rgba(0,0,0,0.18)",
-                        backdropFilter: "blur(24px)",
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        boxShadow: "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)",
-                      }
-                    : {
-                        background: "#ffffff",
-                        border: "1px solid #e4e4e7",
-                        boxShadow: "0 8px 40px rgba(0,0,0,0.12)",
-                      }),
-                  borderRadius: `${form.borderRadius ?? 16}px`,
-                  color: form.backgroundStyle === "blurred" ? "#ffffff" : "#18181b",
-                  maxHeight: "480px",
-                }}
-              >
-                {/* Banner */}
-                <div
-                  className="relative h-24 w-full shrink-0"
-                  style={
-                    form.bannerUrl
-                      ? {
-                        backgroundImage: `url(${form.bannerUrl})`,
-                        backgroundSize: "cover",
-                        backgroundPosition: "center center",
-                        backgroundRepeat: "no-repeat",
-                      }
-                      : { backgroundColor: form.primaryColor ?? "#2563eb" }
-                  }
-                >
-                  {/* Avatar */}
-                  <div
+          {/* Preview */}
+          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-card-foreground">Preview</h2>
+              {form.position !== "center-inline" && (
+                <div className="flex gap-0.5 bg-muted/50 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setPreviewMode("home")}
                     className={cn(
-                      "absolute -bottom-5 left-5 w-12 h-12 border-2 overflow-hidden flex items-center justify-center",
-                      form.avatarUrl ? "rounded-full" : "rounded-xl",
+                      "px-3 py-1 rounded-md text-xs font-medium transition-colors",
+                      previewMode === "home"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
                     )}
-                    style={{
-                      backgroundColor: form.avatarUrl
-                        ? "transparent"
-                        : (form.primaryColor ?? "#2563eb"),
-                      borderColor: form.backgroundStyle === "blurred" ? "rgba(255,255,255,0.15)" : "#e4e4e7",
-                    }}
                   >
-                    {form.avatarUrl ? (
-                      <img
-                        src={form.avatarUrl}
-                        alt="Avatar"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke={form.textColor ?? "#ffffff"}
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="w-6 h-6"
-                      >
-                        <path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z" />
-                        <path d="M19 2l.5 1.5L21 4l-1.5.5L19 6l-.5-1.5L17 4l1.5-.5L19 2z" />
-                      </svg>
+                    Home
+                  </button>
+                  <button
+                    onClick={() => setPreviewMode("chat")}
+                    className={cn(
+                      "px-3 py-1 rounded-md text-xs font-medium transition-colors",
+                      previewMode === "chat"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
                     )}
-                  </div>
+                  >
+                    Chat
+                  </button>
                 </div>
-
-                {/* Home content */}
-                <div className="px-5 pt-8 pb-4 flex-1 overflow-y-auto">
-                  <h3 className="text-lg font-bold">
-                    {form.homeTitle || "How can we help?"}
-                  </h3>
-                  {form.homeSubtitle && (
-                    <p className="text-xs mt-1 opacity-60">{form.homeSubtitle}</p>
-                  )}
-
-                  {/* Ask box */}
-                  <div className="mt-4 rounded-xl p-3" style={{ border: form.backgroundStyle === "blurred" ? "1px solid rgba(255,255,255,0.1)" : "1px solid #e4e4e7" }}>
-                    <div className="flex items-center gap-1.5 text-xs opacity-50 mb-2">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
-                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                      </svg>
-                      Ask our assistant anything
-                    </div>
-                    <div className="text-xs opacity-30">Ask a question...</div>
-                  </div>
-
-                  {/* Quick actions preview placeholder */}
-                  <div className="mt-4 space-y-0">
-                    <p className="text-[11px] opacity-30 text-center py-2">
-                      Quick actions configured on the Quick Actions page
-                    </p>
-                  </div>
-                </div>
-
-                {/* Footer */}
-                <div className="px-4 py-2 text-center" style={{ borderTop: form.backgroundStyle === "blurred" ? "1px solid rgba(255,255,255,0.1)" : "1px solid #e4e4e7" }}>
-                  <span className="text-[10px] opacity-30">
-                    Powered by ReplyMaven
-                  </span>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
+            <div
+              className="rounded-xl overflow-hidden border border-border"
+              style={{ height: "min(700px, calc(100vh - 12rem))" }}
+            >
+              <iframe
+                ref={iframeRef}
+                srcDoc={previewHtml}
+                className="w-full h-full border-0"
+                sandbox="allow-scripts allow-same-origin"
+                title="Widget Preview"
+              />
+            </div>
           </div>
         </div>
       </div>
