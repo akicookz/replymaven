@@ -13,6 +13,7 @@ import {
   type ContactFormConfigRow,
   type ContactFormSubmissionRow,
 } from "../db";
+import { users } from "../db/auth.schema";
 
 export class WidgetService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
@@ -244,11 +245,42 @@ export class WidgetService {
           .limit(1),
       ]);
 
+    // Resolve intro message author
+    let introMessageAuthor: {
+      name: string;
+      avatar: string | null;
+      workTitle: string | null;
+    } | null = null;
+
+    const authorId = settings[0]?.introMessageAuthorId;
+    if (authorId) {
+      const authorRows = await this.db
+        .select({
+          name: users.name,
+          image: users.image,
+          profilePicture: users.profilePicture,
+          workTitle: users.workTitle,
+        })
+        .from(users)
+        .where(eq(users.id, authorId))
+        .limit(1);
+
+      if (authorRows[0]) {
+        const a = authorRows[0];
+        introMessageAuthor = {
+          name: a.name,
+          avatar: a.profilePicture ?? a.image,
+          workTitle: a.workTitle,
+        };
+      }
+    }
+
     return {
       widget: config,
       quickActions: actions,
       introMessage:
         settings[0]?.introMessage ?? "Hi there! How can I help you today?",
+      introMessageAuthor,
       showIntroBubble: settings[0]?.showIntroBubble ?? true,
       botName: settings[0]?.botName ?? null,
       contactForm:

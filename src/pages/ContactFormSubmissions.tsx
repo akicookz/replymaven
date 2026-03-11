@@ -1,6 +1,7 @@
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Mail, AlertCircle } from "lucide-react";
+import { MobileMenuButton } from "@/components/PageHeader";
 
 interface ContactFormSubmission {
   id: string;
@@ -68,11 +69,14 @@ function ContactFormSubmissions() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-lg font-semibold text-foreground">Contact Form Submissions</h1>
-        <p className="text-[13px] text-muted-foreground">
-          View responses submitted through the contact form widget.
-        </p>
+      <div className="flex items-start gap-3">
+        <MobileMenuButton />
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">Contact Form Submissions</h1>
+          <p className="text-xs md:text-sm text-muted-foreground mt-1">
+            View responses submitted through the contact form widget.
+          </p>
+        </div>
       </div>
 
       {/* Loading */}

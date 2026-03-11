@@ -16,12 +16,13 @@ import {
   Plus,
   Check,
   PanelLeftClose,
-  CreditCard,
+  User,
   Users,
-  Menu,
+  CreditCard,
   X,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
+import ProfileSetupDialog from "@/components/ProfileSetupDialog";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { useSubscription } from "@/hooks/use-subscription";
@@ -39,6 +40,9 @@ interface Project {
   slug: string;
 }
 
+import { MobileSidebarContext } from "@/lib/mobile-sidebar";
+export { useMobileSidebar } from "@/lib/mobile-sidebar";
+
 function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -48,6 +52,9 @@ function Layout() {
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showProfileSetup, setShowProfileSetup] = useState(() => {
+    return !localStorage.getItem("rm_profile_setup_done");
+  });
 
   const { data: projects } = useQuery<Project[]>({
     queryKey: ["projects"],
@@ -77,6 +84,8 @@ function Layout() {
   }, [location.pathname]);
 
   const closeMobile = useCallback(() => setMobileOpen(false), []);
+  const openMobile = useCallback(() => setMobileOpen(true), []);
+  const sidebarCtx = { openSidebar: openMobile };
 
   const mainNav = currentProject
     ? [
@@ -180,20 +189,6 @@ function Layout() {
 
   return (
     <div className="flex h-screen bg-background">
-      {/* Mobile top bar */}
-      <div className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 h-14 border-b border-sidebar-border bg-sidebar md:hidden">
-        <Link to="/app">
-          <Logo size="sm" />
-        </Link>
-        <button
-          onClick={() => setMobileOpen(true)}
-          className="p-2 rounded-lg hover:bg-accent text-muted-foreground transition-colors"
-          aria-label="Open menu"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
-      </div>
-
       {/* Mobile overlay */}
       {mobileOpen && (
         <div
@@ -338,7 +333,7 @@ function Layout() {
         {subData?.subscription && !collapsed && (
           <div className="px-3 pb-1">
             <Link
-              to="/app/account/billing"
+              to="/app/account"
               className="block px-3 py-2 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
             >
               <div className="flex items-center justify-between mb-1">
@@ -404,18 +399,25 @@ function Layout() {
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-52 p-1">
               <Link
+                to="/app/account"
+                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <User className="w-4 h-4 shrink-0" />
+                My Profile
+              </Link>
+              <Link
+                to="/app/account/team"
+                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <Users className="w-4 h-4 shrink-0" />
+                Team
+              </Link>
+              <Link
                 to="/app/account/billing"
                 className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
               >
                 <CreditCard className="w-4 h-4 shrink-0" />
                 Billing
-              </Link>
-              <Link
-                to="/app/account/members"
-                className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <Users className="w-4 h-4 shrink-0" />
-                Members
               </Link>
               <Separator className="my-1" />
               <button
@@ -431,11 +433,19 @@ function Layout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto overflow-x-hidden pt-14 md:pt-0">
-        <div className="p-4 md:p-8">
-          <Outlet />
-        </div>
-      </main>
+      <MobileSidebarContext.Provider value={sidebarCtx}>
+        <main className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div className="p-4 md:p-8">
+            <Outlet />
+          </div>
+        </main>
+      </MobileSidebarContext.Provider>
+
+      {/* Profile setup prompt (shows once after onboarding) */}
+      <ProfileSetupDialog
+        open={showProfileSetup}
+        onOpenChange={setShowProfileSetup}
+      />
     </div>
   );
 }

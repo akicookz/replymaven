@@ -1,20 +1,22 @@
 import { useState, useEffect, useCallback } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  CreditCard,
+  User,
   Users,
+  CreditCard,
   ArrowLeft,
   LogOut,
-  Menu,
   X,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
+import { MobileSidebarContext } from "@/lib/mobile-sidebar";
 
 const accountNav = [
+  { label: "My Profile", href: "/app/account", icon: User },
+  { label: "Team", href: "/app/account/team", icon: Users },
   { label: "Billing", href: "/app/account/billing", icon: CreditCard },
-  { label: "Members", href: "/app/account/members", icon: Users },
 ];
 
 function AccountLayout() {
@@ -40,20 +42,6 @@ function AccountLayout() {
 
   return (
     <div className="flex h-screen bg-background">
-      {/* Mobile top bar */}
-      <div className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 h-14 border-b border-sidebar-border bg-sidebar md:hidden">
-        <Link to="/app">
-          <Logo size="sm" />
-        </Link>
-        <button
-          onClick={() => setMobileOpen(true)}
-          className="p-2 rounded-lg hover:bg-accent text-muted-foreground transition-colors"
-          aria-label="Open menu"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
-      </div>
-
       {/* Mobile overlay */}
       {mobileOpen && (
         <div
@@ -153,11 +141,13 @@ function AccountLayout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto pt-14 md:pt-0">
-        <div className="p-4 md:p-8">
-          <Outlet />
-        </div>
-      </main>
+      <MobileSidebarContext.Provider value={{ openSidebar: () => setMobileOpen(true) }}>
+        <main className="flex-1 overflow-y-auto">
+          <div className="p-4 md:p-8 mx-auto w-full max-w-3xl">
+            <Outlet />
+          </div>
+        </main>
+      </MobileSidebarContext.Provider>
     </div>
   );
 }

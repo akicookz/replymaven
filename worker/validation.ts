@@ -42,6 +42,7 @@ export const updateProjectSettingsSchema = z.object({
     .max(50, "Agent name must be 50 characters or less")
     .nullable()
     .optional(),
+  introMessageAuthorId: z.string().max(100).nullable().optional(),
 });
 
 // ─── Widget Config ────────────────────────────────────────────────────────────
@@ -341,6 +342,14 @@ export const createCheckoutSchema = z.object({
   interval: z.enum(["monthly", "annual"]),
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),
+});
+
+// ─── Profile ──────────────────────────────────────────────────────────────
+
+export const updateProfileSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100).optional(),
+  workTitle: z.string().max(100).nullable().optional(),
+  profilePicture: z.string().max(500).nullable().optional(),
 });
 
 // ─── Team Members ─────────────────────────────────────────────────────────────

@@ -148,6 +148,13 @@
       "when": 1773019054477,
       "tag": "0020_worried_paper_doll",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1773213207468,
+      "tag": "0021_lucky_abomination",
+      "breakpoints": true
     }
   ]
 }

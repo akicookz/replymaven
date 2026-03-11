@@ -20,8 +20,9 @@ import Bookings from "./pages/Bookings";
 import ContactFormSubmissions from "./pages/ContactFormSubmissions";
 import CompanyInfo from "./pages/CompanyInfo";
 import Sops from "./pages/Sops";
+import Profile from "./pages/Profile";
+import Team from "./pages/Team";
 import Billing from "./pages/Billing";
-import Members from "./pages/Members";
 import AuthCallback from "./pages/AuthCallback";
 import Docs from "./pages/Docs";
 
@@ -79,9 +80,10 @@ function App() {
           </ErrorBoundary>
         }
       >
-        <Route index element={<Navigate to="billing" replace />} />
+        <Route index element={<Profile />} />
+        <Route path="team" element={<Team />} />
         <Route path="billing" element={<Billing />} />
-        <Route path="members" element={<Members />} />
+        <Route path="members" element={<Navigate to="/app/account/team" replace />} />
       </Route>
 
       {/* /app index -- redirect to first project dashboard */}

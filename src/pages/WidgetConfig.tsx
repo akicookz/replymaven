@@ -26,6 +26,7 @@ import {
 import { ColorPicker } from "@/components/ui/color-picker";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { MobileMenuButton } from "@/components/PageHeader";
 
 interface WidgetConfigData {
   id: string;
@@ -58,6 +59,7 @@ function WidgetConfig() {
   const [form, setForm] = useState<Partial<WidgetConfigData>>({});
   const [introMessage, setIntroMessage] = useState("Hi there! How can I help you today?");
   const [showIntroBubble, setShowIntroBubble] = useState(true);
+  const [introMessageAuthorId, setIntroMessageAuthorId] = useState<string | null>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
   const [pageInput, setPageInput] = useState("");
@@ -91,11 +93,28 @@ function WidgetConfig() {
     },
   });
 
-  const { data: settingsData } = useQuery<{ introMessage?: string; showIntroBubble?: boolean }>({
+  const { data: settingsData } = useQuery<{ introMessage?: string; showIntroBubble?: boolean; introMessageAuthorId?: string | null }>({
     queryKey: ["project-settings", projectId],
     queryFn: async () => {
       const res = await fetch(`/api/projects/${projectId}/settings`);
       if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json();
+    },
+  });
+
+  interface AuthorOption {
+    id: string;
+    name: string;
+    email: string;
+    avatar: string | null;
+    workTitle: string | null;
+  }
+
+  const { data: authors } = useQuery<AuthorOption[]>({
+    queryKey: ["team-authors"],
+    queryFn: async () => {
+      const res = await fetch("/api/team/authors");
+      if (!res.ok) throw new Error("Failed to fetch authors");
       return res.json();
     },
   });
@@ -110,6 +129,9 @@ function WidgetConfig() {
     }
     if (settingsData?.showIntroBubble != null) {
       setShowIntroBubble(settingsData.showIntroBubble);
+    }
+    if (settingsData?.introMessageAuthorId !== undefined) {
+      setIntroMessageAuthorId(settingsData.introMessageAuthorId ?? null);
     }
   }, [settingsData]);
 
@@ -212,7 +234,7 @@ function WidgetConfig() {
         fetch(`/api/projects/${projectId}/settings`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ introMessage, showIntroBubble }),
+          body: JSON.stringify({ introMessage, showIntroBubble, introMessageAuthorId }),
         }),
       ]);
       if (!widgetRes.ok) throw new Error("Failed to save widget config");
@@ -248,7 +270,10 @@ function WidgetConfig() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-foreground">Widget Config</h1>
+        <div className="flex items-start gap-3">
+          <MobileMenuButton />
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">Widget Config</h1>
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="h-80 rounded-2xl bg-muted animate-pulse" />
           <div className="h-80 rounded-2xl bg-muted animate-pulse" />
@@ -262,7 +287,10 @@ function WidgetConfig() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Widget Config</h1>
+        <div className="flex items-start gap-3">
+          <MobileMenuButton />
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">Widget Config</h1>
+        </div>
         <Button onClick={() => save.mutate()} disabled={save.isPending} className="w-full sm:w-auto">
           <Save className="w-4 h-4 mr-2" />
           {save.isPending ? "Saving..." : "Save Changes"}
@@ -620,6 +648,53 @@ function WidgetConfig() {
             <p className="text-xs text-muted-foreground text-right">
               {introMessage.length}/200
             </p>
+
+            {/* Author Selector */}
+            <div className="space-y-2 pt-2">
+              <label className="text-sm font-medium text-card-foreground">
+                Message Author
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Choose who the intro message appears to be from. Their name and avatar will show in the widget.
+              </p>
+              <Select
+                value={introMessageAuthorId ?? "none"}
+                onValueChange={(v) => setIntroMessageAuthorId(v === "none" ? null : v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="No author (bot message)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    No author (bot message)
+                  </SelectItem>
+                  {authors?.map((author) => (
+                    <SelectItem key={author.id} value={author.id}>
+                      <div className="flex items-center gap-2">
+                        {author.avatar ? (
+                          <img
+                            src={author.avatar}
+                            alt={author.name}
+                            className="w-5 h-5 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary">
+                            {author.name.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <span>{author.name}</span>
+                        {author.workTitle && (
+                          <span className="text-muted-foreground">
+                            — {author.workTitle}
+                          </span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {form.position === "center-inline" && (
               <div className="flex items-center justify-between rounded-xl border border-input bg-background px-4 py-3">
                 <div className="space-y-0.5">

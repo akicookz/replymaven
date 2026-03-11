@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import FaqEditor from "@/components/faq-editor";
 import PdfResourceDetail from "@/components/pdf-detail";
 import WebpageResourceDetail from "@/components/webpage-detail";
+import { MobileMenuButton } from "@/components/PageHeader";
 
 interface Resource {
   id: string;
@@ -219,11 +220,14 @@ function Resources() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Knowledgebase</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Manage your company context and source knowledge for AI replies.
-        </p>
+      <div className="flex items-start gap-3">
+        <MobileMenuButton />
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">Knowledgebase</h1>
+          <p className="text-xs md:text-sm text-muted-foreground mt-1">
+            Manage your company context and source knowledge for AI replies.
+          </p>
+        </div>
       </div>
 
       {/* ─── Entry Cards ──────────────────────────────────────────────────── */}

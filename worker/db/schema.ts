@@ -69,6 +69,10 @@ export const projectSettings = sqliteTable(
     introMessage: text("intro_message").default(
       "Hi there! How can I help you today?",
     ),
+    introMessageAuthorId: text("intro_message_author_id").references(
+      () => authSchema.users.id,
+      { onDelete: "set null" },
+    ),
     showIntroBubble: integer("show_intro_bubble", { mode: "boolean" })
       .notNull()
       .default(true),

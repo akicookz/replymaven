@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useSubscription } from "@/hooks/use-subscription";
 import { formatPlanName, usagePercent, getTrialDaysRemaining } from "@/lib/plan";
+import { MobileMenuButton } from "@/components/PageHeader";
 
 // ─── Usage Bar ────────────────────────────────────────────────────────────────
 
@@ -85,7 +86,7 @@ function Billing() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          returnUrl: `${window.location.origin}/app/account/billing`,
+          returnUrl: `${window.location.origin}/app/account`,
         }),
       });
       if (!res.ok) throw new Error("Failed to create portal session");
@@ -112,12 +113,15 @@ function Billing() {
   // No subscription
   if (!sub) {
     return (
-      <div className="max-w-2xl space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Billing</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage your subscription and billing details.
-          </p>
+      <div className="space-y-6">
+        <div className="flex items-start gap-3">
+          <MobileMenuButton />
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-foreground">Billing</h1>
+            <p className="text-xs md:text-sm text-muted-foreground mt-1">
+              Manage your subscription and billing details.
+            </p>
+          </div>
         </div>
 
         <div className="rounded-xl border border-border p-8 text-center space-y-4">
@@ -128,7 +132,7 @@ function Billing() {
               Choose a plan to get started with ReplyMaven.
             </p>
           </div>
-          <Button onClick={() => window.location.href = "/app/onboarding?step=4"}>
+          <Button onClick={() => (window.location.href = "/app/onboarding?step=4")}>
             Choose a Plan
           </Button>
         </div>
@@ -139,12 +143,15 @@ function Billing() {
   const trialDays = getTrialDaysRemaining(sub.trialEndsAt);
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Billing</h1>
-        <p className="text-muted-foreground mt-1">
-          Manage your subscription and billing details.
-        </p>
+    <div className="space-y-6">
+      <div className="flex items-start gap-3">
+        <MobileMenuButton />
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">Billing</h1>
+          <p className="text-xs md:text-sm text-muted-foreground mt-1">
+            Manage your subscription and billing details.
+          </p>
+        </div>
       </div>
 
       {/* Trial Banner */}

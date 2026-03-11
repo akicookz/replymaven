@@ -145,18 +145,18 @@ function CompanyInfo() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex items-start gap-3">
         <Link
           to={`/app/projects/${projectId}/knowledgebase`}
-          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
+          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground shrink-0"
         >
           <ArrowLeft className="w-4 h-4" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold text-foreground">
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">
             Company Information
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
+          <p className="text-xs md:text-sm text-muted-foreground mt-1">
             Set up your company context and tone of voice for AI responses.
           </p>
         </div>

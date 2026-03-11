@@ -47,6 +47,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { MobileMenuButton } from "@/components/PageHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -209,15 +210,18 @@ function QuickActions() {
   return (
     <div className="max-w-4xl mx-auto">
       {/* Header */}
-      <div className="space-y-1 mb-6">
-        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-          <Zap className="w-6 h-6" />
-          Quick Actions
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Buttons displayed on the widget home screen and chat view. Configure
-          contact form and booking settings here too.
-        </p>
+      <div className="flex items-start gap-3 mb-6">
+        <MobileMenuButton />
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-foreground flex items-center gap-2">
+            <Zap className="w-5 h-5 md:w-6 md:h-6" />
+            Quick Actions
+          </h1>
+          <p className="text-xs md:text-sm text-muted-foreground mt-1">
+            Buttons displayed on the widget home screen and chat view. Configure
+            contact form and booking settings here too.
+          </p>
+        </div>
       </div>
 
       {/* Tabs */}

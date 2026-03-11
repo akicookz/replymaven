@@ -9,6 +9,8 @@ export const users = sqliteTable("users", {
     .default(false)
     .notNull(),
   image: text("image"),
+  profilePicture: text("profile_picture"),
+  workTitle: text("work_title"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .default(sql`(current_timestamp)`)
     .notNull(),

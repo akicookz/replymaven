@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bot, Plus, Check, X, Trash2, AlertCircle, Sparkles } from "lucide-react";
+import { MobileMenuButton } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 
 interface CannedResponse {
@@ -118,9 +119,12 @@ function CannedResponses() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold text-foreground">
-          Canned Responses
-        </h1>
+        <div className="flex items-start gap-3">
+          <MobileMenuButton />
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">
+            Canned Responses
+          </h1>
+        </div>
         <Button onClick={() => setShowForm(!showForm)} className="w-full sm:w-auto">
           <Plus className="w-4 h-4 mr-2" />
           Add Response

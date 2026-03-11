@@ -28,8 +28,9 @@ import {
 import { useTeam, type TeamMember } from "@/hooks/use-team";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useSession } from "@/lib/auth-client";
+import { MobileMenuButton } from "@/components/PageHeader";
 
-// ─── Invite Dialog ────────────────────────────────────────────────────────────
+// ─── Invite Form ──────────────────────────────────────────────────────────────
 
 function InviteForm({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState("");
@@ -228,15 +229,15 @@ function MemberRow({
   );
 }
 
-// ─── Members Page ─────────────────────────────────────────────────────────────
+// ─── Team Page ────────────────────────────────────────────────────────────────
 
-function Members() {
+function Team() {
   const [showInvite, setShowInvite] = useState(false);
-  const { data: teamData, isLoading: teamLoading } = useTeam();
+  const { data: teamData, isLoading } = useTeam();
   const { data: subData } = useSubscription();
   const { data: session } = useSession();
 
-  if (teamLoading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -251,13 +252,16 @@ function Members() {
   const seatCurrent = subData?.seats?.current ?? 1;
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Team Members</h1>
-          <p className="text-muted-foreground mt-1">
-            {seatCurrent} of {seatMax} seat{seatMax !== 1 ? "s" : ""} used
-          </p>
+        <div className="flex items-start gap-3">
+          <MobileMenuButton />
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-foreground">Team</h1>
+            <p className="text-xs md:text-sm text-muted-foreground mt-1">
+              {seatCurrent} of {seatMax} seat{seatMax !== 1 ? "s" : ""} used
+            </p>
+          </div>
         </div>
         {(isOwner || subData?.role === "admin") && (
           <Button
@@ -339,4 +343,4 @@ function Members() {
   );
 }
 
-export default Members;
+export default Team;

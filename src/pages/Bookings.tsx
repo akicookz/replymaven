@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Calendar, X, AlertCircle } from "lucide-react";
+import { MobileMenuButton } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -70,10 +71,11 @@ function Bookings() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start gap-3">
+        <MobileMenuButton />
         <div>
-          <h1 className="text-lg font-semibold text-foreground">Bookings</h1>
-          <p className="text-[13px] text-muted-foreground">
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">Bookings</h1>
+          <p className="text-xs md:text-sm text-muted-foreground mt-1">
             View and manage booking requests from your visitors.
           </p>
         </div>

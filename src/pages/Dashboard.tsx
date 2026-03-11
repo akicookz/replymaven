@@ -24,6 +24,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { cn } from "@/lib/utils";
+import { MobileMenuButton } from "@/components/PageHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -218,13 +219,16 @@ function Dashboard() {
     return (
       <div className="space-y-6">
         {/* Greeting */}
-        <div>
-          <h1 className="text-lg font-semibold text-foreground">
-            Hello, {userName.split(" ")[0]}
-          </h1>
-          <p className="text-[13px] text-muted-foreground">
-            What are you working on?
-          </p>
+        <div className="flex items-start gap-3">
+          <MobileMenuButton />
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-foreground">
+              Hello, {userName.split(" ")[0]}
+            </h1>
+            <p className="text-xs md:text-sm text-muted-foreground mt-1">
+              What are you working on?
+            </p>
+          </div>
         </div>
         {/* Stat cards skeleton */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -336,13 +340,16 @@ function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Greeting */}
-      <div>
-        <h1 className="text-lg font-semibold text-foreground">
-          Hello, {userName.split(" ")[0]}
-        </h1>
-        <p className="text-[13px] text-muted-foreground">
-          What are you working on?
-        </p>
+      <div className="flex items-start gap-3">
+        <MobileMenuButton />
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">
+            Hello, {userName.split(" ")[0]}
+          </h1>
+          <p className="text-xs md:text-sm text-muted-foreground mt-1">
+            What are you working on?
+          </p>
+        </div>
       </div>
 
       {/* Stat Cards */}

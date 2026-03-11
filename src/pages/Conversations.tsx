@@ -38,6 +38,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { MobileMenuButton } from "@/components/PageHeader";
 
 interface ConversationMeta {
   url?: string;
@@ -302,6 +303,8 @@ function Conversations() {
   const { data: convoDetail } = useQuery<{
     conversation: Conversation;
     messages: Message[];
+    botName: string | null;
+    agentName: string | null;
   }>({
     queryKey: ["conversation-detail", selectedConvo],
     queryFn: async () => {
@@ -408,7 +411,7 @@ function Conversations() {
 
   if (isLoading) {
     return (
-      <div className="-m-4 md:-m-8 h-[calc(100vh-3.5rem)] md:h-screen flex">
+      <div className="-m-4 md:-m-8 h-screen flex">
         <div className="w-full md:w-[360px] border-r border-border bg-card/30">
           <div className="p-4 border-b border-border">
             <div className="h-8 w-40 rounded-lg bg-muted animate-pulse" />
@@ -439,7 +442,7 @@ function Conversations() {
     : null;
 
   return (
-    <div className="-m-4 md:-m-8 h-[calc(100vh-3.5rem)] md:h-screen flex overflow-hidden">
+    <div className="-m-4 md:-m-8 h-screen flex overflow-hidden">
       {/* ─── Left Panel: Conversation List ─────────────────────────────── */}
       <div
         className={cn(
@@ -449,8 +452,9 @@ function Conversations() {
         )}
       >
         {/* Header */}
-        <div className="px-4 pt-4 pb-2">
-          <h1 className="text-lg font-bold text-foreground">Conversations</h1>
+        <div className="px-4 pt-4 pb-2 flex items-center gap-3">
+          <MobileMenuButton />
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">Conversations</h1>
           <p className="text-xs text-muted-foreground">
             {conversations?.length ?? 0} total
           </p>
@@ -596,7 +600,7 @@ function Conversations() {
                     <span>{convoDetail.conversation.visitorEmail}</span>
                   )}
                   {selectedMeta?.city && selectedMeta?.country && (
-                    <span className="flex items-center gap-1">
+                    <span className="hidden md:inline-flex items-center gap-1">
                       <Globe className="w-3 h-3" />
                       {selectedMeta.city}
                       {selectedMeta.region ? `, ${selectedMeta.region}` : ""}
@@ -709,7 +713,7 @@ function Conversations() {
               return (
                 <Sheet>
                   <SheetTrigger asChild>
-                    <div className="px-4 py-1.5 bg-card/80 border-b border-border flex items-center gap-3 text-[11px] text-muted-foreground w-full overflow-hidden cursor-pointer hover:bg-accent/50 transition-colors">
+                    <div className="px-4 py-1.5 bg-card/80 border-b border-border flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground w-full overflow-hidden cursor-pointer hover:bg-accent/50 transition-colors">
                       {isIdentified ? (
                         <>
                           {customEntries.slice(0, 3).map(([key, value]) => (
@@ -1023,11 +1027,11 @@ function Conversations() {
                         className={cn(
                           "relative max-w-[85%] sm:max-w-[65%] rounded-lg px-3 py-2 shadow-sm overflow-hidden",
                           isVisitor &&
-                            "bg-card text-foreground rounded-tl-none",
+                            "bg-muted/50 text-foreground rounded-tl-none",
                           isBot &&
-                            "bg-primary/10 text-foreground rounded-tr-none border border-primary/20",
+                            "bg-primary/[0.07] text-foreground rounded-tr-none",
                           isAgent &&
-                            "bg-primary/15 text-foreground rounded-tr-none border border-primary/20 border-l-2 border-status-replied/50",
+                            "bg-primary/[0.10] text-foreground rounded-tr-none border-l-2 border-status-replied/50",
                         )}
                       >
                         {/* Role label for bot/agent */}
@@ -1036,13 +1040,13 @@ function Conversations() {
                             {isBot && (
                               <span className="text-[11px] font-semibold text-status-active flex items-center gap-0.5">
                                 <Bot className="w-3 h-3" />
-                                Bot
+                                {convoDetail.botName ?? "Bot"}
                               </span>
                             )}
                             {isAgent && (
                               <span className="text-[11px] font-semibold text-status-replied flex items-center gap-0.5">
                                 <Headphones className="w-3 h-3" />
-                                Agent
+                                {convoDetail.agentName ?? "Agent"}
                               </span>
                             )}
                           </div>

@@ -137,6 +137,7 @@ export class ProjectService {
         | "companyContext"
         | "botName"
         | "agentName"
+        | "introMessageAuthorId"
       >
     >,
   ): Promise<ProjectSettingsRow | null> {

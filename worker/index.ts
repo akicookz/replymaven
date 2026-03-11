@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
+import { eq } from "drizzle-orm";
+import { users } from "./db/auth.schema";
 import { createAuth } from "./auth";
 import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
@@ -59,6 +61,7 @@ import {
   createCheckoutSchema,
   inviteTeamMemberSchema,
   updateTeamMemberRoleSchema,
+  updateProfileSchema,
   createGuidelineSchema,
   updateGuidelineSchema,
 } from "./validation";
@@ -2319,6 +2322,143 @@ const app = new Hono<HonoAppContext>()
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // PROFILE ENDPOINTS (session-authenticated)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ─── Get Current User Profile ───────────────────────────────────────────────
+  .get("/api/profile", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const rows = await db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        image: users.image,
+        profilePicture: users.profilePicture,
+        workTitle: users.workTitle,
+      })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1);
+
+    if (!rows[0]) return c.json({ error: "User not found" }, 404);
+    return c.json(rows[0]);
+  })
+
+  // ─── Update Current User Profile ────────────────────────────────────────────
+  .put("/api/profile", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateProfileSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const updates: Record<string, unknown> = {};
+    if (parsed.data.name !== undefined) updates.name = parsed.data.name;
+    if (parsed.data.workTitle !== undefined) updates.workTitle = parsed.data.workTitle;
+    if (parsed.data.profilePicture !== undefined) updates.profilePicture = parsed.data.profilePicture;
+
+    if (Object.keys(updates).length > 0) {
+      await db.update(users).set(updates).where(eq(users.id, user.id));
+    }
+
+    const rows = await db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        image: users.image,
+        profilePicture: users.profilePicture,
+        workTitle: users.workTitle,
+      })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1);
+
+    return c.json(rows[0]);
+  })
+
+  // ─── Get Team Members for Author Selection ──────────────────────────────────
+  .get("/api/team/authors", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const teamService = new TeamService(db);
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+
+    // Get owner info
+    const ownerRows = await db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        image: users.image,
+        profilePicture: users.profilePicture,
+        workTitle: users.workTitle,
+      })
+      .from(users)
+      .where(eq(users.id, effectiveUserId))
+      .limit(1);
+
+    const authors: Array<{
+      id: string;
+      name: string;
+      email: string;
+      avatar: string | null;
+      workTitle: string | null;
+    }> = [];
+
+    if (ownerRows[0]) {
+      const o = ownerRows[0];
+      authors.push({
+        id: o.id,
+        name: o.name,
+        email: o.email,
+        avatar: o.profilePicture ?? o.image,
+        workTitle: o.workTitle,
+      });
+    }
+
+    // Get accepted team members with user info
+    const members = await teamService.getAllMembers(effectiveUserId);
+    for (const m of members) {
+      if (m.status === "accepted" && m.userId) {
+        const memberRows = await db
+          .select({
+            id: users.id,
+            name: users.name,
+            email: users.email,
+            image: users.image,
+            profilePicture: users.profilePicture,
+            workTitle: users.workTitle,
+          })
+          .from(users)
+          .where(eq(users.id, m.userId))
+          .limit(1);
+
+        if (memberRows[0]) {
+          const mr = memberRows[0];
+          authors.push({
+            id: mr.id,
+            name: mr.name,
+            email: mr.email,
+            avatar: mr.profilePicture ?? mr.image,
+            workTitle: mr.workTitle,
+          });
+        }
+      }
+    }
+
+    return c.json(authors);
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // TEAM ENDPOINTS (session-authenticated)
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -3846,7 +3986,14 @@ const app = new Hono<HonoAppContext>()
       })) ?? [],
     }));
 
-    return c.json({ conversation, messages: messagesWithTools });
+    const settings = await projectService.getSettings(project.id);
+
+    return c.json({
+      conversation,
+      messages: messagesWithTools,
+      botName: settings?.botName ?? null,
+      agentName: settings?.agentName ?? null,
+    });
   })
   .post("/api/projects/:id/conversations/:convId/reply", async (c) => {
     const user = c.get("user");

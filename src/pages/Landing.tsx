@@ -1705,7 +1705,7 @@ function Landing() {
   }
 
   function handleManagePlan() {
-    navigate("/app/account/billing");
+    navigate("/app/account");
   }
 
   const authCallbackUrl = selectedPlan

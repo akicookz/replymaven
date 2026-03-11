@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { MobileMenuButton } from "@/components/PageHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -430,11 +431,14 @@ function Tools() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Tools</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Configure external API tools your bot can call during conversations.
-          </p>
+        <div className="flex items-start gap-3">
+          <MobileMenuButton />
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-foreground">Tools</h1>
+            <p className="text-xs md:text-sm text-muted-foreground mt-1">
+              Configure external API tools your bot can call during conversations.
+            </p>
+          </div>
         </div>
         {activeTab === "tools" && (
           <Button

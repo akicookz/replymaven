@@ -998,7 +998,7 @@ function Step5({
   }
 
   function handleManagePlan() {
-    navigate("/app/account/billing");
+    navigate("/app/account");
   }
 
   if (checkoutSuccess) {

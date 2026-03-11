@@ -2910,6 +2910,7 @@
   let inlineBarExpanded = false;
   let pendingIntroMessage: string | null = null;
   let introMessageText: string | null = null;
+  let introMessageAuthor: { name: string; avatar: string | null; workTitle: string | null } | null = null;
   let introBubbleTimer: ReturnType<typeof setTimeout> | null = null;
   let placeholderTexts: string[] = ["Ask a question..."];
   let placeholderIndex = 0;
@@ -3064,7 +3065,47 @@
     chatView.classList.add("active");
     // Show intro message as the first bot message on first chat open
     if (introMessageText) {
-      addMessageToUI("bot", introMessageText);
+      const msgEl = addMessageToUI("bot", introMessageText);
+      // If an author is set, replace the avatar and add author name
+      if (introMessageAuthor && msgEl.parentElement) {
+        const avatar = msgEl.parentElement.querySelector(".rm-message-avatar") as HTMLElement | null;
+        if (avatar) {
+          avatar.innerHTML = "";
+          avatar.classList.remove("rm-icon-avatar");
+          if (introMessageAuthor.avatar) {
+            avatar.style.backgroundColor = "transparent";
+            const img = document.createElement("img");
+            img.src = resolveUrl(introMessageAuthor.avatar);
+            img.alt = introMessageAuthor.name;
+            img.style.width = "100%";
+            img.style.height = "100%";
+            img.style.borderRadius = "50%";
+            img.style.objectFit = "cover";
+            avatar.appendChild(img);
+          } else {
+            avatar.style.backgroundColor = `rgba(${hexToRgb(getPrimaryColor())}, 0.12)`;
+            avatar.style.color = getPrimaryColor();
+            avatar.textContent = introMessageAuthor.name.charAt(0).toUpperCase();
+            avatar.style.display = "flex";
+            avatar.style.alignItems = "center";
+            avatar.style.justifyContent = "center";
+            avatar.style.fontSize = "12px";
+            avatar.style.fontWeight = "600";
+          }
+          avatar.classList.remove("hidden");
+        }
+        // Add author name label above the message
+        const row = msgEl.parentElement;
+        const nameLabel = document.createElement("div");
+        nameLabel.className = "rm-message-author-name";
+        nameLabel.style.fontSize = "11px";
+        nameLabel.style.fontWeight = "500";
+        nameLabel.style.color = "var(--rm-text-secondary, #6b7280)";
+        nameLabel.style.marginBottom = "2px";
+        nameLabel.style.marginLeft = "40px";
+        nameLabel.textContent = introMessageAuthor.name;
+        row.parentElement?.insertBefore(nameLabel, row);
+      }
       introMessageText = null;
       pendingIntroMessage = null;
     }
@@ -4268,6 +4309,9 @@
         pendingIntroMessage = loadedConfig.introMessage;
         introMessageText = loadedConfig.introMessage;
       }
+      if (loadedConfig.introMessageAuthor) {
+        introMessageAuthor = loadedConfig.introMessageAuthor;
+      }
 
       // ─── Intro Pill (corner positions) ──────────────────────────────────────
       if (
@@ -4275,11 +4319,12 @@
         loadedConfig.showIntroBubble !== false &&
         loadedConfig.introMessage
       ) {
-        introPillTitle.textContent = loadedConfig.widget?.headerText || "Chat with us";
+        introPillTitle.textContent = introMessageAuthor?.name || loadedConfig.widget?.headerText || "Chat with us";
         introPillDesc.textContent = loadedConfig.introMessage;
 
-        if (loadedConfig.widget?.avatarUrl) {
-          introPillAvatar.src = resolveUrl(loadedConfig.widget.avatarUrl);
+        const pillAvatarUrl = introMessageAuthor?.avatar || loadedConfig.widget?.avatarUrl;
+        if (pillAvatarUrl) {
+          introPillAvatar.src = resolveUrl(pillAvatarUrl);
           introPillAvatar.style.display = "block";
           introPillIcon.style.display = "none";
         } else {
