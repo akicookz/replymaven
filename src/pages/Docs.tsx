@@ -52,6 +52,7 @@ const navItems: NavItem[] = [
       { id: "send-message", label: "Send Message" },
       { id: "identify", label: "Identify Visitors" },
       { id: "set-metadata", label: "Set Custom Metadata" },
+      { id: "page-context", label: "Page Context" },
       { id: "notifications", label: "Request Notifications" },
     ],
   },
@@ -969,6 +970,63 @@ window.ReplyMaven.setMetadata({
   errorCode: "ERR_PAYMENT_DECLINED",
 });`}
             />
+
+            {/* ── Page Context ──────────────────────────────────────── */}
+            <SectionHeading id="page-context" level={3}>
+              Page Context
+            </SectionHeading>
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              Use <IC>setPageContext()</IC> to send contextual data that the
+              AI <strong>actively uses</strong> when generating responses. This
+              is different from <IC>setMetadata()</IC>, which is only visible
+              on your dashboard — page context is injected into the AI prompt
+              so the bot can tailor its answers.
+            </p>
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              The widget automatically sends the current page URL and title
+              with every message, so basic page awareness works out of the box.
+              Use <IC>setPageContext()</IC> to add richer, app-specific data.
+            </p>
+            <CodeBlock
+              title="Set page context on a pricing page"
+              language="javascript"
+              code={`// On your pricing page — the AI will know the visitor
+// is looking at pricing and can answer accordingly
+window.ReplyMaven.setPageContext({
+  page: "Pricing",
+  plan: "Pro",
+  billingCycle: "annual",
+  cartTotal: "$249.00",
+});`}
+            />
+            <CodeBlock
+              title="Update context on SPA route changes"
+              language="javascript"
+              code={`// In a React app, update context when the route changes
+useEffect(() => {
+  window.ReplyMaven.setPageContext({
+    page: location.pathname,
+    section: "account-settings",
+  });
+}, [location.pathname]);`}
+            />
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              <strong>Key behaviors:</strong>
+            </p>
+            <ul className="list-disc list-inside text-muted-foreground space-y-2 mb-4 ml-1">
+              <li>
+                Context is sent <strong>per-message</strong>, not stored on
+                the conversation — it reflects where the visitor is right now.
+              </li>
+              <li>
+                Each call <strong>replaces</strong> the previous context
+                (it does not merge).
+              </li>
+              <li>
+                Keys are freeform <IC>{"Record<string, string>"}</IC> — you
+                decide what data is relevant for your use case.
+              </li>
+            </ul>
 
             <SectionHeading id="retroactive-updates" level={3}>
               Retroactive Updates
