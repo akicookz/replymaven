@@ -724,6 +724,7 @@ const app = new Hono<HonoAppContext>()
               agentSettings.telegramChatId,
               conversation.visitorName,
               parsed.data.content,
+              conversation.id,
               conversation.telegramThreadId
                 ? parseInt(conversation.telegramThreadId, 10)
                 : undefined,
@@ -796,6 +797,7 @@ const app = new Hono<HonoAppContext>()
             parsed.data.content,
             c.env.BETTER_AUTH_URL,
             project.id,
+            settings.botName,
           )
           .then(async (messageId) => {
             if (messageId) {
@@ -1663,17 +1665,56 @@ const app = new Hono<HonoAppContext>()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body = (await c.req.json()) as { message?: any };
     const message = body.message;
-    if (!message?.text || !message?.reply_to_message) {
-      return c.json({ ok: true }); // Ignore non-reply messages
+    if (!message?.text) {
+      return c.json({ ok: true });
     }
 
-    // Extract conversation ID from the original bot message
-    const originalText = message.reply_to_message.text ?? "";
-    const convMatch = originalText.match(/Conversation:\s*(\S+)/);
-    if (!convMatch) return c.json({ ok: true });
-
-    const conversationId = convMatch[1];
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const projectService = new ProjectService(db);
+    const projectSettings = await projectService.getSettings(projectId);
+    const botName = projectSettings?.botName;
+
+    // ─── Resolve conversation from message context ────────────────────────────
+    let conversationId: string | null = null;
+
+    // Try extracting conversation ID from the replied-to message
+    if (message.reply_to_message) {
+      const originalText = message.reply_to_message.text ?? "";
+      const convMatch = originalText.match(/Conversation:\s*(\S+)/);
+      if (convMatch) {
+        conversationId = convMatch[1];
+      }
+    }
+
+    // Fallback for standalone @BotName messages (no reply) or replies to
+    // messages that don't contain a conversation ID
+    if (!conversationId && botName) {
+      const mentionPrefix = `@${botName}`;
+      if (message.text.toLowerCase().startsWith(mentionPrefix.toLowerCase())) {
+        const agentConvs =
+          await chatService.getAgentModeConversations(projectId);
+        if (agentConvs.length === 1) {
+          conversationId = agentConvs[0].id;
+        } else if (agentConvs.length > 1) {
+          // Ambiguous — tell the agent how to target a specific conversation
+          await telegramService.sendMessage(
+            tgSettings.telegramBotToken,
+            tgSettings.telegramChatId,
+            `Multiple active conversations. Please reply directly to a forwarded visitor message or notification to use @${botName} commands.`,
+            message.message_id,
+          );
+          return c.json({ ok: true });
+        }
+      }
+    }
+
+    // If we still don't have a conversation and there's no reply, ignore
+    if (!conversationId) {
+      if (!message.reply_to_message) return c.json({ ok: true });
+      // Had a reply_to_message but no conversation ID found — ignore
+      return c.json({ ok: true });
+    }
+
     const conversation = await chatService.getConversationById(
       conversationId,
       projectId,
@@ -1681,11 +1722,6 @@ const app = new Hono<HonoAppContext>()
     if (!conversation) {
       return c.json({ ok: true });
     }
-
-    // Get project settings to check for botName
-    const projectService = new ProjectService(db);
-    const projectSettings = await projectService.getSettings(projectId);
-    const botName = projectSettings?.botName;
 
     // Check if message is an @botName command
     if (botName) {

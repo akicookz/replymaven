@@ -200,12 +200,15 @@ export class TelegramService {
     firstMessage: string,
     dashboardBaseUrl: string,
     projectId: string,
+    botName?: string | null,
   ): Promise<number | null> {
     const dashboardLink = buildDashboardLink(
       dashboardBaseUrl,
       projectId,
       conversationId,
     );
+
+    const footer = buildCommandFooter(botName);
 
     const lines = [
       `<b>New conversation started</b>`,
@@ -228,6 +231,8 @@ export class TelegramService {
       ),
       ``,
       `<a href="${dashboardLink}">View conversation on dashboard</a>`,
+      ``,
+      footer,
     );
 
     const result = await this.sendMessage(botToken, chatId, lines.join("\n"));
@@ -267,12 +272,17 @@ export class TelegramService {
     chatId: string,
     visitorName: string | null,
     content: string,
+    conversationId: string,
     replyToMessageId?: number,
   ): Promise<void> {
     const name = escapeHtml(visitorName ?? "Visitor");
     const truncated =
       content.length > 1000 ? content.slice(0, 1000) + "..." : content;
-    const text = `<b>${name}:</b> ${escapeHtml(truncated)}`;
+    const text = [
+      `<b>${name}:</b> ${escapeHtml(truncated)}`,
+      ``,
+      `<b>Conversation:</b> <code>${conversationId}</code>`,
+    ].join("\n");
     await this.sendMessage(botToken, chatId, text, replyToMessageId);
   }
 

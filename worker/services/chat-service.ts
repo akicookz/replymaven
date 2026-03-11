@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, desc, and, gt } from "drizzle-orm";
+import { eq, desc, and, gt, inArray } from "drizzle-orm";
 import {
   conversations,
   messages,
@@ -155,6 +155,22 @@ export class ChatService {
       .where(
         and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
       );
+  }
+
+  async getAgentModeConversations(
+    projectId: string,
+  ): Promise<ConversationRow[]> {
+    return this.db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.projectId, projectId),
+          inArray(conversations.status, ["waiting_agent", "agent_replied"]),
+        ),
+      )
+      .orderBy(desc(conversations.updatedAt))
+      .limit(10);
   }
 
   // ─── Messages ───────────────────────────────────────────────────────────────
