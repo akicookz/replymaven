@@ -95,7 +95,7 @@ export const updateWidgetConfigSchema = z.object({
 
 // ─── Quick Actions ────────────────────────────────────────────────────────────
 export const createQuickActionSchema = z.object({
-  type: z.enum(["prompt", "link", "contact_form", "booking"]),
+  type: z.enum(["prompt", "link", "contact_form"]),
   label: z.string().min(1, "Label is required").max(100),
   action: z.string().max(2048).optional().default(""),
   icon: z.string().max(50).optional().default("link"),
@@ -241,43 +241,9 @@ export const updateContactFormConfigSchema = z.object({
 
 export const submitContactFormSchema = z.object({
   visitorId: z.string().min(1).max(100).optional(),
+  visitorName: z.string().max(100).optional(),
+  visitorEmail: z.string().email().optional(),
   data: z.record(z.string(), z.string().max(5000)),
-});
-
-// ─── Bookings ─────────────────────────────────────────────────────────────────
-export const updateBookingConfigSchema = z.object({
-  enabled: z.boolean().optional(),
-  timezone: z.string().min(1).max(100).optional(),
-  slotDuration: z.enum(["15", "30", "60"]).transform(Number).optional(),
-  bufferTime: z.number().int().min(0).max(60).optional(),
-  bookingWindowDays: z.number().int().min(1).max(60).optional(),
-  minAdvanceHours: z.number().int().min(0).max(168).optional(),
-});
-
-export const availabilityRuleSchema = z.object({
-  dayOfWeek: z.number().int().min(0).max(6),
-  startTime: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Must be HH:mm format"),
-  endTime: z
-    .string()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Must be HH:mm format"),
-});
-
-export const setAvailabilityRulesSchema = z.object({
-  rules: z
-    .array(availabilityRuleSchema)
-    .max(28, "Maximum 28 rules allowed (4 per day)"),
-});
-
-export const createBookingSchema = z.object({
-  visitorName: z.string().min(1, "Name is required").max(100),
-  visitorEmail: z.string().email("Please enter a valid email address"),
-  visitorPhone: z.string().max(30).optional(),
-  notes: z.string().max(1000).optional(),
-  startTime: z.string().min(1, "Start time is required"), // ISO 8601 string
-  timezone: z.string().min(1, "Timezone is required").max(100),
-  conversationId: z.string().max(100).optional(),
 });
 
 // ─── Tools ────────────────────────────────────────────────────────────────────

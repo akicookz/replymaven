@@ -206,6 +206,11 @@ export class ChatService {
     const id = crypto.randomUUID();
     await this.db.insert(messages).values({ id, ...data });
 
+    await this.db
+      .update(conversations)
+      .set({ updatedAt: new Date() })
+      .where(eq(conversations.id, data.conversationId));
+
     // Update KV cache
     await this.updateKVCache(data.conversationId, projectId);
 

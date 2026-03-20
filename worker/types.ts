@@ -26,7 +26,6 @@ export interface PlanLimits {
   autoCannedDraft: boolean;
   customCss: boolean;
   tools: boolean;
-  booking: boolean;
 }
 
 // Extend Env with secrets not in generated wrangler types

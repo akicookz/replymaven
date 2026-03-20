@@ -8,7 +8,6 @@ import {
   AlertCircle,
   Link as LinkIcon,
   MessageSquareText,
-  CalendarClock,
   Sparkles,
   ExternalLink,
   ChevronRight,
@@ -26,10 +25,6 @@ import {
   Bell,
   Folder,
   Globe,
-  Phone,
-  User,
-  XCircle,
-  CalendarDays,
   Eye,
   EyeOff,
 } from "lucide-react";
@@ -51,7 +46,7 @@ import { MobileMenuButton } from "@/components/PageHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ActionType = "prompt" | "link" | "contact_form" | "booking";
+type ActionType = "prompt" | "link" | "contact_form";
 
 interface QuickAction {
   id: string;
@@ -79,36 +74,6 @@ interface ContactFormSubmission {
   id: string;
   visitorId: string | null;
   data: Record<string, string>;
-  createdAt: string;
-}
-
-interface BookingConfig {
-  id?: string;
-  enabled: boolean;
-  timezone: string;
-  slotDuration: number;
-  bufferTime: number;
-  bookingWindowDays: number;
-  minAdvanceHours: number;
-}
-
-interface AvailabilityRule {
-  id?: string;
-  dayOfWeek: number;
-  startTime: string;
-  endTime: string;
-}
-
-interface Booking {
-  id: string;
-  visitorName: string;
-  visitorEmail: string;
-  visitorPhone: string | null;
-  notes: string | null;
-  startTime: string;
-  endTime: string;
-  timezone: string;
-  status: "confirmed" | "cancelled";
   createdAt: string;
 }
 
@@ -149,51 +114,7 @@ const TYPE_CONFIG: Record<
     RightIcon: ChevronRight,
     iconColor: "text-status-active",
   },
-  booking: {
-    label: "Booking",
-    description: "Opens the booking calendar",
-    RightIcon: ChevronRight,
-    iconColor: "text-status-waiting",
-  },
 };
-
-const DAY_NAMES = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-];
-
-const COMMON_TIMEZONES = [
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "America/Anchorage",
-  "Pacific/Honolulu",
-  "America/Toronto",
-  "America/Vancouver",
-  "Europe/London",
-  "Europe/Paris",
-  "Europe/Berlin",
-  "Europe/Amsterdam",
-  "Europe/Rome",
-  "Europe/Madrid",
-  "Europe/Stockholm",
-  "Europe/Moscow",
-  "Asia/Dubai",
-  "Asia/Kolkata",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "Asia/Shanghai",
-  "Asia/Seoul",
-  "Australia/Sydney",
-  "Australia/Melbourne",
-  "Pacific/Auckland",
-];
 
 function getIconComponent(icon: string) {
   const found = ICON_OPTIONS.find((o) => o.value === icon);
@@ -205,7 +126,7 @@ function getIconComponent(icon: string) {
 function QuickActions() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"actions" | "contact_form" | "booking">("actions");
+  const [activeTab, setActiveTab] = useState<"actions" | "contact_form">("actions");
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -219,7 +140,7 @@ function QuickActions() {
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-1">
             Buttons displayed on the widget home screen and chat view. Configure
-            contact form and booking settings here too.
+            contact form settings here too.
           </p>
         </div>
       </div>
@@ -230,7 +151,6 @@ function QuickActions() {
           [
             { key: "actions", label: "Actions" },
             { key: "contact_form", label: "Contact Form" },
-            { key: "booking", label: "Booking" },
           ] as const
         ).map((tab) => (
           <button
@@ -250,7 +170,6 @@ function QuickActions() {
 
       {activeTab === "actions" && <ActionsTab projectId={projectId!} queryClient={queryClient} />}
       {activeTab === "contact_form" && <ContactFormTab projectId={projectId!} queryClient={queryClient} />}
-      {activeTab === "booking" && <BookingTab projectId={projectId!} queryClient={queryClient} />}
     </div>
   );
 }
@@ -347,13 +266,11 @@ function ActionsTab({
       prompt: "sparkle",
       link: "link",
       contact_form: "mail",
-      booking: "calendar",
     };
     setNewIcon(defaults[newType]);
   }, [newType]);
 
   const hasContactForm = actions?.some((a) => a.type === "contact_form");
-  const hasBooking = actions?.some((a) => a.type === "booking");
 
   return (
     <div className="space-y-6">
@@ -398,18 +315,6 @@ function ActionsTab({
                     <MessageSquareText className="w-3.5 h-3.5" />
                     Contact Form
                     {hasContactForm && (
-                      <span className="text-[10px] text-muted-foreground ml-1">(exists)</span>
-                    )}
-                  </span>
-                </SelectItem>
-                <SelectItem
-                  value="booking"
-                  disabled={!!hasBooking}
-                >
-                  <span className="flex items-center gap-1.5">
-                    <CalendarClock className="w-3.5 h-3.5" />
-                    Booking
-                    {hasBooking && (
                       <span className="text-[10px] text-muted-foreground ml-1">(exists)</span>
                     )}
                   </span>
@@ -575,7 +480,7 @@ function ActionsTab({
             No quick actions yet
           </h2>
           <p className="text-sm text-muted-foreground max-w-md leading-relaxed">
-            Add actions like AI prompts, external links, contact forms, and booking
+            Add actions like AI prompts, external links, and contact form
             buttons. They appear on the widget home screen and chat view.
           </p>
         </div>
@@ -1051,611 +956,6 @@ function ContactFormTab({
             </div>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Booking Tab ──────────────────────────────────────────────────────────────
-
-function BookingTab({
-  projectId,
-  queryClient,
-}: {
-  projectId: string;
-  queryClient: ReturnType<typeof useQueryClient>;
-}) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
-
-  const [enabled, setEnabled] = useState(false);
-  const [timezone, setTimezone] = useState("America/New_York");
-  const [slotDuration, setSlotDuration] = useState(30);
-  const [bufferTime, setBufferTime] = useState(0);
-  const [rules, setRules] = useState<AvailabilityRule[]>([]);
-  const [hasChanges, setHasChanges] = useState(false);
-
-  const { data: configData, isLoading: configLoading } = useQuery<{
-    config: BookingConfig;
-    rules: AvailabilityRule[];
-  }>({
-    queryKey: ["booking-config", projectId],
-    queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/booking/config`);
-      if (!res.ok) throw new Error("Failed to fetch");
-      return res.json();
-    },
-  });
-
-  const { data: bookings, isLoading: bookingsLoading } = useQuery<Booking[]>({
-    queryKey: ["bookings", projectId],
-    queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/bookings`);
-      if (!res.ok) throw new Error("Failed to fetch");
-      return res.json();
-    },
-  });
-
-  useEffect(() => {
-    if (configData) {
-      setEnabled(configData.config.enabled);
-      setTimezone(configData.config.timezone);
-      setSlotDuration(configData.config.slotDuration);
-      setBufferTime(configData.config.bufferTime);
-      setRules(
-        configData.rules.map((r) => ({
-          dayOfWeek: r.dayOfWeek,
-          startTime: r.startTime,
-          endTime: r.endTime,
-        })),
-      );
-      setHasChanges(false);
-    }
-  }, [configData]);
-
-  const saveSettings = useMutation({
-    mutationFn: async () => {
-      // Save config and availability rules together
-      const [configRes, rulesRes] = await Promise.all([
-        fetch(`/api/projects/${projectId}/booking/config`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            enabled,
-            timezone,
-            slotDuration: String(slotDuration),
-            bufferTime,
-          }),
-        }),
-        fetch(`/api/projects/${projectId}/booking/availability`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rules }),
-        }),
-      ]);
-      if (!configRes.ok || !rulesRes.ok) throw new Error("Failed to save");
-      return true;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["booking-config", projectId],
-      });
-      setHasChanges(false);
-    },
-  });
-
-  const cancelBooking = useMutation({
-    mutationFn: async (bookingId: string) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/bookings/${bookingId}`,
-        { method: "PATCH" },
-      );
-      if (!res.ok) throw new Error("Failed to cancel");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["bookings", projectId] });
-    },
-  });
-
-  function addTimeBlock(dayOfWeek: number) {
-    setRules([...rules, { dayOfWeek, startTime: "09:00", endTime: "17:00" }]);
-    setHasChanges(true);
-  }
-
-  function removeTimeBlock(index: number) {
-    setRules(rules.filter((_, i) => i !== index));
-    setHasChanges(true);
-  }
-
-  function updateTimeBlock(
-    index: number,
-    field: "startTime" | "endTime",
-    value: string,
-  ) {
-    const updated = [...rules];
-    updated[index] = { ...updated[index], [field]: value };
-    setRules(updated);
-    setHasChanges(true);
-  }
-
-  function getRulesForDay(dayOfWeek: number) {
-    return rules
-      .map((r, idx) => ({ ...r, _index: idx }))
-      .filter((r) => r.dayOfWeek === dayOfWeek);
-  }
-
-  if (configLoading) {
-    return (
-      <div className="space-y-4">
-        <div className="h-8 w-48 rounded-xl bg-muted animate-pulse" />
-        <div className="h-40 rounded-xl bg-muted animate-pulse" />
-      </div>
-    );
-  }
-
-  const isConfigured =
-    configData?.config?.enabled &&
-    configData.rules.length > 0;
-
-  const upcomingBookings = (bookings ?? []).filter(
-    (b) =>
-      b.status === "confirmed" &&
-      new Date(b.startTime).getTime() > Date.now(),
-  );
-  const pastBookings = (bookings ?? []).filter(
-    (b) =>
-      b.status !== "confirmed" ||
-      new Date(b.startTime).getTime() <= Date.now(),
-  );
-
-  return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-            <CalendarClock className="w-5 h-5" />
-            Bookings
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Meetings booked by visitors through your widget.
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setSettingsOpen(true)}
-          className="gap-1.5"
-        >
-          <Settings className="w-4 h-4" />
-          Settings
-        </Button>
-      </div>
-
-      {/* Bookings list or empty state */}
-      {!isConfigured ? (
-        <div className="flex flex-col items-center justify-center py-24 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-5">
-            <CalendarDays className="w-8 h-8 text-primary" />
-          </div>
-          <h2 className="text-lg font-semibold text-foreground mb-1">
-            No bookings configured
-          </h2>
-          <p className="text-sm text-muted-foreground max-w-md mb-6 leading-relaxed">
-            Let visitors book meetings directly from your widget. Set up your
-            availability and meeting preferences, then add a "Booking" quick
-            action on the Actions tab.
-          </p>
-          <Button onClick={() => setSettingsOpen(true)} className="gap-1.5">
-            <Settings className="w-4 h-4" />
-            Set up bookings
-          </Button>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <div className="flex items-center gap-3 mb-1">
-            <Badge variant="secondary" className="gap-1">
-              <CalendarClock className="w-3 h-3" />
-              {upcomingBookings.length} upcoming
-            </Badge>
-            <Badge variant="outline" className="gap-1">
-              {(bookings ?? []).length} total
-            </Badge>
-          </div>
-
-          {bookingsLoading ? (
-            <div className="space-y-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="h-24 rounded-xl bg-muted animate-pulse"
-                />
-              ))}
-            </div>
-          ) : !bookings || bookings.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <Inbox className="w-10 h-10 text-muted-foreground/30 mb-3" />
-              <p className="text-sm text-muted-foreground">
-                No bookings yet. They'll appear here when visitors book
-                meetings.
-              </p>
-            </div>
-          ) : (
-            <>
-              {upcomingBookings.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                    <Clock className="w-4 h-4" />
-                    Upcoming ({upcomingBookings.length})
-                  </h3>
-                  {upcomingBookings.map((booking) => (
-                    <BookingCard
-                      key={booking.id}
-                      booking={booking}
-                      onCancel={() => cancelBooking.mutate(booking.id)}
-                      cancelling={cancelBooking.isPending}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {pastBookings.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold text-muted-foreground">
-                    Past & Cancelled ({pastBookings.length})
-                  </h3>
-                  {pastBookings.map((booking) => (
-                    <BookingCard
-                      key={booking.id}
-                      booking={booking}
-                      past
-                    />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Settings Slide-over Panel */}
-      <div
-        className={cn(
-          "fixed inset-0 bg-black/40 z-40 transition-opacity",
-          settingsOpen
-            ? "opacity-100 pointer-events-auto"
-            : "opacity-0 pointer-events-none",
-        )}
-        onClick={() => setSettingsOpen(false)}
-      />
-
-      <div
-        className={cn(
-          "fixed top-0 right-0 h-full w-full max-w-lg bg-background border-l border-border z-50 flex flex-col transition-transform duration-300 ease-in-out",
-          settingsOpen ? "translate-x-0" : "translate-x-full",
-        )}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">
-              Booking settings
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Configure your availability and meeting preferences
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setSettingsOpen(false)}
-            className="h-8 w-8"
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-          {/* Enable toggle */}
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Enable bookings</Label>
-              <p className="text-xs text-muted-foreground">
-                Enables the booking feature for your widget
-              </p>
-            </div>
-            <Switch
-              checked={enabled}
-              onCheckedChange={(checked) => {
-                setEnabled(checked);
-                setHasChanges(true);
-              }}
-            />
-          </div>
-
-          {enabled && (
-            <>
-              {/* Timezone */}
-              <div className="space-y-2">
-                <Label>Your timezone</Label>
-                <Select
-                  value={timezone}
-                  onValueChange={(val) => {
-                    setTimezone(val);
-                    setHasChanges(true);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {COMMON_TIMEZONES.map((tz) => (
-                      <SelectItem key={tz} value={tz}>
-                        {tz.replace(/_/g, " ")}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Meeting duration */}
-              <div className="space-y-2">
-                <Label>Meeting duration</Label>
-                <div className="flex gap-2">
-                  {[15, 30, 60].map((d) => (
-                    <button
-                      key={d}
-                      onClick={() => {
-                        setSlotDuration(d);
-                        setHasChanges(true);
-                      }}
-                      className={cn(
-                        "flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-colors",
-                        slotDuration === d
-                          ? "border-primary bg-primary/8 text-primary"
-                          : "border-border text-muted-foreground hover:bg-accent",
-                      )}
-                    >
-                      {d} min
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Buffer time */}
-              <div className="space-y-2">
-                <Label>Buffer between meetings</Label>
-                <p className="text-xs text-muted-foreground">
-                  Extra time between consecutive bookings
-                </p>
-                <Select
-                  value={String(bufferTime)}
-                  onValueChange={(val) => {
-                    setBufferTime(parseInt(val));
-                    setHasChanges(true);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="0">No buffer</SelectItem>
-                    <SelectItem value="5">5 minutes</SelectItem>
-                    <SelectItem value="10">10 minutes</SelectItem>
-                    <SelectItem value="15">15 minutes</SelectItem>
-                    <SelectItem value="30">30 minutes</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Weekly availability */}
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-sm font-semibold">
-                    Weekly availability
-                  </Label>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Set your available hours. Times are in{" "}
-                    <span className="font-medium">
-                      {timezone.replace(/_/g, " ")}
-                    </span>
-                    .
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  {[1, 2, 3, 4, 5, 6, 0].map((dayOfWeek) => {
-                    const dayRules = getRulesForDay(dayOfWeek);
-                    return (
-                      <div
-                        key={dayOfWeek}
-                        className="flex items-start gap-3 py-2.5 border-b border-border last:border-0"
-                      >
-                        <div className="w-20 shrink-0 pt-2">
-                          <span className="text-sm font-medium text-foreground">
-                            {DAY_NAMES[dayOfWeek]}
-                          </span>
-                        </div>
-
-                        <div className="flex-1 space-y-2">
-                          {dayRules.length === 0 ? (
-                            <p className="text-xs text-muted-foreground py-2">
-                              Unavailable
-                            </p>
-                          ) : (
-                            dayRules.map((rule) => (
-                              <div
-                                key={rule._index}
-                                className="flex items-center gap-2"
-                              >
-                                <Input
-                                  type="time"
-                                  value={rule.startTime}
-                                  onChange={(e) =>
-                                    updateTimeBlock(
-                                      rule._index,
-                                      "startTime",
-                                      e.target.value,
-                                    )
-                                  }
-                                  className="w-28"
-                                />
-                                <span className="text-muted-foreground text-xs">
-                                  to
-                                </span>
-                                <Input
-                                  type="time"
-                                  value={rule.endTime}
-                                  onChange={(e) =>
-                                    updateTimeBlock(
-                                      rule._index,
-                                      "endTime",
-                                      e.target.value,
-                                    )
-                                  }
-                                  className="w-28"
-                                />
-                                <button
-                                  onClick={() => removeTimeBlock(rule._index)}
-                                  className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ))
-                          )}
-
-                          {dayRules.length < 4 && (
-                            <button
-                              onClick={() => addTimeBlock(dayOfWeek)}
-                              className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors py-1"
-                            >
-                              <Plus className="w-3 h-3" />
-                              Add time block
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Drawer footer with single save button */}
-        <div className="px-6 py-4 border-t border-border flex items-center gap-3">
-          <Button
-            onClick={() => saveSettings.mutate()}
-            disabled={!hasChanges || saveSettings.isPending}
-            className="flex-1"
-          >
-            {saveSettings.isPending ? "Saving..." : "Save changes"}
-          </Button>
-          {saveSettings.isError && (
-            <div className="flex items-center gap-1.5 text-destructive text-xs">
-              <AlertCircle className="w-3.5 h-3.5" />
-              Failed
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Booking Card Component ───────────────────────────────────────────────────
-
-function BookingCard({
-  booking,
-  onCancel,
-  cancelling,
-  past,
-}: {
-  booking: Booking;
-  onCancel?: () => void;
-  cancelling?: boolean;
-  past?: boolean;
-}) {
-  const start = new Date(booking.startTime);
-  const end = new Date(booking.endTime);
-
-  const dateStr = start.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-  const timeStr = `${start.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  })} - ${end.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  })}`;
-
-  return (
-    <div
-      className={cn(
-        "px-5 py-4 bg-card rounded-xl border border-border",
-        past && "opacity-60",
-      )}
-    >
-      <div className="flex items-start justify-between">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-              <CalendarClock className="w-4 h-4 text-primary" />
-              {dateStr}
-            </div>
-            <span className="text-sm text-muted-foreground">{timeStr}</span>
-            <Badge
-              variant={booking.status === "confirmed" ? "default" : "secondary"}
-              className="text-[11px]"
-            >
-              {booking.status}
-            </Badge>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <User className="w-3.5 h-3.5" />
-              {booking.visitorName}
-            </span>
-            <span className="flex items-center gap-1">
-              <Mail className="w-3.5 h-3.5" />
-              {booking.visitorEmail}
-            </span>
-            {booking.visitorPhone && (
-              <span className="flex items-center gap-1">
-                <Phone className="w-3.5 h-3.5" />
-                {booking.visitorPhone}
-              </span>
-            )}
-          </div>
-
-          {booking.notes && (
-            <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
-              <FileText className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <span className="line-clamp-2">{booking.notes}</span>
-            </div>
-          )}
-        </div>
-
-        {!past && booking.status === "confirmed" && onCancel && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onCancel}
-            disabled={cancelling}
-            className="text-muted-foreground hover:text-destructive shrink-0"
-          >
-            <XCircle className="w-4 h-4 mr-1" />
-            Cancel
-          </Button>
-        )}
       </div>
     </div>
   );

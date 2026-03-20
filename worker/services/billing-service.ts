@@ -37,7 +37,6 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     autoCannedDraft: false,
     customCss: false,
     tools: false,
-    booking: false,
   },
   standard: {
     plan: "standard",
@@ -51,7 +50,6 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     autoCannedDraft: false,
     customCss: false,
     tools: true,
-    booking: true,
   },
   business: {
     plan: "business",
@@ -65,7 +63,6 @@ const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     autoCannedDraft: true,
     customCss: true,
     tools: true,
-    booking: true,
   },
 };
 

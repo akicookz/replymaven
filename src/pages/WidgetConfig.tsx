@@ -179,7 +179,6 @@ function WidgetConfig() {
       showIntroBubble: debouncedPreviewState.showIntroBubble,
       botName: null,
       contactForm: null,
-      bookingEnabled: false,
     };
 
     return `<!DOCTYPE html>

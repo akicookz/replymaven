@@ -128,67 +128,6 @@ export class TelegramService {
     return result.message_id ?? null;
   }
 
-  // ─── Notify New Booking ─────────────────────────────────────────────────────
-
-  async notifyNewBooking(
-    botToken: string,
-    chatId: string,
-    booking: {
-      visitorName: string;
-      visitorEmail: string;
-      visitorPhone?: string | null;
-      notes?: string | null;
-      startTime: Date;
-      endTime: Date;
-      timezone: string;
-    },
-    projectName: string,
-    dashboardBaseUrl: string,
-    projectId: string,
-    conversationId?: string | null,
-  ): Promise<void> {
-    const startFormatted = booking.startTime.toLocaleString("en-US", {
-      dateStyle: "medium",
-      timeStyle: "short",
-      timeZone: booking.timezone,
-    });
-    const endFormatted = booking.endTime.toLocaleString("en-US", {
-      timeStyle: "short",
-      timeZone: booking.timezone,
-    });
-
-    const lines = [
-      `<b>New booking received</b>`,
-      ``,
-      `<b>Project:</b> ${escapeHtml(projectName)}`,
-      `<b>Name:</b> ${escapeHtml(booking.visitorName)}`,
-      `<b>Email:</b> ${escapeHtml(booking.visitorEmail)}`,
-    ];
-
-    if (booking.visitorPhone) {
-      lines.push(`<b>Phone:</b> ${escapeHtml(booking.visitorPhone)}`);
-    }
-
-    lines.push(
-      `<b>Time:</b> ${startFormatted} – ${endFormatted} (${escapeHtml(booking.timezone)})`,
-    );
-
-    if (booking.notes) {
-      lines.push(`<b>Notes:</b> ${escapeHtml(booking.notes)}`);
-    }
-
-    if (conversationId) {
-      const dashboardLink = buildDashboardLink(
-        dashboardBaseUrl,
-        projectId,
-        conversationId,
-      );
-      lines.push(``, `<a href="${dashboardLink}">View conversation</a>`);
-    }
-
-    await this.sendMessage(botToken, chatId, lines.join("\n"));
-  }
-
   // ─── Notify New Conversation Message ────────────────────────────────────────
 
   async notifyNewConversation(

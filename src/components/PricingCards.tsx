@@ -45,7 +45,7 @@ const pricingPlans = [
       "PDF indexing",
       "Telegram live agent handoff",
       "Custom tone of voice",
-      "Tools & Booking",
+      "Tools",
     ],
   },
   {

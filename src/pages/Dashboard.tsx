@@ -7,7 +7,6 @@ import {
   Plus,
   ArrowUpRight,
   ArrowDownRight,
-  Calendar,
   Mail,
   Clock,
   Globe,
@@ -68,15 +67,6 @@ function countryToFlag(countryCode: string): string {
   return String.fromCodePoint(first) + String.fromCodePoint(second);
 }
 
-interface RecentBooking {
-  id: string;
-  visitorName: string;
-  visitorEmail: string;
-  startTime: string;
-  status: string;
-  createdAt: string;
-}
-
 interface RecentContactSubmission {
   id: string;
   visitorId: string | null;
@@ -93,7 +83,6 @@ interface DashboardData {
   pendingCannedDrafts: number;
   conversationsByDay: ConversationsByDay[];
   recentConversations: RecentConversation[];
-  recentBookings: RecentBooking[];
   recentContactSubmissions: RecentContactSubmission[];
 }
 
@@ -294,7 +283,7 @@ function Dashboard() {
     // ─── Build Activity Timeline ────────────────────────────────────────────
     type TimelineItem = {
       id: string;
-      type: "booking" | "contact_form";
+      type: "contact_form";
       title: string;
       subtitle: string;
       timestamp: string;
@@ -302,18 +291,6 @@ function Dashboard() {
     };
 
     const timelineItems: TimelineItem[] = [];
-
-    for (const b of data.recentBookings) {
-      const startDate = new Date(b.startTime);
-      timelineItems.push({
-        id: b.id,
-        type: "booking",
-        title: b.visitorName,
-        subtitle: `Booking for ${startDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
-        timestamp: b.createdAt,
-        status: b.status,
-      });
-    }
 
     for (const s of data.recentContactSubmissions) {
       let parsedData: Record<string, string> = {};
@@ -446,26 +423,11 @@ function Dashboard() {
               {timelineItems.slice(0, 8).map((item) => (
                 <Link
                   key={item.id}
-                  to={
-                    item.type === "booking"
-                      ? `/app/projects/${projectId}/bookings`
-                      : `/app/projects/${projectId}/contact-form`
-                  }
+                  to={`/app/projects/${projectId}/contact-form`}
                   className="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-accent/50 transition-colors group"
                 >
-                  <div
-                    className={cn(
-                      "w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5",
-                      item.type === "booking"
-                        ? "bg-primary/10"
-                        : "bg-orange-500/10",
-                    )}
-                  >
-                    {item.type === "booking" ? (
-                      <Calendar className="w-3.5 h-3.5 text-primary" />
-                    ) : (
-                      <Mail className="w-3.5 h-3.5 text-orange-500" />
-                    )}
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 bg-orange-500/10">
+                    <Mail className="w-3.5 h-3.5 text-orange-500" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -498,7 +460,7 @@ function Dashboard() {
           ) : (
             <div className="flex flex-col items-center justify-center h-[200px] text-sm text-muted-foreground gap-1">
               <Clock className="w-5 h-5 mb-1 text-muted-foreground/50" />
-              No bookings or form submissions yet
+              No form submissions yet
             </div>
           )}
         </div>

@@ -22,13 +22,8 @@ import {
   Zap,
   Twitter,
   Linkedin,
-  Calendar,
   ClipboardList,
   Wrench,
-  Phone,
-  Mail,
-  ChevronLeft,
-  ChevronRight,
   Heart,
   Search,
   Loader2,
@@ -300,123 +295,6 @@ function AnimatedChatWidget() {
   );
 }
 
-// ─── Mock Booking UI ──────────────────────────────────────────────────────────
-
-function MockBookingUI() {
-  const days = [
-    { day: "Mon", date: "12", month: "Jan" },
-    { day: "Tue", date: "13", month: "Jan", selected: true },
-    { day: "Wed", date: "14", month: "Jan" },
-    { day: "Thu", date: "15", month: "Jan" },
-    { day: "Fri", date: "16", month: "Jan" },
-  ];
-
-  const slots = [
-    { time: "9:00 AM", available: true },
-    { time: "9:30 AM", available: true, selected: true },
-    { time: "10:00 AM", available: false },
-    { time: "10:30 AM", available: true },
-    { time: "11:00 AM", available: true },
-    { time: "11:30 AM", available: true },
-  ];
-
-  return (
-    <div
-      className={cn(
-        cardVariants({ variant: "glow-secondary" }),
-        "w-full overflow-hidden bg-black/80 backdrop-blur-2xl",
-      )}
-    >
-      {/* Header */}
-      <div className="px-5 py-4 flex items-center gap-3 shrink-0">
-        <div className="w-9 h-9 rounded-full bg-brand/15 flex items-center justify-center">
-          <Calendar className="w-4.5 h-4.5 text-brand" />
-        </div>
-        <div>
-          <p className="text-card-foreground text-[15px] font-medium leading-tight">
-            Book a demo
-          </p>
-          <p className="text-quaternary text-[12px]">
-            30 min · Select a date & time
-          </p>
-        </div>
-      </div>
-
-      {/* Date picker */}
-      <div className="px-5 pt-4 pb-3 flex-1">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-[12px] text-muted-foreground">January 2026</span>
-          <div className="flex gap-1">
-            <div className="w-6 h-6 rounded-md bg-white/[0.05] flex items-center justify-center border border-white/[0.06]">
-              <ChevronLeft className="w-3 h-3 text-quaternary" />
-            </div>
-            <div className="w-6 h-6 rounded-md bg-white/[0.05] flex items-center justify-center border border-white/[0.06]">
-              <ChevronRight className="w-3 h-3 text-quaternary" />
-            </div>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          {days.map((d) => (
-            <div
-              key={d.date}
-              className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 rounded-xl border text-center transition-colors ${d.selected
-                ? "bg-brand/15 border-brand/25"
-                : "bg-white/[0.02] border-white/[0.06]"
-                }`}
-            >
-              <span className={`text-[10px] ${d.selected ? "text-brand" : "text-quaternary"}`}>
-                {d.day}
-              </span>
-              <span className={`text-[15px] font-medium ${d.selected ? "text-brand" : "text-card-foreground"}`}>
-                {d.date}
-              </span>
-              <span className={`text-[9px] ${d.selected ? "text-brand-soft/60" : "text-quaternary"}`}>
-                {d.month}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Time slots */}
-      <div className="px-5 pb-3 flex-1">
-        <p className="text-[11px] text-quaternary mb-2 uppercase tracking-wider">
-          Available times
-        </p>
-        <div className="grid grid-cols-2 gap-1.5">
-          {slots.map((s) => (
-            <div
-              key={s.time}
-              className={`py-2 rounded-lg text-center text-[12px] border transition-colors ${s.selected
-                ? "bg-brand/15 border-brand/25 text-brand"
-                : s.available
-                  ? "bg-white/[0.02] border-white/[0.06] text-secondary-foreground"
-                  : "bg-white/[0.01] border-white/[0.03] text-disabled line-through"
-                }`}
-            >
-              {s.time}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Quick form */}
-      <div className="px-5 pb-5 space-y-2.5 flex-1">
-        <div className="bg-white/[0.03] rounded-lg border border-white/[0.06] px-3 py-2 flex items-center gap-2.5">
-          <Mail className="w-3.5 h-3.5 text-quaternary shrink-0" />
-          <span className="text-[12px] text-muted-foreground">sarah@example.com</span>
-        </div>
-        <div className="bg-white/[0.03] rounded-lg border border-white/[0.06] px-3 py-2 flex items-center gap-2.5">
-          <Phone className="w-3.5 h-3.5 text-quaternary shrink-0" />
-          <span className="text-[12px] text-quaternary">Phone (optional)</span>
-        </div>
-        <div className="bg-brand/15 border border-brand/25 rounded-lg py-2.5 text-center text-[13px] text-brand font-medium">
-          Confirm Booking
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Mock Contact Form UI ─────────────────────────────────────────────────────
 
@@ -1331,55 +1209,6 @@ function FeatureBentoGrid() {
   );
 }
 
-// ─── Feature Section: Booking ─────────────────────────────────────────────────
-
-function FeatureBooking() {
-  return (
-    <section className="min-h-screen flex items-center py-24">
-      <div className="max-w-7xl mx-auto px-6 w-full">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
-          {/* Copy */}
-          <div className="space-y-5">
-            <p className="text-sm font-medium text-brand uppercase tracking-wider">
-              Booking
-            </p>
-            <h2 className="text-3xl sm:text-[2.5rem] font-light text-foreground tracking-tight leading-tight">
-              AI agent that can book new demos
-            </h2>
-            <p className="text-muted-foreground leading-relaxed max-w-lg">
-              <span className="font-medium text-card-foreground">Built-in scheduling</span> with configurable availability, time zones, slot durations, and buffer times. The AI can detect booking intent and open the scheduler automatically -- or visitors can trigger it from a quick action button.
-            </p>
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              {[
-                { icon: Calendar, label: "Scheduling" },
-                { icon: Globe, label: "Timezone aware" },
-                { icon: Mail, label: "Email confirmations" },
-                { icon: Zap, label: "AI-triggered" },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-brand/10 bg-white/[0.03] backdrop-blur-lg text-sm"
-                >
-                  <item.icon className="w-4 h-4 text-quaternary" />
-                  <span className="text-card-foreground font-medium">{item.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Visual */}
-          <div className="relative overflow-hidden rounded-[2rem]">
-            <div className="absolute -inset-8 bg-brand/[0.03] rounded-[2rem] blur-3xl" />
-            <div className="relative">
-              <MockBookingUI />
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 // ─── Feature Section: Contact Form ────────────────────────────────────────────
 
 function FeatureContactForm() {
@@ -1878,7 +1707,6 @@ function Landing() {
       <FeatureDocsIndexing />
       <FeatureToolCalls />
       <FeatureWidgetAndHandoff />
-      <FeatureBooking />
       <FeatureContactForm />
       <FeatureAnalytics />
 

@@ -1691,308 +1691,7 @@
     }
 
     /* ─── Responsive ──────────────────────────────────────────────────────── */
-    /* ─── Booking View ─────────────────────────────────────────────────────── */
-    .rm-booking-view {
-      display: none;
-      flex-direction: column;
-      flex: 1;
-      min-height: 0;
-      background: transparent;
-    }
-    .rm-booking-view.active {
-      display: flex;
-    }
-    .rm-booking-view > .rm-header {
-      margin-bottom: 0;
-    }
-    .rm-booking-scroll {
-      flex: 1;
-      overflow-y: auto;
-      min-height: 0;
-    }
-    .rm-booking-scroll::-webkit-scrollbar { width: 4px; }
-    .rm-booking-scroll::-webkit-scrollbar-thumb { background: var(--rm-scrollbar); border-radius: 4px; }
-    /* ── Month label row ─────────────────────────────────────────────────── */
-    .rm-booking-month-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 16px 8px;
-    }
-    .rm-booking-month-label {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--rm-text);
-    }
-    .rm-booking-month-arrows {
-      display: flex;
-      gap: 4px;
-    }
-    .rm-booking-date-arrow {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 28px;
-      height: 28px;
-      border-radius: 8px;
-      border: 1px solid var(--rm-border);
-      background: var(--rm-bg-secondary);
-      cursor: pointer;
-      flex-shrink: 0;
-      transition: background 0.15s;
-    }
-    .rm-booking-date-arrow:hover { background: var(--rm-bg-tertiary); }
-    .rm-booking-date-arrow svg { width: 14px; height: 14px; color: var(--rm-text-secondary); }
-    /* ── Date strip ──────────────────────────────────────────────────────── */
-    .rm-booking-dates {
-      display: flex;
-      gap: 6px;
-      padding: 4px 16px 14px;
-      overflow-x: auto;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-      scroll-behavior: smooth;
-    }
-    .rm-booking-dates::-webkit-scrollbar { display: none; }
-    .rm-booking-date-pill {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 8px 0;
-      border-radius: 12px;
-      border: 1px solid var(--rm-border);
-      background: var(--rm-bg-secondary);
-      cursor: pointer;
-      min-width: 56px;
-      transition: all 0.15s ease;
-      flex-shrink: 0;
-    }
-    .rm-booking-date-pill:hover {
-      border-color: var(--rm-bg-tertiary);
-      background: var(--rm-bg-tertiary);
-    }
-    .rm-booking-date-pill.selected {
-      border-color: var(--rm-primary, #2563eb);
-      background: var(--rm-accent-bg);
-    }
-    .rm-booking-date-pill.selected .rm-date-weekday,
-    .rm-booking-date-pill.selected .rm-date-month {
-      color: var(--rm-accent-text);
-    }
-    .rm-booking-date-pill.selected .rm-date-day {
-      color: var(--rm-accent-text);
-    }
-    .rm-booking-date-pill.today:not(.selected) {
-      border-color: var(--rm-primary, #2563eb);
-    }
-    .rm-date-weekday {
-      font-size: 10px;
-      font-weight: 500;
-      text-transform: uppercase;
-      color: var(--rm-text-muted);
-      letter-spacing: 0.5px;
-    }
-    .rm-date-day {
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--rm-text);
-      line-height: 1.3;
-    }
-    .rm-date-month {
-      font-size: 9px;
-      color: var(--rm-text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-    }
-    /* ── Slots section ───────────────────────────────────────────────────── */
-    .rm-booking-slots-section {
-      padding: 0 16px 12px;
-      border-top: 1px solid var(--rm-border-subtle);
-    }
-    .rm-booking-slots-label {
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.6px;
-      color: var(--rm-text-muted);
-      padding: 12px 0 8px;
-    }
-    .rm-booking-slots-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-    }
-    .rm-booking-slots-loading {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 32px 16px;
-      color: var(--rm-text-muted);
-      font-size: 13px;
-    }
-    .rm-booking-slot {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 10px 8px;
-      border-radius: var(--rm-input-radius);
-      border: 1px solid var(--rm-border);
-      background: var(--rm-bg-secondary);
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--rm-text);
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .rm-booking-slot:hover {
-      border-color: var(--rm-primary, #2563eb);
-      background: var(--rm-accent-bg);
-    }
-    .rm-booking-slot.selected {
-      border-color: var(--rm-primary, #2563eb);
-      background: var(--rm-accent-bg);
-      color: var(--rm-accent-text);
-      font-weight: 600;
-    }
-    .rm-booking-slot.unavailable {
-      opacity: 0.35;
-      cursor: not-allowed;
-      text-decoration: line-through;
-      pointer-events: none;
-    }
-    /* ── Inline fields + confirm ─────────────────────────────────────────── */
-    .rm-booking-fields {
-      padding: 12px 16px 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .rm-booking-inline-field {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 12px;
-      border: 1px solid var(--rm-border);
-      border-radius: var(--rm-input-radius);
-      background: var(--rm-input-bg);
-      transition: border-color 0.15s;
-    }
-    .rm-booking-inline-field:focus-within {
-      border-color: var(--rm-primary, #2563eb);
-      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
-    }
-    .rm-booking-inline-field svg {
-      width: 16px;
-      height: 16px;
-      color: var(--rm-text-muted);
-      flex-shrink: 0;
-    }
-    .rm-booking-inline-field input {
-      flex: 1;
-      border: none;
-      outline: none;
-      font-size: 13px;
-      color: var(--rm-text);
-      background: transparent;
-      font-family: inherit;
-      min-width: 0;
-    }
-    .rm-booking-inline-field input::placeholder {
-      color: var(--rm-text-muted);
-    }
-    .rm-booking-confirm-btn {
-      width: 100%;
-      padding: 12px;
-      border: none;
-      border-radius: var(--rm-input-radius);
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--rm-brand-text, #ffffff);
-      cursor: pointer;
-      transition: opacity 0.15s;
-      margin-top: 4px;
-    }
-    .rm-booking-confirm-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .rm-booking-confirm-btn:not(:disabled):hover {
-      opacity: 0.9;
-    }
-    .rm-booking-error {
-      color: #f87171;
-      font-size: 12px;
-      text-align: center;
-      margin-top: 4px;
-      display: none;
-    }
-    .rm-booking-no-slots {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 32px 16px;
-      text-align: center;
-      color: var(--rm-text-muted);
-      font-size: 13px;
-    }
-    .rm-booking-no-slots svg {
-      width: 32px;
-      height: 32px;
-      margin-bottom: 8px;
-      opacity: 0.4;
-    }
-    /* ─── Booking Confirmation ─────────────────────────────────────────── */
-    .rm-booking-confirmed {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      flex: 1;
-      padding: 40px 24px;
-      text-align: center;
-    }
-    .rm-booking-confirmed-icon {
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 16px;
-    }
-    .rm-booking-confirmed-icon svg {
-      width: 28px;
-      height: 28px;
-      color: var(--rm-brand-text, #ffffff);
-    }
-    .rm-booking-confirmed h3 {
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--rm-text);
-      margin: 0 0 12px;
-    }
-    .rm-booking-confirmed-details {
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--rm-text);
-      margin-bottom: 4px;
-    }
-    .rm-booking-confirmed-time {
-      font-size: 13px;
-      color: var(--rm-text-secondary);
-      margin-bottom: 16px;
-    }
-    .rm-booking-confirmed-email {
-      font-size: 13px;
-      color: var(--rm-text-secondary);
-      line-height: 1.5;
-    }
-    .rm-booking-confirmed-email strong {
-      color: var(--rm-text);
-    }
-    .rm-booking-back-btn {
+    .rm-back-btn {
       margin-top: 24px;
       padding: 10px 24px;
       border: 1px solid var(--rm-border);
@@ -2004,7 +1703,7 @@
       cursor: pointer;
       transition: background 0.15s;
     }
-    .rm-booking-back-btn:hover { background: var(--rm-bg-tertiary); }
+    .rm-back-btn:hover { background: var(--rm-bg-tertiary); }
 
     @media (max-width: 480px) {
       .rm-widget-container.bottom-right,
@@ -2764,40 +2463,9 @@
   powered.innerHTML =
     'Powered by <a href="https://replymaven.com" target="_blank" rel="noopener">ReplyMaven</a>';
 
-  // ─── Booking View ────────────────────────────────────────────────────────────
-  const bookingView = document.createElement("div");
-  bookingView.className = "rm-booking-view";
-
-  // Booking header (reuses the .rm-header style)
-  const bookingHeader = document.createElement("div");
-  bookingHeader.className = "rm-header";
-  const bookingHeaderBack = document.createElement("button");
-  bookingHeaderBack.className = "rm-header-back";
-  bookingHeaderBack.innerHTML = ICONS.backArrow;
-  bookingHeaderBack.onclick = () => showHomeScreen();
-  const bookingHeaderTitle = document.createElement("div");
-  bookingHeaderTitle.style.cssText = "flex:1;min-width:0;";
-  bookingHeaderTitle.innerHTML =
-    '<div style="font-weight:600;font-size:14px;">Book a Meeting</div><div class="rm-booking-subtitle" style="font-size:12px;opacity:0.75;margin-top:1px;">Select a date & time</div>';
-  const bookingHeaderClose = document.createElement("button");
-  bookingHeaderClose.className = "rm-header-close";
-  bookingHeaderClose.innerHTML = ICONS.close;
-  bookingHeaderClose.onclick = () => closeChatWidget();
-  bookingHeader.appendChild(bookingHeaderBack);
-  bookingHeader.appendChild(bookingHeaderTitle);
-  bookingHeader.appendChild(bookingHeaderClose);
-  bookingView.appendChild(bookingHeader);
-
-  // Booking content container (swapped between step1/step2/step3)
-  const bookingContent = document.createElement("div");
-  bookingContent.style.cssText =
-    "display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;";
-  bookingView.appendChild(bookingContent);
-
   // Assemble chat window
   chatWindow.appendChild(homeView);
   chatWindow.appendChild(formView);
-  chatWindow.appendChild(bookingView);
   chatWindow.appendChild(chatView);
   chatWindow.appendChild(powered);
 
@@ -3055,13 +2723,12 @@
   });
 
   // ─── View State ──────────────────────────────────────────────────────────────
-  let currentView: "home" | "chat" | "form" | "booking" = "home";
+  let currentView: "home" | "chat" | "form" = "home";
 
   function showChatScreen() {
     currentView = "chat";
     homeView.classList.add("hidden");
     formView.classList.remove("active");
-    bookingView.classList.remove("active");
     chatView.classList.add("active");
     // Show intro message as the first bot message on first chat open
     if (introMessageText) {
@@ -3125,7 +2792,6 @@
     currentView = "home";
     homeView.classList.remove("hidden");
     formView.classList.remove("active");
-    bookingView.classList.remove("active");
     chatView.classList.remove("active");
   }
 
@@ -3133,17 +2799,7 @@
     currentView = "form";
     homeView.classList.add("hidden");
     chatView.classList.remove("active");
-    bookingView.classList.remove("active");
     formView.classList.add("active");
-  }
-
-  function showBookingScreen() {
-    currentView = "booking";
-    homeView.classList.add("hidden");
-    chatView.classList.remove("active");
-    formView.classList.remove("active");
-    bookingView.classList.add("active");
-    initBookingView();
   }
 
   // ─── Visibility Tracking ─────────────────────────────────────────────────────
@@ -3381,471 +3037,6 @@
     flushParagraph();
 
     return result.join("");
-  }
-
-  // ─── Booking Logic ───────────────────────────────────────────────────────────
-
-  let bookingConfig: {
-    enabled: boolean;
-    timezone?: string;
-    slotDuration?: number;
-    bookingWindowDays?: number;
-  } | null = null;
-  let bookingSelectedDate: string | null = null;
-  let bookingSelectedSlot: {
-    startTime: string;
-    endTime: string;
-    startTimeLocal: string;
-    endTimeLocal: string;
-  } | null = null;
-  let bookingStep: "slots" | "confirmed" = "slots";
-
-  function getVisitorTimezone(): string {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone;
-    } catch {
-      return "America/New_York";
-    }
-  }
-
-  function getBookingDates(): Array<{
-    dateStr: string;
-    label: string;
-    weekday: string;
-    day: number;
-    month: string;
-    isToday: boolean;
-  }> {
-    const dates: Array<{
-      dateStr: string;
-      label: string;
-      weekday: string;
-      day: number;
-      month: string;
-      isToday: boolean;
-    }> = [];
-    const today = new Date();
-    const windowDays = bookingConfig?.bookingWindowDays ?? 14;
-    for (let i = 0; i < windowDays; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, "0");
-      const day = String(d.getDate()).padStart(2, "0");
-      const dateStr = `${year}-${month}-${day}`;
-      const weekday = d.toLocaleDateString("en-US", { weekday: "short" });
-      const monthLabel = d.toLocaleDateString("en-US", { month: "short" });
-      dates.push({
-        dateStr,
-        label: `${monthLabel} ${d.getDate()}`,
-        weekday,
-        day: d.getDate(),
-        month: monthLabel,
-        isToday: i === 0,
-      });
-    }
-    return dates;
-  }
-
-  async function fetchBookingConfig(): Promise<void> {
-    try {
-      const res = await fetch(
-        `${baseUrl}/api/widget/${projectSlug}/booking/config`,
-      );
-      if (res.ok) {
-        bookingConfig = await res.json();
-      }
-    } catch {
-      // Silently fail
-    }
-  }
-
-  async function fetchSlots(dateStr: string): Promise<
-    Array<{
-      startTime: string;
-      endTime: string;
-      startTimeLocal: string;
-      endTimeLocal: string;
-      available: boolean;
-    }>
-  > {
-    try {
-      const tz = encodeURIComponent(getVisitorTimezone());
-      const res = await fetch(
-        `${baseUrl}/api/widget/${projectSlug}/booking/slots?date=${dateStr}&timezone=${tz}`,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        return data.slots || [];
-      }
-    } catch {
-      // Silently fail
-    }
-    return [];
-  }
-
-  async function submitBooking(data: {
-    visitorName: string;
-    visitorEmail: string;
-    visitorPhone?: string;
-    notes?: string;
-    startTime: string;
-    timezone: string;
-    conversationId?: string;
-  }): Promise<boolean> {
-    try {
-      const res = await fetch(`${baseUrl}/api/widget/${projectSlug}/booking`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
-  }
-
-  function initBookingView() {
-    bookingStep = "slots";
-    bookingSelectedSlot = null;
-    const dates = getBookingDates();
-    if (dates.length > 0 && !bookingSelectedDate) {
-      bookingSelectedDate = dates[0].dateStr;
-    }
-    renderBookingSlots();
-  }
-
-  function renderBookingSlots() {
-    const primary = config?.widget?.primaryColor || "#2563eb";
-    bookingContent.innerHTML = "";
-
-    // Reset header to default
-    const duration = bookingConfig?.slotDuration || 30;
-    bookingHeaderTitle.innerHTML = `<div style="font-weight:600;font-size:14px;">Book a Meeting</div><div class="rm-booking-subtitle" style="font-size:12px;opacity:0.75;margin-top:1px;">${duration} min · Select a date & time</div>`;
-    bookingHeaderBack.onclick = () => showHomeScreen();
-
-    // Single scrollable container for the entire view
-    const scroll = document.createElement("div");
-    scroll.className = "rm-booking-scroll";
-
-    const dates = getBookingDates();
-
-    // ── Month / year label row ──────────────────────────────────────────────
-    const selectedDateObj = bookingSelectedDate
-      ? new Date(bookingSelectedDate + "T12:00:00")
-      : new Date();
-    const monthRow = document.createElement("div");
-    monthRow.className = "rm-booking-month-row";
-
-    const monthLabel = document.createElement("span");
-    monthLabel.className = "rm-booking-month-label";
-    monthLabel.textContent = selectedDateObj.toLocaleDateString("en-US", {
-      month: "long",
-      year: "numeric",
-    });
-
-    const arrowsWrap = document.createElement("div");
-    arrowsWrap.className = "rm-booking-month-arrows";
-
-    const leftArrow = document.createElement("button");
-    leftArrow.className = "rm-booking-date-arrow";
-    leftArrow.innerHTML = ICONS.chevronLeft;
-
-    const rightArrow = document.createElement("button");
-    rightArrow.className = "rm-booking-date-arrow";
-    rightArrow.innerHTML = ICONS.chevronRight;
-
-    arrowsWrap.appendChild(leftArrow);
-    arrowsWrap.appendChild(rightArrow);
-    monthRow.appendChild(monthLabel);
-    monthRow.appendChild(arrowsWrap);
-    scroll.appendChild(monthRow);
-
-    // ── Date strip (horizontal scroll) ──────────────────────────────────────
-    const dateStrip = document.createElement("div");
-    dateStrip.className = "rm-booking-dates";
-
-    leftArrow.onclick = () => {
-      dateStrip.scrollBy({ left: -180, behavior: "smooth" });
-    };
-    rightArrow.onclick = () => {
-      dateStrip.scrollBy({ left: 180, behavior: "smooth" });
-    };
-
-    dates.forEach((d) => {
-      const pill = document.createElement("div");
-      pill.className = "rm-booking-date-pill";
-      if (d.dateStr === bookingSelectedDate) pill.classList.add("selected");
-      if (d.isToday) pill.classList.add("today");
-      pill.style.setProperty("--rm-primary", primary);
-      pill.style.setProperty("--rm-primary-rgb", hexToRgb(primary));
-
-      const weekday = document.createElement("span");
-      weekday.className = "rm-date-weekday";
-      weekday.textContent = d.weekday;
-
-      const day = document.createElement("span");
-      day.className = "rm-date-day";
-      day.textContent = String(d.day);
-
-      const month = document.createElement("span");
-      month.className = "rm-date-month";
-      month.textContent = d.month;
-
-      pill.appendChild(weekday);
-      pill.appendChild(day);
-      pill.appendChild(month);
-
-      pill.onclick = () => {
-        bookingSelectedDate = d.dateStr;
-        bookingSelectedSlot = null;
-        renderBookingSlots();
-      };
-      dateStrip.appendChild(pill);
-    });
-
-    scroll.appendChild(dateStrip);
-
-    // ── Slots section (2-col grid) ──────────────────────────────────────────
-    const slotsSection = document.createElement("div");
-    slotsSection.className = "rm-booking-slots-section";
-
-    const slotsLabel = document.createElement("div");
-    slotsLabel.className = "rm-booking-slots-label";
-    slotsLabel.textContent = "Available times";
-    slotsSection.appendChild(slotsLabel);
-
-    const slotsGrid = document.createElement("div");
-    slotsGrid.className = "rm-booking-slots-grid";
-
-    const loading = document.createElement("div");
-    loading.className = "rm-booking-slots-loading";
-    loading.textContent = "Loading available times...";
-    slotsGrid.appendChild(loading);
-    slotsSection.appendChild(slotsGrid);
-    scroll.appendChild(slotsSection);
-
-    // ── Inline fields + confirm button ──────────────────────────────────────
-    const fieldsArea = document.createElement("div");
-    fieldsArea.className = "rm-booking-fields";
-
-    // Email field
-    const emailRow = document.createElement("div");
-    emailRow.className = "rm-booking-inline-field";
-    emailRow.innerHTML = ICONS.mail;
-    const emailInput = document.createElement("input");
-    emailInput.type = "email";
-    emailInput.placeholder = "Email address";
-    if (visitorInfo.email) emailInput.value = visitorInfo.email;
-    emailRow.appendChild(emailInput);
-    fieldsArea.appendChild(emailRow);
-
-    // Phone field
-    const phoneRow = document.createElement("div");
-    phoneRow.className = "rm-booking-inline-field";
-    phoneRow.innerHTML = ICONS.phone;
-    const phoneInput = document.createElement("input");
-    phoneInput.type = "tel";
-    phoneInput.placeholder = "Phone (optional)";
-    fieldsArea.appendChild(phoneRow);
-    phoneRow.appendChild(phoneInput);
-
-    // Confirm button
-    const confirmBtn = document.createElement("button");
-    confirmBtn.className = "rm-booking-confirm-btn";
-    confirmBtn.style.backgroundColor = primary;
-    confirmBtn.textContent = "Confirm Booking";
-    fieldsArea.appendChild(confirmBtn);
-
-    // Error message
-    const errorEl = document.createElement("div");
-    errorEl.className = "rm-booking-error";
-    fieldsArea.appendChild(errorEl);
-
-    scroll.appendChild(fieldsArea);
-    bookingContent.appendChild(scroll);
-
-    // ── Confirm button handler ──────────────────────────────────────────────
-    confirmBtn.onclick = async () => {
-      const email = emailInput.value.trim();
-      const phone = phoneInput.value.trim();
-
-      if (!bookingSelectedSlot) {
-        errorEl.textContent = "Please select a time slot";
-        errorEl.style.display = "block";
-        return;
-      }
-      if (!email) {
-        errorEl.textContent = "Email is required";
-        errorEl.style.display = "block";
-        return;
-      }
-      if (!email.includes("@") || !email.includes(".")) {
-        errorEl.textContent = "Please enter a valid email address";
-        errorEl.style.display = "block";
-        return;
-      }
-
-      confirmBtn.disabled = true;
-      confirmBtn.textContent = "Booking...";
-      errorEl.style.display = "none";
-
-      const success = await submitBooking({
-        visitorName: visitorInfo.name || email.split("@")[0],
-        visitorEmail: email,
-        visitorPhone: phone || undefined,
-        startTime: bookingSelectedSlot!.startTime,
-        timezone: getVisitorTimezone(),
-        conversationId: conversationId || undefined,
-      });
-
-      if (success) {
-        renderBookingConfirmation(
-          visitorInfo.name || email.split("@")[0],
-          email,
-        );
-      } else {
-        confirmBtn.disabled = false;
-        confirmBtn.textContent = "Confirm Booking";
-        errorEl.textContent =
-          "This time slot may no longer be available. Please try another time.";
-        errorEl.style.display = "block";
-      }
-    };
-
-    // ── Fetch and render slots ──────────────────────────────────────────────
-    if (bookingSelectedDate) {
-      fetchSlots(bookingSelectedDate).then((slots) => {
-        slotsGrid.innerHTML = "";
-
-        if (slots.length === 0) {
-          const noSlots = document.createElement("div");
-          noSlots.className = "rm-booking-no-slots";
-          noSlots.innerHTML = ICONS.calendar;
-          const noSlotsText = document.createElement("span");
-          noSlotsText.textContent = "No available times on this date";
-          noSlots.appendChild(noSlotsText);
-          slotsGrid.style.display = "block";
-          slotsGrid.appendChild(noSlots);
-          return;
-        }
-
-        const hasAvailable = slots.some((s) => s.available);
-        if (!hasAvailable) {
-          const noSlots = document.createElement("div");
-          noSlots.className = "rm-booking-no-slots";
-          noSlots.innerHTML = ICONS.clock;
-          const noSlotsText = document.createElement("span");
-          noSlotsText.textContent = "All times are booked for this date";
-          noSlots.appendChild(noSlotsText);
-          slotsGrid.style.display = "block";
-          slotsGrid.appendChild(noSlots);
-          return;
-        }
-
-        slots.forEach((slot) => {
-          const el = document.createElement("div");
-          el.className = "rm-booking-slot";
-          el.style.setProperty("--rm-primary", primary);
-          el.style.setProperty("--rm-primary-rgb", hexToRgb(primary));
-          el.textContent = slot.startTimeLocal;
-
-          if (!slot.available) {
-            el.classList.add("unavailable");
-          } else {
-            if (bookingSelectedSlot?.startTime === slot.startTime) {
-              el.classList.add("selected");
-            }
-            el.onclick = () => {
-              bookingSelectedSlot = {
-                startTime: slot.startTime,
-                endTime: slot.endTime,
-                startTimeLocal: slot.startTimeLocal,
-                endTimeLocal: slot.endTimeLocal,
-              };
-              // Highlight selected, deselect others
-              slotsGrid
-                .querySelectorAll(".rm-booking-slot")
-                .forEach((s) => s.classList.remove("selected"));
-              el.classList.add("selected");
-            };
-          }
-          slotsGrid.appendChild(el);
-        });
-      });
-    }
-
-    // Scroll to selected date pill
-    setTimeout(() => {
-      const selected = dateStrip.querySelector(".selected");
-      if (selected) {
-        selected.scrollIntoView({ inline: "center", block: "nearest" });
-      }
-    }, 50);
-  }
-
-  function renderBookingConfirmation(name: string, email: string) {
-    bookingStep = "confirmed";
-    const primary = config?.widget?.primaryColor || "#2563eb";
-
-    bookingContent.innerHTML = "";
-    bookingHeaderTitle.innerHTML =
-      '<div style="font-weight:600;font-size:14px;">Booking Confirmed</div>';
-    bookingHeaderBack.onclick = () => showHomeScreen();
-
-    const confirmed = document.createElement("div");
-    confirmed.className = "rm-booking-confirmed";
-
-    const icon = document.createElement("div");
-    icon.className = "rm-booking-confirmed-icon";
-    icon.style.backgroundColor = primary;
-    icon.innerHTML = ICONS.check;
-
-    const h3 = document.createElement("h3");
-    h3.textContent = "Booking Confirmed!";
-
-    if (bookingSelectedDate && bookingSelectedSlot) {
-      const selectedDate = new Date(bookingSelectedDate + "T12:00:00");
-      const dateLabel = selectedDate.toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      });
-
-      const details = document.createElement("div");
-      details.className = "rm-booking-confirmed-details";
-      details.textContent = dateLabel;
-
-      const time = document.createElement("div");
-      time.className = "rm-booking-confirmed-time";
-      time.textContent = `${bookingSelectedSlot.startTimeLocal} - ${bookingSelectedSlot.endTimeLocal}`;
-
-      const emailMsg = document.createElement("div");
-      emailMsg.className = "rm-booking-confirmed-email";
-      emailMsg.innerHTML = `We'll send a calendar invite to<br><strong>${email}</strong>`;
-
-      const backBtn = document.createElement("button");
-      backBtn.className = "rm-booking-back-btn";
-      backBtn.textContent = "Back to Chat";
-      backBtn.onclick = () => {
-        bookingSelectedDate = null;
-        bookingSelectedSlot = null;
-        bookingHeaderTitle.innerHTML =
-          '<div style="font-weight:600;font-size:14px;">Book a Meeting</div>';
-        bookingHeaderBack.onclick = () => showHomeScreen();
-        showHomeScreen();
-      };
-
-      confirmed.appendChild(icon);
-      confirmed.appendChild(h3);
-      confirmed.appendChild(details);
-      confirmed.appendChild(time);
-      confirmed.appendChild(emailMsg);
-      confirmed.appendChild(backBtn);
-    }
-
-    bookingContent.appendChild(confirmed);
   }
 
   // ─── Page Targeting ──────────────────────────────────────────────────────────
@@ -4087,7 +3278,7 @@
           arrowEl.className = "rm-home-link-arrow";
           if (qa.type === "link") {
             arrowEl.innerHTML = ICONS.externalLink;
-          } else if (qa.type === "contact_form" || qa.type === "booking") {
+          } else if (qa.type === "contact_form") {
             arrowEl.innerHTML = ICONS.chevronRight;
           } else {
             // prompt type
@@ -4104,8 +3295,6 @@
               window.open(qa.action, "_blank", "noopener,noreferrer");
             } else if (qa.type === "contact_form") {
               showFormScreen();
-            } else if (qa.type === "booking") {
-              showBookingScreen();
             } else if (qa.type === "prompt") {
               showChatScreen();
               setTimeout(() => {
@@ -4242,7 +3431,12 @@
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ visitorId, data }),
+                body: JSON.stringify({
+                  visitorId,
+                  visitorName: visitorInfo.name,
+                  visitorEmail: visitorInfo.email,
+                  data,
+                }),
               },
             );
 
@@ -4255,6 +3449,28 @@
               submitBtn2.disabled = false;
               submitBtn2.textContent = "Send message";
               return;
+            }
+
+            const result = await res.json().catch(() => null);
+
+            if ((result as { visitorEmail?: string | null })?.visitorEmail) {
+              visitorInfo.email =
+                (result as { visitorEmail: string }).visitorEmail;
+            }
+            if ((result as { visitorName?: string | null })?.visitorName) {
+              visitorInfo.name =
+                (result as { visitorName: string }).visitorName;
+            }
+            if ((result as { conversationId?: string })?.conversationId) {
+              conversationId =
+                (result as { conversationId: string }).conversationId;
+              conversationStatus =
+                (result as { conversationStatus?: string | null })
+                  .conversationStatus ?? conversationStatus;
+              persistConversationId(conversationId);
+              startPolling();
+              inlineBarActions.classList.remove("has-actions");
+              await loadConversationHistory(false);
             }
 
             // Show success state
@@ -4278,9 +3494,9 @@
               cf.description || "We'll get back to you soon.";
 
             const formBackBtn = document.createElement("button");
-            formBackBtn.className = "rm-booking-back-btn";
+            formBackBtn.className = "rm-form-back-btn";
             formBackBtn.textContent = "Back to Chat";
-            formBackBtn.onclick = () => showHomeScreen();
+            formBackBtn.onclick = () => showChatScreen();
 
             success.appendChild(successIcon);
             success.appendChild(successTitle);
@@ -4295,13 +3511,6 @@
             submitBtn2.textContent = "Send message";
           }
         };
-      }
-
-      // ─── Booking Setup ──────────────────────────────────────────────────────
-      if (loadedConfig.bookingEnabled) {
-        fetchBookingConfig(); // Pre-load booking config
-
-        // Booking primary color already applied via CSS var(--rm-primary)
       }
 
       // Intro message — stored for lazy display on first chat open
@@ -4442,8 +3651,6 @@
               actionBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
             } else if (qa.type === "contact_form") {
               actionBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-            } else if (qa.type === "booking") {
-              actionBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
             }
 
             const labelSpan = document.createElement("span");
@@ -4458,10 +3665,6 @@
                 showChatScreen();
                 openChatWidget();
                 setTimeout(() => showFormScreen(), 100);
-              } else if (qa.type === "booking") {
-                showChatScreen();
-                openChatWidget();
-                setTimeout(() => showBookingScreen(), 100);
               } else if (qa.type === "prompt") {
                 showChatScreen();
                 openChatWidget();
@@ -4673,6 +3876,11 @@
         let botMessageEl: HTMLElement | null = null;
         let handoffDetected = false;
         let handoffEmail: string | null = null;
+        let teamRequestEvent: {
+          submitted: boolean;
+          needsEmail: boolean;
+          visitorEmail: string | null;
+        } | null = null;
         let resolvedDetected = false;
         let sseBuffer = "";
 
@@ -4711,16 +3919,14 @@
                   continue;
                 }
 
-                if (data.booking) {
-                  // Bot detected scheduling intent -> open booking UI
-                  if (botMessageEl) {
-                    botMessageEl.closest(".rm-message-row")?.remove();
-                    botMessageEl = null;
-                  }
+                if (data.teamRequest) {
+                  teamRequestEvent = {
+                    submitted: data.teamRequest.submitted === true,
+                    needsEmail: data.teamRequest.needsEmail === true,
+                    visitorEmail:
+                      data.teamRequest.visitorEmail || visitorInfo.email || null,
+                  };
                   hideTyping();
-                  if (bookingConfig?.enabled) {
-                    showBookingScreen();
-                  }
                   continue;
                 }
 
@@ -4787,18 +3993,16 @@
                     continue;
                   }
 
-                  // Client-side filter: if [BOOKING_REQUESTED] appears, open booking UI
-                  if (botMessage.includes("[BOOKING_REQUESTED]")) {
-                    if (botMessageEl) {
-                      botMessageEl.closest(".rm-message-row")?.remove();
-                      botMessageEl = null;
-                    }
-                    hideTyping();
-                    botMessage = "";
-                    if (bookingConfig?.enabled) {
-                      showBookingScreen();
-                    }
-                    continue;
+                  if (botMessage.includes("[TEAM_REQUEST_APPROVED]")) {
+                    const fallbackEmail = visitorInfo.email || null;
+                    teamRequestEvent = {
+                      submitted: !!fallbackEmail,
+                      needsEmail: !fallbackEmail,
+                      visitorEmail: fallbackEmail,
+                    };
+                    botMessage = botMessage
+                      .replace("[TEAM_REQUEST_APPROVED]", "")
+                      .trim();
                   }
 
                   // Client-side filter: if [RESOLVED] appears, mark as resolved
@@ -4843,6 +4047,12 @@
                   if (handoffDetected) {
                     showHandoffCard(handoffEmail);
                   }
+                  if (teamRequestEvent) {
+                    showTeamRequestCard({
+                      submitted: teamRequestEvent.submitted,
+                      email: teamRequestEvent.visitorEmail,
+                    });
+                  }
                   // Handle resolved -- close the conversation
                   if (resolvedDetected) {
                     conversationStatus = "closed";
@@ -4872,8 +4082,20 @@
         }
 
         // Edge case: stream ended without a done event but handoff was detected
-        if (handoffDetected && !document.querySelector(".rm-handoff-card")) {
+        if (
+          handoffDetected &&
+          !document.querySelector('[data-card-type="handoff"]')
+        ) {
           showHandoffCard(handoffEmail);
+        }
+        if (
+          teamRequestEvent &&
+          !document.querySelector('[data-card-type="team-request"]')
+        ) {
+          showTeamRequestCard({
+            submitted: teamRequestEvent.submitted,
+            email: teamRequestEvent.visitorEmail,
+          });
         }
         // Edge case: stream ended without a done event but resolved was detected
         if (resolvedDetected && conversationStatus !== "closed") {
@@ -5348,6 +4570,7 @@
 
     const card = document.createElement("div");
     card.className = "rm-handoff-card";
+    card.setAttribute("data-card-type", "handoff");
 
     // Icon
     const icon = document.createElement("div");
@@ -5424,7 +4647,74 @@
     input.placeholder = "Add any details for the team...";
   }
 
-  function appendEmailForm(card: HTMLElement) {
+  function showTeamRequestCard(options: {
+    submitted: boolean;
+    email: string | null;
+  }) {
+    const existing = document.querySelector('[data-card-type="team-request"]');
+    if (existing) return;
+
+    const primaryColor = getPrimaryColor();
+    const card = document.createElement("div");
+    card.className = "rm-handoff-card";
+    card.setAttribute("data-card-type", "team-request");
+
+    const icon = document.createElement("div");
+    icon.className = "rm-handoff-icon";
+    icon.style.backgroundColor = `rgba(${hexToRgb(primaryColor)}, 0.12)`;
+    icon.style.color = primaryColor;
+    icon.innerHTML = ICONS.headset;
+    card.appendChild(icon);
+
+    const title = document.createElement("div");
+    title.className = "rm-handoff-title";
+    title.textContent = options.submitted
+      ? "Request sent to our team"
+      : "I can pass this to our team";
+    card.appendChild(title);
+
+    const subtitle = document.createElement("div");
+    subtitle.className = "rm-handoff-subtitle";
+    subtitle.textContent = options.submitted
+      ? options.email
+        ? `We'll review this and follow up at ${options.email}.`
+        : "We'll review this and follow up soon."
+      : "Leave your email so the team can follow up.";
+    card.appendChild(subtitle);
+
+    if (options.submitted) {
+      const confirmed = document.createElement("div");
+      confirmed.className = "rm-handoff-confirmed";
+      confirmed.innerHTML = ICONS.check;
+      const confirmText = document.createElement("span");
+      confirmText.textContent = options.email
+        ? `Submitted for review. We'll use ${options.email}.`
+        : "Submitted for review.";
+      confirmed.appendChild(confirmText);
+      card.appendChild(confirmed);
+    } else {
+      appendEmailForm(card, {
+        successText: (email, result) =>
+          result?.teamRequestSubmitted
+            ? `Thanks! I passed this to the team. They'll follow up at ${email}`
+            : `Thanks! We'll reach out at ${email}`,
+      });
+    }
+
+    messagesContainer.insertBefore(card, typingRow);
+    input.placeholder = "Add more details if needed...";
+    scrollToBottom();
+  }
+
+  function appendEmailForm(
+    card: HTMLElement,
+    options?: {
+      successText?: (
+        email: string,
+        result: { teamRequestSubmitted?: boolean } | null,
+      ) => string;
+    },
+  ) {
     const primaryColor = getPrimaryColor();
 
     const form = document.createElement("div");
@@ -5448,8 +4738,9 @@
       emailInput.disabled = true;
 
       try {
+        let responseData: { teamRequestSubmitted?: boolean } | null = null;
         if (conversationId) {
-          await fetch(
+          const response = await fetch(
             `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/email`,
             {
               method: "POST",
@@ -5457,6 +4748,10 @@
               body: JSON.stringify({ email }),
             },
           );
+          if (!response.ok) {
+            throw new Error("Failed to save email");
+          }
+          responseData = await response.json().catch(() => null);
         }
         // Update local state
         visitorInfo.email = email;
@@ -5472,7 +4767,9 @@
         confirmed.className = "rm-handoff-confirmed";
         confirmed.innerHTML = ICONS.check;
         const confirmText = document.createElement("span");
-        confirmText.textContent = `Thanks! We'll reach out at ${email}`;
+        confirmText.textContent = options?.successText
+          ? options.successText(email, responseData)
+          : `Thanks! We'll reach out at ${email}`;
         confirmed.appendChild(confirmText);
         card.appendChild(confirmed);
         scrollToBottom();
@@ -5690,7 +4987,7 @@
 
   // ─── Conversation History Loading ────────────────────────────────────────────
 
-  async function loadConversationHistory() {
+  async function loadConversationHistory(openChat = true) {
     if (!conversationId) return;
 
     try {
@@ -5724,8 +5021,10 @@
         // Clear intro message — history already contains the conversation
         introMessageText = null;
         pendingIntroMessage = null;
-        // Switch to chat view since we have history
-        showChatScreen();
+        if (openChat) {
+          // Switch to chat view since we have history
+          showChatScreen();
+        }
 
         for (const msg of msgs) {
           const el = addMessageToUI(

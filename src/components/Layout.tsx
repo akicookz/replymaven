@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   MessageSquare,
   FolderOpen,
-  Calendar,
   Mail,
   Palette,
   Bot,
@@ -103,11 +102,6 @@ function Layout() {
           label: "Knowledgebase",
           href: `/app/projects/${currentProject.id}/knowledgebase`,
           icon: FolderOpen,
-        },
-        {
-          label: "Bookings",
-          href: `/app/projects/${currentProject.id}/bookings`,
-          icon: Calendar,
         },
         {
           label: "Contact Form",

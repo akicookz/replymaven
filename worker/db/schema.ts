@@ -157,7 +157,7 @@ export const quickActions = sqliteTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     type: text("type", {
-      enum: ["prompt", "link", "contact_form", "booking"],
+      enum: ["prompt", "link", "contact_form"],
     })
       .notNull()
       .default("prompt"),
@@ -409,100 +409,6 @@ export type ContactFormSubmissionRow =
 export type NewContactFormSubmissionRow =
   typeof contactFormSubmissions.$inferInsert;
 
-// ─── Booking Config ───────────────────────────────────────────────────────────
-
-export const bookingConfig = sqliteTable(
-  "booking_config",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
-    timezone: text("timezone").notNull().default("America/New_York"),
-    slotDuration: integer("slot_duration").notNull().default(30), // 15, 30, or 60 minutes
-    bufferTime: integer("buffer_time").notNull().default(0), // minutes between slots
-    bookingWindowDays: integer("booking_window_days").notNull().default(14),
-    minAdvanceHours: integer("min_advance_hours").notNull().default(1),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .$onUpdate(() => new Date())
-      .notNull(),
-  },
-  (table) => [uniqueIndex("idx_booking_config_project").on(table.projectId)],
-);
-
-export type BookingConfigRow = typeof bookingConfig.$inferSelect;
-export type NewBookingConfigRow = typeof bookingConfig.$inferInsert;
-
-// ─── Availability Rules ──────────────────────────────────────────────────────
-
-export const availabilityRules = sqliteTable(
-  "availability_rules",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    dayOfWeek: integer("day_of_week").notNull(), // 0=Sunday, 6=Saturday
-    startTime: text("start_time").notNull(), // "09:00" HH:mm in owner timezone
-    endTime: text("end_time").notNull(), // "17:00" HH:mm in owner timezone
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .notNull(),
-  },
-  (table) => [
-    index("idx_availability_rules_project").on(table.projectId),
-    index("idx_availability_rules_day").on(table.projectId, table.dayOfWeek),
-  ],
-);
-
-export type AvailabilityRuleRow = typeof availabilityRules.$inferSelect;
-export type NewAvailabilityRuleRow = typeof availabilityRules.$inferInsert;
-
-// ─── Bookings ─────────────────────────────────────────────────────────────────
-
-export const bookings = sqliteTable(
-  "bookings",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    conversationId: text("conversation_id").references(() => conversations.id, {
-      onDelete: "set null",
-    }),
-    visitorName: text("visitor_name").notNull(),
-    visitorEmail: text("visitor_email").notNull(),
-    visitorPhone: text("visitor_phone"),
-    notes: text("notes"),
-    startTime: integer("start_time", { mode: "timestamp" }).notNull(),
-    endTime: integer("end_time", { mode: "timestamp" }).notNull(),
-    timezone: text("timezone").notNull(), // visitor's timezone at time of booking
-    status: text("status", { enum: ["confirmed", "cancelled"] })
-      .notNull()
-      .default("confirmed"),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .$onUpdate(() => new Date())
-      .notNull(),
-  },
-  (table) => [
-    index("idx_bookings_project").on(table.projectId),
-    index("idx_bookings_project_start").on(table.projectId, table.startTime),
-    index("idx_bookings_status").on(table.status),
-  ],
-);
-
-export type BookingRow = typeof bookings.$inferSelect;
-export type NewBookingRow = typeof bookings.$inferInsert;
-
 // ─── Tools ────────────────────────────────────────────────────────────────────
 
 export const tools = sqliteTable(
@@ -741,9 +647,6 @@ export const schema = {
   cannedResponses,
   contactFormConfig,
   contactFormSubmissions,
-  bookingConfig,
-  availabilityRules,
-  bookings,
   subscriptions,
   teamMembers,
   usage,

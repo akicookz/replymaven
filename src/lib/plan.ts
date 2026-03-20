@@ -10,7 +10,6 @@ export interface PlanLimits {
   autoCannedDraft: boolean;
   customCss: boolean;
   tools: boolean;
-  booking: boolean;
 }
 
 type BooleanFeature = {

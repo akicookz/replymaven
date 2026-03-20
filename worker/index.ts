@@ -15,7 +15,6 @@ import { TelegramService } from "./services/telegram-service";
 import { CannedResponseService } from "./services/canned-response-service";
 import { DashboardService } from "./services/dashboard-service";
 import { CrawlService, type CrawlMessage } from "./services/crawl-service";
-import { BookingService } from "./services/booking-service";
 import { EmailService } from "./services/email-service";
 import { ToolService } from "./services/tool-service";
 import { GuidelineService } from "./services/guideline-service";
@@ -52,9 +51,6 @@ import {
   updateConversationPublicSchema,
   updateContactFormConfigSchema,
   submitContactFormSchema,
-  updateBookingConfigSchema,
-  setAvailabilityRulesSchema,
-  createBookingSchema,
   createToolSchema,
   updateToolSchema,
   testToolSchema,
@@ -120,6 +116,213 @@ function validate<T>(
   if (result.success) return { success: true, data: result.data as T };
   const message = result.error?.issues?.[0]?.message ?? "Validation failed";
   return { success: false, error: message };
+}
+
+function parseConversationMetadata(
+  rawMetadata: string | null | undefined,
+): Record<string, unknown> {
+  if (!rawMetadata) return {};
+
+  try {
+    const parsed = JSON.parse(rawMetadata) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Ignore malformed metadata
+  }
+
+  return {};
+}
+
+function formatTeamRequestTranscript(
+  conversationHistory: Array<{ role: string; content: string }>,
+): string {
+  return conversationHistory
+    .filter((message) => message.content.trim())
+    .slice(-12)
+    .map((message) => `${capitalizeRole(message.role)}: ${message.content.trim()}`)
+    .join("\n\n")
+    .slice(0, 5000);
+}
+
+function capitalizeRole(role: string): string {
+  if (!role) return "Unknown";
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+function formatSubmissionValue(value: string | null | undefined): string {
+  return value?.trim() || "Not provided";
+}
+
+function isLikelyEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function extractContactFormEmail(
+  formData: Record<string, string>,
+): string | null {
+  for (const [key, value] of Object.entries(formData)) {
+    if (!/email/i.test(key)) continue;
+    if (isLikelyEmail(value)) return value.trim();
+  }
+
+  return null;
+}
+
+function extractContactFormName(
+  formData: Record<string, string>,
+): string | null {
+  for (const [key, value] of Object.entries(formData)) {
+    const normalizedKey = key.trim().toLowerCase();
+    if (normalizedKey.includes("company")) continue;
+    if (!normalizedKey.includes("name")) continue;
+
+    const trimmedValue = value.trim();
+    if (!trimmedValue) continue;
+    return trimmedValue.slice(0, 100);
+  }
+
+  return null;
+}
+
+function buildContactFormConversationMessage(
+  formData: Record<string, string>,
+): string {
+  const lines = ["Contact form submission"];
+
+  for (const [key, value] of Object.entries(formData)) {
+    const trimmedValue = value.trim();
+    if (!trimmedValue) continue;
+    lines.push(`${key}: ${trimmedValue}`);
+  }
+
+  return lines.join("\n");
+}
+
+function buildContactFormRecord(
+  formData: Record<string, string>,
+  visitorName: string | null,
+  visitorEmail: string | null,
+): Record<string, string> {
+  const enrichedData = { ...formData };
+
+  if (visitorName && !extractContactFormName(enrichedData)) {
+    enrichedData["Visitor name"] = visitorName;
+  }
+
+  if (visitorEmail && !extractContactFormEmail(enrichedData)) {
+    enrichedData["Visitor email"] = visitorEmail;
+  }
+
+  return enrichedData;
+}
+
+async function createTeamRequestSubmission(params: {
+  aiService: AiService;
+  chatService: ChatService;
+  widgetService: WidgetService;
+  projectService: ProjectService;
+  telegramService?: TelegramService;
+  project: { id: string; name: string };
+  conversation: {
+    id: string;
+    visitorId: string | null;
+    visitorName: string | null;
+    visitorEmail: string | null;
+  };
+  conversationHistory: Array<{ role: string; content: string }>;
+  summary: string | null;
+  email: string;
+  settings: {
+    companyName?: string | null;
+    telegramBotToken?: string | null;
+    telegramChatId?: string | null;
+  } | null;
+  env: {
+    BETTER_AUTH_URL: string;
+    RESEND_API_KEY?: string;
+  };
+  executionCtx: ExecutionContext;
+}): Promise<{ submissionId: string; summary: string }> {
+  const summary =
+    params.summary?.trim() ||
+    (await params.aiService.summarizeTeamRequest(params.conversationHistory)) ||
+    "Visitor asked for team follow-up.";
+  const transcript =
+    formatTeamRequestTranscript(params.conversationHistory) ||
+    "No recent chat history available.";
+
+  const formData = {
+    Type: "AI team request",
+    "Conversation ID": params.conversation.id,
+    "Requester name": formatSubmissionValue(params.conversation.visitorName),
+    "Requester email": params.email,
+    "Request summary": summary,
+    "Recent chat": transcript,
+  };
+
+  const submission = await params.widgetService.createContactFormSubmission(
+    params.project.id,
+    params.conversation.visitorId ?? undefined,
+    formData,
+  );
+
+  await params.chatService.updateConversation(
+    params.conversation.id,
+    params.project.id,
+    {
+      metadata: JSON.stringify({
+        teamRequestPending: false,
+        teamRequestSubmittedAt: new Date().toISOString(),
+        teamRequestSubmissionId: submission.id,
+        teamRequestSummary: summary,
+      }),
+    },
+  );
+
+  if (
+    params.telegramService &&
+    params.settings?.telegramBotToken &&
+    params.settings?.telegramChatId
+  ) {
+    params.executionCtx.waitUntil(
+      params.telegramService
+        .notifyContactForm(
+          params.settings.telegramBotToken,
+          params.settings.telegramChatId,
+          formData,
+          params.env.BETTER_AUTH_URL,
+          params.project.id,
+        )
+        .catch(() => {
+          // Silently ignore Telegram errors
+        }),
+    );
+  }
+
+  if (params.env.RESEND_API_KEY) {
+    const emailService = new EmailService(params.env.RESEND_API_KEY);
+    const ownerEmail = await params.projectService.getOwnerEmail(params.project.id);
+    if (ownerEmail) {
+      const projectName = params.settings?.companyName ?? params.project.name;
+      const dashboardUrl = `${params.env.BETTER_AUTH_URL}/app/projects/${params.project.id}/contact-form`;
+      params.executionCtx.waitUntil(
+        emailService
+          .sendContactFormNotification({
+            ownerEmail,
+            projectName,
+            formData,
+            dashboardUrl,
+          })
+          .catch((err) => {
+            console.error("Team request email failed:", err);
+          }),
+      );
+    }
+  }
+
+  return { submissionId: submission.id, summary };
 }
 
 // ─── Auto-draft canned response helper ────────────────────────────────────────
@@ -893,16 +1096,13 @@ const app = new Hono<HonoAppContext>()
       parsed.data.content,
     );
 
-    // Check if booking is enabled, load enabled tools and guidelines in parallel
-    const bookingService = new BookingService(db);
+    // Load enabled tools and guidelines in parallel
     const toolService = new ToolService(db);
     const guidelineService = new GuidelineService(db);
-    const [bookingCfg, enabledTools, enabledGuidelines] = await Promise.all([
-      bookingService.getBookingConfig(project.id),
+    const [enabledTools, enabledGuidelines] = await Promise.all([
       toolService.getEnabledTools(project.id),
       guidelineService.getEnabledByProject(project.id),
     ]);
-    const bookingEnabled = bookingCfg?.enabled ?? false;
 
     // Per-project rate limit for tool-enabled conversations (100 tool-bearing messages per minute)
     if (enabledTools.length > 0) {
@@ -934,15 +1134,11 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Extract agent handback instructions from conversation metadata
-    let agentHandbackInstructions: string | null = null;
-    if (conversation.metadata) {
-      try {
-        const meta = JSON.parse(conversation.metadata);
-        agentHandbackInstructions = meta.agentHandbackInstructions ?? null;
-      } catch {
-        // Ignore malformed metadata
-      }
-    }
+    const conversationMetadata = parseConversationMetadata(conversation.metadata);
+    const agentHandbackInstructions =
+      typeof conversationMetadata.agentHandbackInstructions === "string"
+        ? conversationMetadata.agentHandbackInstructions
+        : null;
 
     // Build system prompt and stream response
     const systemPrompt = aiService.buildSystemPrompt(
@@ -958,7 +1154,6 @@ const app = new Hono<HonoAppContext>()
       cannedMatch ? cannedMatch.response : null,
       conversationSummary,
       {
-        bookingEnabled,
         hasTools: enabledTools.length > 0,
         guidelines: enabledGuidelines.map((g) => ({
           condition: g.condition,
@@ -1192,17 +1387,107 @@ const app = new Hono<HonoAppContext>()
             );
           }
 
-          // Check if booking was requested
-          if (fullResponse.includes("[BOOKING_REQUESTED]")) {
-            fullResponse = fullResponse.replace(
-              "[BOOKING_REQUESTED]",
-              "I'd be happy to help you schedule a meeting! Let me open our booking calendar for you.",
-            );
+          // Check if the visitor approved a team review request
+          if (fullResponse.includes("[TEAM_REQUEST_APPROVED]")) {
+            const existingSubmissionId =
+              typeof conversationMetadata.teamRequestSubmissionId === "string"
+                ? conversationMetadata.teamRequestSubmissionId
+                : null;
+            const existingSummary =
+              typeof conversationMetadata.teamRequestSummary === "string"
+                ? conversationMetadata.teamRequestSummary
+                : null;
+            const cleanedResponse = fullResponse
+              .replace("[TEAM_REQUEST_APPROVED]", "")
+              .trim();
+            const teamRequestSummary =
+              existingSummary ||
+              (await aiService.summarizeTeamRequest(conversationHistory));
 
-            // Send booking event to widget
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ booking: true })}\n\n`),
-            );
+            fullResponse =
+              cleanedResponse ||
+              "I’ve passed this along for the team to review.";
+
+            if (existingSubmissionId) {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    teamRequest: {
+                      submitted: true,
+                      needsEmail: false,
+                      visitorEmail: conversation.visitorEmail ?? null,
+                    },
+                  })}\n\n`,
+                ),
+              );
+            } else if (conversation.visitorEmail) {
+              const telegramService =
+                settings?.telegramBotToken && settings?.telegramChatId
+                  ? new TelegramService(db)
+                  : undefined;
+              const submission = await createTeamRequestSubmission({
+                aiService,
+                chatService,
+                widgetService: new WidgetService(db),
+                projectService,
+                telegramService,
+                project,
+                conversation,
+                conversationHistory,
+                summary: teamRequestSummary,
+                email: conversation.visitorEmail,
+                settings,
+                env: {
+                  BETTER_AUTH_URL: c.env.BETTER_AUTH_URL,
+                  RESEND_API_KEY: c.env.RESEND_API_KEY,
+                },
+                executionCtx: c.executionCtx,
+              });
+
+              conversationMetadata.teamRequestPending = false;
+              conversationMetadata.teamRequestSubmissionId =
+                submission.submissionId;
+              conversationMetadata.teamRequestSummary = submission.summary;
+              conversationMetadata.teamRequestSubmittedAt =
+                new Date().toISOString();
+
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    teamRequest: {
+                      submitted: true,
+                      needsEmail: false,
+                      visitorEmail: conversation.visitorEmail,
+                    },
+                  })}\n\n`,
+                ),
+              );
+            } else {
+              await chatService.updateConversation(conversationId, project.id, {
+                metadata: JSON.stringify({
+                  teamRequestPending: true,
+                  teamRequestSummary,
+                  teamRequestRequestedAt: new Date().toISOString(),
+                }),
+              });
+
+              conversationMetadata.teamRequestPending = true;
+              conversationMetadata.teamRequestSummary = teamRequestSummary;
+              conversationMetadata.teamRequestRequestedAt =
+                new Date().toISOString();
+
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    teamRequest: {
+                      submitted: false,
+                      needsEmail: true,
+                      visitorEmail: null,
+                    },
+                  })}\n\n`,
+                ),
+              );
+            }
           }
 
           // Check if conversation was resolved by the bot
@@ -1351,6 +1636,67 @@ const app = new Hono<HonoAppContext>()
       project.id,
       parsed.data.email,
     );
+
+    const metadata = parseConversationMetadata(conversation.metadata);
+    const shouldSubmitTeamRequest =
+      metadata.teamRequestPending === true &&
+      typeof metadata.teamRequestSubmissionId !== "string";
+
+    if (shouldSubmitTeamRequest) {
+      const history = await chatService.getMessages(conversationId);
+      const conversationHistory = history
+        .filter((message) => message.role !== "bot" || message.content)
+        .slice(-20)
+        .map((message) => ({
+          role: message.role as "visitor" | "bot" | "agent",
+          content: message.content,
+        }));
+      const settings = await projectService.getSettings(project.id);
+      const aiService = new AiService({
+        model: c.env.AI_MODEL,
+        geminiApiKey: c.env.GEMINI_API_KEY,
+        openaiApiKey: c.env.OPENAI_API_KEY,
+      });
+      const telegramService =
+        settings?.telegramBotToken && settings?.telegramChatId
+          ? new TelegramService(db)
+          : undefined;
+      const summary =
+        typeof metadata.teamRequestSummary === "string"
+          ? metadata.teamRequestSummary
+          : null;
+
+      const submission = await createTeamRequestSubmission({
+        aiService,
+        chatService,
+        widgetService: new WidgetService(db),
+        projectService,
+        telegramService,
+        project,
+        conversation: {
+          id: conversation.id,
+          visitorId: conversation.visitorId,
+          visitorName: conversation.visitorName,
+          visitorEmail: parsed.data.email,
+        },
+        conversationHistory,
+        summary,
+        email: parsed.data.email,
+        settings,
+        env: {
+          BETTER_AUTH_URL: c.env.BETTER_AUTH_URL,
+          RESEND_API_KEY: c.env.RESEND_API_KEY,
+        },
+        executionCtx: c.executionCtx,
+      });
+
+      return c.json({
+        ok: true,
+        teamRequestSubmitted: true,
+        submissionId: submission.submissionId,
+      });
+    }
+
     return c.json({ ok: true });
   })
 
@@ -1416,6 +1762,7 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const widgetService = new WidgetService(db);
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
 
     // Verify contact form is enabled
     const formConfig = await widgetService.getContactFormConfig(project.id);
@@ -1423,10 +1770,69 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Contact form is not enabled" }, 400);
     }
 
+    const visitorId = parsed.data.visitorId ?? crypto.randomUUID();
+    const visitorEmail =
+      parsed.data.visitorEmail ?? extractContactFormEmail(parsed.data.data);
+    const visitorName =
+      parsed.data.visitorName ?? extractContactFormName(parsed.data.data);
+    const contactFormData = buildContactFormRecord(
+      parsed.data.data,
+      visitorName,
+      visitorEmail,
+    );
+
+    let conversation =
+      await chatService.getActiveConversationByVisitor(project.id, visitorId);
+
+    if (conversation) {
+      const updatedConversation = await chatService.updateConversation(
+        conversation.id,
+        project.id,
+        {
+          visitorName: visitorName ?? undefined,
+          visitorEmail: visitorEmail ?? undefined,
+        },
+      );
+      conversation = updatedConversation ?? conversation;
+    } else {
+      const cf = c.req.raw.cf as CfProperties | undefined;
+      const metadata: Record<string, string> = {
+        source: "contact_form",
+      };
+      if (cf?.country) metadata.country = String(cf.country);
+      if (cf?.city) metadata.city = String(cf.city);
+      if (cf?.region) metadata.region = String(cf.region);
+      if (cf?.timezone) metadata.timezone = String(cf.timezone);
+      if (ip !== "unknown") metadata.ip = ip;
+      const userAgent = c.req.header("user-agent");
+      if (userAgent) metadata.userAgent = userAgent;
+
+      conversation = await chatService.createConversation({
+        projectId: project.id,
+        visitorId,
+        visitorName: visitorName ?? null,
+        visitorEmail: visitorEmail ?? null,
+        metadata: JSON.stringify(metadata),
+      });
+    }
+
     const submission = await widgetService.createContactFormSubmission(
       project.id,
-      parsed.data.visitorId,
-      parsed.data.data,
+      visitorId,
+      contactFormData,
+    );
+
+    const contactFormMessage = buildContactFormConversationMessage(contactFormData);
+
+    await chatService.addMessage(
+      {
+        conversationId: conversation.id,
+        role: "visitor",
+        content: contactFormMessage,
+        imageUrl: null,
+        sources: null,
+      },
+      project.id,
     );
 
     // Notify via Telegram if configured
@@ -1434,17 +1840,28 @@ const app = new Hono<HonoAppContext>()
     if (settings?.telegramBotToken && settings?.telegramChatId) {
       const telegramService = new TelegramService(db);
       c.executionCtx.waitUntil(
-        telegramService
-          .notifyContactForm(
-            settings.telegramBotToken,
-            settings.telegramChatId,
-            parsed.data.data,
-            c.env.BETTER_AUTH_URL,
-            project.id,
-          )
-          .catch(() => {
-            // Silently ignore Telegram errors
-          }),
+        (conversation.status === "waiting_agent" ||
+        conversation.status === "agent_replied"
+          ? telegramService.forwardVisitorMessage(
+              settings.telegramBotToken,
+              settings.telegramChatId,
+              conversation.visitorName,
+              contactFormMessage,
+              conversation.id,
+              conversation.telegramThreadId
+                ? parseInt(conversation.telegramThreadId, 10)
+                : undefined,
+            )
+          : telegramService.notifyContactForm(
+              settings.telegramBotToken,
+              settings.telegramChatId,
+              contactFormData,
+              c.env.BETTER_AUTH_URL,
+              project.id,
+            )
+        ).catch(() => {
+          // Silently ignore Telegram errors
+        }),
       );
     }
 
@@ -1460,7 +1877,7 @@ const app = new Hono<HonoAppContext>()
             .sendContactFormNotification({
               ownerEmail,
               projectName,
-              formData: parsed.data.data,
+              formData: contactFormData,
               dashboardUrl,
             })
             .catch((err) => {
@@ -1470,180 +1887,16 @@ const app = new Hono<HonoAppContext>()
       }
     }
 
-    return c.json(submission, 201);
-  })
-
-  // ─── Booking Config (public - for widget) ──────────────────────────────────
-  .get("/api/widget/:projectSlug/booking/config", async (c) => {
-    const ip = getClientIp(c);
-    if (!checkRateLimit(`bconf:${ip}`, 30, 60_000)) {
-      return c.json({ error: "Rate limit exceeded" }, 429);
-    }
-
-    const slug = c.req.param("projectSlug");
-    const db = drizzle(c.env.DB);
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectBySlugPublic(slug);
-    if (!project) return c.json({ error: "Project not found" }, 404);
-
-    const bookingService = new BookingService(db);
-    const config = await bookingService.getBookingConfig(project.id);
-
-    if (!config || !config.enabled) {
-      return c.json({ enabled: false });
-    }
-
-    return c.json({
-      enabled: true,
-      timezone: config.timezone,
-      slotDuration: config.slotDuration,
-      bookingWindowDays: config.bookingWindowDays,
-    });
-  })
-
-  // ─── Available Slots (public - for widget) ────────────────────────────────
-  .get("/api/widget/:projectSlug/booking/slots", async (c) => {
-    const ip = getClientIp(c);
-    if (!checkRateLimit(`bslots:${ip}`, 60, 60_000)) {
-      return c.json({ error: "Rate limit exceeded" }, 429);
-    }
-
-    const slug = c.req.param("projectSlug");
-    const date = c.req.query("date"); // YYYY-MM-DD
-    const visitorTimezone = c.req.query("timezone") ?? "America/New_York";
-
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return c.json(
-        { error: "Valid date parameter required (YYYY-MM-DD)" },
-        400,
-      );
-    }
-
-    const db = drizzle(c.env.DB);
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectBySlugPublic(slug);
-    if (!project) return c.json({ error: "Project not found" }, 404);
-
-    const bookingService = new BookingService(db);
-    const slots = await bookingService.getAvailableSlots(
-      project.id,
-      date,
-      visitorTimezone,
+    return c.json(
+      {
+        ...submission,
+        conversationId: conversation.id,
+        conversationStatus: conversation.status,
+        visitorEmail,
+        visitorName,
+      },
+      201,
     );
-
-    return c.json({ slots });
-  })
-
-  // ─── Create Booking (public - from widget) ────────────────────────────────
-  .post("/api/widget/:projectSlug/booking", async (c) => {
-    const ip = getClientIp(c);
-    if (!checkRateLimit(`book:${ip}`, 5, 60_000)) {
-      return c.json({ error: "Rate limit exceeded" }, 429);
-    }
-
-    const slug = c.req.param("projectSlug");
-    const db = drizzle(c.env.DB);
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectBySlugPublic(slug);
-    if (!project) return c.json({ error: "Project not found" }, 404);
-
-    const body = await c.req.json();
-    const parsed = validate(createBookingSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
-    const bookingService = new BookingService(db);
-
-    let booking;
-    try {
-      booking = await bookingService.createBooking({
-        projectId: project.id,
-        visitorName: parsed.data.visitorName,
-        visitorEmail: parsed.data.visitorEmail,
-        visitorPhone: parsed.data.visitorPhone,
-        notes: parsed.data.notes,
-        startTime: parsed.data.startTime,
-        timezone: parsed.data.timezone,
-        conversationId: parsed.data.conversationId,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Booking failed";
-      return c.json({ error: message }, 409);
-    }
-
-    // Send confirmation emails and Telegram notification in background
-    const settings = await projectService.getSettings(project.id);
-    const bookingConfig = await bookingService.getBookingConfig(project.id);
-    const projectName = settings?.companyName ?? project.name;
-
-    const backgroundTasks: Promise<unknown>[] = [];
-
-    if (c.env.RESEND_API_KEY) {
-      const emailService = new EmailService(c.env.RESEND_API_KEY);
-      const ownerEmail = await projectService.getOwnerEmail(project.id);
-
-      backgroundTasks.push(
-        Promise.all([
-          emailService.sendBookingConfirmation({
-            visitorName: booking.visitorName,
-            visitorEmail: booking.visitorEmail,
-            visitorPhone: booking.visitorPhone,
-            notes: booking.notes,
-            startTime: new Date(booking.startTime),
-            endTime: new Date(booking.endTime),
-            timezone: booking.timezone,
-            projectName,
-          }),
-          emailService.sendBookingNotification({
-            visitorName: booking.visitorName,
-            visitorEmail: booking.visitorEmail,
-            visitorPhone: booking.visitorPhone,
-            notes: booking.notes,
-            startTime: new Date(booking.startTime),
-            endTime: new Date(booking.endTime),
-            timezone: booking.timezone,
-            projectName,
-            ownerEmail: ownerEmail ?? undefined,
-            ownerTimezone: bookingConfig?.timezone,
-          }),
-        ]).catch((err) => {
-          console.error("Booking email failed:", err);
-        }),
-      );
-    }
-
-    // Notify via Telegram if configured
-    if (settings?.telegramBotToken && settings?.telegramChatId) {
-      const telegramService = new TelegramService(db);
-      backgroundTasks.push(
-        telegramService
-          .notifyNewBooking(
-            settings.telegramBotToken,
-            settings.telegramChatId,
-            {
-              visitorName: booking.visitorName,
-              visitorEmail: booking.visitorEmail,
-              visitorPhone: booking.visitorPhone,
-              notes: booking.notes,
-              startTime: new Date(booking.startTime),
-              endTime: new Date(booking.endTime),
-              timezone: booking.timezone,
-            },
-            projectName,
-            c.env.BETTER_AUTH_URL,
-            project.id,
-            parsed.data.conversationId,
-          )
-          .catch((err) => {
-            console.error("Booking Telegram notification failed:", err);
-          }),
-      );
-    }
-
-    if (backgroundTasks.length > 0) {
-      c.executionCtx.waitUntil(Promise.all(backgroundTasks));
-    }
-
-    return c.json(booking, 201);
   })
 
   // ─── Telegram Webhook ───────────────────────────────────────────────────────
@@ -2963,8 +3216,8 @@ const app = new Hono<HonoAppContext>()
 
     const widgetService = new WidgetService(db);
 
-    // Enforce max 1 contact_form and max 1 booking action per project
-    if (parsed.data.type === "contact_form" || parsed.data.type === "booking") {
+    // Enforce max 1 contact_form action per project
+    if (parsed.data.type === "contact_form") {
       const existing = await widgetService.getQuickActionsByType(
         project.id,
         parsed.data.type,
@@ -4399,136 +4652,6 @@ const app = new Hono<HonoAppContext>()
     );
 
     return c.json({ ok: success });
-  })
-
-  // ─── Booking Config (Dashboard) ──────────────────────────────────────────────
-  .get("/api/projects/:id/booking/config", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const bookingService = new BookingService(db);
-    const [config, rules] = await Promise.all([
-      bookingService.getBookingConfig(project.id),
-      bookingService.getAvailabilityRules(project.id),
-    ]);
-
-    return c.json({
-      config: config ?? {
-        enabled: false,
-        timezone: "America/New_York",
-        slotDuration: 30,
-        bufferTime: 0,
-        bookingWindowDays: 14,
-        minAdvanceHours: 1,
-      },
-      rules,
-    });
-  })
-  .put("/api/projects/:id/booking/config", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    // Feature gate: booking
-    const planLimits = c.get("planLimits");
-    if (planLimits && !planLimits.booking) {
-      return c.json(
-        {
-          error: "Booking is available on Pro and Business plans.",
-          code: "feature_not_available",
-        },
-        403,
-      );
-    }
-
-    const body = await c.req.json();
-    const parsed = validate(updateBookingConfigSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const bookingService = new BookingService(db);
-    const config = await bookingService.upsertBookingConfig(
-      project.id,
-      parsed.data,
-    );
-    return c.json(config);
-  })
-
-  // ─── Availability Rules (Dashboard) ────────────────────────────────────────
-  .put("/api/projects/:id/booking/availability", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const body = await c.req.json();
-    const parsed = validate(setAvailabilityRulesSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const bookingService = new BookingService(db);
-    const rules = await bookingService.setAvailabilityRules(
-      project.id,
-      parsed.data.rules,
-    );
-    return c.json(rules);
-  })
-
-  // ─── Bookings List (Dashboard) ─────────────────────────────────────────────
-  .get("/api/projects/:id/bookings", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const status = c.req.query("status");
-    const bookingService = new BookingService(db);
-    const bookings = await bookingService.getBookings(project.id, {
-      status: status || undefined,
-    });
-    return c.json(bookings);
-  })
-
-  // ─── Cancel Booking (Dashboard) ────────────────────────────────────────────
-  .patch("/api/projects/:id/bookings/:bookingId", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const bookingService = new BookingService(db);
-    const booking = await bookingService.cancelBooking(
-      c.req.param("bookingId"),
-      project.id,
-    );
-    if (!booking) return c.json({ error: "Not found" }, 404);
-    return c.json(booking);
   })
 
   // ─── Widget Bundle Upload to R2 ─────────────────────────────────────────────

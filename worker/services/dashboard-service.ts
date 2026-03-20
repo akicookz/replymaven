@@ -6,7 +6,6 @@ import {
   messages,
   resources,
   cannedResponses,
-  bookings,
   contactFormSubmissions,
 } from "../db";
 
@@ -36,7 +35,6 @@ export class DashboardService {
         conversationsByDay: [],
         conversationsByStatus: [],
         recentConversations: [],
-        recentBookings: [],
         recentContactSubmissions: [],
       };
     }
@@ -146,19 +144,6 @@ export class DashboardService {
       .orderBy(desc(conversations.updatedAt))
       .limit(5);
 
-    // ─── Recent bookings (last 5) ────────────────────────────────────────────
-    const recentBookings = await this.db
-      .select()
-      .from(bookings)
-      .where(
-        sql`${bookings.projectId} IN (${sql.join(
-          projectIds.map((id) => sql`${id}`),
-          sql`, `,
-        )})`,
-      )
-      .orderBy(desc(bookings.createdAt))
-      .limit(5);
-
     // ─── Recent contact form submissions (last 5) ────────────────────────────
     const recentContactSubmissions = await this.db
       .select()
@@ -182,7 +167,6 @@ export class DashboardService {
       conversationsByDay,
       conversationsByStatus,
       recentConversations,
-      recentBookings,
       recentContactSubmissions,
     };
   }
