@@ -673,7 +673,7 @@ const app = new Hono<HonoAppContext>()
 
     const widgetService = new WidgetService(db);
     const config = await widgetService.getFullWidgetConfig(project.id);
-    return c.json(config);
+    return c.json({ ...config, projectName: project.name });
   })
 
   // ─── Create Conversation ────────────────────────────────────────────────────

@@ -304,6 +304,7 @@ export class WidgetService {
       introMessageAuthor,
       showIntroBubble: settings[0]?.showIntroBubble ?? true,
       botName: settings[0]?.botName ?? null,
+      companyName: settings[0]?.companyName ?? null,
       inquiryForm:
         formConfig?.enabled
           ? {

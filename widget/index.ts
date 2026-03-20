@@ -215,7 +215,7 @@
       --rm-scrollbar: rgba(0,0,0,0.12);
       --rm-bot-bg: #ffffff;
       --rm-bot-text: #18181b;
-      --rm-bot-border: rgba(0,0,0,0.06);
+
       --rm-visitor-bg: var(--rm-primary, #2563eb);
       --rm-visitor-text: var(--rm-brand-text, #ffffff);
 
@@ -656,7 +656,6 @@
     .rm-message-row.bot .rm-message,
     .rm-message-row.agent .rm-message {
       background: var(--rm-bot-bg, #ffffff);
-      border: 1px solid var(--rm-bot-border, rgba(0,0,0,0.06));
       color: var(--rm-bot-text, #18181b);
       border-radius: 18px 18px 18px 4px;
     }
@@ -1292,14 +1291,10 @@
     }
     .rm-home-ask {
       margin-top: 16px;
-      border: 1px solid var(--rm-border);
+      border: 1px solid var(--rm-accent-bg-hover);
       border-radius: var(--rm-card-radius);
       padding: 14px;
       cursor: pointer;
-      transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    .rm-home-ask:hover {
-      border-color: var(--rm-accent-bg-hover);
       box-shadow: 0 1px 4px var(--rm-accent-bg);
     }
     .rm-home-ask-label {
@@ -1681,6 +1676,23 @@
     }
 
     /* ─── Animations ──────────────────────────────────────────────────────── */
+    @keyframes rm-ask-sweep {
+      0% { background-position: 200% center; }
+      100% { background-position: -200% center; }
+    }
+    .rm-ask-label-text {
+      background: linear-gradient(
+        90deg,
+        var(--rm-accent-text, #2563eb) 0%,
+        var(--rm-primary, #2563eb) 40%,
+        var(--rm-accent-text, #2563eb) 80%
+      );
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: rm-ask-sweep 3s ease-in-out infinite;
+    }
     @keyframes rm-message-in {
       from {
         opacity: 0;
@@ -2271,7 +2283,7 @@
   homeAsk.className = "rm-home-ask";
   const homeAskLabel = document.createElement("div");
   homeAskLabel.className = "rm-home-ask-label";
-  homeAskLabel.innerHTML = ICONS.sparkle + " Ask our assistant anything";
+  homeAskLabel.innerHTML = ICONS.sparkle + ' <span class="rm-ask-label-text">Ask AI</span>';
   const homeAskInput = document.createElement("input");
   homeAskInput.className = "rm-home-ask-input";
   homeAskInput.placeholder = "Ask a question...";
@@ -3144,7 +3156,6 @@
           // Bot/visitor messages — always derived
           container.style.setProperty("--rm-bot-bg", "rgba(255,255,255,0.10)");
           container.style.setProperty("--rm-bot-text", "#ffffff");
-          container.style.setProperty("--rm-bot-border", `rgba(${pRgb}, 0.2)`);
           container.style.setProperty("--rm-glow-border", "rgba(255,255,255,0.12)");
         } else {
           // Light theme: accent tokens from primary
@@ -3154,7 +3165,6 @@
           // Bot/visitor messages — always derived
           container.style.setProperty("--rm-bot-bg", "#f4f4f5");
           container.style.setProperty("--rm-bot-text", "#18181b");
-          container.style.setProperty("--rm-bot-border", "rgba(0,0,0,0.06)");
           container.style.setProperty("--rm-glow-border", `rgba(${pRgb}, 0.2)`);
         }
 
@@ -3175,7 +3185,7 @@
         }
 
         // Header text
-        headerTitle.textContent = w.headerText || "Chat with us";
+        headerTitle.textContent = loadedConfig.botName || w.headerText || "Support Assistant";
         headerSubtitle.textContent = w.headerSubtitle || "We typically reply instantly";
 
         // Position
@@ -3244,6 +3254,12 @@
         } else {
           homeSubtitle.style.display = "none";
         }
+      }
+
+      // ─── Ask Label with Project Name ──────────────────────────────────────
+      const projectDisplayName = loadedConfig.companyName || loadedConfig.projectName;
+      if (projectDisplayName) {
+        homeAskLabel.innerHTML = ICONS.sparkle + ` <span class="rm-ask-label-text">Ask AI about ${projectDisplayName}</span>`;
       }
 
       // ─── Quick Actions on Home Screen ────────────────────────────────────────
