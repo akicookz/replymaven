@@ -144,7 +144,7 @@
 
   // ─── SVG Icons ──────────────────────────────────────────────────────────────
   const ICONS = {
-    chat: '<svg viewBox="0 0 68 90" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M64.5991 34.4292C64.5991 30.8374 63.7372 27.3928 62.2031 24.8531C60.669 22.3133 58.5882 20.8865 56.4186 20.8865H27.0835C24.9141 20.8857 22.8337 19.4584 21.3 16.9185L12.2933 2.00792C11.8872 1.33568 11.3697 0.877895 10.8064 0.692442C10.2432 0.506988 9.65931 0.602195 9.12871 0.966024C8.59811 1.32985 8.14459 1.94597 7.82548 2.73647C7.50637 3.52697 7.33601 4.45637 7.33594 5.40715V75.0574C7.33594 78.6491 8.1978 82.0938 9.73194 84.6335C11.2661 87.1733 13.3468 88.6001 15.5164 88.6001H56.4186C58.5882 88.6001 60.669 87.1733 62.2031 84.6335C63.7372 82.0938 64.5991 78.6491 64.5991 75.0574V34.4292Z"/><path d="M0.599609 65.6436H14.354"/><path d="M0.599609 52.2524H14.354"/><path d="M0.599609 40.7739H14.354"/><path d="M22.4941 59.9043C31.7573 69.4695 41.0205 69.4695 50.2836 59.9043"/></svg>',
+    chat: '<svg viewBox="0 0 68 90" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M64.5991 34.4292C64.5991 30.8374 63.7372 27.3928 62.2031 24.8531C60.669 22.3133 58.5882 20.8865 56.4186 20.8865H27.0835C24.9141 20.8857 22.8337 19.4584 21.3 16.9185L12.2933 2.00792C11.8872 1.33568 11.3697 0.877895 10.8064 0.692442C10.2432 0.506988 9.65931 0.602195 9.12871 0.966024C8.59811 1.32985 8.14459 1.94597 7.82548 2.73647C7.50637 3.52697 7.33601 4.45637 7.33594 5.40715V75.0574C7.33594 78.6491 8.1978 82.0938 9.73194 84.6335C11.2661 87.1733 13.3468 88.6001 15.5164 88.6001H56.4186C58.5882 88.6001 60.669 87.1733 62.2031 84.6335C63.7372 82.0938 64.5991 78.6491 64.5991 75.0574V34.4292Z"/><path d="M0.599609 65.6436H14.354"/><path d="M0.599609 52.2524H14.354"/><path d="M0.599609 40.7739H14.354"/><path d="M22.4941 59.9043C31.7573 69.4695 41.0205 69.4695 50.2836 59.9043"/></svg>',
     close:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
     send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
@@ -428,9 +428,9 @@
       white-space: nowrap;
     }
     .rm-intro-pill-desc {
-      font-size: 13px;
-      font-weight: 400;
-      color: var(--rm-text-muted, #71717a);
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--rm-text-secondary, #52525b);
       line-height: 1.4;
       display: -webkit-box;
       -webkit-line-clamp: 3;
@@ -3200,6 +3200,27 @@
 
         // Font family
         if (w.fontFamily && w.fontFamily !== "system-ui") {
+          const fontUrls: Record<string, string> = {
+            "Inter": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
+            "Satoshi": "https://api.fontshare.com/v2/css?f[]=satoshi@400;500;600;700&display=swap",
+            "DM Sans": "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap",
+            "Nunito": "https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700&display=swap",
+            "Raleway": "https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600&display=swap",
+            "Plus Jakarta Sans": "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap",
+            "IBM Plex Sans": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap",
+            "Lato": "https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap",
+            "Space Grotesk": "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap",
+            "Outfit": "https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap",
+            "Merriweather Sans": "https://fonts.googleapis.com/css2?family=Merriweather+Sans:wght@400;500;600&display=swap",
+            "JetBrains Mono": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap",
+          };
+          const fontUrl = fontUrls[w.fontFamily];
+          if (fontUrl) {
+            const link = document.createElement("link");
+            link.rel = "stylesheet";
+            link.href = fontUrl;
+            document.head.appendChild(link);
+          }
           container.style.fontFamily =
             w.fontFamily + ", -apple-system, BlinkMacSystemFont, sans-serif";
         }

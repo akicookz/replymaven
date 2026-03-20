@@ -430,6 +430,37 @@ function WidgetConfig() {
                 </Select>
               </div>
             </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">
+                Font
+              </label>
+              <Select
+                value={form.fontFamily || "system-ui"}
+                onValueChange={(val) =>
+                  setForm({ ...form, fontFamily: val })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select font" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="system-ui">System Default</SelectItem>
+                  <SelectItem value="Inter">Inter</SelectItem>
+                  <SelectItem value="Satoshi">Satoshi</SelectItem>
+                  <SelectItem value="DM Sans">DM Sans</SelectItem>
+                  <SelectItem value="Nunito">Nunito</SelectItem>
+                  <SelectItem value="Raleway">Raleway</SelectItem>
+                  <SelectItem value="Plus Jakarta Sans">Plus Jakarta Sans</SelectItem>
+                  <SelectItem value="IBM Plex Sans">IBM Plex Sans</SelectItem>
+                  <SelectItem value="Lato">Lato</SelectItem>
+                  <SelectItem value="Space Grotesk">Space Grotesk</SelectItem>
+                  <SelectItem value="Outfit">Outfit</SelectItem>
+                  <SelectItem value="Merriweather Sans">Merriweather Sans</SelectItem>
+                  <SelectItem value="JetBrains Mono">JetBrains Mono</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Background Style */}
