@@ -46,7 +46,7 @@ import { MobileMenuButton } from "@/components/PageHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ActionType = "prompt" | "link" | "contact_form";
+type ActionType = "prompt" | "link" | "inquiry";
 
 interface QuickAction {
   id: string;
@@ -58,19 +58,19 @@ interface QuickAction {
   sortOrder: number;
 }
 
-interface ContactFormField {
+interface InquiryField {
   label: string;
   type: "text" | "textarea";
   required: boolean;
 }
 
-interface ContactFormConfig {
+interface InquiryConfig {
   enabled: boolean;
   description: string | null;
-  fields: ContactFormField[];
+  fields: InquiryField[];
 }
 
-interface ContactFormSubmission {
+interface InquirySubmission {
   id: string;
   visitorId: string | null;
   data: Record<string, string>;
@@ -108,9 +108,9 @@ const TYPE_CONFIG: Record<
     RightIcon: ExternalLink,
     iconColor: "text-status-replied",
   },
-  contact_form: {
-    label: "Contact Form",
-    description: "Opens the contact form",
+  inquiry: {
+    label: "Inquiry",
+    description: "Opens the inquiry form",
     RightIcon: ChevronRight,
     iconColor: "text-status-active",
   },
@@ -126,7 +126,7 @@ function getIconComponent(icon: string) {
 function QuickActions() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"actions" | "contact_form">("actions");
+  const [activeTab, setActiveTab] = useState<"actions" | "inquiry">("actions");
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -140,7 +140,7 @@ function QuickActions() {
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-1">
             Buttons displayed on the widget home screen and chat view. Configure
-            contact form settings here too.
+            inquiry form settings here too.
           </p>
         </div>
       </div>
@@ -150,7 +150,7 @@ function QuickActions() {
         {(
           [
             { key: "actions", label: "Actions" },
-            { key: "contact_form", label: "Contact Form" },
+            { key: "inquiry", label: "Inquiries" },
           ] as const
         ).map((tab) => (
           <button
@@ -169,7 +169,7 @@ function QuickActions() {
       </div>
 
       {activeTab === "actions" && <ActionsTab projectId={projectId!} queryClient={queryClient} />}
-      {activeTab === "contact_form" && <ContactFormTab projectId={projectId!} queryClient={queryClient} />}
+      {activeTab === "inquiry" && <InquiriesTab projectId={projectId!} queryClient={queryClient} />}
     </div>
   );
 }
@@ -265,12 +265,12 @@ function ActionsTab({
     const defaults: Record<ActionType, string> = {
       prompt: "sparkle",
       link: "link",
-      contact_form: "mail",
+      inquiry: "mail",
     };
     setNewIcon(defaults[newType]);
   }, [newType]);
 
-  const hasContactForm = actions?.some((a) => a.type === "contact_form");
+  const hasInquiry = actions?.some((a) => a.type === "inquiry");
 
   return (
     <div className="space-y-6">
@@ -308,13 +308,13 @@ function ActionsTab({
                   </span>
                 </SelectItem>
                 <SelectItem
-                  value="contact_form"
-                  disabled={!!hasContactForm}
+                  value="inquiry"
+                  disabled={!!hasInquiry}
                 >
                   <span className="flex items-center gap-1.5">
                     <MessageSquareText className="w-3.5 h-3.5" />
-                    Contact Form
-                    {hasContactForm && (
+                    Inquiry
+                    {hasInquiry && (
                       <span className="text-[10px] text-muted-foreground ml-1">(exists)</span>
                     )}
                   </span>
@@ -407,7 +407,8 @@ function ActionsTab({
         <div className="space-y-2">
           {actions.map((action) => {
             const IconComp = getIconComponent(action.icon);
-            const typeConf = TYPE_CONFIG[action.type];
+            const typeConf = TYPE_CONFIG[action.type as ActionType];
+            if (!typeConf) return null;
             return (
               <div
                 key={action.id}
@@ -480,7 +481,7 @@ function ActionsTab({
             No quick actions yet
           </h2>
           <p className="text-sm text-muted-foreground max-w-md leading-relaxed">
-            Add actions like AI prompts, external links, and contact form
+            Add actions like AI prompts, external links, and inquiry form
             buttons. They appear on the widget home screen and chat view.
           </p>
         </div>
@@ -489,9 +490,9 @@ function ActionsTab({
   );
 }
 
-// ─── Contact Form Tab ─────────────────────────────────────────────────────────
+// ─── Inquiries Tab ────────────────────────────────────────────────────────────
 
-function ContactFormTab({
+function InquiriesTab({
   projectId,
   queryClient,
 }: {
@@ -503,28 +504,28 @@ function ContactFormTab({
   const [description, setDescription] = useState(
     "We'll get back to you within 1-2 hours.",
   );
-  const [fields, setFields] = useState<ContactFormField[]>([]);
+  const [fields, setFields] = useState<InquiryField[]>([]);
   const [newLabel, setNewLabel] = useState("");
   const [newType, setNewType] = useState<"text" | "textarea">("text");
   const [newRequired, setNewRequired] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
-  const { data: config, isLoading } = useQuery<ContactFormConfig>({
-    queryKey: ["contact-form", projectId],
+  const { data: config, isLoading } = useQuery<InquiryConfig>({
+    queryKey: ["inquiry-config", projectId],
     queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/contact-form`);
+      const res = await fetch(`/api/projects/${projectId}/inquiries`);
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
   });
 
   const { data: submissions, isLoading: submissionsLoading } = useQuery<
-    ContactFormSubmission[]
+    InquirySubmission[]
   >({
-    queryKey: ["contact-form-submissions", projectId],
+    queryKey: ["inquiries", projectId],
     queryFn: async () => {
       const res = await fetch(
-        `/api/projects/${projectId}/contact-form/submissions`,
+        `/api/projects/${projectId}/inquiries/submissions`,
       );
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
@@ -544,7 +545,7 @@ function ContactFormTab({
 
   const saveConfig = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/contact-form`, {
+      const res = await fetch(`/api/projects/${projectId}/inquiries`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled, description, fields }),
@@ -554,7 +555,7 @@ function ContactFormTab({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: ["contact-form", projectId],
+        queryKey: ["inquiry-config", projectId],
       });
       setHasChanges(false);
     },
@@ -608,7 +609,7 @@ function ContactFormTab({
         <div className="space-y-1">
           <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
             <Mail className="w-5 h-5" />
-            Contact Form
+            Inquiries
           </h2>
           <p className="text-sm text-muted-foreground">
             Messages from visitors who used the "Leave a message" form.
@@ -632,11 +633,11 @@ function ContactFormTab({
             <MessageSquareText className="w-8 h-8 text-primary" />
           </div>
           <h2 className="text-lg font-semibold text-foreground mb-1">
-            No contact form configured
+            No inquiry form configured
           </h2>
           <p className="text-sm text-muted-foreground max-w-md mb-6 leading-relaxed">
             Let visitors leave a message when you're away. Set up a form with
-            custom fields like name, email, and message. Then add a "Contact Form"
+            custom fields like name, email, and message. Then add an "Inquiry"
             quick action on the Actions tab to show it in your widget.
           </p>
           <Button onClick={() => setSettingsOpen(true)} className="gap-1.5">
@@ -744,7 +745,7 @@ function ContactFormTab({
               Form settings
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Configure your contact form fields and behavior
+              Configure your inquiry form fields and behavior
             </p>
           </div>
           <Button
@@ -760,9 +761,9 @@ function ContactFormTab({
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label>Enable contact form</Label>
+              <Label>Enable inquiry form</Label>
               <p className="text-xs text-muted-foreground">
-                Enables the contact form feature for your widget
+                Enables the inquiry form feature for your widget
               </p>
             </div>
             <Switch
@@ -797,7 +798,7 @@ function ContactFormTab({
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label>Form fields</Label>
+                  <Label>Inquiry form fields</Label>
                   <span className="text-xs text-muted-foreground">
                     {fields.length}/10
                   </span>

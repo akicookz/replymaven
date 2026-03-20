@@ -503,33 +503,34 @@
 
     /* ─── Header ──────────────────────────────────────────────────────────── */
     .rm-header {
-      padding: 18px 20px;
-      color: var(--rm-brand-text, #ffffff);
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
+      padding: 16px;
+      margin-bottom: 0;
+      background: var(--rm-bg, #ffffff);
+      color: var(--rm-text, #18181b);
       flex-shrink: 0;
       position: relative;
       z-index: 2;
-      margin-bottom: 0;
-      background: var(--rm-primary, #2563eb);
-      border-bottom: none;
-      box-shadow: none;
+    }
+    .rm-chat-window[data-bg-style="blurred"] .rm-header {
+      background: transparent;
     }
     .rm-chat-window[data-bg-style="blurred"] .rm-header {
       margin-bottom: -24px;
       background: linear-gradient(to bottom, rgba(var(--rm-primary-rgb, 37,99,235), 0.3), rgba(var(--rm-primary-rgb, 37,99,235), 0.0));
     }
     .rm-header-avatar {
-      width: 36px;
-      height: 36px;
-      min-width: 36px;
+      width: 32px;
+      height: 32px;
       border-radius: 50%;
-      background: var(--rm-primary, #2563eb);
       display: flex;
       align-items: center;
       justify-content: center;
-      color: var(--rm-brand-text, #ffffff);
+      flex-shrink: 0;
+      background: var(--rm-accent-bg, rgba(37,99,235,0.08));
+      color: var(--rm-accent-text, #2563eb);
     }
     .rm-header-avatar.rm-icon-avatar {
       border-radius: 10px;
@@ -552,14 +553,15 @@
     }
     .rm-header-subtitle {
       font-size: 12px;
-      opacity: 0.8;
+      color: var(--rm-text-secondary, #52525b);
+      opacity: 1;
       margin-top: 1px;
       line-height: 1.3;
     }
     .rm-header-close {
-      background: rgba(255,255,255,0.1);
+      background: var(--rm-bg-secondary, #f4f4f5);
       border: none;
-      color: var(--rm-brand-text, #ffffff);
+      color: var(--rm-text-secondary, #52525b);
       cursor: pointer;
       width: 32px;
       height: 32px;
@@ -571,7 +573,7 @@
       transition: background 0.2s;
     }
     .rm-header-close:hover {
-      background: rgba(255,255,255,0.25);
+      background: var(--rm-bg-tertiary, #e4e4e7);
     }
     .rm-header-close svg {
       width: 16px;
@@ -1384,9 +1386,9 @@
 
     /* Chat header back button */
     .rm-header-back {
-      background: rgba(255,255,255,0.15);
+      background: var(--rm-bg-secondary, #f4f4f5);
       border: none;
-      color: var(--rm-brand-text, #ffffff);
+      color: var(--rm-text-secondary, #52525b);
       cursor: pointer;
       width: 32px;
       height: 32px;
@@ -1398,7 +1400,7 @@
       transition: background 0.2s;
     }
     .rm-header-back:hover {
-      background: rgba(255,255,255,0.25);
+      background: var(--rm-bg-tertiary, #e4e4e7);
     }
     .rm-header-back svg {
       width: 16px;
@@ -1493,7 +1495,7 @@
       white-space: nowrap;
     }
 
-    /* ─── Contact Form ────────────────────────────────────────────────────── */
+    /* ─── Inquiry Form ────────────────────────────────────────────────────── */
     .rm-form-view {
       flex: 1;
       display: none;
@@ -2289,7 +2291,7 @@
   homeView.appendChild(homeBanner);
   homeView.appendChild(homeBody);
 
-  // ─── Contact Form View ──────────────────────────────────────────────────────
+  // ─── Inquiry Form View ──────────────────────────────────────────────────────
   const formView = document.createElement("div");
   formView.className = "rm-form-view";
 
@@ -3140,7 +3142,7 @@
           container.style.setProperty("--rm-accent-bg-hover", `rgba(${pRgb}, 0.30)`);
           container.style.setProperty("--rm-accent-text", "#ffffff");
           // Bot/visitor messages — always derived
-          container.style.setProperty("--rm-bot-bg", "rgba(255,255,255,0.08)");
+          container.style.setProperty("--rm-bot-bg", "rgba(255,255,255,0.10)");
           container.style.setProperty("--rm-bot-text", "#ffffff");
           container.style.setProperty("--rm-bot-border", `rgba(${pRgb}, 0.2)`);
           container.style.setProperty("--rm-glow-border", "rgba(255,255,255,0.12)");
@@ -3150,7 +3152,7 @@
           container.style.setProperty("--rm-accent-bg-hover", `rgba(${pRgb}, 0.15)`);
           container.style.setProperty("--rm-accent-text", primary);
           // Bot/visitor messages — always derived
-          container.style.setProperty("--rm-bot-bg", "#ffffff");
+          container.style.setProperty("--rm-bot-bg", "#f4f4f5");
           container.style.setProperty("--rm-bot-text", "#18181b");
           container.style.setProperty("--rm-bot-border", "rgba(0,0,0,0.06)");
           container.style.setProperty("--rm-glow-border", `rgba(${pRgb}, 0.2)`);
@@ -3278,7 +3280,7 @@
           arrowEl.className = "rm-home-link-arrow";
           if (qa.type === "link") {
             arrowEl.innerHTML = ICONS.externalLink;
-          } else if (qa.type === "contact_form") {
+          } else if (qa.type === "inquiry") {
             arrowEl.innerHTML = ICONS.chevronRight;
           } else {
             // prompt type
@@ -3293,7 +3295,7 @@
           row.onclick = () => {
             if (qa.type === "link") {
               window.open(qa.action, "_blank", "noopener,noreferrer");
-            } else if (qa.type === "contact_form") {
+            } else if (qa.type === "inquiry") {
               showFormScreen();
             } else if (qa.type === "prompt") {
               showChatScreen();
@@ -3322,9 +3324,9 @@
         });
       }
 
-      // ─── Contact Form Setup (build form fields if enabled) ──────────────────
-      if (loadedConfig.contactForm) {
-        const cf = loadedConfig.contactForm as {
+      // ─── Inquiry Form Setup (build form fields if enabled) ──────────────────
+      if (loadedConfig.inquiryForm) {
+        const cf = loadedConfig.inquiryForm as {
           description: string | null;
           fields: Array<{ label: string; type: string; required: boolean }>;
         };
@@ -3427,7 +3429,7 @@
 
           try {
             const res = await fetch(
-              `${baseUrl}/api/widget/${projectSlug}/contact-form`,
+              `${baseUrl}/api/widget/${projectSlug}/inquiries`,
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -3649,7 +3651,7 @@
             // Add icon for non-prompt types
             if (qa.type === "link") {
               actionBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
-            } else if (qa.type === "contact_form") {
+            } else if (qa.type === "inquiry") {
               actionBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
             }
 
@@ -3661,7 +3663,7 @@
               e.stopPropagation();
               if (qa.type === "link") {
                 window.open(qa.action, "_blank", "noopener,noreferrer");
-              } else if (qa.type === "contact_form") {
+              } else if (qa.type === "inquiry") {
                 showChatScreen();
                 openChatWidget();
                 setTimeout(() => showFormScreen(), 100);
@@ -5267,6 +5269,10 @@
     },
     requestNotifications: () => {
       requestNotificationPermission();
+    },
+    openInquiryForm: () => {
+      if (!isOpen) openChatWidget();
+      showFormScreen();
     },
   };
 

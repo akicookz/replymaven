@@ -119,7 +119,7 @@ const navItems: NavItem[] = [
     icon: <Settings className="w-4 h-4" />,
     children: [
       { id: "telegram", label: "Telegram" },
-      { id: "contact-form", label: "Contact Form" },
+      { id: "inquiries", label: "Inquiries" },
       { id: "tone-of-voice", label: "Tone of Voice" },
       { id: "canned-responses", label: "Canned Responses" },
     ],
@@ -1396,14 +1396,14 @@ window.ReplyMaven.setMetadata({
               </li>
             </ul>
 
-            <SectionHeading id="contact-form" level={3}>
-              Contact Form
+            <SectionHeading id="inquiries" level={3}>
+              Inquiries
             </SectionHeading>
             <p className="text-muted-foreground leading-relaxed mb-4">
-              Enable a "Leave a message" contact form on the widget's home
+              Enable a "Leave a message" inquiry form on the widget's home
               screen. Visitors can submit structured information when they
               prefer not to chat. Configure fields in{" "}
-              <strong>Contact Form</strong> in the dashboard.
+              <strong>Inquiries</strong> in the dashboard.
             </p>
 
             <SectionHeading id="tone-of-voice" level={3}>

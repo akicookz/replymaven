@@ -862,6 +862,73 @@ If the conversation is too short, trivial, or doesn't contain a clear reusable Q
     return null;
   }
 
+  // ─── Compose Inquiry Reply ──────────────────────────────────────────────────
+
+  async composeInquiryReply(
+    settings: {
+      toneOfVoice?: string | null;
+      customTonePrompt?: string | null;
+      companyContext?: string | null;
+      companyName?: string | null;
+    },
+    projectName: string,
+    inquiryData: Record<string, string>,
+  ): Promise<{ subject: string; body: string }> {
+    const toneInstruction =
+      settings.toneOfVoice === "custom" && settings.customTonePrompt
+        ? settings.customTonePrompt
+        : settings.toneOfVoice === "friendly"
+          ? "Write in a warm, friendly, and approachable tone."
+          : settings.toneOfVoice === "casual"
+            ? "Write in a casual, relaxed tone."
+            : settings.toneOfVoice === "formal"
+              ? "Write in a formal, respectful tone."
+              : "Write in a professional, clear tone.";
+
+    const companyCtx = settings.companyContext
+      ? `\nCompany context:\n${settings.companyContext}`
+      : "";
+
+    const fieldLines = Object.entries(inquiryData)
+      .map(([key, val]) => `${key}: ${val}`)
+      .join("\n");
+
+    const { text } = await generateText({
+      model: this.model,
+      system: `You are a helpful assistant composing email replies on behalf of "${projectName}".
+${toneInstruction}${companyCtx}
+
+Compose a professional reply email to an inquiry form submission. The reply should:
+- Address the person by name if available
+- Acknowledge what they wrote
+- Provide a helpful, relevant response based on the company context
+- Be concise but thorough
+- End with an appropriate sign-off using "[Your name]" as placeholder
+
+Return ONLY valid JSON in this exact format:
+{"subject":"<email subject line>","body":"<email body text>"}
+
+Do not wrap in markdown code blocks. Do not include any text outside the JSON.`,
+      prompt: `Inquiry submission:\n${fieldLines}`,
+      temperature: 0.5,
+      maxOutputTokens: 1024,
+    });
+
+    try {
+      const cleaned = text.replace(/```json?\s*/g, "").replace(/```\s*/g, "").trim();
+      const parsed = JSON.parse(cleaned);
+      return {
+        subject: parsed.subject || "Re: Your inquiry",
+        body: parsed.body || "",
+      };
+    } catch {
+      return {
+        subject: "Re: Your inquiry",
+        body: text.trim(),
+      };
+    }
+  }
+
   // ─── Summarize Website Content ────────────────────────────────────────────────
 
   async summarizeWebsite(rawText: string): Promise<string> {

@@ -178,9 +178,9 @@ export class TelegramService {
     return result.message_id ?? null;
   }
 
-  // ─── Notify Contact Form with Dashboard Link ───────────────────────────────
+  // ─── Notify Inquiry Submission with Dashboard Link ──────────────────────────
 
-  async notifyContactForm(
+  async notifyInquiry(
     botToken: string,
     chatId: string,
     fields: Record<string, string>,
@@ -191,10 +191,10 @@ export class TelegramService {
       .map(([key, val]) => `<b>${escapeHtml(key)}:</b> ${escapeHtml(val)}`)
       .join("\n");
 
-    const projectLink = `${dashboardBaseUrl}/app/projects/${projectId}/contact-submissions`;
+    const projectLink = `${dashboardBaseUrl}/app/projects/${projectId}/inquiries`;
 
     const text = [
-      `<b>New contact form submission</b>`,
+      `<b>New inquiry submitted</b>`,
       ``,
       fieldLines,
       ``,

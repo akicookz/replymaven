@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { MobileMenuButton } from "@/components/PageHeader";
+import { DetailsPanel } from "@/components/DetailsPanel";
 
 interface ConversationMeta {
   url?: string;
@@ -170,13 +171,6 @@ function parseBrowserName(ua?: string, browserField?: string): string {
     return match ? `Safari ${match[1].split(".")[0]}` : "Safari";
   }
   return "Unknown";
-}
-
-function formatMetaKey(key: string): string {
-  return key
-    .replace(/([A-Z])/g, " $1")
-    .replace(/^./, (s) => s.toUpperCase())
-    .trim();
 }
 
 function countryToFlag(countryCode: string): string {
@@ -569,7 +563,7 @@ function Conversations() {
         {selectedConvo && convoDetail ? (
           <>
             {/* Chat Header */}
-            <div className="px-4 py-3 flex items-center gap-3 bg-card border-b border-border">
+            <div className="px-4 py-3 flex items-center gap-3 bg-card">
               {/* Mobile back button */}
               <button
                 onClick={() => setSelectedConvo(null)}
@@ -713,7 +707,7 @@ function Conversations() {
               return (
                 <Sheet>
                   <SheetTrigger asChild>
-                    <div className="px-4 py-1.5 bg-card/80 border-b border-border flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground w-full overflow-hidden cursor-pointer hover:bg-accent/50 transition-colors">
+                    <div className="px-4 py-1.5 bg-card/80 flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground w-full overflow-hidden cursor-pointer hover:bg-accent/50 transition-colors">
                       {isIdentified ? (
                         <>
                           {customEntries.slice(0, 3).map(([key, value]) => (
@@ -769,72 +763,19 @@ function Conversations() {
                   </SheetTrigger>
                   <SheetContent side="right" className="overflow-y-auto">
                     <SheetHeader>
-                      <SheetTitle>Visitor Metadata</SheetTitle>
+                      <SheetTitle>Details</SheetTitle>
                     </SheetHeader>
-                    <div className="space-y-5 mt-4">
-                      {/* Custom Metadata Section */}
-                      <div>
-                        <h4 className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                          <Tag className="w-3.5 h-3.5 text-primary" />
-                          Custom Metadata
-                        </h4>
-                        {customEntries.length > 0 ? (
-                          <div className="rounded-lg border border-border overflow-hidden">
-                            {customEntries.map(([key, value], i) => (
-                              <div
-                                key={key}
-                                className={cn(
-                                  "flex items-start gap-3 px-3 py-2 text-sm",
-                                  i > 0 && "border-t border-border",
-                                )}
-                              >
-                                <span className="text-muted-foreground font-medium min-w-[100px] shrink-0">
-                                  {key}
-                                </span>
-                                <span className="text-foreground break-all">
-                                  {value}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-sm text-muted-foreground italic">
-                            No custom metadata set
-                          </p>
-                        )}
-                      </div>
-
-                      {/* System Metadata Section */}
-                      <div>
-                        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                          <Monitor className="w-3.5 h-3.5" />
-                          System Metadata
-                        </h4>
-                        {Object.keys(system).length > 0 ? (
-                          <div className="rounded-lg border border-border overflow-hidden">
-                            {Object.entries(system).map(([key, value], i) => (
-                              <div
-                                key={key}
-                                className={cn(
-                                  "flex items-start gap-3 px-3 py-2 text-sm",
-                                  i > 0 && "border-t border-border",
-                                )}
-                              >
-                                <span className="text-muted-foreground font-medium min-w-[100px] shrink-0">
-                                  {formatMetaKey(key)}
-                                </span>
-                                <span className="text-foreground break-all">
-                                  {value}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-sm text-muted-foreground italic">
-                            No system metadata available
-                          </p>
-                        )}
-                      </div>
+                    <div className="mt-4 px-4">
+                      <DetailsPanel
+                        identity={[
+                          convoDetail.conversation.visitorName ? { label: "Name", value: convoDetail.conversation.visitorName } : null,
+                          convoDetail.conversation.visitorEmail ? { label: "Email", value: convoDetail.conversation.visitorEmail } : null,
+                        ].filter((x): x is { label: string; value: string } => x !== null)}
+                        fields={customEntries.length > 0 ? custom : undefined}
+                        fieldsLabel="Custom Metadata"
+                        systemFields={system}
+                        systemDefaultOpen={customEntries.length === 0 && !convoDetail.conversation.visitorName && !convoDetail.conversation.visitorEmail}
+                      />
                     </div>
                   </SheetContent>
                 </Sheet>

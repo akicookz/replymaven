@@ -52,9 +52,9 @@ export class EmailService {
     });
   }
 
-  // ─── Contact Form Notification (to project owner) ──────────────────────────
+  // ─── Inquiry Notification (to project owner) ────────────────────────────────
 
-  async sendContactFormNotification(details: {
+  async sendInquiryNotification(details: {
     ownerEmail: string;
     projectName: string;
     formData: Record<string, string>;
@@ -73,10 +73,10 @@ export class EmailService {
     await this.resend.emails.send({
       from: `${projectName} <noreply@replymaven.com>`,
       to: ownerEmail,
-      subject: `New contact form submission - ${projectName}`,
+      subject: `New inquiry submission - ${projectName}`,
       html: `
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
-          <h1 style="font-size: 20px; font-weight: 600; margin: 0 0 16px;">New Contact Form Submission</h1>
+          <h1 style="font-size: 20px; font-weight: 600; margin: 0 0 16px;">New Inquiry Submission</h1>
           <div style="background: #f9fafb; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
             ${fieldsHtml}
           </div>

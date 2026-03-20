@@ -296,9 +296,9 @@ function AnimatedChatWidget() {
 }
 
 
-// ─── Mock Contact Form UI ─────────────────────────────────────────────────────
+// ─── Mock Inquiry UI ──────────────────────────────────────────────────────────
 
-function MockContactFormUI() {
+function MockInquiryUI() {
   return (
     <div
       className={cn(
@@ -1209,7 +1209,7 @@ function FeatureBentoGrid() {
   );
 }
 
-// ─── Feature Section: Contact Form ────────────────────────────────────────────
+// ─── Feature Section: Inquiries ───────────────────────────────────────────────
 
 function FeatureContactForm() {
   return (
@@ -1220,22 +1220,22 @@ function FeatureContactForm() {
           <div className="relative order-2 lg:order-1 overflow-hidden rounded-[2rem]">
             <div className="absolute -inset-8 bg-brand/[0.03] rounded-[2rem] blur-3xl" />
             <div className="relative">
-              <MockContactFormUI />
+              <MockInquiryUI />
             </div>
           </div>
 
           {/* Copy */}
           <div className="space-y-5 order-1 lg:order-2">
             <p className="text-sm font-medium text-brand uppercase tracking-wider">
-              Contact Forms
+              Inquiries
             </p>
             <h2 className="text-3xl sm:text-[2.5rem] font-light text-foreground tracking-tight leading-tight">
               Capture leads with
               <br className="hidden sm:block" />
-              built-in contact forms
+              built-in inquiry forms
             </h2>
             <p className="text-muted-foreground leading-relaxed max-w-lg">
-              <span className="font-medium text-card-foreground">Dynamic form builder</span> with custom fields -- text inputs, textareas, required field validation, and a configurable description message. Submissions are stored, show up in your dashboard, and notify your team via Telegram.
+              <span className="font-medium text-card-foreground">Dynamic form builder</span> with custom fields -- text inputs, textareas, required field validation, and a configurable description message. Inquiry submissions are stored, show up in your dashboard, and notify your team via Telegram.
             </p>
             <div className="grid grid-cols-2 gap-3 pt-2">
               {[

@@ -162,6 +162,20 @@
       "when": 1773989892997,
       "tag": "0022_calm_miss_america",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1774004400000,
+      "tag": "0023_rename_contact_form_to_inquiries",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1774008000000,
+      "tag": "0024_add_inquiry_status",
+      "breakpoints": true
     }
   ]
 }

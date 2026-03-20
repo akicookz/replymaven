@@ -4,13 +4,13 @@ import {
   widgetConfig,
   quickActions,
   projectSettings,
-  contactFormConfig,
-  contactFormSubmissions,
+  inquiryConfig,
+  inquiries,
   type WidgetConfigRow,
   type QuickActionRow,
   type NewQuickActionRow,
-  type ContactFormConfigRow,
-  type ContactFormSubmissionRow,
+  type InquiryConfigRow,
+  type InquiryRow,
 } from "../db";
 import { users } from "../db/auth.schema";
 
@@ -128,7 +128,7 @@ export class WidgetService {
 
   async getQuickActionsByType(
     projectId: string,
-    type: "prompt" | "link" | "contact_form",
+    type: "prompt" | "link" | "inquiry",
   ): Promise<QuickActionRow[]> {
     return this.db
       .select()
@@ -141,28 +141,28 @@ export class WidgetService {
       );
   }
 
-  // ─── Contact Form Config ─────────────────────────────────────────────────
+  // ─── Inquiry Config ──────────────────────────────────────────────────────
 
-  async getContactFormConfig(
+  async getInquiryConfig(
     projectId: string,
-  ): Promise<ContactFormConfigRow | null> {
+  ): Promise<InquiryConfigRow | null> {
     const rows = await this.db
       .select()
-      .from(contactFormConfig)
-      .where(eq(contactFormConfig.projectId, projectId))
+      .from(inquiryConfig)
+      .where(eq(inquiryConfig.projectId, projectId))
       .limit(1);
     return rows[0] ?? null;
   }
 
-  async upsertContactFormConfig(
+  async upsertInquiryConfig(
     projectId: string,
     updates: {
       enabled?: boolean;
       description?: string | null;
       fields?: Array<{ label: string; type: string; required: boolean }>;
     },
-  ): Promise<ContactFormConfigRow> {
-    const existing = await this.getContactFormConfig(projectId);
+  ): Promise<InquiryConfigRow> {
+    const existing = await this.getInquiryConfig(projectId);
 
     if (existing) {
       const setData: Record<string, unknown> = {};
@@ -173,15 +173,15 @@ export class WidgetService {
         setData.fields = JSON.stringify(updates.fields);
 
       await this.db
-        .update(contactFormConfig)
+        .update(inquiryConfig)
         .set(setData)
-        .where(eq(contactFormConfig.projectId, projectId));
+        .where(eq(inquiryConfig.projectId, projectId));
 
-      return (await this.getContactFormConfig(projectId))!;
+      return (await this.getInquiryConfig(projectId))!;
     }
 
     const id = crypto.randomUUID();
-    await this.db.insert(contactFormConfig).values({
+    await this.db.insert(inquiryConfig).values({
       id,
       projectId,
       enabled: updates.enabled ?? false,
@@ -189,18 +189,18 @@ export class WidgetService {
         updates.description ?? "We'll get back to you within 1-2 hours.",
       fields: updates.fields ? JSON.stringify(updates.fields) : "[]",
     });
-    return (await this.getContactFormConfig(projectId))!;
+    return (await this.getInquiryConfig(projectId))!;
   }
 
-  // ─── Contact Form Submissions ───────────────────────────────────────────
+  // ─── Inquiries ──────────────────────────────────────────────────────────
 
-  async createContactFormSubmission(
+  async createInquiry(
     projectId: string,
     visitorId: string | undefined,
     data: Record<string, string>,
-  ): Promise<ContactFormSubmissionRow> {
+  ): Promise<InquiryRow> {
     const id = crypto.randomUUID();
-    await this.db.insert(contactFormSubmissions).values({
+    await this.db.insert(inquiries).values({
       id,
       projectId,
       visitorId: visitorId ?? null,
@@ -208,20 +208,47 @@ export class WidgetService {
     });
     const rows = await this.db
       .select()
-      .from(contactFormSubmissions)
-      .where(eq(contactFormSubmissions.id, id))
+      .from(inquiries)
+      .where(eq(inquiries.id, id))
       .limit(1);
     return rows[0]!;
   }
 
-  async getContactFormSubmissions(
+  async getInquiries(
     projectId: string,
-  ): Promise<ContactFormSubmissionRow[]> {
+  ): Promise<InquiryRow[]> {
     return this.db
       .select()
-      .from(contactFormSubmissions)
-      .where(eq(contactFormSubmissions.projectId, projectId))
-      .orderBy(asc(contactFormSubmissions.createdAt));
+      .from(inquiries)
+      .where(eq(inquiries.projectId, projectId))
+      .orderBy(asc(inquiries.createdAt));
+  }
+
+  async getInquiryById(
+    id: string,
+    projectId: string,
+  ): Promise<InquiryRow | null> {
+    const rows = await this.db
+      .select()
+      .from(inquiries)
+      .where(eq(inquiries.id, id))
+      .limit(1);
+    if (!rows[0] || rows[0].projectId !== projectId) return null;
+    return rows[0];
+  }
+
+  async updateInquiryStatus(
+    id: string,
+    projectId: string,
+    status: "new" | "replied" | "closed",
+  ): Promise<InquiryRow | null> {
+    const existing = await this.getInquiryById(id, projectId);
+    if (!existing) return null;
+    await this.db
+      .update(inquiries)
+      .set({ status })
+      .where(eq(inquiries.id, id));
+    return (await this.getInquiryById(id, projectId))!;
   }
 
   // ─── Full Widget Config for Embed ───────────────────────────────────────────
@@ -236,7 +263,7 @@ export class WidgetService {
           .from(projectSettings)
           .where(eq(projectSettings.projectId, projectId))
           .limit(1),
-        this.getContactFormConfig(projectId),
+        this.getInquiryConfig(projectId),
       ]);
 
     // Resolve intro message author
@@ -277,7 +304,7 @@ export class WidgetService {
       introMessageAuthor,
       showIntroBubble: settings[0]?.showIntroBubble ?? true,
       botName: settings[0]?.botName ?? null,
-      contactForm:
+      inquiryForm:
         formConfig?.enabled
           ? {
               description: formConfig.description,

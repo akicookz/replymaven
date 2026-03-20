@@ -67,7 +67,7 @@ function countryToFlag(countryCode: string): string {
   return String.fromCodePoint(first) + String.fromCodePoint(second);
 }
 
-interface RecentContactSubmission {
+interface RecentInquiry {
   id: string;
   visitorId: string | null;
   data: string;
@@ -83,7 +83,7 @@ interface DashboardData {
   pendingCannedDrafts: number;
   conversationsByDay: ConversationsByDay[];
   recentConversations: RecentConversation[];
-  recentContactSubmissions: RecentContactSubmission[];
+  recentInquiries: RecentInquiry[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -283,7 +283,7 @@ function Dashboard() {
     // ─── Build Activity Timeline ────────────────────────────────────────────
     type TimelineItem = {
       id: string;
-      type: "contact_form";
+      type: "inquiry";
       title: string;
       subtitle: string;
       timestamp: string;
@@ -292,7 +292,7 @@ function Dashboard() {
 
     const timelineItems: TimelineItem[] = [];
 
-    for (const s of data.recentContactSubmissions) {
+    for (const s of data.recentInquiries) {
       let parsedData: Record<string, string> = {};
       try {
         parsedData = JSON.parse(s.data);
@@ -303,9 +303,9 @@ function Dashboard() {
       const fieldCount = Object.keys(parsedData).length;
       timelineItems.push({
         id: s.id,
-        type: "contact_form",
+        type: "inquiry",
         title: parsedData["Name"] ?? parsedData["name"] ?? parsedData["Email"] ?? parsedData["email"] ?? firstValue,
-        subtitle: `Contact form with ${fieldCount} field${fieldCount !== 1 ? "s" : ""}`,
+        subtitle: `Inquiry with ${fieldCount} field${fieldCount !== 1 ? "s" : ""}`,
         timestamp: s.createdAt,
       });
     }
@@ -423,7 +423,7 @@ function Dashboard() {
               {timelineItems.slice(0, 8).map((item) => (
                 <Link
                   key={item.id}
-                  to={`/app/projects/${projectId}/contact-form`}
+                  to={`/app/projects/${projectId}/inquiries`}
                   className="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-accent/50 transition-colors group"
                 >
                   <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 bg-orange-500/10">
@@ -460,7 +460,7 @@ function Dashboard() {
           ) : (
             <div className="flex flex-col items-center justify-center h-[200px] text-sm text-muted-foreground gap-1">
               <Clock className="w-5 h-5 mb-1 text-muted-foreground/50" />
-              No form submissions yet
+              No inquiries yet
             </div>
           )}
         </div>

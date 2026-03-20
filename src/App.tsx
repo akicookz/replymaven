@@ -16,7 +16,7 @@ import WidgetConfig from "./pages/WidgetConfig";
 import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
 import Tools from "./pages/Tools";
-import ContactFormSubmissions from "./pages/ContactFormSubmissions";
+import Inquiries from "./pages/Inquiries";
 import CompanyInfo from "./pages/CompanyInfo";
 import Sops from "./pages/Sops";
 import Profile from "./pages/Profile";
@@ -141,8 +141,8 @@ function App() {
           element={<CannedResponses />}
         />
         <Route
-          path="projects/:projectId/contact-form"
-          element={<ContactFormSubmissions />}
+          path="projects/:projectId/inquiries"
+          element={<Inquiries />}
         />
         <Route
           path="projects/:projectId/tools"

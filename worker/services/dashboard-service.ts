@@ -6,7 +6,7 @@ import {
   messages,
   resources,
   cannedResponses,
-  contactFormSubmissions,
+  inquiries,
 } from "../db";
 
 export class DashboardService {
@@ -35,7 +35,7 @@ export class DashboardService {
         conversationsByDay: [],
         conversationsByStatus: [],
         recentConversations: [],
-        recentContactSubmissions: [],
+        recentInquiries: [],
       };
     }
 
@@ -144,17 +144,17 @@ export class DashboardService {
       .orderBy(desc(conversations.updatedAt))
       .limit(5);
 
-    // ─── Recent contact form submissions (last 5) ────────────────────────────
-    const recentContactSubmissions = await this.db
+    // ─── Recent inquiries (last 5) ──────────────────────────────────────────
+    const recentInquiries = await this.db
       .select()
-      .from(contactFormSubmissions)
+      .from(inquiries)
       .where(
-        sql`${contactFormSubmissions.projectId} IN (${sql.join(
+        sql`${inquiries.projectId} IN (${sql.join(
           projectIds.map((id) => sql`${id}`),
           sql`, `,
         )})`,
       )
-      .orderBy(desc(contactFormSubmissions.createdAt))
+      .orderBy(desc(inquiries.createdAt))
       .limit(5);
 
     return {
@@ -167,7 +167,7 @@ export class DashboardService {
       conversationsByDay,
       conversationsByStatus,
       recentConversations,
-      recentContactSubmissions,
+      recentInquiries,
     };
   }
 }

@@ -49,8 +49,9 @@ import {
   onboardingWidgetSchema,
   updateVisitorEmailSchema,
   updateConversationPublicSchema,
-  updateContactFormConfigSchema,
-  submitContactFormSchema,
+  updateInquiryConfigSchema,
+  submitInquirySchema,
+  updateInquiryStatusSchema,
   createToolSchema,
   updateToolSchema,
   testToolSchema,
@@ -159,7 +160,7 @@ function isLikelyEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-function extractContactFormEmail(
+function extractInquiryEmail(
   formData: Record<string, string>,
 ): string | null {
   for (const [key, value] of Object.entries(formData)) {
@@ -170,7 +171,7 @@ function extractContactFormEmail(
   return null;
 }
 
-function extractContactFormName(
+function extractInquiryName(
   formData: Record<string, string>,
 ): string | null {
   for (const [key, value] of Object.entries(formData)) {
@@ -186,10 +187,10 @@ function extractContactFormName(
   return null;
 }
 
-function buildContactFormConversationMessage(
+function buildInquiryConversationMessage(
   formData: Record<string, string>,
 ): string {
-  const lines = ["Contact form submission"];
+  const lines = ["Inquiry submission"];
 
   for (const [key, value] of Object.entries(formData)) {
     const trimmedValue = value.trim();
@@ -200,18 +201,18 @@ function buildContactFormConversationMessage(
   return lines.join("\n");
 }
 
-function buildContactFormRecord(
+function buildInquiryRecord(
   formData: Record<string, string>,
   visitorName: string | null,
   visitorEmail: string | null,
 ): Record<string, string> {
   const enrichedData = { ...formData };
 
-  if (visitorName && !extractContactFormName(enrichedData)) {
+  if (visitorName && !extractInquiryName(enrichedData)) {
     enrichedData["Visitor name"] = visitorName;
   }
 
-  if (visitorEmail && !extractContactFormEmail(enrichedData)) {
+  if (visitorEmail && !extractInquiryEmail(enrichedData)) {
     enrichedData["Visitor email"] = visitorEmail;
   }
 
@@ -262,7 +263,7 @@ async function createTeamRequestSubmission(params: {
     "Recent chat": transcript,
   };
 
-  const submission = await params.widgetService.createContactFormSubmission(
+  const submission = await params.widgetService.createInquiry(
     params.project.id,
     params.conversation.visitorId ?? undefined,
     formData,
@@ -288,7 +289,7 @@ async function createTeamRequestSubmission(params: {
   ) {
     params.executionCtx.waitUntil(
       params.telegramService
-        .notifyContactForm(
+        .notifyInquiry(
           params.settings.telegramBotToken,
           params.settings.telegramChatId,
           formData,
@@ -306,10 +307,10 @@ async function createTeamRequestSubmission(params: {
     const ownerEmail = await params.projectService.getOwnerEmail(params.project.id);
     if (ownerEmail) {
       const projectName = params.settings?.companyName ?? params.project.name;
-      const dashboardUrl = `${params.env.BETTER_AUTH_URL}/app/projects/${params.project.id}/contact-form`;
+      const dashboardUrl = `${params.env.BETTER_AUTH_URL}/app/projects/${params.project.id}/inquiries`;
       params.executionCtx.waitUntil(
         emailService
-          .sendContactFormNotification({
+          .sendInquiryNotification({
             ownerEmail,
             projectName,
             formData,
@@ -1743,8 +1744,8 @@ const app = new Hono<HonoAppContext>()
     return c.json(updated);
   })
 
-  // ─── Contact Form Submit (public) ────────────────────────────────────────
-  .post("/api/widget/:projectSlug/contact-form", async (c) => {
+  // ─── Inquiry Submit (public) ──────────────────────────────────────────────
+  .post("/api/widget/:projectSlug/inquiries", async (c) => {
     const ip = getClientIp(c);
     if (!checkRateLimit(`cform:${ip}`, 5, 60_000)) {
       return c.json({ error: "Rate limit exceeded" }, 429);
@@ -1758,24 +1759,24 @@ const app = new Hono<HonoAppContext>()
     if (!project) return c.json({ error: "Project not found" }, 404);
 
     const body = await c.req.json();
-    const parsed = validate(submitContactFormSchema, body);
+    const parsed = validate(submitInquirySchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const widgetService = new WidgetService(db);
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
 
-    // Verify contact form is enabled
-    const formConfig = await widgetService.getContactFormConfig(project.id);
+    // Verify inquiry form is enabled
+    const formConfig = await widgetService.getInquiryConfig(project.id);
     if (!formConfig?.enabled) {
-      return c.json({ error: "Contact form is not enabled" }, 400);
+      return c.json({ error: "Inquiry form is not enabled" }, 400);
     }
 
     const visitorId = parsed.data.visitorId ?? crypto.randomUUID();
     const visitorEmail =
-      parsed.data.visitorEmail ?? extractContactFormEmail(parsed.data.data);
+      parsed.data.visitorEmail ?? extractInquiryEmail(parsed.data.data);
     const visitorName =
-      parsed.data.visitorName ?? extractContactFormName(parsed.data.data);
-    const contactFormData = buildContactFormRecord(
+      parsed.data.visitorName ?? extractInquiryName(parsed.data.data);
+    const inquiryData = buildInquiryRecord(
       parsed.data.data,
       visitorName,
       visitorEmail,
@@ -1797,7 +1798,7 @@ const app = new Hono<HonoAppContext>()
     } else {
       const cf = c.req.raw.cf as CfProperties | undefined;
       const metadata: Record<string, string> = {
-        source: "contact_form",
+        source: "inquiry",
       };
       if (cf?.country) metadata.country = String(cf.country);
       if (cf?.city) metadata.city = String(cf.city);
@@ -1816,19 +1817,19 @@ const app = new Hono<HonoAppContext>()
       });
     }
 
-    const submission = await widgetService.createContactFormSubmission(
+    const submission = await widgetService.createInquiry(
       project.id,
       visitorId,
-      contactFormData,
+      inquiryData,
     );
 
-    const contactFormMessage = buildContactFormConversationMessage(contactFormData);
+    const inquiryMessage = buildInquiryConversationMessage(inquiryData);
 
     await chatService.addMessage(
       {
         conversationId: conversation.id,
         role: "visitor",
-        content: contactFormMessage,
+        content: inquiryMessage,
         imageUrl: null,
         sources: null,
       },
@@ -1846,16 +1847,16 @@ const app = new Hono<HonoAppContext>()
               settings.telegramBotToken,
               settings.telegramChatId,
               conversation.visitorName,
-              contactFormMessage,
+              inquiryMessage,
               conversation.id,
               conversation.telegramThreadId
                 ? parseInt(conversation.telegramThreadId, 10)
                 : undefined,
             )
-          : telegramService.notifyContactForm(
+          : telegramService.notifyInquiry(
               settings.telegramBotToken,
               settings.telegramChatId,
-              contactFormData,
+              inquiryData,
               c.env.BETTER_AUTH_URL,
               project.id,
             )
@@ -1871,13 +1872,13 @@ const app = new Hono<HonoAppContext>()
       const ownerEmail = await projectService.getOwnerEmail(project.id);
       if (ownerEmail) {
         const projectName = settings?.companyName ?? project.name;
-        const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/contact-form`;
+        const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/inquiries`;
         c.executionCtx.waitUntil(
           emailService
-            .sendContactFormNotification({
+            .sendInquiryNotification({
               ownerEmail,
               projectName,
-              formData: contactFormData,
+              formData: inquiryData,
               dashboardUrl,
             })
             .catch((err) => {
@@ -3216,8 +3217,8 @@ const app = new Hono<HonoAppContext>()
 
     const widgetService = new WidgetService(db);
 
-    // Enforce max 1 contact_form action per project
-    if (parsed.data.type === "contact_form") {
+    // Enforce max 1 inquiry action per project
+    if (parsed.data.type === "inquiry") {
       const existing = await widgetService.getQuickActionsByType(
         project.id,
         parsed.data.type,
@@ -3636,8 +3637,8 @@ const app = new Hono<HonoAppContext>()
     return c.json(executions);
   })
 
-  // ─── Contact Form Config (Dashboard) ─────────────────────────────────────
-  .get("/api/projects/:id/contact-form", async (c) => {
+  // ─── Inquiry Config (Dashboard) ───────────────────────────────────────────
+  .get("/api/projects/:id/inquiries", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
@@ -3649,7 +3650,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     const widgetService = new WidgetService(db);
-    const config = await widgetService.getContactFormConfig(project.id);
+    const config = await widgetService.getInquiryConfig(project.id);
     if (!config) {
       return c.json({
         enabled: false,
@@ -3663,12 +3664,12 @@ const app = new Hono<HonoAppContext>()
       fields: JSON.parse(config.fields || "[]"),
     });
   })
-  .put("/api/projects/:id/contact-form", async (c) => {
+  .put("/api/projects/:id/inquiries", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     const body = await c.req.json();
-    const parsed = validate(updateContactFormConfigSchema, body);
+    const parsed = validate(updateInquiryConfigSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const db = c.get("db");
@@ -3679,7 +3680,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     const widgetService = new WidgetService(db);
-    const config = await widgetService.upsertContactFormConfig(
+    const config = await widgetService.upsertInquiryConfig(
       project.id,
       parsed.data,
     );
@@ -3689,7 +3690,7 @@ const app = new Hono<HonoAppContext>()
       fields: JSON.parse(config.fields || "[]"),
     });
   })
-  .get("/api/projects/:id/contact-form/submissions", async (c) => {
+  .get("/api/projects/:id/inquiries/submissions", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
@@ -3701,7 +3702,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     const widgetService = new WidgetService(db);
-    const submissions = await widgetService.getContactFormSubmissions(
+    const submissions = await widgetService.getInquiries(
       project.id,
     );
     return c.json(
@@ -3710,6 +3711,73 @@ const app = new Hono<HonoAppContext>()
         data: JSON.parse(s.data || "{}"),
       })),
     );
+  })
+
+  // ─── Update Inquiry Status ──────────────────────────────────────────────────
+  .patch("/api/projects/:id/inquiries/:inquiryId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateInquiryStatusSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const inquiry = await widgetService.updateInquiryStatus(
+      c.req.param("inquiryId"),
+      project.id,
+      parsed.data.status,
+    );
+    if (!inquiry) return c.json({ error: "Not found" }, 404);
+    return c.json({ ...inquiry, data: JSON.parse(inquiry.data || "{}") });
+  })
+
+  // ─── Compose Inquiry Reply ─────────────────────────────────────────────────
+  .post("/api/projects/:id/inquiries/:inquiryId/compose", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const inquiry = await widgetService.getInquiryById(
+      c.req.param("inquiryId"),
+      project.id,
+    );
+    if (!inquiry) return c.json({ error: "Not found" }, 404);
+
+    const settings = await projectService.getSettings(project.id);
+    const aiService = new AiService({
+      model: c.env.AI_MODEL,
+      geminiApiKey: c.env.GEMINI_API_KEY,
+      openaiApiKey: c.env.OPENAI_API_KEY,
+    });
+    const inquiryData = JSON.parse(inquiry.data || "{}");
+
+    const reply = await aiService.composeInquiryReply(
+      {
+        toneOfVoice: settings?.toneOfVoice,
+        customTonePrompt: settings?.customTonePrompt,
+        companyContext: settings?.companyContext,
+        companyName: settings?.companyName,
+      },
+      settings?.companyName ?? project.name,
+      inquiryData,
+    );
+
+    return c.json(reply);
   })
 
   // ─── Resources ─────────────────────────────────────────────────────────────

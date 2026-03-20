@@ -157,7 +157,7 @@ export const quickActions = sqliteTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     type: text("type", {
-      enum: ["prompt", "link", "contact_form"],
+      enum: ["prompt", "link", "inquiry"],
     })
       .notNull()
       .default("prompt"),
@@ -354,10 +354,10 @@ export const cannedResponses = sqliteTable(
 export type CannedResponseRow = typeof cannedResponses.$inferSelect;
 export type NewCannedResponseRow = typeof cannedResponses.$inferInsert;
 
-// ─── Contact Form Config ──────────────────────────────────────────────────
+// ─── Inquiry Config ───────────────────────────────────────────────────────
 
-export const contactFormConfig = sqliteTable(
-  "contact_form_config",
+export const inquiryConfig = sqliteTable(
+  "inquiry_config",
   {
     id: text("id").primaryKey(),
     projectId: text("project_id")
@@ -377,17 +377,17 @@ export const contactFormConfig = sqliteTable(
       .notNull(),
   },
   (table) => [
-    uniqueIndex("idx_contact_form_config_project").on(table.projectId),
+    uniqueIndex("idx_inquiry_config_project").on(table.projectId),
   ],
 );
 
-export type ContactFormConfigRow = typeof contactFormConfig.$inferSelect;
-export type NewContactFormConfigRow = typeof contactFormConfig.$inferInsert;
+export type InquiryConfigRow = typeof inquiryConfig.$inferSelect;
+export type NewInquiryConfigRow = typeof inquiryConfig.$inferInsert;
 
-// ─── Contact Form Submissions ─────────────────────────────────────────────
+// ─── Inquiries ────────────────────────────────────────────────────────────
 
-export const contactFormSubmissions = sqliteTable(
-  "contact_form_submissions",
+export const inquiries = sqliteTable(
+  "inquiries",
   {
     id: text("id").primaryKey(),
     projectId: text("project_id")
@@ -395,19 +395,22 @@ export const contactFormSubmissions = sqliteTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     visitorId: text("visitor_id"),
     data: text("data").notNull(), // JSON object of { fieldLabel: value }
+    status: text("status", { enum: ["new", "replied", "closed"] })
+      .notNull()
+      .default("new"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
   },
   (table) => [
-    index("idx_contact_form_submissions_project").on(table.projectId),
+    index("idx_inquiries_project").on(table.projectId),
   ],
 );
 
-export type ContactFormSubmissionRow =
-  typeof contactFormSubmissions.$inferSelect;
-export type NewContactFormSubmissionRow =
-  typeof contactFormSubmissions.$inferInsert;
+export type InquiryRow =
+  typeof inquiries.$inferSelect;
+export type NewInquiryRow =
+  typeof inquiries.$inferInsert;
 
 // ─── Tools ────────────────────────────────────────────────────────────────────
 
@@ -645,8 +648,8 @@ export const schema = {
   conversations,
   messages,
   cannedResponses,
-  contactFormConfig,
-  contactFormSubmissions,
+  inquiryConfig,
+  inquiries,
   subscriptions,
   teamMembers,
   usage,

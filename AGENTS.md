@@ -201,6 +201,7 @@ replymaven/
 - Fonts: `Satoshi` (sans), `Playfair Display` (heading)
 - Dark mode via `.dark` class variant
 - Ensure keyboard accessibility, ARIA usage, and color contrast
+- **Never use borders as visual separators** -- no `border-t`, `border-b`, `<hr>`, horizontal rules, or separator elements for dividing sections or list rows. Use spacing (`space-y-*`, `gap-*`, `py-*`) and background color contrast (`bg-muted/50` cards) for visual separation instead. Container borders on cards (`border border-border` on the outer card) are acceptable only sparingly, but row-separator borders within lists/tables are never allowed.
 
 ### Routing and data fetching
 

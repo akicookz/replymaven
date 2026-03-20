@@ -95,7 +95,7 @@ export const updateWidgetConfigSchema = z.object({
 
 // ─── Quick Actions ────────────────────────────────────────────────────────────
 export const createQuickActionSchema = z.object({
-  type: z.enum(["prompt", "link", "contact_form"]),
+  type: z.enum(["prompt", "link", "inquiry"]),
   label: z.string().min(1, "Label is required").max(100),
   action: z.string().max(2048).optional().default(""),
   icon: z.string().max(50).optional().default("link"),
@@ -223,27 +223,31 @@ export const onboardingWidgetSchema = z.object({
   fontFamily: z.string().max(100),
 });
 
-// ─── Contact Form ─────────────────────────────────────────────────────────
-export const contactFormFieldSchema = z.object({
+// ─── Inquiries ────────────────────────────────────────────────────────────
+export const inquiryFieldSchema = z.object({
   label: z.string().min(1, "Label is required").max(100),
   type: z.enum(["text", "textarea"]),
   required: z.boolean().default(false),
 });
 
-export const updateContactFormConfigSchema = z.object({
+export const updateInquiryConfigSchema = z.object({
   enabled: z.boolean().optional(),
   description: z.string().max(500).nullable().optional(),
   fields: z
-    .array(contactFormFieldSchema)
+    .array(inquiryFieldSchema)
     .max(10, "Maximum 10 fields allowed")
     .optional(),
 });
 
-export const submitContactFormSchema = z.object({
+export const submitInquirySchema = z.object({
   visitorId: z.string().min(1).max(100).optional(),
   visitorName: z.string().max(100).optional(),
   visitorEmail: z.string().email().optional(),
   data: z.record(z.string(), z.string().max(5000)),
+});
+
+export const updateInquiryStatusSchema = z.object({
+  status: z.enum(["new", "replied", "closed"]),
 });
 
 // ─── Tools ────────────────────────────────────────────────────────────────────
