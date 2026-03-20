@@ -54,6 +54,7 @@ const navItems: NavItem[] = [
       { id: "set-metadata", label: "Set Custom Metadata" },
       { id: "page-context", label: "Page Context" },
       { id: "notifications", label: "Request Notifications" },
+      { id: "open-inquiry-form", label: "Open Inquiry Form" },
     ],
   },
   {
@@ -628,6 +629,26 @@ window.ReplyMaven.toggle();`}
               language="javascript"
               code={`window.ReplyMaven.requestNotifications();`}
             />
+
+            <SectionHeading id="open-inquiry-form" level={3}>
+              Open Inquiry Form
+            </SectionHeading>
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              Open the inquiry form programmatically. If the widget is
+              closed, it will be opened first. The inquiry form must be
+              enabled in your project settings under{" "}
+              <strong>Inquiries</strong>.
+            </p>
+            <CodeBlock
+              title="Open the inquiry form"
+              language="javascript"
+              code={`window.ReplyMaven.openInquiryForm();`}
+            />
+            <Callout type="tip">
+              Use this to trigger the inquiry form from custom buttons or
+              links on your page -- for example, a "Contact Us" button in
+              your navigation.
+            </Callout>
 
             {/* ── Customization ───────────────────────────────────────── */}
             <SectionHeading id="colors-fonts">
@@ -1404,6 +1425,10 @@ window.ReplyMaven.setMetadata({
               screen. Visitors can submit structured information when they
               prefer not to chat. Configure fields in{" "}
               <strong>Inquiries</strong> in the dashboard.
+            </p>
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              You can also open the inquiry form programmatically using{" "}
+              <IC>window.ReplyMaven.openInquiryForm()</IC>.
             </p>
 
             <SectionHeading id="tone-of-voice" level={3}>

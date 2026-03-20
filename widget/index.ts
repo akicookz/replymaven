@@ -3185,7 +3185,7 @@
         }
 
         // Header text
-        headerTitle.textContent = loadedConfig.botName || w.headerText || "Support Assistant";
+        headerTitle.textContent = w.headerText || loadedConfig.botName || "Ask AI";
         headerSubtitle.textContent = w.headerSubtitle || "We typically reply instantly";
 
         // Position

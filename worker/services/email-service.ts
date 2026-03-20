@@ -11,7 +11,7 @@ export class EmailService {
 
   async sendWelcomeEmail(to: string, name: string): Promise<void> {
     await this.resend.emails.send({
-      from: "ReplyMaven <noreply@replymaven.com>",
+      from: "ReplyMaven <noreply@updates.replymaven.com>",
       to,
       subject: "Welcome to ReplyMaven",
       html: `
@@ -35,7 +35,7 @@ export class EmailService {
     const displayName = visitorName ?? "A visitor";
 
     await this.resend.emails.send({
-      from: `${projectName} <noreply@replymaven.com>`,
+      from: `${projectName} <noreply@updates.replymaven.com>`,
       to: ownerEmail,
       subject: `Agent requested: ${displayName} needs help`,
       html: `
@@ -71,7 +71,7 @@ export class EmailService {
       .join("");
 
     await this.resend.emails.send({
-      from: `${projectName} <noreply@replymaven.com>`,
+      from: `${projectName} <noreply@updates.replymaven.com>`,
       to: ownerEmail,
       subject: `New inquiry submission - ${projectName}`,
       html: `
@@ -114,7 +114,7 @@ export class EmailService {
     const msg = reasonMessages[reason];
 
     await this.resend.emails.send({
-      from: "ReplyMaven <noreply@replymaven.com>",
+      from: "ReplyMaven <noreply@updates.replymaven.com>",
       to,
       subject: msg.subject,
       html: `
@@ -130,7 +130,7 @@ export class EmailService {
     name: string,
   ): Promise<void> {
     await this.resend.emails.send({
-      from: "ReplyMaven <noreply@replymaven.com>",
+      from: "ReplyMaven <noreply@updates.replymaven.com>",
       to,
       subject: "Your chatbot is back online",
       html: `

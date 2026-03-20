@@ -8,7 +8,7 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 
 ### Core Features
 
-- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation (`open`, `close`, `toggle`, `sendMessage`, `identify`, `setPageContext`, `setMetadata`, `requestNotifications`). Uses SSE for streaming AI responses. Automatically sends current page URL and title as context with each message.
+- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation (`open`, `close`, `toggle`, `sendMessage`, `identify`, `setPageContext`, `setMetadata`, `requestNotifications`, `openInquiryForm`). Uses SSE for streaming AI responses. Automatically sends current page URL and title as context with each message.
 - **Dashboard** -- React SPA where users configure their bot, manage resources, review conversations, and customize the widget's look and feel.
 - **Resource management** -- users add web pages, FAQs, and PDFs as knowledge sources. These are stored in R2 and indexed via Cloudflare AI Search for RAG retrieval.
 - **Tone of voice** -- configurable AI personality (professional, friendly, casual, formal, or custom prompt).
@@ -584,6 +584,7 @@ window.ReplyMaven.identify({ name: "John", email: "john@example.com" })
 window.ReplyMaven.setPageContext({ page: "Pricing", plan: "Pro" })
 window.ReplyMaven.setMetadata({ internalId: "abc123" })
 window.ReplyMaven.requestNotifications()
+window.ReplyMaven.openInquiryForm()
 ```
 
 ### SSE Streaming Flow
@@ -747,7 +748,7 @@ Secrets (via `.dev.vars` locally, `wrangler secret put` for production):
 
 ### Phase 7 -- Polish
 31. Dashboard analytics (conversation counts, response times, topics)
-32. Widget programmatic API (`open`, `close`, `toggle`, `identify`, `sendMessage`, `setPageContext`, `setMetadata`, `requestNotifications`)
+32. Widget programmatic API (`open`, `close`, `toggle`, `identify`, `sendMessage`, `setPageContext`, `setMetadata`, `requestNotifications`, `openInquiryForm`)
 33. Implement `setPageContext` for per-message AI-visible page context (auto-includes `currentPageUrl` and `pageTitle`)
 34. Rate limiting and abuse prevention
 35. Error handling, loading states, edge cases
