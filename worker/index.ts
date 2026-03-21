@@ -603,9 +603,7 @@ function buildRagContext(chunks: PreparedRagChunk[]): {
     seenText.add(dedupeKey);
     contextChars += finalText.length;
 
-    if (chunk.score >= 0.45) {
-      sourceFilenames.add(chunk.key);
-    }
+    sourceFilenames.add(chunk.key);
   }
 
   if (selected.length === 0) {

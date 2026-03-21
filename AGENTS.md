@@ -70,6 +70,27 @@ bun run db:generate
 bun run widget:build
 ```
 
+## Deployment
+
+**Always ask the user before deploying anything.**
+
+### Worker / Website (dashboard)
+
+Commit and push to `main`. The worker and website are deployed automatically.
+
+```bash
+git add . && git commit -m "your message" && git push
+```
+
+### Widget
+
+The widget is a separate build. After making changes to `widget/`, build and upload to R2:
+
+```bash
+bun run widget:build
+npx wrangler r2 object put supportbot-uploads/widget-embed.js --file=public/widget-embed.js --content-type="application/javascript" --remote
+```
+
 ---
 
 ## Project Structure

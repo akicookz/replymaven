@@ -92,8 +92,15 @@ interface Message {
   id: string;
   role: "visitor" | "bot" | "agent";
   content: string;
+  sources?: string | null;
   createdAt: string;
   toolExecutions?: ToolExecutionInfo[];
+}
+
+interface SourceReference {
+  title: string;
+  url?: string | null;
+  type?: "webpage" | "pdf" | "faq";
 }
 
 interface CannedResponse {
@@ -1040,6 +1047,43 @@ function Conversations() {
                         <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                           {msg.content}
                         </p>
+
+                        {/* Source links */}
+                        {isBot && msg.sources && (() => {
+                          try {
+                            const sources: SourceReference[] = JSON.parse(msg.sources);
+                            if (!Array.isArray(sources) || sources.length === 0) return null;
+                            return (
+                              <div className="mt-1.5 pt-1.5 border-t border-border/30 space-y-0.5">
+                                {sources.map((src, i) => {
+                                  const srcType = src.type || "webpage";
+                                  const typeLabel = srcType === "pdf" ? "Docs" : srcType === "faq" ? "FAQ" : "Website";
+                                  const Icon = srcType === "webpage" ? Globe : FileText;
+                                  return (
+                                    <div key={i} className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                      <Icon className="w-3 h-3 shrink-0" />
+                                      <span className="font-semibold text-[10px] uppercase tracking-wide shrink-0">{typeLabel}</span>
+                                      {src.url ? (
+                                        <a
+                                          href={src.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="hover:opacity-70 truncate"
+                                        >
+                                          {src.title}
+                                        </a>
+                                      ) : (
+                                        <span className="truncate">{src.title}</span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          } catch {
+                            return null;
+                          }
+                        })()}
 
                         {/* Timestamp + checkmarks */}
                         <div
