@@ -144,7 +144,7 @@
 
   // ─── SVG Icons ──────────────────────────────────────────────────────────────
   const ICONS = {
-    chat: '<svg viewBox="0 0 68 90" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M64.5991 34.4292C64.5991 30.8374 63.7372 27.3928 62.2031 24.8531C60.669 22.3133 58.5882 20.8865 56.4186 20.8865H27.0835C24.9141 20.8857 22.8337 19.4584 21.3 16.9185L12.2933 2.00792C11.8872 1.33568 11.3697 0.877895 10.8064 0.692442C10.2432 0.506988 9.65931 0.602195 9.12871 0.966024C8.59811 1.32985 8.14459 1.94597 7.82548 2.73647C7.50637 3.52697 7.33601 4.45637 7.33594 5.40715V75.0574C7.33594 78.6491 8.1978 82.0938 9.73194 84.6335C11.2661 87.1733 13.3468 88.6001 15.5164 88.6001H56.4186C58.5882 88.6001 60.669 87.1733 62.2031 84.6335C63.7372 82.0938 64.5991 78.6491 64.5991 75.0574V34.4292Z"/><path d="M0.599609 65.6436H14.354"/><path d="M0.599609 52.2524H14.354"/><path d="M0.599609 40.7739H14.354"/><path d="M22.4941 59.9043C31.7573 69.4695 41.0205 69.4695 50.2836 59.9043"/></svg>',
+    chat: '<svg viewBox="0 0 68 90" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M64.5991 34.4292C64.5991 30.8374 63.7372 27.3928 62.2031 24.8531C60.669 22.3133 58.5882 20.8865 56.4186 20.8865H27.0835C24.9141 20.8857 22.8337 19.4584 21.3 16.9185L12.2933 2.00792C11.8872 1.33568 11.3697 0.877895 10.8064 0.692442C10.2432 0.506988 9.65931 0.602195 9.12871 0.966024C8.59811 1.32985 8.14459 1.94597 7.82548 2.73647C7.50637 3.52697 7.33601 4.45637 7.33594 5.40715V75.0574C7.33594 78.6491 8.1978 82.0938 9.73194 84.6335C11.2661 87.1733 13.3468 88.6001 15.5164 88.6001H56.4186C58.5882 88.6001 60.669 87.1733 62.2031 84.6335C63.7372 82.0938 64.5991 78.6491 64.5991 75.0574V34.4292Z"/><path d="M0.599609 65.6436H14.354"/><path d="M0.599609 52.2524H14.354"/><path d="M0.599609 40.7739H14.354"/><path d="M22.4941 59.9043C31.7573 69.4695 41.0205 69.4695 50.2836 59.9043"/></svg>',
     close:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
     send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
@@ -1085,141 +1085,6 @@
     }
 
     /* ─── Handoff Card ────────────────────────────────────────────────────── */
-    .rm-handoff-card {
-      margin: 8px 0;
-      padding: 20px;
-      border-radius: 14px;
-      background: var(--rm-bg-secondary);
-      border: 1px solid var(--rm-border-subtle);
-      text-align: center;
-      animation: rm-message-in 0.4s ease-out;
-      align-self: stretch;
-      max-width: 100%;
-    }
-    .rm-handoff-icon {
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 12px;
-    }
-    .rm-handoff-icon svg {
-      width: 22px;
-      height: 22px;
-    }
-    .rm-handoff-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--rm-text);
-      margin-bottom: 4px;
-    }
-    .rm-handoff-subtitle {
-      font-size: 13px;
-      color: var(--rm-text-secondary);
-      margin-bottom: 16px;
-      line-height: 1.4;
-    }
-    .rm-handoff-email-display {
-      display: inline-block;
-      padding: 6px 12px;
-      background: var(--rm-bg-tertiary);
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--rm-text);
-      margin-bottom: 14px;
-    }
-    .rm-handoff-actions {
-      display: flex;
-      gap: 8px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    .rm-handoff-btn {
-      padding: 8px 18px;
-      border-radius: var(--rm-btn-radius);
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.2s, transform 0.15s;
-      border: none;
-      font-family: inherit;
-    }
-    .rm-handoff-btn:active {
-      transform: scale(0.97);
-    }
-    .rm-handoff-btn-primary {
-      color: var(--rm-brand-text, #ffffff);
-    }
-    .rm-handoff-btn-secondary {
-      background: var(--rm-bg-secondary);
-      color: var(--rm-text-secondary);
-    }
-    .rm-handoff-btn-secondary:hover {
-      background: var(--rm-bg-tertiary);
-    }
-    .rm-handoff-email-form {
-      display: flex;
-      gap: 8px;
-      margin-top: 4px;
-    }
-    .rm-handoff-email-input {
-      flex: 1;
-      padding: 9px 14px;
-      border: 1px solid var(--rm-border);
-      border-radius: var(--rm-input-radius);
-      font-size: 13px;
-      outline: none;
-      font-family: inherit;
-      color: var(--rm-text);
-      background: var(--rm-input-bg);
-      transition: border-color 0.2s;
-    }
-    .rm-handoff-email-input:focus {
-      border-color: var(--rm-primary, #2563eb);
-      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
-      background: var(--rm-input-bg-focus);
-    }
-    .rm-handoff-email-input::placeholder {
-      color: var(--rm-text-muted);
-    }
-    .rm-handoff-submit {
-      width: 36px;
-      min-width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      border: none;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--rm-brand-text, #ffffff);
-      transition: opacity 0.2s;
-    }
-    .rm-handoff-submit:hover {
-      opacity: 0.9;
-    }
-    .rm-handoff-submit svg {
-      width: 16px;
-      height: 16px;
-    }
-    .rm-handoff-confirmed {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      font-size: 13px;
-      color: #4ade80;
-      font-weight: 500;
-      margin-top: 4px;
-    }
-    .rm-handoff-confirmed svg {
-      width: 16px;
-      height: 16px;
-    }
-
     /* ─── Home Screen ─────────────────────────────────────────────────────── */
     .rm-home {
       flex: 1;
@@ -3913,13 +3778,7 @@
         const decoder = new TextDecoder();
         let botMessage = "";
         let botMessageEl: HTMLElement | null = null;
-        let handoffDetected = false;
-        let handoffEmail: string | null = null;
-        let teamRequestEvent: {
-          submitted: boolean;
-          needsEmail: boolean;
-          visitorEmail: string | null;
-        } | null = null;
+        let inquiryDetected = false;
         let resolvedDetected = false;
         let sseBuffer = "";
 
@@ -3946,26 +3805,8 @@
               try {
                 const data = JSON.parse(line.slice(6));
 
-                if (data.handoff) {
-                  handoffDetected = true;
-                  handoffEmail = data.visitorEmail || visitorInfo.email || null;
-                  // Remove any bot message bubble that was showing the [HANDOFF_REQUESTED] token
-                  if (botMessageEl) {
-                    botMessageEl.closest(".rm-message-row")?.remove();
-                    botMessageEl = null;
-                  }
-                  hideTyping();
-                  continue;
-                }
-
-                if (data.teamRequest) {
-                  teamRequestEvent = {
-                    submitted: data.teamRequest.submitted === true,
-                    needsEmail: data.teamRequest.needsEmail === true,
-                    visitorEmail:
-                      data.teamRequest.visitorEmail || visitorInfo.email || null,
-                  };
-                  hideTyping();
+                if (data.inquiry) {
+                  inquiryDetected = true;
                   continue;
                 }
 
@@ -4018,29 +3859,11 @@
                 if (data.text) {
                   botMessage += data.text;
 
-                  // Client-side filter: if [HANDOFF_REQUESTED] appears in accumulated text,
-                  // strip it and mark handoff (backup for when SSE handoff event hasn't arrived yet)
-                  if (botMessage.includes("[HANDOFF_REQUESTED]")) {
-                    handoffDetected = true;
-                    handoffEmail = visitorInfo.email || null;
-                    if (botMessageEl) {
-                      botMessageEl.closest(".rm-message-row")?.remove();
-                      botMessageEl = null;
-                    }
-                    hideTyping();
-                    botMessage = "";
-                    continue;
-                  }
-
-                  if (botMessage.includes("[TEAM_REQUEST_APPROVED]")) {
-                    const fallbackEmail = visitorInfo.email || null;
-                    teamRequestEvent = {
-                      submitted: !!fallbackEmail,
-                      needsEmail: !fallbackEmail,
-                      visitorEmail: fallbackEmail,
-                    };
+                  // Client-side filter: strip [NEW_INQUIRY] token if it leaks through
+                  if (botMessage.includes("[NEW_INQUIRY]")) {
+                    inquiryDetected = true;
                     botMessage = botMessage
-                      .replace("[TEAM_REQUEST_APPROVED]", "")
+                      .replace("[NEW_INQUIRY]", "")
                       .trim();
                   }
 
@@ -4082,15 +3905,14 @@
                   }
                   lastMessageTimestamp = Date.now();
                   scrollToBottom();
-                  // Show handoff card if needed
-                  if (handoffDetected) {
-                    showHandoffCard(handoffEmail);
-                  }
-                  if (teamRequestEvent) {
-                    showTeamRequestCard({
-                      submitted: teamRequestEvent.submitted,
-                      email: teamRequestEvent.visitorEmail,
-                    });
+                  // Handle inquiry -- enter agent listen mode
+                  if (inquiryDetected) {
+                    _isHandedOff = true;
+                    conversationStatus = "waiting_agent";
+                    requestNotificationPermission();
+                    stopPolling();
+                    startPolling();
+                    input.placeholder = "Add any details for the team...";
                   }
                   // Handle resolved -- close the conversation
                   if (resolvedDetected) {
@@ -4120,21 +3942,14 @@
           }
         }
 
-        // Edge case: stream ended without a done event but handoff was detected
-        if (
-          handoffDetected &&
-          !document.querySelector('[data-card-type="handoff"]')
-        ) {
-          showHandoffCard(handoffEmail);
-        }
-        if (
-          teamRequestEvent &&
-          !document.querySelector('[data-card-type="team-request"]')
-        ) {
-          showTeamRequestCard({
-            submitted: teamRequestEvent.submitted,
-            email: teamRequestEvent.visitorEmail,
-          });
+        // Edge case: stream ended without a done event but inquiry was detected
+        if (inquiryDetected && conversationStatus !== "waiting_agent") {
+          _isHandedOff = true;
+          conversationStatus = "waiting_agent";
+          requestNotificationPermission();
+          stopPolling();
+          startPolling();
+          input.placeholder = "Add any details for the team...";
         }
         // Edge case: stream ended without a done event but resolved was detected
         if (resolvedDetected && conversationStatus !== "closed") {
@@ -4594,242 +4409,6 @@
   }
 
   // ─── Handoff Card ───────────────────────────────────────────────────────────
-
-  function showHandoffCard(email: string | null) {
-    _isHandedOff = true;
-    conversationStatus = "waiting_agent";
-    const primaryColor = getPrimaryColor();
-
-    // Request notification permission on handoff
-    requestNotificationPermission();
-
-    // Restart polling with faster interval for agent replies
-    stopPolling();
-    startPolling();
-
-    const card = document.createElement("div");
-    card.className = "rm-handoff-card";
-    card.setAttribute("data-card-type", "handoff");
-
-    // Icon
-    const icon = document.createElement("div");
-    icon.className = "rm-handoff-icon";
-    icon.style.backgroundColor = `rgba(${hexToRgb(primaryColor)}, 0.12)`;
-    icon.style.color = primaryColor;
-    icon.innerHTML = ICONS.headset;
-    card.appendChild(icon);
-
-    // Title
-    const title = document.createElement("div");
-    title.className = "rm-handoff-title";
-    title.textContent = "Conversation forwarded to our team";
-    card.appendChild(title);
-
-    // Subtitle
-    const subtitle = document.createElement("div");
-    subtitle.className = "rm-handoff-subtitle";
-
-    if (email) {
-      subtitle.textContent = "Is this a good way to reach you?";
-      card.appendChild(subtitle);
-
-      // Show email
-      const emailDisplay = document.createElement("div");
-      emailDisplay.className = "rm-handoff-email-display";
-      emailDisplay.textContent = email;
-      card.appendChild(emailDisplay);
-
-      // Actions
-      const actions = document.createElement("div");
-      actions.className = "rm-handoff-actions";
-
-      const confirmBtn = document.createElement("button");
-      confirmBtn.className = "rm-handoff-btn rm-handoff-btn-primary";
-      confirmBtn.style.backgroundColor = primaryColor;
-      confirmBtn.textContent = "Yes, that works";
-      confirmBtn.onclick = () => {
-        actions.remove();
-        const confirmed = document.createElement("div");
-        confirmed.className = "rm-handoff-confirmed";
-        confirmed.innerHTML = ICONS.check;
-        const confirmText = document.createElement("span");
-        confirmText.textContent = `We'll follow up at ${email}`;
-        confirmed.appendChild(confirmText);
-        card.appendChild(confirmed);
-        scrollToBottom();
-      };
-
-      const changeBtn = document.createElement("button");
-      changeBtn.className = "rm-handoff-btn rm-handoff-btn-secondary";
-      changeBtn.textContent = "Use a different email";
-      changeBtn.onclick = () => {
-        actions.remove();
-        emailDisplay.remove();
-        subtitle.textContent = "Enter your preferred email address";
-        appendEmailForm(card);
-      };
-
-      actions.appendChild(confirmBtn);
-      actions.appendChild(changeBtn);
-      card.appendChild(actions);
-    } else {
-      subtitle.textContent = "Leave your email so we can get back to you.";
-      card.appendChild(subtitle);
-      appendEmailForm(card);
-    }
-
-    // Insert card before typing indicator
-    messagesContainer.insertBefore(card, typingRow);
-    scrollToBottom();
-
-    // Update input placeholder
-    input.placeholder = "Add any details for the team...";
-  }
-
-  function showTeamRequestCard(options: {
-    submitted: boolean;
-    email: string | null;
-  }) {
-    const existing = document.querySelector('[data-card-type="team-request"]');
-    if (existing) return;
-
-    const primaryColor = getPrimaryColor();
-    const card = document.createElement("div");
-    card.className = "rm-handoff-card";
-    card.setAttribute("data-card-type", "team-request");
-
-    const icon = document.createElement("div");
-    icon.className = "rm-handoff-icon";
-    icon.style.backgroundColor = `rgba(${hexToRgb(primaryColor)}, 0.12)`;
-    icon.style.color = primaryColor;
-    icon.innerHTML = ICONS.headset;
-    card.appendChild(icon);
-
-    const title = document.createElement("div");
-    title.className = "rm-handoff-title";
-    title.textContent = options.submitted
-      ? "Request sent to our team"
-      : "I can pass this to our team";
-    card.appendChild(title);
-
-    const subtitle = document.createElement("div");
-    subtitle.className = "rm-handoff-subtitle";
-    subtitle.textContent = options.submitted
-      ? options.email
-        ? `We'll review this and follow up at ${options.email}.`
-        : "We'll review this and follow up soon."
-      : "Leave your email so the team can follow up.";
-    card.appendChild(subtitle);
-
-    if (options.submitted) {
-      const confirmed = document.createElement("div");
-      confirmed.className = "rm-handoff-confirmed";
-      confirmed.innerHTML = ICONS.check;
-      const confirmText = document.createElement("span");
-      confirmText.textContent = options.email
-        ? `Submitted for review. We'll use ${options.email}.`
-        : "Submitted for review.";
-      confirmed.appendChild(confirmText);
-      card.appendChild(confirmed);
-    } else {
-      appendEmailForm(card, {
-        successText: (email, result) =>
-          result?.teamRequestSubmitted
-            ? `Thanks! I passed this to the team. They'll follow up at ${email}`
-            : `Thanks! We'll reach out at ${email}`,
-      });
-    }
-
-    messagesContainer.insertBefore(card, typingRow);
-    input.placeholder = "Add more details if needed...";
-    scrollToBottom();
-  }
-
-  function appendEmailForm(
-    card: HTMLElement,
-    options?: {
-      successText?: (
-        email: string,
-        result: { teamRequestSubmitted?: boolean } | null,
-      ) => string;
-    },
-  ) {
-    const primaryColor = getPrimaryColor();
-
-    const form = document.createElement("div");
-    form.className = "rm-handoff-email-form";
-
-    const emailInput = document.createElement("input");
-    emailInput.className = "rm-handoff-email-input";
-    emailInput.type = "email";
-    emailInput.placeholder = "you@example.com";
-
-    const submitBtn = document.createElement("button");
-    submitBtn.className = "rm-handoff-submit";
-    submitBtn.style.backgroundColor = primaryColor;
-    submitBtn.innerHTML = ICONS.arrowRight;
-
-    async function submitEmail() {
-      const email = emailInput.value.trim();
-      if (!email || !email.includes("@")) return;
-
-      submitBtn.disabled = true;
-      emailInput.disabled = true;
-
-      try {
-        let responseData: { teamRequestSubmitted?: boolean } | null = null;
-        if (conversationId) {
-          const response = await fetch(
-            `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/email`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email }),
-            },
-          );
-          if (!response.ok) {
-            throw new Error("Failed to save email");
-          }
-          responseData = await response.json().catch(() => null);
-        }
-        // Update local state
-        visitorInfo.email = email;
-
-        // Replace form with confirmation
-        form.remove();
-
-        // Remove subtitle if it exists
-        const sub = card.querySelector(".rm-handoff-subtitle");
-        if (sub) sub.remove();
-
-        const confirmed = document.createElement("div");
-        confirmed.className = "rm-handoff-confirmed";
-        confirmed.innerHTML = ICONS.check;
-        const confirmText = document.createElement("span");
-        confirmText.textContent = options?.successText
-          ? options.successText(email, responseData)
-          : `Thanks! We'll reach out at ${email}`;
-        confirmed.appendChild(confirmText);
-        card.appendChild(confirmed);
-        scrollToBottom();
-      } catch {
-        submitBtn.disabled = false;
-        emailInput.disabled = false;
-      }
-    }
-
-    emailInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") submitEmail();
-    });
-    submitBtn.onclick = submitEmail;
-
-    form.appendChild(emailInput);
-    form.appendChild(submitBtn);
-    card.appendChild(form);
-
-    // Auto-focus the email input
-    setTimeout(() => emailInput.focus(), 100);
-  }
 
   // ─── Polling for New Messages ──────────────────────────────────────────────
 

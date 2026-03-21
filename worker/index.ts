@@ -1162,6 +1162,10 @@ const app = new Hono<HonoAppContext>()
         })),
         agentHandbackInstructions,
         pageContext: parsed.data.pageContext,
+        visitorInfo: {
+          name: conversation.visitorName,
+          email: conversation.visitorEmail,
+        },
       },
     );
 
@@ -1315,22 +1319,84 @@ const app = new Hono<HonoAppContext>()
             );
           }
 
-          // Check if handoff was requested
-          if (fullResponse.includes("[HANDOFF_REQUESTED]")) {
+          // Check if a new inquiry was created by the AI
+          if (fullResponse.includes("[NEW_INQUIRY]")) {
+            // Extract contact info from conversation
+            const contactInfo =
+              await aiService.extractContactInfo(conversationHistory);
+            const visitorName =
+              conversation.visitorName ?? contactInfo.name ?? null;
+            const visitorEmail =
+              conversation.visitorEmail ?? contactInfo.email ?? null;
+
+            // Update conversation with extracted contact info
+            if (contactInfo.name || contactInfo.email) {
+              await chatService.updateConversation(
+                conversationId,
+                project.id,
+                {
+                  visitorName: visitorName ?? undefined,
+                  visitorEmail: visitorEmail ?? undefined,
+                },
+              );
+            }
+
+            // Set conversation to waiting_agent
             await chatService.updateConversationStatus(
               conversationId,
               project.id,
               "waiting_agent",
             );
 
-            // Notify via Telegram if configured
-            if (settings?.telegramBotToken && settings?.telegramChatId) {
-              const telegramService = new TelegramService(db);
+            // Summarize and create inquiry submission
+            const summary =
+              await aiService.summarizeTeamRequest(conversationHistory);
+            const telegramService =
+              settings?.telegramBotToken && settings?.telegramChatId
+                ? new TelegramService(db)
+                : undefined;
+
+            const submission = await createTeamRequestSubmission({
+              aiService,
+              chatService,
+              widgetService: new WidgetService(db),
+              projectService,
+              telegramService,
+              project,
+              conversation: {
+                ...conversation,
+                visitorName,
+                visitorEmail,
+              },
+              conversationHistory,
+              summary,
+              email: visitorEmail ?? "not provided",
+              settings,
+              env: {
+                BETTER_AUTH_URL: c.env.BETTER_AUTH_URL,
+                RESEND_API_KEY: c.env.RESEND_API_KEY,
+              },
+              executionCtx: c.executionCtx,
+            });
+
+            conversationMetadata.teamRequestPending = false;
+            conversationMetadata.teamRequestSubmissionId =
+              submission.submissionId;
+            conversationMetadata.teamRequestSummary = submission.summary;
+            conversationMetadata.teamRequestSubmittedAt =
+              new Date().toISOString();
+
+            // Notify via Telegram if configured (handoff-style notification)
+            if (
+              telegramService &&
+              settings?.telegramBotToken &&
+              settings?.telegramChatId
+            ) {
               const threadId = await telegramService.notifyHandoff(
                 settings.telegramBotToken,
                 settings.telegramChatId,
                 conversationId,
-                conversation.visitorName,
+                visitorName,
                 parsed.data.content,
                 conversationHistory,
                 c.env.BETTER_AUTH_URL,
@@ -1358,137 +1424,30 @@ const app = new Hono<HonoAppContext>()
                     .sendHandoffNotification({
                       ownerEmail,
                       projectName,
-                      visitorName: conversation.visitorName,
+                      visitorName,
                       visitorMessage: parsed.data.content,
                       dashboardUrl,
                     })
                     .catch((err) => {
-                      console.error("Handoff email failed:", err);
+                      console.error("Inquiry email notification failed:", err);
                     }),
                 );
               }
             }
 
-            // Strip the [HANDOFF_REQUESTED] token — the AI now says its own
-            // natural message before it (e.g. "Let me connect you with...")
-            fullResponse = fullResponse.replace("[HANDOFF_REQUESTED]", "").trim();
+            // Strip the [NEW_INQUIRY] token
+            fullResponse = fullResponse.replace("[NEW_INQUIRY]", "").trim();
             if (!fullResponse) {
               const agentLabel = settings?.agentName ?? "a team member";
-              fullResponse = `I'll connect you with ${agentLabel}. They'll be with you shortly!`;
+              fullResponse = `I've forwarded this to the team. ${agentLabel} will follow up shortly!`;
             }
 
-            // Send handoff event to widget with visitor email for smart handoff UX
+            // Send inquiry event to widget
             controller.enqueue(
               encoder.encode(
-                `data: ${JSON.stringify({
-                  handoff: true,
-                  visitorEmail: conversation.visitorEmail ?? null,
-                })}\n\n`,
+                `data: ${JSON.stringify({ inquiry: true })}\n\n`,
               ),
             );
-          }
-
-          // Check if the visitor approved a team review request
-          if (fullResponse.includes("[TEAM_REQUEST_APPROVED]")) {
-            const existingSubmissionId =
-              typeof conversationMetadata.teamRequestSubmissionId === "string"
-                ? conversationMetadata.teamRequestSubmissionId
-                : null;
-            const existingSummary =
-              typeof conversationMetadata.teamRequestSummary === "string"
-                ? conversationMetadata.teamRequestSummary
-                : null;
-            const cleanedResponse = fullResponse
-              .replace("[TEAM_REQUEST_APPROVED]", "")
-              .trim();
-            const teamRequestSummary =
-              existingSummary ||
-              (await aiService.summarizeTeamRequest(conversationHistory));
-
-            fullResponse =
-              cleanedResponse ||
-              "I’ve passed this along for the team to review.";
-
-            if (existingSubmissionId) {
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    teamRequest: {
-                      submitted: true,
-                      needsEmail: false,
-                      visitorEmail: conversation.visitorEmail ?? null,
-                    },
-                  })}\n\n`,
-                ),
-              );
-            } else if (conversation.visitorEmail) {
-              const telegramService =
-                settings?.telegramBotToken && settings?.telegramChatId
-                  ? new TelegramService(db)
-                  : undefined;
-              const submission = await createTeamRequestSubmission({
-                aiService,
-                chatService,
-                widgetService: new WidgetService(db),
-                projectService,
-                telegramService,
-                project,
-                conversation,
-                conversationHistory,
-                summary: teamRequestSummary,
-                email: conversation.visitorEmail,
-                settings,
-                env: {
-                  BETTER_AUTH_URL: c.env.BETTER_AUTH_URL,
-                  RESEND_API_KEY: c.env.RESEND_API_KEY,
-                },
-                executionCtx: c.executionCtx,
-              });
-
-              conversationMetadata.teamRequestPending = false;
-              conversationMetadata.teamRequestSubmissionId =
-                submission.submissionId;
-              conversationMetadata.teamRequestSummary = submission.summary;
-              conversationMetadata.teamRequestSubmittedAt =
-                new Date().toISOString();
-
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    teamRequest: {
-                      submitted: true,
-                      needsEmail: false,
-                      visitorEmail: conversation.visitorEmail,
-                    },
-                  })}\n\n`,
-                ),
-              );
-            } else {
-              await chatService.updateConversation(conversationId, project.id, {
-                metadata: JSON.stringify({
-                  teamRequestPending: true,
-                  teamRequestSummary,
-                  teamRequestRequestedAt: new Date().toISOString(),
-                }),
-              });
-
-              conversationMetadata.teamRequestPending = true;
-              conversationMetadata.teamRequestSummary = teamRequestSummary;
-              conversationMetadata.teamRequestRequestedAt =
-                new Date().toISOString();
-
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    teamRequest: {
-                      submitted: false,
-                      needsEmail: true,
-                      visitorEmail: null,
-                    },
-                  })}\n\n`,
-                ),
-              );
-            }
           }
 
           // Check if conversation was resolved by the bot
@@ -1637,66 +1596,6 @@ const app = new Hono<HonoAppContext>()
       project.id,
       parsed.data.email,
     );
-
-    const metadata = parseConversationMetadata(conversation.metadata);
-    const shouldSubmitTeamRequest =
-      metadata.teamRequestPending === true &&
-      typeof metadata.teamRequestSubmissionId !== "string";
-
-    if (shouldSubmitTeamRequest) {
-      const history = await chatService.getMessages(conversationId);
-      const conversationHistory = history
-        .filter((message) => message.role !== "bot" || message.content)
-        .slice(-20)
-        .map((message) => ({
-          role: message.role as "visitor" | "bot" | "agent",
-          content: message.content,
-        }));
-      const settings = await projectService.getSettings(project.id);
-      const aiService = new AiService({
-        model: c.env.AI_MODEL,
-        geminiApiKey: c.env.GEMINI_API_KEY,
-        openaiApiKey: c.env.OPENAI_API_KEY,
-      });
-      const telegramService =
-        settings?.telegramBotToken && settings?.telegramChatId
-          ? new TelegramService(db)
-          : undefined;
-      const summary =
-        typeof metadata.teamRequestSummary === "string"
-          ? metadata.teamRequestSummary
-          : null;
-
-      const submission = await createTeamRequestSubmission({
-        aiService,
-        chatService,
-        widgetService: new WidgetService(db),
-        projectService,
-        telegramService,
-        project,
-        conversation: {
-          id: conversation.id,
-          visitorId: conversation.visitorId,
-          visitorName: conversation.visitorName,
-          visitorEmail: parsed.data.email,
-        },
-        conversationHistory,
-        summary,
-        email: parsed.data.email,
-        settings,
-        env: {
-          BETTER_AUTH_URL: c.env.BETTER_AUTH_URL,
-          RESEND_API_KEY: c.env.RESEND_API_KEY,
-        },
-        executionCtx: c.executionCtx,
-      });
-
-      return c.json({
-        ok: true,
-        teamRequestSubmitted: true,
-        submissionId: submission.submissionId,
-      });
-    }
 
     return c.json({ ok: true });
   })
@@ -4345,11 +4244,42 @@ const app = new Hono<HonoAppContext>()
 
     const settings = await projectService.getSettings(project.id);
 
+    // Fetch associated inquiry if one was created from this conversation
+    let inquiry: {
+      id: string;
+      data: Record<string, string>;
+      status: string;
+      createdAt: number | Date;
+    } | null = null;
+    try {
+      const metadata = conversation.metadata
+        ? JSON.parse(conversation.metadata as string)
+        : {};
+      if (metadata.teamRequestSubmissionId) {
+        const widgetService = new WidgetService(db);
+        const inq = await widgetService.getInquiryById(
+          metadata.teamRequestSubmissionId,
+          project.id,
+        );
+        if (inq) {
+          inquiry = {
+            id: inq.id,
+            data: inq.data ? JSON.parse(inq.data as string) : {},
+            status: inq.status,
+            createdAt: inq.createdAt,
+          };
+        }
+      }
+    } catch {
+      // Ignore metadata parsing errors
+    }
+
     return c.json({
       conversation,
       messages: messagesWithTools,
       botName: settings?.botName ?? null,
       agentName: settings?.agentName ?? null,
+      inquiry,
     });
   })
   .post("/api/projects/:id/conversations/:convId/reply", async (c) => {

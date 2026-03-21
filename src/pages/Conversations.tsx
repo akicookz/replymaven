@@ -23,6 +23,7 @@ import {
   ShieldBan,
   Zap,
   Tag,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -294,11 +295,17 @@ function Conversations() {
     },
   });
 
-  const { data: convoDetail } = useQuery<{
+  const { data: convoDetail, isPending: isDetailLoading } = useQuery<{
     conversation: Conversation;
     messages: Message[];
     botName: string | null;
     agentName: string | null;
+    inquiry: {
+      id: string;
+      data: Record<string, string>;
+      status: string;
+      createdAt: string;
+    } | null;
   }>({
     queryKey: ["conversation-detail", selectedConvo],
     queryFn: async () => {
@@ -560,7 +567,43 @@ function Conversations() {
           !selectedConvo && "hidden md:flex",
         )}
       >
-        {selectedConvo && convoDetail ? (
+        {selectedConvo && isDetailLoading ? (
+          <div className="flex-1 flex flex-col">
+            {/* Skeleton header */}
+            <div className="px-4 py-3 flex items-center gap-3 bg-card">
+              <button
+                onClick={() => setSelectedConvo(null)}
+                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground md:hidden shrink-0"
+                aria-label="Back to list"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <div className="w-9 h-9 rounded-full bg-muted animate-pulse" />
+              <div className="space-y-1.5 flex-1">
+                <div className="h-3.5 w-28 bg-muted rounded animate-pulse" />
+                <div className="h-2.5 w-20 bg-muted/60 rounded animate-pulse" />
+              </div>
+            </div>
+            {/* Skeleton messages */}
+            <div className="flex-1 px-4 py-4 space-y-3">
+              <div className="flex justify-start">
+                <div className="h-12 w-48 bg-muted/30 rounded-lg rounded-tl-none animate-pulse" />
+              </div>
+              <div className="flex justify-end">
+                <div className="h-16 w-56 bg-primary/[0.04] rounded-lg rounded-tr-none animate-pulse" />
+              </div>
+              <div className="flex justify-start">
+                <div className="h-10 w-40 bg-muted/30 rounded-lg rounded-tl-none animate-pulse" />
+              </div>
+              <div className="flex justify-end">
+                <div className="h-20 w-52 bg-primary/[0.04] rounded-lg rounded-tr-none animate-pulse" />
+              </div>
+              <div className="flex justify-start">
+                <div className="h-12 w-44 bg-muted/30 rounded-lg rounded-tl-none animate-pulse" />
+              </div>
+            </div>
+          </div>
+        ) : selectedConvo && convoDetail ? (
           <>
             {/* Chat Header */}
             <div className="px-4 py-3 flex items-center gap-3 bg-card">
@@ -1019,6 +1062,53 @@ function Conversations() {
                   </div>
                 );
               })}
+
+              {/* Inquiry bubble */}
+              {convoDetail.inquiry && (() => {
+                const inq = convoDetail.inquiry;
+                // Filter out noisy internal fields
+                const hiddenKeys = new Set(["Conversation ID", "Recent chat", "Type"]);
+                const fields = Object.entries(inq.data).filter(
+                  ([key]) => !hiddenKeys.has(key),
+                );
+                if (fields.length === 0) return null;
+                return (
+                  <div className="flex justify-start mb-0.5">
+                    <div className="relative max-w-[85%] sm:max-w-[65%] rounded-lg rounded-tl-none px-3 py-2 shadow-sm bg-muted/50 text-foreground overflow-hidden">
+                      <div className="flex items-center gap-1 mb-1.5">
+                        <FileText className="w-3 h-3 text-muted-foreground" />
+                        <span className="text-[11px] font-semibold text-muted-foreground">
+                          Inquiry
+                        </span>
+                        <span className={cn(
+                          "text-[10px] px-1.5 py-0.5 rounded-full ml-1",
+                          inq.status === "new" && "bg-blue-500/10 text-blue-400",
+                          inq.status === "replied" && "bg-emerald-500/10 text-emerald-400",
+                          inq.status === "closed" && "bg-muted text-muted-foreground",
+                        )}>
+                          {inq.status === "new" ? "New" : inq.status === "replied" ? "Replied" : "Closed"}
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {fields.map(([key, value]) => (
+                          <div key={key} className="text-[13px] leading-relaxed">
+                            <span className="font-medium text-foreground/80">{key}:</span>{" "}
+                            <span className="text-foreground/70 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                              {value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex items-center justify-end mt-1">
+                        <span className="text-[10px] text-muted-foreground/70">
+                          {formatTime(String(inq.createdAt))}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div ref={messagesEndRef} />
             </div>
 

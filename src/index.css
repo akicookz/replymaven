@@ -48,7 +48,6 @@
   /* ─── Specialty Surfaces ─────────────────────────────────────────── */
   --color-code: var(--code);
 
-
   --font-sans: "Inter", system-ui, sans-serif;
   --font-heading: "Inter", system-ui, sans-serif;
 }
@@ -64,7 +63,7 @@
   --brand-soft: #fb923c;
 
   /* Surface scale (dark) */
-  --background: #08080a;
+  --background: #0b0600;
   --foreground: #f0f0f5;
 
   --card: #0c0c10;
