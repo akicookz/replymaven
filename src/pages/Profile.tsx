@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Camera, Loader2, User, CheckCircle2 } from "lucide-react";
+import { Camera, Loader2, User, CheckCircle2, Pencil, Mail } from "lucide-react";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 
@@ -11,6 +11,140 @@ interface ProfileData {
   image: string | null;
   profilePicture: string | null;
   workTitle: string | null;
+}
+
+// ─── Email Change Section ─────────────────────────────────────────────────────
+
+function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
+  const [editing, setEditing] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [sent, setSent] = useState(false);
+
+  const changeEmailMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/auth/change-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          newEmail,
+          callbackURL: "/app/account",
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { message?: string };
+        throw new Error(data.message ?? "Failed to send verification email");
+      }
+    },
+    onSuccess: () => {
+      setSent(true);
+    },
+  });
+
+  if (sent) {
+    return (
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-foreground">Email</label>
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-brand/5">
+          <Mail className="w-4 h-4 text-brand shrink-0" />
+          <div className="space-y-0.5">
+            <p className="text-sm text-foreground">Verification email sent</p>
+            <p className="text-xs text-muted-foreground">
+              Check <span className="font-medium text-foreground">{newEmail}</span> and click the link to confirm.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setSent(false);
+            setEditing(false);
+            setNewEmail("");
+            changeEmailMutation.reset();
+          }}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  if (editing) {
+    return (
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-foreground">New Email</label>
+        <div className="flex gap-2">
+          <input
+            type="email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            placeholder="new@example.com"
+            className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            autoFocus
+          />
+          <Button
+            onClick={() => changeEmailMutation.mutate()}
+            disabled={
+              !newEmail.trim() ||
+              newEmail === currentEmail ||
+              changeEmailMutation.isPending
+            }
+            size="default"
+          >
+            {changeEmailMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              "Verify"
+            )}
+          </Button>
+        </div>
+        {changeEmailMutation.isError && (
+          <p className="text-xs text-destructive">
+            {changeEmailMutation.error.message}
+          </p>
+        )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(false);
+              setNewEmail("");
+              changeEmailMutation.reset();
+            }}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Cancel
+          </button>
+          <span className="text-xs text-muted-foreground">
+            Currently: {currentEmail}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium text-foreground">Email</label>
+      <div className="flex items-center gap-2">
+        <input
+          type="email"
+          value={currentEmail}
+          disabled
+          className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-muted text-muted-foreground cursor-not-allowed"
+        />
+        <Button
+          variant="outline"
+          size="default"
+          onClick={() => setEditing(true)}
+        >
+          <Pencil className="w-3.5 h-3.5 mr-1.5" />
+          Edit
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function Profile() {
@@ -174,19 +308,8 @@ function Profile() {
           />
         </div>
 
-        {/* Email (read-only) */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">Email</label>
-          <input
-            type="email"
-            value={profile?.email ?? ""}
-            disabled
-            className="w-full px-4 py-2.5 rounded-xl border border-input bg-muted text-muted-foreground cursor-not-allowed"
-          />
-          <p className="text-xs text-muted-foreground">
-            Email is managed by your login provider and cannot be changed here.
-          </p>
-        </div>
+        {/* Email */}
+        <EmailChangeSection currentEmail={profile?.email ?? ""} />
 
         {/* Save */}
         <div className="flex items-center gap-3">
