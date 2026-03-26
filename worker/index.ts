@@ -9,7 +9,7 @@ import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
 import { WidgetService } from "./services/widget-service";
 import { ChatService } from "./services/chat-service";
-import { ResourceService } from "./services/resource-service";
+import { ResourceService, type SourceReference } from "./services/resource-service";
 import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
 import { CannedResponseService } from "./services/canned-response-service";
@@ -515,15 +515,69 @@ interface PreparedRagChunk {
   text: string;
 }
 
-const RAG_MAX_CONTEXT_CHARS = 12_000;
-const RAG_MAX_CHUNKS = 6;
-const RAG_MAX_CHUNKS_PER_SOURCE = 2;
-const RAG_MAX_CHUNK_CHARS = 1_600;
+interface RetrievedSearchChunk {
+  item?: { key?: string };
+  score?: number;
+  text?: string;
+}
+
+const RAG_MAX_CONTEXT_CHARS = 16_000;
+const RAG_MAX_CHUNKS = 10;
+const RAG_MAX_CHUNKS_PER_SOURCE = 3;
+const RAG_MAX_CHUNK_CHARS = 1_800;
 const RAG_HARD_MIN_SCORE = 0.2;
-const RAG_PREFERRED_MIN_SCORE = 0.35;
+const RAG_PREFERRED_MIN_SCORE = 0.25;
+
+function buildRetrievalQueries(
+  rawMessage: string,
+  reformulatedQuery: string,
+): string[] {
+  const queries: string[] = [];
+
+  for (const candidate of [rawMessage, reformulatedQuery]) {
+    const normalized = candidate.trim();
+    if (!normalized) continue;
+    if (
+      queries.some((existing) => existing.toLowerCase() === normalized.toLowerCase())
+    ) {
+      continue;
+    }
+    queries.push(normalized);
+  }
+
+  return queries;
+}
+
+function mergeRetrievedSearchChunks(
+  chunkGroups: RetrievedSearchChunk[][],
+): RetrievedSearchChunk[] {
+  const merged = new Map<string, RetrievedSearchChunk>();
+
+  for (const chunks of chunkGroups) {
+    for (const chunk of chunks) {
+      const key = chunk.item?.key;
+      const text = (chunk.text ?? "").trim();
+      if (!key || !text) continue;
+
+      const normalizedPrefix = text.slice(0, 220).toLowerCase();
+      const dedupeKey = `${key}:${normalizedPrefix}`;
+      const existing = merged.get(dedupeKey);
+
+      if (!existing || (chunk.score ?? 0) > (existing.score ?? 0)) {
+        merged.set(dedupeKey, {
+          item: { key },
+          score: chunk.score ?? 0,
+          text,
+        });
+      }
+    }
+  }
+
+  return [...merged.values()];
+}
 
 function prepareRagChunks(
-  chunks: Array<{ item?: { key?: string }; score?: number; text?: string }>,
+  chunks: RetrievedSearchChunk[],
   projectId: string,
 ): { chunks: PreparedRagChunk[]; droppedCrossTenant: number } {
   const projectPrefix = `${projectId}/`;
@@ -558,21 +612,36 @@ function prepareRagChunks(
   return { chunks: preferredChunks, droppedCrossTenant };
 }
 
-function buildRagContext(chunks: PreparedRagChunk[]): {
+function getSourceReferenceDedupKey(source: SourceReference): string {
+  if (source.type === "webpage" && source.url) {
+    return `webpage:${source.url}`;
+  }
+
+  return `${source.type}:${source.title}`;
+}
+
+function buildRagContext(
+  chunks: PreparedRagChunk[],
+  sourceReferenceMap: Map<string, SourceReference>,
+): {
   context: string;
   topScore: number;
-  filenames: string[];
+  selectedChunkCount: number;
+  sources: SourceReference[];
+  unresolvedKeys: string[];
 } {
   const selected: Array<{ key: string; score: number; text: string }> = [];
   const sourceCounts = new Map<string, number>();
   const seenText = new Set<string>();
-  const sourceFilenames = new Set<string>();
+  const selectedSources: SourceReference[] = [];
+  const seenSourceKeys = new Set<string>();
+  const unresolvedKeys = new Set<string>();
   let contextChars = 0;
 
   for (const chunk of chunks) {
     if (selected.length >= RAG_MAX_CHUNKS) break;
     if (chunk.score < RAG_HARD_MIN_SCORE) continue;
-    if (selected.length >= 2 && chunk.score < RAG_PREFERRED_MIN_SCORE) continue;
+    if (selected.length >= 4 && chunk.score < RAG_PREFERRED_MIN_SCORE) continue;
 
     const perSource = sourceCounts.get(chunk.key) ?? 0;
     if (perSource >= RAG_MAX_CHUNKS_PER_SOURCE) continue;
@@ -602,12 +671,29 @@ function buildRagContext(chunks: PreparedRagChunk[]): {
     sourceCounts.set(chunk.key, perSource + 1);
     seenText.add(dedupeKey);
     contextChars += finalText.length;
+    const sourceReference = sourceReferenceMap.get(chunk.key);
+    if (!sourceReference) {
+      unresolvedKeys.add(chunk.key);
+      continue;
+    }
 
-    sourceFilenames.add(chunk.key);
+    const sourceDedupKey = getSourceReferenceDedupKey(sourceReference);
+    if (seenSourceKeys.has(sourceDedupKey)) {
+      continue;
+    }
+
+    seenSourceKeys.add(sourceDedupKey);
+    selectedSources.push(sourceReference);
   }
 
   if (selected.length === 0) {
-    return { context: "", topScore: 0, filenames: [] };
+    return {
+      context: "",
+      topScore: 0,
+      selectedChunkCount: 0,
+      sources: [],
+      unresolvedKeys: [],
+    };
   }
 
   const context = selected
@@ -620,7 +706,9 @@ function buildRagContext(chunks: PreparedRagChunk[]): {
   return {
     context,
     topScore: selected[0]?.score ?? 0,
-    filenames: [...sourceFilenames],
+    selectedChunkCount: selected.length,
+    sources: selectedSources,
+    unresolvedKeys: [...unresolvedKeys],
   };
 }
 
@@ -757,12 +845,27 @@ const app = new Hono<HonoAppContext>()
     if (!project) return c.json({ error: "Project not found" }, 404);
 
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-    const conversation = await chatService.getConversationById(
+    let conversation = await chatService.getConversationById(
       conversationId,
       project.id,
     );
     if (!conversation) {
       return c.json({ error: "Conversation not found" }, 404);
+    }
+
+    // ─── Lazy auto-close check ──────────────────────────────────────────────
+    if (conversation.status !== "closed") {
+      const settings = await projectService.getSettings(project.id);
+      if (settings?.autoCloseMinutes) {
+        const result = await chatService.checkAndCloseStale(
+          conversationId,
+          project.id,
+          settings.autoCloseMinutes,
+        );
+        if (result.closed && result.conversation) {
+          conversation = result.conversation;
+        }
+      }
     }
 
     // Support ?since=<timestamp> for polling
@@ -795,6 +898,42 @@ const app = new Hono<HonoAppContext>()
       messages: msgs,
       status: conversation.status,
     });
+  })
+
+  // ─── Visitor Heartbeat ───────────────────────────────────────────────────────
+  .post("/api/widget/:projectSlug/conversations/:id/heartbeat", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`hb:${ip}`, 30, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const slug = c.req.param("projectSlug");
+    const conversationId = c.req.param("id");
+    const db = drizzle(c.env.DB);
+
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.json({ error: "Project not found" }, 404);
+
+    let presence: "active" | "background" = "active";
+    try {
+      const body = await c.req.json();
+      if (body.presence === "background") presence = "background";
+    } catch {
+      // No body or invalid JSON — default to active
+    }
+
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.updateVisitorLastSeen(
+      conversationId,
+      project.id,
+      presence,
+    );
+    if (!conversation) {
+      return c.json({ error: "Conversation not found" }, 404);
+    }
+
+    return c.json({ ok: true, status: conversation.status });
   })
 
   // ─── Widget Image Upload ──────────────────────────────────────────────────────
@@ -890,12 +1029,42 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-    const conversation = await chatService.getConversationById(
+    let conversation = await chatService.getConversationById(
       conversationId,
       project.id,
     );
     if (!conversation) {
       return c.json({ error: "Conversation not found" }, 404);
+    }
+
+    // ─── Reopen closed conversations ────────────────────────────────────────
+    if (conversation.status === "closed") {
+      const reopened = await chatService.reopenConversation(
+        conversationId,
+        project.id,
+      );
+      if (reopened) {
+        conversation = reopened;
+        // Notify Telegram that visitor reopened
+        const reopenSettings = await projectService.getSettings(project.id);
+        if (reopenSettings?.telegramBotToken && reopenSettings?.telegramChatId) {
+          const telegramService = new TelegramService(db);
+          c.executionCtx.waitUntil(
+            telegramService
+              .sendMessage(
+                reopenSettings.telegramBotToken,
+                reopenSettings.telegramChatId,
+                `🔄 Visitor ${conversation.visitorName ?? conversation.visitorId} reopened a closed conversation.`,
+                conversation.telegramThreadId
+                  ? parseInt(conversation.telegramThreadId, 10)
+                  : undefined,
+              )
+              .catch((err) => {
+                console.error("Telegram reopen notification failed:", err);
+              }),
+          );
+        }
+      }
     }
 
     // Store visitor message (with optional image)
@@ -1027,62 +1196,82 @@ const app = new Hono<HonoAppContext>()
       aiService.reformulateQuery(conversationHistory, parsed.data.content),
       aiService.summarizeConversation(conversationHistory),
     ]);
-    const isMultiTurnConversation = conversationHistory.length > 1;
+    const retrievalQueries = buildRetrievalQueries(
+      parsed.data.content,
+      searchQuery,
+    );
 
     // Query AI Search for relevant context with improved retrieval settings
     let ragContext = "";
-    const ragFilenames: string[] = [];
+    let sourceReferences: SourceReference[] = [];
+    let groundingConfidence: "high" | "low" | "none" = "none";
     try {
-      const searchResults = await c.env.AI.aiSearch()
-        .get("supportbot")
-        .search({
-          messages: [{ role: "user", content: searchQuery }],
-          ai_search_options: {
-            retrieval: {
-              retrieval_type: "hybrid",
-              filters: {
-                type: "eq",
-                key: "folder",
-                value: `${project.id}/`,
+      const searchResults = await Promise.all(
+        retrievalQueries.map((query) =>
+          c.env.AI.aiSearch()
+            .get("supportbot")
+            .search({
+              messages: [{ role: "user", content: query }],
+              ai_search_options: {
+                retrieval: {
+                  retrieval_type: "hybrid",
+                  filters: {
+                    type: "eq",
+                    key: "folder",
+                    value: `${project.id}/`,
+                  },
+                  max_num_results: 12,
+                  match_threshold: 0.2,
+                },
+                query_rewrite: {
+                  enabled: false,
+                },
+                reranking: {
+                  enabled: true,
+                  model: "@cf/baai/bge-reranker-base",
+                },
               },
-              max_num_results: 12,
-              match_threshold: 0.2,
-            },
-            query_rewrite: {
-              // Avoid double rewriting in multi-turn chats since we already reformulate.
-              enabled: !isMultiTurnConversation,
-            },
-            reranking: {
-              enabled: true,
-              model: "@cf/baai/bge-reranker-base",
-            },
-          },
-        });
-
-      const prepared = prepareRagChunks(
-        searchResults?.chunks ?? [],
-        project.id,
+            }),
+        ),
       );
+
+      const mergedChunks = mergeRetrievedSearchChunks(
+        searchResults.map((result) => result?.chunks ?? []),
+      );
+      const prepared = prepareRagChunks(mergedChunks, project.id);
       if (prepared.droppedCrossTenant > 0) {
         console.warn(
           `Dropped ${prepared.droppedCrossTenant} cross-tenant retrieval chunks for project ${project.id}`,
         );
       }
 
-      const ragSelection = buildRagContext(prepared.chunks);
+      const resourceService = new ResourceService(db, c.env.UPLOADS);
+      const sourceReferenceMap = await resourceService.resolveSourceReferenceMap(
+        project.id,
+        prepared.chunks.map((chunk) => chunk.key),
+      );
+      const ragSelection = buildRagContext(prepared.chunks, sourceReferenceMap);
       if (ragSelection.context) {
         // Track the top result score for confidence assessment
         const topScore = ragSelection.topScore;
-        const ragConfident = topScore >= 0.6;
+        const ragConfident =
+          topScore >= 0.6 && ragSelection.selectedChunkCount >= 2;
 
         ragContext = ragSelection.context;
-        ragFilenames.push(...ragSelection.filenames);
+        sourceReferences = ragSelection.sources;
+        groundingConfidence = ragConfident ? "high" : "low";
+
+        if (ragSelection.unresolvedKeys.length > 0) {
+          console.warn(
+            `Could not resolve ${ragSelection.unresolvedKeys.length} RAG source keys for project ${project.id}`,
+          );
+        }
 
         // Warn the model when results may not be directly relevant
         if (!ragConfident) {
           ragContext = `NOTE: The following knowledge base results may not be directly relevant to the visitor's question. Only use them if they genuinely answer what the visitor asked. If none are relevant, tell the visitor you don't have that information.\n\n${ragContext}`;
         }
-        console.log("Search Query:", searchQuery);
+        console.log("Retrieval Queries:", retrievalQueries);
         console.log("RAG Context:", ragContext);
       }
     } catch (err) {
@@ -1164,6 +1353,7 @@ const app = new Hono<HonoAppContext>()
           name: conversation.visitorName,
           email: conversation.visitorEmail,
         },
+        groundingConfidence,
       },
     );
 
@@ -1477,25 +1667,6 @@ const app = new Hono<HonoAppContext>()
               env: c.env,
               kv: c.env.CONVERSATIONS_CACHE,
             });
-          }
-
-          // Resolve source references from AI Search filenames
-          let sourceReferences: Array<{
-            title: string;
-            url: string | null;
-            type: "webpage" | "pdf" | "faq";
-          }> = [];
-          if (ragFilenames.length > 0) {
-            try {
-              const resourceService = new ResourceService(db, c.env.UPLOADS);
-              sourceReferences =
-                await resourceService.resolveSourcesFromFilenames(
-                  project.id,
-                  ragFilenames,
-                );
-            } catch (err) {
-              console.error("Source resolution failed:", err);
-            }
           }
 
           // Store bot message in DB with structured sources
@@ -4184,8 +4355,17 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
+    const statusFilter = (c.req.query("status") as "open" | "closed" | "all") ?? "all";
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-    const convos = await chatService.getConversationsByProject(project.id);
+
+    // Lazy auto-close stale conversations
+    const settings = await projectService.getSettings(project.id);
+    if (settings?.autoCloseMinutes && statusFilter !== "closed") {
+      const openConvos = await chatService.getConversationsByProject(project.id, 50, 0, "open");
+      await chatService.checkAndCloseStaleForProject(openConvos, settings.autoCloseMinutes);
+    }
+
+    const convos = await chatService.getConversationsByProject(project.id, 50, 0, statusFilter);
     return c.json(convos);
   })
   .get("/api/projects/:id/conversations/:convId", async (c) => {
@@ -4200,12 +4380,27 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
-    const conversation = await chatService.getConversationById(
+    let conversation = await chatService.getConversationById(
       c.req.param("convId"),
       project.id,
     );
     if (!conversation) {
       return c.json({ error: "Not found" }, 404);
+    }
+
+    // Lazy auto-close check
+    if (conversation.status !== "closed") {
+      const staleSettings = await projectService.getSettings(project.id);
+      if (staleSettings?.autoCloseMinutes) {
+        const result = await chatService.checkAndCloseStale(
+          conversation.id,
+          project.id,
+          staleSettings.autoCloseMinutes,
+        );
+        if (result.closed && result.conversation) {
+          conversation = result.conversation;
+        }
+      }
     }
 
     const toolService = new ToolService(db);

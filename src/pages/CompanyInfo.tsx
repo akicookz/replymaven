@@ -16,6 +16,7 @@ interface ProjectSettingsData {
   customTonePrompt: string | null;
   botName: string | null;
   agentName: string | null;
+  autoCloseMinutes: number | null;
 }
 
 const toneOptions: ToneOfVoice[] = [
@@ -38,6 +39,7 @@ function CompanyInfo() {
     customTonePrompt: "",
     botName: "",
     agentName: "",
+    autoCloseMinutes: 30 as number | null,
   });
 
   const { data: settings, isLoading } = useQuery<ProjectSettingsData>({
@@ -59,6 +61,7 @@ function CompanyInfo() {
       customTonePrompt: settings.customTonePrompt ?? "",
       botName: settings.botName ?? "",
       agentName: settings.agentName ?? "",
+      autoCloseMinutes: settings.autoCloseMinutes ?? 30,
     });
   }, [settings]);
 
@@ -85,6 +88,7 @@ function CompanyInfo() {
             : null,
         botName: companyForm.botName.trim() || null,
         agentName: companyForm.agentName.trim() || null,
+        autoCloseMinutes: companyForm.autoCloseMinutes,
       };
       const res = await fetch(`/api/projects/${projectId}/settings`, {
         method: "PUT",
@@ -351,6 +355,61 @@ function CompanyInfo() {
             placeholder="Describe your business, products, policies, and anything the assistant should know."
             className="w-full px-4 py-3 rounded-xl border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
           />
+        </div>
+
+        {/* ─── Auto-Close ──────────────────────────────────────────────── */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-sm font-medium text-foreground">
+                Auto-Close Inactive Conversations
+              </label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Automatically close conversations with no activity after a set period.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={companyForm.autoCloseMinutes !== null}
+              onClick={() =>
+                setCompanyForm((prev) => ({
+                  ...prev,
+                  autoCloseMinutes: prev.autoCloseMinutes === null ? 30 : null,
+                }))
+              }
+              className={cn(
+                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors",
+                companyForm.autoCloseMinutes !== null ? "bg-primary" : "bg-input",
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform mt-0.5",
+                  companyForm.autoCloseMinutes !== null ? "translate-x-[22px]" : "translate-x-0.5",
+                )}
+              />
+            </button>
+          </div>
+          {companyForm.autoCloseMinutes !== null && (
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={5}
+                max={1440}
+                value={companyForm.autoCloseMinutes}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  setCompanyForm((prev) => ({
+                    ...prev,
+                    autoCloseMinutes: isNaN(val) ? 30 : Math.min(1440, Math.max(5, val)),
+                  }));
+                }}
+                className="w-24 px-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <span className="text-sm text-muted-foreground">minutes of inactivity</span>
+            </div>
+          )}
         </div>
 
         {isLoading && (

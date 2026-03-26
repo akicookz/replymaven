@@ -79,6 +79,7 @@ export const projectSettings = sqliteTable(
     autoCannedDraft: integer("auto_canned_draft", { mode: "boolean" })
       .notNull()
       .default(true),
+    autoCloseMinutes: integer("auto_close_minutes").default(30), // null = disabled
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -275,6 +276,12 @@ export const conversations = sqliteTable(
     }),
     telegramThreadId: text("telegram_thread_id"),
     metadata: text("metadata"), // JSON string
+    lastActivityAt: integer("last_activity_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    visitorLastSeenAt: integer("visitor_last_seen_at", { mode: "timestamp" }),
+    visitorPresence: text("visitor_presence", { enum: ["active", "background"] }).default("active"),
+    visitorLastOnlineAt: integer("visitor_last_online_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),

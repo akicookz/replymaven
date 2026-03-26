@@ -70,6 +70,9 @@ interface Conversation {
   status: string;
   closeReason: string | null;
   metadata: string | null;
+  visitorLastSeenAt: string | null;
+  visitorPresence: string | null;
+  visitorLastOnlineAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -290,13 +293,14 @@ function Conversations() {
   const [selectedConvo, setSelectedConvo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "all">("open");
   const [expandedToolCards, setExpandedToolCards] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { data: conversations, isLoading } = useQuery<Conversation[]>({
-    queryKey: ["conversations", projectId],
+    queryKey: ["conversations", projectId, statusFilter],
     queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/conversations`);
+      const res = await fetch(`/api/projects/${projectId}/conversations?status=${statusFilter}`);
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
@@ -482,6 +486,24 @@ function Conversations() {
           </div>
         </div>
 
+        {/* Status Filter Tabs */}
+        <div className="px-3 pb-2 flex gap-1">
+          {(["open", "closed", "all"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setStatusFilter(tab)}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                statusFilter === tab
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {tab === "open" ? "Open" : tab === "closed" ? "Closed" : "All"}
+            </button>
+          ))}
+        </div>
+
         {/* List */}
         <div className="flex-1 overflow-y-auto">
           {filteredConversations?.map((convo) => {
@@ -638,6 +660,43 @@ function Conversations() {
                     )}
                     {getVisitorDisplayName(convoDetail.conversation)}
                   </h2>
+                  {(() => {
+                    const conv = convoDetail.conversation;
+                    const lastSeenRaw = conv.visitorLastSeenAt;
+                    if (!lastSeenRaw) return null;
+                    const lastSeen = new Date(typeof lastSeenRaw === "string"
+                      ? lastSeenRaw
+                      : Number(lastSeenRaw) * 1000);
+                    const isRecent = Date.now() - lastSeen.getTime() < 2 * 60 * 1000;
+
+                    let label: string;
+                    let dotClass: string;
+                    let badgeClass: string;
+
+                    if (!isRecent) {
+                      label = "Offline";
+                      dotClass = "bg-muted-foreground/50";
+                      badgeClass = "text-muted-foreground bg-muted/50";
+                    } else if (conv.visitorPresence === "background") {
+                      label = "In Background";
+                      dotClass = "bg-amber-500";
+                      badgeClass = "text-amber-600 bg-amber-500/10";
+                    } else {
+                      label = "Online";
+                      dotClass = "bg-emerald-500";
+                      badgeClass = "text-emerald-600 bg-emerald-500/10";
+                    }
+
+                    return (
+                      <span className={cn(
+                        "inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full",
+                        badgeClass,
+                      )}>
+                        <span className={cn("w-1.5 h-1.5 rounded-full", dotClass)} />
+                        {label}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
                   {convoDetail.conversation.visitorEmail && (

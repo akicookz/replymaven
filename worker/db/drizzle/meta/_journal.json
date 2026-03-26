@@ -176,6 +176,13 @@
       "when": 1774008000000,
       "tag": "0024_add_inquiry_status",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1774094400000,
+      "tag": "0025_add_stale_chat_columns",
+      "breakpoints": true
     }
   ]
 }
