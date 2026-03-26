@@ -17,6 +17,12 @@ export interface FaqPair {
   answer: string;
 }
 
+export interface SourceReference {
+  title: string;
+  url: string | null;
+  type: "webpage" | "pdf" | "faq";
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export class ResourceService {
@@ -523,123 +529,44 @@ export class ResourceService {
    * display-ready source references (title + URL + type). Returns sources for
    * all resource types: webpages (clickable), PDFs (label only), and FAQs (label only).
    */
+  async resolveSourceReferenceMap(
+    projectId: string,
+    filenames: string[],
+  ): Promise<Map<string, SourceReference>> {
+    const sourceMap = new Map<string, SourceReference>();
+    const uniqueFilenames = [...new Set(filenames)];
+
+    for (const filename of uniqueFilenames) {
+      const source = await this.resolveSourceReference(projectId, filename);
+      if (source) {
+        sourceMap.set(filename, source);
+      }
+    }
+
+    return sourceMap;
+  }
+
   async resolveSourcesFromFilenames(
     projectId: string,
     filenames: string[],
-  ): Promise<Array<{ title: string; url: string | null; type: "webpage" | "pdf" | "faq" }>> {
+  ): Promise<SourceReference[]> {
     if (filenames.length === 0) return [];
 
-    const uniqueFilenames = [...new Set(filenames)];
-    const sources: Array<{ title: string; url: string | null; type: "webpage" | "pdf" | "faq" }> = [];
-    const seenUrls = new Set<string>();
-    const seenTitles = new Set<string>();
+    const sourceMap = await this.resolveSourceReferenceMap(projectId, filenames);
+    const sources: SourceReference[] = [];
+    const seenSourceKeys = new Set<string>();
 
-    for (const filename of uniqueFilenames) {
-      // Try matching as a crawled page (pattern: {projectId}/page-{uuid}.md)
-      const crawledPageRows = await this.db
-        .select({
-          url: crawledPages.url,
-          resourceId: crawledPages.resourceId,
-          pageTitle: crawledPages.pageTitle,
-        })
-        .from(crawledPages)
-        .where(
-          and(
-            eq(crawledPages.r2Key, filename),
-            eq(crawledPages.projectId, projectId),
-          ),
-        )
-        .limit(1);
+    for (const filename of filenames) {
+      const source = sourceMap.get(filename);
+      if (!source) continue;
 
-      if (crawledPageRows.length > 0) {
-        const page = crawledPageRows[0];
-        if (page.url && !seenUrls.has(page.url)) {
-          const parentRows = await this.db
-            .select({ type: resources.type, title: resources.title })
-            .from(resources)
-            .where(eq(resources.id, page.resourceId))
-            .limit(1);
-
-          if (parentRows.length > 0 && parentRows[0].type === "webpage") {
-            seenUrls.add(page.url);
-            sources.push({
-              title: page.pageTitle || parentRows[0].title,
-              url: page.url,
-              type: "webpage",
-            });
-          }
-        }
+      const dedupeKey = this.getSourceReferenceDedupKey(source);
+      if (seenSourceKeys.has(dedupeKey)) {
         continue;
       }
 
-      // Try matching as a direct resource (pattern: {projectId}/{resourceId}.md)
-      const projectPrefix = `${projectId}/`;
-
-      // Handle canonical PDF text companion keys ({projectId}/{resourceId}-text.md).
-      if (
-        filename.startsWith(projectPrefix) &&
-        filename.endsWith("-text.md")
-      ) {
-        const resourceId = filename
-          .slice(projectPrefix.length, -"-text.md".length)
-          .trim();
-        if (resourceId) {
-          const pdfRows = await this.db
-            .select({ type: resources.type, title: resources.title })
-            .from(resources)
-            .where(
-              and(
-                eq(resources.id, resourceId),
-                eq(resources.projectId, projectId),
-              ),
-            )
-            .limit(1);
-
-          if (
-            pdfRows.length > 0 &&
-            pdfRows[0].type === "pdf" &&
-            !seenTitles.has(pdfRows[0].title)
-          ) {
-            seenTitles.add(pdfRows[0].title);
-            sources.push({ title: pdfRows[0].title, url: null, type: "pdf" });
-            continue;
-          }
-        }
-      }
-
-      // Try matching as a direct resource (pattern: {projectId}/{resourceId}.md)
-      const resourceRows = await this.db
-        .select({
-          type: resources.type,
-          title: resources.title,
-          url: resources.url,
-        })
-        .from(resources)
-        .where(
-          and(
-            eq(resources.r2Key, filename),
-            eq(resources.projectId, projectId),
-          ),
-        )
-        .limit(1);
-
-      if (resourceRows.length > 0) {
-        const resource = resourceRows[0];
-        if (
-          resource.type === "webpage" &&
-          resource.url &&
-          !seenUrls.has(resource.url)
-        ) {
-          seenUrls.add(resource.url);
-          sources.push({ title: resource.title, url: resource.url, type: "webpage" });
-        } else if (resource.type === "pdf" && !seenTitles.has(resource.title)) {
-          seenTitles.add(resource.title);
-          sources.push({ title: resource.title, url: null, type: "pdf" });
-        } else if (resource.type === "faq" && !seenTitles.has(resource.title)) {
-          seenTitles.add(resource.title);
-          sources.push({ title: resource.title, url: null, type: "faq" });
-        }
-      }
+      seenSourceKeys.add(dedupeKey);
+      sources.push(source);
     }
 
     return sources;
@@ -653,5 +580,130 @@ export class ResourceService {
         `## Q: ${pair.question}\n\n${pair.answer}`,
     );
     return `# FAQ: ${title}\n\n${sections.join("\n\n---\n\n")}`;
+  }
+
+  private async resolveSourceReference(
+    projectId: string,
+    filename: string,
+  ): Promise<SourceReference | null> {
+    const crawledPageRows = await this.db
+      .select({
+        url: crawledPages.url,
+        resourceId: crawledPages.resourceId,
+        pageTitle: crawledPages.pageTitle,
+      })
+      .from(crawledPages)
+      .where(
+        and(
+          eq(crawledPages.r2Key, filename),
+          eq(crawledPages.projectId, projectId),
+        ),
+      )
+      .limit(1);
+
+    if (crawledPageRows.length > 0) {
+      const page = crawledPageRows[0];
+      const parentRows = await this.db
+        .select({ type: resources.type, title: resources.title })
+        .from(resources)
+        .where(eq(resources.id, page.resourceId))
+        .limit(1);
+
+      if (parentRows.length > 0 && parentRows[0].type === "webpage" && page.url) {
+        return {
+          title: page.pageTitle || parentRows[0].title,
+          url: page.url,
+          type: "webpage",
+        };
+      }
+    }
+
+    const projectPrefix = `${projectId}/`;
+
+    if (filename.startsWith(projectPrefix) && filename.endsWith("-text.md")) {
+      const resourceId = filename
+        .slice(projectPrefix.length, -"-text.md".length)
+        .trim();
+      if (resourceId) {
+        const resource = await this.getSourceResourceById(projectId, resourceId);
+        if (resource?.type === "pdf") {
+          return { title: resource.title, url: null, type: "pdf" };
+        }
+      }
+    }
+
+    if (filename.startsWith(projectPrefix) && filename.endsWith(".pdf")) {
+      const resourceId = filename.slice(projectPrefix.length, -".pdf".length).trim();
+      if (resourceId) {
+        const resource = await this.getSourceResourceById(projectId, resourceId);
+        if (resource?.type === "pdf") {
+          return { title: resource.title, url: null, type: "pdf" };
+        }
+      }
+    }
+
+    const resourceRows = await this.db
+      .select({
+        type: resources.type,
+        title: resources.title,
+        url: resources.url,
+      })
+      .from(resources)
+      .where(
+        and(
+          eq(resources.r2Key, filename),
+          eq(resources.projectId, projectId),
+        ),
+      )
+      .limit(1);
+
+    if (resourceRows.length === 0) {
+      return null;
+    }
+
+    const resource = resourceRows[0];
+    if (resource.type === "webpage" && resource.url) {
+      return { title: resource.title, url: resource.url, type: "webpage" };
+    }
+
+    if (resource.type === "pdf") {
+      return { title: resource.title, url: null, type: "pdf" };
+    }
+
+    if (resource.type === "faq") {
+      return { title: resource.title, url: null, type: "faq" };
+    }
+
+    return null;
+  }
+
+  private async getSourceResourceById(
+    projectId: string,
+    resourceId: string,
+  ): Promise<{ type: "webpage" | "pdf" | "faq"; title: string; url: string | null } | null> {
+    const resourceRows = await this.db
+      .select({
+        type: resources.type,
+        title: resources.title,
+        url: resources.url,
+      })
+      .from(resources)
+      .where(
+        and(
+          eq(resources.id, resourceId),
+          eq(resources.projectId, projectId),
+        ),
+      )
+      .limit(1);
+
+    return resourceRows[0] ?? null;
+  }
+
+  private getSourceReferenceDedupKey(source: SourceReference): string {
+    if (source.type === "webpage" && source.url) {
+      return `webpage:${source.url}`;
+    }
+
+    return `${source.type}:${source.title}`;
   }
 }

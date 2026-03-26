@@ -43,6 +43,7 @@ export const updateProjectSettingsSchema = z.object({
     .nullable()
     .optional(),
   introMessageAuthorId: z.string().max(100).nullable().optional(),
+  autoCloseMinutes: z.number().int().min(5).max(1440).nullable().optional(),
 });
 
 // ─── Widget Config ────────────────────────────────────────────────────────────

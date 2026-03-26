@@ -41,6 +41,7 @@
   // Polling state
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let lastMessageTimestamp: number | null = null;
+  let lastNewMessageAt: number = Date.now();
   const renderedMessageIds = new Set<string>();
   let unreadCount = 0;
 
@@ -49,6 +50,9 @@
 
   // Streaming guard -- prevents polling from creating duplicate messages during SSE
   let isStreaming = false;
+
+  // Heartbeat state
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   // Notification state
   let notificationPermission: NotificationPermission = "default";
@@ -3654,6 +3658,7 @@
         conversationStatus = data.status ?? "active";
         persistConversationId(data.id);
         startPolling();
+        startHeartbeat();
         // Hide inline action bubbles once conversation starts
         inlineBarActions.classList.remove("has-actions");
       }
@@ -3683,6 +3688,12 @@
       if (!conversationId) await createConversation();
       if (!conversationId) return;
 
+      // Reopen closed conversation — hide banner, server handles status update
+      if (conversationStatus === "closed") {
+        hideClosedBanner();
+        conversationStatus = "active";
+      }
+
       // Capture and clear any pending image
       const imageFile = pendingImageFile;
       let uploadedImageUrl: string | null = null;
@@ -3708,6 +3719,7 @@
       );
       quickTopicsContainer.style.display = "none";
       lastMessageTimestamp = Date.now();
+      lastNewMessageAt = Date.now();
 
       // Upload image to R2 if present
       if (imageFile) {
@@ -3924,7 +3936,8 @@
                     );
                     scrollToBottom();
                     stopPolling();
-                    clearPersistedConversation();
+                    stopHeartbeat();
+                    showClosedBanner();
                   }
                 }
 
@@ -3960,7 +3973,8 @@
           );
           scrollToBottom();
           stopPolling();
-          clearPersistedConversation();
+          stopHeartbeat();
+          showClosedBanner();
         }
         clearTimeout(streamTimeout);
       } catch {
@@ -3972,6 +3986,7 @@
       }
     } finally {
       isStreaming = false;
+      lastNewMessageAt = Date.now();
       startPolling();
       isSending = false;
       sendBtn.disabled = false;
@@ -4416,15 +4431,16 @@
     if (pollTimer) return; // Already polling
     if (!conversationId) return;
 
-    // Determine poll interval based on conversation status
+    // Determine poll interval based on conversation status and idle time
     const getInterval = () => {
-      if (
+      const idleMin = (Date.now() - lastNewMessageAt) / 60000;
+      const agentMode =
         conversationStatus === "waiting_agent" ||
-        conversationStatus === "agent_replied"
-      ) {
-        return 3000; // 3s when waiting for agent
-      }
-      return 10000; // 10s for active conversations
+        conversationStatus === "agent_replied";
+
+      if (idleMin < 5) return agentMode ? 3000 : 10000;
+      if (idleMin < 30) return agentMode ? 10000 : 15000;
+      return agentMode ? 15000 : 30000;
     };
 
     let currentInterval = getInterval();
@@ -4452,6 +4468,73 @@
     }
   }
 
+  // ─── Heartbeat ──────────────────────────────────────────────────────────────
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    if (!conversationId) return;
+
+    heartbeatTimer = setInterval(async () => {
+      if (!conversationId) { stopHeartbeat(); return; }
+      try {
+        const presence = document.hidden ? "background" : "active";
+        const res = await fetch(
+          `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/heartbeat`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ presence }),
+          },
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.status && data.status !== conversationStatus) {
+          conversationStatus = data.status;
+          if (data.status === "closed") {
+            showClosedBanner();
+            stopPolling();
+          }
+        }
+      } catch {
+        // Silently ignore heartbeat failures
+      }
+    }, 60_000);
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  }
+
+  // ─── Closed Conversation Banner ─────────────────────────────────────────────
+
+  function showClosedBanner() {
+    // Avoid duplicate banners
+    const existing = messagesContainer.querySelector(".rm-closed-banner");
+    if (existing) return;
+
+    const banner = document.createElement("div");
+    banner.className = "rm-closed-banner";
+    banner.style.cssText = `
+      text-align: center;
+      padding: 8px 16px;
+      margin: 8px 16px;
+      font-size: 12px;
+      color: var(--rm-text-color, #666);
+      opacity: 0.7;
+    `;
+    banner.textContent = "This conversation was closed. Send a message to reopen.";
+    messagesContainer.insertBefore(banner, typingRow);
+    scrollToBottom();
+  }
+
+  function hideClosedBanner() {
+    const banner = messagesContainer.querySelector(".rm-closed-banner");
+    if (banner) banner.remove();
+  }
+
   async function pollMessages() {
     if (!conversationId) return;
     if (isStreaming) return; // Don't poll during active SSE stream
@@ -4474,8 +4557,13 @@
         conversationStatus = status;
         if (status === "closed") {
           stopPolling();
-          clearPersistedConversation();
+          stopHeartbeat();
+          showClosedBanner();
           return;
+        }
+        // If reopened (e.g. by agent), hide banner
+        if (status === "active") {
+          hideClosedBanner();
         }
       }
 
@@ -4524,6 +4612,7 @@
       }
 
       if (hasNewMessages) {
+        lastNewMessageAt = Date.now();
         scrollToBottom();
         // Show notification if widget is closed/minimized
         if (!isOpen || !isTabActive) {
@@ -4626,12 +4715,9 @@
       const msgs = data.messages ?? data;
       conversationStatus = data.status ?? null;
 
-      // If conversation is closed, clear it and start fresh
+      // If conversation is closed, show history with closed banner (visitor can reopen)
       if (conversationStatus === "closed") {
-        conversationId = null;
-        conversationStatus = null;
-        clearPersistedConversation();
-        return;
+        // Don't clear — show history and allow reopen by sending a message
       }
 
       // Render existing messages
@@ -4696,8 +4782,15 @@
         input.placeholder = "Add any details for the team...";
       }
 
+      // If conversation is closed, show the closed banner
+      if (conversationStatus === "closed") {
+        showClosedBanner();
+        return; // Don't start polling for closed conversations
+      }
+
       // Start polling for new messages
       startPolling();
+      startHeartbeat();
     } catch (err) {
       console.error("[ReplyMaven] Failed to load conversation history:", err);
     }
