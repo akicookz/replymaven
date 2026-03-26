@@ -7,7 +7,6 @@ import {
   Building2,
   Sparkles,
   Palette,
-  MessageSquare,
   ArrowRight,
   ArrowLeft,
   Loader2,
@@ -15,7 +14,11 @@ import {
   Copy,
   AlertCircle,
   CreditCard,
+  MessageSquare,
+  LogOut,
 } from "lucide-react";
+import { Logo } from "@/components/Logo";
+import { signOut } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { PricingCardsSelect, BillingToggle } from "@/components/PricingCards";
 import {
@@ -130,8 +133,8 @@ function Step1({
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-            <Building2 className="w-6 h-6 text-primary" />
+          <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
+            <Building2 className="w-6 h-6 text-brand" />
           </div>
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-foreground">
@@ -326,8 +329,8 @@ function Step2({
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-4 min-w-0">
-            <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-              <Globe className="w-6 h-6 text-primary" />
+            <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
+              <Globe className="w-6 h-6 text-brand" />
             </div>
             <div className="space-y-1">
               <h2 className="text-xl font-bold text-foreground">
@@ -391,8 +394,8 @@ function Step2({
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-4">
-        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-          <Sparkles className="w-6 h-6 text-primary" />
+        <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
+          <Sparkles className="w-6 h-6 text-brand" />
         </div>
         <div className="space-y-1">
           <h2 className="text-xl font-bold text-foreground">
@@ -499,8 +502,8 @@ function Step3({
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-4">
-        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-          <Palette className="w-6 h-6 text-primary" />
+        <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
+          <Palette className="w-6 h-6 text-brand" />
         </div>
         <div className="space-y-1">
           <h2 className="text-xl font-bold text-foreground">
@@ -843,8 +846,8 @@ function Step4({
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-4">
-        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-          <MessageSquare className="w-6 h-6 text-primary" />
+        <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
+          <MessageSquare className="w-6 h-6 text-brand" />
         </div>
         <div className="space-y-1">
           <h2 className="text-xl font-bold text-foreground">
@@ -1028,8 +1031,8 @@ function Step5({
       {/* Header row: icon + title left, toggle right */}
       <div className="flex items-start flex-col md:flex-row justify-between gap-4">
         <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-            <CreditCard className="w-6 h-6 text-primary" />
+          <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
+            <CreditCard className="w-6 h-6 text-brand" />
           </div>
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-foreground">
@@ -1117,12 +1120,7 @@ function OnboardingSkeleton() {
       {/* Header */}
       <header className="px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center">
-              <MessageSquare className="w-4 h-4 text-primary-foreground" />
-            </div>
-            <span className="font-bold text-foreground">ReplyMaven</span>
-          </div>
+          <Logo size="md" />
           {/* Skeleton progress bar */}
           <div className="flex items-center gap-2">
             {STEPS.map((s, i) => (
@@ -1186,6 +1184,7 @@ interface ExistingProject {
 }
 
 function Onboarding() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectSlug, setProjectSlug] = useState<string | null>(null);
@@ -1439,13 +1438,21 @@ function Onboarding() {
       {/* Header */}
       <header className="px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center">
-              <MessageSquare className="w-4 h-4 text-primary-foreground" />
-            </div>
-            <span className="font-bold text-foreground">ReplyMaven</span>
+          <Logo size="md" />
+          <div className="flex items-center gap-4">
+            <ProgressBar currentStep={step} />
+            <button
+              type="button"
+              onClick={async () => {
+                await signOut();
+                navigate("/");
+              }}
+              className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Log out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
-          <ProgressBar currentStep={step} />
         </div>
       </header>
 
