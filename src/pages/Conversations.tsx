@@ -393,7 +393,7 @@ function Conversations() {
   const [selectedConvo, setSelectedConvo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "all">("open");
+  const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "all">("all");
   const [expandedToolCards, setExpandedToolCards] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -594,22 +594,24 @@ function Conversations() {
           </div>
         </div>
 
-        {/* Status Filter Tabs */}
-        <div className="px-3 pb-2 flex gap-1">
-          {(["open", "closed", "all"] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setStatusFilter(tab)}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
-                statusFilter === tab
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted",
-              )}
-            >
-              {tab === "open" ? "Open" : tab === "closed" ? "Closed" : "All"}
-            </button>
-          ))}
+        {/* Status Filter Segments */}
+        <div className="px-3 pb-2">
+          <div className="flex bg-muted rounded-lg p-0.5">
+            {(["all", "open", "closed"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setStatusFilter(tab)}
+                className={cn(
+                  "flex-1 text-center px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+                  statusFilter === tab
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {tab === "all" ? "All" : tab === "open" ? "Open" : "Closed"}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* List */}

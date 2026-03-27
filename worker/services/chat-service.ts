@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, desc, and, gt, ne, inArray, sql } from "drizzle-orm";
+import { eq, desc, and, gt, ne, inArray } from "drizzle-orm";
 import {
   conversations,
   messages,
@@ -49,14 +49,7 @@ export class ChatService {
       .from(conversations)
       .where(and(...conditions))
       .orderBy(
-        desc(
-          sql`case
-            when ${conversations.visitorLastSeenAt} is not null
-              and ${conversations.visitorLastSeenAt} > ${conversations.updatedAt}
-            then ${conversations.visitorLastSeenAt}
-            else ${conversations.updatedAt}
-          end`,
-        ),
+        desc(conversations.lastActivityAt),
         desc(conversations.updatedAt),
       )
       .limit(limit)
