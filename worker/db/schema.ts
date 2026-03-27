@@ -313,6 +313,11 @@ export const messages = sqliteTable(
     content: text("content").notNull(),
     imageUrl: text("image_url"),
     sources: text("sources"), // JSON string of RAG source references
+    senderName: text("sender_name"),
+    senderAvatar: text("sender_avatar"),
+    userId: text("user_id").references(() => authSchema.users.id, {
+      onDelete: "set null",
+    }),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),

@@ -189,6 +189,8 @@
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
     aiSparkle:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/><path d="M19 2l.5 1.5L21 4l-1.5.5L19 6l-.5-1.5L17 4l1.5-.5L19 2z"/></svg>',
+    person:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
     circleQuestion:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
     phone:
@@ -657,11 +659,30 @@
       color: var(--rm-visitor-text, var(--rm-brand-text, #ffffff));
       border-radius: 18px 18px 4px 18px;
     }
-    .rm-message-row.bot .rm-message,
-    .rm-message-row.agent .rm-message {
+    .rm-message-row.bot .rm-message {
       background: var(--rm-bot-bg, #ffffff);
       color: var(--rm-bot-text, #18181b);
       border-radius: 18px 18px 18px 4px;
+    }
+    .rm-message-row.agent .rm-message {
+      background: var(--rm-agent-bg, #f0f7ff);
+      color: var(--rm-bot-text, #18181b);
+      border-radius: 18px 18px 18px 4px;
+      border-left: 2px solid var(--rm-primary, #2563eb);
+    }
+    .rm-sender-label {
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 2px;
+      padding-left: 36px;
+    }
+    .rm-sender-label.bot {
+      color: var(--rm-bot-text, #18181b);
+      opacity: 0.5;
+    }
+    .rm-sender-label.agent {
+      color: var(--rm-primary, #2563eb);
+      opacity: 0.7;
     }
 
     /* ─── Typing Indicator ────────────────────────────────────────────────── */
@@ -3069,6 +3090,7 @@
           // Bot/visitor messages — always derived
           container.style.setProperty("--rm-bot-bg", "rgba(255,255,255,0.10)");
           container.style.setProperty("--rm-bot-text", "#ffffff");
+          container.style.setProperty("--rm-agent-bg", `rgba(${pRgb}, 0.15)`);
           container.style.setProperty(
             "--rm-glow-border",
             "rgba(255,255,255,0.12)",
@@ -3084,6 +3106,7 @@
           // Bot/visitor messages — always derived
           container.style.setProperty("--rm-bot-bg", "#f4f4f5");
           container.style.setProperty("--rm-bot-text", "#18181b");
+          container.style.setProperty("--rm-agent-bg", `rgba(${pRgb}, 0.06)`);
           container.style.setProperty("--rm-glow-border", `rgba(${pRgb}, 0.2)`);
         }
 
@@ -4139,6 +4162,8 @@
     content: string,
     messageId?: string,
     imageUrl?: string,
+    senderName?: string,
+    senderAvatar?: string,
   ): HTMLElement {
     // Track rendered message IDs for deduplication (polling)
     if (messageId) {
@@ -4150,6 +4175,19 @@
     }
 
     const primaryColor = getPrimaryColor();
+    const isRoleChange = lastMessageRole !== null && lastMessageRole !== role;
+
+    // Sender name label — show on role change for bot/agent
+    if (isRoleChange && (role === "bot" || role === "agent")) {
+      const label = document.createElement("div");
+      label.className = `rm-sender-label ${role}`;
+      if (role === "bot") {
+        label.textContent = senderName || config?.botName || "AI Assistant";
+      } else {
+        label.textContent = senderName || config?.agentName || "Support Agent";
+      }
+      messagesContainer.insertBefore(label, typingRow);
+    }
 
     // Message row (avatar + bubble)
     const row = document.createElement("div");
@@ -4161,22 +4199,49 @@
       const avatar = document.createElement("div");
       avatar.className = "rm-message-avatar";
 
-      const avatarUrl = config?.widget?.avatarUrl;
-      if (avatarUrl) {
+      if (role === "agent" && senderAvatar) {
+        // Agent with profile picture
         avatar.style.backgroundColor = "transparent";
         const avatarImg = document.createElement("img");
-        avatarImg.src = resolveUrl(avatarUrl);
-        avatarImg.alt = "Bot";
+        avatarImg.src = resolveUrl(senderAvatar);
+        avatarImg.alt = senderName || "Agent";
         avatarImg.style.width = "100%";
         avatarImg.style.height = "100%";
         avatarImg.style.borderRadius = "50%";
         avatarImg.style.objectFit = "cover";
         avatar.appendChild(avatarImg);
-      } else {
+      } else if (role === "agent" && senderName) {
+        // Agent with initials
+        avatar.style.backgroundColor = `rgba(${hexToRgb(primaryColor)}, 0.15)`;
+        avatar.style.color = primaryColor;
+        avatar.style.fontSize = "12px";
+        avatar.style.fontWeight = "600";
+        avatar.textContent = senderName.charAt(0).toUpperCase();
+      } else if (role === "agent") {
+        // Agent fallback — person icon
         avatar.classList.add("rm-icon-avatar");
         avatar.style.backgroundColor = `rgba(${hexToRgb(primaryColor)}, 0.12)`;
         avatar.style.color = primaryColor;
-        avatar.innerHTML = ICONS.aiSparkle;
+        avatar.innerHTML = ICONS.person;
+      } else {
+        // Bot avatar — custom avatarUrl or AI sparkle icon
+        const avatarUrl = config?.widget?.avatarUrl;
+        if (avatarUrl) {
+          avatar.style.backgroundColor = "transparent";
+          const avatarImg = document.createElement("img");
+          avatarImg.src = resolveUrl(avatarUrl);
+          avatarImg.alt = "Bot";
+          avatarImg.style.width = "100%";
+          avatarImg.style.height = "100%";
+          avatarImg.style.borderRadius = "50%";
+          avatarImg.style.objectFit = "cover";
+          avatar.appendChild(avatarImg);
+        } else {
+          avatar.classList.add("rm-icon-avatar");
+          avatar.style.backgroundColor = `rgba(${hexToRgb(primaryColor)}, 0.12)`;
+          avatar.style.color = primaryColor;
+          avatar.innerHTML = ICONS.aiSparkle;
+        }
       }
 
       // Hide avatar if this is a consecutive message from the same role
@@ -4220,7 +4285,7 @@
     row.appendChild(msgEl);
 
     // Add extra spacing when switching between roles (role-aware grouping)
-    if (lastMessageRole !== null && lastMessageRole !== role) {
+    if (isRoleChange) {
       row.classList.add("rm-role-change");
     }
 
@@ -4712,7 +4777,10 @@
         // Only render bot/agent messages (visitor messages are already rendered locally)
         if (msg.role === "bot" || msg.role === "agent") {
           hideTyping();
-          const el = addMessageToUI(msg.role, msg.content, msg.id);
+          const el = addMessageToUI(
+            msg.role, msg.content, msg.id, undefined,
+            msg.senderName ?? undefined, msg.senderAvatar ?? undefined,
+          );
           // Render markdown for bot/agent messages
           if (el.parentElement) {
             el.innerHTML = renderMarkdown(msg.content);
@@ -4873,6 +4941,8 @@
             msg.content,
             msg.id,
             msg.imageUrl ?? undefined,
+            msg.senderName ?? undefined,
+            msg.senderAvatar ?? undefined,
           );
           // Render markdown for bot/agent messages
           if (

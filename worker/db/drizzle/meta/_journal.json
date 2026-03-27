@@ -183,6 +183,13 @@
       "when": 1774094400000,
       "tag": "0025_add_stale_chat_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1774180800000,
+      "tag": "0026_add_message_sender_fields",
+      "breakpoints": true
     }
   ]
 }

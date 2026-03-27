@@ -1043,7 +1043,12 @@ const app = new Hono<HonoAppContext>()
 
           // Store the bot response as a message
           await chatService.addMessage(
-            { conversationId, role: "bot", content: responseText },
+            {
+              conversationId,
+              role: "bot",
+              content: responseText,
+              senderName: projectSettings?.botName ?? null,
+            },
             projectId,
           );
 
@@ -1094,6 +1099,7 @@ const app = new Hono<HonoAppContext>()
         conversationId,
         role: "agent",
         content: message.text,
+        senderName: message.from?.first_name ?? null,
       },
       projectId,
     );
@@ -3394,11 +3400,25 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
+    // Fetch full user profile for sender info
+    const userProfile = await db
+      .select({
+        profilePicture: users.profilePicture,
+        image: users.image,
+      })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1);
+    const avatar = userProfile[0]?.profilePicture ?? userProfile[0]?.image ?? null;
+
     const message = await chatService.addMessage(
       {
         conversationId: conversation.id,
         role: "agent",
         content: parsed.data.content,
+        userId: user.id,
+        senderName: user.name,
+        senderAvatar: avatar,
       },
       project.id,
     );

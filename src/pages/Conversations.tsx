@@ -96,6 +96,9 @@ interface Message {
   role: "visitor" | "bot" | "agent";
   content: string;
   sources?: string | null;
+  senderName?: string | null;
+  senderAvatar?: string | null;
+  userId?: string | null;
   createdAt: string;
   toolExecutions?: ToolExecutionInfo[];
 }
@@ -1086,17 +1089,24 @@ function Conversations() {
                       >
                         {/* Role label for bot/agent */}
                         {(isBot || isAgent) && (
-                          <div className="flex items-center gap-1 mb-0.5">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            {isAgent && msg.senderAvatar && (
+                              <img
+                                src={msg.senderAvatar}
+                                alt={msg.senderName ?? "Agent"}
+                                className="w-4 h-4 rounded-full object-cover"
+                              />
+                            )}
                             {isBot && (
                               <span className="text-[11px] font-semibold text-status-active flex items-center gap-0.5">
                                 <Bot className="w-3 h-3" />
-                                {convoDetail.botName ?? "Bot"}
+                                {msg.senderName ?? convoDetail.botName ?? "Bot"}
                               </span>
                             )}
                             {isAgent && (
                               <span className="text-[11px] font-semibold text-status-replied flex items-center gap-0.5">
-                                <Headphones className="w-3 h-3" />
-                                {convoDetail.agentName ?? "Agent"}
+                                {!msg.senderAvatar && <Headphones className="w-3 h-3" />}
+                                {msg.senderName ?? convoDetail.agentName ?? "Agent"}
                               </span>
                             )}
                           </div>

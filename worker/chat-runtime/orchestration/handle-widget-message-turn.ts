@@ -724,6 +724,7 @@ export async function handleWidgetMessageTurn(
             retrieval.sourceReferences.length > 0
               ? JSON.stringify(retrieval.sourceReferences)
               : null,
+          senderName: settings?.botName ?? null,
         },
         context.project.id,
       );
