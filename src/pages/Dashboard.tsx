@@ -248,8 +248,8 @@ function Dashboard() {
           ))}
         </div>
         {/* Chart + actions skeleton */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 h-[340px] rounded-xl bg-card border border-border animate-pulse" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="h-[340px] rounded-xl bg-card border border-border animate-pulse" />
           <div className="h-[340px] rounded-xl bg-card border border-border animate-pulse" />
         </div>
         {/* Table + status skeleton */}
@@ -303,10 +303,10 @@ function Dashboard() {
     type TimelineItem = {
       id: string;
       type: "inquiry";
-      title: string;
-      subtitle: string;
+      name: string;
+      email: string | null;
+      firstLine: string | null;
       timestamp: string;
-      status?: string;
     };
 
     const timelineItems: TimelineItem[] = [];
@@ -318,13 +318,18 @@ function Dashboard() {
       } catch {
         // ignore
       }
-      const firstValue = Object.values(parsedData)[0] ?? "Unknown";
-      const fieldCount = Object.keys(parsedData).length;
+      const name = parsedData["Name"] ?? parsedData["name"] ?? null;
+      const email = parsedData["Email"] ?? parsedData["email"] ?? null;
+      const nameKeys = new Set(["name", "email"]);
+      const firstLine = Object.entries(parsedData)
+        .find(([k]) => !nameKeys.has(k.toLowerCase()))?.[1] ?? null;
+
       timelineItems.push({
         id: s.id,
         type: "inquiry",
-        title: parsedData["Name"] ?? parsedData["name"] ?? parsedData["Email"] ?? parsedData["email"] ?? firstValue,
-        subtitle: `Inquiry with ${fieldCount} field${fieldCount !== 1 ? "s" : ""}`,
+        name: name ?? email ?? "Unknown",
+        email: name ? email : null, // don't show email twice if it was used as name
+        firstLine,
         timestamp: s.createdAt,
       });
     }
@@ -373,9 +378,9 @@ function Dashboard() {
       </div>
 
       {/* Chart + Quick Actions */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Conversations Chart */}
-        <div className="lg:col-span-2 bg-card rounded-xl border border-border p-6">
+        <div className="bg-card rounded-xl border border-border p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-sm font-semibold text-foreground">
               Conversations over time
@@ -434,7 +439,7 @@ function Dashboard() {
         <div className="bg-card rounded-xl border border-border p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-sm font-semibold text-foreground">
-              Recent Activity
+              Recent Inquiries
             </h2>
           </div>
           {timelineItems.length > 0 ? (
@@ -449,26 +454,19 @@ function Dashboard() {
                     <Mail className="w-3.5 h-3.5 text-orange-500" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-medium text-foreground truncate">
-                        {item.title}
-                      </span>
-                      {item.status && (
-                        <span
-                          className={cn(
-                            "text-[10px] font-medium px-1.5 py-0.5 rounded-full border capitalize shrink-0",
-                            item.status === "confirmed"
-                              ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/25"
-                              : "bg-muted text-muted-foreground border-border",
-                          )}
-                        >
-                          {item.status}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[12px] text-muted-foreground truncate">
-                      {item.subtitle}
-                    </p>
+                    <span className="text-[13px] font-medium text-foreground truncate block">
+                      {item.name}
+                    </span>
+                    {item.email && (
+                      <p className="text-[12px] text-muted-foreground truncate">
+                        {item.email}
+                      </p>
+                    )}
+                    {item.firstLine && (
+                      <p className="text-[12px] text-muted-foreground/70 truncate">
+                        {item.firstLine}
+                      </p>
+                    )}
                   </div>
                   <span className="text-[11px] text-muted-foreground shrink-0 mt-0.5">
                     {formatTimeAgo(item.timestamp)}
