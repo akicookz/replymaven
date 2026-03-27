@@ -3852,9 +3852,8 @@
       if (!conversationId) await createConversation();
       if (!conversationId) return;
 
-      // Reopen closed conversation — hide banner, server handles status update
+      // Reopen closed conversation — server handles status update
       if (conversationStatus === "closed") {
-        hideClosedBanner();
         conversationStatus = "active";
         syncConversationModeUi();
       }
@@ -4114,7 +4113,6 @@
                     scrollToBottom();
                     stopPolling();
                     stopHeartbeat();
-                    showClosedBanner();
                   }
                 }
 
@@ -4149,7 +4147,6 @@
           scrollToBottom();
           stopPolling();
           stopHeartbeat();
-          showClosedBanner();
         }
         clearTimeout(streamTimeout);
       } catch {
@@ -4741,7 +4738,6 @@
         if (data.status && data.status !== conversationStatus) {
           conversationStatus = data.status;
           if (data.status === "closed") {
-            showClosedBanner();
             stopPolling();
           }
         }
@@ -4756,33 +4752,6 @@
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
     }
-  }
-
-  // ─── Closed Conversation Banner ─────────────────────────────────────────────
-
-  function showClosedBanner() {
-    // Avoid duplicate banners
-    const existing = messagesContainer.querySelector(".rm-closed-banner");
-    if (existing) return;
-
-    const banner = document.createElement("div");
-    banner.className = "rm-closed-banner";
-    banner.style.cssText = `
-      text-align: center;
-      padding: 8px 16px;
-      margin: 8px 16px;
-      font-size: 12px;
-      color: var(--rm-text-color, #666);
-      opacity: 0.7;
-    `;
-    banner.textContent = "This conversation was closed.";
-    messagesContainer.insertBefore(banner, typingRow);
-    scrollToBottom();
-  }
-
-  function hideClosedBanner() {
-    const banner = messagesContainer.querySelector(".rm-closed-banner");
-    if (banner) banner.remove();
   }
 
   async function pollMessages() {
@@ -4809,12 +4778,7 @@
         if (status === "closed") {
           stopPolling();
           stopHeartbeat();
-          showClosedBanner();
           return;
-        }
-        // If reopened (e.g. by agent), hide banner
-        if (status === "active") {
-          hideClosedBanner();
         }
       }
 
@@ -4980,8 +4944,8 @@
         // Clear intro message — history already contains the conversation
         introMessageText = null;
         pendingIntroMessage = null;
-        if (openChat) {
-          // Switch to chat view since we have history
+        if (openChat && conversationStatus !== "closed") {
+          // Switch to chat view since we have an active conversation with history
           showChatScreen();
         }
 
@@ -5030,10 +4994,9 @@
         scrollToBottom();
       }
 
-      // If conversation is closed, show the closed banner
+      // Don't start polling for closed conversations
       if (conversationStatus === "closed") {
-        showClosedBanner();
-        return; // Don't start polling for closed conversations
+        return;
       }
 
       // Start polling for new messages
@@ -5144,6 +5107,14 @@
       document.body.style.overflow = "hidden";
       document.documentElement.style.overflow = "hidden";
     }
+    // Route to appropriate screen based on conversation state
+    if (!isInlineBarVariant) {
+      if (conversationId && conversationStatus !== "closed") {
+        showChatScreen();
+      } else {
+        showHomeScreen();
+      }
+    }
     // For center-inline: keep the bar visible as the input, skip home screen
     if (isInlineBarVariant) {
       stopPlaceholderRotation();
@@ -5199,6 +5170,7 @@
     toggle: toggleChatWidget,
     sendMessage: (text: string) => {
       if (!isOpen) openChatWidget();
+      showChatScreen();
       handleSendMessage(text);
     },
     identify: (info: {
