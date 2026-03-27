@@ -669,11 +669,16 @@
       color: var(--rm-bot-text, #18181b);
       border-radius: 18px 18px 18px 4px;
     }
+    .rm-msg-col {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
     .rm-sender-label {
       font-size: 11px;
       font-weight: 600;
-      margin-bottom: 1px;
-      margin-left: 36px;
+      margin-bottom: 0;
     }
     .rm-sender-label.bot {
       color: var(--rm-bot-text, #18181b);
@@ -2663,8 +2668,9 @@
     if (introMessageText) {
       const msgEl = addMessageToUI("bot", introMessageText);
       // If an author is set, replace the avatar and add author name
-      if (introMessageAuthor && msgEl.parentElement) {
-        const avatar = msgEl.parentElement.querySelector(
+      const msgRow = msgEl.closest(".rm-message-row");
+      if (introMessageAuthor && msgRow) {
+        const avatar = msgRow.querySelector(
           ".rm-message-avatar",
         ) as HTMLElement | null;
         if (avatar) {
@@ -2694,17 +2700,14 @@
           }
           avatar.classList.remove("hidden");
         }
-        // Add author name label above the message
-        const row = msgEl.parentElement;
-        const nameLabel = document.createElement("div");
-        nameLabel.className = "rm-message-author-name";
-        nameLabel.style.fontSize = "11px";
-        nameLabel.style.fontWeight = "500";
-        nameLabel.style.color = "var(--rm-text-secondary, #6b7280)";
-        nameLabel.style.marginBottom = "2px";
-        nameLabel.style.marginLeft = "40px";
-        nameLabel.textContent = introMessageAuthor.name;
-        row.parentElement?.insertBefore(nameLabel, row);
+        // Add author name label above the message inside the column wrapper
+        const col = msgEl.parentElement;
+        if (col) {
+          const nameLabel = document.createElement("div");
+          nameLabel.className = "rm-sender-label bot";
+          nameLabel.textContent = introMessageAuthor.name;
+          col.insertBefore(nameLabel, msgEl);
+        }
       }
       introMessageText = null;
       pendingIntroMessage = null;
@@ -4200,22 +4203,11 @@
     const primaryColor = getPrimaryColor();
     const isRoleChange = lastMessageRole !== null && lastMessageRole !== role;
 
-    // Sender name label — show on role change for bot/agent
-    if (isRoleChange && (role === "bot" || role === "agent")) {
-      const label = document.createElement("div");
-      label.className = `rm-sender-label ${role}`;
-      if (role === "bot") {
-        label.textContent = senderName || config?.botName || "AI Assistant";
-      } else {
-        label.textContent = senderName || config?.agentName || "Support Agent";
-      }
-      messagesContainer.insertBefore(label, typingRow);
-    }
-
     // Message row (avatar + bubble)
     const row = document.createElement("div");
     row.className = `rm-message-row ${role}`;
     if (messageId) row.dataset.messageId = messageId;
+    let msgEl: HTMLElement;
 
     // Avatar for bot/agent messages
     if (role === "bot" || role === "agent") {
@@ -4267,30 +4259,69 @@
         }
       }
 
-      // Hide avatar if this is a consecutive message from the same role
+      // Show avatar on the latest message only — hide previous same-role avatar
       if (lastMessageRole === role) {
-        avatar.classList.add("hidden");
+        const prevRows = messagesContainer.querySelectorAll(`.rm-message-row.${role}`);
+        if (prevRows.length > 0) {
+          const prevAvatar = prevRows[prevRows.length - 1].querySelector(".rm-message-avatar");
+          if (prevAvatar) prevAvatar.classList.add("hidden");
+        }
       }
 
       row.appendChild(avatar);
-    }
 
-    // Message bubble
-    const msgEl = document.createElement("div");
-    msgEl.className = "rm-message";
+      // Column wrapper for label + bubble
+      const col = document.createElement("div");
+      col.className = "rm-msg-col";
 
-    // Render image inside bubble if present
-    if (imageUrl) {
-      const img = document.createElement("img");
-      img.className = "rm-message-image";
-      img.src = imageUrl.startsWith("data:") ? imageUrl : resolveUrl(imageUrl);
-      img.alt = "Attached image";
-      img.onclick = () => window.open(img.src, "_blank");
-      msgEl.appendChild(img);
-    }
+      // Sender name label — show on role change for bot/agent
+      if (isRoleChange) {
+        const label = document.createElement("div");
+        label.className = `rm-sender-label ${role}`;
+        if (role === "bot") {
+          label.textContent = senderName || config?.botName || "AI Assistant";
+        } else {
+          label.textContent = senderName || config?.agentName || "Support Agent";
+        }
+        col.appendChild(label);
+      }
 
-    if (role === "visitor") {
-      // Visitor messages: plain text, styled with brand colors
+      // Message bubble
+      msgEl = document.createElement("div");
+      msgEl.className = "rm-message";
+
+      // Render image inside bubble if present
+      if (imageUrl) {
+        const img = document.createElement("img");
+        img.className = "rm-message-image";
+        img.src = imageUrl.startsWith("data:") ? imageUrl : resolveUrl(imageUrl);
+        img.alt = "Attached image";
+        img.onclick = () => window.open(img.src, "_blank");
+        msgEl.appendChild(img);
+      }
+
+      // Bot/agent messages: render markdown
+      const textContainer = document.createElement("div");
+      textContainer.innerHTML = renderMarkdown(content);
+      msgEl.appendChild(textContainer);
+
+      col.appendChild(msgEl);
+      row.appendChild(col);
+    } else {
+      // Visitor messages — no avatar, no column wrapper
+      msgEl = document.createElement("div");
+      msgEl.className = "rm-message";
+
+      // Render image inside bubble if present
+      if (imageUrl) {
+        const img = document.createElement("img");
+        img.className = "rm-message-image";
+        img.src = imageUrl.startsWith("data:") ? imageUrl : resolveUrl(imageUrl);
+        img.alt = "Attached image";
+        img.onclick = () => window.open(img.src, "_blank");
+        msgEl.appendChild(img);
+      }
+
       if (content && content !== "Sent an image") {
         const textNode = document.createElement("span");
         textNode.textContent = content;
@@ -4298,14 +4329,9 @@
       }
       msgEl.style.backgroundColor = primaryColor;
       msgEl.style.color = getBrandTextColor();
-    } else {
-      // Bot/agent messages: render markdown
-      const textContainer = document.createElement("div");
-      textContainer.innerHTML = renderMarkdown(content);
-      msgEl.appendChild(textContainer);
-    }
 
-    row.appendChild(msgEl);
+      row.appendChild(msgEl);
+    }
 
     // Add extra spacing when switching between roles (role-aware grouping)
     if (isRoleChange) {
