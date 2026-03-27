@@ -73,9 +73,10 @@ export const projectSettings = sqliteTable(
       () => authSchema.users.id,
       { onDelete: "set null" },
     ),
-    showIntroBubble: integer("show_intro_bubble", { mode: "boolean" })
+    introMessageDelay: integer("intro_message_delay").notNull().default(1),
+    introMessageDuration: integer("intro_message_duration")
       .notNull()
-      .default(true),
+      .default(15),
     autoCannedDraft: integer("auto_canned_draft", { mode: "boolean" })
       .notNull()
       .default(true),

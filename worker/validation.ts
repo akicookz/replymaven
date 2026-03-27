@@ -18,7 +18,8 @@ export const updateProjectSettingsSchema = z.object({
     .optional(),
   customTonePrompt: z.string().max(2000).nullable().optional(),
   introMessage: z.string().max(200).optional(),
-  showIntroBubble: z.boolean().optional(),
+  introMessageDelay: z.number().int().min(0).max(30).optional(),
+  introMessageDuration: z.number().int().min(0).max(120).optional(),
   autoCannedDraft: z.boolean().optional(),
   companyName: z.string().max(200).nullable().optional(),
   companyUrl: z

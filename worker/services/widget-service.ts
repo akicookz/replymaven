@@ -302,7 +302,8 @@ export class WidgetService {
       introMessage:
         settings[0]?.introMessage ?? "Hi there! How can I help you today?",
       introMessageAuthor,
-      showIntroBubble: settings[0]?.showIntroBubble ?? true,
+      introMessageDelay: settings[0]?.introMessageDelay ?? 1,
+      introMessageDuration: settings[0]?.introMessageDuration ?? 15,
       botName: settings[0]?.botName ?? null,
       agentName: settings[0]?.agentName ?? null,
       companyName: settings[0]?.companyName ?? null,

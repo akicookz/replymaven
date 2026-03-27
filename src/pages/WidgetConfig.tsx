@@ -18,7 +18,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import {
   WidgetPageShell,
   WidgetPreviewPanel,
@@ -508,23 +507,48 @@ function WidgetConfig() {
           </Select>
         </div>
 
-        {state.form.position === "center-inline" ? (
-          <div className="flex items-center justify-between rounded-xl border border-input bg-background px-4 py-3">
-            <div className="space-y-0.5">
-              <p className="text-sm font-medium text-card-foreground">
-                Show intro bubble before focus
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Display the intro message as a floating bubble above the input
-                bar before the visitor interacts.
-              </p>
-            </div>
-            <Switch
-              checked={state.showIntroBubble}
-              onCheckedChange={state.setShowIntroBubble}
-            />
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-card-foreground">
+              Show after
+            </label>
+            <Select
+              value={String(state.introMessageDelay)}
+              onValueChange={(v) => state.setIntroMessageDelay(Number(v))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">Immediately</SelectItem>
+                <SelectItem value="1">After 1 second</SelectItem>
+                <SelectItem value="3">After 3 seconds</SelectItem>
+                <SelectItem value="5">After 5 seconds</SelectItem>
+                <SelectItem value="10">After 10 seconds</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-        ) : null}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-card-foreground">
+              Hide after
+            </label>
+            <Select
+              value={String(state.introMessageDuration)}
+              onValueChange={(v) => state.setIntroMessageDuration(Number(v))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="8">8 seconds</SelectItem>
+                <SelectItem value="15">15 seconds</SelectItem>
+                <SelectItem value="30">30 seconds</SelectItem>
+                <SelectItem value="60">1 minute</SelectItem>
+                <SelectItem value="0">Never</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
       </WidgetSectionCard>
 
       <WidgetSectionCard

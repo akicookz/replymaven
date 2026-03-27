@@ -36,7 +36,8 @@ export interface AuthorOption {
 
 interface ProjectSettingsData {
   introMessage?: string;
-  showIntroBubble?: boolean;
+  introMessageDelay?: number;
+  introMessageDuration?: number;
   introMessageAuthorId?: string | null;
 }
 
@@ -61,7 +62,8 @@ export interface WidgetSettingsState {
   project?: ProjectData;
   form: Partial<WidgetConfigData>;
   introMessage: string;
-  showIntroBubble: boolean;
+  introMessageDelay: number;
+  introMessageDuration: number;
   introMessageAuthorId: string | null;
   authors?: AuthorOption[];
   avatarUploading: boolean;
@@ -76,7 +78,8 @@ export interface WidgetSettingsState {
   iframeRef: RefObject<HTMLIFrameElement | null>;
   save: UseMutationResult<WidgetConfigData, Error, void>;
   setIntroMessage: Dispatch<SetStateAction<string>>;
-  setShowIntroBubble: Dispatch<SetStateAction<boolean>>;
+  setIntroMessageDelay: Dispatch<SetStateAction<number>>;
+  setIntroMessageDuration: Dispatch<SetStateAction<number>>;
   setIntroMessageAuthorId: Dispatch<SetStateAction<string | null>>;
   setPageInput: Dispatch<SetStateAction<string>>;
   setPreviewMode: Dispatch<SetStateAction<"home" | "chat">>;
@@ -99,7 +102,8 @@ function buildPreviewHtml(options: {
   projectSlug: string;
   form: Partial<WidgetConfigData>;
   introMessage: string;
-  showIntroBubble: boolean;
+  introMessageDelay: number;
+  introMessageDuration: number;
   previewMode: "home" | "chat";
 }): string {
   const configPayload = {
@@ -123,7 +127,8 @@ function buildPreviewHtml(options: {
     },
     quickActions: [],
     introMessage: options.introMessage,
-    showIntroBubble: options.showIntroBubble,
+    introMessageDelay: options.introMessageDelay,
+    introMessageDuration: options.introMessageDuration,
     botName: null,
     contactForm: null,
   };
@@ -175,7 +180,8 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
   const [introMessage, setIntroMessage] = useState(
     "Hi there! How can I help you today?",
   );
-  const [showIntroBubble, setShowIntroBubble] = useState(true);
+  const [introMessageDelay, setIntroMessageDelay] = useState(1);
+  const [introMessageDuration, setIntroMessageDuration] = useState(15);
   const [introMessageAuthorId, setIntroMessageAuthorId] = useState<
     string | null
   >(null);
@@ -189,11 +195,13 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
   ] = useState<{
     form: Partial<WidgetConfigData>;
     introMessage: string;
-    showIntroBubble: boolean;
+    introMessageDelay: number;
+    introMessageDuration: number;
   }>({
     form: {},
     introMessage: "Hi there! How can I help you today?",
-    showIntroBubble: true,
+    introMessageDelay: 1,
+    introMessageDuration: 15,
   });
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -249,8 +257,11 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
     if (settingsData?.introMessage != null) {
       setIntroMessage(settingsData.introMessage);
     }
-    if (settingsData?.showIntroBubble != null) {
-      setShowIntroBubble(settingsData.showIntroBubble);
+    if (settingsData?.introMessageDelay != null) {
+      setIntroMessageDelay(settingsData.introMessageDelay);
+    }
+    if (settingsData?.introMessageDuration != null) {
+      setIntroMessageDuration(settingsData.introMessageDuration);
     }
     if (settingsData?.introMessageAuthorId !== undefined) {
       setIntroMessageAuthorId(settingsData.introMessageAuthorId ?? null);
@@ -259,11 +270,11 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedPreviewState({ form, introMessage, showIntroBubble });
+      setDebouncedPreviewState({ form, introMessage, introMessageDelay, introMessageDuration });
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [form, introMessage, showIntroBubble]);
+  }, [form, introMessage, introMessageDelay, introMessageDuration]);
 
   useEffect(() => {
     if (form.position === "center-inline") {
@@ -278,7 +289,8 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
       projectSlug: project?.slug ?? "preview",
       form: debouncedPreviewState.form,
       introMessage: debouncedPreviewState.introMessage,
-      showIntroBubble: debouncedPreviewState.showIntroBubble,
+      introMessageDelay: debouncedPreviewState.introMessageDelay,
+      introMessageDuration: debouncedPreviewState.introMessageDuration,
       previewMode,
     });
   }, [debouncedPreviewState, previewMode, project?.slug]);
@@ -296,7 +308,8 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             introMessage,
-            showIntroBubble,
+            introMessageDelay,
+            introMessageDuration,
             introMessageAuthorId,
           }),
         }),
@@ -357,7 +370,8 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
     project,
     form,
     introMessage,
-    showIntroBubble,
+    introMessageDelay,
+    introMessageDuration,
     introMessageAuthorId,
     authors,
     avatarUploading,
@@ -372,7 +386,8 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
     iframeRef,
     save,
     setIntroMessage,
-    setShowIntroBubble,
+    setIntroMessageDelay,
+    setIntroMessageDuration,
     setIntroMessageAuthorId,
     setPageInput,
     setPreviewMode,

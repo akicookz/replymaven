@@ -138,6 +138,8 @@ export class ProjectService {
         | "botName"
         | "agentName"
         | "introMessageAuthorId"
+        | "introMessageDelay"
+        | "introMessageDuration"
       >
     >,
   ): Promise<ProjectSettingsRow | null> {

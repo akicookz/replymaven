@@ -59,6 +59,8 @@
 
   // Visibility tracking
   let isTabActive = !document.hidden;
+  let originalDocTitle = document.title;
+  let titleOverridden = false;
 
   function generateVisitorId(): string {
     const id = "v_" + Math.random().toString(36).substring(2, 15);
@@ -315,25 +317,18 @@
     }
     .rm-trigger-badge {
       position: absolute;
-      top: -4px;
-      right: -4px;
-      min-width: 20px;
-      height: 20px;
-      border-radius: 10px;
+      top: -2px;
+      right: -2px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
       background: #ef4444;
-      color: white;
-      font-size: 11px;
-      font-weight: 700;
       display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 0 5px;
-      line-height: 1;
       z-index: 1;
       box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     .rm-trigger-badge.visible {
-      display: flex;
+      display: block;
     }
 
     /* ─── Intro Pill (corner positions) ──────────────────────────────────── */
@@ -1814,72 +1809,6 @@
       width: 100%;
     }
 
-    /* ─── Floating Intro Bubble (center-inline) ──────────────────────────── */
-    .rm-inline-bar-intro {
-      position: absolute;
-      bottom: calc(100% + 12px);
-      left: 4px;
-      max-width: 260px;
-      padding: 8px 14px;
-      border-radius: 18px 18px 18px 4px;
-      background: var(--rm-bg);
-      color: var(--rm-text);
-      font-size: 13px;
-      line-height: 1.45;
-      border: 1px solid var(--rm-border);
-      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-      pointer-events: none;
-      opacity: 0;
-      visibility: hidden;
-      transform: translateY(8px);
-      transition: opacity 0.35s ease, transform 0.35s ease, visibility 0.35s;
-    }
-    .rm-inline-bar.ready .rm-inline-bar-intro {
-      opacity: 1;
-      visibility: visible;
-      transform: translateY(0);
-      transition-delay: 0.4s;
-    }
-    .rm-inline-bar.expanded .rm-inline-bar-intro,
-    .rm-inline-bar.chat-active .rm-inline-bar-intro,
-    .rm-inline-bar-intro.rm-intro-hidden {
-      opacity: 0;
-      visibility: hidden;
-      transform: translateY(8px);
-      transition-delay: 0s;
-    }
-
-    /* ─── Expanded Intro Bubble (shown on focus, above topics) ────────────── */
-    .rm-inline-bar-intro-expanded {
-      max-width: 260px;
-      padding: 8px 14px;
-      border-radius: 18px 18px 18px 4px;
-      background: var(--rm-bg);
-      color: var(--rm-text);
-      font-size: 13px;
-      line-height: 1.45;
-      border: 1px solid var(--rm-border);
-      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-      pointer-events: none;
-    }
-    .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-intro-expanded {
-      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: none;
-      color: #ffffff;
-      box-shadow: none;
-    }
-
-    .rm-inline-bar[data-bg-style="blurred"] .rm-inline-bar-intro {
-      background: color-mix(in srgb, var(--rm-primary, #2563eb), #000000 70%);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: none;
-      color: #ffffff;
-      box-shadow: none;
-    }
-
     .rm-inline-bar-topic {
       display: inline-flex;
       align-self: flex-start;
@@ -2392,7 +2321,7 @@
   triggerCloseIcon.innerHTML = ICONS.close;
   const triggerBadge = document.createElement("span");
   triggerBadge.className = "rm-trigger-badge";
-  triggerBadge.textContent = "0";
+  triggerBadge.textContent = "";
   trigger.appendChild(triggerChatIcon);
   trigger.appendChild(triggerCloseIcon);
   trigger.appendChild(triggerBadge);
@@ -2428,6 +2357,7 @@
   introPill.onclick = () => toggleChatWidget();
 
   let introPillTimer: ReturnType<typeof setTimeout> | null = null;
+  let introPillDelayTimer: ReturnType<typeof setTimeout> | null = null;
 
   container.appendChild(chatWindow);
   container.appendChild(trigger);
@@ -2488,14 +2418,13 @@
   // ─── Inline Bar State ───────────────────────────────────────────────────────
   let isInlineBarVariant = false;
   let inlineBarExpanded = false;
-  let pendingIntroMessage: string | null = null;
   let introMessageText: string | null = null;
   let introMessageAuthor: {
     name: string;
     avatar: string | null;
     workTitle: string | null;
   } | null = null;
-  let introBubbleTimer: ReturnType<typeof setTimeout> | null = null;
+
   let placeholderTexts: string[] = ["Ask a question..."];
   let placeholderIndex = 0;
   let placeholderInterval: ReturnType<typeof setInterval> | null = null;
@@ -2597,11 +2526,6 @@
 
   // Inline bar event listeners
   inlineBarInput.addEventListener("focus", () => {
-    // Clear the intro bubble auto-hide timer if it hasn't fired yet
-    if (introBubbleTimer) {
-      clearTimeout(introBubbleTimer);
-      introBubbleTimer = null;
-    }
     if (!inlineBarExpanded) expandInlineBar();
     // If there's a conversation to restore, open the chat window
     if (isInlineBarVariant && !isOpen && conversationId) {
@@ -2710,7 +2634,6 @@
         }
       }
       introMessageText = null;
-      pendingIntroMessage = null;
     }
     setTimeout(() => input.focus(), 100);
   }
@@ -2741,6 +2664,10 @@
   // ─── Visibility Tracking ─────────────────────────────────────────────────────
   document.addEventListener("visibilitychange", () => {
     isTabActive = !document.hidden;
+    if (isTabActive && titleOverridden) {
+      document.title = originalDocTitle;
+      titleOverridden = false;
+    }
   });
 
   // ─── Event Handlers ─────────────────────────────────────────────────────────
@@ -3544,46 +3471,10 @@
 
       // Intro message — stored for lazy display on first chat open
       if (loadedConfig.introMessage) {
-        pendingIntroMessage = loadedConfig.introMessage;
         introMessageText = loadedConfig.introMessage;
       }
       if (loadedConfig.introMessageAuthor) {
         introMessageAuthor = loadedConfig.introMessageAuthor;
-      }
-
-      // ─── Intro Pill (corner positions) ──────────────────────────────────────
-      if (
-        !isInlineBarVariant &&
-        loadedConfig.showIntroBubble !== false &&
-        loadedConfig.introMessage
-      ) {
-        introPillTitle.textContent =
-          introMessageAuthor?.name ||
-          loadedConfig.widget?.headerText ||
-          "Chat with us";
-        introPillDesc.textContent = loadedConfig.introMessage;
-
-        const pillAvatarUrl =
-          introMessageAuthor?.avatar || loadedConfig.widget?.avatarUrl;
-        if (pillAvatarUrl) {
-          introPillAvatar.src = resolveUrl(pillAvatarUrl);
-          introPillAvatar.style.display = "block";
-          introPillIcon.style.display = "none";
-        } else {
-          introPillAvatar.style.display = "none";
-          introPillIcon.style.display = "flex";
-        }
-
-        // Show with slight delay after trigger appears
-        setTimeout(() => {
-          introPill.classList.add("visible");
-        }, 600);
-
-        // Auto-hide after 15 seconds
-        introPillTimer = setTimeout(() => {
-          introPill.classList.add("rm-intro-hidden");
-          introPillTimer = null;
-        }, 15000);
       }
 
       // ─── Prompt-type Quick Actions as Chat Pills ────────────────────────────
@@ -3748,36 +3639,6 @@
           });
           inlineBarActions.classList.add("has-actions");
         }
-
-        // Floating intro bubble (center-inline only, visible before expanding)
-        // Only show if showIntroBubble config is enabled (default true)
-        if (pendingIntroMessage && loadedConfig.showIntroBubble !== false) {
-          const introBubble = document.createElement("div");
-          introBubble.className = "rm-inline-bar-intro";
-          introBubble.textContent = pendingIntroMessage;
-          inlineBar.appendChild(introBubble);
-
-          // Auto-hide the floating intro bubble after 3 seconds
-          introBubbleTimer = setTimeout(() => {
-            introBubble.classList.add("rm-intro-hidden");
-            introBubbleTimer = null;
-          }, 3000);
-        }
-
-        // Expanded intro bubble (shown above quick actions when input is focused)
-        if (pendingIntroMessage || introMessageText) {
-          const expandedIntroBubble = document.createElement("div");
-          expandedIntroBubble.className = "rm-inline-bar-intro-expanded";
-          expandedIntroBubble.textContent =
-            pendingIntroMessage || introMessageText || "";
-          // Prepend as first child of float container so it appears above actions and topics
-          inlineBarFloat.insertBefore(
-            expandedIntroBubble,
-            inlineBarFloat.firstChild,
-          );
-        }
-
-        pendingIntroMessage = null;
 
         // Append inline bar to body and start placeholder rotation
         document.body.appendChild(inlineBar);
@@ -4831,13 +4692,54 @@
 
       if (hasNewMessages) {
         lastNewMessageAt = Date.now();
-        scrollToBottom();
-        // Show notification if widget is closed/minimized
-        if (!isOpen || !isTabActive) {
+        if (isOpen) scrollToBottom();
+
+        if (!isOpen) {
+          // Widget is closed -- show red dot + pop out intro pill with latest message
           incrementUnreadBadge();
           showBrowserNotification(
             msgs[msgs.length - 1]?.content ?? "New message",
           );
+
+          const latestMsg = [...msgs].reverse().find((m: { role: string }) => m.role !== "visitor");
+          if (latestMsg) {
+            const senderName =
+              latestMsg.senderName ||
+              (latestMsg.role === "agent"
+                ? "Agent"
+                : config?.botName || config?.widget?.headerText || "New message");
+            introPillTitle.textContent = senderName;
+            const text = latestMsg.content ?? "";
+            introPillDesc.textContent =
+              text.length > 120 ? text.substring(0, 120) + "..." : text;
+
+            // Update avatar to match message author
+            const msgAvatarUrl = latestMsg.senderAvatar
+              ? resolveUrl(latestMsg.senderAvatar)
+              : config?.widget?.avatarUrl
+                ? resolveUrl(config.widget.avatarUrl)
+                : null;
+            updatePillAvatar(msgAvatarUrl);
+
+            introPill.classList.remove("rm-intro-hidden");
+            introPill.classList.add("visible");
+            if (introPillTimer) clearTimeout(introPillTimer);
+            introPillTimer = setTimeout(() => {
+              introPill.classList.add("rm-intro-hidden");
+              introPillTimer = null;
+            }, 8000);
+          }
+        } else if (!isTabActive) {
+          // Widget is open but tab is inactive -- flash document title
+          incrementUnreadBadge();
+          showBrowserNotification(
+            msgs[msgs.length - 1]?.content ?? "New message",
+          );
+          if (!titleOverridden) {
+            originalDocTitle = document.title;
+          }
+          document.title = "New Message | " + originalDocTitle;
+          titleOverridden = true;
         }
       }
     } catch {
@@ -4901,7 +4803,6 @@
 
   function incrementUnreadBadge() {
     unreadCount++;
-    triggerBadge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
     triggerBadge.classList.add("visible");
   }
 
@@ -4943,7 +4844,6 @@
       if (msgs.length > 0) {
         // Clear intro message — history already contains the conversation
         introMessageText = null;
-        pendingIntroMessage = null;
         if (openChat && conversationStatus !== "closed") {
           // Switch to chat view since we have an active conversation with history
           showChatScreen();
@@ -5039,6 +4939,61 @@
     } catch {
       // Silently ignore
     }
+
+    // No active conversation found — show intro message pill if configured
+    if (!conversationId && introMessageText && !isOpen) {
+      showIntroPill();
+    }
+  }
+
+  // ─── Intro/New-Message Pill Helpers ─────────────────────────────────────────
+
+  function updatePillAvatar(avatarUrl: string | null) {
+    if (avatarUrl) {
+      introPillAvatar.src = resolveUrl(avatarUrl);
+      introPillAvatar.style.display = "block";
+      introPillIcon.style.display = "none";
+    } else {
+      introPillAvatar.style.display = "none";
+      introPillIcon.style.display = "flex";
+    }
+  }
+
+  function showIntroPill() {
+    const senderName =
+      introMessageAuthor?.name ||
+      config?.widget?.headerText ||
+      "Chat with us";
+    introPillTitle.textContent = senderName;
+    const text = introMessageText ?? "";
+    introPillDesc.textContent =
+      text.length > 120 ? text.substring(0, 120) + "..." : text;
+
+    const avatarUrl =
+      introMessageAuthor?.avatar
+        ? resolveUrl(introMessageAuthor.avatar)
+        : config?.widget?.avatarUrl
+          ? resolveUrl(config.widget.avatarUrl)
+          : null;
+    updatePillAvatar(avatarUrl);
+
+    const delay = (config?.introMessageDelay ?? 1) * 1000;
+    const duration = (config?.introMessageDuration ?? 15) * 1000;
+
+    if (introPillDelayTimer) clearTimeout(introPillDelayTimer);
+    introPillDelayTimer = setTimeout(() => {
+      introPillDelayTimer = null;
+      introPill.classList.remove("rm-intro-hidden");
+      introPill.classList.add("visible");
+    }, delay);
+
+    if (duration > 0) {
+      if (introPillTimer) clearTimeout(introPillTimer);
+      introPillTimer = setTimeout(() => {
+        introPill.classList.add("rm-intro-hidden");
+        introPillTimer = null;
+      }, delay + duration);
+    }
   }
 
   // ─── Server Sync for Identity/Metadata ──────────────────────────────────────
@@ -5097,6 +5052,10 @@
     trigger.classList.add("active");
     clearUnreadBadge();
     // Hide intro pill permanently
+    if (introPillDelayTimer) {
+      clearTimeout(introPillDelayTimer);
+      introPillDelayTimer = null;
+    }
     if (introPillTimer) {
       clearTimeout(introPillTimer);
       introPillTimer = null;
