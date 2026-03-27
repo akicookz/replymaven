@@ -1,5 +1,23 @@
 import { Resend } from "resend";
 
+// ─── Shared Email Layout ──────────────────────────────────────────────────────
+
+const LINK_STYLE = "color: #18181b; font-weight: 500; text-decoration: underline;";
+const BUTTON_STYLE = "display: inline-block; background: #18181b; color: #fff; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500;";
+
+function wrapEmail(body: string): string {
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin: 0; padding: 0; background: #ffffff;">
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px; color: #18181b; font-size: 15px; line-height: 1.6;">
+<!--[if mso]><table role="presentation" width="480" align="center" cellpadding="0" cellspacing="0"><tr><td style="padding: 40px 20px;"><![endif]-->
+${body}
+<p style="color: #a1a1aa; font-size: 13px; margin: 32px 0 0;">— ReplyMaven</p>
+<!--[if mso]></td></tr></table><![endif]-->
+</div>
+</body></html>`;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export class EmailService {
@@ -14,52 +32,12 @@ export class EmailService {
       from: "ReplyMaven <noreply@updates.replymaven.com>",
       to,
       subject: "Welcome to ReplyMaven",
-      html: `
-        <h1>Welcome, ${name}!</h1>
-        <p>Thanks for signing up for ReplyMaven. You can now create your first project and start building your AI support agent.</p>
-        <p>Get started by creating a project in your dashboard.</p>
-      `,
+      html: wrapEmail(`
+<p style="font-size: 18px; font-weight: 600; margin: 0 0 16px;">Welcome to ReplyMaven</p>
+<p style="color: #3f3f46; margin: 0 0 16px;">Hi ${escapeHtml(name)}, thanks for signing up. You can now create your first project and start building your AI support agent.</p>
+<a href="https://replymaven.com/app" style="${BUTTON_STYLE}">Go to Dashboard</a>
+      `),
     });
-  }
-
-  // ─── Handoff / Agent Request Notification (to project owner) ─────────────────
-
-  async sendHandoffNotification(details: {
-    ownerEmail: string;
-    projectName: string;
-    visitorName: string | null;
-    visitorMessage: string;
-    dashboardUrl: string;
-  }): Promise<void> {
-    try {
-      const {
-        ownerEmail,
-        projectName,
-        visitorName,
-        visitorMessage,
-        dashboardUrl,
-      } = details;
-      const displayName = visitorName ?? "A visitor";
-
-      await this.resend.emails.send({
-        from: `${projectName} <noreply@updates.replymaven.com>`,
-        to: ownerEmail,
-        subject: `Agent requested: ${displayName} needs help`,
-        html: `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
-          <h1 style="font-size: 20px; font-weight: 600; margin: 0 0 8px;">Agent Requested</h1>
-          <p style="color: #6b7280; margin: 0 0 24px;">${displayName} needs help from a human agent on <strong>${projectName}</strong>.</p>
-          <div style="background: #f9fafb; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-            <p style="margin: 0 0 8px; font-size: 14px; color: #6b7280;">Latest message</p>
-            <p style="margin: 0; font-size: 15px;">${escapeHtml(visitorMessage)}</p>
-          </div>
-          <a href="${dashboardUrl}" style="display: inline-block; background: #18181b; color: #fff; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500;">View Conversation</a>
-        </div>
-      `,
-      });
-    } catch (error) {
-      console.error("[EmailService] Handoff notification email failed:", error);
-    }
   }
 
   // ─── Inquiry Notification (to project owner) ────────────────────────────────
@@ -73,27 +51,26 @@ export class EmailService {
     try {
       const { ownerEmail, projectName, formData, dashboardUrl } = details;
 
-      const fieldsHtml = Object.entries(formData)
+      const entries = Object.entries(formData);
+      const fieldsHtml = entries
         .map(
-          ([key, value]) =>
-            `<p style="margin: 0 0 8px; font-size: 14px; color: #6b7280;">${escapeHtml(key)}</p>
-           <p style="margin: 0 0 16px; font-size: 15px;">${escapeHtml(String(value))}</p>`,
+          ([key, value], i) =>
+            `<p style="font-size: 13px; color: #a1a1aa; margin: 0 0 2px;">${escapeHtml(key)}</p>
+<p style="font-size: 15px; color: #18181b; margin: 0 0 ${i < entries.length - 1 ? "12px" : "0"};">${escapeHtml(String(value))}</p>`,
         )
         .join("");
 
       await this.resend.emails.send({
         from: `${projectName} <noreply@updates.replymaven.com>`,
         to: ownerEmail,
-        subject: `New inquiry submission - ${projectName}`,
-        html: `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
-          <h1 style="font-size: 20px; font-weight: 600; margin: 0 0 16px;">New Inquiry Submission</h1>
-          <div style="background: #f9fafb; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-            ${fieldsHtml}
-          </div>
-          <a href="${dashboardUrl}" style="display: inline-block; background: #18181b; color: #fff; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500;">View in Dashboard</a>
-        </div>
-        `,
+        subject: `New inquiry - ${projectName}`,
+        html: wrapEmail(`
+<p style="font-size: 18px; font-weight: 600; margin: 0 0 20px;">New Inquiry</p>
+<div style="background: #fafafa; border-radius: 8px; padding: 16px 20px; margin: 0 0 24px;">
+${fieldsHtml}
+</div>
+<a href="${dashboardUrl}" style="${BUTTON_STYLE}">View in Dashboard</a>
+        `),
       });
     } catch (error) {
       console.error("[EmailService] Inquiry notification email failed:", error);
@@ -114,18 +91,18 @@ export class EmailService {
       > = {
         payment_failed: {
           subject: "Action Required: Your chatbot is paused",
-          body: `<p>Your recent payment failed and your chatbot has been paused. Visitors will not be able to use it until the issue is resolved.</p>
-               <p>Please update your payment method in your <a href="https://replymaven.com/app/billing">dashboard</a> to restore service.</p>`,
+          body: `<p style="color: #3f3f46; margin: 0 0 16px;">Your recent payment failed and your chatbot has been paused. Visitors will not be able to use it until the issue is resolved.</p>
+<p style="color: #3f3f46; margin: 0;">Please update your payment method in your <a href="https://replymaven.com/app/billing" style="${LINK_STYLE}">dashboard</a> to restore service.</p>`,
         },
         canceled: {
           subject: "Your ReplyMaven subscription has been canceled",
-          body: `<p>Your subscription has been canceled and your chatbot is no longer active. Visitors will see an unavailable message.</p>
-               <p>If this was a mistake, you can resubscribe anytime from your <a href="https://replymaven.com/app/billing">dashboard</a>.</p>`,
+          body: `<p style="color: #3f3f46; margin: 0 0 16px;">Your subscription has been canceled and your chatbot is no longer active. Visitors will see an unavailable message.</p>
+<p style="color: #3f3f46; margin: 0;">If this was a mistake, you can resubscribe anytime from your <a href="https://replymaven.com/app/billing" style="${LINK_STYLE}">dashboard</a>.</p>`,
         },
         other: {
           subject: "Your chatbot is currently unavailable",
-          body: `<p>Your subscription is inactive and your chatbot is currently unavailable to visitors.</p>
-               <p>Please check your <a href="https://replymaven.com/app/billing">billing settings</a> to restore service.</p>`,
+          body: `<p style="color: #3f3f46; margin: 0 0 16px;">Your subscription is inactive and your chatbot is currently unavailable to visitors.</p>
+<p style="color: #3f3f46; margin: 0;">Please check your <a href="https://replymaven.com/app/billing" style="${LINK_STYLE}">billing settings</a> to restore service.</p>`,
         },
       };
 
@@ -135,11 +112,10 @@ export class EmailService {
         from: "ReplyMaven <noreply@updates.replymaven.com>",
         to,
         subject: msg.subject,
-        html: `
-        <h1>Hi ${name},</h1>
-        ${msg.body}
-        <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">— The ReplyMaven Team</p>
-      `,
+        html: wrapEmail(`
+<p style="font-size: 18px; font-weight: 600; margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+${msg.body}
+        `),
       });
     } catch (error) {
       console.error(
@@ -158,11 +134,10 @@ export class EmailService {
         from: "ReplyMaven <noreply@updates.replymaven.com>",
         to,
         subject: "Your chatbot is back online",
-        html: `
-        <h1>Hi ${name},</h1>
-        <p>Your subscription is active again and your chatbot is back online. Visitors can use it as normal.</p>
-        <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">— The ReplyMaven Team</p>
-      `,
+        html: wrapEmail(`
+<p style="font-size: 18px; font-weight: 600; margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p style="color: #3f3f46; margin: 0;">Your subscription is active again and your chatbot is back online. Visitors can use it as normal.</p>
+        `),
       });
     } catch (error) {
       console.error(

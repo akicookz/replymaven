@@ -2,50 +2,11 @@ import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { projectSettings } from "../db";
 
-interface TelegramMessage {
-  role: string;
-  content: string;
-}
-
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-}
-
-function formatMessageHistory(messages: TelegramMessage[]): string {
-  return messages
-    .map((m) => {
-      const label =
-        m.role === "visitor"
-          ? "Visitor"
-          : m.role === "bot"
-            ? "Bot"
-            : "Agent";
-      const truncated =
-        m.content.length > 300
-          ? m.content.slice(0, 300) + "..."
-          : m.content;
-      return `<b>${label}:</b> ${escapeHtml(truncated)}`;
-    })
-    .join("\n\n");
-}
-
-function buildCommandFooter(botName?: string | null): string {
-  const lines = ["Reply to respond to the visitor."];
-  if (botName) {
-    lines.push(`@${botName} to hand back to the bot.`);
-  }
-  return lines.join("\n");
-}
-
-function buildDashboardLink(
-  baseUrl: string,
-  projectId: string,
-  conversationId: string,
-): string {
-  return `${baseUrl}/app/projects/${projectId}/conversations?id=${conversationId}`;
 }
 
 export class TelegramService {
@@ -85,99 +46,6 @@ export class TelegramService {
     };
   }
 
-  // ─── Notify Agent of Handoff ────────────────────────────────────────────────
-
-  async notifyHandoff(
-    botToken: string,
-    chatId: string,
-    conversationId: string,
-    visitorName: string | null,
-    summary: string,
-    recentMessages: TelegramMessage[],
-    dashboardBaseUrl: string,
-    projectId: string,
-    botName?: string | null,
-  ): Promise<number | null> {
-    const dashboardLink = buildDashboardLink(
-      dashboardBaseUrl,
-      projectId,
-      conversationId,
-    );
-    const last4 = recentMessages.slice(-4);
-
-    const footer = buildCommandFooter(botName);
-
-    const text = [
-      `<b>New support request</b>`,
-      ``,
-      `<b>Visitor:</b> ${escapeHtml(visitorName ?? "Anonymous")}`,
-      `<b>Conversation:</b> <code>${conversationId}</code>`,
-      ``,
-      `<b>Summary:</b>`,
-      escapeHtml(summary),
-      ``,
-      ...(last4.length > 0
-        ? [`<b>Recent messages:</b>`, ``, formatMessageHistory(last4), ``]
-        : []),
-      `<a href="${dashboardLink}">View conversation on dashboard</a>`,
-      ``,
-      footer,
-    ].join("\n");
-
-    const result = await this.sendMessage(botToken, chatId, text);
-    return result.message_id ?? null;
-  }
-
-  // ─── Notify New Conversation Message ────────────────────────────────────────
-
-  async notifyNewConversation(
-    botToken: string,
-    chatId: string,
-    conversationId: string,
-    visitorName: string | null,
-    visitorEmail: string | null,
-    firstMessage: string,
-    dashboardBaseUrl: string,
-    projectId: string,
-    botName?: string | null,
-  ): Promise<number | null> {
-    const dashboardLink = buildDashboardLink(
-      dashboardBaseUrl,
-      projectId,
-      conversationId,
-    );
-
-    const footer = buildCommandFooter(botName);
-
-    const lines = [
-      `<b>New conversation started</b>`,
-      ``,
-      `<b>Visitor:</b> ${escapeHtml(visitorName ?? "Anonymous")}`,
-      `<b>Conversation:</b> <code>${conversationId}</code>`,
-    ];
-
-    if (visitorEmail) {
-      lines.push(`<b>Email:</b> ${escapeHtml(visitorEmail)}`);
-    }
-
-    lines.push(
-      ``,
-      `<b>Message:</b>`,
-      escapeHtml(
-        firstMessage.length > 500
-          ? firstMessage.slice(0, 500) + "..."
-          : firstMessage,
-      ),
-      ``,
-      `<a href="${dashboardLink}">View conversation on dashboard</a>`,
-      ``,
-      footer,
-    );
-
-    const result = await this.sendMessage(botToken, chatId, lines.join("\n"));
-    return result.message_id ?? null;
-  }
-
   // ─── Notify Inquiry Submission with Dashboard Link ──────────────────────────
 
   async notifyInquiry(
@@ -186,7 +54,7 @@ export class TelegramService {
     fields: Record<string, string>,
     dashboardBaseUrl: string,
     projectId: string,
-  ): Promise<void> {
+  ): Promise<number | null> {
     const fieldLines = Object.entries(fields)
       .map(([key, val]) => `<b>${escapeHtml(key)}:</b> ${escapeHtml(val)}`)
       .join("\n");
@@ -201,7 +69,8 @@ export class TelegramService {
       `<a href="${projectLink}">View on dashboard</a>`,
     ].join("\n");
 
-    await this.sendMessage(botToken, chatId, text);
+    const result = await this.sendMessage(botToken, chatId, text);
+    return result.message_id ?? null;
   }
 
   // ─── Forward Visitor Message to Agent ─────────────────────────────────────

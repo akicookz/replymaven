@@ -37,7 +37,6 @@ import { TelegramService } from "../../services/telegram-service";
 import { ToolService } from "../../services/tool-service";
 import { WidgetService } from "../../services/widget-service";
 import { isEncrypted, decryptHeaders } from "../../services/encryption-service";
-import { EmailService } from "../../services/email-service";
 
 function parseConversationMetadata(
   rawMetadata: string | null | undefined,
@@ -231,23 +230,6 @@ export async function handleWidgetMessageTurn(
     );
     if (reopened) {
       conversation = reopened;
-      if (settings?.telegramBotToken && settings?.telegramChatId) {
-        const telegramService = new TelegramService(context.db);
-        context.executionCtx.waitUntil(
-          telegramService
-            .sendMessage(
-              settings.telegramBotToken,
-              settings.telegramChatId,
-              `🔄 Visitor ${conversation.visitorName ?? conversation.visitorId} reopened a closed conversation.`,
-              conversation.telegramThreadId
-                ? parseInt(conversation.telegramThreadId, 10)
-                : undefined,
-            )
-            .catch((err) => {
-              console.error("Telegram reopen notification failed:", err);
-            }),
-        );
-      }
     }
   }
 
@@ -323,41 +305,6 @@ export async function handleWidgetMessageTurn(
           role: message.role as "visitor" | "bot" | "agent",
           content: message.content,
         }));
-
-      const visitorMessages = history.filter((message) => message.role === "visitor");
-      if (
-        visitorMessages.length === 1 &&
-        settings?.telegramBotToken &&
-        settings?.telegramChatId
-      ) {
-        const telegramService = new TelegramService(context.db);
-        context.executionCtx.waitUntil(
-          telegramService
-            .notifyNewConversation(
-              settings.telegramBotToken,
-              settings.telegramChatId,
-              context.conversationId,
-              conversation.visitorName,
-              conversation.visitorEmail,
-              context.payload.content,
-              context.env.BETTER_AUTH_URL,
-              context.project.id,
-              settings.botName,
-            )
-            .then(async (messageId) => {
-              if (messageId) {
-                await chatService.updateTelegramThreadId(
-                  context.conversationId,
-                  context.project.id,
-                  String(messageId),
-                );
-              }
-            })
-            .catch((err) => {
-              console.error("New conversation Telegram notification failed:", err);
-            }),
-        );
-      }
 
       const modelConfig = {
         model: context.env.AI_MODEL,
@@ -641,75 +588,34 @@ export async function handleWidgetMessageTurn(
             : undefined;
 
         const submission = await createTeamRequestSubmission({
-          chatService,
-          widgetService: new WidgetService(context.db),
-          projectService,
-          telegramService,
-          project: context.project,
-          conversation: {
-            ...conversation,
-            visitorName,
-            visitorEmail,
-          },
-          conversationHistory,
-          summary,
-          email: visitorEmail ?? "not provided",
-          settings,
-          env: {
-            BETTER_AUTH_URL: context.env.BETTER_AUTH_URL,
-            RESEND_API_KEY: context.env.RESEND_API_KEY,
-          },
-          executionCtx: context.executionCtx,
-        });
-
-        if (
-          telegramService &&
-          settings?.telegramBotToken &&
-          settings?.telegramChatId
-        ) {
-          const threadId = await telegramService.notifyHandoff(
-            settings.telegramBotToken,
-            settings.telegramChatId,
-            context.conversationId,
-            visitorName,
-            context.payload.content,
+            chatService,
+            widgetService: new WidgetService(context.db),
+            projectService,
+            telegramService,
+            project: context.project,
+            conversation: {
+              ...conversation,
+              visitorName,
+              visitorEmail,
+            },
             conversationHistory,
-            context.env.BETTER_AUTH_URL,
+            summary,
+            email: visitorEmail ?? "not provided",
+            settings,
+            env: {
+              BETTER_AUTH_URL: context.env.BETTER_AUTH_URL,
+              RESEND_API_KEY: context.env.RESEND_API_KEY,
+            },
+            executionCtx: context.executionCtx,
+          });
+
+        if (submission.telegramThreadId) {
+          await chatService.updateTelegramThreadId(
+            context.conversationId,
             context.project.id,
-            settings.botName,
+            submission.telegramThreadId,
           );
-          if (threadId) {
-            await chatService.updateTelegramThreadId(
-              context.conversationId,
-              context.project.id,
-              String(threadId),
-            );
-          }
         }
-
-        if (context.env.RESEND_API_KEY) {
-          const emailService = new EmailService(context.env.RESEND_API_KEY);
-          const ownerEmail = await projectService.getOwnerEmail(context.project.id);
-          if (ownerEmail) {
-            const projectName = settings?.companyName ?? context.project.name;
-            const dashboardUrl = `${context.env.BETTER_AUTH_URL}/app/projects/${context.project.id}/conversations/${context.conversationId}`;
-            context.executionCtx.waitUntil(
-              emailService
-                .sendHandoffNotification({
-                  ownerEmail,
-                  projectName,
-                  visitorName,
-                  visitorMessage: context.payload.content,
-                  dashboardUrl,
-                })
-                .catch((err) => {
-                  console.error("Inquiry email notification failed:", err);
-                }),
-            );
-          }
-        }
-
-        void submission;
         fullResponse = fullResponse.replace("[NEW_INQUIRY]", "").trim();
         if (!fullResponse) {
           const agentLabel = settings?.agentName ?? "a team member";
