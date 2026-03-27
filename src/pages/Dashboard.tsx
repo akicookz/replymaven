@@ -318,17 +318,27 @@ function Dashboard() {
       } catch {
         // ignore
       }
-      const name = parsedData["Name"] ?? parsedData["name"] ?? null;
-      const email = parsedData["Email"] ?? parsedData["email"] ?? null;
-      const nameKeys = new Set(["name", "email"]);
-      const firstLine = Object.entries(parsedData)
-        .find(([k]) => !nameKeys.has(k.toLowerCase()))?.[1] ?? null;
+      const nameKey = Object.keys(parsedData).find((k) =>
+        k.toLowerCase().includes("name"),
+      );
+      const emailKey = Object.keys(parsedData).find((k) =>
+        k.toLowerCase().includes("email"),
+      );
+      const name = nameKey ? parsedData[nameKey] : null;
+      const email = emailKey ? parsedData[emailKey] : null;
+      const excludeKeys = new Set(
+        [nameKey, emailKey].filter(Boolean).map((k) => k!.toLowerCase()),
+      );
+      const firstLine =
+        Object.entries(parsedData).find(
+          ([k]) => !excludeKeys.has(k.toLowerCase()),
+        )?.[1] ?? null;
 
       timelineItems.push({
         id: s.id,
         type: "inquiry",
         name: name ?? email ?? "Unknown",
-        email: name ? email : null, // don't show email twice if it was used as name
+        email: name ? email : null,
         firstLine,
         timestamp: s.createdAt,
       });

@@ -12,6 +12,10 @@ import {
   Loader2,
   Mail,
   Send,
+  X,
+  CheckCheck,
+  MailCheck,
+  Archive,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +34,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { DetailsPanel } from "@/components/DetailsPanel";
@@ -157,6 +162,7 @@ function Inquiries() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedInquiry, setSelectedInquiry] =
     useState<InquirySubmission | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -242,7 +248,58 @@ function Inquiries() {
     },
   });
 
+  const bulkStatusMutation = useMutation({
+    mutationFn: async ({
+      ids,
+      status,
+    }: {
+      ids: string[];
+      status: "new" | "replied" | "closed";
+    }) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/inquiries/bulk-status`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids, status }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to update");
+      return { ids, status };
+    },
+    onSuccess: ({ ids, status }) => {
+      queryClient.setQueryData<InquirySubmission[]>(
+        ["inquiries", projectId],
+        (old) =>
+          old?.map((s) => (ids.includes(s.id) ? { ...s, status } : s)) ?? [],
+      );
+      setSelectedIds(new Set());
+    },
+  });
+
   // ─── Handlers ───────────────────────────────────────────────────────────────
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === sorted.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(sorted.map((s) => s.id)));
+    }
+  }
+
+  function handleBulkAction(status: "new" | "replied" | "closed") {
+    if (selectedIds.size === 0) return;
+    bulkStatusMutation.mutate({ ids: Array.from(selectedIds), status });
+  }
 
   function handleOpenInquiry(inquiry: InquirySubmission) {
     setSelectedInquiry(inquiry);
@@ -336,6 +393,59 @@ function Inquiries() {
         </div>
       )}
 
+      {/* Bulk Action Bar */}
+      {selectedIds.size > 0 && (
+        <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2.5 bg-card/80 backdrop-blur-xl rounded-xl border border-border">
+          <Checkbox
+            checked={selectedIds.size === sorted.length}
+            onCheckedChange={toggleSelectAll}
+            className="mr-1"
+          />
+          <span className="text-sm font-medium text-foreground">
+            {selectedIds.size} selected
+          </span>
+          <div className="flex-1" />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs gap-1.5"
+            disabled={bulkStatusMutation.isPending}
+            onClick={() => handleBulkAction("replied")}
+          >
+            <MailCheck className="w-3.5 h-3.5" />
+            Mark Replied
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs gap-1.5"
+            disabled={bulkStatusMutation.isPending}
+            onClick={() => handleBulkAction("closed")}
+          >
+            <Archive className="w-3.5 h-3.5" />
+            Close
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs gap-1.5"
+            disabled={bulkStatusMutation.isPending}
+            onClick={() => handleBulkAction("new")}
+          >
+            <CheckCheck className="w-3.5 h-3.5" />
+            Mark New
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            <X className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      )}
+
       {/* Card List */}
       {sorted.length > 0 && (
         <div className="space-y-2">
@@ -346,13 +456,30 @@ function Inquiries() {
               primary?.label ?? null,
             );
             const statusCfg = STATUS_CONFIG[inquiry.status];
+            const isSelected = selectedIds.has(inquiry.id);
 
             return (
               <div
                 key={inquiry.id}
                 onClick={() => handleOpenInquiry(inquiry)}
-                className="flex items-center gap-3 px-4 py-3 bg-card/50 rounded-xl border border-border cursor-pointer hover:bg-accent/30 transition-colors group"
+                className={cn(
+                  "flex items-center gap-3 px-4 py-3 bg-card/50 rounded-xl border cursor-pointer hover:bg-accent/30 transition-colors group",
+                  isSelected
+                    ? "border-primary/40 bg-primary/5"
+                    : "border-border",
+                )}
               >
+                {/* Checkbox */}
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="shrink-0"
+                >
+                  <Checkbox
+                    checked={isSelected}
+                    onCheckedChange={() => toggleSelected(inquiry.id)}
+                  />
+                </div>
+
                 {/* Icon */}
                 <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
                   <Inbox className="w-4 h-4 text-muted-foreground" />

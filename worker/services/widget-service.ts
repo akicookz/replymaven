@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, asc, and } from "drizzle-orm";
+import { eq, asc, and, inArray } from "drizzle-orm";
 import {
   widgetConfig,
   quickActions,
@@ -249,6 +249,20 @@ export class WidgetService {
       .set({ status })
       .where(eq(inquiries.id, id));
     return (await this.getInquiryById(id, projectId))!;
+  }
+
+  async bulkUpdateInquiryStatus(
+    ids: string[],
+    projectId: string,
+    status: "new" | "replied" | "closed",
+  ): Promise<number> {
+    await this.db
+      .update(inquiries)
+      .set({ status })
+      .where(
+        and(inArray(inquiries.id, ids), eq(inquiries.projectId, projectId)),
+      );
+    return ids.length;
   }
 
   // ─── Full Widget Config for Embed ───────────────────────────────────────────

@@ -56,6 +56,7 @@ import {
   updateInquiryConfigSchema,
   submitInquirySchema,
   updateInquiryStatusSchema,
+  bulkUpdateInquiryStatusSchema,
   createToolSchema,
   updateToolSchema,
   testToolSchema,
@@ -2717,6 +2718,31 @@ const app = new Hono<HonoAppContext>()
   })
 
   // ─── Update Inquiry Status ──────────────────────────────────────────────────
+  // ─── Bulk Update Inquiry Status ───────────────────────────────────────────
+  .patch("/api/projects/:id/inquiries/bulk-status", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(bulkUpdateInquiryStatusSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const updated = await widgetService.bulkUpdateInquiryStatus(
+      parsed.data.ids,
+      project.id,
+      parsed.data.status,
+    );
+    return c.json({ updated });
+  })
+
   .patch("/api/projects/:id/inquiries/:inquiryId", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);

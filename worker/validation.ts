@@ -252,6 +252,11 @@ export const updateInquiryStatusSchema = z.object({
   status: z.enum(["new", "replied", "closed"]),
 });
 
+export const bulkUpdateInquiryStatusSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(100),
+  status: z.enum(["new", "replied", "closed"]),
+});
+
 // ─── Tools ────────────────────────────────────────────────────────────────────
 
 const toolParameterSchema = z.object({
