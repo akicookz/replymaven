@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
+
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -154,8 +154,8 @@ function QuickActions() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b border-border">
+      {/* Segment Control */}
+      <div className="inline-flex rounded-lg bg-muted p-1 mb-6">
         {(
           [
             { key: "actions", label: "Actions" },
@@ -166,10 +166,10 @@ function QuickActions() {
             key={tab.key}
             onClick={() => handleTabChange(tab.key)}
             className={cn(
-              "px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px",
+              "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
               activeTab === tab.key
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             {tab.label}
@@ -177,8 +177,12 @@ function QuickActions() {
         ))}
       </div>
 
-      {activeTab === "actions" && <ActionsTab projectId={projectId!} queryClient={queryClient} />}
-      {activeTab === "tools" && <ToolsPanel projectId={projectId!} embedded />}
+      <div className={activeTab !== "actions" ? "hidden" : ""}>
+        <ActionsTab projectId={projectId!} queryClient={queryClient} />
+      </div>
+      <div className={activeTab !== "tools" ? "hidden" : ""}>
+        <ToolsPanel projectId={projectId!} embedded />
+      </div>
     </div>
   );
 }
@@ -198,6 +202,13 @@ function ActionsTab({
   const [newIcon, setNewIcon] = useState("sparkle");
   const [newShowOnHome, setNewShowOnHome] = useState(false);
   const [expandedInquiryId, setExpandedInquiryId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    label: "",
+    action: "",
+    icon: "link",
+    showOnHome: false,
+  });
 
   const {
     data: actions,
@@ -267,6 +278,30 @@ function ActionsTab({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["quick-actions", projectId] });
+    },
+  });
+
+  const updateAction = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/quick-actions/${id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            label: editForm.label.trim(),
+            action: editForm.action.trim(),
+            icon: editForm.icon,
+            showOnHome: editForm.showOnHome,
+          }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to update");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["quick-actions", projectId] });
+      setEditingId(null);
     },
   });
 
@@ -374,10 +409,10 @@ function ActionsTab({
           {/* Row 3: Show on home + submit */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
-              <Checkbox
+              <Switch
                 id="show-on-home"
                 checked={newShowOnHome}
-                onCheckedChange={(checked) => setNewShowOnHome(checked === true)}
+                onCheckedChange={(checked) => setNewShowOnHome(checked)}
               />
               <Label
                 htmlFor="show-on-home"
@@ -421,12 +456,25 @@ function ActionsTab({
             if (!typeConf) return null;
             const isInquiryAction = action.type === "inquiry";
             const isInquiryExpanded = expandedInquiryId === action.id;
+            const isEditing = editingId === action.id;
             return (
               <div
                 key={action.id}
                 className="bg-card/50 rounded-xl border border-border overflow-hidden group"
               >
-                <div className="flex items-center gap-3 px-4 py-3">
+                <div
+                  className="flex items-center gap-3 px-4 py-3 cursor-pointer"
+                  onClick={() => {
+                    if (isEditing) return;
+                    setEditingId(action.id);
+                    setEditForm({
+                      label: action.label,
+                      action: action.action,
+                      icon: action.icon,
+                      showOnHome: action.showOnHome,
+                    });
+                  }}
+                >
                   {/* Left icon */}
                   <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
                     <IconComp className="w-4 h-4 text-muted-foreground" />
@@ -448,7 +496,7 @@ function ActionsTab({
                         {action.action}
                       </p>
                     )}
-                    {isInquiryAction && (
+                    {isInquiryAction && !isEditing && (
                       <p className="text-xs text-muted-foreground mt-0.5">
                         Configure the form directly on this action.
                       </p>
@@ -458,9 +506,10 @@ function ActionsTab({
                   {isInquiryAction && (
                     <button
                       type="button"
-                      onClick={() =>
-                        setExpandedInquiryId(isInquiryExpanded ? null : action.id)
-                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpandedInquiryId(isInquiryExpanded ? null : action.id);
+                      }}
                       className={cn(
                         "p-1.5 rounded-lg transition-colors",
                         isInquiryExpanded
@@ -476,12 +525,13 @@ function ActionsTab({
                   {/* Home toggle */}
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={(e) => {
+                      e.stopPropagation();
                       toggleHome.mutate({
                         id: action.id,
                         showOnHome: !action.showOnHome,
-                      })
-                    }
+                      });
+                    }}
                     className={cn(
                       "p-1.5 rounded-lg transition-colors",
                       action.showOnHome
@@ -500,13 +550,104 @@ function ActionsTab({
                   {/* Delete */}
                   <button
                     type="button"
-                    onClick={() => deleteAction.mutate(action.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteAction.mutate(action.id);
+                    }}
                     disabled={deleteAction.isPending}
                     className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-destructive disabled:opacity-50 transition-opacity"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
+
+                {/* Inline Edit Panel */}
+                {isEditing && (
+                  <div className="px-4 py-4 bg-muted/20 space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Label</Label>
+                      <Input
+                        value={editForm.label}
+                        onChange={(e) =>
+                          setEditForm((prev) => ({ ...prev, label: e.target.value }))
+                        }
+                        placeholder="Button label"
+                      />
+                    </div>
+
+                    {action.type !== "inquiry" && (
+                      <div className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">
+                          {action.type === "link" ? "URL" : "Prompt"}
+                        </Label>
+                        <Input
+                          value={editForm.action}
+                          onChange={(e) =>
+                            setEditForm((prev) => ({ ...prev, action: e.target.value }))
+                          }
+                          placeholder={
+                            action.type === "link"
+                              ? "https://example.com"
+                              : "Pre-filled message for the AI"
+                          }
+                        />
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Icon</Label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {ICON_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() =>
+                              setEditForm((prev) => ({ ...prev, icon: opt.value }))
+                            }
+                            className={cn(
+                              "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
+                              editForm.icon === opt.value
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-muted-foreground hover:bg-muted/80",
+                            )}
+                            title={opt.label}
+                          >
+                            <opt.Icon className="w-4 h-4" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={editForm.showOnHome}
+                        onCheckedChange={(checked) =>
+                          setEditForm((prev) => ({ ...prev, showOnHome: checked }))
+                        }
+                      />
+                      <Label className="text-sm text-muted-foreground font-normal">
+                        Show on home screen
+                      </Label>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setEditingId(null)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => updateAction.mutate(action.id)}
+                        disabled={updateAction.isPending || !editForm.label.trim()}
+                      >
+                        {updateAction.isPending ? "Saving..." : "Save Changes"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 {isInquiryAction && isInquiryExpanded && (
                   <div className="px-4 py-4 bg-muted/20">
@@ -788,12 +929,10 @@ function InquiryActionConfig({
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Checkbox
+                    <Switch
                       id="new-field-required"
                       checked={newRequired}
-                      onCheckedChange={(checked) =>
-                        setNewRequired(checked === true)
-                      }
+                      onCheckedChange={(checked) => setNewRequired(checked)}
                     />
                     <Label
                       htmlFor="new-field-required"
