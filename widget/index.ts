@@ -2339,9 +2339,12 @@
   attachBtn.innerHTML = ICONS.paperclip;
   attachBtn.type = "button";
 
+  const defaultMessagePlaceholder = "Type a message...";
+  const agentMessagePlaceholder = "Add any details for the team...";
+
   const input = document.createElement("input");
   input.className = "rm-input";
-  input.placeholder = "Type a message...";
+  input.placeholder = defaultMessagePlaceholder;
 
   const sendBtn = document.createElement("button");
   sendBtn.className = "rm-send-btn";
@@ -2493,13 +2496,31 @@
   let placeholderIndex = 0;
   let placeholderInterval: ReturnType<typeof setInterval> | null = null;
 
+  function syncConversationModeUi() {
+    const agentMode = conversationStatus === "agent_replied";
+    _isHandedOff = agentMode;
+    input.placeholder = agentMode
+      ? agentMessagePlaceholder
+      : defaultMessagePlaceholder;
+
+    if (inlineBarExpanded) {
+      inlineBarInput.placeholder = conversationId
+        ? agentMode
+          ? agentMessagePlaceholder
+          : defaultMessagePlaceholder
+        : "Ask a question...";
+    }
+  }
+
   function expandInlineBar() {
     if (inlineBarExpanded) return;
     inlineBarExpanded = true;
     inlineBar.classList.add("expanded");
     inlineBarPlaceholder.style.display = "none";
     inlineBarInput.placeholder = conversationId
-      ? "Type a message..."
+      ? _isHandedOff
+        ? agentMessagePlaceholder
+        : defaultMessagePlaceholder
       : "Ask a question...";
     inlineBarInput.focus();
     stopPlaceholderRotation();
@@ -3826,6 +3847,7 @@
       if (conversationStatus === "closed") {
         hideClosedBanner();
         conversationStatus = "active";
+        syncConversationModeUi();
       }
 
       // Capture and clear any pending image
@@ -3908,12 +3930,11 @@
           return;
         }
 
-        // Check if this is an agent-mode JSON response (not SSE)
+        // After a real agent reply, the server returns JSON instead of SSE.
         const contentType = res.headers.get("content-type") || "";
         if (contentType.includes("application/json")) {
           hideTyping();
           // Message stored server-side, agent will reply via polling.
-          // No bot response expected — visitor is talking to a human.
           return;
         }
 
@@ -4066,18 +4087,16 @@
                   }
                   lastMessageTimestamp = Date.now();
                   scrollToBottom();
-                  // Handle inquiry -- enter agent listen mode
+                  // Inquiry requests a human, but AI stays active until an agent replies.
                   if (inquiryDetected) {
-                    _isHandedOff = true;
                     conversationStatus = "waiting_agent";
+                    syncConversationModeUi();
                     requestNotificationPermission();
-                    stopPolling();
-                    startPolling();
-                    input.placeholder = "Add any details for the team...";
                   }
                   // Handle resolved -- close the conversation
                   if (resolvedDetected) {
                     conversationStatus = "closed";
+                    syncConversationModeUi();
                     // Show the closing message as a final bot message
                     addMessageToUI(
                       "bot",
@@ -4106,16 +4125,14 @@
 
         // Edge case: stream ended without a done event but inquiry was detected
         if (inquiryDetected && conversationStatus !== "waiting_agent") {
-          _isHandedOff = true;
           conversationStatus = "waiting_agent";
+          syncConversationModeUi();
           requestNotificationPermission();
-          stopPolling();
-          startPolling();
-          input.placeholder = "Add any details for the team...";
         }
         // Edge case: stream ended without a done event but resolved was detected
         if (resolvedDetected && conversationStatus !== "closed") {
           conversationStatus = "closed";
+          syncConversationModeUi();
           addMessageToUI(
             "bot",
             "Glad I could help! Feel free to reach out anytime if you have more questions.",
@@ -4633,9 +4650,7 @@
     // Determine poll interval based on conversation status and idle time
     const getInterval = () => {
       const idleMin = (Date.now() - lastNewMessageAt) / 60000;
-      const agentMode =
-        conversationStatus === "waiting_agent" ||
-        conversationStatus === "agent_replied";
+      const agentMode = conversationStatus === "agent_replied";
 
       if (idleMin < 5) return agentMode ? 3000 : 10000;
       if (idleMin < 30) return agentMode ? 10000 : 15000;
@@ -4757,6 +4772,7 @@
       // Update conversation status
       if (status && status !== conversationStatus) {
         conversationStatus = status;
+        syncConversationModeUi();
         if (status === "closed") {
           stopPolling();
           stopHeartbeat();
@@ -4919,6 +4935,7 @@
       const data = await res.json();
       const msgs = data.messages ?? data;
       conversationStatus = data.status ?? null;
+      syncConversationModeUi();
 
       // If conversation is closed, show history with closed banner (visitor can reopen)
       if (conversationStatus === "closed") {
@@ -4978,15 +4995,6 @@
         }
 
         scrollToBottom();
-      }
-
-      // If conversation is in a handoff state, show the handoff status
-      if (
-        conversationStatus === "waiting_agent" ||
-        conversationStatus === "agent_replied"
-      ) {
-        _isHandedOff = true;
-        input.placeholder = "Add any details for the team...";
       }
 
       // If conversation is closed, show the closed banner

@@ -263,9 +263,9 @@ function getStatusLabel(status: string): string {
     case "active":
       return "Active";
     case "waiting_agent":
-      return "Waiting";
+      return "Pending human";
     case "agent_replied":
-      return "Replied";
+      return "Agent engaged";
     case "closed":
       return "Closed";
     default:

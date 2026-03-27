@@ -90,8 +90,8 @@ interface DashboardData {
 
 const STATUS_LABELS: Record<string, string> = {
   active: "Active",
-  waiting_agent: "Waiting",
-  agent_replied: "Replied",
+  waiting_agent: "Pending human",
+  agent_replied: "Agent engaged",
   closed: "Closed",
 };
 

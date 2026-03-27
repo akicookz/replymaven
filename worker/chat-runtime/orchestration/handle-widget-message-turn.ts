@@ -128,6 +128,23 @@ function createEmptyRetrievalResult(): RetrievalResult {
   };
 }
 
+function isAgentRequestedStatus(status: string): boolean {
+  return status === "waiting_agent" || status === "agent_replied";
+}
+
+function getLastTeamMessageRole(
+  history: Array<{ role: string }>,
+): "bot" | "agent" | null {
+  for (let index = history.length - 1; index >= 0; index--) {
+    const role = history[index]?.role;
+    if (role === "bot" || role === "agent") {
+      return role;
+    }
+  }
+
+  return null;
+}
+
 export async function handleWidgetMessageTurn(
   context: WidgetMessageTurnContext,
 ): Promise<Response> {
@@ -245,30 +262,38 @@ export async function handleWidgetMessageTurn(
     context.project.id,
   );
 
-  if (
-    conversation.status === "waiting_agent" ||
-    conversation.status === "agent_replied"
-  ) {
-    if (settings?.telegramBotToken && settings?.telegramChatId) {
-      const telegramService = new TelegramService(context.db);
-      context.executionCtx.waitUntil(
-        telegramService
-          .forwardVisitorMessage(
-            settings.telegramBotToken,
-            settings.telegramChatId,
-            conversation.visitorName,
-            context.payload.content,
-            conversation.id,
-            conversation.telegramThreadId
-              ? parseInt(conversation.telegramThreadId, 10)
-              : undefined,
-          )
-          .catch((err) => {
-            console.error("Telegram forward failed:", err);
-          }),
-      );
-    }
+  const requestedAgent = isAgentRequestedStatus(conversation.status);
+  const prefetchedHistory = requestedAgent
+    ? ((await chatService.getFromCache(
+        context.conversationId,
+        context.project.id,
+      )) ??
+      (await chatService.getMessages(context.conversationId)))
+    : null;
+  const shouldSilenceForAgent =
+    requestedAgent && getLastTeamMessageRole(prefetchedHistory ?? []) === "agent";
 
+  if (requestedAgent && settings?.telegramBotToken && settings?.telegramChatId) {
+    const telegramService = new TelegramService(context.db);
+    context.executionCtx.waitUntil(
+      telegramService
+        .forwardVisitorMessage(
+          settings.telegramBotToken,
+          settings.telegramChatId,
+          conversation.visitorName,
+          context.payload.content,
+          conversation.id,
+          conversation.telegramThreadId
+            ? parseInt(conversation.telegramThreadId, 10)
+            : undefined,
+        )
+        .catch((err) => {
+          console.error("Telegram forward failed:", err);
+        }),
+    );
+  }
+
+  if (shouldSilenceForAgent) {
     return Response.json({ ok: true, agentMode: true });
   }
 
@@ -289,6 +314,7 @@ export async function handleWidgetMessageTurn(
 
       const history =
         (await chatService.getFromCache(context.conversationId, context.project.id)) ??
+        prefetchedHistory ??
         (await chatService.getMessages(context.conversationId));
       const conversationHistory = history
         .filter((message) => message.role !== "bot" || message.content)

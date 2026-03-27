@@ -1180,7 +1180,7 @@ window.ReplyMaven.setMetadata({
                 </span>
                 <ChevronRight className="w-4 h-4 text-muted-foreground/40" />
                 <span className="text-sm text-muted-foreground">
-                  Bot handed off to a human; waiting for agent reply
+                  Human help was requested; AI may continue until an agent replies
                 </span>
               </div>
               <div className="flex items-center gap-3">
@@ -1189,7 +1189,7 @@ window.ReplyMaven.setMetadata({
                 </span>
                 <ChevronRight className="w-4 h-4 text-muted-foreground/40" />
                 <span className="text-sm text-muted-foreground">
-                  Agent has responded; conversation may continue
+                  Agent has replied; AI stays silent until `@BotName` hands control back
                 </span>
               </div>
               <div className="flex items-center gap-3">
