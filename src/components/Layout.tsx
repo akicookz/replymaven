@@ -8,8 +8,6 @@ import {
   Inbox,
   Palette,
   Bot,
-  Wrench,
-  Zap,
   LogOut,
   ChevronDown,
   Plus,
@@ -114,24 +112,14 @@ function Layout() {
   const toolsNav = currentProject
     ? [
         {
-          label: "Widget",
+          label: "Widgets",
           href: `/app/projects/${currentProject.id}/widget`,
           icon: Palette,
-        },
-        {
-          label: "Quick Actions",
-          href: `/app/projects/${currentProject.id}/quick-actions`,
-          icon: Zap,
         },
         {
           label: "Canned Responses",
           href: `/app/projects/${currentProject.id}/canned-responses`,
           icon: Bot,
-        },
-        {
-          label: "Tools",
-          href: `/app/projects/${currentProject.id}/tools`,
-          icon: Wrench,
         },
       ]
     : [];
@@ -296,12 +284,12 @@ function Layout() {
             ))}
           </div>
 
-          {/* Tools */}
+          {/* Configure */}
           {toolsNav.length > 0 && (
             <div className="space-y-1">
               {!collapsed && (
                 <p className="px-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Tools
+                  Configure
                 </p>
               )}
               <div className="space-y-0.5">

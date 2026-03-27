@@ -1,8 +1,9 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import Layout from "./components/Layout";
 import AccountLayout from "./components/AccountLayout";
+import WidgetLayout from "./components/WidgetLayout";
 import AuthGuard from "./components/AuthGuard";
 import OnboardingGuard from "./components/OnboardingGuard";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -12,7 +13,6 @@ import Dashboard from "./pages/Dashboard";
 import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
 import Resources from "./pages/Resources";
-import WidgetConfig from "./pages/WidgetConfig";
 import QuickActions from "./pages/QuickActions";
 import CannedResponses from "./pages/CannedResponses";
 import Tools from "./pages/Tools";
@@ -24,6 +24,9 @@ import Team from "./pages/Team";
 import Billing from "./pages/Billing";
 import AuthCallback from "./pages/AuthCallback";
 import Docs from "./pages/Docs";
+import WidgetAppearance from "./pages/widgets/WidgetAppearance";
+import WidgetHome from "./pages/widgets/WidgetHome";
+import WidgetEmbedVisibility from "./pages/widgets/WidgetEmbedVisibility";
 
 // ─── Redirect /app to first project's dashboard ──────────────────────────────
 function DashboardRedirect() {
@@ -43,6 +46,22 @@ function DashboardRedirect() {
   }
 
   return <Navigate to={`/app/projects/${projects[0].id}`} replace />;
+}
+
+function ProjectWidgetRedirect({
+  target,
+}: {
+  target: "quick-actions" | "tools";
+}) {
+  const { projectId } = useParams<{ projectId: string }>();
+
+  if (!projectId) {
+    return <Navigate to="/app" replace />;
+  }
+
+  return (
+    <Navigate to={`/app/projects/${projectId}/widget/${target}`} replace />
+  );
 }
 
 function App() {
@@ -82,7 +101,30 @@ function App() {
         <Route index element={<Profile />} />
         <Route path="team" element={<Team />} />
         <Route path="billing" element={<Billing />} />
-        <Route path="members" element={<Navigate to="/app/account/team" replace />} />
+        <Route
+          path="members"
+          element={<Navigate to="/app/account/team" replace />}
+        />
+      </Route>
+
+      <Route
+        path="/app/projects/:projectId/widget"
+        element={
+          <ErrorBoundary>
+            <AuthGuard>
+              <OnboardingGuard>
+                <WidgetLayout />
+              </OnboardingGuard>
+            </AuthGuard>
+          </ErrorBoundary>
+        }
+      >
+        <Route index element={<Navigate to="appearance" replace />} />
+        <Route path="appearance" element={<WidgetAppearance />} />
+        <Route path="home" element={<WidgetHome />} />
+        <Route path="quick-actions" element={<QuickActions />} />
+        <Route path="tools" element={<Tools />} />
+        <Route path="embed" element={<WidgetEmbedVisibility />} />
       </Route>
 
       {/* /app index -- redirect to first project dashboard */}
@@ -129,14 +171,6 @@ function App() {
           element={<Navigate to="../knowledgebase" replace />}
         />
         <Route
-          path="projects/:projectId/widget"
-          element={<WidgetConfig />}
-        />
-        <Route
-          path="projects/:projectId/quick-actions"
-          element={<QuickActions />}
-        />
-        <Route
           path="projects/:projectId/canned-responses"
           element={<CannedResponses />}
         />
@@ -145,8 +179,12 @@ function App() {
           element={<Inquiries />}
         />
         <Route
+          path="projects/:projectId/quick-actions"
+          element={<ProjectWidgetRedirect target="quick-actions" />}
+        />
+        <Route
           path="projects/:projectId/tools"
-          element={<Tools />}
+          element={<ProjectWidgetRedirect target="tools" />}
         />
       </Route>
     </Routes>
