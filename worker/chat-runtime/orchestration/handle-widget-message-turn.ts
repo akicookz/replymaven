@@ -1,6 +1,7 @@
 import { buildSupportSystemPrompt } from "../prompt/build-support-system-prompt";
 import { createLanguageModel } from "../llm/create-language-model";
 import {
+  classifySupportTurn,
   extractContactInfo,
   reformulateQuery,
   summarizeConversation,
@@ -11,7 +12,11 @@ import { triggerAutoDraftIfEnabled } from "../post-turn/auto-draft";
 import { createTeamRequestSubmission } from "../post-turn/team-request";
 import { verifyAnswer } from "../workflows/verify-answer";
 import { buildRetrievalQueries } from "../retrieval/build-retrieval-queries";
-import { runAiSearch } from "../retrieval/run-ai-search";
+import {
+  runAiSearch,
+  type RetrievalResult,
+} from "../retrieval/run-ai-search";
+import { decideExecutionPath } from "../workflows/decide-execution-path";
 import { createWidgetSseResponse } from "../streaming/create-widget-sse-response";
 import {
   createInitialAgentEventState,
@@ -85,7 +90,9 @@ function shouldVerifyAnswer(options: {
   fullResponse: string;
   groundingConfidence: "high" | "low" | "none";
   hadToolCalls: boolean;
+  hasEvidence: boolean;
 }): boolean {
+  if (!options.hasEvidence) return false;
   if (!options.fullResponse.trim()) return false;
   if (options.fullResponse.includes("[NEW_INQUIRY]")) return false;
   if (options.fullResponse.includes("[RESOLVED]")) return false;
@@ -107,6 +114,18 @@ function shouldVerifyAnswer(options: {
       draftedAnswerHasSpecificClaims
     )
   );
+}
+
+function createEmptyRetrievalResult(): RetrievalResult {
+  return {
+    ragContext: "",
+    sourceReferences: [],
+    groundingConfidence: "none",
+    unresolvedKeys: [],
+    droppedCrossTenant: 0,
+    retrievalAttempted: false,
+    broaderSearchAttempted: false,
+  };
 }
 
 export async function handleWidgetMessageTurn(
@@ -186,6 +205,7 @@ export async function handleWidgetMessageTurn(
       }
     }
   }
+  const availableTools = enabledTools.map(toToolDefinition);
 
   if (conversation.status === "closed") {
     const reopened = await chatService.reopenConversation(
@@ -267,8 +287,6 @@ export async function handleWidgetMessageTurn(
         uploads: context.env.UPLOADS,
       });
 
-      emitStatus("Searching docs...", "retrieval");
-
       const history =
         (await chatService.getFromCache(context.conversationId, context.project.id)) ??
         (await chatService.getMessages(context.conversationId));
@@ -322,30 +340,78 @@ export async function handleWidgetMessageTurn(
       };
       const model = createLanguageModel(modelConfig);
 
-      const [searchQuery, conversationSummary] = await Promise.all([
-        reformulateQuery(model, conversationHistory, context.payload.content),
+      const [conversationSummary, turnPlan] = await Promise.all([
         summarizeConversation(model, conversationHistory),
+        classifySupportTurn(
+          model,
+          conversationHistory,
+          context.payload.content,
+          context.payload.pageContext,
+        ),
       ]);
-      const retrievalQueries = buildRetrievalQueries(
-        context.payload.content,
-        searchQuery,
-      );
-
-      const retrieval = await runAiSearch({
-        env: context.env,
-        db: context.db,
-        projectId: context.project.id,
-        queries: retrievalQueries,
+      const executionPlan = decideExecutionPath({
+        intent: turnPlan.intent,
+        userMessage: context.payload.content,
+        enabledTools: availableTools,
       });
-      if (retrieval.droppedCrossTenant > 0) {
-        console.warn(
-          `Dropped ${retrieval.droppedCrossTenant} cross-tenant retrieval chunks for project ${context.project.id}`,
+      console.log("Chat runtime intent classification", {
+        projectId: context.project.id,
+        conversationId: context.conversationId,
+        intent: turnPlan.intent,
+        summary: turnPlan.summary,
+        followUpQuestion: turnPlan.followUpQuestion,
+      });
+      console.log("Chat runtime execution path", {
+        projectId: context.project.id,
+        conversationId: context.conversationId,
+        executionPath: executionPlan.path,
+        retrievalMode: executionPlan.retrievalMode,
+        allowedTools: executionPlan.allowedTools.map((tool) => tool.name),
+        toolChoice:
+          typeof executionPlan.toolChoice === "string"
+            ? executionPlan.toolChoice
+            : executionPlan.toolChoice.toolName,
+      });
+
+      let retrieval = createEmptyRetrievalResult();
+      if (executionPlan.retrievalMode !== "none") {
+        emitStatus("Searching docs...", "retrieval");
+        const searchQuery = await reformulateQuery(
+          model,
+          conversationHistory,
+          context.payload.content,
         );
-      }
-      if (retrieval.unresolvedKeys.length > 0) {
-        console.warn(
-          `Could not resolve ${retrieval.unresolvedKeys.length} RAG source keys for project ${context.project.id}`,
-        );
+        const retrievalQueries =
+          executionPlan.retrievalMode === "light"
+            ? turnPlan.retrievalQueries.length > 0
+              ? turnPlan.retrievalQueries
+              : [searchQuery]
+            : buildRetrievalQueries(
+                context.payload.content,
+                searchQuery,
+                turnPlan.retrievalQueries,
+              );
+
+        retrieval = await runAiSearch({
+          env: context.env,
+          db: context.db,
+          projectId: context.project.id,
+          queries: retrievalQueries,
+          broaderQueries: executionPlan.allowBroaderRetry
+            ? turnPlan.broaderQueries
+            : [],
+          allowBroaderRetry: executionPlan.allowBroaderRetry,
+        });
+        if (retrieval.droppedCrossTenant > 0) {
+          console.warn(
+            `Dropped ${retrieval.droppedCrossTenant} cross-tenant retrieval chunks for project ${context.project.id}`,
+          );
+        }
+        if (retrieval.unresolvedKeys.length > 0) {
+          console.warn(
+            `Could not resolve ${retrieval.unresolvedKeys.length} RAG source keys for project ${context.project.id}`,
+          );
+        }
       }
 
       const cannedMatch = await chatService.findCannedResponse(
@@ -372,7 +438,7 @@ export async function handleWidgetMessageTurn(
         cannedMatch ? cannedMatch.response : null,
         conversationSummary,
         {
-          hasTools: enabledTools.length > 0,
+          hasTools: executionPlan.allowedTools.length > 0,
           guidelines: enabledGuidelines.map((guideline) => ({
             condition: guideline.condition,
             instruction: guideline.instruction,
@@ -384,6 +450,17 @@ export async function handleWidgetMessageTurn(
             email: conversation.visitorEmail,
           },
           groundingConfidence: retrieval.groundingConfidence,
+          needsClarification:
+            executionPlan.path === "clarify_first" ||
+            Boolean(turnPlan.followUpQuestion),
+          turnPlan: {
+            intent: turnPlan.intent,
+            summary: turnPlan.summary,
+            followUpQuestion: turnPlan.followUpQuestion,
+          },
+          executionPath: executionPlan.path,
+          retrievalAttempted: retrieval.retrievalAttempted,
+          broaderSearchAttempted: retrieval.broaderSearchAttempted,
         },
       );
 
@@ -396,7 +473,8 @@ export async function handleWidgetMessageTurn(
           conversationHistory,
           userMessage: context.payload.content,
           image,
-          tools: enabledTools.map(toToolDefinition),
+          tools: executionPlan.allowedTools,
+          toolChoice: executionPlan.toolChoice,
           onToolCallStart: (info) => {
             console.log(`Tool call started: ${info.toolName}`, info.input);
             emitStatus("Checking connected systems...", "tool");
@@ -472,6 +550,9 @@ export async function handleWidgetMessageTurn(
           fullResponse,
           groundingConfidence: retrieval.groundingConfidence,
           hadToolCalls: eventState.hadToolCalls,
+          hasEvidence:
+            retrieval.ragContext.trim().length > 0 ||
+            eventState.lastToolOutput != null,
         })
       ) {
         telemetry.verifierRan = true;

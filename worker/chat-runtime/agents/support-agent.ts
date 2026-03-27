@@ -1,5 +1,6 @@
-import { ToolLoopAgent, stepCountIs } from "ai";
+import { ToolLoopAgent, stepCountIs, type ToolChoice } from "ai";
 import {
+  type AgentToolChoice,
   type SupportAgentDependencies,
   type SupportAgentResult,
   type SupportAgentStreamOptions,
@@ -16,13 +17,38 @@ export async function streamSupportAgent(
   const toolRegistry = options.tools?.length
     ? buildToolRegistry(options.tools)
     : {};
+  const availableToolNames = Object.keys(toolRegistry);
+
+  function toSdkToolChoice(
+    toolChoice: AgentToolChoice | undefined,
+  ): ToolChoice<Record<string, unknown>> {
+    return toolChoice ?? "auto";
+  }
 
   const agent = new ToolLoopAgent({
     model,
     instructions: options.systemPrompt,
     tools: toolRegistry,
     stopWhen: options.tools?.length ? stepCountIs(3) : undefined,
-    toolChoice: "auto",
+    toolChoice: toSdkToolChoice(options.toolChoice),
+    prepareStep: options.prepareStep
+      ? (stepOptions) => {
+          const overrides = options.prepareStep?.({
+            stepNumber: stepOptions.stepNumber,
+            availableToolNames,
+          });
+          if (!overrides) return undefined;
+
+          const activeTools = overrides.activeTools?.filter((toolName) =>
+            availableToolNames.includes(toolName),
+          );
+
+          return {
+            toolChoice: toSdkToolChoice(overrides.toolChoice),
+            activeTools: activeTools as Array<keyof typeof toolRegistry> | undefined,
+          };
+        }
+      : undefined,
     temperature: 0.3,
     maxOutputTokens: 2048,
   });

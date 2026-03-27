@@ -60,6 +60,33 @@ Email: ${emailStr}
 `;
   }
 
+  if (options?.turnPlan || options?.executionPath) {
+    prompt += `<execution-posture>
+Support intent: ${options.turnPlan?.intent ?? "unknown"}
+Execution path: ${options.executionPath ?? "unknown"}
+${options.turnPlan ? `Summary: ${options.turnPlan.summary}` : ""}
+${options.turnPlan?.followUpQuestion ? `Focused follow-up if needed: ${options.turnPlan.followUpQuestion}` : ""}
+</execution-posture>
+
+`;
+  }
+
+  if (options?.needsClarification) {
+    prompt += `<clarification-guidance>
+The visitor's latest request is vague or underspecified. You do not yet know the exact failure, page, step, or configuration involved.
+
+Handle this by:
+- using the knowledge base to provide the most relevant initial troubleshooting guidance you can support
+- giving 1-3 grounded first checks only if they are clearly supported by the retrieved context
+- asking one focused follow-up question that will identify the exact feature, page, step, error, or behavior involved
+- if the knowledge base does not provide reliable troubleshooting guidance, say that and ask the focused follow-up question
+
+Do not pretend you already know the exact issue.
+</clarification-guidance>
+
+`;
+  }
+
   prompt += `<task>
 Your job is to help visitors who land on ${projectName}'s website by answering their questions accurately and helpfully.
 
@@ -93,19 +120,28 @@ ${ragContext}
 `;
   }
 
-  if (options?.groundingConfidence === "none") {
+  if (
+    options?.retrievalAttempted &&
+    options?.groundingConfidence === "none"
+  ) {
     prompt += `<grounding-status>
 No relevant knowledge-base excerpts were retrieved for this question.
 
+${options?.broaderSearchAttempted ? "A broader second-pass documentation search was also attempted and still did not find a concrete match.\n" : ""}
+
 For product behavior, troubleshooting, setup steps, integrations, pricing, policy, feature availability, or documentation questions:
-- Do NOT answer from general company context alone.
-- Do NOT infer likely behavior.
-- Say clearly that you could not find that information in the knowledge base.
-- If helpful, ask the visitor to share the exact feature name, error, page, or keyword they want checked.
+- Say clearly that you could not find a concrete answer in the knowledge base.
+- You may still give a brief, cautious best-effort suggestion based on <about-the-company> and the general product context if it helps orient the visitor.
+- Any best-effort suggestion must be clearly labeled as tentative, not documented fact.
+- Do NOT invent exact steps, settings, limits, policies, or guarantees that are not in the knowledge base.
+- Ask one focused follow-up question so you can search again more precisely.
 </grounding-status>
 
 `;
-  } else if (options?.groundingConfidence === "low") {
+  } else if (
+    options?.retrievalAttempted &&
+    options?.groundingConfidence === "low"
+  ) {
     prompt += `<grounding-status>
 Knowledge-base retrieval returned only weak or partial matches for this question.
 
@@ -152,6 +188,7 @@ ${options.agentHandbackInstructions}
 You have access to tools that can perform actions and retrieve data on behalf of the visitor. When a visitor's request requires looking up data or performing an action, use the appropriate tool.
 
 Rules for tool use:
+- Respect the execution posture. If the path is tool-first, use the most relevant tool before answering. If the path is docs-first, only use tools when the retrieved docs still do not fully resolve the visitor's request. If the path is clarify-first, ask for the missing detail before using tools.
 - If a tool call fails, explain the error to the visitor in a helpful way and suggest alternatives.
 - Never fabricate tool results. If you called a tool but it returned an error, say so honestly.
 - If you need information from the visitor before calling a tool (e.g., an order ID), ask for it conversationally before making the call.
@@ -187,13 +224,14 @@ Answering questions:
 - Extract specific answers and present them directly. Walk the visitor through solutions step-by-step when applicable.
 - If multiple solutions exist, present the most likely one first, then briefly mention alternatives.
 - Keep responses concise but complete. Use short paragraphs and bullet points.
-- If tools are available and the visitor is asking you to look something up, verify something, or perform an action, use the relevant tool before saying you do not know.
-- If the visitor gives a vague or underspecified problem report (for example: "it isn't working", "widget broken", "still not working"), ask focused follow-up questions first. Ask only for the minimum details needed to investigate.
+- Follow the execution posture shown above. Do not invent your own workflow or ignore the selected path.
+- If tools are available and the visitor is asking you to look something up, verify something, or perform an action, use the relevant allowed tool before saying you do not know.
+- If the visitor gives a vague or underspecified problem report (for example: "it isn't working", "widget broken", "still not working"), do not answer as if you know the exact issue. Use the available documentation to give the most relevant grounded first checks you can, then ask one focused follow-up question. Ask only for the minimum details needed to investigate.
 
 When you don't know:
 - If the answer is not in the provided context, be honest about that and briefly explain what information would help you continue.
 - Never fabricate, guess, or infer answers. If it's not in the context, you don't know it.
-- If <grounding-status> says retrieval is weak or missing, treat that as a hard constraint. Do not turn partial hints into a confident answer.
+- If <grounding-status> says retrieval is weak or missing, do not turn partial hints into a confident answer. You may offer a clearly tentative high-level suggestion only when it is grounded in <about-the-company> and helpful for troubleshooting.
 - Do not jump straight to live human handoff just because the answer is missing. First use the available context/tools and ask a clarifying question when the request is too thin to troubleshoot.
 
 Escalation:

@@ -2152,7 +2152,8 @@
   homeAsk.className = "rm-home-ask";
   const homeAskLabel = document.createElement("div");
   homeAskLabel.className = "rm-home-ask-label";
-  homeAskLabel.innerHTML = ICONS.sparkle + ' <span class="rm-ask-label-text">Ask AI</span>';
+  homeAskLabel.innerHTML =
+    ICONS.sparkle + ' <span class="rm-ask-label-text">Ask AI</span>';
   const homeAskInput = document.createElement("input");
   homeAskInput.className = "rm-home-ask-input";
   homeAskInput.placeholder = "Ask a question...";
@@ -2461,7 +2462,11 @@
   let inlineBarExpanded = false;
   let pendingIntroMessage: string | null = null;
   let introMessageText: string | null = null;
-  let introMessageAuthor: { name: string; avatar: string | null; workTitle: string | null } | null = null;
+  let introMessageAuthor: {
+    name: string;
+    avatar: string | null;
+    workTitle: string | null;
+  } | null = null;
   let introBubbleTimer: ReturnType<typeof setTimeout> | null = null;
   let placeholderTexts: string[] = ["Ask a question..."];
   let placeholderIndex = 0;
@@ -2618,7 +2623,9 @@
       const msgEl = addMessageToUI("bot", introMessageText);
       // If an author is set, replace the avatar and add author name
       if (introMessageAuthor && msgEl.parentElement) {
-        const avatar = msgEl.parentElement.querySelector(".rm-message-avatar") as HTMLElement | null;
+        const avatar = msgEl.parentElement.querySelector(
+          ".rm-message-avatar",
+        ) as HTMLElement | null;
         if (avatar) {
           avatar.innerHTML = "";
           avatar.classList.remove("rm-icon-avatar");
@@ -2635,7 +2642,9 @@
           } else {
             avatar.style.backgroundColor = `rgba(${hexToRgb(getPrimaryColor())}, 0.12)`;
             avatar.style.color = getPrimaryColor();
-            avatar.textContent = introMessageAuthor.name.charAt(0).toUpperCase();
+            avatar.textContent = introMessageAuthor.name
+              .charAt(0)
+              .toUpperCase();
             avatar.style.display = "flex";
             avatar.style.alignItems = "center";
             avatar.style.justifyContent = "center";
@@ -2839,7 +2848,10 @@
       /(https?:\/\/[^\s<)]+)/g,
       '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>',
     );
-    html = html.replace(/%%LINK(\d+)%%/g, (_, i) => linkPlaceholders[Number(i)]);
+    html = html.replace(
+      /%%LINK(\d+)%%/g,
+      (_, i) => linkPlaceholders[Number(i)],
+    );
 
     // Split into lines for block-level processing
     const lines = html.split("\n");
@@ -2976,7 +2988,9 @@
             handleRouteChange();
           };
           const origReplace = history.replaceState;
-          history.replaceState = function (...args: Parameters<typeof origReplace>) {
+          history.replaceState = function (
+            ...args: Parameters<typeof origReplace>
+          ) {
             origReplace.apply(this, args);
             handleRouteChange();
           };
@@ -3007,29 +3021,65 @@
         if (bgStyle === "blurred") {
           // Dark glassmorphism: primary-tinted dark theme
           container.style.setProperty("--rm-bg", "rgba(0,0,0,0.18)");
-          container.style.setProperty("--rm-bg-secondary", `rgba(255,255,255,0.06)`);
-          container.style.setProperty("--rm-bg-tertiary", `rgba(255,255,255,0.10)`);
+          container.style.setProperty(
+            "--rm-bg-secondary",
+            `rgba(255,255,255,0.06)`,
+          );
+          container.style.setProperty(
+            "--rm-bg-tertiary",
+            `rgba(255,255,255,0.10)`,
+          );
           container.style.setProperty("--rm-text", "#ffffff");
-          container.style.setProperty("--rm-text-secondary", "rgba(255,255,255,0.7)");
-          container.style.setProperty("--rm-text-muted", "rgba(255,255,255,0.4)");
+          container.style.setProperty(
+            "--rm-text-secondary",
+            "rgba(255,255,255,0.7)",
+          );
+          container.style.setProperty(
+            "--rm-text-muted",
+            "rgba(255,255,255,0.4)",
+          );
           container.style.setProperty("--rm-border", `rgba(255,255,255,0.12)`);
-          container.style.setProperty("--rm-border-subtle", `rgba(255,255,255,0.08)`);
-          container.style.setProperty("--rm-shadow", `0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(${pRgb}, 0.15)`);
-          container.style.setProperty("--rm-input-bg", `rgba(255,255,255,0.08)`);
-          container.style.setProperty("--rm-input-bg-focus", `rgba(255,255,255,0.12)`);
-          container.style.setProperty("--rm-scrollbar", "rgba(255,255,255,0.12)");
+          container.style.setProperty(
+            "--rm-border-subtle",
+            `rgba(255,255,255,0.08)`,
+          );
+          container.style.setProperty(
+            "--rm-shadow",
+            `0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(${pRgb}, 0.15)`,
+          );
+          container.style.setProperty(
+            "--rm-input-bg",
+            `rgba(255,255,255,0.08)`,
+          );
+          container.style.setProperty(
+            "--rm-input-bg-focus",
+            `rgba(255,255,255,0.12)`,
+          );
+          container.style.setProperty(
+            "--rm-scrollbar",
+            "rgba(255,255,255,0.12)",
+          );
           // Accent tokens — visible on dark surfaces
           container.style.setProperty("--rm-accent-bg", `rgba(${pRgb}, 0.20)`);
-          container.style.setProperty("--rm-accent-bg-hover", `rgba(${pRgb}, 0.30)`);
+          container.style.setProperty(
+            "--rm-accent-bg-hover",
+            `rgba(${pRgb}, 0.30)`,
+          );
           container.style.setProperty("--rm-accent-text", "#ffffff");
           // Bot/visitor messages — always derived
           container.style.setProperty("--rm-bot-bg", "rgba(255,255,255,0.10)");
           container.style.setProperty("--rm-bot-text", "#ffffff");
-          container.style.setProperty("--rm-glow-border", "rgba(255,255,255,0.12)");
+          container.style.setProperty(
+            "--rm-glow-border",
+            "rgba(255,255,255,0.12)",
+          );
         } else {
           // Light theme: accent tokens from primary
           container.style.setProperty("--rm-accent-bg", `rgba(${pRgb}, 0.08)`);
-          container.style.setProperty("--rm-accent-bg-hover", `rgba(${pRgb}, 0.15)`);
+          container.style.setProperty(
+            "--rm-accent-bg-hover",
+            `rgba(${pRgb}, 0.15)`,
+          );
           container.style.setProperty("--rm-accent-text", primary);
           // Bot/visitor messages — always derived
           container.style.setProperty("--rm-bot-bg", "#f4f4f5");
@@ -3054,8 +3104,10 @@
         }
 
         // Header text
-        headerTitle.textContent = w.headerText || loadedConfig.botName || "Ask AI";
-        headerSubtitle.textContent = w.headerSubtitle || "We typically reply instantly";
+        headerTitle.textContent =
+          w.headerText || loadedConfig.botName || "Ask AI";
+        headerSubtitle.textContent =
+          w.headerSubtitle || "We typically reply instantly";
 
         // Position
         if (isCenterInline) {
@@ -3070,18 +3122,29 @@
         // Font family
         if (w.fontFamily && w.fontFamily !== "system-ui") {
           const fontUrls: Record<string, string> = {
-            "Inter": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
-            "Satoshi": "https://api.fontshare.com/v2/css?f[]=satoshi@400;500;600;700&display=swap",
-            "DM Sans": "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap",
-            "Nunito": "https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700&display=swap",
-            "Raleway": "https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600&display=swap",
-            "Plus Jakarta Sans": "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap",
-            "IBM Plex Sans": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap",
-            "Lato": "https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap",
-            "Space Grotesk": "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap",
-            "Outfit": "https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap",
-            "Merriweather Sans": "https://fonts.googleapis.com/css2?family=Merriweather+Sans:wght@400;500;600&display=swap",
-            "JetBrains Mono": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap",
+            Inter:
+              "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
+            Satoshi:
+              "https://api.fontshare.com/v2/css?f[]=satoshi@400;500;600;700&display=swap",
+            "DM Sans":
+              "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap",
+            Nunito:
+              "https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700&display=swap",
+            Raleway:
+              "https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600&display=swap",
+            "Plus Jakarta Sans":
+              "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap",
+            "IBM Plex Sans":
+              "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap",
+            Lato: "https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap",
+            "Space Grotesk":
+              "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap",
+            Outfit:
+              "https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap",
+            "Merriweather Sans":
+              "https://fonts.googleapis.com/css2?family=Merriweather+Sans:wght@400;500;600&display=swap",
+            "JetBrains Mono":
+              "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap",
           };
           const fontUrl = fontUrls[w.fontFamily];
           if (fontUrl) {
@@ -3147,9 +3210,12 @@
       }
 
       // ─── Ask Label with Project Name ──────────────────────────────────────
-      const projectDisplayName = loadedConfig.companyName || loadedConfig.projectName;
+      const projectDisplayName =
+        loadedConfig.companyName || loadedConfig.projectName;
       if (projectDisplayName) {
-        homeAskLabel.innerHTML = ICONS.sparkle + ` <span class="rm-ask-label-text">Ask AI about ${projectDisplayName}</span>`;
+        homeAskLabel.innerHTML =
+          ICONS.sparkle +
+          ` <span class="rm-ask-label-text">Ask AI about ${projectDisplayName}</span>`;
       }
 
       // ─── Quick Actions on Home Screen ────────────────────────────────────────
@@ -3362,16 +3428,18 @@
             const result = await res.json().catch(() => null);
 
             if ((result as { visitorEmail?: string | null })?.visitorEmail) {
-              visitorInfo.email =
-                (result as { visitorEmail: string }).visitorEmail;
+              visitorInfo.email = (
+                result as { visitorEmail: string }
+              ).visitorEmail;
             }
             if ((result as { visitorName?: string | null })?.visitorName) {
-              visitorInfo.name =
-                (result as { visitorName: string }).visitorName;
+              visitorInfo.name = (
+                result as { visitorName: string }
+              ).visitorName;
             }
             if ((result as { conversationId?: string })?.conversationId) {
-              conversationId =
-                (result as { conversationId: string }).conversationId;
+              conversationId = (result as { conversationId: string })
+                .conversationId;
               conversationStatus =
                 (result as { conversationStatus?: string | null })
                   .conversationStatus ?? conversationStatus;
@@ -3436,10 +3504,14 @@
         loadedConfig.showIntroBubble !== false &&
         loadedConfig.introMessage
       ) {
-        introPillTitle.textContent = introMessageAuthor?.name || loadedConfig.widget?.headerText || "Chat with us";
+        introPillTitle.textContent =
+          introMessageAuthor?.name ||
+          loadedConfig.widget?.headerText ||
+          "Chat with us";
         introPillDesc.textContent = loadedConfig.introMessage;
 
-        const pillAvatarUrl = introMessageAuthor?.avatar || loadedConfig.widget?.avatarUrl;
+        const pillAvatarUrl =
+          introMessageAuthor?.avatar || loadedConfig.widget?.avatarUrl;
         if (pillAvatarUrl) {
           introPillAvatar.src = resolveUrl(pillAvatarUrl);
           introPillAvatar.style.display = "block";
@@ -3497,19 +3569,46 @@
         const iPRgb = hexToRgb(inlinePrimary);
         if (inlineBgStyle === "blurred") {
           inlineBar.style.setProperty("--rm-bg", "rgba(0,0,0,0.18)");
-          inlineBar.style.setProperty("--rm-bg-secondary", `rgba(255,255,255,0.06)`);
-          inlineBar.style.setProperty("--rm-bg-tertiary", `rgba(255,255,255,0.10)`);
+          inlineBar.style.setProperty(
+            "--rm-bg-secondary",
+            `rgba(255,255,255,0.06)`,
+          );
+          inlineBar.style.setProperty(
+            "--rm-bg-tertiary",
+            `rgba(255,255,255,0.10)`,
+          );
           inlineBar.style.setProperty("--rm-text", "#ffffff");
-          inlineBar.style.setProperty("--rm-text-secondary", "rgba(255,255,255,0.7)");
-          inlineBar.style.setProperty("--rm-text-muted", "rgba(255,255,255,0.4)");
+          inlineBar.style.setProperty(
+            "--rm-text-secondary",
+            "rgba(255,255,255,0.7)",
+          );
+          inlineBar.style.setProperty(
+            "--rm-text-muted",
+            "rgba(255,255,255,0.4)",
+          );
           inlineBar.style.setProperty("--rm-border", `rgba(255,255,255,0.12)`);
-          inlineBar.style.setProperty("--rm-border-subtle", `rgba(255,255,255,0.08)`);
-          inlineBar.style.setProperty("--rm-input-bg", `rgba(255,255,255,0.08)`);
-          inlineBar.style.setProperty("--rm-input-bg-focus", `rgba(255,255,255,0.12)`);
+          inlineBar.style.setProperty(
+            "--rm-border-subtle",
+            `rgba(255,255,255,0.08)`,
+          );
+          inlineBar.style.setProperty(
+            "--rm-input-bg",
+            `rgba(255,255,255,0.08)`,
+          );
+          inlineBar.style.setProperty(
+            "--rm-input-bg-focus",
+            `rgba(255,255,255,0.12)`,
+          );
           inlineBar.style.setProperty("--rm-accent-bg", `rgba(${iPRgb}, 0.20)`);
-          inlineBar.style.setProperty("--rm-accent-bg-hover", `rgba(${iPRgb}, 0.30)`);
+          inlineBar.style.setProperty(
+            "--rm-accent-bg-hover",
+            `rgba(${iPRgb}, 0.30)`,
+          );
           inlineBar.style.setProperty("--rm-accent-text", "#ffffff");
-          inlineBar.style.setProperty("--rm-glow-border", "rgba(255,255,255,0.12)");
+          inlineBar.style.setProperty(
+            "--rm-glow-border",
+            "rgba(255,255,255,0.12)",
+          );
         } else {
           inlineBar.style.setProperty("--rm-bg", "#ffffff");
           inlineBar.style.setProperty("--rm-bg-secondary", "#f4f4f5");
@@ -3520,9 +3619,15 @@
           inlineBar.style.setProperty("--rm-border", "#e4e4e7");
           inlineBar.style.setProperty("--rm-border-subtle", "rgba(0,0,0,0.06)");
           inlineBar.style.setProperty("--rm-accent-bg", `rgba(${iPRgb}, 0.08)`);
-          inlineBar.style.setProperty("--rm-accent-bg-hover", `rgba(${iPRgb}, 0.15)`);
+          inlineBar.style.setProperty(
+            "--rm-accent-bg-hover",
+            `rgba(${iPRgb}, 0.15)`,
+          );
           inlineBar.style.setProperty("--rm-accent-text", inlinePrimary);
-          inlineBar.style.setProperty("--rm-glow-border", `rgba(${iPRgb}, 0.2)`);
+          inlineBar.style.setProperty(
+            "--rm-glow-border",
+            `rgba(${iPRgb}, 0.2)`,
+          );
         }
 
         // Populate inline bar topics from prompt-type quick actions
@@ -3556,9 +3661,11 @@
 
             // Add icon for non-prompt types
             if (qa.type === "link") {
-              actionBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+              actionBtn.innerHTML =
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
             } else if (qa.type === "inquiry") {
-              actionBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+              actionBtn.innerHTML =
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
             }
 
             const labelSpan = document.createElement("span");
@@ -3608,9 +3715,13 @@
         if (pendingIntroMessage || introMessageText) {
           const expandedIntroBubble = document.createElement("div");
           expandedIntroBubble.className = "rm-inline-bar-intro-expanded";
-          expandedIntroBubble.textContent = pendingIntroMessage || introMessageText || "";
+          expandedIntroBubble.textContent =
+            pendingIntroMessage || introMessageText || "";
           // Prepend as first child of float container so it appears above actions and topics
-          inlineBarFloat.insertBefore(expandedIntroBubble, inlineBarFloat.firstChild);
+          inlineBarFloat.insertBefore(
+            expandedIntroBubble,
+            inlineBarFloat.firstChild,
+          );
         }
 
         pendingIntroMessage = null;
@@ -3891,9 +4002,7 @@
                   // Client-side filter: strip [NEW_INQUIRY] token if it leaks through
                   if (botMessage.includes("[NEW_INQUIRY]")) {
                     inquiryDetected = true;
-                    botMessage = botMessage
-                      .replace("[NEW_INQUIRY]", "")
-                      .trim();
+                    botMessage = botMessage.replace("[NEW_INQUIRY]", "").trim();
                   }
 
                   // Client-side filter: if [RESOLVED] appears, mark as resolved
@@ -4294,12 +4403,17 @@
     const icon = document.createElement("div");
     icon.className = "rm-tool-call-icon pending rm-tool-call-loading";
     // Wrench icon
-    icon.appendChild(createSvgIcon("M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"));
+    icon.appendChild(
+      createSvgIcon(
+        "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z",
+      ),
+    );
 
     const nameEl = document.createElement("span");
     nameEl.className = "rm-tool-call-name";
     const displayName = toolName.replace(/_/g, " ");
-    nameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+    nameEl.textContent =
+      displayName.charAt(0).toUpperCase() + displayName.slice(1);
 
     const meta = document.createElement("div");
     meta.className = "rm-tool-call-meta";
@@ -4399,7 +4513,10 @@
       const durEl = document.createElement("span");
       durEl.className = "rm-tool-call-duration";
       durEl.textContent = `${result.duration}ms`;
-      meta.insertBefore(durEl, meta.querySelector(".rm-tool-call-chevron") ?? null);
+      meta.insertBefore(
+        durEl,
+        meta.querySelector(".rm-tool-call-chevron") ?? null,
+      );
     }
 
     // Fill in result section
@@ -4492,7 +4609,10 @@
     if (!conversationId) return;
 
     heartbeatTimer = setInterval(async () => {
-      if (!conversationId) { stopHeartbeat(); return; }
+      if (!conversationId) {
+        stopHeartbeat();
+        return;
+      }
       try {
         const presence = document.hidden ? "background" : "active";
         const res = await fetch(
@@ -4542,7 +4662,7 @@
       color: var(--rm-text-color, #666);
       opacity: 0.7;
     `;
-    banner.textContent = "This conversation was closed. Send a message to reopen.";
+    banner.textContent = "This conversation was closed.";
     messagesContainer.insertBefore(banner, typingRow);
     scrollToBottom();
   }

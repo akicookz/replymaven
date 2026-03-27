@@ -6,6 +6,23 @@ import { type AppEnv } from "../types";
 import { type SourceReference } from "../services/resource-service";
 
 export type GroundingConfidence = "high" | "low" | "none";
+export type SupportIntent =
+  | "how_to"
+  | "troubleshoot"
+  | "lookup"
+  | "policy"
+  | "clarify"
+  | "handoff";
+export type ExecutionPath =
+  | "docs_first"
+  | "tool_first"
+  | "clarify_first"
+  | "handoff";
+export type AgentToolChoice =
+  | "auto"
+  | "none"
+  | "required"
+  | { type: "tool"; toolName: string };
 
 export interface ConversationTurnMessage {
   role: "visitor" | "bot" | "agent";
@@ -48,6 +65,14 @@ export interface SupportAgentStreamOptions {
   userMessage: string;
   image?: SupportAgentImage | null;
   tools?: SupportToolDefinition[];
+  toolChoice?: AgentToolChoice;
+  prepareStep?: (options: {
+    stepNumber: number;
+    availableToolNames: string[];
+  }) => {
+    toolChoice?: AgentToolChoice;
+    activeTools?: string[];
+  } | undefined;
   abortSignal?: AbortSignal;
   onToolCallStart?: (info: ToolCallLifecycleInfo) => void;
   onToolCallFinish?: (info: ToolCallFinishInfo) => void;
@@ -60,6 +85,15 @@ export interface SupportPromptOptions {
   pageContext?: Record<string, string>;
   visitorInfo?: { name: string | null; email: string | null };
   groundingConfidence?: GroundingConfidence;
+  needsClarification?: boolean;
+  turnPlan?: {
+    intent: SupportIntent;
+    summary: string;
+    followUpQuestion?: string | null;
+  } | null;
+  executionPath?: ExecutionPath;
+  retrievalAttempted?: boolean;
+  broaderSearchAttempted?: boolean;
 }
 
 export type SupportPromptSettings = Pick<
@@ -121,6 +155,22 @@ export interface ChatRuntimeAiConfig {
   model: string;
   geminiApiKey: string;
   openaiApiKey: string;
+}
+
+export interface SupportTurnPlan {
+  intent: SupportIntent;
+  summary: string;
+  retrievalQueries: string[];
+  broaderQueries: string[];
+  followUpQuestion: string | null;
+}
+
+export interface ExecutionPathDecision {
+  path: ExecutionPath;
+  retrievalMode: "none" | "light" | "full";
+  allowBroaderRetry: boolean;
+  allowedTools: SupportToolDefinition[];
+  toolChoice: AgentToolChoice;
 }
 
 export interface SupportAgentDependencies {

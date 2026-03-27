@@ -1,10 +1,11 @@
 export function buildRetrievalQueries(
   rawMessage: string,
   reformulatedQuery: string,
+  plannedQueries: string[] = [],
 ): string[] {
   const queries: string[] = [];
 
-  for (const candidate of [rawMessage, reformulatedQuery]) {
+  for (const candidate of [rawMessage, reformulatedQuery, ...plannedQueries]) {
     const normalized = candidate.trim();
     if (!normalized) continue;
     if (

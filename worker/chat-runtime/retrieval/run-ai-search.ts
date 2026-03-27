@@ -10,15 +10,18 @@ export interface RetrievalResult {
   groundingConfidence: GroundingConfidence;
   unresolvedKeys: string[];
   droppedCrossTenant: number;
+  retrievalAttempted: boolean;
+  broaderSearchAttempted: boolean;
 }
 
-export async function runAiSearch(options: {
-  env: Pick<AppEnv, "AI" | "UPLOADS">;
-  db: import("drizzle-orm/d1").DrizzleD1Database<Record<string, unknown>>;
+async function executeSearchPass(options: {
+  env: Pick<AppEnv, "AI">;
   projectId: string;
   queries: string[];
-}): Promise<RetrievalResult> {
-  const searchResults = await Promise.all(
+  matchThreshold: number;
+  maxResults: number;
+}) {
+  return Promise.all(
     options.queries.map((query) =>
       options.env.AI.aiSearch()
         .get("supportbot")
@@ -32,8 +35,8 @@ export async function runAiSearch(options: {
                 key: "folder",
                 value: `${options.projectId}/`,
               },
-              max_num_results: 12,
-              match_threshold: 0.2,
+              max_num_results: options.maxResults,
+              match_threshold: options.matchThreshold,
             },
             query_rewrite: {
               enabled: false,
@@ -46,18 +49,73 @@ export async function runAiSearch(options: {
         }),
     ),
   );
+}
+
+export async function runAiSearch(options: {
+  env: Pick<AppEnv, "AI" | "UPLOADS">;
+  db: import("drizzle-orm/d1").DrizzleD1Database<Record<string, unknown>>;
+  projectId: string;
+  queries: string[];
+  broaderQueries?: string[];
+  allowBroaderRetry?: boolean;
+}): Promise<RetrievalResult> {
+  if (options.queries.length === 0) {
+    return {
+      ragContext: "",
+      sourceReferences: [],
+      groundingConfidence: "none",
+      unresolvedKeys: [],
+      droppedCrossTenant: 0,
+      retrievalAttempted: false,
+      broaderSearchAttempted: false,
+    };
+  }
+
+  let broaderSearchAttempted = false;
+  let searchResults = await executeSearchPass({
+    env: options.env,
+    projectId: options.projectId,
+    queries: options.queries,
+    matchThreshold: 0.2,
+    maxResults: 12,
+  });
 
   const mergedChunks = mergeRetrievedSearchChunks(
     searchResults.map((result) => result?.chunks ?? []),
   );
-  const prepared = prepareRagChunks(mergedChunks, options.projectId);
-
+  let prepared = prepareRagChunks(mergedChunks, options.projectId);
   const resourceService = new ResourceService(options.db, options.env.UPLOADS);
-  const sourceReferenceMap = await resourceService.resolveSourceReferenceMap(
+  let sourceReferenceMap = await resourceService.resolveSourceReferenceMap(
     options.projectId,
     prepared.chunks.map((chunk) => chunk.key),
   );
-  const ragSelection = buildRagContext(prepared.chunks, sourceReferenceMap);
+  let ragSelection = buildRagContext(prepared.chunks, sourceReferenceMap);
+
+  if (!ragSelection.context && options.allowBroaderRetry !== false) {
+    const broaderQueries =
+      options.broaderQueries && options.broaderQueries.length > 0
+        ? options.broaderQueries
+        : options.queries;
+
+    broaderSearchAttempted = true;
+    searchResults = await executeSearchPass({
+      env: options.env,
+      projectId: options.projectId,
+      queries: broaderQueries,
+      matchThreshold: 0.1,
+      maxResults: 18,
+    });
+
+    const broaderMergedChunks = mergeRetrievedSearchChunks(
+      searchResults.map((result) => result?.chunks ?? []),
+    );
+    prepared = prepareRagChunks(broaderMergedChunks, options.projectId);
+    sourceReferenceMap = await resourceService.resolveSourceReferenceMap(
+      options.projectId,
+      prepared.chunks.map((chunk) => chunk.key),
+    );
+    ragSelection = buildRagContext(prepared.chunks, sourceReferenceMap);
+  }
 
   if (!ragSelection.context) {
     return {
@@ -66,6 +124,8 @@ export async function runAiSearch(options: {
       groundingConfidence: "none",
       unresolvedKeys: [],
       droppedCrossTenant: prepared.droppedCrossTenant,
+      retrievalAttempted: true,
+      broaderSearchAttempted,
     };
   }
 
@@ -82,5 +142,7 @@ export async function runAiSearch(options: {
     groundingConfidence: ragConfident ? "high" : "low",
     unresolvedKeys: ragSelection.unresolvedKeys,
     droppedCrossTenant: prepared.droppedCrossTenant,
+    retrievalAttempted: true,
+    broaderSearchAttempted,
   };
 }
