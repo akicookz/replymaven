@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, Loader2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,8 @@ interface ProfileData {
   image: string | null;
   profilePicture: string | null;
   workTitle: string | null;
+  profileSetupCompletedAt: string | null;
+  profileSetupDismissedAt: string | null;
 }
 
 function ProfileSetupDialog({
@@ -43,16 +45,14 @@ function ProfileSetupDialog({
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [initialized, setInitialized] = useState(false);
 
-  // Initialize form when profile loads
-  if (profile && !initialized) {
+  useEffect(() => {
+    if (!profile) return;
     setName(profile.name ?? "");
     setWorkTitle(profile.workTitle ?? "");
     setAvatarPreview(profile.profilePicture ?? profile.image ?? null);
     setAvatarUrl(profile.profilePicture ?? null);
-    setInitialized(true);
-  }
+  }, [profile]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -68,9 +68,24 @@ function ProfileSetupDialog({
       if (!res.ok) throw new Error("Failed to update profile");
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: ProfileData) => {
+      queryClient.setQueryData(["profile"], data);
       queryClient.invalidateQueries({ queryKey: ["profile"] });
-      localStorage.setItem("rm_profile_setup_done", "1");
+      onOpenChange(false);
+    },
+  });
+
+  const dismissMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/profile/setup/dismiss", {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("Failed to dismiss profile setup");
+      return res.json();
+    },
+    onSuccess: (data: ProfileData) => {
+      queryClient.setQueryData(["profile"], data);
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
       onOpenChange(false);
     },
   });
@@ -187,17 +202,20 @@ function ProfileSetupDialog({
           <div className="flex gap-3">
             <Button
               variant="outline"
-              onClick={() => {
-                localStorage.setItem("rm_profile_setup_done", "1");
-                onOpenChange(false);
-              }}
+              onClick={() => dismissMutation.mutate()}
+              disabled={dismissMutation.isPending || saveMutation.isPending}
               className="flex-1"
             >
-              Skip
+              {dismissMutation.isPending ? "Skipping..." : "Skip"}
             </Button>
             <Button
               onClick={() => saveMutation.mutate()}
-              disabled={saveMutation.isPending || uploading || !name.trim()}
+              disabled={
+                dismissMutation.isPending ||
+                saveMutation.isPending ||
+                uploading ||
+                !name.trim()
+              }
               className="flex-1"
             >
               {saveMutation.isPending ? (

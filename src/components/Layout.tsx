@@ -17,6 +17,7 @@ import {
   Users,
   CreditCard,
   X,
+  Zap,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import ProfileSetupDialog from "@/components/ProfileSetupDialog";
@@ -37,6 +38,12 @@ interface Project {
   slug: string;
 }
 
+interface ProfileSetupState {
+  id: string;
+  profileSetupCompletedAt: string | null;
+  profileSetupDismissedAt: string | null;
+}
+
 import { MobileSidebarContext } from "@/lib/mobile-sidebar";
 export { useMobileSidebar } from "@/lib/mobile-sidebar";
 
@@ -49,15 +56,21 @@ function Layout() {
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [showProfileSetup, setShowProfileSetup] = useState(() => {
-    return !localStorage.getItem("rm_profile_setup_done");
-  });
 
   const { data: projects } = useQuery<Project[]>({
     queryKey: ["projects"],
     queryFn: async () => {
       const res = await fetch("/api/projects");
       if (!res.ok) throw new Error("Failed to fetch projects");
+      return res.json();
+    },
+  });
+
+  const { data: profile } = useQuery<ProfileSetupState>({
+    queryKey: ["profile"],
+    queryFn: async () => {
+      const res = await fetch("/api/profile");
+      if (!res.ok) throw new Error("Failed to fetch profile");
       return res.json();
     },
   });
@@ -112,9 +125,14 @@ function Layout() {
   const toolsNav = currentProject
     ? [
         {
-          label: "Widgets",
+          label: "Widget Configuration",
           href: `/app/projects/${currentProject.id}/widget`,
           icon: Palette,
+        },
+        {
+          label: "Quick Actions and Tools",
+          href: `/app/projects/${currentProject.id}/quick-actions`,
+          icon: Zap,
         },
         {
           label: "Canned Responses",
@@ -168,6 +186,10 @@ function Layout() {
 
   const userName = session?.user?.name ?? "User";
   const userEmail = session?.user?.email ?? "";
+  const showProfileSetup =
+    !!profile &&
+    !profile.profileSetupCompletedAt &&
+    !profile.profileSetupDismissedAt;
 
   return (
     <div className="flex h-screen bg-background">
@@ -426,7 +448,7 @@ function Layout() {
       {/* Profile setup prompt (shows once after onboarding) */}
       <ProfileSetupDialog
         open={showProfileSetup}
-        onOpenChange={setShowProfileSetup}
+        onOpenChange={() => {}}
       />
     </div>
   );

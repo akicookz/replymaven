@@ -1604,6 +1604,8 @@ const app = new Hono<HonoAppContext>()
         image: users.image,
         profilePicture: users.profilePicture,
         workTitle: users.workTitle,
+        profileSetupCompletedAt: users.profileSetupCompletedAt,
+        profileSetupDismissedAt: users.profileSetupDismissedAt,
       })
       .from(users)
       .where(eq(users.id, user.id))
@@ -1624,6 +1626,7 @@ const app = new Hono<HonoAppContext>()
 
     const db = c.get("db");
     const updates: Record<string, unknown> = {};
+    updates.profileSetupCompletedAt = new Date();
     if (parsed.data.name !== undefined) updates.name = parsed.data.name;
     if (parsed.data.workTitle !== undefined) updates.workTitle = parsed.data.workTitle;
     if (parsed.data.profilePicture !== undefined) updates.profilePicture = parsed.data.profilePicture;
@@ -1640,6 +1643,37 @@ const app = new Hono<HonoAppContext>()
         image: users.image,
         profilePicture: users.profilePicture,
         workTitle: users.workTitle,
+        profileSetupCompletedAt: users.profileSetupCompletedAt,
+        profileSetupDismissedAt: users.profileSetupDismissedAt,
+      })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1);
+
+    return c.json(rows[0]);
+  })
+
+  // ─── Dismiss Profile Setup Prompt ────────────────────────────────────────────
+  .post("/api/profile/setup/dismiss", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    await db
+      .update(users)
+      .set({ profileSetupDismissedAt: new Date() })
+      .where(eq(users.id, user.id));
+
+    const rows = await db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        image: users.image,
+        profilePicture: users.profilePicture,
+        workTitle: users.workTitle,
+        profileSetupCompletedAt: users.profileSetupCompletedAt,
+        profileSetupDismissedAt: users.profileSetupDismissedAt,
       })
       .from(users)
       .where(eq(users.id, user.id))

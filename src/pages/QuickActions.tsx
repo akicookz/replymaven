@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Zap,
@@ -13,12 +13,9 @@ import {
   ChevronRight,
   ChevronUp,
   ChevronDown,
-  Clock,
-  Inbox,
   Type,
   AlignLeft,
   Settings,
-  X,
   FileText,
   Mail,
   Calendar,
@@ -43,6 +40,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { MobileMenuButton } from "@/components/PageHeader";
+import { ToolsPanel } from "./Tools";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,13 +66,6 @@ interface InquiryConfig {
   enabled: boolean;
   description: string | null;
   fields: InquiryField[];
-}
-
-interface InquirySubmission {
-  id: string;
-  visitorId: string | null;
-  data: Record<string, string>;
-  createdAt: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -126,7 +117,25 @@ function getIconComponent(icon: string) {
 function QuickActions() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"actions" | "inquiry">("actions");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState<"actions" | "tools">(
+    searchTab === "tools" ? "tools" : "actions",
+  );
+
+  useEffect(() => {
+    setActiveTab(searchTab === "tools" ? "tools" : "actions");
+  }, [searchTab]);
+
+  function handleTabChange(tab: "actions" | "tools") {
+    setActiveTab(tab);
+    if (tab === "tools") {
+      setSearchParams({ tab: "tools" }, { replace: true });
+      return;
+    }
+
+    setSearchParams({}, { replace: true });
+  }
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -136,11 +145,11 @@ function QuickActions() {
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-foreground flex items-center gap-2">
             <Zap className="w-5 h-5 md:w-6 md:h-6" />
-            Quick Actions
+            Quick Actions and Tools
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Buttons displayed on the widget home screen and chat view. Configure
-            inquiry form settings here too.
+            Manage widget shortcuts, inquiry behavior, and bot tools from one
+            place.
           </p>
         </div>
       </div>
@@ -150,12 +159,12 @@ function QuickActions() {
         {(
           [
             { key: "actions", label: "Actions" },
-            { key: "inquiry", label: "Inquiries" },
+            { key: "tools", label: "Tools" },
           ] as const
         ).map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
+            onClick={() => handleTabChange(tab.key)}
             className={cn(
               "px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px",
               activeTab === tab.key
@@ -169,7 +178,7 @@ function QuickActions() {
       </div>
 
       {activeTab === "actions" && <ActionsTab projectId={projectId!} queryClient={queryClient} />}
-      {activeTab === "inquiry" && <InquiriesTab projectId={projectId!} queryClient={queryClient} />}
+      {activeTab === "tools" && <ToolsPanel projectId={projectId!} embedded />}
     </div>
   );
 }
@@ -188,6 +197,7 @@ function ActionsTab({
   const [newAction, setNewAction] = useState("");
   const [newIcon, setNewIcon] = useState("sparkle");
   const [newShowOnHome, setNewShowOnHome] = useState(false);
+  const [expandedInquiryId, setExpandedInquiryId] = useState<string | null>(null);
 
   const {
     data: actions,
@@ -409,65 +419,100 @@ function ActionsTab({
             const IconComp = getIconComponent(action.icon);
             const typeConf = TYPE_CONFIG[action.type as ActionType];
             if (!typeConf) return null;
+            const isInquiryAction = action.type === "inquiry";
+            const isInquiryExpanded = expandedInquiryId === action.id;
             return (
               <div
                 key={action.id}
-                className="flex items-center gap-3 px-4 py-3 bg-card/50 rounded-xl border border-border group"
+                className="bg-card/50 rounded-xl border border-border overflow-hidden group"
               >
-                {/* Left icon */}
-                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
-                  <IconComp className="w-4 h-4 text-muted-foreground" />
-                </div>
-
-                {/* Label + meta */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {action.label}
-                    </p>
-                    <Badge variant="outline" className="text-[10px] shrink-0 gap-1">
-                      <typeConf.RightIcon className={cn("w-3 h-3", typeConf.iconColor)} />
-                      {typeConf.label}
-                    </Badge>
+                <div className="flex items-center gap-3 px-4 py-3">
+                  {/* Left icon */}
+                  <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                    <IconComp className="w-4 h-4 text-muted-foreground" />
                   </div>
-                  {action.action && (
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {action.action}
-                    </p>
+
+                  {/* Label + meta */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {action.label}
+                      </p>
+                      <Badge variant="outline" className="text-[10px] shrink-0 gap-1">
+                        <typeConf.RightIcon className={cn("w-3 h-3", typeConf.iconColor)} />
+                        {typeConf.label}
+                      </Badge>
+                    </div>
+                    {action.action && (
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">
+                        {action.action}
+                      </p>
+                    )}
+                    {isInquiryAction && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Configure the form directly on this action.
+                      </p>
+                    )}
+                  </div>
+
+                  {isInquiryAction && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedInquiryId(isInquiryExpanded ? null : action.id)
+                      }
+                      className={cn(
+                        "p-1.5 rounded-lg transition-colors",
+                        isInquiryExpanded
+                          ? "text-primary bg-primary/10"
+                          : "text-muted-foreground hover:bg-muted",
+                      )}
+                      title="Configure inquiry form"
+                    >
+                      <Settings className="w-4 h-4" />
+                    </button>
                   )}
+
+                  {/* Home toggle */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      toggleHome.mutate({
+                        id: action.id,
+                        showOnHome: !action.showOnHome,
+                      })
+                    }
+                    className={cn(
+                      "p-1.5 rounded-lg transition-colors",
+                      action.showOnHome
+                        ? "text-primary hover:bg-primary/10"
+                        : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted",
+                    )}
+                    title={action.showOnHome ? "Shown on home screen" : "Hidden from home screen"}
+                  >
+                    {action.showOnHome ? (
+                      <Eye className="w-4 h-4" />
+                    ) : (
+                      <EyeOff className="w-4 h-4" />
+                    )}
+                  </button>
+
+                  {/* Delete */}
+                  <button
+                    type="button"
+                    onClick={() => deleteAction.mutate(action.id)}
+                    disabled={deleteAction.isPending}
+                    className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-destructive disabled:opacity-50 transition-opacity"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
 
-                {/* Home toggle */}
-                <button
-                  onClick={() =>
-                    toggleHome.mutate({
-                      id: action.id,
-                      showOnHome: !action.showOnHome,
-                    })
-                  }
-                  className={cn(
-                    "p-1.5 rounded-lg transition-colors",
-                    action.showOnHome
-                      ? "text-primary hover:bg-primary/10"
-                      : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted",
-                  )}
-                  title={action.showOnHome ? "Shown on home screen" : "Hidden from home screen"}
-                >
-                  {action.showOnHome ? (
-                    <Eye className="w-4 h-4" />
-                  ) : (
-                    <EyeOff className="w-4 h-4" />
-                  )}
-                </button>
-
-                {/* Delete */}
-                <button
-                  onClick={() => deleteAction.mutate(action.id)}
-                  disabled={deleteAction.isPending}
-                  className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-destructive disabled:opacity-50 transition-opacity"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {isInquiryAction && isInquiryExpanded && (
+                  <div className="px-4 py-4 bg-muted/20">
+                    <InquiryActionConfig projectId={projectId} />
+                  </div>
+                )}
               </div>
             );
           })}
@@ -490,16 +535,14 @@ function ActionsTab({
   );
 }
 
-// ─── Inquiries Tab ────────────────────────────────────────────────────────────
+// ─── Inquiry Config ───────────────────────────────────────────────────────────
 
-function InquiriesTab({
+function InquiryActionConfig({
   projectId,
-  queryClient,
 }: {
   projectId: string;
-  queryClient: ReturnType<typeof useQueryClient>;
 }) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const queryClient = useQueryClient();
   const [enabled, setEnabled] = useState(false);
   const [description, setDescription] = useState(
     "We'll get back to you within 1-2 hours.",
@@ -514,19 +557,6 @@ function InquiriesTab({
     queryKey: ["inquiry-config", projectId],
     queryFn: async () => {
       const res = await fetch(`/api/projects/${projectId}/inquiries`);
-      if (!res.ok) throw new Error("Failed to fetch");
-      return res.json();
-    },
-  });
-
-  const { data: submissions, isLoading: submissionsLoading } = useQuery<
-    InquirySubmission[]
-  >({
-    queryKey: ["inquiries", projectId],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/projects/${projectId}/inquiries/submissions`,
-      );
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
@@ -591,371 +621,221 @@ function InquiriesTab({
     setHasChanges(true);
   }
 
-  const isConfigured = config?.enabled && (config?.fields?.length ?? 0) > 0;
-
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="h-8 w-48 rounded-xl bg-muted animate-pulse" />
-        <div className="h-40 rounded-xl bg-muted animate-pulse" />
+        <div className="h-6 w-40 rounded-xl bg-muted animate-pulse" />
+        <div className="h-36 rounded-xl bg-muted animate-pulse" />
       </div>
     );
   }
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-            <Mail className="w-5 h-5" />
-            Inquiries
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Messages from visitors who used the "Leave a message" form.
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">
+            Inquiry form configuration
+          </h3>
+          <p className="text-xs text-muted-foreground mt-1">
+            Visitors will see this form when they tap the inquiry quick action.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setSettingsOpen(true)}
-          className="gap-1.5"
-        >
-          <Settings className="w-4 h-4" />
-          Settings
-        </Button>
+        <div className="flex items-center gap-3">
+          <Badge variant={enabled ? "secondary" : "outline"}>
+            {enabled ? "Enabled" : "Disabled"}
+          </Badge>
+          <Switch
+            checked={enabled}
+            onCheckedChange={(checked) => {
+              setEnabled(checked);
+              setHasChanges(true);
+            }}
+          />
+        </div>
       </div>
 
-      {/* Submissions or empty state */}
-      {!isConfigured ? (
-        <div className="flex flex-col items-center justify-center py-24 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-5">
-            <MessageSquareText className="w-8 h-8 text-primary" />
-          </div>
-          <h2 className="text-lg font-semibold text-foreground mb-1">
-            No inquiry form configured
-          </h2>
-          <p className="text-sm text-muted-foreground max-w-md mb-6 leading-relaxed">
-            Let visitors leave a message when you're away. Set up a form with
-            custom fields like name, email, and message. Then add an "Inquiry"
-            quick action on the Actions tab to show it in your widget.
-          </p>
-          <Button onClick={() => setSettingsOpen(true)} className="gap-1.5">
-            <Settings className="w-4 h-4" />
-            Set up form
-          </Button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="flex items-center gap-3 mb-1">
-            <Badge variant="secondary" className="gap-1">
-              <Inbox className="w-3 h-3" />
-              {submissions?.length ?? 0} submissions
-            </Badge>
-            {config?.fields && (
-              <Badge variant="outline" className="gap-1">
-                {config.fields.length} field{config.fields.length !== 1 ? "s" : ""}
-              </Badge>
-            )}
-          </div>
-
-          {submissionsLoading ? (
-            <div className="space-y-3">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="h-20 rounded-xl bg-muted animate-pulse"
-                />
-              ))}
-            </div>
-          ) : submissions && submissions.length > 0 ? (
-            <div className="space-y-2">
-              {[...submissions].reverse().map((sub) => (
-                <div
-                  key={sub.id}
-                  className="px-5 py-4 bg-card rounded-xl border border-border"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Clock className="w-3.5 h-3.5" />
-                      {new Date(sub.createdAt).toLocaleDateString([], {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}{" "}
-                      at{" "}
-                      {new Date(sub.createdAt).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </div>
-                    {sub.visitorId && (
-                      <span className="text-[11px] text-muted-foreground font-mono">
-                        {sub.visitorId}
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid gap-2">
-                    {Object.entries(sub.data).map(([key, value]) => (
-                      <div key={key} className="flex gap-3">
-                        <span className="text-xs font-medium text-muted-foreground w-24 shrink-0 pt-0.5">
-                          {key}
-                        </span>
-                        <span className="text-sm text-foreground whitespace-pre-wrap break-words min-w-0">
-                          {value}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <Inbox className="w-10 h-10 text-muted-foreground/30 mb-3" />
-              <p className="text-sm text-muted-foreground">
-                No submissions yet. They'll appear here when visitors submit the
-                form.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Settings Slide-over Panel */}
-      <div
-        className={cn(
-          "fixed inset-0 bg-black/40 z-40 transition-opacity",
-          settingsOpen
-            ? "opacity-100 pointer-events-auto"
-            : "opacity-0 pointer-events-none",
-        )}
-        onClick={() => setSettingsOpen(false)}
-      />
-
-      <div
-        className={cn(
-          "fixed top-0 right-0 h-full w-full max-w-lg bg-background border-l border-border z-50 flex flex-col transition-transform duration-300 ease-in-out",
-          settingsOpen ? "translate-x-0" : "translate-x-full",
-        )}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">
-              Form settings
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Configure your inquiry form fields and behavior
+      {enabled && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="form-description">Form description</Label>
+            <p className="text-xs text-muted-foreground">
+              Shown at the top of the form. Let visitors know when to expect a
+              reply.
             </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setSettingsOpen(false)}
-            className="h-8 w-8"
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Enable inquiry form</Label>
-              <p className="text-xs text-muted-foreground">
-                Enables the inquiry form feature for your widget
-              </p>
-            </div>
-            <Switch
-              checked={enabled}
-              onCheckedChange={(checked) => {
-                setEnabled(checked);
+            <textarea
+              id="form-description"
+              value={description}
+              onChange={(e) => {
+                setDescription(e.target.value);
                 setHasChanges(true);
               }}
+              placeholder="We'll get back to you within 1-2 hours."
+              rows={2}
+              className="w-full px-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             />
           </div>
 
-          {enabled && (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="form-description">Form description</Label>
-                <p className="text-xs text-muted-foreground">
-                  Shown at the top of the form. Let visitors know when to expect
-                  a reply.
-                </p>
-                <textarea
-                  id="form-description"
-                  value={description}
-                  onChange={(e) => {
-                    setDescription(e.target.value);
-                    setHasChanges(true);
-                  }}
-                  placeholder="We'll get back to you within 1-2 hours."
-                  rows={2}
-                  className="w-full px-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-                />
-              </div>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Inquiry form fields</Label>
+              <span className="text-xs text-muted-foreground">
+                {fields.length}/10
+              </span>
+            </div>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>Inquiry form fields</Label>
-                  <span className="text-xs text-muted-foreground">
-                    {fields.length}/10
-                  </span>
-                </div>
-
-                {fields.length > 0 && (
-                  <div className="space-y-1.5">
-                    {fields.map((field, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-lg group"
-                      >
-                        <div className="flex flex-col -space-y-1">
-                          <button
-                            type="button"
-                            onClick={() => moveField(index, "up")}
-                            disabled={index === 0}
-                            className="text-muted-foreground hover:text-foreground disabled:opacity-20 p-0.5"
-                          >
-                            <ChevronUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => moveField(index, "down")}
-                            disabled={index === fields.length - 1}
-                            className="text-muted-foreground hover:text-foreground disabled:opacity-20 p-0.5"
-                          >
-                            <ChevronDown className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-
-                        <div className="w-7 h-7 rounded-md bg-background border border-border flex items-center justify-center shrink-0">
-                          {field.type === "textarea" ? (
-                            <AlignLeft className="w-3.5 h-3.5 text-muted-foreground" />
-                          ) : (
-                            <Type className="w-3.5 h-3.5 text-muted-foreground" />
-                          )}
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-foreground truncate">
-                            {field.label}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {field.type === "textarea"
-                              ? "Multi-line"
-                              : "Single-line"}
-                            {field.required && " -- Required"}
-                          </p>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => removeField(index)}
-                          className="p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-destructive transition-opacity"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {fields.length === 0 && (
-                  <div className="py-6 text-center border border-dashed border-border rounded-xl">
-                    <Type className="w-6 h-6 mx-auto text-muted-foreground/40 mb-2" />
-                    <p className="text-xs text-muted-foreground">
-                      No fields yet. Add your first field below.
-                    </p>
-                  </div>
-                )}
-
-                {fields.length < 10 && (
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      addField();
-                    }}
-                    className="space-y-3 p-3 bg-muted/30 rounded-xl border border-dashed border-border"
+            {fields.length > 0 && (
+              <div className="space-y-1.5">
+                {fields.map((field, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-2 px-3 py-2 bg-background rounded-lg group"
                   >
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <Input
-                        type="text"
-                        value={newLabel}
-                        onChange={(e) => setNewLabel(e.target.value)}
-                        placeholder="Field label (e.g. Email)"
-                        className="flex-1"
-                      />
-                      <Select
-                        value={newType}
-                        onValueChange={(val) =>
-                          setNewType(val as "text" | "textarea")
-                        }
+                    <div className="flex flex-col -space-y-1">
+                      <button
+                        type="button"
+                        onClick={() => moveField(index, "up")}
+                        disabled={index === 0}
+                        className="text-muted-foreground hover:text-foreground disabled:opacity-20 p-0.5"
                       >
-                        <SelectTrigger className="w-full sm:w-[130px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="text">
-                            <Type className="w-3.5 h-3.5" />
-                            Text input
-                          </SelectItem>
-                          <SelectItem value="textarea">
-                            <AlignLeft className="w-3.5 h-3.5" />
-                            Text area
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id="new-field-required"
-                          checked={newRequired}
-                          onCheckedChange={(checked) =>
-                            setNewRequired(checked === true)
-                          }
-                        />
-                        <Label
-                          htmlFor="new-field-required"
-                          className="text-sm text-muted-foreground font-normal cursor-pointer"
-                        >
-                          Required field
-                        </Label>
-                      </div>
-                      <Button
-                        type="submit"
-                        size="sm"
-                        variant="outline"
-                        disabled={!newLabel.trim()}
-                        className="gap-1"
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveField(index, "down")}
+                        disabled={index === fields.length - 1}
+                        className="text-muted-foreground hover:text-foreground disabled:opacity-20 p-0.5"
                       >
-                        <Plus className="w-3.5 h-3.5" />
-                        Add
-                      </Button>
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                  </form>
-                )}
-              </div>
-            </>
-          )}
-        </div>
 
-        <div className="px-6 py-4 border-t border-border flex items-center gap-3">
-          <Button
-            onClick={() => saveConfig.mutate()}
-            disabled={!hasChanges || saveConfig.isPending}
-            className="flex-1"
-          >
-            {saveConfig.isPending ? "Saving..." : "Save changes"}
-          </Button>
+                    <div className="w-7 h-7 rounded-md bg-muted border border-border flex items-center justify-center shrink-0">
+                      {field.type === "textarea" ? (
+                        <AlignLeft className="w-3.5 h-3.5 text-muted-foreground" />
+                      ) : (
+                        <Type className="w-3.5 h-3.5 text-muted-foreground" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {field.label}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {field.type === "textarea" ? "Multi-line" : "Single-line"}
+                        {field.required && " -- Required"}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => removeField(index)}
+                      className="p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-destructive transition-opacity"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {fields.length === 0 && (
+              <div className="py-6 text-center border border-dashed border-border rounded-xl">
+                <Type className="w-6 h-6 mx-auto text-muted-foreground/40 mb-2" />
+                <p className="text-xs text-muted-foreground">
+                  No fields yet. Add your first field below.
+                </p>
+              </div>
+            )}
+
+            {fields.length < 10 && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  addField();
+                }}
+                className="space-y-3 p-3 bg-background rounded-xl border border-dashed border-border"
+              >
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Input
+                    type="text"
+                    value={newLabel}
+                    onChange={(e) => setNewLabel(e.target.value)}
+                    placeholder="Field label (e.g. Email)"
+                    className="flex-1"
+                  />
+                  <Select
+                    value={newType}
+                    onValueChange={(val) =>
+                      setNewType(val as "text" | "textarea")
+                    }
+                  >
+                    <SelectTrigger className="w-full sm:w-[130px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="text">
+                        <Type className="w-3.5 h-3.5" />
+                        Text input
+                      </SelectItem>
+                      <SelectItem value="textarea">
+                        <AlignLeft className="w-3.5 h-3.5" />
+                        Text area
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="new-field-required"
+                      checked={newRequired}
+                      onCheckedChange={(checked) =>
+                        setNewRequired(checked === true)
+                      }
+                    />
+                    <Label
+                      htmlFor="new-field-required"
+                      className="text-sm text-muted-foreground font-normal cursor-pointer"
+                    >
+                      Required field
+                    </Label>
+                  </div>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    variant="outline"
+                    disabled={!newLabel.trim()}
+                    className="gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add
+                  </Button>
+                </div>
+              </form>
+            )}
+          </div>
+        </>
+      )}
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs text-muted-foreground">
+          Inquiry submissions stay in the main `Inquiries` inbox.
+        </p>
+        <div className="flex items-center gap-3">
           {saveConfig.isError && (
             <div className="flex items-center gap-1.5 text-destructive text-xs">
               <AlertCircle className="w-3.5 h-3.5" />
               Failed
             </div>
           )}
+          <Button
+            onClick={() => saveConfig.mutate()}
+            disabled={!hasChanges || saveConfig.isPending}
+          >
+            {saveConfig.isPending ? "Saving..." : "Save changes"}
+          </Button>
         </div>
       </div>
     </div>

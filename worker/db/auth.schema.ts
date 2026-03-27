@@ -11,6 +11,12 @@ export const users = sqliteTable("users", {
   image: text("image"),
   profilePicture: text("profile_picture"),
   workTitle: text("work_title"),
+  profileSetupCompletedAt: integer("profile_setup_completed_at", {
+    mode: "timestamp",
+  }),
+  profileSetupDismissedAt: integer("profile_setup_dismissed_at", {
+    mode: "timestamp",
+  }),
   createdAt: integer("created_at", { mode: "timestamp" })
     .default(sql`(current_timestamp)`)
     .notNull(),

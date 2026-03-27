@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 
 import Layout from "./components/Layout";
 import AccountLayout from "./components/AccountLayout";
-import WidgetLayout from "./components/WidgetLayout";
 import AuthGuard from "./components/AuthGuard";
 import OnboardingGuard from "./components/OnboardingGuard";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -14,8 +13,8 @@ import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
 import Resources from "./pages/Resources";
 import QuickActions from "./pages/QuickActions";
+import WidgetConfig from "./pages/WidgetConfig";
 import CannedResponses from "./pages/CannedResponses";
-import Tools from "./pages/Tools";
 import Inquiries from "./pages/Inquiries";
 import CompanyInfo from "./pages/CompanyInfo";
 import Sops from "./pages/Sops";
@@ -24,9 +23,6 @@ import Team from "./pages/Team";
 import Billing from "./pages/Billing";
 import AuthCallback from "./pages/AuthCallback";
 import Docs from "./pages/Docs";
-import WidgetAppearance from "./pages/widgets/WidgetAppearance";
-import WidgetHome from "./pages/widgets/WidgetHome";
-import WidgetEmbedVisibility from "./pages/widgets/WidgetEmbedVisibility";
 
 // ─── Redirect /app to first project's dashboard ──────────────────────────────
 function DashboardRedirect() {
@@ -48,10 +44,10 @@ function DashboardRedirect() {
   return <Navigate to={`/app/projects/${projects[0].id}`} replace />;
 }
 
-function ProjectWidgetRedirect({
+function ProjectPageRedirect({
   target,
 }: {
-  target: "quick-actions" | "tools";
+  target: "widget" | "quick-actions" | "tools";
 }) {
   const { projectId } = useParams<{ projectId: string }>();
 
@@ -59,8 +55,17 @@ function ProjectWidgetRedirect({
     return <Navigate to="/app" replace />;
   }
 
+  if (target === "tools") {
+    return (
+      <Navigate
+        to={`/app/projects/${projectId}/quick-actions?tab=tools`}
+        replace
+      />
+    );
+  }
+
   return (
-    <Navigate to={`/app/projects/${projectId}/widget/${target}`} replace />
+    <Navigate to={`/app/projects/${projectId}/${target}`} replace />
   );
 }
 
@@ -107,26 +112,6 @@ function App() {
         />
       </Route>
 
-      <Route
-        path="/app/projects/:projectId/widget"
-        element={
-          <ErrorBoundary>
-            <AuthGuard>
-              <OnboardingGuard>
-                <WidgetLayout />
-              </OnboardingGuard>
-            </AuthGuard>
-          </ErrorBoundary>
-        }
-      >
-        <Route index element={<Navigate to="appearance" replace />} />
-        <Route path="appearance" element={<WidgetAppearance />} />
-        <Route path="home" element={<WidgetHome />} />
-        <Route path="quick-actions" element={<QuickActions />} />
-        <Route path="tools" element={<Tools />} />
-        <Route path="embed" element={<WidgetEmbedVisibility />} />
-      </Route>
-
       {/* /app index -- redirect to first project dashboard */}
       <Route
         path="/app"
@@ -171,6 +156,22 @@ function App() {
           element={<Navigate to="../knowledgebase" replace />}
         />
         <Route
+          path="projects/:projectId/widget"
+          element={<WidgetConfig />}
+        />
+        <Route
+          path="projects/:projectId/widget/quick-actions"
+          element={<ProjectPageRedirect target="quick-actions" />}
+        />
+        <Route
+          path="projects/:projectId/widget/tools"
+          element={<ProjectPageRedirect target="tools" />}
+        />
+        <Route
+          path="projects/:projectId/widget/*"
+          element={<ProjectPageRedirect target="widget" />}
+        />
+        <Route
           path="projects/:projectId/canned-responses"
           element={<CannedResponses />}
         />
@@ -180,11 +181,11 @@ function App() {
         />
         <Route
           path="projects/:projectId/quick-actions"
-          element={<ProjectWidgetRedirect target="quick-actions" />}
+          element={<QuickActions />}
         />
         <Route
           path="projects/:projectId/tools"
-          element={<ProjectWidgetRedirect target="tools" />}
+          element={<ProjectPageRedirect target="tools" />}
         />
       </Route>
     </Routes>

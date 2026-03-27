@@ -102,14 +102,21 @@ interface TelegramData {
   telegramChatId: string | null;
 }
 
+interface ToolsPanelProps {
+  projectId: string;
+  embedded?: boolean;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
-function Tools() {
-  const { projectId } = useParams<{ projectId: string }>();
+export function ToolsPanel({
+  projectId,
+  embedded = false,
+}: ToolsPanelProps) {
   const queryClient = useQueryClient();
 
   // UI state
-  const [activeTab, setActiveTab] = useState<"tools" | "logs">("tools");
+  const [showLogs, setShowLogs] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ToolFormData>(emptyForm);
@@ -151,7 +158,7 @@ function Tools() {
       if (!res.ok) throw new Error("Failed to fetch executions");
       return res.json();
     },
-    enabled: activeTab === "logs",
+    enabled: showLogs,
   });
 
   // ─── Telegram Preset Query ────────────────────────────────────────────────
@@ -429,18 +436,55 @@ function Tools() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <MobileMenuButton />
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-foreground">Tools</h1>
-            <p className="text-xs md:text-sm text-muted-foreground mt-1">
-              Configure external API tools your bot can call during conversations.
-            </p>
+      {!embedded && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <MobileMenuButton />
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold text-foreground">
+                Tools
+              </h1>
+              <p className="text-xs md:text-sm text-muted-foreground mt-1">
+                Configure external API tools your bot can call during
+                conversations.
+              </p>
+            </div>
           </div>
         </div>
-        {activeTab === "tools" && (
+      )}
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">
+            {showLogs ? "Execution Log" : "Tools"}
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {showLogs
+              ? "Review recent tool calls and responses."
+              : "Configure external API tools your bot can call during conversations."}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {showLogs ? (
+            <Button
+              variant="outline"
+              onClick={() => setShowLogs(false)}
+            >
+              <ChevronRight className="w-4 h-4 mr-2 rotate-180" />
+              Back to Tools
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => setShowLogs(true)}
+              >
+                <History className="w-4 h-4 mr-2" />
+                View Logs
+              </Button>
+            </>
+          )}
+          {!showLogs && (
           <Button
             onClick={() => {
               resetForm();
@@ -451,39 +495,12 @@ function Tools() {
             <Plus className="w-4 h-4 mr-2" />
             Add Tool
           </Button>
-        )}
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-muted/50 rounded-xl w-fit overflow-x-auto">
-        <button
-          onClick={() => setActiveTab("tools")}
-          className={cn(
-            "px-4 py-1.5 rounded-lg text-sm font-medium transition-colors",
-            activeTab === "tools"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
           )}
-        >
-          <Wrench className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />
-          Tools {tools ? `(${tools.length})` : ""}
-        </button>
-        <button
-          onClick={() => setActiveTab("logs")}
-          className={cn(
-            "px-4 py-1.5 rounded-lg text-sm font-medium transition-colors",
-            activeTab === "logs"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <History className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />
-          Execution Log
-        </button>
+        </div>
       </div>
 
       {/* Tool limit warning */}
-      {activeTab === "tools" && (tools?.length ?? 0) >= 20 && (
+      {!showLogs && (tools?.length ?? 0) >= 20 && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-warning/10 border border-warning/25 text-warning text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
           Maximum of 20 tools reached. Delete an existing tool to add a new one.
@@ -491,7 +508,7 @@ function Tools() {
       )}
 
       {/* ─── Create / Edit Form ──────────────────────────────────────────── */}
-      {activeTab === "tools" && showForm && (
+      {!showLogs && showForm && (
         <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">
@@ -788,7 +805,7 @@ function Tools() {
       )}
 
       {/* ─── Tools Tab ───────────────────────────────────────────────────── */}
-      {activeTab === "tools" && (
+      {!showLogs && (
         <>
           {/* Loading */}
           {isLoading && (
@@ -1271,7 +1288,7 @@ function Tools() {
       )}
 
       {/* ─── Execution Log Tab ───────────────────────────────────────────── */}
-      {activeTab === "logs" && (
+      {showLogs && (
         <>
           {executionsLoading && (
             <div className="space-y-3">
@@ -1420,6 +1437,14 @@ function Tools() {
       )}
     </div>
   );
+}
+
+function Tools() {
+  const { projectId } = useParams<{ projectId: string }>();
+
+  if (!projectId) return null;
+
+  return <ToolsPanel projectId={projectId} />;
 }
 
 export default Tools;
