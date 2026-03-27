@@ -2977,6 +2977,8 @@
 
   // ─── Page Targeting ──────────────────────────────────────────────────────────
 
+  let hiddenByPageTargeting = false;
+
   function matchesCurrentPage(patterns: string[]): boolean {
     const path = window.location.pathname;
     return patterns.some((pattern) => {
@@ -3010,14 +3012,19 @@
           // Initial check
           if (!matchesCurrentPage(patterns)) {
             container.style.display = "none";
+            hiddenByPageTargeting = true;
           }
 
           // SPA route change detection
           const handleRouteChange = () => {
-            if (!matchesCurrentPage(patterns)) {
+            if (!matchesCurrentPage(patterns) && !isOpen) {
               container.style.display = "none";
-            } else {
+              hiddenByPageTargeting = true;
+              stopPolling();
+              stopHeartbeat();
+            } else if (matchesCurrentPage(patterns)) {
               container.style.display = "";
+              hiddenByPageTargeting = false;
             }
           };
 
@@ -4645,6 +4652,7 @@
   function startPolling() {
     if (pollTimer) return; // Already polling
     if (!conversationId) return;
+    if (hiddenByPageTargeting) return;
 
     // Determine poll interval based on conversation status and idle time
     const getInterval = () => {
@@ -5090,6 +5098,11 @@
   }
 
   function openChatWidget() {
+    // Bypass page targeting when opened programmatically
+    if (hiddenByPageTargeting) {
+      container.style.display = "";
+      hiddenByPageTargeting = false;
+    }
     isOpen = true;
     chatWindow.classList.add("open");
     trigger.classList.add("active");
