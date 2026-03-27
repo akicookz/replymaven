@@ -3833,6 +3833,11 @@
                   continue;
                 }
 
+                if (data.status?.message) {
+                  showTyping(data.status.message);
+                  continue;
+                }
+
                 // Handle tool execution events
                 if (data.toolCall) {
                   hideTyping();
@@ -3865,6 +3870,18 @@
                     null,
                     data.toolError.detail || data.toolError.message,
                   );
+                  continue;
+                }
+
+                if (data.finalText) {
+                  botMessage = String(data.finalText);
+                  if (!botMessageEl) {
+                    hideTyping();
+                    botMessageEl = addMessageToUI("bot", botMessage);
+                  } else {
+                    botMessageEl.innerHTML = renderMarkdown(botMessage);
+                  }
+                  scrollToBottom();
                   continue;
                 }
 
@@ -4172,7 +4189,7 @@
   }
 
   function showTyping(message?: string) {
-    statusText.textContent = message ?? "";
+    statusText.textContent = message ?? "Thinking";
     typingRow.classList.add("visible");
     scrollToBottom();
   }

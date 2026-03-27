@@ -214,7 +214,13 @@ export class ChatService {
     const closedIds: string[] = [];
     const staleThreshold = Date.now() - autoCloseMinutes * 60 * 1000;
 
-    for (const conv of projectConversations) {
+    const sorted = [...projectConversations].sort((a, b) => {
+      const aTime = a.lastActivityAt?.getTime() ?? a.createdAt.getTime();
+      const bTime = b.lastActivityAt?.getTime() ?? b.createdAt.getTime();
+      return aTime - bTime;
+    });
+
+    for (const conv of sorted) {
       if (conv.status === "closed") continue;
       const lastActivity = conv.lastActivityAt?.getTime() ?? conv.createdAt.getTime();
       if (lastActivity < staleThreshold) {
