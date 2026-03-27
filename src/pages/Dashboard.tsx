@@ -12,8 +12,6 @@ import {
   Globe,
 } from "lucide-react";
 import { Link, useParams, Navigate } from "react-router-dom";
-import { useSession } from "@/lib/auth-client";
-import { Button } from "@/components/ui/button";
 import {
   BarChart,
   Bar,
@@ -22,6 +20,13 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { Button } from "@/components/ui/button";
+import { useSession } from "@/lib/auth-client";
+import {
+  getConversationActivityTimestamp,
+  getVisitorPresenceState,
+  type VisitorPresenceState,
+} from "@/lib/conversation-presence";
 import { cn } from "@/lib/utils";
 import { MobileMenuButton } from "@/components/PageHeader";
 
@@ -40,6 +45,8 @@ interface RecentConversation {
   visitorEmail: string | null;
   status: string;
   metadata: string | null;
+  visitorLastSeenAt: string | null;
+  visitorPresence: string | null;
   updatedAt: string;
 }
 
@@ -181,6 +188,17 @@ function formatTimeAgo(dateStr: string): string {
   return `${diffDays}d ago`;
 }
 
+function getPresenceDotClass(state: VisitorPresenceState): string {
+  switch (state) {
+    case "online":
+      return "bg-emerald-500";
+    case "background":
+      return "bg-amber-500";
+    default:
+      return "bg-muted-foreground/40";
+  }
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 function Dashboard() {
@@ -196,6 +214,7 @@ function Dashboard() {
       return res.json();
     },
     enabled: !!projectId,
+    refetchInterval: 30_000,
   });
 
   if (!projectId) {
@@ -493,6 +512,15 @@ function Dashboard() {
                 const meta = parseConvoMeta(convo.metadata);
                 const displayName = convo.visitorName ?? convo.visitorEmail?.split("@")[0] ?? convo.visitorId.slice(0, 14);
                 const location = [meta.city, meta.region].filter(Boolean).join(", ");
+                const presenceState = getVisitorPresenceState({
+                  visitorLastSeenAt: convo.visitorLastSeenAt,
+                  visitorPresence: convo.visitorPresence,
+                });
+                const activityAt =
+                  getConversationActivityTimestamp({
+                    visitorLastSeenAt: convo.visitorLastSeenAt,
+                    updatedAt: convo.updatedAt,
+                  }) ?? new Date(convo.updatedAt).getTime();
 
                 return (
                   <Link
@@ -501,9 +529,19 @@ function Dashboard() {
                     className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_100px_100px] items-center px-4 sm:px-6 py-3 hover:bg-accent/50 transition-colors group gap-2"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0 text-sm">
-                        {meta.country ? countryToFlag(meta.country) : (
-                          <Users className="w-3.5 h-3.5 text-muted-foreground" />
+                      <div className="relative shrink-0">
+                        <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm">
+                          {meta.country ? countryToFlag(meta.country) : (
+                            <Users className="w-3.5 h-3.5 text-muted-foreground" />
+                          )}
+                        </div>
+                        {convo.status !== "closed" && (
+                          <span
+                            className={cn(
+                              "absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-card",
+                              getPresenceDotClass(presenceState),
+                            )}
+                          />
                         )}
                       </div>
                       <div className="min-w-0">
@@ -528,7 +566,7 @@ function Dashboard() {
                       {STATUS_LABELS[convo.status] ?? convo.status.replace("_", " ")}
                     </span>
                     <span className="hidden sm:block text-[12px] text-muted-foreground text-right">
-                      {formatTimeAgo(convo.updatedAt)}
+                      {formatTimeAgo(new Date(activityAt).toISOString())}
                     </span>
                   </Link>
                 );

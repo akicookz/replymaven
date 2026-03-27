@@ -38,9 +38,14 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { cn } from "@/lib/utils";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { DetailsPanel } from "@/components/DetailsPanel";
+import {
+  getConversationActivityTimestamp,
+  getVisitorPresenceState,
+  type VisitorPresenceState,
+} from "@/lib/conversation-presence";
+import { cn } from "@/lib/utils";
 
 interface ConversationMeta {
   url?: string;
@@ -115,6 +120,28 @@ interface CannedResponse {
   response: string;
   status: "draft" | "approved" | "rejected";
 }
+
+interface ConversationInquiry {
+  id: string;
+  data: Record<string, string>;
+  status: string;
+  createdAt: string;
+}
+
+type ThreadItem =
+  | {
+      kind: "message";
+      id: string;
+      createdAt: string;
+      message: Message;
+    }
+  | {
+      kind: "inquiry";
+      id: string;
+      createdAt: string;
+      inquiry: ConversationInquiry;
+      fields: Array<[string, string]>;
+    };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -243,20 +270,90 @@ function getInitial(convo: Conversation): string {
   return name.charAt(0).toUpperCase();
 }
 
-// ─── Status helpers ──────────────────────────────────────────────────────────
-
-function getStatusDot(status: string): string {
-  switch (status) {
-    case "active":
-      return "bg-status-active";
-    case "waiting_agent":
-      return "bg-status-waiting";
-    case "agent_replied":
-      return "bg-status-replied";
+function getPresenceDotClass(state: VisitorPresenceState): string {
+  switch (state) {
+    case "online":
+      return "bg-emerald-500";
+    case "background":
+      return "bg-amber-500";
     default:
-      return "bg-status-closed";
+      return "bg-muted-foreground/40";
   }
 }
+
+function getPresenceBadge(state: VisitorPresenceState): {
+  label: string;
+  dotClass: string;
+  badgeClass: string;
+} {
+  switch (state) {
+    case "online":
+      return {
+        label: "Online",
+        dotClass: "bg-emerald-500",
+        badgeClass: "text-emerald-600 bg-emerald-500/10",
+      };
+    case "background":
+      return {
+        label: "In Background",
+        dotClass: "bg-amber-500",
+        badgeClass: "text-amber-600 bg-amber-500/10",
+      };
+    default:
+      return {
+        label: "Offline",
+        dotClass: "bg-muted-foreground/50",
+        badgeClass: "text-muted-foreground bg-muted/50",
+      };
+  }
+}
+
+function getConversationActivityLabel(convo: Pick<
+  Conversation,
+  "visitorLastSeenAt" | "updatedAt"
+>): string {
+  const activityAt =
+    getConversationActivityTimestamp({
+      visitorLastSeenAt: convo.visitorLastSeenAt,
+      updatedAt: convo.updatedAt,
+    }) ?? new Date(convo.updatedAt).getTime();
+
+  return timeAgo(new Date(activityAt).toISOString());
+}
+
+function buildConversationThread(
+  messages: Message[],
+  inquiry: ConversationInquiry | null,
+): ThreadItem[] {
+  const threadItems: ThreadItem[] = messages.map((message) => ({
+    kind: "message",
+    id: message.id,
+    createdAt: message.createdAt,
+    message,
+  }));
+
+  if (inquiry) {
+    const hiddenKeys = new Set(["Conversation ID", "Recent chat", "Type"]);
+    const fields = Object.entries(inquiry.data).filter(
+      ([key]) => !hiddenKeys.has(key),
+    );
+
+    threadItems.push({
+      kind: "inquiry",
+      id: `inquiry:${inquiry.id}`,
+      createdAt: inquiry.createdAt,
+      inquiry,
+      fields,
+    });
+  }
+
+  return threadItems.sort(
+    (a, b) =>
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+}
+
+// ─── Status helpers ──────────────────────────────────────────────────────────
 
 function getStatusLabel(status: string): string {
   switch (status) {
@@ -307,6 +404,7 @@ function Conversations() {
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
+    refetchInterval: 30_000,
   });
 
   const { data: convoDetail, isPending: isDetailLoading } = useQuery<{
@@ -314,12 +412,7 @@ function Conversations() {
     messages: Message[];
     botName: string | null;
     agentName: string | null;
-    inquiry: {
-      id: string;
-      data: Record<string, string>;
-      status: string;
-      createdAt: string;
-    } | null;
+    inquiry: ConversationInquiry | null;
   }>({
     queryKey: ["conversation-detail", selectedConvo],
     queryFn: async () => {
@@ -330,6 +423,7 @@ function Conversations() {
       return res.json();
     },
     enabled: !!selectedConvo,
+    refetchInterval: selectedConvo ? 30_000 : false,
   });
 
   const { data: cannedResponses } = useQuery<CannedResponse[]>({
@@ -398,10 +492,17 @@ function Conversations() {
     },
   });
 
-  // Auto-scroll to bottom when messages change
+  const threadItems = convoDetail
+    ? buildConversationThread(convoDetail.messages, convoDetail.inquiry)
+    : [];
+  const threadSignature = threadItems
+    .map((item) => `${item.kind}:${item.id}:${item.createdAt}`)
+    .join("|");
+
+  // Auto-scroll to bottom when the thread actually changes
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [convoDetail?.messages]);
+  }, [threadSignature]);
 
   // Filter conversations by search
   const filteredConversations = conversations?.filter((c) => {
@@ -417,9 +518,13 @@ function Conversations() {
     // We only have the full message list for the selected conversation
     // For sidebar, we'd need to fetch individually or include in the list endpoint
     // For now, return null (could be enhanced later)
-    if (selectedConvo === convo.id && convoDetail?.messages?.length) {
-      const last = convoDetail.messages[convoDetail.messages.length - 1];
-      return last.content;
+    if (selectedConvo === convo.id && threadItems.length > 0) {
+      const last = threadItems[threadItems.length - 1];
+      if (last.kind === "inquiry") {
+        return "Inquiry submitted";
+      }
+
+      return last.message.content;
     }
     return null;
   }
@@ -513,6 +618,10 @@ function Conversations() {
             const meta = parseMeta(convo.metadata);
             const preview = getLastMessagePreview(convo);
             const isSelected = selectedConvo === convo.id;
+            const presenceState = getVisitorPresenceState({
+              visitorLastSeenAt: convo.visitorLastSeenAt,
+              visitorPresence: convo.visitorPresence,
+            });
 
             return (
               <button
@@ -533,7 +642,7 @@ function Conversations() {
                     <div
                       className={cn(
                         "absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-card",
-                        getStatusDot(convo.status),
+                        getPresenceDotClass(presenceState),
                       )}
                     />
                   )}
@@ -551,7 +660,7 @@ function Conversations() {
                       {getVisitorDisplayName(convo)}
                     </span>
                     <span className="text-[11px] text-muted-foreground whitespace-nowrap">
-                      {timeAgo(convo.updatedAt)}
+                      {getConversationActivityLabel(convo)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2 mt-0.5">
@@ -664,39 +773,27 @@ function Conversations() {
                     {getVisitorDisplayName(convoDetail.conversation)}
                   </h2>
                   {(() => {
-                    const conv = convoDetail.conversation;
-                    const lastSeenRaw = conv.visitorLastSeenAt;
-                    if (!lastSeenRaw) return null;
-                    const lastSeen = new Date(typeof lastSeenRaw === "string"
-                      ? lastSeenRaw
-                      : Number(lastSeenRaw) * 1000);
-                    const isRecent = Date.now() - lastSeen.getTime() < 2 * 60 * 1000;
-
-                    let label: string;
-                    let dotClass: string;
-                    let badgeClass: string;
-
-                    if (!isRecent) {
-                      label = "Offline";
-                      dotClass = "bg-muted-foreground/50";
-                      badgeClass = "text-muted-foreground bg-muted/50";
-                    } else if (conv.visitorPresence === "background") {
-                      label = "In Background";
-                      dotClass = "bg-amber-500";
-                      badgeClass = "text-amber-600 bg-amber-500/10";
-                    } else {
-                      label = "Online";
-                      dotClass = "bg-emerald-500";
-                      badgeClass = "text-emerald-600 bg-emerald-500/10";
-                    }
+                    const presence = getPresenceBadge(
+                      getVisitorPresenceState({
+                        visitorLastSeenAt:
+                          convoDetail.conversation.visitorLastSeenAt,
+                        visitorPresence:
+                          convoDetail.conversation.visitorPresence,
+                      }),
+                    );
 
                     return (
                       <span className={cn(
                         "inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full",
-                        badgeClass,
+                        presence.badgeClass,
                       )}>
-                        <span className={cn("w-1.5 h-1.5 rounded-full", dotClass)} />
-                        {label}
+                        <span
+                          className={cn(
+                            "w-1.5 h-1.5 rounded-full",
+                            presence.dotClass,
+                          )}
+                        />
+                        {presence.label}
                       </span>
                     );
                   })()}
@@ -903,11 +1000,11 @@ function Conversations() {
               }}
             >
               {/* Date separator for first message */}
-              {convoDetail.messages.length > 0 && (
+              {threadItems.length > 0 && (
                 <div className="flex justify-center mb-3">
                   <span className="px-3 py-1 rounded-lg bg-card/80 text-[11px] text-muted-foreground font-medium shadow-sm">
                     {new Date(
-                      convoDetail.messages[0].createdAt,
+                      threadItems[0].createdAt,
                     ).toLocaleDateString([], {
                       weekday: "long",
                       month: "long",
@@ -917,20 +1014,87 @@ function Conversations() {
                 </div>
               )}
 
-              {convoDetail.messages.map((msg, idx) => {
+              {threadItems.map((item, idx) => {
+                const prevItem = idx > 0 ? threadItems[idx - 1] : null;
+                const showDateSep =
+                  prevItem &&
+                  new Date(item.createdAt).toDateString() !==
+                    new Date(prevItem.createdAt).toDateString();
+
+                if (item.kind === "inquiry") {
+                  const inq = item.inquiry;
+
+                  return (
+                    <div key={item.id}>
+                      {showDateSep && (
+                        <div className="flex justify-center my-3">
+                          <span className="px-3 py-1 rounded-lg bg-card/80 text-[11px] text-muted-foreground font-medium shadow-sm">
+                            {new Date(item.createdAt).toLocaleDateString([], {
+                              weekday: "long",
+                              month: "long",
+                              day: "numeric",
+                            })}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex justify-start mb-0.5">
+                        <div className="relative max-w-[85%] sm:max-w-[65%] rounded-lg rounded-tl-none px-3 py-2 shadow-sm bg-muted/50 text-foreground overflow-hidden">
+                          <div className="flex items-center gap-1 mb-1.5">
+                            <FileText className="w-3 h-3 text-muted-foreground" />
+                            <span className="text-[11px] font-semibold text-muted-foreground">
+                              Inquiry
+                            </span>
+                            <span
+                              className={cn(
+                                "text-[10px] px-1.5 py-0.5 rounded-full ml-1",
+                                inq.status === "new" &&
+                                  "bg-blue-500/10 text-blue-400",
+                                inq.status === "replied" &&
+                                  "bg-emerald-500/10 text-emerald-400",
+                                inq.status === "closed" &&
+                                  "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              {inq.status === "new"
+                                ? "New"
+                                : inq.status === "replied"
+                                  ? "Replied"
+                                  : "Closed"}
+                            </span>
+                          </div>
+                          {item.fields.length > 0 && (
+                            <div className="space-y-1">
+                              {item.fields.map(([key, value]) => (
+                                <div key={key} className="text-[13px] leading-relaxed">
+                                  <span className="font-medium text-foreground/80">
+                                    {key}:
+                                  </span>{" "}
+                                  <span className="text-foreground/70 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                                    {value}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div className="flex items-center justify-end mt-1">
+                            <span className="text-[10px] text-muted-foreground/70">
+                              {formatTime(String(inq.createdAt))}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const msg = item.message;
                 const isVisitor = msg.role === "visitor";
                 const isBot = msg.role === "bot";
                 const isAgent = msg.role === "agent";
 
-                // Show date separator between messages on different days
-                const prevMsg = idx > 0 ? convoDetail.messages[idx - 1] : null;
-                const showDateSep =
-                  prevMsg &&
-                  new Date(msg.createdAt).toDateString() !==
-                    new Date(prevMsg.createdAt).toDateString();
-
                 return (
-                  <div key={msg.id}>
+                  <div key={item.id}>
                     {showDateSep && (
                       <div className="flex justify-center my-3">
                         <span className="px-3 py-1 rounded-lg bg-card/80 text-[11px] text-muted-foreground font-medium shadow-sm">
@@ -1175,52 +1339,6 @@ function Conversations() {
                   </div>
                 );
               })}
-
-              {/* Inquiry bubble */}
-              {convoDetail.inquiry && (() => {
-                const inq = convoDetail.inquiry;
-                // Filter out noisy internal fields
-                const hiddenKeys = new Set(["Conversation ID", "Recent chat", "Type"]);
-                const fields = Object.entries(inq.data).filter(
-                  ([key]) => !hiddenKeys.has(key),
-                );
-                if (fields.length === 0) return null;
-                return (
-                  <div className="flex justify-start mb-0.5">
-                    <div className="relative max-w-[85%] sm:max-w-[65%] rounded-lg rounded-tl-none px-3 py-2 shadow-sm bg-muted/50 text-foreground overflow-hidden">
-                      <div className="flex items-center gap-1 mb-1.5">
-                        <FileText className="w-3 h-3 text-muted-foreground" />
-                        <span className="text-[11px] font-semibold text-muted-foreground">
-                          Inquiry
-                        </span>
-                        <span className={cn(
-                          "text-[10px] px-1.5 py-0.5 rounded-full ml-1",
-                          inq.status === "new" && "bg-blue-500/10 text-blue-400",
-                          inq.status === "replied" && "bg-emerald-500/10 text-emerald-400",
-                          inq.status === "closed" && "bg-muted text-muted-foreground",
-                        )}>
-                          {inq.status === "new" ? "New" : inq.status === "replied" ? "Replied" : "Closed"}
-                        </span>
-                      </div>
-                      <div className="space-y-1">
-                        {fields.map(([key, value]) => (
-                          <div key={key} className="text-[13px] leading-relaxed">
-                            <span className="font-medium text-foreground/80">{key}:</span>{" "}
-                            <span className="text-foreground/70 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                              {value}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex items-center justify-end mt-1">
-                        <span className="text-[10px] text-muted-foreground/70">
-                          {formatTime(String(inq.createdAt))}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
 
               <div ref={messagesEndRef} />
             </div>

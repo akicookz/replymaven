@@ -668,13 +668,12 @@
       background: var(--rm-agent-bg, #f0f7ff);
       color: var(--rm-bot-text, #18181b);
       border-radius: 18px 18px 18px 4px;
-      border-left: 2px solid var(--rm-primary, #2563eb);
     }
     .rm-sender-label {
       font-size: 11px;
       font-weight: 600;
-      margin-bottom: 2px;
-      padding-left: 36px;
+      margin-bottom: 1px;
+      margin-left: 36px;
     }
     .rm-sender-label.bot {
       color: var(--rm-bot-text, #18181b);

@@ -141,7 +141,17 @@ export class DashboardService {
           sql`, `,
         )})`,
       )
-      .orderBy(desc(conversations.updatedAt))
+      .orderBy(
+        desc(
+          sql`case
+            when ${conversations.visitorLastSeenAt} is not null
+              and ${conversations.visitorLastSeenAt} > ${conversations.updatedAt}
+            then ${conversations.visitorLastSeenAt}
+            else ${conversations.updatedAt}
+          end`,
+        ),
+        desc(conversations.updatedAt),
+      )
       .limit(5);
 
     // ─── Recent inquiries (last 5) ──────────────────────────────────────────
