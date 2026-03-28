@@ -2,8 +2,9 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { users } from "./db/auth.schema";
+import { conversations, cannedResponses } from "./db/schema";
 import { createAuth } from "./auth";
 import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
@@ -47,6 +48,7 @@ import {
   agentReplySchema,
   createCannedResponseSchema,
   updateCannedResponseSchema,
+  suggestCannedResponseSchema,
   updateTelegramSchema,
   onboardingStep1Schema,
   onboardingContextSchema,
@@ -2793,7 +2795,32 @@ const app = new Hono<HonoAppContext>()
       geminiApiKey: c.env.GEMINI_API_KEY,
       openaiApiKey: c.env.OPENAI_API_KEY,
     });
-    const inquiryData = JSON.parse(inquiry.data || "{}");
+    const inquiryData = JSON.parse(inquiry.data || "{}") as Record<string, string>;
+
+    // Fetch user's work title for email signature
+    const [userProfile] = await db
+      .select({ workTitle: users.workTitle })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1);
+
+    // Find best matching canned response
+    const cannedService = new CannedResponseService(db);
+    const allApproved = (await cannedService.getByProject(project.id)).filter(
+      (cr) => cr.status === "approved",
+    );
+
+    let topCannedMatch: { trigger: string; response: string } | null = null;
+    if (allApproved.length > 0) {
+      const queryText = Object.values(inquiryData).join(" ");
+      const ranked = await aiService.rankCannedResponses(
+        queryText,
+        allApproved.map((cr) => ({ id: cr.id, trigger: cr.trigger, response: cr.response })),
+      );
+      if (ranked.length > 0 && ranked[0].score > 0.5) {
+        topCannedMatch = { trigger: ranked[0].trigger, response: ranked[0].response };
+      }
+    }
 
     const reply = await aiService.composeInquiryReply(
       {
@@ -2804,6 +2831,8 @@ const app = new Hono<HonoAppContext>()
       },
       settings?.companyName ?? project.name,
       inquiryData,
+      { name: user.name, email: user.email, workTitle: userProfile?.workTitle },
+      topCannedMatch,
     );
 
     return c.json(reply);
@@ -3641,6 +3670,42 @@ const app = new Hono<HonoAppContext>()
     if (!deleted) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
   })
+  .post("/api/projects/:id/canned-responses/suggest", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(suggestCannedResponseSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const cannedService = new CannedResponseService(db);
+    const allResponses = await cannedService.getByProject(project.id);
+    const approved = allResponses.filter((cr) => cr.status === "approved");
+
+    if (approved.length === 0) {
+      return c.json({ suggestions: [] });
+    }
+
+    const aiService = new AiService({
+      model: c.env.AI_MODEL,
+      geminiApiKey: c.env.GEMINI_API_KEY,
+      openaiApiKey: c.env.OPENAI_API_KEY,
+    });
+
+    const suggestions = await aiService.rankCannedResponses(
+      parsed.data.query,
+      approved.map((cr) => ({ id: cr.id, trigger: cr.trigger, response: cr.response })),
+    );
+
+    return c.json({ suggestions });
+  })
 
   // ─── Guidelines (SOPs) ──────────────────────────────────────────────────────
   .get("/api/projects/:id/guidelines", async (c) => {
@@ -3933,8 +3998,65 @@ async function handleQueue(
   }
 }
 
+// ─── Scheduled (Cron) ─────────────────────────────────────────────────────────
+
+async function handleScheduled(
+  _event: ScheduledEvent,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<void> {
+  const db = drizzle(env.DB);
+
+  // Find closed conversations that have no linked canned response draft
+  const unprocessed = await db
+    .select({
+      id: conversations.id,
+      projectId: conversations.projectId,
+    })
+    .from(conversations)
+    .where(
+      sql`${conversations.status} = 'closed'
+        AND ${conversations.id} NOT IN (
+          SELECT ${cannedResponses.sourceConversationId}
+          FROM ${cannedResponses}
+          WHERE ${cannedResponses.sourceConversationId} IS NOT NULL
+        )`,
+    )
+    .limit(20);
+
+  if (unprocessed.length === 0) return;
+
+  // Group by project to check settings once per project
+  const byProject = new Map<string, string[]>();
+  for (const row of unprocessed) {
+    const list = byProject.get(row.projectId) ?? [];
+    list.push(row.id);
+    byProject.set(row.projectId, list);
+  }
+
+  for (const [projectId, conversationIds] of byProject) {
+    for (const conversationId of conversationIds) {
+      ctx.waitUntil(
+        triggerAutoDraftIfEnabled({
+          projectId,
+          conversationId,
+          db,
+          env,
+          kv: env.CONVERSATIONS_CACHE,
+        }).catch((err) => {
+          console.error(
+            `Cron auto-draft failed for conversation ${conversationId}:`,
+            err,
+          );
+        }),
+      );
+    }
+  }
+}
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 export default {
   fetch: app.fetch,
   queue: handleQueue,
+  scheduled: handleScheduled,
 };

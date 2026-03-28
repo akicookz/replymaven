@@ -391,6 +391,71 @@ If the conversation is too short, trivial, or doesn't contain a clear reusable Q
     return null;
   }
 
+  // ─── Rank Canned Responses ───────────────────────────────────────────────────
+
+  async rankCannedResponses(
+    query: string,
+    responses: Array<{ id: string; trigger: string; response: string }>,
+  ): Promise<
+    Array<{ id: string; trigger: string; response: string; score: number }>
+  > {
+    if (responses.length === 0) return [];
+
+    const numbered = responses
+      .map((r, i) => `${i + 1}. trigger: "${r.trigger}" | response: "${r.response}"`)
+      .join("\n");
+
+    try {
+      const { text } = await generateText({
+        model: this.model,
+        prompt: `You are ranking pre-written canned responses by relevance to a user query.
+
+QUERY:
+"${query}"
+
+CANNED RESPONSES:
+${numbered}
+
+Score each response 0.0–1.0 for how relevant it is to the query.
+Return ONLY a JSON array of objects with "index" (1-based) and "score" fields, sorted by score descending.
+Example: [{"index":1,"score":0.9},{"index":2,"score":0.1}]
+
+No markdown, no explanation.`,
+        temperature: 0.1,
+        maxOutputTokens: 256,
+      });
+
+      const trimmed = text.trim();
+      const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
+      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : trimmed) as Array<{
+        index: number;
+        score: number;
+      }>;
+
+      return parsed
+        .filter((r) => r.score > 0.3 && r.index >= 1 && r.index <= responses.length)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3)
+        .map((r) => ({
+          ...responses[r.index - 1],
+          score: r.score,
+        }));
+    } catch {
+      // Fallback: simple keyword overlap scoring
+      const queryWords = new Set(query.toLowerCase().split(/\s+/));
+      return responses
+        .map((r) => {
+          const triggerWords = r.trigger.toLowerCase().split(/\s+/);
+          const overlap = triggerWords.filter((w) => queryWords.has(w)).length;
+          const score = triggerWords.length > 0 ? overlap / triggerWords.length : 0;
+          return { ...r, score };
+        })
+        .filter((r) => r.score > 0.3)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+    }
+  }
+
   // ─── Compose Inquiry Reply ──────────────────────────────────────────────────
 
   async composeInquiryReply(
@@ -402,6 +467,12 @@ If the conversation is too short, trivial, or doesn't contain a clear reusable Q
     },
     projectName: string,
     inquiryData: Record<string, string>,
+    senderInfo?: {
+      name: string;
+      email: string;
+      workTitle?: string | null;
+    } | null,
+    matchingCannedResponse?: { trigger: string; response: string } | null,
   ): Promise<{ subject: string; body: string }> {
     const toneInstruction =
       settings.toneOfVoice === "custom" && settings.customTonePrompt
@@ -422,17 +493,25 @@ If the conversation is too short, trivial, or doesn't contain a clear reusable Q
       .map(([key, val]) => `${key}: ${val}`)
       .join("\n");
 
+    const signOff = senderInfo
+      ? `End with this sign-off:\n\nBest regards,\n${senderInfo.name}${senderInfo.workTitle ? `\n${senderInfo.workTitle}` : ""}\n${projectName}\n${senderInfo.email}`
+      : `End with an appropriate sign-off using "[Your name]" as placeholder`;
+
+    const cannedHint = matchingCannedResponse
+      ? `\nA pre-approved answer closely matches this inquiry. Use it as the core of your reply, adapting the wording naturally to fit the email format and tone:\n"${matchingCannedResponse.response}"\n`
+      : "";
+
     const { text } = await generateText({
       model: this.model,
       system: `You are a helpful assistant composing email replies on behalf of "${projectName}".
-${toneInstruction}${companyCtx}
+${toneInstruction}${companyCtx}${cannedHint}
 
 Compose a professional reply email to an inquiry form submission. The reply should:
 - Address the person by name if available
 - Acknowledge what they wrote
 - Provide a helpful, relevant response based on the company context
 - Be concise but thorough
-- End with an appropriate sign-off using "[Your name]" as placeholder
+- ${signOff}
 
 Return ONLY valid JSON in this exact format:
 {"subject":"<email subject line>","body":"<email body text>"}

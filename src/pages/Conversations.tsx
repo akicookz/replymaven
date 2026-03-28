@@ -439,6 +439,45 @@ function Conversations() {
     (cr) => cr.status === "approved",
   );
 
+  // Find the last visitor message for AI-ranked suggestions
+  const lastVisitorMessage = convoDetail?.messages
+    ?.filter((m: Message) => m.role === "visitor")
+    .at(-1);
+
+  const { data: suggestionsData } = useQuery<{
+    suggestions: Array<{
+      id: string;
+      trigger: string;
+      response: string;
+      score: number;
+    }>;
+  }>({
+    queryKey: [
+      "canned-suggestions",
+      projectId,
+      lastVisitorMessage?.id,
+    ],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/projects/${projectId}/canned-responses/suggest`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: lastVisitorMessage!.content }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to fetch suggestions");
+      return res.json();
+    },
+    enabled:
+      !!lastVisitorMessage?.content &&
+      convoDetail?.conversation?.status !== "closed" &&
+      (approvedCanned?.length ?? 0) > 0,
+    staleTime: 60_000,
+  });
+
+  const suggestions = suggestionsData?.suggestions ?? [];
+
   const sendReply = useMutation({
     mutationFn: async () => {
       const res = await fetch(
@@ -1344,6 +1383,31 @@ function Conversations() {
 
               <div ref={messagesEndRef} />
             </div>
+
+            {/* Canned Response Suggestions */}
+            {suggestions.length > 0 &&
+              convoDetail.conversation.status !== "closed" && (
+                <div className="px-3 py-1.5 flex gap-2 overflow-x-auto">
+                  {suggestions.map(
+                    (s: {
+                      id: string;
+                      trigger: string;
+                      response: string;
+                      score: number;
+                    }) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setReplyText(s.response)}
+                        className="shrink-0 px-3 py-1.5 text-xs bg-primary/10 text-primary rounded-full hover:bg-primary/20 transition-colors max-w-[200px] truncate"
+                        title={s.response}
+                      >
+                        {s.trigger}
+                      </button>
+                    ),
+                  )}
+                </div>
+              )}
 
             {/* Reply Input */}
             <div className="px-3 py-2 bg-card border-t border-border">

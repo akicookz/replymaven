@@ -194,6 +194,10 @@ export const updateCannedResponseSchema = z.object({
   status: z.enum(["draft", "approved", "rejected"]).optional(),
 });
 
+export const suggestCannedResponseSchema = z.object({
+  query: z.string().min(1, "Query is required").max(2000),
+});
+
 // ─── Telegram ─────────────────────────────────────────────────────────────────
 export const updateTelegramSchema = z.object({
   telegramBotToken: z.string().max(255).optional(),
