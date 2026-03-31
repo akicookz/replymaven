@@ -3,6 +3,7 @@ import { type ChatService } from "../../services/chat-service";
 import { type ProjectService } from "../../services/project-service";
 import { type TelegramService } from "../../services/telegram-service";
 import { type WidgetService } from "../../services/widget-service";
+import { logError, logInfo } from "../../observability";
 
 function formatSubmissionValue(value: string | null | undefined): string {
   return value?.trim() || "Not provided";
@@ -35,6 +36,18 @@ export async function createTeamRequestSubmission(params: {
   executionCtx: ExecutionContext;
 }): Promise<{ submissionId: string; summary: string; telegramThreadId?: string }> {
   const summary = params.summary.trim() || "Visitor asked for team follow-up.";
+  logInfo("team_request.started", {
+    projectId: params.project.id,
+    conversationId: params.conversation.id,
+    hasTelegram: Boolean(
+      params.telegramService &&
+        params.settings?.telegramBotToken &&
+        params.settings?.telegramChatId,
+    ),
+    hasEmail: Boolean(params.env.RESEND_API_KEY),
+    summaryLength: summary.length,
+    historyCount: params.conversationHistory.length,
+  });
 
   const formData = {
     Name: formatSubmissionValue(params.conversation.visitorName),
@@ -47,6 +60,11 @@ export async function createTeamRequestSubmission(params: {
     params.conversation.visitorId ?? undefined,
     formData,
   );
+  logInfo("team_request.submission_created", {
+    projectId: params.project.id,
+    conversationId: params.conversation.id,
+    submissionId: submission.id,
+  });
 
   await params.chatService.updateConversation(
     params.conversation.id,
@@ -60,6 +78,11 @@ export async function createTeamRequestSubmission(params: {
       }),
     },
   );
+  logInfo("team_request.conversation_updated", {
+    projectId: params.project.id,
+    conversationId: params.conversation.id,
+    submissionId: submission.id,
+  });
 
   let telegramThreadId: string | undefined;
 
@@ -79,8 +102,18 @@ export async function createTeamRequestSubmission(params: {
       if (messageId) {
         telegramThreadId = String(messageId);
       }
-    } catch {
-      // Ignore Telegram failures for follow-up submissions.
+      logInfo("team_request.telegram_notified", {
+        projectId: params.project.id,
+        conversationId: params.conversation.id,
+        submissionId: submission.id,
+        telegramThreadId: telegramThreadId ?? null,
+      });
+    } catch (error) {
+      logError("team_request.telegram_failed", error, {
+        projectId: params.project.id,
+        conversationId: params.conversation.id,
+        submissionId: submission.id,
+      });
     }
   }
 
@@ -90,6 +123,11 @@ export async function createTeamRequestSubmission(params: {
     if (ownerEmail) {
       const projectName = params.settings?.companyName ?? params.project.name;
       const dashboardUrl = `${params.env.BETTER_AUTH_URL}/app/projects/${params.project.id}/inquiries`;
+      logInfo("team_request.email_queued", {
+        projectId: params.project.id,
+        conversationId: params.conversation.id,
+        submissionId: submission.id,
+      });
       params.executionCtx.waitUntil(
         emailService
           .sendInquiryNotification({
@@ -99,11 +137,22 @@ export async function createTeamRequestSubmission(params: {
             dashboardUrl,
           })
           .catch((err) => {
-            console.error("Team request email failed:", err);
+            logError("team_request.email_failed", err, {
+              projectId: params.project.id,
+              conversationId: params.conversation.id,
+              submissionId: submission.id,
+            });
           }),
       );
     }
   }
+
+  logInfo("team_request.completed", {
+    projectId: params.project.id,
+    conversationId: params.conversation.id,
+    submissionId: submission.id,
+    telegramThreadId: telegramThreadId ?? null,
+  });
 
   return { submissionId: submission.id, summary, telegramThreadId };
 }

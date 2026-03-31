@@ -150,7 +150,10 @@
 
   // ─── SVG Icons ──────────────────────────────────────────────────────────────
   const ICONS = {
-    chat: '<svg viewBox="0 0 68 90" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M64.5991 34.4292C64.5991 30.8374 63.7372 27.3928 62.2031 24.8531C60.669 22.3133 58.5882 20.8865 56.4186 20.8865H27.0835C24.9141 20.8857 22.8337 19.4584 21.3 16.9185L12.2933 2.00792C11.8872 1.33568 11.3697 0.877895 10.8064 0.692442C10.2432 0.506988 9.65931 0.602195 9.12871 0.966024C8.59811 1.32985 8.14459 1.94597 7.82548 2.73647C7.50637 3.52697 7.33601 4.45637 7.33594 5.40715V75.0574C7.33594 78.6491 8.1978 82.0938 9.73194 84.6335C11.2661 87.1733 13.3468 88.6001 15.5164 88.6001H56.4186C58.5882 88.6001 60.669 87.1733 62.2031 84.6335C63.7372 82.0938 64.5991 78.6491 64.5991 75.0574V34.4292Z"/><path d="M0.599609 65.6436H14.354"/><path d="M0.599609 52.2524H14.354"/><path d="M0.599609 40.7739H14.354"/><path d="M22.4941 59.9043C31.7573 69.4695 41.0205 69.4695 50.2836 59.9043"/></svg>',
+    chat: (() => {
+      const id = "rm-sm-" + Math.random().toString(36).slice(2, 8);
+      return `<svg viewBox="0 0 28 32" fill="none"><mask id="${id}"><rect width="28" height="32" fill="white"/><path d="M6 14C11.3333 19.3333 16.6667 19.3333 22 14" stroke="black" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></mask><path mask="url(#${id})" d="M24 32H6C2.6875 32 0 29.3125 0 26V6C0 2.6875 2.6875 0 6 0H25C26.6562 0 28 1.34375 28 3V21C28 22.3062 27.1625 23.4187 26 23.8312V28C27.1063 28 28 28.8937 28 30C28 31.1063 27.1063 32 26 32H24ZM6 24C4.89375 24 4 24.8937 4 26C4 27.1063 4.89375 28 6 28H22V24H6Z" fill="currentColor"/></svg>`;
+    })(),
     close:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
     send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
@@ -4119,9 +4122,12 @@
 
       // Show avatar on the latest message only — hide previous same-role avatar
       if (lastMessageRole === role) {
-        const prevRows = messagesContainer.querySelectorAll(`.rm-message-row.${role}`);
+        const prevRows = messagesContainer.querySelectorAll(
+          `.rm-message-row.${role}`,
+        );
         if (prevRows.length > 0) {
-          const prevAvatar = prevRows[prevRows.length - 1].querySelector(".rm-message-avatar");
+          const prevAvatar =
+            prevRows[prevRows.length - 1].querySelector(".rm-message-avatar");
           if (prevAvatar) prevAvatar.classList.add("hidden");
         }
       }
@@ -4139,7 +4145,8 @@
         if (role === "bot") {
           label.textContent = senderName || config?.botName || "AI Assistant";
         } else {
-          label.textContent = senderName || config?.agentName || "Support Agent";
+          label.textContent =
+            senderName || config?.agentName || "Support Agent";
         }
         col.appendChild(label);
       }
@@ -4152,7 +4159,9 @@
       if (imageUrl) {
         const img = document.createElement("img");
         img.className = "rm-message-image";
-        img.src = imageUrl.startsWith("data:") ? imageUrl : resolveUrl(imageUrl);
+        img.src = imageUrl.startsWith("data:")
+          ? imageUrl
+          : resolveUrl(imageUrl);
         img.alt = "Attached image";
         img.onclick = () => window.open(img.src, "_blank");
         msgEl.appendChild(img);
@@ -4174,7 +4183,9 @@
       if (imageUrl) {
         const img = document.createElement("img");
         img.className = "rm-message-image";
-        img.src = imageUrl.startsWith("data:") ? imageUrl : resolveUrl(imageUrl);
+        img.src = imageUrl.startsWith("data:")
+          ? imageUrl
+          : resolveUrl(imageUrl);
         img.alt = "Attached image";
         img.onclick = () => window.open(img.src, "_blank");
         msgEl.appendChild(img);
@@ -4652,8 +4663,12 @@
         if (msg.role === "bot" || msg.role === "agent") {
           hideTyping();
           const el = addMessageToUI(
-            msg.role, msg.content, msg.id, undefined,
-            msg.senderName ?? undefined, msg.senderAvatar ?? undefined,
+            msg.role,
+            msg.content,
+            msg.id,
+            undefined,
+            msg.senderName ?? undefined,
+            msg.senderAvatar ?? undefined,
           );
           // Render markdown for bot/agent messages
           if (el.parentElement) {
@@ -4701,13 +4716,17 @@
             msgs[msgs.length - 1]?.content ?? "New message",
           );
 
-          const latestMsg = [...msgs].reverse().find((m: { role: string }) => m.role !== "visitor");
+          const latestMsg = [...msgs]
+            .reverse()
+            .find((m: { role: string }) => m.role !== "visitor");
           if (latestMsg) {
             const senderName =
               latestMsg.senderName ||
               (latestMsg.role === "agent"
                 ? "Agent"
-                : config?.botName || config?.widget?.headerText || "New message");
+                : config?.botName ||
+                  config?.widget?.headerText ||
+                  "New message");
             introPillTitle.textContent = senderName;
             const text = latestMsg.content ?? "";
             introPillDesc.textContent =
@@ -4961,20 +4980,17 @@
 
   function showIntroPill() {
     const senderName =
-      introMessageAuthor?.name ||
-      config?.widget?.headerText ||
-      "Chat with us";
+      introMessageAuthor?.name || config?.widget?.headerText || "Chat with us";
     introPillTitle.textContent = senderName;
     const text = introMessageText ?? "";
     introPillDesc.textContent =
       text.length > 120 ? text.substring(0, 120) + "..." : text;
 
-    const avatarUrl =
-      introMessageAuthor?.avatar
-        ? resolveUrl(introMessageAuthor.avatar)
-        : config?.widget?.avatarUrl
-          ? resolveUrl(config.widget.avatarUrl)
-          : null;
+    const avatarUrl = introMessageAuthor?.avatar
+      ? resolveUrl(introMessageAuthor.avatar)
+      : config?.widget?.avatarUrl
+        ? resolveUrl(config.widget.avatarUrl)
+        : null;
     updatePillAvatar(avatarUrl);
 
     const delay = (config?.introMessageDelay ?? 1) * 1000;

@@ -32,6 +32,7 @@ import {
 import { BillingService } from "../../services/billing-service";
 import { ChatService } from "../../services/chat-service";
 import { GuidelineService } from "../../services/guideline-service";
+import { logError, logInfo, logWarn } from "../../observability";
 import { ProjectService } from "../../services/project-service";
 import { TelegramService } from "../../services/telegram-service";
 import { ToolService } from "../../services/tool-service";
@@ -144,9 +145,27 @@ function getLastTeamMessageRole(
   return null;
 }
 
+function buildWidgetTurnLogContext(
+  context: WidgetMessageTurnContext,
+  turnId: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    turnId,
+    projectId: context.project.id,
+    conversationId: context.conversationId,
+    ...extra,
+  };
+}
+
+function getToolNames(tools: Array<{ name: string }>): string[] {
+  return tools.map((tool) => tool.name);
+}
+
 export async function handleWidgetMessageTurn(
   context: WidgetMessageTurnContext,
 ): Promise<Response> {
+  const turnId = crypto.randomUUID();
   const projectService = new ProjectService(context.db);
   const billingService = new BillingService(context.db, context.env);
   const chatService = new ChatService(
@@ -156,10 +175,26 @@ export async function handleWidgetMessageTurn(
   const toolService = new ToolService(context.db);
   const guidelineService = new GuidelineService(context.db);
 
+  logInfo(
+    "widget_turn.started",
+    buildWidgetTurnLogContext(context, turnId, {
+      model: context.env.AI_MODEL,
+      messageLength: context.payload.content.length,
+      hasImage: Boolean(context.payload.imageUrl),
+      pageContextKeys: Object.keys(context.payload.pageContext ?? {}),
+    }),
+  );
+
   const ownerSub = await billingService.getSubscriptionByUserId(
     context.project.userId,
   );
   if (!ownerSub || !billingService.isSubscriptionActive(ownerSub)) {
+    logWarn(
+      "widget_turn.blocked",
+      buildWidgetTurnLogContext(context, turnId, {
+        reason: "subscription_inactive",
+      }),
+    );
     return Response.json(
       {
         error:
@@ -174,6 +209,12 @@ export async function handleWidgetMessageTurn(
     context.project.userId,
   );
   if (!messageCheck.allowed) {
+    logWarn(
+      "widget_turn.blocked",
+      buildWidgetTurnLogContext(context, turnId, {
+        reason: "message_limit_reached",
+      }),
+    );
     return Response.json(
       {
         error: "Message limit reached. Please contact the site owner.",
@@ -188,6 +229,12 @@ export async function handleWidgetMessageTurn(
     context.project.id,
   );
   if (!conversation) {
+    logWarn(
+      "widget_turn.blocked",
+      buildWidgetTurnLogContext(context, turnId, {
+        reason: "conversation_not_found",
+      }),
+    );
     return Response.json({ error: "Conversation not found" }, { status: 404 });
   }
 
@@ -199,6 +246,12 @@ export async function handleWidgetMessageTurn(
 
   if (enabledTools.length > 0) {
     if (!context.checkRateLimit(`toolmsg:${context.project.id}`, 100, 60_000)) {
+      logWarn(
+        "widget_turn.blocked",
+        buildWidgetTurnLogContext(context, turnId, {
+          reason: "tool_rate_limit_exceeded",
+        }),
+      );
       return Response.json(
         {
           error: "Tool execution rate limit exceeded. Please try again shortly.",
@@ -216,6 +269,13 @@ export async function handleWidgetMessageTurn(
           );
           tool.headers = JSON.stringify(decrypted);
         } catch {
+          logWarn(
+            "widget_turn.tool_headers_decrypt_failed",
+            buildWidgetTurnLogContext(context, turnId, {
+              toolId: tool.id,
+              toolName: tool.name,
+            }),
+          );
           tool.headers = null;
         }
       }
@@ -230,6 +290,10 @@ export async function handleWidgetMessageTurn(
     );
     if (reopened) {
       conversation = reopened;
+      logInfo(
+        "widget_turn.reopened_conversation",
+        buildWidgetTurnLogContext(context, turnId),
+      );
     }
   }
 
@@ -270,17 +334,34 @@ export async function handleWidgetMessageTurn(
             : undefined,
         )
         .catch((err) => {
-          console.error("Telegram forward failed:", err);
+          logError(
+            "widget_turn.telegram_forward_failed",
+            err,
+            buildWidgetTurnLogContext(context, turnId),
+          );
         }),
     );
   }
 
   if (shouldSilenceForAgent) {
+    logInfo(
+      "widget_turn.agent_mode_bypassed",
+      buildWidgetTurnLogContext(context, turnId, {
+        conversationStatus: conversation.status,
+      }),
+    );
     return Response.json({ ok: true, agentMode: true });
   }
 
   return createWidgetSseResponse(async (controller, encoder) => {
     const telemetry: TurnTelemetry = { startedAt: Date.now() };
+    let currentStage = "load_message_image";
+    let retrieval = createEmptyRetrievalResult();
+    let eventState = createInitialAgentEventState();
+    let turnIntent: string | null = null;
+    let executionPath: string | null = null;
+    let retrievalMode: string | null = null;
+
     function emitStatus(message: string, phase: "retrieval" | "tool" | "verify" | "compose"): void {
       if (!telemetry.firstStatusAt) {
         telemetry.firstStatusAt = Date.now();
@@ -288,12 +369,22 @@ export async function handleWidgetMessageTurn(
       emitStatusEvent(controller, encoder, { phase, message });
     }
 
+    logInfo(
+      "widget_turn.pipeline_started",
+      buildWidgetTurnLogContext(context, turnId, {
+        conversationStatus: conversation.status,
+        availableToolNames: getToolNames(availableTools),
+        guidelineCount: enabledGuidelines.length,
+      }),
+    );
+
     try {
       const image = await loadMessageImage({
         imageUrl,
         uploads: context.env.UPLOADS,
       });
 
+      currentStage = "load_history";
       const history =
         (await chatService.getFromCache(context.conversationId, context.project.id)) ??
         prefetchedHistory ??
@@ -305,6 +396,13 @@ export async function handleWidgetMessageTurn(
           role: message.role as "visitor" | "bot" | "agent",
           content: message.content,
         }));
+      logInfo(
+        "widget_turn.history_loaded",
+        buildWidgetTurnLogContext(context, turnId, {
+          historyCount: conversationHistory.length,
+          requestedAgent,
+        }),
+      );
 
       const modelConfig = {
         model: context.env.AI_MODEL,
@@ -313,6 +411,7 @@ export async function handleWidgetMessageTurn(
       };
       const model = createLanguageModel(modelConfig);
 
+      currentStage = "classify_turn";
       const [conversationSummary, turnPlan] = await Promise.all([
         summarizeConversation(model, conversationHistory),
         classifySupportTurn(
@@ -327,27 +426,27 @@ export async function handleWidgetMessageTurn(
         userMessage: context.payload.content,
         enabledTools: availableTools,
       });
-      console.log("Chat runtime intent classification", {
-        projectId: context.project.id,
-        conversationId: context.conversationId,
-        intent: turnPlan.intent,
-        summary: turnPlan.summary,
-        followUpQuestion: turnPlan.followUpQuestion,
-      });
-      console.log("Chat runtime execution path", {
-        projectId: context.project.id,
-        conversationId: context.conversationId,
-        executionPath: executionPlan.path,
-        retrievalMode: executionPlan.retrievalMode,
-        allowedTools: executionPlan.allowedTools.map((tool) => tool.name),
-        toolChoice:
-          typeof executionPlan.toolChoice === "string"
-            ? executionPlan.toolChoice
-            : executionPlan.toolChoice.toolName,
-      });
+      turnIntent = turnPlan.intent;
+      executionPath = executionPlan.path;
+      retrievalMode = executionPlan.retrievalMode;
+      logInfo(
+        "widget_turn.plan_computed",
+        buildWidgetTurnLogContext(context, turnId, {
+          intent: turnPlan.intent,
+          executionPath: executionPlan.path,
+          retrievalMode: executionPlan.retrievalMode,
+          hasConversationSummary: Boolean(conversationSummary),
+          hasFollowUpQuestion: Boolean(turnPlan.followUpQuestion),
+          allowedTools: getToolNames(executionPlan.allowedTools),
+          toolChoice:
+            typeof executionPlan.toolChoice === "string"
+              ? executionPlan.toolChoice
+              : executionPlan.toolChoice.toolName,
+        }),
+      );
 
-      let retrieval = createEmptyRetrievalResult();
       if (executionPlan.retrievalMode !== "none") {
+        currentStage = "retrieval";
         emitStatus("Searching docs...", "retrieval");
         const searchQuery = await reformulateQuery(
           model,
@@ -364,6 +463,14 @@ export async function handleWidgetMessageTurn(
                 searchQuery,
                 turnPlan.retrievalQueries,
               );
+        logInfo(
+          "widget_turn.retrieval_started",
+          buildWidgetTurnLogContext(context, turnId, {
+            queryCount: retrievalQueries.length,
+            broaderQueryCount: turnPlan.broaderQueries.length,
+            allowBroaderRetry: executionPlan.allowBroaderRetry,
+          }),
+        );
 
         retrieval = await runAiSearch({
           env: context.env,
@@ -376,17 +483,35 @@ export async function handleWidgetMessageTurn(
           allowBroaderRetry: executionPlan.allowBroaderRetry,
         });
         if (retrieval.droppedCrossTenant > 0) {
-          console.warn(
-            `Dropped ${retrieval.droppedCrossTenant} cross-tenant retrieval chunks for project ${context.project.id}`,
+          logWarn(
+            "widget_turn.retrieval_cross_tenant_dropped",
+            buildWidgetTurnLogContext(context, turnId, {
+              droppedCrossTenant: retrieval.droppedCrossTenant,
+            }),
           );
         }
         if (retrieval.unresolvedKeys.length > 0) {
-          console.warn(
-            `Could not resolve ${retrieval.unresolvedKeys.length} RAG source keys for project ${context.project.id}`,
+          logWarn(
+            "widget_turn.retrieval_unresolved_sources",
+            buildWidgetTurnLogContext(context, turnId, {
+              unresolvedSourceCount: retrieval.unresolvedKeys.length,
+            }),
           );
         }
+        logInfo(
+          "widget_turn.retrieval_completed",
+          buildWidgetTurnLogContext(context, turnId, {
+            groundingConfidence: retrieval.groundingConfidence,
+            sourceCount: retrieval.sourceReferences.length,
+            retrievalAttempted: retrieval.retrievalAttempted,
+            broaderSearchAttempted: retrieval.broaderSearchAttempted,
+            unresolvedSourceCount: retrieval.unresolvedKeys.length,
+            droppedCrossTenant: retrieval.droppedCrossTenant,
+          }),
+        );
       }
 
+      currentStage = "find_canned_match";
       const cannedMatch = await chatService.findCannedResponse(
         context.project.id,
         context.payload.content,
@@ -437,7 +562,16 @@ export async function handleWidgetMessageTurn(
         },
       );
 
+      currentStage = "stream_agent";
       emitStatus("Writing the reply...", "compose");
+      logInfo(
+        "widget_turn.agent_stream_started",
+        buildWidgetTurnLogContext(context, turnId, {
+          toolCount: executionPlan.allowedTools.length,
+          hasImage: Boolean(image),
+          cannedMatchStatus: cannedMatch?.status ?? null,
+        }),
+      );
 
       const supportAgent = await streamSupportAgent(
         { modelConfig },
@@ -449,7 +583,13 @@ export async function handleWidgetMessageTurn(
           tools: executionPlan.allowedTools,
           toolChoice: executionPlan.toolChoice,
           onToolCallStart: (info) => {
-            console.log(`Tool call started: ${info.toolName}`, info.input);
+            logInfo(
+              "widget_turn.tool_call_started",
+              buildWidgetTurnLogContext(context, turnId, {
+                toolName: info.toolName,
+                inputKeys: Object.keys(info.input ?? {}),
+              }),
+            );
             emitStatus("Checking connected systems...", "tool");
           },
           onToolCallFinish: (info) => {
@@ -466,14 +606,27 @@ export async function handleWidgetMessageTurn(
                   errorMessage: info.error ? String(info.error) : null,
                 })
                 .catch((err) => {
-                  console.error("Failed to log tool execution:", err);
+                  logError(
+                    "widget_turn.tool_execution_log_failed",
+                    err,
+                    buildWidgetTurnLogContext(context, turnId, {
+                      toolName: info.toolName,
+                    }),
+                  );
                 });
             }
+            logInfo(
+              "widget_turn.tool_call_finished",
+              buildWidgetTurnLogContext(context, turnId, {
+                toolName: info.toolName,
+                success: info.success,
+                durationMs: info.durationMs,
+              }),
+            );
           },
         },
       );
 
-      let eventState = createInitialAgentEventState();
       const emittedToolCalls = new Set<string>();
       const toolCallStartTimes = new Map<string, number>();
 
@@ -495,6 +648,14 @@ export async function handleWidgetMessageTurn(
           emitStatus("Writing the reply...", "compose");
         }
       }
+      logInfo(
+        "widget_turn.agent_stream_completed",
+        buildWidgetTurnLogContext(context, turnId, {
+          textLength: eventState.fullResponse.length,
+          hadToolCalls: eventState.hadToolCalls,
+          stepCount: eventState.stepCount,
+        }),
+      );
 
       let fullResponse = eventState.fullResponse;
 
@@ -529,7 +690,15 @@ export async function handleWidgetMessageTurn(
         })
       ) {
         telemetry.verifierRan = true;
+        currentStage = "verify_answer";
         emitStatus("Checking factual claims against docs...", "verify");
+        logInfo(
+          "widget_turn.verification_started",
+          buildWidgetTurnLogContext(context, turnId, {
+            groundingConfidence: retrieval.groundingConfidence,
+            hadToolCalls: eventState.hadToolCalls,
+          }),
+        );
 
         const verification = await verifyAnswer({
           model,
@@ -539,19 +708,19 @@ export async function handleWidgetMessageTurn(
           lastToolOutput: eventState.lastToolOutput,
         });
         telemetry.verifierVerdict = verification.verdict;
-        console.log("Claim verification result", {
-          projectId: context.project.id,
-          conversationId: context.conversationId,
-          verdict: verification.verdict,
-          claimsChecked: verification.claims.length,
-          unsupportedClaims: verification.claims.filter(
-            (claim) => claim.status === "unsupported",
-          ).length,
-          partialClaims: verification.claims.filter(
-            (claim) => claim.status === "partial",
-          ).length,
-          summary: verification.summary ?? null,
-        });
+        logInfo(
+          "widget_turn.verification_completed",
+          buildWidgetTurnLogContext(context, turnId, {
+            verdict: verification.verdict,
+            claimsChecked: verification.claims.length,
+            unsupportedClaims: verification.claims.filter(
+              (claim) => claim.status === "unsupported",
+            ).length,
+            partialClaims: verification.claims.filter(
+              (claim) => claim.status === "partial",
+            ).length,
+          }),
+        );
 
         if (
           verification.verdict !== "supported" &&
@@ -564,6 +733,7 @@ export async function handleWidgetMessageTurn(
       }
 
       if (fullResponse.includes("[NEW_INQUIRY]")) {
+        currentStage = "team_request";
         const contactInfo = await extractContactInfo(model, conversationHistory);
         const visitorName = conversation.visitorName ?? contactInfo.name ?? null;
         const visitorEmail = conversation.visitorEmail ?? contactInfo.email ?? null;
@@ -588,26 +758,33 @@ export async function handleWidgetMessageTurn(
             : undefined;
 
         const submission = await createTeamRequestSubmission({
-            chatService,
-            widgetService: new WidgetService(context.db),
-            projectService,
-            telegramService,
-            project: context.project,
-            conversation: {
-              ...conversation,
-              visitorName,
-              visitorEmail,
-            },
-            conversationHistory,
-            summary,
-            email: visitorEmail ?? "not provided",
-            settings,
-            env: {
-              BETTER_AUTH_URL: context.env.BETTER_AUTH_URL,
-              RESEND_API_KEY: context.env.RESEND_API_KEY,
-            },
-            executionCtx: context.executionCtx,
-          });
+          chatService,
+          widgetService: new WidgetService(context.db),
+          projectService,
+          telegramService,
+          project: context.project,
+          conversation: {
+            ...conversation,
+            visitorName,
+            visitorEmail,
+          },
+          conversationHistory,
+          summary,
+          email: visitorEmail ?? "not provided",
+          settings,
+          env: {
+            BETTER_AUTH_URL: context.env.BETTER_AUTH_URL,
+            RESEND_API_KEY: context.env.RESEND_API_KEY,
+          },
+          executionCtx: context.executionCtx,
+        });
+        logInfo(
+          "widget_turn.team_request_completed",
+          buildWidgetTurnLogContext(context, turnId, {
+            submissionId: submission.submissionId,
+            telegramThreadId: submission.telegramThreadId ?? null,
+          }),
+        );
 
         if (submission.telegramThreadId) {
           await chatService.updateTelegramThreadId(
@@ -626,6 +803,7 @@ export async function handleWidgetMessageTurn(
       }
 
       if (fullResponse.includes("[RESOLVED]")) {
+        currentStage = "close_conversation";
         await chatService.updateConversationStatus(
           context.conversationId,
           context.project.id,
@@ -638,15 +816,21 @@ export async function handleWidgetMessageTurn(
         );
         emitSseEvent(controller, encoder, { resolved: true });
         emitSseEvent(controller, encoder, { finalText: fullResponse });
+        logInfo(
+          "widget_turn.conversation_resolved",
+          buildWidgetTurnLogContext(context, turnId),
+        );
         triggerAutoDraftIfEnabled({
           projectId: context.project.id,
           conversationId: context.conversationId,
           db: context.db,
           env: context.env,
           kv: context.env.CONVERSATIONS_CACHE,
+          source: "bot_resolved",
         });
       }
 
+      currentStage = "save_bot_message";
       const botMessage = await chatService.addMessage(
         {
           conversationId: context.conversationId,
@@ -664,29 +848,46 @@ export async function handleWidgetMessageTurn(
       try {
         await billingService.incrementMessageUsage(context.project.userId);
       } catch (err) {
-        console.error("Failed to increment message usage:", err);
+        logError(
+          "widget_turn.message_usage_increment_failed",
+          err,
+          buildWidgetTurnLogContext(context, turnId, {
+            messageId: botMessage.id,
+          }),
+        );
       }
 
       if (eventState.hadToolCalls) {
         toolService
           .linkExecutionsToMessage(context.conversationId, botMessage.id)
           .catch((err) => {
-            console.error("Failed to link tool executions to message:", err);
+            logError(
+              "widget_turn.link_tool_executions_failed",
+              err,
+              buildWidgetTurnLogContext(context, turnId, {
+                messageId: botMessage.id,
+              }),
+            );
           });
       }
 
-      console.log("Chat runtime telemetry", {
-        projectId: context.project.id,
-        conversationId: context.conversationId,
-        statusLatencyMs: telemetry.firstStatusAt
-          ? telemetry.firstStatusAt - telemetry.startedAt
-          : null,
-        firstTextLatencyMs: telemetry.firstTextAt
-          ? telemetry.firstTextAt - telemetry.startedAt
-          : null,
-        verifierRan: telemetry.verifierRan ?? false,
-        verifierVerdict: telemetry.verifierVerdict ?? null,
-      });
+      logInfo(
+        "widget_turn.completed",
+        buildWidgetTurnLogContext(context, turnId, {
+          messageId: botMessage.id,
+          sourceCount: retrieval.sourceReferences.length,
+          statusLatencyMs: telemetry.firstStatusAt
+            ? telemetry.firstStatusAt - telemetry.startedAt
+            : null,
+          firstTextLatencyMs: telemetry.firstTextAt
+            ? telemetry.firstTextAt - telemetry.startedAt
+            : null,
+          verifierRan: telemetry.verifierRan ?? false,
+          verifierVerdict: telemetry.verifierVerdict ?? null,
+          hadToolCalls: eventState.hadToolCalls,
+          stepCount: eventState.stepCount,
+        }),
+      );
 
       emitSseEvent(controller, encoder, {
         done: true,
@@ -697,6 +898,25 @@ export async function handleWidgetMessageTurn(
             : undefined,
       });
     } catch (err) {
+      logError(
+        "widget_turn.failed",
+        err,
+        buildWidgetTurnLogContext(context, turnId, {
+          stage: currentStage,
+          model: context.env.AI_MODEL,
+          intent: turnIntent,
+          executionPath,
+          retrievalMode,
+          retrievalAttempted: retrieval.retrievalAttempted,
+          broaderSearchAttempted: retrieval.broaderSearchAttempted,
+          groundingConfidence: retrieval.groundingConfidence,
+          sourceCount: retrieval.sourceReferences.length,
+          hadToolCalls: eventState.hadToolCalls,
+          stepCount: eventState.stepCount,
+          verifierRan: telemetry.verifierRan ?? false,
+          verifierVerdict: telemetry.verifierVerdict ?? null,
+        }),
+      );
       const errorMessage =
         err instanceof Error ? err.message : "Unknown error";
       emitSseEvent(controller, encoder, { error: errorMessage });

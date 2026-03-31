@@ -31,6 +31,7 @@ import { handleWidgetMessageTurn } from "./chat-runtime/orchestration/handle-wid
 import { triggerAutoDraftIfEnabled } from "./chat-runtime/post-turn/auto-draft";
 import { buildToolRegistry } from "./chat-runtime/tools/build-tool-registry";
 import { toToolDefinition } from "./chat-runtime/types";
+import { logError, logInfo } from "./observability";
 import {
   createProjectSchema,
   updateProjectSchema,
@@ -999,6 +1000,7 @@ const app = new Hono<HonoAppContext>()
             db,
             env: c.env,
             kv: c.env.CONVERSATIONS_CACHE,
+            source: "telegram_agent_close",
           });
 
           await telegramService.sendMessage(
@@ -3569,6 +3571,7 @@ const app = new Hono<HonoAppContext>()
       db,
       env: c.env,
       kv: c.env.CONVERSATIONS_CACHE,
+      source: "manual_close",
     });
 
     return c.json({ ok: true });
@@ -3606,13 +3609,28 @@ const app = new Hono<HonoAppContext>()
     }
 
     const service = new CannedResponseService(db);
-    const cr = await service.create({
-      projectId: project.id,
-      trigger: parsed.data.trigger,
-      response: parsed.data.response,
-      status: "approved",
-    });
-    return c.json(cr, 201);
+    try {
+      const cr = await service.create({
+        projectId: project.id,
+        trigger: parsed.data.trigger,
+        response: parsed.data.response,
+        status: "approved",
+      });
+      logInfo("canned_response.created", {
+        projectId: project.id,
+        cannedResponseId: cr.id,
+        source: "dashboard_manual",
+        triggerLength: parsed.data.trigger.length,
+        responseLength: parsed.data.response.length,
+      });
+      return c.json(cr, 201);
+    } catch (error) {
+      logError("canned_response.create_failed", error, {
+        projectId: project.id,
+        source: "dashboard_manual",
+      });
+      throw error;
+    }
   })
   .patch("/api/projects/:id/canned-responses/:crId", async (c) => {
     const user = c.get("user");
@@ -3630,13 +3648,26 @@ const app = new Hono<HonoAppContext>()
     }
 
     const service = new CannedResponseService(db);
-    const cr = await service.update(
-      c.req.param("crId"),
-      project.id,
-      parsed.data,
-    );
-    if (!cr) return c.json({ error: "Not found" }, 404);
-    return c.json(cr);
+    try {
+      const cr = await service.update(
+        c.req.param("crId"),
+        project.id,
+        parsed.data,
+      );
+      if (!cr) return c.json({ error: "Not found" }, 404);
+      logInfo("canned_response.updated", {
+        projectId: project.id,
+        cannedResponseId: cr.id,
+        fieldsUpdated: Object.keys(parsed.data),
+      });
+      return c.json(cr);
+    } catch (error) {
+      logError("canned_response.update_failed", error, {
+        projectId: project.id,
+        cannedResponseId: c.req.param("crId"),
+      });
+      throw error;
+    }
   })
   .post("/api/projects/:id/canned-responses/:crId/approve", async (c) => {
     const user = c.get("user");
@@ -3650,9 +3681,21 @@ const app = new Hono<HonoAppContext>()
     }
 
     const service = new CannedResponseService(db);
-    const approved = await service.approve(c.req.param("crId"), project.id);
-    if (!approved) return c.json({ error: "Not found" }, 404);
-    return c.json({ ok: true });
+    try {
+      const approved = await service.approve(c.req.param("crId"), project.id);
+      if (!approved) return c.json({ error: "Not found" }, 404);
+      logInfo("canned_response.approved", {
+        projectId: project.id,
+        cannedResponseId: c.req.param("crId"),
+      });
+      return c.json({ ok: true });
+    } catch (error) {
+      logError("canned_response.approve_failed", error, {
+        projectId: project.id,
+        cannedResponseId: c.req.param("crId"),
+      });
+      throw error;
+    }
   })
   .delete("/api/projects/:id/canned-responses/:crId", async (c) => {
     const user = c.get("user");
@@ -3666,9 +3709,21 @@ const app = new Hono<HonoAppContext>()
     }
 
     const service = new CannedResponseService(db);
-    const deleted = await service.delete(c.req.param("crId"), project.id);
-    if (!deleted) return c.json({ error: "Not found" }, 404);
-    return c.json({ ok: true });
+    try {
+      const deleted = await service.delete(c.req.param("crId"), project.id);
+      if (!deleted) return c.json({ error: "Not found" }, 404);
+      logInfo("canned_response.deleted", {
+        projectId: project.id,
+        cannedResponseId: c.req.param("crId"),
+      });
+      return c.json({ ok: true });
+    } catch (error) {
+      logError("canned_response.delete_failed", error, {
+        projectId: project.id,
+        cannedResponseId: c.req.param("crId"),
+      });
+      throw error;
+    }
   })
   .post("/api/projects/:id/canned-responses/suggest", async (c) => {
     const user = c.get("user");
@@ -3698,13 +3753,38 @@ const app = new Hono<HonoAppContext>()
       geminiApiKey: c.env.GEMINI_API_KEY,
       openaiApiKey: c.env.OPENAI_API_KEY,
     });
+    logInfo("canned_response.suggest_started", {
+      projectId: project.id,
+      approvedCount: approved.length,
+      queryLength: parsed.data.query.length,
+      model: c.env.AI_MODEL,
+    });
 
-    const suggestions = await aiService.rankCannedResponses(
-      parsed.data.query,
-      approved.map((cr) => ({ id: cr.id, trigger: cr.trigger, response: cr.response })),
-    );
+    try {
+      const suggestions = await aiService.rankCannedResponses(
+        parsed.data.query,
+        approved.map((cr) => ({
+          id: cr.id,
+          trigger: cr.trigger,
+          response: cr.response,
+        })),
+      );
 
-    return c.json({ suggestions });
+      logInfo("canned_response.suggest_completed", {
+        projectId: project.id,
+        approvedCount: approved.length,
+        suggestionCount: suggestions.length,
+      });
+
+      return c.json({ suggestions });
+    } catch (error) {
+      logError("canned_response.suggest_failed", error, {
+        projectId: project.id,
+        approvedCount: approved.length,
+        model: c.env.AI_MODEL,
+      });
+      throw error;
+    }
   })
 
   // ─── Guidelines (SOPs) ──────────────────────────────────────────────────────
@@ -4034,6 +4114,11 @@ async function handleScheduled(
     byProject.set(row.projectId, list);
   }
 
+  logInfo("auto_draft.cron_dispatch_started", {
+    conversationCount: unprocessed.length,
+    projectCount: byProject.size,
+  });
+
   for (const [projectId, conversationIds] of byProject) {
     for (const conversationId of conversationIds) {
       ctx.waitUntil(
@@ -4043,11 +4128,12 @@ async function handleScheduled(
           db,
           env,
           kv: env.CONVERSATIONS_CACHE,
+          source: "scheduled_cron",
         }).catch((err) => {
-          console.error(
-            `Cron auto-draft failed for conversation ${conversationId}:`,
-            err,
-          );
+          logError("auto_draft.cron_dispatch_failed", err, {
+            projectId,
+            conversationId,
+          });
         }),
       );
     }
