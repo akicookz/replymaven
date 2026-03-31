@@ -1,8 +1,9 @@
 import { type SourceReference, ResourceService } from "../../services/resource-service";
+import { logInfo, logWarn } from "../../observability";
 import { type AppEnv } from "../../types";
 import { buildRagContext, prepareRagChunks } from "./build-rag-context";
 import { mergeRetrievedSearchChunks } from "./merge-search-chunks";
-import { type GroundingConfidence } from "../types";
+import { type GroundingConfidence, type RetrievedSearchChunk } from "../types";
 
 export interface RetrievalResult {
   ragContext: string;
@@ -14,13 +15,30 @@ export interface RetrievalResult {
   broaderSearchAttempted: boolean;
 }
 
-async function executeSearchPass(options: {
+type SearchRetrievalType = "hybrid" | "vector";
+
+interface SearchPassResult {
+  results: Array<{ chunks?: RetrievedSearchChunk[] } | null | undefined>;
+  retrievalType: SearchRetrievalType;
+}
+
+function isHybridRetrievalUnavailableError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+
+  return (
+    error.message.includes("retrieval_type 'hybrid' is not available") &&
+    error.message.includes("keyword indexing is disabled")
+  );
+}
+
+async function searchWithRetrievalType(options: {
   env: Pick<AppEnv, "AI">;
   projectId: string;
   queries: string[];
   matchThreshold: number;
   maxResults: number;
-}) {
+  retrievalType: SearchRetrievalType;
+}): Promise<Array<{ chunks?: RetrievedSearchChunk[] } | null | undefined>> {
   return Promise.all(
     options.queries.map((query) =>
       options.env.AI.aiSearch()
@@ -29,7 +47,7 @@ async function executeSearchPass(options: {
           messages: [{ role: "user", content: query }],
           ai_search_options: {
             retrieval: {
-              retrieval_type: "hybrid",
+              retrieval_type: options.retrievalType,
               filters: {
                 type: "eq",
                 key: "folder",
@@ -49,6 +67,54 @@ async function executeSearchPass(options: {
         }),
     ),
   );
+}
+
+async function executeSearchPass(options: {
+  env: Pick<AppEnv, "AI">;
+  projectId: string;
+  queries: string[];
+  matchThreshold: number;
+  maxResults: number;
+  retrievalType: SearchRetrievalType;
+}): Promise<SearchPassResult> {
+  try {
+    return {
+      results: await searchWithRetrievalType(options),
+      retrievalType: options.retrievalType,
+    };
+  } catch (error) {
+    if (
+      options.retrievalType === "hybrid" &&
+      isHybridRetrievalUnavailableError(error)
+    ) {
+      logWarn("ai_search.retrieval_type_fallback", {
+        projectId: options.projectId,
+        attemptedRetrievalType: "hybrid",
+        fallbackRetrievalType: "vector",
+        queryCount: options.queries.length,
+        matchThreshold: options.matchThreshold,
+        maxResults: options.maxResults,
+      });
+
+      const results = await searchWithRetrievalType({
+        ...options,
+        retrievalType: "vector",
+      });
+
+      logInfo("ai_search.retrieval_type_fallback_succeeded", {
+        projectId: options.projectId,
+        activeRetrievalType: "vector",
+        queryCount: options.queries.length,
+      });
+
+      return {
+        results,
+        retrievalType: "vector",
+      };
+    }
+
+    throw error;
+  }
 }
 
 export async function runAiSearch(options: {
@@ -72,13 +138,17 @@ export async function runAiSearch(options: {
   }
 
   let broaderSearchAttempted = false;
-  let searchResults = await executeSearchPass({
+  let activeRetrievalType: SearchRetrievalType = "hybrid";
+  let searchPass = await executeSearchPass({
     env: options.env,
     projectId: options.projectId,
     queries: options.queries,
     matchThreshold: 0.2,
     maxResults: 12,
+    retrievalType: activeRetrievalType,
   });
+  let searchResults = searchPass.results;
+  activeRetrievalType = searchPass.retrievalType;
 
   const mergedChunks = mergeRetrievedSearchChunks(
     searchResults.map((result) => result?.chunks ?? []),
@@ -98,13 +168,16 @@ export async function runAiSearch(options: {
         : options.queries;
 
     broaderSearchAttempted = true;
-    searchResults = await executeSearchPass({
+    searchPass = await executeSearchPass({
       env: options.env,
       projectId: options.projectId,
       queries: broaderQueries,
       matchThreshold: 0.1,
       maxResults: 18,
+      retrievalType: activeRetrievalType,
     });
+    searchResults = searchPass.results;
+    activeRetrievalType = searchPass.retrievalType;
 
     const broaderMergedChunks = mergeRetrievedSearchChunks(
       searchResults.map((result) => result?.chunks ?? []),
