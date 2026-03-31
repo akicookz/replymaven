@@ -609,7 +609,7 @@
       gap: 8px;
       align-items: flex-end;
       animation: rm-message-in 0.3s ease-out;
-      max-width: 88%;
+      max-width: 92%;
     }
     .rm-message-row.visitor {
       align-self: flex-end;
@@ -651,6 +651,7 @@
       line-height: 1.5;
       word-wrap: break-word;
       overflow-wrap: break-word;
+      overflow: hidden;
     }
     .rm-message-row.visitor .rm-message {
       background: var(--rm-visitor-bg, var(--rm-primary, #2563eb));
@@ -694,6 +695,7 @@
       align-self: flex-start;
       gap: 8px;
       padding: 0 16px;
+      margin-top: 8px;
       max-height: 0;
       opacity: 0;
       overflow: hidden;
@@ -702,7 +704,7 @@
     .rm-typing-row.visible {
       max-height: 40px;
       opacity: 1;
-      padding: 6px 16px;
+      padding: 8px 16px;
     }
     .rm-typing-dots {
       display: flex;
@@ -1302,8 +1304,8 @@
       margin-bottom: 0;
     }
     .rm-message ul, .rm-message ol {
-      margin: 4px 0 8px 0;
-      padding-left: 18px;
+      margin: 4px 0 8px 18px;
+      padding-left: 0;
     }
     .rm-message li {
       margin-bottom: 3px;
