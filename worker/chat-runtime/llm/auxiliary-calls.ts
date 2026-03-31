@@ -5,6 +5,14 @@ import {
   type SupportTurnPlan,
 } from "../types";
 
+interface AuxiliaryCallOptions {
+  throwOnModelError?: boolean;
+}
+
+function shouldThrowOnModelError(options?: AuxiliaryCallOptions): boolean {
+  return options?.throwOnModelError === true;
+}
+
 export function isVagueIssueReport(message: string): boolean {
   const original = message.trim();
   const normalized = original.toLowerCase();
@@ -42,7 +50,9 @@ const supportTurnPlanSchema = z.object({
   followUpQuestion: z.string().max(220).nullable().optional(),
 });
 
-function fallbackClassifySupportTurn(currentMessage: string): SupportTurnPlan {
+export function fallbackClassifySupportTurn(
+  currentMessage: string,
+): SupportTurnPlan {
   const normalized = currentMessage.trim().toLowerCase();
   const explicitHandoff =
     /\b(human|person|agent|support team|someone|representative)\b/.test(
@@ -127,6 +137,7 @@ export async function classifySupportTurn(
   conversationHistory: ConversationTurnMessage[],
   currentMessage: string,
   pageContext?: Record<string, string>,
+  options?: AuxiliaryCallOptions,
 ): Promise<SupportTurnPlan> {
   const recentHistory = conversationHistory.slice(-6);
   const transcript = recentHistory
@@ -188,7 +199,10 @@ Rules:
       broaderQueries: object.broaderQueries,
       followUpQuestion: object.followUpQuestion ?? null,
     };
-  } catch {
+  } catch (error) {
+    if (shouldThrowOnModelError(options)) {
+      throw error;
+    }
     return fallbackClassifySupportTurn(currentMessage);
   }
 }
@@ -197,6 +211,7 @@ export async function reformulateQuery(
   model: LanguageModel,
   conversationHistory: ConversationTurnMessage[],
   currentMessage: string,
+  options?: AuxiliaryCallOptions,
 ): Promise<string> {
   const needsTroubleshootingExpansion = isVagueIssueReport(currentMessage);
   if (conversationHistory.length <= 1 && !needsTroubleshootingExpansion) {
@@ -228,7 +243,10 @@ Output ONLY the rewritten search query, nothing else. If the latest message is a
     });
 
     return text.trim() || currentMessage;
-  } catch {
+  } catch (error) {
+    if (shouldThrowOnModelError(options)) {
+      throw error;
+    }
     return currentMessage;
   }
 }
@@ -236,6 +254,7 @@ Output ONLY the rewritten search query, nothing else. If the latest message is a
 export async function summarizeConversation(
   model: LanguageModel,
   conversationHistory: ConversationTurnMessage[],
+  options?: AuxiliaryCallOptions,
 ): Promise<string | null> {
   if (conversationHistory.length < 6) return null;
 
@@ -257,14 +276,30 @@ SUMMARY:`,
     });
 
     return text.trim() || null;
-  } catch {
+  } catch (error) {
+    if (shouldThrowOnModelError(options)) {
+      throw error;
+    }
     return null;
   }
+}
+
+export function fallbackSummarizeTeamRequest(
+  conversationHistory: Array<{ role: string; content: string }>,
+): string {
+  const visitorMessages = conversationHistory
+    .filter((message) => message.role === "visitor")
+    .slice(-4)
+    .map((message) => message.content.trim())
+    .filter(Boolean);
+
+  return visitorMessages.join(" ").slice(0, 700);
 }
 
 export async function summarizeTeamRequest(
   model: LanguageModel,
   conversationHistory: Array<{ role: string; content: string }>,
+  options?: AuxiliaryCallOptions,
 ): Promise<string> {
   const transcript = conversationHistory
     .slice(-16)
@@ -295,24 +330,19 @@ Rules:
     });
 
     return text.trim();
-  } catch {
-    const visitorMessages = conversationHistory
-      .filter((message) => message.role === "visitor")
-      .slice(-4)
-      .map((message) => message.content.trim())
-      .filter(Boolean);
-
-    return visitorMessages.join(" ").slice(0, 700);
+  } catch (error) {
+    if (shouldThrowOnModelError(options)) {
+      throw error;
+    }
+    return fallbackSummarizeTeamRequest(conversationHistory);
   }
 }
 
-export async function extractContactInfo(
-  model: LanguageModel,
+export function fallbackExtractContactInfo(
   messages: Array<{ role: string; content: string }>,
-): Promise<{ name: string | null; email: string | null }> {
+): { name: string | null; email: string | null } {
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
   let extractedEmail: string | null = null;
-  let extractedName: string | null = null;
 
   const visitorMessages = messages
     .filter((message) => message.role === "visitor")
@@ -324,6 +354,22 @@ export async function extractContactInfo(
       extractedEmail = emailMatch[0].toLowerCase();
     }
   }
+
+  return { name: null, email: extractedEmail };
+}
+
+export async function extractContactInfo(
+  model: LanguageModel,
+  messages: Array<{ role: string; content: string }>,
+  options?: AuxiliaryCallOptions,
+): Promise<{ name: string | null; email: string | null }> {
+  const fallbackContactInfo = fallbackExtractContactInfo(messages);
+  let extractedEmail = fallbackContactInfo.email;
+  let extractedName = fallbackContactInfo.name;
+
+  const visitorMessages = messages
+    .filter((message) => message.role === "visitor")
+    .slice(-10);
 
   const transcript = visitorMessages.map((message) => message.content).join("\n");
 
@@ -358,7 +404,10 @@ email: <email or unknown>`,
         extractedEmail = email.toLowerCase();
       }
     }
-  } catch {
+  } catch (error) {
+    if (shouldThrowOnModelError(options)) {
+      throw error;
+    }
     // Regex fallback is good enough.
   }
 

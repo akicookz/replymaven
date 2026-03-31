@@ -1,8 +1,15 @@
 import { buildSupportSystemPrompt } from "../prompt/build-support-system-prompt";
-import { createLanguageModel } from "../llm/create-language-model";
+import {
+  createLanguageModel,
+  createModelRuntimeState,
+  runWithModelFallback,
+} from "../llm/create-language-model";
 import {
   classifySupportTurn,
   extractContactInfo,
+  fallbackClassifySupportTurn,
+  fallbackExtractContactInfo,
+  fallbackSummarizeTeamRequest,
   reformulateQuery,
   summarizeConversation,
   summarizeTeamRequest,
@@ -10,7 +17,11 @@ import {
 import { streamSupportAgent } from "../agents/support-agent";
 import { triggerAutoDraftIfEnabled } from "../post-turn/auto-draft";
 import { createTeamRequestSubmission } from "../post-turn/team-request";
-import { verifyAnswer } from "../workflows/verify-answer";
+import {
+  fallbackVerificationResult,
+  type VerificationResult,
+  verifyAnswer,
+} from "../workflows/verify-answer";
 import { buildRetrievalQueries } from "../retrieval/build-retrieval-queries";
 import {
   runAiSearch,
@@ -25,6 +36,7 @@ import {
   mapAgentStreamPartToSse,
 } from "../streaming/map-agent-events-to-sse";
 import {
+  type SupportTurnPlan,
   type TurnTelemetry,
   type WidgetMessageTurnContext,
   toToolDefinition,
@@ -361,12 +373,31 @@ export async function handleWidgetMessageTurn(
     let turnIntent: string | null = null;
     let executionPath: string | null = null;
     let retrievalMode: string | null = null;
+    const modelConfig = {
+      model: context.env.AI_MODEL,
+      geminiApiKey: context.env.GEMINI_API_KEY,
+      openaiApiKey: context.env.OPENAI_API_KEY,
+    };
+    const modelRuntime = createModelRuntimeState(modelConfig);
+    let safeAiReplayWindowClosed = false;
 
     function emitStatus(message: string, phase: "retrieval" | "tool" | "verify" | "compose"): void {
       if (!telemetry.firstStatusAt) {
         telemetry.firstStatusAt = Date.now();
       }
       emitStatusEvent(controller, encoder, { phase, message });
+    }
+
+    function closeSafeAiReplayWindow(reason: string): void {
+      if (safeAiReplayWindowClosed) return;
+      safeAiReplayWindowClosed = true;
+      logInfo(
+        "widget_turn.safe_ai_replay_closed",
+        buildWidgetTurnLogContext(context, turnId, {
+          reason,
+          activeModel: modelRuntime.activeConfig.model,
+        }),
+      );
     }
 
     logInfo(
@@ -404,23 +435,36 @@ export async function handleWidgetMessageTurn(
         }),
       );
 
-      const modelConfig = {
-        model: context.env.AI_MODEL,
-        geminiApiKey: context.env.GEMINI_API_KEY,
-        openaiApiKey: context.env.OPENAI_API_KEY,
-      };
-      const model = createLanguageModel(modelConfig);
-
       currentStage = "classify_turn";
-      const [conversationSummary, turnPlan] = await Promise.all([
-        summarizeConversation(model, conversationHistory),
-        classifySupportTurn(
-          model,
-          conversationHistory,
-          context.payload.content,
-          context.payload.pageContext,
-        ),
-      ]);
+      let conversationSummary: string | null = null;
+      let turnPlan: SupportTurnPlan;
+      try {
+        turnPlan = await runWithModelFallback({
+          runtime: modelRuntime,
+          stage: "classify_turn",
+          logContext: buildWidgetTurnLogContext(context, turnId),
+          operation: async (activeConfig) => {
+            const activeModel = createLanguageModel(activeConfig);
+            return classifySupportTurn(
+              activeModel,
+              conversationHistory,
+              context.payload.content,
+              context.payload.pageContext,
+              { throwOnModelError: true },
+            );
+          },
+        });
+      } catch {
+        turnPlan = fallbackClassifySupportTurn(context.payload.content);
+        logWarn(
+          "widget_turn.plan_heuristic_fallback_used",
+          buildWidgetTurnLogContext(context, turnId),
+        );
+      }
+      conversationSummary = await summarizeConversation(
+        createLanguageModel(modelRuntime.activeConfig),
+        conversationHistory,
+      );
       const executionPlan = decideExecutionPath({
         intent: turnPlan.intent,
         userMessage: context.payload.content,
@@ -448,11 +492,28 @@ export async function handleWidgetMessageTurn(
       if (executionPlan.retrievalMode !== "none") {
         currentStage = "retrieval";
         emitStatus("Searching docs...", "retrieval");
-        const searchQuery = await reformulateQuery(
-          model,
-          conversationHistory,
-          context.payload.content,
-        );
+        let searchQuery = context.payload.content;
+        try {
+          searchQuery = await runWithModelFallback({
+            runtime: modelRuntime,
+            stage: "reformulate_query",
+            logContext: buildWidgetTurnLogContext(context, turnId),
+            operation: async (activeConfig) => {
+              const activeModel = createLanguageModel(activeConfig);
+              return reformulateQuery(
+                activeModel,
+                conversationHistory,
+                context.payload.content,
+                { throwOnModelError: true },
+              );
+            },
+          });
+        } catch {
+          logWarn(
+            "widget_turn.reformulate_query_fallback_used",
+            buildWidgetTurnLogContext(context, turnId),
+          );
+        }
         const retrievalQueries =
           executionPlan.retrievalMode === "light"
             ? turnPlan.retrievalQueries.length > 0
@@ -569,85 +630,112 @@ export async function handleWidgetMessageTurn(
         buildWidgetTurnLogContext(context, turnId, {
           toolCount: executionPlan.allowedTools.length,
           hasImage: Boolean(image),
-          cannedMatchStatus: cannedMatch?.status ?? null,
+          cannedMatchStatus: cannedMatch ? "approved" : null,
         }),
       );
 
-      const supportAgent = await streamSupportAgent(
-        { modelConfig },
-        {
-          systemPrompt,
-          conversationHistory,
-          userMessage: context.payload.content,
-          image,
-          tools: executionPlan.allowedTools,
-          toolChoice: executionPlan.toolChoice,
-          onToolCallStart: (info) => {
-            logInfo(
-              "widget_turn.tool_call_started",
-              buildWidgetTurnLogContext(context, turnId, {
-                toolName: info.toolName,
-                inputKeys: Object.keys(info.input ?? {}),
-              }),
-            );
-            emitStatus("Checking connected systems...", "tool");
-          },
-          onToolCallFinish: (info) => {
-            const matchedTool = enabledTools.find((tool) => tool.name === info.toolName);
-            if (matchedTool) {
-              toolService
-                .logExecution({
-                  toolId: matchedTool.id,
-                  conversationId: context.conversationId,
-                  input: info.input ?? {},
-                  output: info.output,
-                  status: info.success ? "success" : "error",
-                  duration: info.durationMs,
-                  errorMessage: info.error ? String(info.error) : null,
-                })
-                .catch((err) => {
-                  logError(
-                    "widget_turn.tool_execution_log_failed",
-                    err,
-                    buildWidgetTurnLogContext(context, turnId, {
-                      toolName: info.toolName,
-                    }),
-                  );
-                });
+      let streamTextStarted = false;
+      let toolActivityStarted = false;
+      eventState = await runWithModelFallback({
+        runtime: modelRuntime,
+        stage: "stream_agent",
+        logContext: buildWidgetTurnLogContext(context, turnId),
+        canRetry: () => !streamTextStarted && !toolActivityStarted,
+        getRetryContext: () => ({
+          streamTextStarted,
+          toolActivityStarted,
+        }),
+        operation: async (activeConfig) => {
+          const supportAgent = await streamSupportAgent(
+            { modelConfig: activeConfig },
+            {
+              systemPrompt,
+              conversationHistory,
+              userMessage: context.payload.content,
+              image,
+              tools: executionPlan.allowedTools,
+              toolChoice: executionPlan.toolChoice,
+              onToolCallStart: (info) => {
+                toolActivityStarted = true;
+                logInfo(
+                  "widget_turn.tool_call_started",
+                  buildWidgetTurnLogContext(context, turnId, {
+                    toolName: info.toolName,
+                    inputKeys: Object.keys(info.input ?? {}),
+                  }),
+                );
+                emitStatus("Checking connected systems...", "tool");
+              },
+              onToolCallFinish: (info) => {
+                const matchedTool = enabledTools.find(
+                  (tool) => tool.name === info.toolName,
+                );
+                if (matchedTool) {
+                  toolService
+                    .logExecution({
+                      toolId: matchedTool.id,
+                      conversationId: context.conversationId,
+                      input: info.input ?? {},
+                      output: info.output,
+                      status: info.success ? "success" : "error",
+                      duration: info.durationMs,
+                      errorMessage: info.error ? String(info.error) : null,
+                    })
+                    .catch((err) => {
+                      logError(
+                        "widget_turn.tool_execution_log_failed",
+                        err,
+                        buildWidgetTurnLogContext(context, turnId, {
+                          toolName: info.toolName,
+                        }),
+                      );
+                    });
+                }
+                logInfo(
+                  "widget_turn.tool_call_finished",
+                  buildWidgetTurnLogContext(context, turnId, {
+                    toolName: info.toolName,
+                    success: info.success,
+                    durationMs: info.durationMs,
+                  }),
+                );
+              },
+            },
+          );
+
+          let nextEventState = createInitialAgentEventState();
+          const emittedToolCalls = new Set<string>();
+          const toolCallStartTimes = new Map<string, number>();
+
+          for await (const part of supportAgent.fullStream) {
+            if (!telemetry.firstTextAt && part.type === "text-delta") {
+              telemetry.firstTextAt = Date.now();
             }
-            logInfo(
-              "widget_turn.tool_call_finished",
-              buildWidgetTurnLogContext(context, turnId, {
-                toolName: info.toolName,
-                success: info.success,
-                durationMs: info.durationMs,
-              }),
-            );
-          },
+
+            if (part.type === "text-delta") {
+              streamTextStarted = true;
+            }
+            if (part.type === "tool-call" || part.type === "tool-result") {
+              toolActivityStarted = true;
+            }
+
+            nextEventState = mapAgentStreamPartToSse({
+              part,
+              controller,
+              encoder,
+              emittedToolCalls,
+              toolCallStartTimes,
+              state: nextEventState,
+            });
+
+            if (part.type === "tool-result" && !nextEventState.lastToolError) {
+              emitStatus("Writing the reply...", "compose");
+            }
+          }
+
+          return nextEventState;
         },
-      );
-
-      const emittedToolCalls = new Set<string>();
-      const toolCallStartTimes = new Map<string, number>();
-
-      for await (const part of supportAgent.fullStream) {
-        if (!telemetry.firstTextAt && part.type === "text-delta") {
-          telemetry.firstTextAt = Date.now();
-        }
-
-        eventState = mapAgentStreamPartToSse({
-          part,
-          controller,
-          encoder,
-          emittedToolCalls,
-          toolCallStartTimes,
-          state: eventState,
-        });
-
-        if (part.type === "tool-result" && !eventState.lastToolError) {
-          emitStatus("Writing the reply...", "compose");
-        }
-      }
+      });
       logInfo(
         "widget_turn.agent_stream_completed",
         buildWidgetTurnLogContext(context, turnId, {
@@ -700,13 +788,33 @@ export async function handleWidgetMessageTurn(
           }),
         );
 
-        const verification = await verifyAnswer({
-          model,
-          userMessage: context.payload.content,
-          draftedAnswer: fullResponse,
-          ragContext: retrieval.ragContext,
-          lastToolOutput: eventState.lastToolOutput,
-        });
+        let verification: VerificationResult;
+        try {
+          verification = await runWithModelFallback({
+            runtime: modelRuntime,
+            stage: "verify_answer",
+            logContext: buildWidgetTurnLogContext(context, turnId),
+            operation: async (activeConfig) => {
+              const activeModel = createLanguageModel(activeConfig);
+              return verifyAnswer({
+                model: activeModel,
+                userMessage: context.payload.content,
+                draftedAnswer: fullResponse,
+                ragContext: retrieval.ragContext,
+                lastToolOutput: eventState.lastToolOutput,
+                verifyOptions: { throwOnModelError: true },
+              });
+            },
+          });
+        } catch {
+          verification = fallbackVerificationResult({
+            draftedAnswer: fullResponse,
+          });
+          logWarn(
+            "widget_turn.verification_fallback_used",
+            buildWidgetTurnLogContext(context, turnId),
+          );
+        }
         telemetry.verifierVerdict = verification.verdict;
         logInfo(
           "widget_turn.verification_completed",
@@ -734,10 +842,62 @@ export async function handleWidgetMessageTurn(
 
       if (fullResponse.includes("[NEW_INQUIRY]")) {
         currentStage = "team_request";
-        const contactInfo = await extractContactInfo(model, conversationHistory);
+        let contactInfo: { name: string | null; email: string | null };
+        try {
+          contactInfo = await runWithModelFallback({
+            runtime: modelRuntime,
+            stage: "extract_contact_info",
+            logContext: buildWidgetTurnLogContext(context, turnId),
+            canRetry: () => !safeAiReplayWindowClosed,
+            getRetryContext: () => ({
+              safeAiReplayWindowClosed,
+            }),
+            operation: async (activeConfig) => {
+              const activeModel = createLanguageModel(activeConfig);
+              return extractContactInfo(
+                activeModel,
+                conversationHistory,
+                { throwOnModelError: true },
+              );
+            },
+          });
+        } catch {
+          contactInfo = fallbackExtractContactInfo(conversationHistory);
+          logWarn(
+            "widget_turn.contact_info_fallback_used",
+            buildWidgetTurnLogContext(context, turnId),
+          );
+        }
         const visitorName = conversation.visitorName ?? contactInfo.name ?? null;
         const visitorEmail = conversation.visitorEmail ?? contactInfo.email ?? null;
 
+        let summary: string;
+        try {
+          summary = await runWithModelFallback({
+            runtime: modelRuntime,
+            stage: "summarize_team_request",
+            logContext: buildWidgetTurnLogContext(context, turnId),
+            canRetry: () => !safeAiReplayWindowClosed,
+            getRetryContext: () => ({
+              safeAiReplayWindowClosed,
+            }),
+            operation: async (activeConfig) => {
+              const activeModel = createLanguageModel(activeConfig);
+              return summarizeTeamRequest(
+                activeModel,
+                conversationHistory,
+                { throwOnModelError: true },
+              );
+            },
+          });
+        } catch {
+          summary = fallbackSummarizeTeamRequest(conversationHistory);
+          logWarn(
+            "widget_turn.team_request_summary_fallback_used",
+            buildWidgetTurnLogContext(context, turnId),
+          );
+        }
+        closeSafeAiReplayWindow("team_request_mutation");
         if (contactInfo.name || contactInfo.email) {
           await chatService.updateConversation(context.conversationId, context.project.id, {
             visitorName: visitorName ?? undefined,
@@ -750,8 +910,6 @@ export async function handleWidgetMessageTurn(
           context.project.id,
           "waiting_agent",
         );
-
-        const summary = await summarizeTeamRequest(model, conversationHistory);
         const telegramService =
           settings?.telegramBotToken && settings?.telegramChatId
             ? new TelegramService(context.db)
@@ -903,7 +1061,8 @@ export async function handleWidgetMessageTurn(
         err,
         buildWidgetTurnLogContext(context, turnId, {
           stage: currentStage,
-          model: context.env.AI_MODEL,
+          configuredModel: context.env.AI_MODEL,
+          activeModel: modelRuntime.activeConfig.model,
           intent: turnIntent,
           executionPath,
           retrievalMode,
@@ -915,6 +1074,7 @@ export async function handleWidgetMessageTurn(
           stepCount: eventState.stepCount,
           verifierRan: telemetry.verifierRan ?? false,
           verifierVerdict: telemetry.verifierVerdict ?? null,
+          safeAiReplayWindowClosed,
         }),
       );
       const errorMessage =

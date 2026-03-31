@@ -27,7 +27,11 @@ export interface VerificationResult {
   summary?: string | null;
 }
 
-function buildUnsupportedFallback(userMessage: string): string {
+interface VerifyAnswerOptions {
+  throwOnModelError?: boolean;
+}
+
+export function buildUnsupportedFallback(userMessage: string): string {
   const needsPrecision =
     /(pricing|plan|policy|refund|billing|setup|configure|integration|api|error|issue|problem|limit)/i.test(
       userMessage,
@@ -40,12 +44,24 @@ function buildUnsupportedFallback(userMessage: string): string {
   return "I couldn't verify that reliably from the knowledge base I searched. If you can share a bit more detail, I can check again.";
 }
 
+export function fallbackVerificationResult(options: {
+  draftedAnswer: string;
+}): VerificationResult {
+  return {
+    verdict: "supported",
+    answer: options.draftedAnswer,
+    claims: [],
+    summary: null,
+  };
+}
+
 export async function verifyAnswer(options: {
   model: LanguageModel;
   userMessage: string;
   draftedAnswer: string;
   ragContext: string;
   lastToolOutput?: unknown;
+  verifyOptions?: VerifyAnswerOptions;
 }): Promise<VerificationResult> {
   if (!options.draftedAnswer.trim()) {
     return {
@@ -141,14 +157,14 @@ Rules:
       claims,
       summary: object.summary ?? null,
     };
-  } catch {
+  } catch (error) {
+    if (options.verifyOptions?.throwOnModelError) {
+      throw error;
+    }
     // Fall back to the drafted answer if verification fails.
   }
 
-  return {
-    verdict: "supported",
-    answer: options.draftedAnswer,
-    claims: [],
-    summary: null,
-  };
+  return fallbackVerificationResult({
+    draftedAnswer: options.draftedAnswer,
+  });
 }
