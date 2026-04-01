@@ -1,21 +1,44 @@
 import { Resend } from "resend";
 
-// ─── Shared Email Layout ──────────────────────────────────────────────────────
+// ─── Dark-Mode Email Design Tokens ────────────────────────────────────────────
 
-const LINK_STYLE = "color: #18181b; font-weight: 500; text-decoration: underline;";
-const BUTTON_STYLE = "display: inline-block; background: #18181b; color: #fff; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500;";
+const BODY_TEXT = "color: #c8c8d2;";
+const MUTED_TEXT = "color: #8a8a96;";
+const HEADING_STYLE =
+  "color: #f0f0f5; font-size: 18px; font-weight: 600;";
+const LINK_STYLE =
+  "color: #f97316; font-weight: 500; text-decoration: underline;";
+const BUTTON_STYLE =
+  "display: inline-block; background: #f97316; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;";
+const CARD_STYLE =
+  "background: #0c0c10; border-radius: 12px; padding: 20px 24px;";
+
+// ─── Shared Email Layout ──────────────────────────────────────────────────────
 
 function wrapEmail(body: string): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin: 0; padding: 0; background: #ffffff;">
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px; color: #18181b; font-size: 15px; line-height: 1.6;">
-<!--[if mso]><table role="presentation" width="480" align="center" cellpadding="0" cellspacing="0"><tr><td style="padding: 40px 20px;"><![endif]-->
+<body style="margin: 0; padding: 0; background: #0b0600;">
+<div style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 48px 24px; color: #f0f0f5; font-size: 15px; line-height: 1.6;">
+<!--[if mso]><table role="presentation" width="480" align="center" cellpadding="0" cellspacing="0"><tr><td style="padding: 48px 24px;"><![endif]-->
 ${body}
-<p style="color: #a1a1aa; font-size: 13px; margin: 32px 0 0;">— ReplyMaven</p>
+<p style="${MUTED_TEXT} font-size: 13px; margin: 40px 0 0;">&mdash; ReplyMaven</p>
 <!--[if mso]></td></tr></table><![endif]-->
 </div>
 </body></html>`;
+}
+
+// ─── OTP Email Template ───────────────────────────────────────────────────────
+
+export function buildOtpEmailHtml(otp: string): string {
+  return wrapEmail(`
+<p style="${HEADING_STYLE} margin: 0 0 16px;">Your verification code</p>
+<p style="${BODY_TEXT} margin: 0 0 24px;">Enter this code to verify your email address. It expires in 10 minutes.</p>
+<div style="${CARD_STYLE} text-align: center; margin: 0 0 24px;">
+  <p style="font-size: 32px; font-weight: 700; letter-spacing: 8px; margin: 0; color: #f97316; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;">${escapeHtml(otp)}</p>
+</div>
+<p style="${MUTED_TEXT} font-size: 13px; margin: 0;">If you didn't request this code, you can safely ignore this email.</p>
+  `);
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -33,8 +56,8 @@ export class EmailService {
       to,
       subject: "Welcome to ReplyMaven",
       html: wrapEmail(`
-<p style="font-size: 18px; font-weight: 600; margin: 0 0 16px;">Welcome to ReplyMaven</p>
-<p style="color: #3f3f46; margin: 0 0 16px;">Hi ${escapeHtml(name)}, thanks for signing up. You can now create your first project and start building your AI support agent.</p>
+<p style="${HEADING_STYLE} margin: 0 0 16px;">Welcome to ReplyMaven</p>
+<p style="${BODY_TEXT} margin: 0 0 16px;">Hi ${escapeHtml(name)}, thanks for signing up. You can now create your first project and start building your AI support agent.</p>
 <a href="https://replymaven.com/app" style="${BUTTON_STYLE}">Go to Dashboard</a>
       `),
     });
@@ -55,8 +78,8 @@ export class EmailService {
       const fieldsHtml = entries
         .map(
           ([key, value], i) =>
-            `<p style="font-size: 13px; color: #a1a1aa; margin: 0 0 2px;">${escapeHtml(key)}</p>
-<p style="font-size: 15px; color: #18181b; margin: 0 0 ${i < entries.length - 1 ? "12px" : "0"};">${escapeHtml(String(value))}</p>`,
+            `<p style="font-size: 13px; ${MUTED_TEXT} margin: 0 0 2px;">${escapeHtml(key)}</p>
+<p style="font-size: 15px; color: #f0f0f5; margin: 0 0 ${i < entries.length - 1 ? "12px" : "0"};">${escapeHtml(String(value))}</p>`,
         )
         .join("");
 
@@ -65,8 +88,8 @@ export class EmailService {
         to: ownerEmail,
         subject: `New inquiry - ${projectName}`,
         html: wrapEmail(`
-<p style="font-size: 18px; font-weight: 600; margin: 0 0 20px;">New Inquiry</p>
-<div style="background: #fafafa; border-radius: 8px; padding: 16px 20px; margin: 0 0 24px;">
+<p style="${HEADING_STYLE} margin: 0 0 20px;">New Inquiry</p>
+<div style="${CARD_STYLE} margin: 0 0 24px;">
 ${fieldsHtml}
 </div>
 <a href="${dashboardUrl}" style="${BUTTON_STYLE}">View in Dashboard</a>
@@ -92,9 +115,9 @@ ${fieldsHtml}
         to,
         subject: "You've used 80% of your monthly messages",
         html: wrapEmail(`
-<p style="font-size: 18px; font-weight: 600; margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p style="color: #3f3f46; margin: 0 0 16px;">You've used <strong>${used}</strong> of <strong>${max}</strong> messages on your <strong>${escapeHtml(plan)}</strong> plan this billing period.</p>
-<p style="color: #3f3f46; margin: 0 0 24px;">Once you reach your limit, your chatbot will stop responding to visitors until the next period. Consider upgrading if you expect to exceed your quota.</p>
+<p style="${HEADING_STYLE} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p style="${BODY_TEXT} margin: 0 0 16px;">You've used <strong style="color: #f0f0f5;">${used}</strong> of <strong style="color: #f0f0f5;">${max}</strong> messages on your <strong style="color: #f0f0f5;">${escapeHtml(plan)}</strong> plan this billing period.</p>
+<p style="${BODY_TEXT} margin: 0 0 24px;">Once you reach your limit, your chatbot will stop responding to visitors until the next period. Consider upgrading if you expect to exceed your quota.</p>
 <a href="https://replymaven.com/app/account/billing" style="${BUTTON_STYLE}">View Usage</a>
         `),
       });
@@ -115,9 +138,9 @@ ${fieldsHtml}
         to,
         subject: "You've reached your message limit",
         html: wrapEmail(`
-<p style="font-size: 18px; font-weight: 600; margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p style="color: #3f3f46; margin: 0 0 16px;">You've used all <strong>${max}</strong> messages on your <strong>${escapeHtml(plan)}</strong> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
-<p style="color: #3f3f46; margin: 0 0 24px;">Upgrade your plan to get more messages and keep your chatbot online.</p>
+<p style="${HEADING_STYLE} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p style="${BODY_TEXT} margin: 0 0 16px;">You've used all <strong style="color: #f0f0f5;">${max}</strong> messages on your <strong style="color: #f0f0f5;">${escapeHtml(plan)}</strong> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
+<p style="${BODY_TEXT} margin: 0 0 24px;">Upgrade your plan to get more messages and keep your chatbot online.</p>
 <a href="https://replymaven.com/app/account/billing" style="${BUTTON_STYLE}">Upgrade Plan</a>
         `),
       });
@@ -140,18 +163,18 @@ ${fieldsHtml}
       > = {
         payment_failed: {
           subject: "Action Required: Your chatbot is paused",
-          body: `<p style="color: #3f3f46; margin: 0 0 16px;">Your recent payment failed and your chatbot has been paused. Visitors will not be able to use it until the issue is resolved.</p>
-<p style="color: #3f3f46; margin: 0;">Please update your payment method in your <a href="https://replymaven.com/app/billing" style="${LINK_STYLE}">dashboard</a> to restore service.</p>`,
+          body: `<p style="${BODY_TEXT} margin: 0 0 16px;">Your recent payment failed and your chatbot has been paused. Visitors will not be able to use it until the issue is resolved.</p>
+<p style="${BODY_TEXT} margin: 0;">Please update your payment method in your <a href="https://replymaven.com/app/billing" style="${LINK_STYLE}">dashboard</a> to restore service.</p>`,
         },
         canceled: {
           subject: "Your ReplyMaven subscription has been canceled",
-          body: `<p style="color: #3f3f46; margin: 0 0 16px;">Your subscription has been canceled and your chatbot is no longer active. Visitors will see an unavailable message.</p>
-<p style="color: #3f3f46; margin: 0;">If this was a mistake, you can resubscribe anytime from your <a href="https://replymaven.com/app/billing" style="${LINK_STYLE}">dashboard</a>.</p>`,
+          body: `<p style="${BODY_TEXT} margin: 0 0 16px;">Your subscription has been canceled and your chatbot is no longer active. Visitors will see an unavailable message.</p>
+<p style="${BODY_TEXT} margin: 0;">If this was a mistake, you can resubscribe anytime from your <a href="https://replymaven.com/app/billing" style="${LINK_STYLE}">dashboard</a>.</p>`,
         },
         other: {
           subject: "Your chatbot is currently unavailable",
-          body: `<p style="color: #3f3f46; margin: 0 0 16px;">Your subscription is inactive and your chatbot is currently unavailable to visitors.</p>
-<p style="color: #3f3f46; margin: 0;">Please check your <a href="https://replymaven.com/app/billing" style="${LINK_STYLE}">billing settings</a> to restore service.</p>`,
+          body: `<p style="${BODY_TEXT} margin: 0 0 16px;">Your subscription is inactive and your chatbot is currently unavailable to visitors.</p>
+<p style="${BODY_TEXT} margin: 0;">Please check your <a href="https://replymaven.com/app/billing" style="${LINK_STYLE}">billing settings</a> to restore service.</p>`,
         },
       };
 
@@ -162,7 +185,7 @@ ${fieldsHtml}
         to,
         subject: msg.subject,
         html: wrapEmail(`
-<p style="font-size: 18px; font-weight: 600; margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p style="${HEADING_STYLE} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
 ${msg.body}
         `),
       });
@@ -184,8 +207,8 @@ ${msg.body}
         to,
         subject: "Your chatbot is back online",
         html: wrapEmail(`
-<p style="font-size: 18px; font-weight: 600; margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p style="color: #3f3f46; margin: 0;">Your subscription is active again and your chatbot is back online. Visitors can use it as normal.</p>
+<p style="${HEADING_STYLE} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p style="${BODY_TEXT} margin: 0;">Your subscription is active again and your chatbot is back online. Visitors can use it as normal.</p>
         `),
       });
     } catch (error) {

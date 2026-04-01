@@ -67,6 +67,8 @@ import {
   inviteTeamMemberSchema,
   updateTeamMemberRoleSchema,
   updateProfileSchema,
+  requestEmailChangeSchema,
+  verifyEmailChangeSchema,
   createGuidelineSchema,
   updateGuidelineSchema,
 } from "./validation";
@@ -1766,6 +1768,131 @@ const app = new Hono<HonoAppContext>()
     }
 
     return c.json(authors);
+  })
+
+  // ─── Request Email Change (send OTP to new email) ────────────────────────
+  .post("/api/profile/change-email/request", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    // Per-user rate limit: 3 requests per 5 minutes
+    if (!checkRateLimit(`email-change:${user.id}`, 3, 300_000)) {
+      return c.json({ error: "Too many requests. Try again later." }, 429);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(requestEmailChangeSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const { newEmail } = parsed.data;
+    const normalizedEmail = newEmail.toLowerCase();
+
+    if (normalizedEmail === user.email.toLowerCase()) {
+      return c.json({ error: "New email is the same as your current email" }, 400);
+    }
+
+    const db = c.get("db");
+    const existing = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, normalizedEmail))
+      .limit(1);
+    if (existing.length > 0) {
+      return c.json({ error: "This email is already in use" }, 400);
+    }
+
+    // Generate OTP via Better Auth emailOTP plugin (no user-existence check)
+    const auth = createAuth(c.env, c.req.raw.cf as CfProperties);
+    const api = auth.api as typeof auth.api & {
+      createVerificationOTP: (opts: { body: { email: string; type: string } }) => Promise<string>;
+    };
+    const otp = await api.createVerificationOTP({
+      body: { email: normalizedEmail, type: "email-verification" },
+    });
+
+    // Store intent + OTP in KV (10 min TTL, matches OTP expiry)
+    await c.env.CONVERSATIONS_CACHE.put(
+      `email-change:${user.id}`,
+      JSON.stringify({ newEmail: normalizedEmail, otp, attempts: 0 }),
+      { expirationTtl: 600 },
+    );
+
+    // Send OTP email manually (since sendVerificationOTP requires existing user)
+    const { buildOtpEmailHtml } = await import("./services/email-service");
+    const { Resend } = await import("resend");
+    const resend = new Resend(c.env.RESEND_API_KEY);
+    await resend.emails.send({
+      from: "ReplyMaven <noreply@updates.replymaven.com>",
+      to: normalizedEmail,
+      subject: `${otp} is your ReplyMaven verification code`,
+      html: buildOtpEmailHtml(otp),
+    });
+
+    return c.json({ success: true });
+  })
+
+  // ─── Verify Email Change (check OTP and update email) ──────────────────────
+  .post("/api/profile/change-email/verify", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(verifyEmailChangeSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const { otp } = parsed.data;
+
+    // Read pending intent from KV
+    const intentRaw = await c.env.CONVERSATIONS_CACHE.get(`email-change:${user.id}`);
+    if (!intentRaw) {
+      return c.json({ error: "No pending email change or it expired" }, 400);
+    }
+    const intent = JSON.parse(intentRaw) as {
+      newEmail: string;
+      otp: string;
+      attempts: number;
+    };
+
+    // Check attempt limit (max 5)
+    if (intent.attempts >= 5) {
+      await c.env.CONVERSATIONS_CACHE.delete(`email-change:${user.id}`);
+      return c.json(
+        { error: "Too many incorrect attempts. Please request a new code.", code: "too_many_attempts" },
+        403,
+      );
+    }
+
+    // Compare OTP
+    if (otp !== intent.otp) {
+      intent.attempts++;
+      await c.env.CONVERSATIONS_CACHE.put(
+        `email-change:${user.id}`,
+        JSON.stringify(intent),
+        { expirationTtl: 600 },
+      );
+      const remaining = 5 - intent.attempts;
+      return c.json(
+        {
+          error: remaining > 0
+            ? `Incorrect code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`
+            : "Too many incorrect attempts. Please request a new code.",
+          code: remaining > 0 ? "invalid_otp" : "too_many_attempts",
+        },
+        remaining > 0 ? 400 : 403,
+      );
+    }
+
+    // OTP is valid — update user email in D1
+    const db = c.get("db");
+    await db
+      .update(users)
+      .set({ email: intent.newEmail })
+      .where(eq(users.id, user.id));
+
+    // Clean up KV intent
+    await c.env.CONVERSATIONS_CACHE.delete(`email-change:${user.id}`);
+
+    return c.json({ success: true, email: intent.newEmail });
   })
 
   // ═══════════════════════════════════════════════════════════════════════════

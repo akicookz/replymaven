@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Camera, Loader2, User, CheckCircle2, Pencil, Mail } from "lucide-react";
+import { Camera, Loader2, User, CheckCircle2, Pencil } from "lucide-react";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
+import { useSession } from "@/lib/auth-client";
 
 interface ProfileData {
   id: string;
@@ -15,103 +16,236 @@ interface ProfileData {
 
 // ─── Email Change Section ─────────────────────────────────────────────────────
 
-function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
-  const [editing, setEditing] = useState(false);
-  const [newEmail, setNewEmail] = useState("");
-  const [sent, setSent] = useState(false);
+type EmailChangeState = "idle" | "editing" | "otp";
 
-  const changeEmailMutation = useMutation({
+function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
+  const queryClient = useQueryClient();
+  const { refetch: refetchSession } = useSession();
+  const [state, setState] = useState<EmailChangeState>("idle");
+  const [newEmail, setNewEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  function reset() {
+    setState("idle");
+    setNewEmail("");
+    setOtp("");
+    setError(null);
+    setResendCooldown(0);
+  }
+
+  function startResendCooldown() {
+    setResendCooldown(30);
+    const interval = setInterval(() => {
+      setResendCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }
+
+  const requestMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/auth/change-email", {
+      const res = await fetch("/api/profile/change-email/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          newEmail,
-          callbackURL: "/app/account",
-        }),
+        body: JSON.stringify({ newEmail }),
       });
       if (!res.ok) {
-        const data = (await res.json()) as { message?: string };
-        throw new Error(data.message ?? "Failed to send verification email");
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error ?? "Failed to send verification code");
       }
     },
     onSuccess: () => {
-      setSent(true);
+      setError(null);
+      setOtp("");
+      setState("otp");
+      startResendCooldown();
+    },
+    onError: (err: Error) => {
+      setError(err.message);
     },
   });
 
-  if (sent) {
+  const verifyMutation = useMutation({
+    mutationFn: async (): Promise<{ code?: string }> => {
+      const res = await fetch("/api/profile/change-email/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ otp }),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string; code?: string };
+        const err = new Error(data.error ?? "Verification failed");
+        (err as Error & { code?: string }).code = data.code;
+        throw err;
+      }
+      return res.json();
+    },
+    onSuccess: async () => {
+      setSuccess(true);
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+      await refetchSession();
+      setTimeout(() => {
+        setSuccess(false);
+        reset();
+      }, 2000);
+    },
+    onError: (err: Error & { code?: string }) => {
+      setError(err.message);
+      if (err.code === "too_many_attempts") {
+        setOtp("");
+        setState("editing");
+      }
+    },
+  });
+
+  if (success) {
     return (
       <div className="space-y-2">
         <label className="text-sm font-medium text-foreground">Email</label>
         <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-brand/5">
-          <Mail className="w-4 h-4 text-brand shrink-0" />
-          <div className="space-y-0.5">
-            <p className="text-sm text-foreground">Verification email sent</p>
-            <p className="text-xs text-muted-foreground">
-              Check <span className="font-medium text-foreground">{newEmail}</span> and click the link to confirm.
-            </p>
-          </div>
+          <CheckCircle2 className="w-4 h-4 text-brand shrink-0" />
+          <p className="text-sm text-foreground">Email updated successfully</p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setSent(false);
-            setEditing(false);
-            setNewEmail("");
-            changeEmailMutation.reset();
-          }}
-          className="text-xs text-muted-foreground hover:text-foreground"
-        >
-          Cancel
-        </button>
       </div>
     );
   }
 
-  if (editing) {
+  if (state === "otp") {
+    return (
+      <div className="space-y-3">
+        <label className="text-sm font-medium text-foreground">
+          Verification Code
+        </label>
+        <p className="text-xs text-muted-foreground">
+          Enter the 6-digit code sent to{" "}
+          <span className="font-medium text-foreground">{newEmail}</span>
+        </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (otp.length === 6 && !verifyMutation.isPending) {
+              verifyMutation.mutate();
+            }
+          }}
+        >
+          <div className="flex gap-2">
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              pattern="[0-9]*"
+              value={otp}
+              onChange={(e) => {
+                const v = e.target.value.replace(/\D/g, "").slice(0, 6);
+                setOtp(v);
+                setError(null);
+              }}
+              placeholder="000000"
+              className="w-36 px-4 py-2.5 rounded-xl border border-input bg-background text-foreground text-center font-mono text-lg tracking-[0.3em] placeholder:text-muted-foreground placeholder:tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-ring"
+              autoFocus
+            />
+            <Button
+              type="submit"
+              disabled={otp.length !== 6 || verifyMutation.isPending}
+              size="default"
+            >
+              {verifyMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                "Verify"
+              )}
+            </Button>
+          </div>
+        </form>
+        {error && (
+          <p className="text-xs text-destructive">{error}</p>
+        )}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setOtp("");
+              setError(null);
+              requestMutation.mutate();
+            }}
+            disabled={requestMutation.isPending || resendCooldown > 0}
+            className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {requestMutation.isPending
+              ? "Sending..."
+              : resendCooldown > 0
+                ? `Resend code (${resendCooldown}s)`
+                : "Resend code"}
+          </button>
+          <button
+            type="button"
+            onClick={reset}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (state === "editing") {
     return (
       <div className="space-y-2">
         <label className="text-sm font-medium text-foreground">New Email</label>
-        <div className="flex gap-2">
-          <input
-            type="email"
-            value={newEmail}
-            onChange={(e) => setNewEmail(e.target.value)}
-            placeholder="new@example.com"
-            className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            autoFocus
-          />
-          <Button
-            onClick={() => changeEmailMutation.mutate()}
-            disabled={
-              !newEmail.trim() ||
-              newEmail === currentEmail ||
-              changeEmailMutation.isPending
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (newEmail.trim() && newEmail !== currentEmail && !requestMutation.isPending) {
+              requestMutation.mutate();
             }
-            size="default"
-          >
-            {changeEmailMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              "Verify"
-            )}
-          </Button>
-        </div>
-        {changeEmailMutation.isError && (
-          <p className="text-xs text-destructive">
-            {changeEmailMutation.error.message}
-          </p>
+          }}
+        >
+          <div className="flex gap-2">
+            <input
+              type="email"
+              value={newEmail}
+              onChange={(e) => {
+                setNewEmail(e.target.value);
+                setError(null);
+              }}
+              placeholder="new@example.com"
+              className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              autoFocus
+            />
+            <Button
+              type="submit"
+              disabled={
+                !newEmail.trim() ||
+                newEmail === currentEmail ||
+                requestMutation.isPending
+              }
+              size="default"
+            >
+              {requestMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                "Send code"
+              )}
+            </Button>
+          </div>
+        </form>
+        {error && (
+          <p className="text-xs text-destructive">{error}</p>
         )}
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => {
-              setEditing(false);
-              setNewEmail("");
-              changeEmailMutation.reset();
-            }}
+            onClick={reset}
             className="text-xs text-muted-foreground hover:text-foreground"
           >
             Cancel
@@ -137,7 +271,7 @@ function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
         <Button
           variant="outline"
           size="default"
-          onClick={() => setEditing(true)}
+          onClick={() => setState("editing")}
         >
           <Pencil className="w-3.5 h-3.5 mr-1.5" />
           Edit

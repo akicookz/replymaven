@@ -76,7 +76,7 @@ function App() {
       <Route path="/docs" element={<Docs />} />
 
       <Route
-        path="/api/auth/callback/:provider"
+        path="/api/auth/*"
         element={<AuthCallback />}
       />
 

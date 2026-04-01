@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { emailOTP } from "better-auth/plugins/email-otp";
 import {
   withCloudflare,
   type CloudflareGeolocation,
@@ -7,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { schema } from "./db";
 import { Resend } from "resend";
 import { type AppEnv } from "./types";
+import { buildOtpEmailHtml } from "./services/email-service";
 
 export function createAuth(
   env: AppEnv,
@@ -39,26 +41,22 @@ export function createAuth(
             clientSecret: env.GITHUB_CLIENT_SECRET,
           },
         },
-        user: {
-          changeEmail: {
-            enabled: true,
-            sendChangeEmailVerification: async ({ user, newEmail, url }) => {
+        plugins: [
+          emailOTP({
+            otpLength: 6,
+            expiresIn: 600,
+            allowedAttempts: 5,
+            sendVerificationOTP: async ({ email, otp }) => {
               const resend = new Resend(env.RESEND_API_KEY);
               await resend.emails.send({
                 from: "ReplyMaven <noreply@updates.replymaven.com>",
-                to: newEmail,
-                subject: "Verify your new email address",
-                html: `
-                  <h2>Confirm your email change</h2>
-                  <p>Hi ${user.name},</p>
-                  <p>You requested to change your ReplyMaven email to <strong>${newEmail}</strong>.</p>
-                  <p><a href="${url}" style="display:inline-block;padding:12px 24px;background:#f97316;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">Verify new email</a></p>
-                  <p>If you didn't request this, you can safely ignore this email.</p>
-                `,
+                to: email,
+                subject: `${otp} is your ReplyMaven verification code`,
+                html: buildOtpEmailHtml(otp),
               });
             },
-          },
-        },
+          }),
+        ],
         rateLimit: {
           enabled: true,
           window: 60,

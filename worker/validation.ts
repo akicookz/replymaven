@@ -333,6 +333,16 @@ export const updateProfileSchema = z.object({
   profilePicture: z.string().max(500).nullable().optional(),
 });
 
+// ─── Email Change ─────────────────────────────────────────────────────────────
+
+export const requestEmailChangeSchema = z.object({
+  newEmail: z.string().email("Invalid email address"),
+});
+
+export const verifyEmailChangeSchema = z.object({
+  otp: z.string().regex(/^\d{6}$/, "Code must be 6 digits"),
+});
+
 // ─── Team Members ─────────────────────────────────────────────────────────────
 
 export const inviteTeamMemberSchema = z.object({
