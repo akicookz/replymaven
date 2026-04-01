@@ -77,6 +77,55 @@ ${fieldsHtml}
     }
   }
 
+  // ─── Usage Alert Notifications ──────────────────────────────────────────────
+
+  async sendUsageWarningEmail(
+    to: string,
+    name: string,
+    plan: string,
+    used: number,
+    max: number,
+  ): Promise<void> {
+    try {
+      await this.resend.emails.send({
+        from: "ReplyMaven <noreply@updates.replymaven.com>",
+        to,
+        subject: "You've used 80% of your monthly messages",
+        html: wrapEmail(`
+<p style="font-size: 18px; font-weight: 600; margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p style="color: #3f3f46; margin: 0 0 16px;">You've used <strong>${used}</strong> of <strong>${max}</strong> messages on your <strong>${escapeHtml(plan)}</strong> plan this billing period.</p>
+<p style="color: #3f3f46; margin: 0 0 24px;">Once you reach your limit, your chatbot will stop responding to visitors until the next period. Consider upgrading if you expect to exceed your quota.</p>
+<a href="https://replymaven.com/app/account/billing" style="${BUTTON_STYLE}">View Usage</a>
+        `),
+      });
+    } catch (error) {
+      console.error("[EmailService] Usage warning email failed:", error);
+    }
+  }
+
+  async sendUsageLimitReachedEmail(
+    to: string,
+    name: string,
+    plan: string,
+    max: number,
+  ): Promise<void> {
+    try {
+      await this.resend.emails.send({
+        from: "ReplyMaven <noreply@updates.replymaven.com>",
+        to,
+        subject: "You've reached your message limit",
+        html: wrapEmail(`
+<p style="font-size: 18px; font-weight: 600; margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
+<p style="color: #3f3f46; margin: 0 0 16px;">You've used all <strong>${max}</strong> messages on your <strong>${escapeHtml(plan)}</strong> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
+<p style="color: #3f3f46; margin: 0 0 24px;">Upgrade your plan to get more messages and keep your chatbot online.</p>
+<a href="https://replymaven.com/app/account/billing" style="${BUTTON_STYLE}">Upgrade Plan</a>
+        `),
+      });
+    } catch (error) {
+      console.error("[EmailService] Usage limit reached email failed:", error);
+    }
+  }
+
   // ─── Subscription Status Notifications ────────────────────────────────────────
 
   async sendSubscriptionInactiveEmail(

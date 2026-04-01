@@ -15,6 +15,8 @@ interface SubscriptionData {
   usage: {
     messagesUsed: number;
   };
+  usagePeriodStart: string | null;
+  usagePeriodEnd: string | null;
   limits: PlanLimits | null;
   seats: {
     current: number;

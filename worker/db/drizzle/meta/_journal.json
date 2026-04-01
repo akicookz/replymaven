@@ -204,6 +204,13 @@
       "when": 1774690324464,
       "tag": "0028_intro_message_delay_duration",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1774776724464,
+      "tag": "0029_usage_alert_columns",
+      "breakpoints": true
     }
   ]
 }

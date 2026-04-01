@@ -587,6 +587,12 @@ export const usage = sqliteTable(
       .references(() => authSchema.users.id, { onDelete: "cascade" }),
     periodStart: integer("period_start", { mode: "timestamp" }).notNull(),
     messagesUsed: integer("messages_used").notNull().default(0),
+    alerted80: integer("alerted_80", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    alerted100: integer("alerted_100", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),

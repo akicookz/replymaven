@@ -1552,7 +1552,7 @@ const app = new Hono<HonoAppContext>()
 
     const subscription =
       await billingService.getSubscriptionByUserId(effectiveUserId);
-    const currentUsage = await billingService.getUsage(effectiveUserId);
+    const currentUsage = await billingService.getUsage(effectiveUserId, subscription);
     const seatCount = await teamService.getSeatCount(effectiveUserId);
     const membership = await teamService.getTeamMembership(user.id);
 
@@ -1560,6 +1560,8 @@ const app = new Hono<HonoAppContext>()
       return c.json({
         subscription: null,
         usage: { messagesUsed: 0 },
+        usagePeriodStart: null,
+        usagePeriodEnd: null,
         limits: null,
         seats: { current: 1, max: 0 },
         role: "owner",
@@ -1567,6 +1569,8 @@ const app = new Hono<HonoAppContext>()
     }
 
     const limits = BillingService.getPlanLimits(subscription.plan as Plan);
+    const usagePeriodStart = billingService.getUsagePeriodStart(subscription);
+    const usagePeriodEnd = billingService.getUsagePeriodEnd(subscription);
 
     return c.json({
       subscription: {
@@ -1582,6 +1586,8 @@ const app = new Hono<HonoAppContext>()
       usage: {
         messagesUsed: currentUsage?.messagesUsed ?? 0,
       },
+      usagePeriodStart,
+      usagePeriodEnd,
       limits,
       seats: {
         current: seatCount,

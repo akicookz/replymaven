@@ -231,10 +231,19 @@ function Billing() {
       {/* Usage */}
       {limits && (
         <div className="rounded-xl border border-border p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-foreground">Usage</h2>
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-lg font-semibold text-foreground">Usage</h2>
+            {data?.usagePeriodStart && data?.usagePeriodEnd && (
+              <p className="text-xs text-muted-foreground">
+                {new Date(data.usagePeriodStart).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                {" — "}
+                {new Date(data.usagePeriodEnd).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </p>
+            )}
+          </div>
 
           <UsageBar
-            label="Messages this month"
+            label="Messages this period"
             used={usage?.messagesUsed ?? 0}
             max={limits.maxMessagesPerMonth}
           />

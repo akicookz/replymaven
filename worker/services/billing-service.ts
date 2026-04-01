@@ -583,13 +583,57 @@ export class BillingService {
 
   // ─── Usage Tracking ───────────────────────────────────────────────────────
 
-  private getCurrentPeriodStart(): Date {
-    const now = new Date();
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  /**
+   * Compute the start of the current usage period based on the subscription.
+   * Monthly plans: use Stripe's currentPeriodStart directly.
+   * Annual plans: rolling 30-day window from the annual period start.
+   * Fallback: first of the current UTC month.
+   */
+  getUsagePeriodStart(subscription: SubscriptionRow | null): Date {
+    if (!subscription?.currentPeriodStart) {
+      const now = new Date();
+      return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    }
+
+    if (subscription.interval === "monthly") {
+      return subscription.currentPeriodStart;
+    }
+
+    // Annual plans: rolling 30-day window from period start
+    const anchor = subscription.currentPeriodStart.getTime();
+    const now = Date.now();
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+    const elapsed = now - anchor;
+    const windowIndex = Math.max(0, Math.floor(elapsed / THIRTY_DAYS_MS));
+    return new Date(anchor + windowIndex * THIRTY_DAYS_MS);
   }
 
-  async getUsage(userId: string): Promise<UsageRow | null> {
-    const periodStart = this.getCurrentPeriodStart();
+  /**
+   * Compute the end of the current usage period.
+   * Monthly plans: use Stripe's currentPeriodEnd.
+   * Annual plans: usage period start + 30 days.
+   */
+  getUsagePeriodEnd(subscription: SubscriptionRow | null): Date {
+    if (!subscription?.currentPeriodEnd) {
+      const now = new Date();
+      return new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+      );
+    }
+
+    if (subscription.interval === "monthly") {
+      return subscription.currentPeriodEnd;
+    }
+
+    const start = this.getUsagePeriodStart(subscription);
+    return new Date(start.getTime() + 30 * 24 * 60 * 60 * 1000);
+  }
+
+  async getUsage(
+    userId: string,
+    subscription: SubscriptionRow | null,
+  ): Promise<UsageRow | null> {
+    const periodStart = this.getUsagePeriodStart(subscription);
     const rows = await this.db
       .select()
       .from(usage)
@@ -598,17 +642,26 @@ export class BillingService {
     return rows[0] ?? null;
   }
 
-  async incrementMessageUsage(userId: string): Promise<number> {
-    const periodStart = this.getCurrentPeriodStart();
+  async incrementMessageUsage(
+    userId: string,
+    subscription: SubscriptionRow | null,
+  ): Promise<number> {
+    const periodStart = this.getUsagePeriodStart(subscription);
 
     // Try to increment existing row
-    const existing = await this.getUsage(userId);
+    const existing = await this.getUsage(userId, subscription);
     if (existing) {
       const newCount = existing.messagesUsed + 1;
       await this.db
         .update(usage)
         .set({ messagesUsed: newCount })
         .where(eq(usage.id, existing.id));
+      await this.checkAndSendUsageAlerts(
+        userId,
+        subscription,
+        newCount,
+        existing,
+      );
       return newCount;
     }
 
@@ -620,7 +673,103 @@ export class BillingService {
       periodStart,
       messagesUsed: 1,
     });
+
+    // Check alerts even for count=1 (in case limit is 1)
+    const newRow = await this.getUsage(userId, subscription);
+    if (newRow) {
+      await this.checkAndSendUsageAlerts(userId, subscription, 1, newRow);
+    }
+
     return 1;
+  }
+
+  // ─── Usage Alerts ─────────────────────────────────────────────────────────
+
+  private async checkAndSendUsageAlerts(
+    userId: string,
+    subscription: SubscriptionRow | null,
+    currentCount: number,
+    usageRow: UsageRow,
+  ): Promise<void> {
+    if (!subscription) return;
+
+    try {
+      const limits = BillingService.getPlanLimits(subscription.plan as Plan);
+      const max = limits.maxMessagesPerMonth;
+      const threshold80 = Math.floor(max * 0.8);
+
+      // 100% alert
+      if (currentCount >= max && !usageRow.alerted100) {
+        await this.db
+          .update(usage)
+          .set({ alerted100: true })
+          .where(eq(usage.id, usageRow.id));
+        this.sendUsageAlert(
+          userId,
+          subscription.plan as Plan,
+          currentCount,
+          max,
+          "limit_reached",
+        );
+      }
+
+      // 80% alert (independent check — both can fire if user jumps from <80% to >=100%)
+      if (currentCount >= threshold80 && !usageRow.alerted80) {
+        await this.db
+          .update(usage)
+          .set({ alerted80: true })
+          .where(eq(usage.id, usageRow.id));
+        this.sendUsageAlert(
+          userId,
+          subscription.plan as Plan,
+          currentCount,
+          max,
+          "warning",
+        );
+      }
+    } catch (err) {
+      console.error("[BillingService] Usage alert check failed:", err);
+    }
+  }
+
+  private async sendUsageAlert(
+    userId: string,
+    plan: Plan,
+    used: number,
+    max: number,
+    type: "warning" | "limit_reached",
+  ): Promise<void> {
+    try {
+      const user = await this.db
+        .select({ email: users.email, name: users.name })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1)
+        .then((rows) => rows[0]);
+      if (!user?.email) return;
+
+      const emailService = new EmailService(this.env.RESEND_API_KEY);
+      const name = user.name ?? "there";
+
+      if (type === "warning") {
+        await emailService.sendUsageWarningEmail(
+          user.email,
+          name,
+          plan,
+          used,
+          max,
+        );
+      } else {
+        await emailService.sendUsageLimitReachedEmail(
+          user.email,
+          name,
+          plan,
+          max,
+        );
+      }
+    } catch (err) {
+      console.error("[BillingService] Usage alert email failed:", err);
+    }
   }
 
   // ─── Plan Enforcement Checks ──────────────────────────────────────────────
@@ -651,7 +800,7 @@ export class BillingService {
     if (!sub) return { allowed: false, used: 0, max: 0 };
 
     const limits = BillingService.getPlanLimits(sub.plan as Plan);
-    const currentUsage = await this.getUsage(userId);
+    const currentUsage = await this.getUsage(userId, sub);
     const used = currentUsage?.messagesUsed ?? 0;
 
     return {

@@ -1004,7 +1004,7 @@ export async function handleWidgetMessageTurn(
       );
 
       try {
-        await billingService.incrementMessageUsage(context.project.userId);
+        await billingService.incrementMessageUsage(context.project.userId, ownerSub);
       } catch (err) {
         logError(
           "widget_turn.message_usage_increment_failed",
