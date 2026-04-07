@@ -214,25 +214,24 @@ export class ChatService {
     projectConversations: ConversationRow[],
     autoCloseMinutes: number,
   ): Promise<string[]> {
-    const closedIds: string[] = [];
     const staleThreshold = Date.now() - autoCloseMinutes * 60 * 1000;
 
-    const sorted = [...projectConversations].sort((a, b) => {
-      const aTime = a.lastActivityAt?.getTime() ?? a.createdAt.getTime();
-      const bTime = b.lastActivityAt?.getTime() ?? b.createdAt.getTime();
-      return aTime - bTime;
-    });
+    const staleIds = projectConversations
+      .filter((conv) => {
+        if (conv.status === "closed") return false;
+        const lastActivity = conv.lastActivityAt?.getTime() ?? conv.createdAt.getTime();
+        return lastActivity < staleThreshold;
+      })
+      .map((conv) => conv.id);
 
-    for (const conv of sorted) {
-      if (conv.status === "closed") continue;
-      const lastActivity = conv.lastActivityAt?.getTime() ?? conv.createdAt.getTime();
-      if (lastActivity < staleThreshold) {
-        await this.updateConversationStatus(conv.id, conv.projectId, "closed", "ended");
-        closedIds.push(conv.id);
-      }
+    if (staleIds.length > 0) {
+      await this.db
+        .update(conversations)
+        .set({ status: "closed", closeReason: "ended", updatedAt: new Date() })
+        .where(inArray(conversations.id, staleIds));
     }
 
-    return closedIds;
+    return staleIds;
   }
 
   async reopenConversation(

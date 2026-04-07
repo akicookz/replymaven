@@ -875,6 +875,59 @@ const app = new Hono<HonoAppContext>()
     );
   })
 
+  // ─── Telegram Detect Chat ID ─────────────────────────────────────────────────
+  .post("/api/telegram/detect-chat-id", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`tg-detect:${ip}`, 10, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const body = await c.req.json<{ botToken?: string }>();
+    if (!body.botToken || typeof body.botToken !== "string") {
+      return c.json({ error: "botToken is required" }, 400);
+    }
+
+    try {
+      const res = await fetch(
+        `https://api.telegram.org/bot${body.botToken}/getUpdates?limit=20&allowed_updates=["message"]`,
+      );
+      const data = await res.json<{
+        ok: boolean;
+        result?: Array<{
+          message?: {
+            chat: { id: number; type: string; title?: string; first_name?: string };
+          };
+        }>;
+        description?: string;
+      }>();
+
+      if (!data.ok) {
+        return c.json(
+          { error: data.description ?? "Invalid bot token" },
+          400,
+        );
+      }
+
+      const seen = new Set<number>();
+      const chats: Array<{ id: string; type: string; title: string }> = [];
+
+      for (const update of data.result ?? []) {
+        const chat = update.message?.chat;
+        if (!chat || seen.has(chat.id)) continue;
+        seen.add(chat.id);
+        chats.push({
+          id: String(chat.id),
+          type: chat.type,
+          title: chat.title ?? chat.first_name ?? `Chat ${chat.id}`,
+        });
+      }
+
+      return c.json({ chats });
+    } catch {
+      return c.json({ error: "Failed to connect to Telegram API" }, 500);
+    }
+  })
+
   // ─── Telegram Webhook ───────────────────────────────────────────────────────
   .post("/api/telegram/webhook/:projectId", async (c) => {
     const ip = getClientIp(c);
@@ -4092,7 +4145,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     const buffer = await fileObj.arrayBuffer();
-    await c.env.UPLOADS.put("widget-embed.js", buffer, {
+    await c.env.WIDGET_BUCKET.put("widget-embed.js", buffer, {
       httpMetadata: { contentType: "application/javascript" },
     });
 

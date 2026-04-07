@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { MobileMenuButton } from "@/components/PageHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -135,6 +136,9 @@ export function ToolsPanel({
   const [telegramChatId, setTelegramChatId] = useState("");
   const [telegramSaveStatus, setTelegramSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [telegramTestResult, setTelegramTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [detectingChatId, setDetectingChatId] = useState(false);
+  const [detectedChats, setDetectedChats] = useState<Array<{ id: string; type: string; title: string }> | null>(null);
+  const [detectError, setDetectError] = useState<string | null>(null);
 
   // ─── Queries ──────────────────────────────────────────────────────────────
 
@@ -973,21 +977,95 @@ export function ToolsPanel({
                           placeholder={telegramConfigured ? "Enter new token to update" : "Paste your bot token from @BotFather"}
                           className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                         />
+                        <Accordion type="single" collapsible>
+                          <AccordionItem value="bot-token-help" className="border-0">
+                            <AccordionTrigger className="py-1 text-xs text-muted-foreground hover:text-foreground hover:no-underline">
+                              How do I get a bot token?
+                            </AccordionTrigger>
+                            <AccordionContent className="text-xs text-muted-foreground pb-1">
+                              <ol className="list-decimal list-inside space-y-1">
+                                <li>Open Telegram and search for <strong className="text-foreground">@BotFather</strong></li>
+                                <li>Send <code className="bg-muted px-1 rounded">/newbot</code> and follow the prompts to name your bot</li>
+                                <li>BotFather will reply with a token like <code className="bg-muted px-1 rounded">123456:ABC-DEF...</code> — copy it</li>
+                                <li>Paste it in the field above</li>
+                              </ol>
+                            </AccordionContent>
+                          </AccordionItem>
+                        </Accordion>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground">
                           Chat ID <span className="text-destructive">*</span>
                         </label>
-                        <input
-                          type="text"
-                          value={telegramChatId}
-                          onChange={(e) => setTelegramChatId(e.target.value)}
-                          placeholder={telegramData?.telegramChatId ?? "Your Telegram chat or group ID"}
-                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                        />
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={telegramChatId}
+                            onChange={(e) => { setTelegramChatId(e.target.value); setDetectedChats(null); setDetectError(null); }}
+                            placeholder={telegramData?.telegramChatId ?? "Your Telegram chat or group ID"}
+                            className="flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={!telegramBotToken || detectingChatId}
+                            onClick={async () => {
+                              setDetectingChatId(true);
+                              setDetectError(null);
+                              setDetectedChats(null);
+                              try {
+                                const res = await fetch("/api/telegram/detect-chat-id", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ botToken: telegramBotToken }),
+                                });
+                                const data = await res.json() as { chats?: Array<{ id: string; type: string; title: string }>; error?: string };
+                                if (!res.ok) {
+                                  setDetectError(data.error ?? "Detection failed");
+                                } else if (!data.chats?.length) {
+                                  setDetectError("No chats found. Send /start to your bot first, then try again.");
+                                } else if (data.chats.length === 1) {
+                                  setTelegramChatId(data.chats[0].id);
+                                  setDetectedChats(null);
+                                } else {
+                                  setDetectedChats(data.chats);
+                                }
+                              } catch {
+                                setDetectError("Failed to connect");
+                              } finally {
+                                setDetectingChatId(false);
+                              }
+                            }}
+                            className="shrink-0"
+                          >
+                            {detectingChatId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Detect"}
+                          </Button>
+                        </div>
                         <p className="text-xs text-muted-foreground">
-                          Send /start to your bot, then use @userinfobot to find your chat ID.
+                          Send <code className="bg-muted px-1 rounded">/start</code> to your bot in Telegram (or add it to a group and send a message), then click <strong>Detect</strong>.
                         </p>
+                        {detectError && (
+                          <p className="text-xs text-destructive">{detectError}</p>
+                        )}
+                        {detectedChats && detectedChats.length > 1 && (
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-medium text-muted-foreground">Multiple chats found — pick one:</p>
+                            <div className="space-y-1">
+                              {detectedChats.map((chat) => (
+                                <button
+                                  key={chat.id}
+                                  type="button"
+                                  onClick={() => { setTelegramChatId(chat.id); setDetectedChats(null); }}
+                                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-muted/30 hover:bg-muted/60 text-sm transition-colors"
+                                >
+                                  <span className="text-foreground">{chat.title}</span>
+                                  <span className="text-xs text-muted-foreground">{chat.type} · {chat.id}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                     {telegramSaveStatus === "error" && (

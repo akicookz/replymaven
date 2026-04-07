@@ -12,6 +12,7 @@ interface CrawlMessage {
 interface Env {
   DB: D1Database;
   UPLOADS: R2Bucket;
+  WIDGET_BUCKET: R2Bucket;
   CONVERSATIONS_CACHE: KVNamespace;
   AI: Ai;
   ASSETS: Fetcher;

@@ -396,6 +396,7 @@ function Conversations() {
   const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "all">("all");
   const [expandedToolCards, setExpandedToolCards] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { data: conversations, isLoading } = useQuery<Conversation[]>({
     queryKey: ["conversations", projectId, statusFilter],
@@ -404,7 +405,7 @@ function Conversations() {
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
-    refetchInterval: 30_000,
+    refetchInterval: 15_000,
   });
 
   const { data: convoDetail, isPending: isDetailLoading } = useQuery<{
@@ -423,7 +424,12 @@ function Conversations() {
       return res.json();
     },
     enabled: !!selectedConvo,
-    refetchInterval: selectedConvo ? 30_000 : false,
+    refetchInterval: (query) => {
+      if (!selectedConvo) return false;
+      const status = query.state.data?.conversation?.status;
+      if (status === "closed") return false;
+      return 5_000;
+    },
   });
 
   const { data: cannedResponses } = useQuery<CannedResponse[]>({
@@ -471,7 +477,6 @@ function Conversations() {
     },
     enabled:
       !!lastVisitorMessage?.content &&
-      convoDetail?.conversation?.status !== "closed" &&
       (approvedCanned?.length ?? 0) > 0,
     staleTime: 60_000,
   });
@@ -479,20 +484,69 @@ function Conversations() {
   const suggestions = suggestionsData?.suggestions ?? [];
 
   const sendReply = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (content: string) => {
       const res = await fetch(
         `/api/projects/${projectId}/conversations/${selectedConvo}/reply`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: replyText }),
+          body: JSON.stringify({ content }),
         },
       );
       if (!res.ok) throw new Error("Failed to send reply");
       return res.json();
     },
-    onSuccess: () => {
+    onMutate: async (content: string) => {
+      await queryClient.cancelQueries({
+        queryKey: ["conversation-detail", selectedConvo],
+      });
+      const previous = queryClient.getQueryData<{
+        conversation: Conversation;
+        messages: Message[];
+        botName: string | null;
+        agentName: string | null;
+        inquiry: ConversationInquiry | null;
+      }>(["conversation-detail", selectedConvo]);
+
+      queryClient.setQueryData(
+        ["conversation-detail", selectedConvo],
+        (old: typeof previous) => {
+          if (!old) return old;
+          return {
+            ...old,
+            conversation: { ...old.conversation, status: "agent_replied" },
+            messages: [
+              ...old.messages,
+              {
+                id: `optimistic-${Date.now()}`,
+                conversationId: selectedConvo,
+                role: "agent",
+                content,
+                createdAt: new Date().toISOString(),
+                sources: null,
+                senderName: null,
+                senderAvatar: null,
+                toolExecutions: [],
+                _optimistic: true,
+                _status: "sending" as const,
+              },
+            ],
+          };
+        },
+      );
+
       setReplyText("");
+      return { previous };
+    },
+    onError: (_err, _content, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(
+          ["conversation-detail", selectedConvo],
+          context.previous,
+        );
+      }
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: ["conversation-detail", selectedConvo],
       });
@@ -521,9 +575,43 @@ function Conversations() {
       if (!res.ok) throw new Error("Failed to close conversation");
       return res.json();
     },
-    onSuccess: () => {
+    onMutate: async ({ convId, closeReason }) => {
+      await queryClient.cancelQueries({
+        queryKey: ["conversation-detail", convId],
+      });
+      const previousDetail = queryClient.getQueryData(["conversation-detail", convId]);
+      const previousList = queryClient.getQueryData(["conversations", projectId, statusFilter]);
+
+      queryClient.setQueryData(
+        ["conversation-detail", convId],
+        (old: typeof previousDetail & { conversation?: Conversation }) => {
+          if (!old || !("conversation" in (old as Record<string, unknown>))) return old;
+          const o = old as { conversation: Conversation; messages: Message[]; botName: string | null; agentName: string | null; inquiry: ConversationInquiry | null };
+          return { ...o, conversation: { ...o.conversation, status: "closed", closeReason } };
+        },
+      );
+
+      queryClient.setQueryData(
+        ["conversations", projectId, statusFilter],
+        (old: Conversation[] | undefined) =>
+          old?.map((c) =>
+            c.id === convId ? { ...c, status: "closed", closeReason } : c,
+          ),
+      );
+
+      return { previousDetail, previousList };
+    },
+    onError: (_err, { convId }, context) => {
+      if (context?.previousDetail) {
+        queryClient.setQueryData(["conversation-detail", convId], context.previousDetail);
+      }
+      if (context?.previousList) {
+        queryClient.setQueryData(["conversations", projectId, statusFilter], context.previousList);
+      }
+    },
+    onSettled: (_data, _error, { convId }) => {
       queryClient.invalidateQueries({
-        queryKey: ["conversation-detail", selectedConvo],
+        queryKey: ["conversation-detail", convId],
       });
       queryClient.invalidateQueries({
         queryKey: ["conversations", projectId],
@@ -1365,14 +1453,27 @@ function Conversations() {
                             "flex items-center gap-1 justify-end mt-0.5",
                           )}
                         >
-                          <span className="text-[10px] text-muted-foreground/70">
-                            {formatTime(msg.createdAt)}
-                          </span>
-                          {!isVisitor && (
-                            <CheckCheck className="w-3.5 h-3.5 text-status-replied/70" />
-                          )}
-                          {isVisitor && (
-                            <Check className="w-3 h-3 text-muted-foreground/40" />
+                          {(msg as Message & { _optimistic?: boolean }).
+                            _optimistic ? (
+                            <span className="text-[10px] text-muted-foreground/70 italic">
+                              {sendReply.isPending
+                                ? "Sending..."
+                                : sendReply.isError
+                                  ? "Failed to send"
+                                  : "Sent"}
+                            </span>
+                          ) : (
+                            <>
+                              <span className="text-[10px] text-muted-foreground/70">
+                                {formatTime(msg.createdAt)}
+                              </span>
+                              {!isVisitor && (
+                                <CheckCheck className="w-3.5 h-3.5 text-status-replied/70" />
+                              )}
+                              {isVisitor && (
+                                <Check className="w-3 h-3 text-muted-foreground/40" />
+                              )}
+                            </>
                           )}
                         </div>
                       </div>
@@ -1385,8 +1486,7 @@ function Conversations() {
             </div>
 
             {/* Canned Response Suggestions */}
-            {suggestions.length > 0 &&
-              convoDetail.conversation.status !== "closed" && (
+            {suggestions.length > 0 && (
                 <div className="px-3 py-1.5 flex gap-2 overflow-x-auto">
                   {suggestions.map(
                     (s: {
@@ -1411,74 +1511,97 @@ function Conversations() {
 
             {/* Reply Input */}
             <div className="px-3 py-2 bg-card border-t border-border">
-              {convoDetail.conversation.status === "closed" ? (
-                <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
-                  <XCircle className="w-4 h-4" />
+              {convoDetail.conversation.status === "closed" && (
+                <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-muted-foreground">
+                  <XCircle className="w-3 h-3" />
                   {getCloseReasonLabel(convoDetail.conversation.closeReason)}
+                  <span className="text-muted-foreground/60">· Replying will reopen</span>
                 </div>
-              ) : (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (replyText.trim()) sendReply.mutate();
-                  }}
-                  className="flex items-center gap-2"
-                >
-                  {approvedCanned && approvedCanned.length > 0 && (
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-10 w-10 shrink-0 text-muted-foreground hover:text-foreground"
-                        >
-                          <Zap className="w-4 h-4" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        side="top"
-                        align="start"
-                        className="w-72 p-1 max-h-64 overflow-y-auto"
-                      >
-                        <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
-                          Canned responses
-                        </div>
-                        {approvedCanned.map((cr) => (
-                          <button
-                            key={cr.id}
-                            type="button"
-                            className="flex flex-col gap-0.5 w-full px-2 py-1.5 text-left rounded-lg hover:bg-accent transition-colors"
-                            onClick={() => setReplyText(cr.response)}
-                          >
-                            <span className="text-xs font-medium text-foreground truncate w-full">
-                              {cr.trigger}
-                            </span>
-                            <span className="text-xs text-muted-foreground line-clamp-2">
-                              {cr.response}
-                            </span>
-                          </button>
-                        ))}
-                      </PopoverContent>
-                    </Popover>
-                  )}
-                  <input
-                    type="text"
-                    value={replyText}
-                    onChange={(e) => setReplyText(e.target.value)}
-                    placeholder="Type your reply..."
-                    className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <Button
-                    type="submit"
-                    size="icon"
-                    disabled={!replyText.trim() || sendReply.isPending}
-                    className="h-10 w-10 rounded-full"
-                  >
-                    <Send className="w-4 h-4" />
-                  </Button>
-                </form>
               )}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (replyText.trim()) {
+                    sendReply.mutate(replyText.trim());
+                    if (replyTextareaRef.current) {
+                      replyTextareaRef.current.style.height = "auto";
+                    }
+                  }
+                }}
+                className="flex items-end gap-2"
+              >
+                {approvedCanned && approvedCanned.length > 0 && (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-10 w-10 shrink-0 text-muted-foreground hover:text-foreground mb-0.5"
+                      >
+                        <Zap className="w-4 h-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      side="top"
+                      align="start"
+                      className="w-72 p-1 max-h-64 overflow-y-auto"
+                    >
+                      <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
+                        Canned responses
+                      </div>
+                      {approvedCanned.map((cr) => (
+                        <button
+                          key={cr.id}
+                          type="button"
+                          className="flex flex-col gap-0.5 w-full px-2 py-1.5 text-left rounded-lg hover:bg-accent transition-colors"
+                          onClick={() => setReplyText(cr.response)}
+                        >
+                          <span className="text-xs font-medium text-foreground truncate w-full">
+                            {cr.trigger}
+                          </span>
+                          <span className="text-xs text-muted-foreground line-clamp-2">
+                            {cr.response}
+                          </span>
+                        </button>
+                      ))}
+                    </PopoverContent>
+                  </Popover>
+                )}
+                <textarea
+                  ref={replyTextareaRef}
+                  value={replyText}
+                  onChange={(e) => {
+                    setReplyText(e.target.value);
+                    // Auto-resize
+                    e.target.style.height = "auto";
+                    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      if (replyText.trim()) {
+                        sendReply.mutate(replyText.trim());
+                        if (replyTextareaRef.current) {
+                          replyTextareaRef.current.style.height = "auto";
+                        }
+                      }
+                    }
+                  }}
+                  placeholder={convoDetail.conversation.status === "closed" ? "Reply to reopen..." : "Type your reply..."}
+                  rows={1}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none overflow-hidden leading-normal"
+                  style={{ maxHeight: 120 }}
+                />
+                <Button
+                  type="submit"
+                  size="icon"
+                  disabled={!replyText.trim() || sendReply.isPending}
+                  className="h-10 w-10 rounded-full mb-0.5"
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              </form>
             </div>
           </>
         ) : (
