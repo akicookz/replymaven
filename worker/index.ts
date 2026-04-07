@@ -1120,43 +1120,9 @@ const app = new Hono<HonoAppContext>()
     return c.json({ ok: true });
   })
 
-  // ─── Widget Embed JS ───────────────────────────────────────────────────────
-  .get("/api/widget-embed.js", async (c) => {
-    // In local dev, serve widget from Vite dev server assets (public/ dir)
-    // instead of R2, so you can test widget changes without deploying.
-    // Run `bun run widget:build` to update the local bundle.
-    const isLocal = c.env.BETTER_AUTH_URL?.includes("localhost");
-    if (isLocal) {
-      try {
-        const res = await c.env.ASSETS.fetch(
-          new Request("http://localhost/widget-embed.js"),
-        );
-        if (res.ok) {
-          const body = await res.text();
-          return c.text(body, 200, {
-            "Content-Type": "application/javascript",
-            "Cache-Control": "no-cache",
-          });
-        }
-      } catch {
-        // fall through to R2
-      }
-    }
-
-    const obj = await c.env.UPLOADS.get("widget-embed.js");
-    if (!obj) {
-      return c.text(
-        '// ReplyMaven widget not deployed yet. Run: bun run widget:deploy\nconsole.warn("[ReplyMaven] Widget bundle not found. Deploy it with: bun run widget:deploy");',
-        200,
-        { "Content-Type": "application/javascript" },
-      );
-    }
-
-    const body = await obj.text();
-    return c.text(body, 200, {
-      "Content-Type": "application/javascript",
-      "Cache-Control": "public, max-age=3600",
-    });
+  // ─── Widget Embed JS (redirect to R2 custom domain) ────────────────────────
+  .get("/api/widget-embed.js", (c) => {
+    return c.redirect("https://widget.replymaven.com/widget-embed.js", 301);
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -3483,14 +3449,18 @@ const app = new Hono<HonoAppContext>()
     const statusFilter = (c.req.query("status") as "open" | "closed" | "all") ?? "all";
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
 
-    // Lazy auto-close stale conversations
+    // Lazy auto-close stale conversations (single query, no double fetch)
     const settings = await projectService.getSettings(project.id);
+    let convos = await chatService.getConversationsByProject(project.id, 50, 0, statusFilter);
     if (settings?.autoCloseMinutes && statusFilter !== "closed") {
-      const openConvos = await chatService.getConversationsByProject(project.id, 50, 0, "open");
-      await chatService.checkAndCloseStaleForProject(openConvos, settings.autoCloseMinutes);
+      const closedIds = await chatService.checkAndCloseStaleForProject(convos, settings.autoCloseMinutes);
+      if (closedIds.length > 0) {
+        convos = convos.map((c) => closedIds.includes(c.id) ? { ...c, status: "closed" as const } : c);
+        if (statusFilter === "open") {
+          convos = convos.filter((c) => c.status !== "closed");
+        }
+      }
     }
-
-    const convos = await chatService.getConversationsByProject(project.id, 50, 0, statusFilter);
     return c.json(convos);
   })
   .get("/api/projects/:id/conversations/:convId", async (c) => {
@@ -3513,14 +3483,16 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
+    // Fetch settings once (used for auto-close check + botName/agentName)
+    const settings = await projectService.getSettings(project.id);
+
     // Lazy auto-close check
     if (conversation.status !== "closed") {
-      const staleSettings = await projectService.getSettings(project.id);
-      if (staleSettings?.autoCloseMinutes) {
+      if (settings?.autoCloseMinutes) {
         const result = await chatService.checkAndCloseStale(
           conversation.id,
           project.id,
-          staleSettings.autoCloseMinutes,
+          settings.autoCloseMinutes,
         );
         if (result.closed && result.conversation) {
           conversation = result.conversation;
@@ -3529,8 +3501,10 @@ const app = new Hono<HonoAppContext>()
     }
 
     const toolService = new ToolService(db);
+    // Try KV cache first for messages, fall back to D1
+    const cachedMsgs = await chatService.getFromCache(conversation.id, project.id);
     const [msgs, toolExecs] = await Promise.all([
-      chatService.getMessages(conversation.id),
+      cachedMsgs ? Promise.resolve(cachedMsgs) : chatService.getMessages(conversation.id),
       toolService.getExecutionsByConversation(conversation.id),
     ]);
 
@@ -3559,8 +3533,6 @@ const app = new Hono<HonoAppContext>()
         createdAt: ex.createdAt,
       })) ?? [],
     }));
-
-    const settings = await projectService.getSettings(project.id);
 
     // Fetch associated inquiry if one was created from this conversation
     let inquiry: {
@@ -3634,6 +3606,11 @@ const app = new Hono<HonoAppContext>()
       .where(eq(users.id, user.id))
       .limit(1);
     const avatar = userProfile[0]?.profilePicture ?? userProfile[0]?.image ?? null;
+
+    // Reopen closed conversations before adding the message
+    if (conversation.status === "closed") {
+      await chatService.reopenConversation(conversation.id, project.id);
+    }
 
     const message = await chatService.addMessage(
       {

@@ -733,7 +733,7 @@ function Step4({
   const widgetInjected = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const embedCode = `<script src="${window.location.origin}/api/widget-embed.js" data-project="${slug}"></script>`;
+  const embedCode = `<script src="https://widget.replymaven.com/widget-embed.js" data-project="${slug}"></script>`;
 
   // Fetch sample question
   const { data: sampleData } = useQuery<{ question: string }>({
@@ -765,7 +765,7 @@ function Step4({
     widgetInjected.current = true;
 
     const script = document.createElement("script");
-    script.src = `/api/widget-embed.js`;
+    script.src = `https://widget.replymaven.com/widget-embed.js`;
     script.setAttribute("data-project", slug);
     document.body.appendChild(script);
 

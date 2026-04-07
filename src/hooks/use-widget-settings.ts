@@ -93,11 +93,6 @@ export interface WidgetSettingsState {
   uploadBanner: (file: File) => Promise<void>;
 }
 
-function getWindowOrigin(): string {
-  if (typeof window === "undefined") return "";
-  return window.location.origin;
-}
-
 function buildPreviewHtml(options: {
   projectSlug: string;
   form: Partial<WidgetConfigData>;
@@ -159,7 +154,7 @@ function buildPreviewHtml(options: {
     return origFetch.call(this, url, opts);
   };
 </script>
-<script src="/api/widget-embed.js" data-project="${options.projectSlug}"></script>
+<script src="https://widget.replymaven.com/widget-embed.js" data-project="${options.projectSlug}"></script>
 <script>
   var mode = "${options.previewMode}";
   var waitForWidget = setInterval(function() {
@@ -356,7 +351,7 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
     }
   }
 
-  const embedSnippet = `<script src="${getWindowOrigin()}/api/widget-embed.js" data-project="${project?.slug ?? "your-project"}"></script>`;
+  const embedSnippet = `<script src="https://widget.replymaven.com/widget-embed.js" data-project="${project?.slug ?? "your-project"}"></script>`;
 
   async function uploadAvatar(file: File): Promise<void> {
     await handleImageUpload(file, setAvatarUploading, "avatarUrl");

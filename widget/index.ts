@@ -2,7 +2,7 @@
  * ReplyMaven Widget Embed Script
  *
  * Usage:
- * <script src="https://replymaven.com/api/widget-embed.js" data-project="your-project-slug"></script>
+ * <script src="https://widget.replymaven.com/widget-embed.js" data-project="your-project-slug"></script>
  *
  * Programmatic API:
  * window.ReplyMaven.open()
@@ -674,6 +674,18 @@
       gap: 1px;
       min-width: 0;
     }
+    .rm-msg-status {
+      font-size: 11px;
+      line-height: 1;
+      color: rgba(0, 0, 0, 0.35);
+      text-align: right;
+      margin-top: 3px;
+      padding-right: 2px;
+      transition: opacity 0.5s ease;
+    }
+    .rm-msg-status.failed {
+      color: #ef4444;
+    }
     .rm-sender-label {
       font-size: 11px;
       font-weight: 600;
@@ -955,7 +967,7 @@
       padding: 12px 16px;
       border-top: 1px solid var(--rm-border-subtle);
       display: flex;
-      align-items: center;
+      align-items: flex-end;
       gap: 8px;
       background: transparent;
       position: relative;
@@ -967,12 +979,17 @@
       border: 1px solid var(--rm-border);
       border-radius: var(--rm-btn-radius);
       font-size: 14px;
+      line-height: 1.5;
       outline: none;
       background: var(--rm-input-bg);
       color: var(--rm-text);
       transition: border-color 0.2s, box-shadow 0.2s;
       font-family: inherit;
       touch-action: manipulation;
+      resize: none;
+      overflow: hidden;
+      max-height: 120px;
+      box-sizing: border-box;
     }
     .rm-input:focus {
       border-color: var(--rm-primary, #2563eb);
@@ -2280,9 +2297,10 @@
   const defaultMessagePlaceholder = "Type a message...";
   const agentMessagePlaceholder = "Add any details for the team...";
 
-  const input = document.createElement("input");
+  const input = document.createElement("textarea");
   input.className = "rm-input";
   input.placeholder = defaultMessagePlaceholder;
+  input.rows = 1;
 
   const sendBtn = document.createElement("button");
   sendBtn.className = "rm-send-btn";
@@ -2526,7 +2544,7 @@
     // Open the chat window above it and send the message
     showChatScreen();
     openChatWidget();
-    setTimeout(() => handleSendMessage(text), 100);
+    requestAnimationFrame(() => handleSendMessage(text));
   }
 
   // Inline bar event listeners
@@ -2696,20 +2714,28 @@
   });
 
   input.addEventListener("keydown", (e) => {
-    if (
-      e.key === "Enter" &&
-      !isSending &&
-      (input.value.trim() || pendingImageFile)
-    ) {
-      handleSendMessage(input.value.trim());
-      input.value = "";
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!isSending && (input.value.trim() || pendingImageFile)) {
+        handleSendMessage(input.value.trim());
+        input.value = "";
+        input.style.height = "auto";
+      }
     }
+  });
+
+  // Auto-resize textarea on input
+  input.addEventListener("input", () => {
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+    input.style.overflow = input.scrollHeight > 120 ? "auto" : "hidden";
   });
 
   sendBtn.addEventListener("click", () => {
     if (!isSending && (input.value.trim() || pendingImageFile)) {
       handleSendMessage(input.value.trim());
       input.value = "";
+      input.style.height = "auto";
     }
   });
 
@@ -3256,11 +3282,11 @@
               showFormScreen();
             } else if (qa.type === "prompt") {
               showChatScreen();
-              setTimeout(() => {
+              requestAnimationFrame(() => {
                 if (!isSending) {
                   handleSendMessage(qa.action);
                 }
-              }, 100);
+              });
             }
           };
 
@@ -3594,7 +3620,7 @@
               // Keep inline bar visible — it becomes the chat input
               showChatScreen();
               openChatWidget();
-              setTimeout(() => handleSendMessage(qa.action), 100);
+              requestAnimationFrame(() => handleSendMessage(qa.action));
             };
             inlineBarTopics.appendChild(topicBtn);
           });
@@ -3797,11 +3823,22 @@
 
         if (!res.ok) {
           hideTyping();
+          if (lastVisitorStatusEl) {
+            lastVisitorStatusEl.textContent = "Failed to send";
+            lastVisitorStatusEl.classList.add("failed");
+          }
           addMessageToUI(
             "bot",
             "Sorry, something went wrong. Please try again.",
           );
           return;
+        }
+
+        // Mark visitor message as sent
+        if (lastVisitorStatusEl) {
+          const statusEl = lastVisitorStatusEl;
+          statusEl.textContent = "Sent";
+          setTimeout(() => { statusEl.style.opacity = "0"; }, 2000);
         }
 
         // After a real agent reply, the server returns JSON instead of SSE.
@@ -3822,6 +3859,7 @@
         let inquiryDetected = false;
         let resolvedDetected = false;
         let sseBuffer = "";
+        let markdownRenderTimer: number | null = null;
 
         // Timeout to prevent the stream from hanging forever (90s)
         const streamTimeout = setTimeout(() => {
@@ -3940,14 +3978,20 @@
                     hideTyping();
                     botMessageEl = addMessageToUI("bot", botMessage);
                   } else {
-                    botMessageEl.innerHTML = renderMarkdown(botMessage);
+                    // Debounce markdown rendering — show plaintext immediately, render markdown at most every 80ms
+                    botMessageEl.textContent = botMessage;
+                    if (markdownRenderTimer) clearTimeout(markdownRenderTimer);
+                    markdownRenderTimer = setTimeout(() => {
+                      if (botMessageEl) botMessageEl.innerHTML = renderMarkdown(botMessage);
+                    }, 80) as unknown as number;
                   }
                   scrollToBottom();
                 }
 
                 if (data.done) {
                   hideTyping();
-                  // Stream complete -- render final markdown
+                  // Stream complete -- clear debounce timer and render final markdown
+                  if (markdownRenderTimer) { clearTimeout(markdownRenderTimer); markdownRenderTimer = null; }
                   if (botMessageEl && botMessage) {
                     botMessageEl.innerHTML = renderMarkdown(botMessage);
                   }
@@ -4017,6 +4061,10 @@
         clearTimeout(streamTimeout);
       } catch {
         hideTyping();
+        if (lastVisitorStatusEl) {
+          lastVisitorStatusEl.textContent = "Failed to send";
+          lastVisitorStatusEl.classList.add("failed");
+        }
         addMessageToUI(
           "bot",
           "Sorry, I couldn't connect. Please check your internet connection.",
@@ -4045,6 +4093,8 @@
 
   // Track previous message role for avatar grouping
   let lastMessageRole: string | null = null;
+  // Track the latest visitor message status element for iMessage-style delivery status
+  let lastVisitorStatusEl: HTMLElement | null = null;
 
   function addMessageToUI(
     role: string,
@@ -4201,7 +4251,24 @@
       msgEl.style.backgroundColor = primaryColor;
       msgEl.style.color = getBrandTextColor();
 
-      row.appendChild(msgEl);
+      // Wrap message + status in a column for visitor messages
+      const visitorCol = document.createElement("div");
+      visitorCol.style.display = "flex";
+      visitorCol.style.flexDirection = "column";
+      visitorCol.style.alignItems = "flex-end";
+      visitorCol.style.minWidth = "0";
+      visitorCol.appendChild(msgEl);
+
+      // Add delivery status element (only for new messages sent by the visitor, not poll-loaded ones)
+      if (!messageId) {
+        const statusEl = document.createElement("div");
+        statusEl.className = "rm-msg-status";
+        statusEl.textContent = "Sending...";
+        visitorCol.appendChild(statusEl);
+        lastVisitorStatusEl = statusEl;
+      }
+
+      row.appendChild(visitorCol);
     }
 
     // Add extra spacing when switching between roles (role-aware grouping)

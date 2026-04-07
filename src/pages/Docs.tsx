@@ -432,7 +432,7 @@ function Docs() {
             <CodeBlock
               title="Add to your HTML"
               language="html"
-              code={`<script src="https://replymaven.com/api/widget-embed.js"
+              code={`<script src="https://widget.replymaven.com/widget-embed.js"
         data-project="your-project-slug"></script>`}
             />
             <p className="text-muted-foreground leading-relaxed mb-2">
@@ -1532,13 +1532,13 @@ window.ReplyMaven.setMetadata({
 // The widget loads once and persists across route changes
 
 // Option 1: In index.html
-<script src="https://replymaven.com/api/widget-embed.js"
+<script src="https://widget.replymaven.com/widget-embed.js"
         data-project="your-project-slug"></script>
 
 // Option 2: Load dynamically in a React effect
 useEffect(() => {
   const script = document.createElement("script");
-  script.src = "https://replymaven.com/api/widget-embed.js";
+  script.src = "https://widget.replymaven.com/widget-embed.js";
   script.setAttribute("data-project", "your-project-slug");
   script.async = true;
   document.body.appendChild(script);
@@ -1568,8 +1568,8 @@ window.ReplyMaven?.setMetadata({
             <CodeBlock
               title="CSP directives"
               language="text"
-              code={`script-src 'self' https://replymaven.com;
-connect-src 'self' https://replymaven.com;
+              code={`script-src 'self' https://widget.replymaven.com;
+connect-src 'self' https://replymaven.com https://widget.replymaven.com;
 style-src 'self' 'unsafe-inline';`}
             />
 
@@ -1585,11 +1585,11 @@ style-src 'self' 'unsafe-inline';`}
               title="Different projects for different pages"
               language="html"
               code={`<!-- On your marketing site -->
-<script src="https://replymaven.com/api/widget-embed.js"
+<script src="https://widget.replymaven.com/widget-embed.js"
         data-project="marketing-bot"></script>
 
 <!-- On your app/dashboard -->
-<script src="https://replymaven.com/api/widget-embed.js"
+<script src="https://widget.replymaven.com/widget-embed.js"
         data-project="app-support-bot"></script>`}
             />
 

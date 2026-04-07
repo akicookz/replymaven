@@ -1058,7 +1058,7 @@ function FeatureBentoGrid() {
                 <div className="w-1.5 h-1.5 rounded-full bg-[#febc2e]" />
                 <div className="w-1.5 h-1.5 rounded-full bg-[#28c840]" />
               </div>
-              <code className="text-[9px] leading-relaxed text-brand font-mono whitespace-pre">{'<script\n  src="replymaven.com\n  /widget-embed.js"\n/>'}</code>
+              <code className="text-[9px] leading-relaxed text-brand font-mono whitespace-pre">{'<script\n  src="widget.\n  replymaven.com\n  /widget-embed.js"\n/>'}</code>
             </div>
           </div>
 
@@ -1844,7 +1844,7 @@ function Landing() {
                 </div>
                 <code className="text-[11px] leading-relaxed text-brand font-mono whitespace-pre">
                   {
-                    '<script\n  src="replymaven.com/\n    widget-embed.js"\n  data-project="my-bot"\n></script>'
+                    '<script\n  src="widget.\n    replymaven.com/\n    widget-embed.js"\n  data-project="my-bot"\n></script>'
                   }
                 </code>
               </div>

@@ -88,7 +88,7 @@ The widget is a separate build. After making changes to `widget/`, build and upl
 
 ```bash
 bun run widget:build
-npx wrangler r2 object put supportbot-uploads/widget-embed.js --file=public/widget-embed.js --content-type="application/javascript" --remote
+bun run widget:upload
 ```
 
 ---
@@ -558,7 +558,7 @@ api_keys
 | POST | `/api/widget/:projectSlug/conversations/:id/messages` | Send message (returns SSE stream, or JSON `{ agentMode: true }` when in agent mode) |
 | GET | `/api/widget/:projectSlug/conversations/:id/messages` | Get conversation history |
 | POST | `/api/telegram/webhook/:projectId` | Telegram bot webhook |
-| GET | `/api/widget-embed.js` | Serve the widget JS bundle from R2 |
+| GET | `/api/widget-embed.js` | 301 redirect to `widget.replymaven.com` (legacy) |
 
 ### Dashboard (session-authenticated)
 
@@ -587,10 +587,10 @@ api_keys
 
 ### Chat Widget
 
-The widget is a standalone JS file (`widget-embed.js`) built separately via Vite into a single IIFE bundle. Users add it to their page:
+The widget is a standalone JS file (`widget-embed.js`) built separately via Vite into a single IIFE bundle, served from a dedicated R2 custom domain (`widget.replymaven.com`). Users add it to their page:
 
 ```html
-<script src="https://replymaven.com/api/widget-embed.js"
+<script src="https://widget.replymaven.com/widget-embed.js"
         data-project="project-slug"></script>
 ```
 
