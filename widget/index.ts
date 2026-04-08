@@ -22,7 +22,8 @@
     return;
   }
 
-  const baseUrl = new URL(script.src).origin;
+  const scriptOrigin = new URL(script.src).origin;
+  const baseUrl = scriptOrigin.replace(/^(https?:\/\/)widget\./, "$1");
 
   // ─── State ──────────────────────────────────────────────────────────────────
   let isOpen = false;

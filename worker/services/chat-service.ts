@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, desc, and, gt, ne, inArray } from "drizzle-orm";
+import { eq, desc, and, gt, ne, inArray, sql } from "drizzle-orm";
 import {
   conversations,
   messages,
@@ -54,6 +54,27 @@ export class ChatService {
       )
       .limit(limit)
       .offset(offset);
+  }
+
+  async getConversationCounts(
+    projectId: string,
+  ): Promise<{ all: number; open: number; closed: number }> {
+    const rows = await this.db
+      .select({
+        status: conversations.status,
+        count: sql<number>`count(*)`,
+      })
+      .from(conversations)
+      .where(eq(conversations.projectId, projectId))
+      .groupBy(conversations.status);
+
+    let all = 0;
+    let closed = 0;
+    for (const row of rows) {
+      all += row.count;
+      if (row.status === "closed") closed = row.count;
+    }
+    return { all, open: all - closed, closed };
   }
 
   async createConversation(

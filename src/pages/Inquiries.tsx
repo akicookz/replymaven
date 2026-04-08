@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -170,6 +170,7 @@ function Inquiries() {
   const [composeData, setComposeData] = useState<ComposeReply | null>(null);
   const [editSubject, setEditSubject] = useState("");
   const [editBody, setEditBody] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "new" | "replied" | "closed">("all");
 
   // Reset view when sheet closes
   useEffect(() => {
@@ -322,10 +323,10 @@ function Inquiries() {
   }
 
   function toggleSelectAll() {
-    if (selectedIds.size === sorted.length) {
+    if (selectedIds.size === filtered.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(sorted.map((s) => s.id)));
+      setSelectedIds(new Set(filtered.map((s) => s.id)));
     }
   }
 
@@ -374,12 +375,27 @@ function Inquiries() {
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
-  const sorted = submissions
-    ? [...submissions].sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )
-    : [];
+  const sorted = useMemo(
+    () => submissions
+      ? [...submissions].sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        )
+      : [],
+    [submissions],
+  );
+
+  const counts = useMemo(() => ({
+    all: sorted.length,
+    new: sorted.filter((s) => s.status === "new").length,
+    replied: sorted.filter((s) => s.status === "replied").length,
+    closed: sorted.filter((s) => s.status === "closed").length,
+  }), [sorted]);
+
+  const filtered = useMemo(
+    () => statusFilter === "all" ? sorted : sorted.filter((s) => s.status === statusFilter),
+    [sorted, statusFilter],
+  );
 
   return (
     <div className="space-y-6">
@@ -395,6 +411,27 @@ function Inquiries() {
           </p>
         </div>
       </div>
+
+      {/* Status Filter Segments */}
+      {!isLoading && !isError && sorted.length > 0 && (
+        <div className="flex bg-muted rounded-lg p-0.5">
+          {(["all", "new", "replied", "closed"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setStatusFilter(tab)}
+              className={cn(
+                "flex-1 text-center px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center justify-center gap-1.5",
+                statusFilter === tab
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {tab === "all" ? "All" : STATUS_CONFIG[tab as keyof typeof STATUS_CONFIG].label}
+              <span className="text-[10px] opacity-60">{counts[tab]}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Loading */}
       {isLoading && (
@@ -417,12 +454,14 @@ function Inquiries() {
       )}
 
       {/* Empty */}
-      {!isLoading && !isError && sorted.length === 0 && (
+      {!isLoading && !isError && filtered.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 space-y-3">
           <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center">
             <Inbox className="w-6 h-6 text-muted-foreground" />
           </div>
-          <p className="text-sm text-muted-foreground">No inquiries yet.</p>
+          <p className="text-sm text-muted-foreground">
+            {statusFilter === "all" ? "No inquiries yet." : `No ${statusFilter} inquiries.`}
+          </p>
         </div>
       )}
 
@@ -430,7 +469,7 @@ function Inquiries() {
       {selectedIds.size > 0 && (
         <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2.5 bg-card/80 backdrop-blur-xl rounded-xl border border-border">
           <Checkbox
-            checked={selectedIds.size === sorted.length}
+            checked={selectedIds.size === filtered.length}
             onCheckedChange={toggleSelectAll}
             className="mr-1"
           />
@@ -480,9 +519,9 @@ function Inquiries() {
       )}
 
       {/* Card List */}
-      {sorted.length > 0 && (
+      {filtered.length > 0 && (
         <div className="space-y-2">
-          {sorted.map((inquiry) => {
+          {filtered.map((inquiry) => {
             const primary = getPrimaryField(inquiry.data);
             const subtitle = getSubtitle(
               inquiry.data,

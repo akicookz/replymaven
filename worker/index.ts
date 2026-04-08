@@ -484,6 +484,16 @@ const app = new Hono<HonoAppContext>()
         );
         if (result.closed && result.conversation) {
           conversation = result.conversation;
+          c.executionCtx.waitUntil(
+            triggerAutoDraftIfEnabled({
+              projectId: project.id,
+              conversationId,
+              db,
+              env: c.env,
+              kv: c.env.CONVERSATIONS_CACHE,
+              source: "stale_auto_close",
+            }),
+          );
         }
       }
     }
@@ -1049,14 +1059,16 @@ const app = new Hono<HonoAppContext>()
           );
 
           // Auto-draft canned response in background
-          triggerAutoDraftIfEnabled({
-            projectId,
-            conversationId,
-            db,
-            env: c.env,
-            kv: c.env.CONVERSATIONS_CACHE,
-            source: "telegram_agent_close",
-          });
+          c.executionCtx.waitUntil(
+            triggerAutoDraftIfEnabled({
+              projectId,
+              conversationId,
+              db,
+              env: c.env,
+              kv: c.env.CONVERSATIONS_CACHE,
+              source: "telegram_agent_close",
+            }),
+          );
 
           await telegramService.sendMessage(
             tgSettings.telegramBotToken,
@@ -3500,11 +3512,13 @@ const app = new Hono<HonoAppContext>()
     }
 
     const statusFilter = (c.req.query("status") as "open" | "closed" | "all") ?? "all";
+    const limit = Math.min(parseInt(c.req.query("limit") ?? "25", 10) || 25, 100);
+    const offset = parseInt(c.req.query("offset") ?? "0", 10) || 0;
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
 
     // Lazy auto-close stale conversations (single query, no double fetch)
     const settings = await projectService.getSettings(project.id);
-    let convos = await chatService.getConversationsByProject(project.id, 50, 0, statusFilter);
+    let convos = await chatService.getConversationsByProject(project.id, limit, offset, statusFilter);
     if (settings?.autoCloseMinutes && statusFilter !== "closed") {
       const closedIds = await chatService.checkAndCloseStaleForProject(convos, settings.autoCloseMinutes);
       if (closedIds.length > 0) {
@@ -3514,7 +3528,8 @@ const app = new Hono<HonoAppContext>()
         }
       }
     }
-    return c.json(convos);
+    const counts = await chatService.getConversationCounts(project.id);
+    return c.json({ conversations: convos, counts, hasMore: convos.length === limit });
   })
   .get("/api/projects/:id/conversations/:convId", async (c) => {
     const user = c.get("user");
@@ -3549,6 +3564,16 @@ const app = new Hono<HonoAppContext>()
         );
         if (result.closed && result.conversation) {
           conversation = result.conversation;
+          c.executionCtx.waitUntil(
+            triggerAutoDraftIfEnabled({
+              projectId: project.id,
+              conversationId: conversation.id,
+              db,
+              env: c.env,
+              kv: c.env.CONVERSATIONS_CACHE,
+              source: "stale_auto_close",
+            }),
+          );
         }
       }
     }
@@ -3728,14 +3753,16 @@ const app = new Hono<HonoAppContext>()
     );
 
     // Auto-draft canned response in background
-    triggerAutoDraftIfEnabled({
-      projectId: project.id,
-      conversationId: conversation.id,
-      db,
-      env: c.env,
-      kv: c.env.CONVERSATIONS_CACHE,
-      source: "manual_close",
-    });
+    c.executionCtx.waitUntil(
+      triggerAutoDraftIfEnabled({
+        projectId: project.id,
+        conversationId: conversation.id,
+        db,
+        env: c.env,
+        kv: c.env.CONVERSATIONS_CACHE,
+        source: "manual_close",
+      }),
+    );
 
     return c.json({ ok: true });
   })
@@ -4265,7 +4292,7 @@ async function handleScheduled(
           WHERE ${cannedResponses.sourceConversationId} IS NOT NULL
         )`,
     )
-    .limit(20);
+    .limit(50);
 
   if (unprocessed.length === 0) return;
 

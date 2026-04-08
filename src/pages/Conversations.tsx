@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import {
   MessageSquare,
   Send,
@@ -398,14 +398,50 @@ function Conversations() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const { data: conversations, isLoading } = useQuery<Conversation[]>({
+  const [loadedConversations, setLoadedConversations] = useState<Conversation[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+
+  const { data: convosPage, isLoading, isFetching } = useQuery<{
+    conversations: Conversation[];
+    counts: { all: number; open: number; closed: number };
+    hasMore: boolean;
+  }>({
     queryKey: ["conversations", projectId, statusFilter],
     queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/conversations?status=${statusFilter}`);
+      const res = await fetch(`/api/projects/${projectId}/conversations?status=${statusFilter}&limit=25&offset=0`);
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
+  });
+
+  // Sync first page into loaded conversations
+  useEffect(() => {
+    if (convosPage?.conversations) {
+      setLoadedConversations(convosPage.conversations);
+      setHasMore(convosPage.hasMore);
+    }
+  }, [convosPage]);
+
+  // Reset accumulated pages when filter changes
+  useEffect(() => {
+    setLoadedConversations([]);
+    setHasMore(true);
+  }, [statusFilter]);
+
+  const loadMoreConversations = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations?status=${statusFilter}&limit=25&offset=${loadedConversations.length}`,
+      );
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json() as Promise<{ conversations: Conversation[]; counts: { all: number; open: number; closed: number }; hasMore: boolean }>;
+    },
+    onSuccess: (data) => {
+      setLoadedConversations((prev) => [...prev, ...data.conversations]);
+      setHasMore(data.hasMore);
+    },
   });
 
   const { data: convoDetail, isPending: isDetailLoading } = useQuery<{
@@ -424,6 +460,7 @@ function Conversations() {
       return res.json();
     },
     enabled: !!selectedConvo,
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => {
       if (!selectedConvo) return false;
       const status = query.state.data?.conversation?.status;
@@ -593,10 +630,20 @@ function Conversations() {
 
       queryClient.setQueryData(
         ["conversations", projectId, statusFilter],
-        (old: Conversation[] | undefined) =>
-          old?.map((c) =>
-            c.id === convId ? { ...c, status: "closed", closeReason } : c,
-          ),
+        (old: { conversations: Conversation[]; counts: { all: number; open: number; closed: number }; hasMore: boolean } | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            conversations: old.conversations.map((c) =>
+              c.id === convId ? { ...c, status: "closed", closeReason } : c,
+            ),
+          };
+        },
+      );
+
+      // Also update local loaded state
+      setLoadedConversations((prev) =>
+        prev.map((c) => c.id === convId ? { ...c, status: "closed", closeReason } : c),
       );
 
       return { previousDetail, previousList };
@@ -619,12 +666,19 @@ function Conversations() {
     },
   });
 
-  const threadItems = convoDetail
-    ? buildConversationThread(convoDetail.messages, convoDetail.inquiry)
-    : [];
-  const threadSignature = threadItems
-    .map((item) => `${item.kind}:${item.id}:${item.createdAt}`)
-    .join("|");
+  const threadItems = useMemo(
+    () => convoDetail
+      ? buildConversationThread(convoDetail.messages, convoDetail.inquiry)
+      : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [convoDetail?.messages, convoDetail?.inquiry],
+  );
+  const threadSignature = useMemo(
+    () => threadItems
+      .map((item) => `${item.kind}:${item.id}:${item.createdAt}`)
+      .join("|"),
+    [threadItems],
+  );
 
   // Auto-scroll to bottom when the thread actually changes
   useEffect(() => {
@@ -632,7 +686,7 @@ function Conversations() {
   }, [threadSignature]);
 
   // Filter conversations by search
-  const filteredConversations = conversations?.filter((c) => {
+  const filteredConversations = loadedConversations.filter((c) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     const name = getVisitorDisplayName(c).toLowerCase();
@@ -703,7 +757,7 @@ function Conversations() {
           <MobileMenuButton />
           <h1 className="text-xl md:text-2xl font-bold text-foreground">Conversations</h1>
           <p className="text-xs text-muted-foreground">
-            {conversations?.length ?? 0} total
+            {convosPage?.counts?.all ?? 0} total
           </p>
         </div>
 
@@ -736,14 +790,19 @@ function Conversations() {
                 )}
               >
                 {tab === "all" ? "All" : tab === "open" ? "Open" : "Closed"}
+                {convosPage?.counts && (
+                  <span className="ml-1 text-[10px] opacity-60">
+                    {convosPage.counts[tab]}
+                  </span>
+                )}
               </button>
             ))}
           </div>
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto">
-          {filteredConversations?.map((convo) => {
+        <div className={cn("flex-1 overflow-y-auto transition-opacity", isFetching && !isLoading && "opacity-60")}>
+          {filteredConversations.map((convo) => {
             const meta = parseMeta(convo.metadata);
             const preview = getLastMessagePreview(convo);
             const isSelected = selectedConvo === convo.id;
@@ -818,13 +877,22 @@ function Conversations() {
               </button>
             );
           })}
-          {(!filteredConversations || filteredConversations.length === 0) && (
+          {filteredConversations.length === 0 && (
             <div className="p-8 text-center">
               <MessageSquare className="w-10 h-10 mx-auto text-muted-foreground/30 mb-2" />
               <p className="text-sm text-muted-foreground">
                 {searchQuery ? "No matching conversations" : "No conversations yet"}
               </p>
             </div>
+          )}
+          {hasMore && !searchQuery && filteredConversations.length > 0 && (
+            <button
+              onClick={() => loadMoreConversations.mutate()}
+              disabled={loadMoreConversations.isPending}
+              className="w-full py-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {loadMoreConversations.isPending ? "Loading..." : "Load more"}
+            </button>
           )}
         </div>
       </div>

@@ -978,14 +978,16 @@ export async function handleWidgetMessageTurn(
           "widget_turn.conversation_resolved",
           buildWidgetTurnLogContext(context, turnId),
         );
-        triggerAutoDraftIfEnabled({
-          projectId: context.project.id,
-          conversationId: context.conversationId,
-          db: context.db,
-          env: context.env,
-          kv: context.env.CONVERSATIONS_CACHE,
-          source: "bot_resolved",
-        });
+        context.executionCtx.waitUntil(
+          triggerAutoDraftIfEnabled({
+            projectId: context.project.id,
+            conversationId: context.conversationId,
+            db: context.db,
+            env: context.env,
+            kv: context.env.CONVERSATIONS_CACHE,
+            source: "bot_resolved",
+          }),
+        );
       }
 
       currentStage = "save_bot_message";
