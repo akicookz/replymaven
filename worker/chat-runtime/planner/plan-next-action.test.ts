@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { sanitizePlannerDecision } from "./plan-next-action";
+import { fallbackPlanNextAction, sanitizePlannerDecision } from "./plan-next-action";
 import {
   type PlannerDecision,
   type PlannerLoopState,
@@ -37,6 +37,13 @@ function createState(): PlannerLoopState {
     },
     toolEvidence: [],
     missingInputs: [],
+    knownVisitorName: null,
+    knownVisitorEmail: null,
+    handoffRequested: false,
+    awaitingHandoffConfirmation: false,
+    awaitingContactFields: [],
+    contactDeclined: false,
+    handoffSummary: null,
     finalDraft: null,
     terminationReason: null,
   };
@@ -69,9 +76,17 @@ function sanitize(options: {
   decision: PlannerDecision;
   state?: PlannerLoopState;
   tools?: SupportToolDefinition[];
+  conversationHistory?: Array<{ role: "visitor" | "bot" | "agent"; content: string }>;
 }) {
   return sanitizePlannerDecision({
     decision: options.decision,
+    conversationHistory:
+      options.conversationHistory ?? [
+        {
+          role: "visitor",
+          content: "The widget is not working on my pricing page.",
+        },
+      ],
     currentMessage: "The widget is not working on my pricing page.",
     turnPlan: createTurnPlan(),
     availableTools: options.tools ?? [createTool()],
@@ -195,5 +210,150 @@ describe("sanitizePlannerDecision", () => {
     });
 
     expect(sanitized.nextAction.type).toBe("stop");
+  });
+
+  test("asks for contact once before creating inquiry when contact info is missing", () => {
+    const sanitized = sanitize({
+      decision: {
+        goal: "Forward this to the team",
+        nextAction: {
+          type: "create_inquiry",
+          reason: "Human follow-up requested.",
+        },
+      },
+      conversationHistory: [
+        {
+          role: "visitor",
+          content: "The SEO Spider crawl is missing most of my pages.",
+        },
+        {
+          role: "visitor",
+          content: "I need a live agent.",
+        },
+      ],
+    });
+
+    expect(sanitized.nextAction.type).toBe("collect_contact");
+  });
+
+  test("allows create_inquiry after contact details were declined", () => {
+    const state = createState();
+    state.awaitingContactFields = ["email"];
+    state.contactDeclined = true;
+
+    const sanitized = sanitize({
+      state,
+      decision: {
+        goal: "Forward this to the team",
+        nextAction: {
+          type: "create_inquiry",
+          reason: "The visitor still wants human follow-up.",
+        },
+      },
+      conversationHistory: [
+        {
+          role: "bot",
+          content:
+            "I can forward this to the team. Before I do, could you share your email so they can follow up directly? If you'd rather keep it in chat, just say that.",
+        },
+        {
+          role: "visitor",
+          content: "Please just keep it in chat.",
+        },
+      ],
+    });
+
+    expect(sanitized.nextAction.type).toBe("create_inquiry");
+  });
+});
+
+describe("fallbackPlanNextAction", () => {
+  test("moves explicit human requests into contact collection when issue context exists", () => {
+    const state = createState();
+
+    const decision = fallbackPlanNextAction({
+      conversationHistory: [
+        {
+          role: "visitor",
+          content: "The SEO Spider crawl is only finding 40 out of 300 pages.",
+        },
+        {
+          role: "visitor",
+          content: "live agent",
+        },
+      ],
+      currentMessage: "live agent",
+      turnPlan: {
+        ...createTurnPlan(),
+        intent: "handoff",
+        summary: "The visitor wants human help with an incomplete SEO Spider crawl.",
+      },
+      availableTools: [createTool()],
+      state,
+      maxSteps: 5,
+    });
+
+    expect(decision.nextAction.type).toBe("collect_contact");
+  });
+
+  test("proceeds to inquiry when visitor declines contact after a contact request", () => {
+    const state = createState();
+    state.awaitingContactFields = ["email"];
+    state.contactDeclined = true;
+
+    const decision = fallbackPlanNextAction({
+      conversationHistory: [
+        {
+          role: "visitor",
+          content: "The SEO Spider crawl is only finding 40 out of 300 pages.",
+        },
+        {
+          role: "bot",
+          content:
+            "I can forward this to the team. Before I do, could you share your email so they can follow up directly? If you'd rather keep it in chat, just say that.",
+        },
+        {
+          role: "visitor",
+          content: "No email, please keep it in chat.",
+        },
+      ],
+      currentMessage: "No email, please keep it in chat.",
+      turnPlan: {
+        ...createTurnPlan(),
+        intent: "handoff",
+        summary: "The visitor wants human help with an incomplete SEO Spider crawl.",
+      },
+      availableTools: [createTool()],
+      state,
+      maxSteps: 5,
+    });
+
+    expect(decision.nextAction.type).toBe("create_inquiry");
+  });
+
+  test("does not mistake generic contact wording for contact collection flow", () => {
+    const state = createState();
+    state.docsEvidence.retrievalAttempted = true;
+
+    const decision = fallbackPlanNextAction({
+      conversationHistory: [
+        {
+          role: "bot",
+          content: "You can contact support from the dashboard settings page.",
+        },
+        {
+          role: "visitor",
+          content: "Still broken on my pricing page.",
+        },
+      ],
+      currentMessage: "Still broken on my pricing page.",
+      turnPlan: createTurnPlan(),
+      availableTools: [createTool()],
+      state,
+      maxSteps: 5,
+    });
+
+    expect(decision.nextAction.type).not.toBe("create_inquiry");
+    expect(decision.nextAction.type).not.toBe("collect_contact");
   });
 });

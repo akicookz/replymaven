@@ -1,4 +1,4 @@
-import { ToolLoopAgent, stepCountIs, type ToolChoice } from "ai";
+import { streamText, ToolLoopAgent, stepCountIs, type ToolChoice } from "ai";
 import {
   type AgentToolChoice,
   type SupportAgentDependencies,
@@ -29,11 +29,40 @@ export async function streamSupportAgent(
     return toolChoice ?? "auto";
   }
 
+  const messages = toSdkConversationMessages(options.conversationHistory);
+  const userContent: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; image: string; mimeType?: string }
+  > = [{ type: "text", text: options.userMessage }];
+
+  if (options.image) {
+    userContent.push({
+      type: "image",
+      image: options.image.base64,
+      mimeType: options.image.mimeType,
+    });
+  }
+
+  if (availableToolNames.length === 0) {
+    const result = streamText({
+      model,
+      system: options.systemPrompt,
+      messages: [...messages, { role: "user", content: userContent }],
+      abortSignal: options.abortSignal,
+      temperature: 0.3,
+      maxOutputTokens: 2048,
+    });
+
+    return {
+      fullStream: result.fullStream as SupportAgentResult["fullStream"],
+    };
+  }
+
   const agent = new ToolLoopAgent({
     model,
     instructions: options.systemPrompt,
     tools: toolRegistry,
-    stopWhen: availableToolNames.length > 0 ? stepCountIs(3) : undefined,
+    stopWhen: stepCountIs(3),
     toolChoice: toSdkToolChoice(options.toolChoice),
     prepareStep: options.prepareStep
       ? (stepOptions) => {
@@ -56,20 +85,6 @@ export async function streamSupportAgent(
     temperature: 0.3,
     maxOutputTokens: 2048,
   });
-
-  const messages = toSdkConversationMessages(options.conversationHistory);
-  const userContent: Array<
-    | { type: "text"; text: string }
-    | { type: "image"; image: string; mimeType?: string }
-  > = [{ type: "text", text: options.userMessage }];
-
-  if (options.image) {
-    userContent.push({
-      type: "image",
-      image: options.image.base64,
-      mimeType: options.image.mimeType,
-    });
-  }
 
   const result = await agent.stream({
     messages: [...messages, { role: "user", content: userContent }],

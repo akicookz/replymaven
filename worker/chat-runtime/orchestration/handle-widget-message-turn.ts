@@ -5,17 +5,12 @@ import {
 } from "../llm/create-language-model";
 import {
   classifySupportTurn,
-  extractContactInfo,
   fallbackClassifySupportTurn,
-  fallbackExtractContactInfo,
-  fallbackSummarizeTeamRequest,
   isVagueIssueReport,
   summarizeConversation,
-  summarizeTeamRequest,
 } from "../llm/auxiliary-calls";
 import { runPlannerLoop } from "../executor/run-planner-loop";
 import { triggerAutoRefinementIfEnabled } from "../post-turn/auto-refine";
-import { createTeamRequestSubmission } from "../post-turn/team-request";
 import { buildUnsupportedFallback } from "../workflows/verify-answer";
 import {
   type RetrievalResult,
@@ -40,7 +35,6 @@ import { logError, logInfo, logWarn } from "../../observability";
 import { ProjectService } from "../../services/project-service";
 import { TelegramService } from "../../services/telegram-service";
 import { ToolService } from "../../services/tool-service";
-import { WidgetService } from "../../services/widget-service";
 import { isEncrypted, decryptHeaders } from "../../services/encryption-service";
 
 function parseConversationMetadata(
@@ -660,10 +654,20 @@ export async function handleWidgetMessageTurn(
         availableTools,
         enabledToolRows: enabledTools,
         toolService,
+        chatService,
+        projectService,
         db: context.db,
         env: context.env,
+        executionCtx: context.executionCtx,
         project: context.project,
-        conversationId: context.conversationId,
+        conversation: {
+          id: context.conversationId,
+          visitorId: conversation.visitorId,
+          visitorName: conversation.visitorName,
+          visitorEmail: conversation.visitorEmail,
+          status: conversation.status,
+          metadata: conversation.metadata,
+        },
         settings: settings ?? {
           toneOfVoice: "professional",
           customTonePrompt: null,
@@ -682,6 +686,15 @@ export async function handleWidgetMessageTurn(
         agentHandbackInstructions,
         image,
         emitStatus,
+        shouldAllowTeamRequest: ({ retrievalAttempted, hadToolCalls }) =>
+          shouldAllowTeamRequest({
+            conversation,
+            conversationHistory,
+            latestMessage: context.payload.content,
+            turnIntent,
+            retrievalAttempted,
+            hadToolCalls,
+          }),
         closeSafeAiReplayWindow,
         buildLogContext: (extra = {}) =>
           buildWidgetTurnLogContext(context, turnId, extra),
@@ -739,13 +752,18 @@ export async function handleWidgetMessageTurn(
         retrieval.retrievalAttempted &&
         retrieval.groundingConfidence === "none" &&
         !eventState.hadToolCalls &&
-        loopResult.terminationAction !== "ask_user" &&
-        !fullResponse.includes("[NEW_INQUIRY]") &&
+        ![
+          "ask_user",
+          "offer_handoff",
+          "collect_contact",
+          "create_inquiry",
+        ].includes(loopResult.terminationAction) &&
         !fullResponse.includes("[RESOLVED]")
       ) {
-        const unsupportedFallback = turnPlan.followUpQuestion
-          ? `${buildUnsupportedFallback(context.payload.content)} ${turnPlan.followUpQuestion}`
-          : buildUnsupportedFallback(context.payload.content);
+        const unsupportedFallback = buildUnsupportedFallback(
+          context.payload.content,
+          turnPlan.intent,
+        );
 
         if (unsupportedFallback.trim() !== fullResponse.trim()) {
           fullResponse = unsupportedFallback.trim();
@@ -774,158 +792,6 @@ export async function handleWidgetMessageTurn(
             }),
           );
           emitSseEvent(controller, encoder, { finalText: fullResponse });
-        }
-      }
-
-      if (fullResponse.includes("[NEW_INQUIRY]")) {
-        const teamRequestDecision = shouldAllowTeamRequest({
-          conversation,
-          conversationHistory,
-          latestMessage: context.payload.content,
-          turnIntent,
-          retrievalAttempted: retrieval.retrievalAttempted,
-          hadToolCalls: eventState.hadToolCalls,
-        });
-
-        if (!teamRequestDecision.allowed) {
-          const fallbackFollowUp =
-            turnPlan.followUpQuestion ??
-            "Could you share the exact feature, page, step, or error you're seeing?";
-
-          fullResponse = `I don't have enough detail yet to escalate this usefully. ${fallbackFollowUp}`;
-          logWarn(
-            "widget_turn.team_request_blocked",
-            buildWidgetTurnLogContext(context, turnId, {
-              reason: teamRequestDecision.reason,
-              turnIntent,
-              executionPath,
-              retrievalAttempted: retrieval.retrievalAttempted,
-              hadToolCalls: eventState.hadToolCalls,
-            }),
-          );
-          emitSseEvent(controller, encoder, { finalText: fullResponse });
-        } else {
-          currentStage = "team_request";
-        let contactInfo: { name: string | null; email: string | null };
-        try {
-          contactInfo = await runWithModelFallback({
-            runtime: modelRuntime,
-            stage: "extract_contact_info",
-            logContext: buildWidgetTurnLogContext(context, turnId),
-            canRetry: () => !safeAiReplayWindowClosed,
-            getRetryContext: () => ({
-              safeAiReplayWindowClosed,
-            }),
-            operation: async (activeConfig) => {
-              const activeModel = createLanguageModel(activeConfig);
-              return extractContactInfo(
-                activeModel,
-                conversationHistory,
-                { throwOnModelError: true },
-              );
-            },
-          });
-        } catch {
-          contactInfo = fallbackExtractContactInfo(conversationHistory);
-          logWarn(
-            "widget_turn.contact_info_fallback_used",
-            buildWidgetTurnLogContext(context, turnId),
-          );
-        }
-        const visitorName = conversation.visitorName ?? contactInfo.name ?? null;
-        const visitorEmail = conversation.visitorEmail ?? contactInfo.email ?? null;
-
-        let summary: string;
-        try {
-          summary = await runWithModelFallback({
-            runtime: modelRuntime,
-            stage: "summarize_team_request",
-            logContext: buildWidgetTurnLogContext(context, turnId),
-            canRetry: () => !safeAiReplayWindowClosed,
-            getRetryContext: () => ({
-              safeAiReplayWindowClosed,
-            }),
-            operation: async (activeConfig) => {
-              const activeModel = createLanguageModel(activeConfig);
-              return summarizeTeamRequest(
-                activeModel,
-                conversationHistory,
-                { throwOnModelError: true },
-              );
-            },
-          });
-        } catch {
-          summary = fallbackSummarizeTeamRequest(conversationHistory);
-          logWarn(
-            "widget_turn.team_request_summary_fallback_used",
-            buildWidgetTurnLogContext(context, turnId),
-          );
-        }
-        closeSafeAiReplayWindow("team_request_mutation");
-        if (contactInfo.name || contactInfo.email) {
-          await chatService.updateConversation(context.conversationId, context.project.id, {
-            visitorName: visitorName ?? undefined,
-            visitorEmail: visitorEmail ?? undefined,
-          });
-        }
-
-        await chatService.updateConversationStatus(
-          context.conversationId,
-          context.project.id,
-          "waiting_agent",
-        );
-        const telegramService =
-          settings?.telegramBotToken && settings?.telegramChatId
-            ? new TelegramService(context.db)
-            : undefined;
-
-        const submission = await createTeamRequestSubmission({
-          chatService,
-          widgetService: new WidgetService(context.db),
-          projectService,
-          telegramService,
-          project: context.project,
-          conversation: {
-            ...conversation,
-            visitorName,
-            visitorEmail,
-          },
-          conversationHistory,
-          summary,
-          email: visitorEmail ?? "not provided",
-          settings,
-          env: {
-            BETTER_AUTH_URL: context.env.BETTER_AUTH_URL,
-            RESEND_API_KEY: context.env.RESEND_API_KEY,
-          },
-          executionCtx: context.executionCtx,
-        });
-        logInfo(
-          "widget_turn.team_request_completed",
-          buildWidgetTurnLogContext(context, turnId, {
-            submissionId: submission.submissionId,
-            created: submission.created,
-            telegramThreadId: submission.telegramThreadId ?? null,
-          }),
-        );
-
-        if (submission.telegramThreadId) {
-          await chatService.updateTelegramThreadId(
-            context.conversationId,
-            context.project.id,
-            submission.telegramThreadId,
-          );
-        }
-        fullResponse = fullResponse.replace("[NEW_INQUIRY]", "").trim();
-        if (!submission.created) {
-          const agentLabel = settings?.agentName ?? "a team member";
-          fullResponse = `I've already forwarded this conversation to the team. ${agentLabel} will continue the follow-up there.`;
-        } else if (!fullResponse) {
-          const agentLabel = settings?.agentName ?? "a team member";
-          fullResponse = `I've forwarded this to the team. ${agentLabel} will follow up shortly!`;
-        }
-        emitSseEvent(controller, encoder, { inquiry: true });
-        emitSseEvent(controller, encoder, { finalText: fullResponse });
         }
       }
 

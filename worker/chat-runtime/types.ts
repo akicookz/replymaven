@@ -13,11 +13,6 @@ export type SupportIntent =
   | "policy"
   | "clarify"
   | "handoff";
-export type ExecutionPath =
-  | "docs_first"
-  | "tool_first"
-  | "clarify_first"
-  | "handoff";
 export type AgentToolChoice =
   | "auto"
   | "none"
@@ -79,13 +74,11 @@ export interface SupportAgentStreamOptions {
 }
 
 export interface SupportPromptOptions {
-  hasTools?: boolean;
   guidelines?: Array<{ condition: string; instruction: string }>;
   agentHandbackInstructions?: string | null;
   pageContext?: Record<string, string>;
   visitorInfo?: { name: string | null; email: string | null };
   groundingConfidence?: GroundingConfidence;
-  needsClarification?: boolean;
   turnPlan?: {
     intent: SupportIntent;
     summary: string;
@@ -94,8 +87,6 @@ export interface SupportPromptOptions {
   plannerGoal?: string | null;
   plannerActionHistory?: PlannerActionHistoryEntry[];
   toolEvidenceSummary?: string | null;
-  allowedToolNames?: string[];
-  executionPath?: ExecutionPath;
   retrievalAttempted?: boolean;
   broaderSearchAttempted?: boolean;
 }
@@ -173,6 +164,9 @@ export type PlannerActionType =
   | "search_docs"
   | "call_tool"
   | "ask_user"
+  | "offer_handoff"
+  | "collect_contact"
+  | "create_inquiry"
   | "compose"
   | "stop";
 
@@ -196,6 +190,22 @@ export interface PlannerAskUserAction {
   question: string;
 }
 
+export interface PlannerOfferHandoffAction {
+  type: "offer_handoff";
+  reason: string;
+}
+
+export interface PlannerCollectContactAction {
+  type: "collect_contact";
+  reason: string;
+  missingFields: Array<"name" | "email">;
+}
+
+export interface PlannerCreateInquiryAction {
+  type: "create_inquiry";
+  reason: string;
+}
+
 export interface PlannerComposeAction {
   type: "compose";
   reason: string;
@@ -211,6 +221,9 @@ export type PlannerNextAction =
   | PlannerSearchDocsAction
   | PlannerCallToolAction
   | PlannerAskUserAction
+  | PlannerOfferHandoffAction
+  | PlannerCollectContactAction
+  | PlannerCreateInquiryAction
   | PlannerComposeAction
   | PlannerStopAction;
 
@@ -260,6 +273,13 @@ export interface PlannerLoopState {
   docsEvidence: PlannerDocsEvidence;
   toolEvidence: PlannerToolEvidence[];
   missingInputs: string[];
+  knownVisitorName: string | null;
+  knownVisitorEmail: string | null;
+  handoffRequested: boolean;
+  awaitingHandoffConfirmation: boolean;
+  awaitingContactFields: Array<"name" | "email">;
+  contactDeclined: boolean;
+  handoffSummary: string | null;
   finalDraft: string | null;
   terminationReason: string | null;
 }
@@ -273,14 +293,6 @@ export interface PlannerLoopResult {
   stepCount: number;
   terminationAction: PlannerActionType;
   loopState: PlannerLoopState;
-}
-
-export interface ExecutionPathDecision {
-  path: ExecutionPath;
-  retrievalMode: "none" | "full";
-  allowBroaderRetry: boolean;
-  allowedTools: SupportToolDefinition[];
-  toolChoice: AgentToolChoice;
 }
 
 export interface SupportAgentDependencies {

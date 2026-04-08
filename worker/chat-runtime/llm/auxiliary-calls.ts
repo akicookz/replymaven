@@ -4,6 +4,14 @@ import {
   type ConversationTurnMessage,
   type SupportTurnPlan,
 } from "../types";
+import {
+  buildClassifySupportTurnPrompt,
+  buildExtractContactInfoPrompt,
+  buildReformulateQueryPrompt,
+  buildSummarizeConversationPrompt,
+  buildSummarizeTeamRequestPrompt,
+} from "./support-prompt-builders";
+import { buildIntentAwareFollowUpQuestion } from "../workflows/build-intent-aware-follow-up";
 
 interface AuxiliaryCallOptions {
   throwOnModelError?: boolean;
@@ -68,9 +76,15 @@ export function fallbackClassifySupportTurn(
 ): SupportTurnPlan {
   const normalized = currentMessage.trim().toLowerCase();
   const explicitHandoff =
-    /\b(human|person|agent|support team|someone|representative)\b/.test(
+    /\b(live agent|human|person|agent|support team|someone|representative|engineer)\b/.test(
       normalized,
-    ) && /\b(help|talk|speak|contact|reach)\b/.test(normalized);
+    ) &&
+    (
+      /\b(help|talk|speak|contact|reach|connect|handoff|hand off|escalate)\b/.test(
+        normalized,
+      ) ||
+      /^live agent$/.test(normalized)
+    );
   if (explicitHandoff) {
     return {
       intent: "handoff",
@@ -91,7 +105,10 @@ export function fallbackClassifySupportTurn(
       summary: "The visitor is asking about plans, billing, or policy details.",
       retrievalQueries: [currentMessage],
       broaderQueries: [currentMessage],
-      followUpQuestion: null,
+      followUpQuestion: buildIntentAwareFollowUpQuestion({
+        userMessage: currentMessage,
+        intent: "policy",
+      }),
     };
   }
 
@@ -102,8 +119,10 @@ export function fallbackClassifySupportTurn(
         "The visitor is trying to verify whether something is working and likely needs troubleshooting guidance.",
       retrievalQueries: [currentMessage],
       broaderQueries: [currentMessage],
-      followUpQuestion:
-        "What exact feature, page, step, or error are you seeing when you try to check it?",
+      followUpQuestion: buildIntentAwareFollowUpQuestion({
+        userMessage: currentMessage,
+        intent: "troubleshoot",
+      }),
     };
   }
 
@@ -127,8 +146,10 @@ export function fallbackClassifySupportTurn(
       summary: "The visitor is reporting something broken or unclear.",
       retrievalQueries: [currentMessage],
       broaderQueries: [currentMessage],
-      followUpQuestion:
-        "Could you share the exact page, step, or error you are seeing?",
+      followUpQuestion: buildIntentAwareFollowUpQuestion({
+        userMessage: currentMessage,
+        intent: "troubleshoot",
+      }),
     };
   }
 
@@ -152,8 +173,10 @@ export function fallbackClassifySupportTurn(
     summary: "The request is too underspecified and needs a focused follow-up.",
     retrievalQueries: [currentMessage],
     broaderQueries: [],
-    followUpQuestion:
-      "Could you share a bit more detail about what you are trying to do or what is not working?",
+    followUpQuestion: buildIntentAwareFollowUpQuestion({
+      userMessage: currentMessage,
+      intent: "clarify",
+    }),
   };
 }
 
@@ -181,41 +204,11 @@ export async function classifySupportTurn(
       schema: supportTurnPlanSchema,
       temperature: 0,
       maxOutputTokens: 384,
-      prompt: `Classify the next support-chat turn and provide retrieval hints for the orchestrator.
-
-Conversation:
-${transcript || "No prior conversation"}
-
-Latest user message:
-${currentMessage}
-
-Page context:
-${pageContextBlock}
-
-You must produce:
-- intent:
-  - how_to: asks how to perform, set up, configure, or use something
-  - troubleshoot: reports something broken, failing, or not working
-  - lookup: needs account-specific data, status, or a backend lookup/action
-  - policy: asks about plans, pricing, billing, limits, refund, security, or policy
-  - clarify: too ambiguous to act on confidently yet
-  - handoff: explicitly wants a human or support team handoff
-- summary: one short line describing the handling posture
-- retrievalQueries: focused documentation searches that would help if docs should be consulted
-- broaderQueries: broader second-pass documentation searches if focused docs miss
-- followUpQuestion: one focused question to ask when the request remains underspecified
-
-Rules:
-- Do not invent product-specific features or terminology.
-- Retrieval hints are only hints. Do not use them to decide tool policy.
-- Questions like "how do I check if X is working?" or "how can I verify X is connected?" are troubleshooting/docs turns, not lookup turns, unless they clearly require account-specific backend data.
-- For lookup turns, retrievalQueries can be empty if documentation is unlikely to help.
-- For clarify turns, keep retrieval light and focus on the one missing detail that unblocks help.
-- For handoff turns, retrievalQueries and broaderQueries should usually be empty.
-- Prefer troubleshooting-oriented search phrases over repeating raw complaints.
-- If a product, page, step, error, or integration is mentioned, include it in retrieval queries when relevant.
-- Broader queries should be more general than focused queries, but still relevant to the issue.
-- Keep queries short and search-friendly.`,
+      prompt: buildClassifySupportTurnPrompt({
+        transcript,
+        currentMessage,
+        pageContextBlock,
+      }),
     });
 
     return {
@@ -252,18 +245,10 @@ export async function reformulateQuery(
   try {
     const { text } = await generateText({
       model,
-      prompt: `Given the conversation below, rewrite the user's latest message into a standalone search query that captures the full intent. The query should be self-contained and optimized for searching a knowledge base.
-
-If the latest message is vague or underspecified (for example "x is not working", "it failed", or "billing is broken"), do NOT just repeat the exact phrase. Expand it into a troubleshooting-oriented search query using the feature, page, or topic mentioned by the user if available, plus likely documentation terms such as setup, troubleshooting, common issues, configuration, errors, or handoff steps.
-
-Do not invent product features or facts that were not mentioned.
-
-CONVERSATION:
-${transcript}
-
-LATEST MESSAGE: ${currentMessage}
-
-Output ONLY the rewritten search query, nothing else. If the latest message is already a clear standalone question, return it as-is.`,
+      prompt: buildReformulateQueryPrompt({
+        transcript,
+        currentMessage,
+      }),
       temperature: 0,
       maxOutputTokens: 128,
     });
@@ -291,12 +276,7 @@ export async function summarizeConversation(
   try {
     const { text } = await generateText({
       model,
-      prompt: `Summarize this customer support conversation in 1-2 sentences. Focus on: what the visitor needs help with and what has been discussed so far. Be factual and concise.
-
-CONVERSATION:
-${transcript}
-
-SUMMARY:`,
+      prompt: buildSummarizeConversationPrompt({ transcript }),
       temperature: 0,
       maxOutputTokens: 128,
     });
@@ -335,22 +315,7 @@ export async function summarizeTeamRequest(
   try {
     const { text } = await generateText({
       model,
-      prompt: `Summarize this support conversation for an internal team follow-up request.
-
-CONVERSATION:
-${transcript}
-
-Write a short factual summary that covers:
-- what the visitor is trying to do
-- what is not working or still unclear
-- any concrete details already shared
-- what the team should investigate or respond with
-
-Rules:
-- Keep it under 700 characters
-- Do not invent details
-- Do not use markdown headings
-- Write in plain text for an internal support note`,
+      prompt: buildSummarizeTeamRequestPrompt({ transcript }),
       temperature: 0.2,
       maxOutputTokens: 256,
     });
@@ -402,14 +367,7 @@ export async function extractContactInfo(
   try {
     const { text } = await generateText({
       model,
-      prompt: `Extract the visitor's name and email from these messages. If either is not present, return "unknown".
-
-VISITOR MESSAGES:
-${transcript}
-
-Respond in exactly this format (no other text):
-name: <name or unknown>
-email: <email or unknown>`,
+      prompt: buildExtractContactInfoPrompt({ transcript }),
       temperature: 0,
       maxOutputTokens: 64,
     });

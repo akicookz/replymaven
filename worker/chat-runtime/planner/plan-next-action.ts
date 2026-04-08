@@ -9,6 +9,7 @@ import {
   type SupportToolDefinition,
   type SupportTurnPlan,
 } from "../types";
+import { buildIntentAwareFollowUpQuestion } from "../workflows/build-intent-aware-follow-up";
 import { buildUnsupportedFallback } from "../workflows/verify-answer";
 
 interface ToolParameterDefinition {
@@ -31,6 +32,7 @@ interface PlanNextActionOptions {
 
 interface SanitizePlannerDecisionOptions {
   decision: PlannerDecision;
+  conversationHistory: ConversationTurnMessage[];
   currentMessage: string;
   turnPlan: SupportTurnPlan;
   availableTools: SupportToolDefinition[];
@@ -55,6 +57,19 @@ const plannerActionSchema = z.discriminatedUnion("type", [
     type: z.literal("ask_user"),
     reason: z.string().min(1).max(220),
     question: z.string().min(1).max(220),
+  }),
+  z.object({
+    type: z.literal("offer_handoff"),
+    reason: z.string().min(1).max(220),
+  }),
+  z.object({
+    type: z.literal("collect_contact"),
+    reason: z.string().min(1).max(220),
+    missingFields: z.array(z.enum(["name", "email"])).min(1).max(2),
+  }),
+  z.object({
+    type: z.literal("create_inquiry"),
+    reason: z.string().min(1).max(220),
   }),
   z.object({
     type: z.literal("compose"),
@@ -250,6 +265,125 @@ function getToolHistoryKey(
   return `${normalizeValue(toolName)}:${JSON.stringify(input, Object.keys(input).sort())}`;
 }
 
+function buildClarificationQuestion(
+  turnPlan: SupportTurnPlan,
+  currentMessage: string,
+): string {
+  return (
+    turnPlan.followUpQuestion ??
+    buildIntentAwareFollowUpQuestion({
+      userMessage: currentMessage,
+      intent: turnPlan.intent,
+    })
+  );
+}
+
+function isExplicitHumanRequest(message: string): boolean {
+  const normalized = normalizeValue(message);
+  if (!normalized) return false;
+
+  if (/\b(live agent|human|support team|talk to support|talk to a human|engineer)\b/.test(normalized)) {
+    return true;
+  }
+
+  const wantsHuman =
+    /\b(human|person|agent|engineer|support team|team member|representative|someone)\b/.test(
+      normalized,
+    );
+  const asksForContact =
+    /\b(help|talk|speak|contact|reach|connect|escalate|handoff|hand off|follow up)\b/.test(
+      normalized,
+    );
+
+  return wantsHuman && asksForContact;
+}
+
+function isAffirmativeConfirmation(message: string): boolean {
+  const normalized = normalizeValue(message);
+  return /^(yes|yeah|yep|sure|ok|okay|please do|go ahead|do it|sounds good|that works)\b/.test(
+    normalized,
+  );
+}
+
+function getLastAssistantMessage(
+  conversationHistory: ConversationTurnMessage[],
+): string | null {
+  for (let index = conversationHistory.length - 1; index >= 0; index--) {
+    const message = conversationHistory[index];
+    if (message.role === "bot" || message.role === "agent") {
+      return message.content;
+    }
+  }
+
+  return null;
+}
+
+function lastAssistantOfferedHandoff(
+  conversationHistory: ConversationTurnMessage[],
+): boolean {
+  const lastAssistantMessage = getLastAssistantMessage(conversationHistory);
+  if (!lastAssistantMessage) return false;
+
+  return /\b(forward this|forward your request|forward this to the team|team follow up|engineer|follow up shortly|would you like me to forward|reply yes)\b/i.test(
+    lastAssistantMessage,
+  );
+}
+
+function lastAssistantRequestedContact(
+  conversationHistory: ConversationTurnMessage[],
+): boolean {
+  const lastAssistantMessage = getLastAssistantMessage(conversationHistory);
+  if (!lastAssistantMessage) return false;
+
+  return /before i do, could you share your (name|email)|share your name and email so they can follow up directly|share your email so they can follow up directly|share your name so they know who to follow up with/i.test(
+    lastAssistantMessage,
+  );
+}
+
+function isDecliningContactDetails(message: string): boolean {
+  const normalized = normalizeValue(message);
+  if (!normalized) return false;
+
+  return /\b(no email|no e-mail|don't want to share|do not want to share|rather not share|prefer not to share|no thanks|continue here|in this chat|reply here|keep it in chat|without email|without e-mail)\b/.test(
+    normalized,
+  );
+}
+
+function hasPriorIssueContext(
+  conversationHistory: ConversationTurnMessage[],
+  currentMessage: string,
+): boolean {
+  return conversationHistory.some((message) => {
+    if (message.role !== "visitor") {
+      return false;
+    }
+
+    if (message.content.trim() === currentMessage.trim()) {
+      return false;
+    }
+
+    if (isExplicitHumanRequest(message.content) || isAffirmativeConfirmation(message.content)) {
+      return false;
+    }
+
+    return message.content.trim().length >= 12;
+  });
+}
+
+function getMissingContactFields(state: PlannerLoopState): Array<"name" | "email"> {
+  const missingFields: Array<"name" | "email"> = [];
+
+  if (!state.knownVisitorName?.trim()) {
+    missingFields.push("name");
+  }
+
+  if (!state.knownVisitorEmail?.trim()) {
+    missingFields.push("email");
+  }
+
+  return missingFields;
+}
+
 export async function planNextAction(
   options: PlanNextActionOptions,
 ): Promise<PlannerDecision> {
@@ -291,6 +425,12 @@ Current planner state:
 - goal: ${options.state.goal}
 - stepCount: ${options.state.stepCount}
 - missingInputs: ${options.state.missingInputs.join(", ") || "none"}
+- knownVisitorName: ${options.state.knownVisitorName ?? "unknown"}
+- knownVisitorEmail: ${options.state.knownVisitorEmail ?? "unknown"}
+- handoffRequested: ${options.state.handoffRequested}
+- awaitingHandoffConfirmation: ${options.state.awaitingHandoffConfirmation}
+- awaitingContactFields: ${options.state.awaitingContactFields.join(", ") || "none"}
+- contactDeclined: ${options.state.contactDeclined}
 
 Action history:
 ${buildActionHistorySummary(options.state.actionHistory)}
@@ -308,6 +448,9 @@ Allowed next actions:
 - search_docs: search the knowledge base again with a better query
 - call_tool: call exactly one assigned tool with explicit input
 - ask_user: ask one focused question when a required detail is missing
+- offer_handoff: offer team follow-up when support is exhausted and wait for confirmation
+- collect_contact: ask only for the missing name/email needed for a team follow-up
+- create_inquiry: create the actual team follow-up request in runtime
 - compose: answer now using the gathered evidence
 - stop: no safe next action remains
 
@@ -316,6 +459,10 @@ Rules:
 - Prefer search_docs before call_tool when documentation can clarify expected product behavior.
 - Use call_tool only when a tool is clearly needed and the required inputs are available.
 - If a required tool input is missing, choose ask_user instead of guessing.
+- If the visitor explicitly asks for a human, do not route them back into normal docs troubleshooting unless the issue context is still missing.
+- Use offer_handoff only when you need visitor confirmation before forwarding.
+- Use collect_contact only when optional contact details would genuinely help follow-up and the visitor has not already declined to share them.
+- Use create_inquiry when the visitor wants human follow-up, there is enough issue context to forward, and either contact details are already known or the visitor has declined to share them.
 - Choose compose only when the existing docs evidence or tool evidence is enough to answer honestly.
 - Never name a tool that is not in the assigned tools list.
 - Never repeat the same search query or same tool call unless you have a materially different reason.
@@ -330,6 +477,7 @@ Rules:
 }
 
 export function fallbackPlanNextAction(options: {
+  conversationHistory: ConversationTurnMessage[];
   currentMessage: string;
   turnPlan: SupportTurnPlan;
   availableTools: SupportToolDefinition[];
@@ -342,6 +490,65 @@ export function fallbackPlanNextAction(options: {
       nextAction: {
         type: "stop",
         reason: "Planner step limit reached.",
+      },
+    };
+  }
+
+  const explicitHumanRequest =
+    options.turnPlan.intent === "handoff" ||
+    isExplicitHumanRequest(options.currentMessage);
+  const confirmedHandoff =
+    isAffirmativeConfirmation(options.currentMessage) &&
+    lastAssistantOfferedHandoff(options.conversationHistory);
+  const contactFollowUp =
+    options.state.awaitingContactFields.length > 0 ||
+    lastAssistantRequestedContact(options.conversationHistory);
+  const hasIssueContext = hasPriorIssueContext(
+    options.conversationHistory,
+    options.currentMessage,
+  );
+  const missingContactFields = getMissingContactFields(options.state);
+  const contactDeclined =
+    options.state.contactDeclined ||
+    (contactFollowUp && isDecliningContactDetails(options.currentMessage));
+
+  if (explicitHumanRequest || confirmedHandoff || contactFollowUp) {
+    if (!hasIssueContext && explicitHumanRequest) {
+      return {
+        goal: options.state.goal,
+        nextAction: {
+          type: "offer_handoff",
+          reason: "A human was requested but the issue context is still too thin to forward cleanly.",
+        },
+      };
+    }
+
+    if (contactFollowUp && contactDeclined) {
+      return {
+        goal: options.state.goal,
+        nextAction: {
+          type: "create_inquiry",
+          reason: "The visitor declined to share contact details but still wants human follow-up.",
+        },
+      };
+    }
+
+    if (missingContactFields.length > 0 && !contactFollowUp) {
+      return {
+        goal: options.state.goal,
+        nextAction: {
+          type: "collect_contact",
+          reason: "Team follow-up is requested but contact details are missing.",
+          missingFields: missingContactFields,
+        },
+      };
+    }
+
+    return {
+      goal: options.state.goal,
+      nextAction: {
+        type: "create_inquiry",
+        reason: "The visitor wants human follow-up and enough issue context is available.",
       },
     };
   }
@@ -378,9 +585,10 @@ export function fallbackPlanNextAction(options: {
     nextAction: {
       type: "ask_user",
       reason: "The request still needs a concrete detail to continue.",
-      question:
-        options.turnPlan.followUpQuestion ??
-        "Could you share the exact feature, page, step, or error you want me to check?",
+      question: buildClarificationQuestion(
+        options.turnPlan,
+        options.currentMessage,
+      ),
     },
   };
 }
@@ -429,9 +637,10 @@ export function sanitizePlannerDecision(
         nextAction: {
           type: "ask_user",
           reason: "The same docs query already failed and more detail is required.",
-          question:
-            options.turnPlan.followUpQuestion ??
-            "Could you share the exact feature, page, step, or error you want me to check?",
+          question: buildClarificationQuestion(
+            options.turnPlan,
+            options.currentMessage,
+          ),
         },
       };
     }
@@ -469,9 +678,10 @@ export function sanitizePlannerDecision(
         nextAction: {
           type: "ask_user",
           reason: "The requested tool is not available, so narrow the issue with one question.",
-          question:
-            options.turnPlan.followUpQuestion ??
-            "Could you share the exact feature, page, step, or error you want me to check?",
+          question: buildClarificationQuestion(
+            options.turnPlan,
+            options.currentMessage,
+          ),
         },
       };
     }
@@ -554,9 +764,96 @@ export function sanitizePlannerDecision(
         nextAction: {
           type: "ask_user",
           reason: "Compose is not allowed because the current evidence is still empty.",
-          question:
-            options.turnPlan.followUpQuestion ??
-            buildUnsupportedFallback(options.currentMessage),
+          question: buildUnsupportedFallback(
+            options.currentMessage,
+            options.turnPlan.intent,
+          ),
+        },
+      };
+    }
+  }
+
+  if (nextAction.type === "offer_handoff") {
+    const explicitHumanRequest =
+      options.turnPlan.intent === "handoff" ||
+      isExplicitHumanRequest(options.currentMessage);
+    const hasIssueContext = hasPriorIssueContext(
+      options.conversationHistory,
+      options.currentMessage,
+    );
+
+    if (explicitHumanRequest && hasIssueContext) {
+      const missingContactFields = getMissingContactFields(options.state);
+      if (missingContactFields.length > 0) {
+        return {
+          goal: nextGoal,
+          nextAction: {
+            type: "collect_contact",
+            reason: "A human was explicitly requested and contact details are still missing.",
+            missingFields: missingContactFields,
+          },
+        };
+      }
+
+      return {
+        goal: nextGoal,
+        nextAction: {
+          type: "create_inquiry",
+          reason: "A human was explicitly requested and enough context already exists.",
+        },
+      };
+    }
+  }
+
+  if (nextAction.type === "collect_contact") {
+    if (options.state.contactDeclined) {
+      return {
+        goal: nextGoal,
+        nextAction: {
+          type: "create_inquiry",
+          reason: "The visitor declined contact details, so proceed with the inquiry without them.",
+        },
+      };
+    }
+
+    const missingFields = nextAction.missingFields.filter(
+      (field) =>
+        (field === "name" && !options.state.knownVisitorName?.trim()) ||
+        (field === "email" && !options.state.knownVisitorEmail?.trim()),
+    );
+
+    if (missingFields.length === 0) {
+      return {
+        goal: nextGoal,
+        nextAction: {
+          type: "create_inquiry",
+          reason: "The required contact details are already available.",
+        },
+      };
+    }
+
+    return {
+      goal: nextGoal,
+      nextAction: {
+        ...nextAction,
+        missingFields,
+      },
+    };
+  }
+
+  if (nextAction.type === "create_inquiry") {
+    const missingFields = getMissingContactFields(options.state);
+    if (
+      missingFields.length > 0 &&
+      !options.state.contactDeclined &&
+      options.state.awaitingContactFields.length === 0
+    ) {
+      return {
+        goal: nextGoal,
+        nextAction: {
+          type: "collect_contact",
+          reason: "An inquiry cannot be created until the missing contact details are collected.",
+          missingFields,
         },
       };
     }

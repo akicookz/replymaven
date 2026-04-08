@@ -2,6 +2,12 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
 import { type ProjectSettingsRow } from "../db";
+import {
+  buildExtractContactInfoPrompt,
+  buildReformulateQueryPrompt,
+  buildSummarizeConversationPrompt,
+  buildSummarizeTeamRequestPrompt,
+} from "../chat-runtime/llm/support-prompt-builders";
 import { buildSupportSystemPrompt } from "../chat-runtime/prompt/build-support-system-prompt";
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -53,14 +59,10 @@ export class AiService {
     try {
       const { text } = await generateText({
         model: this.model,
-        prompt: `Given the conversation below, rewrite the user's latest message into a standalone search query that captures the full intent. The query should be self-contained and optimized for searching a knowledge base.
-
-CONVERSATION:
-${transcript}
-
-LATEST MESSAGE: ${currentMessage}
-
-Output ONLY the rewritten search query, nothing else. If the latest message is already a clear standalone question, return it as-is.`,
+        prompt: buildReformulateQueryPrompt({
+          transcript,
+          currentMessage,
+        }),
         temperature: 0,
         maxOutputTokens: 128,
       });
@@ -92,12 +94,7 @@ Output ONLY the rewritten search query, nothing else. If the latest message is a
     try {
       const { text } = await generateText({
         model: this.model,
-        prompt: `Summarize this customer support conversation in 1-2 sentences. Focus on: what the visitor needs help with and what has been discussed so far. Be factual and concise.
-
-CONVERSATION:
-${transcript}
-
-SUMMARY:`,
+        prompt: buildSummarizeConversationPrompt({ transcript }),
         temperature: 0,
         maxOutputTokens: 128,
       });
@@ -121,22 +118,7 @@ SUMMARY:`,
     try {
       const { text } = await generateText({
         model: this.model,
-        prompt: `Summarize this support conversation for an internal team follow-up request.
-
-CONVERSATION:
-${transcript}
-
-Write a short factual summary that covers:
-- what the visitor is trying to do
-- what is not working or still unclear
-- any concrete details already shared
-- what the team should investigate or respond with
-
-Rules:
-- Keep it under 700 characters
-- Do not invent details
-- Do not use markdown headings
-- Write in plain text for an internal support note`,
+        prompt: buildSummarizeTeamRequestPrompt({ transcript }),
         temperature: 0.2,
         maxOutputTokens: 256,
       });
@@ -182,14 +164,7 @@ Rules:
     try {
       const { text } = await generateText({
         model: this.model,
-        prompt: `Extract the visitor's name and email from these messages. If either is not present, return "unknown".
-
-VISITOR MESSAGES:
-${transcript}
-
-Respond in exactly this format (no other text):
-name: <name or unknown>
-email: <email or unknown>`,
+        prompt: buildExtractContactInfoPrompt({ transcript }),
         temperature: 0,
         maxOutputTokens: 64,
       });

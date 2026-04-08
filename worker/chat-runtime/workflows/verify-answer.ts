@@ -1,5 +1,7 @@
 import { generateObject, type LanguageModel } from "ai";
 import { z } from "zod";
+import { buildIntentAwareUnsupportedFallback } from "./build-intent-aware-follow-up";
+import { type SupportIntent } from "../types";
 
 const claimAssessmentSchema = z.object({
   claim: z.string().min(1).max(300),
@@ -31,17 +33,14 @@ interface VerifyAnswerOptions {
   throwOnModelError?: boolean;
 }
 
-export function buildUnsupportedFallback(userMessage: string): string {
-  const needsPrecision =
-    /(pricing|plan|policy|refund|billing|setup|configure|integration|api|error|issue|problem|limit)/i.test(
-      userMessage,
-    );
-
-  if (needsPrecision) {
-    return "I couldn't verify a reliable answer for that from the knowledge base I searched. If you share the exact feature name, page, error, or policy you want checked, I can try again more precisely.";
-  }
-
-  return "I couldn't verify that reliably from the knowledge base I searched. If you can share a bit more detail, I can check again.";
+export function buildUnsupportedFallback(
+  userMessage: string,
+  intent?: SupportIntent | null,
+): string {
+  return buildIntentAwareUnsupportedFallback({
+    userMessage,
+    intent,
+  });
 }
 
 export function fallbackVerificationResult(options: {
@@ -58,6 +57,7 @@ export function fallbackVerificationResult(options: {
 export async function verifyAnswer(options: {
   model: LanguageModel;
   userMessage: string;
+  intent?: SupportIntent | null;
   draftedAnswer: string;
   ragContext: string;
   lastToolOutput?: unknown;
@@ -75,7 +75,7 @@ export async function verifyAnswer(options: {
   if (!options.ragContext.trim() && !options.lastToolOutput) {
     return {
       verdict: "unsupported",
-      answer: buildUnsupportedFallback(options.userMessage),
+      answer: buildUnsupportedFallback(options.userMessage, options.intent),
       claims: [],
       summary: "No evidence available for verification.",
     };
@@ -115,9 +115,13 @@ Rules:
    - revised: some claims are partial/unsupported but a corrected answer can still be given from supported evidence
    - unsupported: the evidence is too weak to answer confidently
 5. If verdict is revised, revisedAnswer must remove unsupported claims and keep only supported facts.
-6. If verdict is unsupported, revisedAnswer must briefly say the answer could not be verified from the knowledge base and optionally ask for a more precise feature name, page, error, or policy.
+6. If verdict is unsupported, revisedAnswer must briefly say the answer could not be verified from the knowledge base and ask only for the most relevant missing detail for this user intent:
+   - troubleshooting: feature, page, step, or error
+   - pricing/policy: plan, pricing detail, or policy topic
+   - human follow-up request: a brief issue description that would let the runtime forward it cleanly
 7. Be strict. Never preserve a claim just because it sounds plausible.
-8. Do not introduce new facts that are not directly present in the evidence.`,
+8. Do not introduce new facts that are not directly present in the evidence.
+9. Do not invent or manage escalation state, contact collection, or inquiry creation. Those are runtime concerns.`,
     });
 
     const claims = object.claims ?? [];
@@ -152,7 +156,7 @@ Rules:
       verdict: unsupportedClaims > 0 ? "unsupported" : "revised",
       answer:
         unsupportedClaims > 0
-          ? buildUnsupportedFallback(options.userMessage)
+          ? buildUnsupportedFallback(options.userMessage, options.intent)
           : options.draftedAnswer,
       claims,
       summary: object.summary ?? null,
