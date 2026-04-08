@@ -53,19 +53,29 @@ interface CompanySettings {
 interface SuggestionCounts {
   total: number;
   newFaq: number;
-  addFaqEntry: number;
+  updateFaq: number;
   newSop: number;
   updateSop: number;
+  updatePdf: number;
+  updateWebpage: number;
   updateContext: number;
 }
 
 interface KnowledgeSuggestion {
   id: string;
   projectId: string;
-  type: "new_faq" | "add_faq_entry" | "new_sop" | "update_sop" | "update_context";
+  type:
+    | "new_faq"
+    | "update_faq"
+    | "new_sop"
+    | "update_sop"
+    | "update_pdf"
+    | "update_webpage"
+    | "update_context";
   status: "pending" | "approved" | "rejected";
   targetResourceId: string | null;
   targetGuidelineId: string | null;
+  targetPageId: string | null;
   sourceConversationId: string | null;
   suggestion: string;
   reasoning: string | null;
@@ -116,11 +126,14 @@ function Resources() {
   const { data: faqSuggestions } = useQuery<KnowledgeSuggestion[]>({
     queryKey: ["knowledge-suggestions-faq", projectId],
     queryFn: async () => {
-      const [newFaqs, addEntries] = await Promise.all([
+      const [newFaqs, updateFaqs, updatePdfs, updateWebpages] =
+        await Promise.all([
         fetch(`/api/projects/${projectId}/knowledge-suggestions?type=new_faq`).then((r) => r.json()),
-        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=add_faq_entry`).then((r) => r.json()),
-      ]);
-      return [...newFaqs, ...addEntries];
+        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=update_faq`).then((r) => r.json()),
+        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=update_pdf`).then((r) => r.json()),
+        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=update_webpage`).then((r) => r.json()),
+        ]);
+      return [...newFaqs, ...updateFaqs, ...updatePdfs, ...updateWebpages];
     },
     staleTime: 60_000,
   });
@@ -195,7 +208,11 @@ function Resources() {
     },
   });
 
-  const faqSuggestionCount = (suggestionCounts?.newFaq ?? 0) + (suggestionCounts?.addFaqEntry ?? 0);
+  const resourceSuggestionCount =
+    (suggestionCounts?.newFaq ?? 0) +
+    (suggestionCounts?.updateFaq ?? 0) +
+    (suggestionCounts?.updatePdf ?? 0) +
+    (suggestionCounts?.updateWebpage ?? 0);
   const sopSuggestionCount = (suggestionCounts?.newSop ?? 0) + (suggestionCounts?.updateSop ?? 0);
   const contextSuggestionCount = suggestionCounts?.updateContext ?? 0;
 
@@ -369,6 +386,96 @@ function Resources() {
   const hasSelectedSuggestions = selectedSuggestions.size > 0;
   const allSuggestionsSelected = faqSuggestions && selectedSuggestions.size === faqSuggestions.length;
 
+  function getSuggestionTitle(
+    suggestion: KnowledgeSuggestion,
+    payload: Record<string, unknown>,
+    targetResource: Resource | null,
+  ) {
+    switch (suggestion.type) {
+      case "new_faq":
+        return `New FAQ: ${typeof payload.title === "string" ? payload.title : "Untitled FAQ"}`;
+      case "update_faq":
+        return `Refine FAQ: ${targetResource?.title ?? "FAQ resource"}`;
+      case "update_pdf":
+        return `Refine PDF: ${targetResource?.title ?? "PDF resource"}`;
+      case "update_webpage":
+        return `Refine Web Page: ${
+          typeof payload.pageUrl === "string"
+            ? payload.pageUrl
+            : targetResource?.title ?? "Crawled page"
+        }`;
+      default:
+        return "AI Suggestion";
+    }
+  }
+
+  function renderSuggestionPreview(
+    suggestion: KnowledgeSuggestion,
+    payload: Record<string, unknown>,
+  ) {
+    if (suggestion.type === "new_faq" || suggestion.type === "update_faq") {
+      const pairs = Array.isArray(payload.pairs) ? payload.pairs : [];
+      if (pairs.length === 0) return null;
+
+      return (
+        <div className="space-y-2">
+          {pairs.slice(0, 4).map((pair, index) => {
+            if (!pair || typeof pair !== "object") return null;
+
+            return (
+              <div key={index} className="bg-muted/30 rounded-xl p-3 space-y-1">
+                <p className="text-xs font-medium text-foreground">
+                  Q: {typeof pair.question === "string" ? pair.question : ""}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  A: {typeof pair.answer === "string" ? pair.answer : ""}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    if (suggestion.type === "update_pdf" || suggestion.type === "update_webpage") {
+      if (payload.mode === "append" && typeof payload.appendText === "string") {
+        return (
+          <div className="bg-muted/30 rounded-xl p-3 space-y-1">
+            <p className="text-xs font-medium text-foreground">Append</p>
+            <p className="text-xs text-muted-foreground whitespace-pre-wrap">
+              {payload.appendText}
+            </p>
+          </div>
+        );
+      }
+
+      if (
+        payload.mode === "replace" &&
+        typeof payload.currentText === "string" &&
+        typeof payload.updatedText === "string"
+      ) {
+        return (
+          <div className="space-y-2">
+            <div className="bg-muted/30 rounded-xl p-3 space-y-1">
+              <p className="text-xs font-medium text-foreground">Current excerpt</p>
+              <p className="text-xs text-muted-foreground whitespace-pre-wrap">
+                {payload.currentText}
+              </p>
+            </div>
+            <div className="bg-muted/30 rounded-xl p-3 space-y-1">
+              <p className="text-xs font-medium text-foreground">Suggested excerpt</p>
+              <p className="text-xs text-muted-foreground whitespace-pre-wrap">
+                {payload.updatedText}
+              </p>
+            </div>
+          </div>
+        );
+      }
+    }
+
+    return null;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-3">
@@ -438,7 +545,7 @@ function Resources() {
         </Link>
       </div>
 
-      {/* ─── FAQ Suggestions ──────────────────────────────────────────────── */}
+      {/* ─── Resource Suggestions ─────────────────────────────────────────── */}
       {faqSuggestions && faqSuggestions.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -484,10 +591,9 @@ function Resources() {
             )}
           </div>
           {faqSuggestions.map((s) => {
-            const payload = JSON.parse(s.suggestion);
-            const pairs = s.type === "new_faq" ? payload.pairs : payload.pairs;
+            const payload = JSON.parse(s.suggestion) as Record<string, unknown>;
             const targetResource = s.targetResourceId
-              ? resources?.find((r) => r.id === s.targetResourceId)
+              ? (resources?.find((r) => r.id === s.targetResourceId) ?? null)
               : null;
 
             return (
@@ -504,24 +610,22 @@ function Resources() {
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium text-primary">
-                      {s.type === "new_faq"
-                        ? `New FAQ: ${payload.title}`
-                        : `Add to: ${targetResource?.title ?? "FAQ resource"}`}
-                    </p>
-                    {s.reasoning && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {s.reasoning}
+                        {getSuggestionTitle(s, payload, targetResource)}
                       </p>
-                    )}
-                    {s.sourceConversationId && (
-                      <Link
-                        to={`/app/projects/${projectId}/conversations?id=${s.sourceConversationId}`}
-                        className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground mt-1"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        View conversation
-                      </Link>
-                    )}
+                      {s.reasoning && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {s.reasoning}
+                        </p>
+                      )}
+                      {s.sourceConversationId && (
+                        <Link
+                          to={`/app/projects/${projectId}/conversations?id=${s.sourceConversationId}`}
+                          className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground mt-1"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          View conversation
+                        </Link>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -545,23 +649,7 @@ function Resources() {
                     </button>
                   </div>
                 </div>
-                {pairs && pairs.length > 0 && (
-                  <div className="space-y-2">
-                    {pairs.map((pair: { question: string; answer: string }, i: number) => (
-                      <div
-                        key={i}
-                        className="bg-muted/30 rounded-xl p-3 space-y-1"
-                      >
-                        <p className="text-xs font-medium text-foreground">
-                          Q: {pair.question}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          A: {pair.answer}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {renderSuggestionPreview(s, payload)}
               </div>
             );
           })}
@@ -573,9 +661,9 @@ function Resources() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold text-foreground">Resources</h2>
-            {faqSuggestionCount > 0 && (
+            {resourceSuggestionCount > 0 && (
               <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
-                {faqSuggestionCount}
+                {resourceSuggestionCount}
               </span>
             )}
           </div>

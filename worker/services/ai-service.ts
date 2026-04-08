@@ -18,6 +18,37 @@ interface AiServiceConfig {
   openaiApiKey: string;
 }
 
+export interface KnowledgeRefinementPlan {
+  type:
+    | "new_faq"
+    | "update_faq"
+    | "new_sop"
+    | "update_sop"
+    | "update_pdf"
+    | "update_webpage"
+    | "update_context";
+  targetResourceId?: string;
+  targetGuidelineId?: string;
+  targetPageId?: string;
+  reasoning: string;
+}
+
+export interface KnowledgeRefinementSuggestion {
+  type:
+    | "new_faq"
+    | "update_faq"
+    | "new_sop"
+    | "update_sop"
+    | "update_pdf"
+    | "update_webpage"
+    | "update_context";
+  targetResourceId?: string;
+  targetGuidelineId?: string;
+  targetPageId?: string;
+  suggestion: Record<string, unknown>;
+  reasoning: string;
+}
+
 export class AiService {
   private model;
 
@@ -307,52 +338,59 @@ JSON:`,
 
   // ─── Knowledge Refinement ────────────────────────────────────────────────────
 
-  async generateKnowledgeRefinement(
+  async planKnowledgeRefinement(
     conversationMessages: Array<{ role: string; content: string }>,
     existingContext: {
       companyContext: string | null;
-      faqResources: Array<{
+      faqCandidates: Array<{
         id: string;
         title: string;
         pairs: Array<{ question: string; answer: string }>;
       }>;
-      guidelines: Array<{
+      guidelineCandidates: Array<{
         id: string;
         condition: string;
         instruction: string;
       }>;
+      pdfCandidates: Array<{
+        id: string;
+        title: string;
+        excerpt: string;
+      }>;
+      webpageCandidates: Array<{
+        pageId: string;
+        resourceId: string;
+        resourceTitle: string;
+        pageTitle: string | null;
+        url: string;
+      }>;
+      pendingSuggestions: Array<{
+        id: string;
+        type: string;
+        summary: string;
+      }>;
     },
-  ): Promise<
-    Array<{
-      type:
-        | "new_faq"
-        | "add_faq_entry"
-        | "new_sop"
-        | "update_sop"
-        | "update_context";
-      targetResourceId?: string;
-      targetGuidelineId?: string;
-      suggestion: Record<string, unknown>;
-      reasoning: string;
-    }>
-  > {
+  ): Promise<KnowledgeRefinementPlan[]> {
     const transcript = conversationMessages
       .map((m) => `${m.role}: ${m.content}`)
       .join("\n");
 
     const faqSummary =
-      existingContext.faqResources.length > 0
-        ? existingContext.faqResources
+      existingContext.faqCandidates.length > 0
+        ? existingContext.faqCandidates
             .map(
               (faq) =>
-                `FAQ "${faq.title}" (id: ${faq.id}):\n${faq.pairs.map((p) => `  Q: ${p.question}\n  A: ${p.answer}`).join("\n")}`,
+                `FAQ "${faq.title}" (id: ${faq.id}):\n${faq.pairs
+                  .slice(0, 8)
+                  .map((p) => `  Q: ${p.question}`)
+                  .join("\n")}`,
             )
             .join("\n\n")
         : "(none)";
 
     const sopSummary =
-      existingContext.guidelines.length > 0
-        ? existingContext.guidelines
+      existingContext.guidelineCandidates.length > 0
+        ? existingContext.guidelineCandidates
             .map(
               (g) =>
                 `SOP (id: ${g.id}):\n  When: ${g.condition}\n  Then: ${g.instruction}`,
@@ -360,59 +398,102 @@ JSON:`,
             .join("\n\n")
         : "(none)";
 
+    const pdfSummary =
+      existingContext.pdfCandidates.length > 0
+        ? existingContext.pdfCandidates
+            .map(
+              (pdf) =>
+                `PDF "${pdf.title}" (id: ${pdf.id}):\n${pdf.excerpt || "(no excerpt available)"}`,
+            )
+            .join("\n\n")
+        : "(none)";
+
+    const webpageSummary =
+      existingContext.webpageCandidates.length > 0
+        ? existingContext.webpageCandidates
+            .map(
+              (page) =>
+                `Web page (pageId: ${page.pageId}, resourceId: ${page.resourceId}):\n  Resource: ${page.resourceTitle}\n  Title: ${page.pageTitle ?? "(untitled)"}\n  URL: ${page.url}`,
+            )
+            .join("\n\n")
+        : "(none)";
+
+    const pendingSummary =
+      existingContext.pendingSuggestions.length > 0
+        ? existingContext.pendingSuggestions
+            .map(
+              (suggestion) =>
+                `Pending ${suggestion.type} (${suggestion.id}): ${suggestion.summary}`,
+            )
+            .join("\n")
+        : "(none)";
+
     const contextSummary = existingContext.companyContext || "(none)";
 
     try {
       const { text } = await generateText({
         model: this.model,
-        prompt: `You are a knowledge base analyst. Analyze this customer support conversation and identify improvements to the knowledge base.
+        prompt: `You are planning knowledge refinement actions for a customer support knowledge base.
 
 CONVERSATION:
 ${transcript}
 
-EXISTING KNOWLEDGE BASE:
+PENDING SUGGESTIONS TO AVOID DUPLICATING:
+${pendingSummary}
 
-FAQs:
+DETERMINISTICALLY SELECTED FAQ CANDIDATES:
 ${faqSummary}
 
-SOPs (Standard Operating Procedures):
+DETERMINISTICALLY SELECTED SOP CANDIDATES:
 ${sopSummary}
+
+DETERMINISTICALLY SELECTED PDF CANDIDATES:
+${pdfSummary}
+
+DETERMINISTICALLY SELECTED WEB PAGE CANDIDATES:
+${webpageSummary}
 
 Company Context:
 ${contextSummary}
 
-Based on the conversation, suggest improvements. For each suggestion, pick the most appropriate type:
-- "add_faq_entry": Add Q&A pairs to an EXISTING FAQ resource (specify targetResourceId)
-- "new_faq": Create a NEW FAQ resource if no existing one fits (specify title + pairs)
-- "update_sop": Update an EXISTING SOP that was incomplete or wrong (specify targetGuidelineId + new condition/instruction)
-- "new_sop": Create a NEW SOP for a behavioral pattern not covered (specify condition/instruction)
-- "update_context": Append important company info that was missing from company context
+Pick the most appropriate actions. Use only these action types:
+- "update_faq": refine an EXISTING FAQ resource from the candidate list
+- "new_faq": create a NEW FAQ resource only when no existing FAQ candidate is a reasonable fit
+- "update_sop": refine an EXISTING SOP from the candidate list
+- "new_sop": create a NEW SOP only when no existing SOP candidate is a reasonable fit
+- "update_pdf": refine an EXISTING PDF from the candidate list
+- "update_webpage": refine an EXISTING web page from the candidate list
+- "update_context": append missing high-level company context when it does not belong in a FAQ, SOP, PDF, or webpage refinement
 
 Rules:
-- Do NOT suggest duplicates of existing FAQ pairs or SOPs
-- Only suggest if the conversation reveals a genuine knowledge gap, incorrect info, or missing procedure
-- Prefer adding to existing FAQ resources over creating new ones
-- Be specific and actionable
-- If no improvements are needed, return an empty array
+- Return at most 3 actions
+- Prefer refining one of the provided existing candidates over creating something new
+- If a FAQ candidate even partially fits, choose "update_faq" instead of "new_faq"
+- If a SOP candidate even partially fits, choose "update_sop" instead of "new_sop"
+- For PDFs and web pages, NEVER create a new resource suggestion. Only use "update_pdf" or "update_webpage"
+- Do NOT create a duplicate of an existing pending suggestion
+- Do NOT create multiple actions for the same target
+- Only suggest an action if the conversation reveals a genuine gap, incorrect content, or missing procedure
+- If no improvements are needed, return []
 
-Return ONLY valid JSON array (no markdown, no code blocks):
+Return ONLY valid JSON array (no markdown, no code blocks) in this format:
 [
   {
-    "type": "add_faq_entry",
+    "type": "update_faq",
     "targetResourceId": "existing-resource-id",
-    "suggestion": { "pairs": [{"question": "...", "answer": "..."}] },
-    "reasoning": "Why this improvement is needed"
+    "reasoning": "Why this specific target should be refined"
   },
   {
-    "type": "new_sop",
-    "suggestion": { "condition": "When...", "instruction": "The bot should..." },
-    "reasoning": "Why this SOP is needed"
+    "type": "update_webpage",
+    "targetResourceId": "webpage-resource-id",
+    "targetPageId": "page-id",
+    "reasoning": "Why this specific web page should be refined"
   }
 ]
 
 If no improvements are warranted, return exactly: []`,
-        temperature: 0.3,
-        maxOutputTokens: 1024,
+        temperature: 0.2,
+        maxOutputTokens: 1200,
       });
 
       const trimmed = text.trim();
@@ -422,44 +503,339 @@ If no improvements are warranted, return exactly: []`,
         const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
         const parsed = JSON.parse(
           jsonMatch ? jsonMatch[0] : trimmed,
-        ) as Array<{
-          type: string;
-          targetResourceId?: string;
-          targetGuidelineId?: string;
-          suggestion: Record<string, unknown>;
-          reasoning: string;
-        }>;
+        ) as Array<Record<string, unknown>>;
 
         const validTypes = new Set([
           "new_faq",
-          "add_faq_entry",
+          "update_faq",
           "new_sop",
           "update_sop",
+          "update_pdf",
+          "update_webpage",
           "update_context",
         ]);
+        const faqIds = new Set(
+          existingContext.faqCandidates.map((faq) => faq.id),
+        );
+        const guidelineIds = new Set(
+          existingContext.guidelineCandidates.map((guideline) => guideline.id),
+        );
+        const pdfIds = new Set(
+          existingContext.pdfCandidates.map((pdf) => pdf.id),
+        );
+        const webpagePages = new Map(
+          existingContext.webpageCandidates.map((page) => [page.pageId, page]),
+        );
 
-        return parsed.filter(
-          (s) =>
-            validTypes.has(s.type) &&
-            s.suggestion &&
-            typeof s.reasoning === "string",
-        ) as Array<{
-          type:
-            | "new_faq"
-            | "add_faq_entry"
-            | "new_sop"
-            | "update_sop"
-            | "update_context";
-          targetResourceId?: string;
-          targetGuidelineId?: string;
-          suggestion: Record<string, unknown>;
-          reasoning: string;
-        }>;
+        const plans: KnowledgeRefinementPlan[] = [];
+
+        for (const entry of parsed) {
+          const type =
+            typeof entry.type === "string" ? entry.type : undefined;
+          const targetResourceId =
+            typeof entry.targetResourceId === "string"
+              ? entry.targetResourceId
+              : undefined;
+          const targetGuidelineId =
+            typeof entry.targetGuidelineId === "string"
+              ? entry.targetGuidelineId
+              : undefined;
+          const targetPageId =
+            typeof entry.targetPageId === "string"
+              ? entry.targetPageId
+              : undefined;
+          const reasoning =
+            typeof entry.reasoning === "string" ? entry.reasoning : undefined;
+
+          if (!type || !reasoning || !validTypes.has(type)) {
+            continue;
+          }
+
+          switch (type) {
+            case "update_faq":
+              if (targetResourceId && faqIds.has(targetResourceId)) {
+                plans.push({ type, targetResourceId, reasoning });
+              }
+              break;
+            case "update_sop":
+              if (targetGuidelineId && guidelineIds.has(targetGuidelineId)) {
+                plans.push({ type, targetGuidelineId, reasoning });
+              }
+              break;
+            case "update_pdf":
+              if (targetResourceId && pdfIds.has(targetResourceId)) {
+                plans.push({ type, targetResourceId, reasoning });
+              }
+              break;
+            case "update_webpage":
+              if (targetPageId && targetResourceId) {
+                const page = webpagePages.get(targetPageId);
+                if (page && page.resourceId === targetResourceId) {
+                  plans.push({
+                    type,
+                    targetResourceId,
+                    targetPageId,
+                    reasoning,
+                  });
+                }
+              }
+              break;
+            case "new_faq":
+            case "new_sop":
+            case "update_context":
+              plans.push({ type, reasoning });
+              break;
+          }
+        }
+
+        return plans;
       } catch {
         return [];
       }
     } catch {
       return [];
+    }
+  }
+
+  async generateKnowledgeSuggestionPayload(
+    conversationMessages: Array<{ role: string; content: string }>,
+    plan: KnowledgeRefinementPlan,
+    context: {
+      companyContext: string | null;
+      faqTarget?: {
+        id: string;
+        title: string;
+        pairs: Array<{ question: string; answer: string }>;
+      };
+      guidelineTarget?: {
+        id: string;
+        condition: string;
+        instruction: string;
+      };
+      pdfTarget?: {
+        id: string;
+        title: string;
+        excerpt: string;
+      };
+      webpageTarget?: {
+        pageId: string;
+        resourceId: string;
+        resourceTitle: string;
+        pageTitle: string | null;
+        url: string;
+        excerpt: string;
+      };
+    },
+  ): Promise<KnowledgeRefinementSuggestion | null> {
+    const transcript = conversationMessages
+      .map((m) => `${m.role}: ${m.content}`)
+      .join("\n");
+
+    switch (plan.type) {
+      case "new_faq": {
+        const suggestion = await this.generateJsonObject({
+          prompt: `You are creating a new FAQ resource from a support conversation.
+
+CONVERSATION:
+${transcript}
+
+Rules:
+- Create 1-5 concise Q&A pairs
+- Use a title that groups the topic clearly
+- Do not create duplicate or near-duplicate questions inside the same FAQ
+- Return only valid JSON
+
+Return this exact shape:
+{"title":"FAQ title","pairs":[{"question":"...","answer":"..."}]}`,
+          maxOutputTokens: 1200,
+        });
+
+        if (!suggestion) return null;
+        return { ...plan, suggestion };
+      }
+      case "update_faq": {
+        if (!context.faqTarget) return null;
+        const suggestion = await this.generateJsonObject({
+          prompt: `You are refining an existing FAQ resource based on a support conversation.
+
+CONVERSATION:
+${transcript}
+
+CURRENT FAQ RESOURCE:
+Title: ${context.faqTarget.title}
+
+Pairs:
+${context.faqTarget.pairs
+  .map((pair) => `- Q: ${pair.question}\n  A: ${pair.answer}`)
+  .join("\n")}
+
+Rules:
+- Return the FULL updated FAQ resource, not a partial patch
+- Make the minimum necessary changes
+- Prefer updating an existing matching pair instead of creating a near-duplicate pair
+- Preserve unrelated pairs
+- Do not exceed 50 pairs
+- Return only valid JSON
+
+Return this exact shape:
+{"title":"FAQ title","pairs":[{"question":"...","answer":"..."}]}`,
+          maxOutputTokens: 1800,
+        });
+
+        if (!suggestion) return null;
+        return { ...plan, suggestion };
+      }
+      case "new_sop": {
+        const suggestion = await this.generateJsonObject({
+          prompt: `You are creating a new SOP from a support conversation.
+
+CONVERSATION:
+${transcript}
+
+Rules:
+- The condition should describe when the SOP applies
+- The instruction should describe exactly how the bot should respond or behave
+- Keep both concise and specific
+- Return only valid JSON
+
+Return this exact shape:
+{"condition":"When ...","instruction":"The bot should ..."}`,
+          maxOutputTokens: 400,
+        });
+
+        if (!suggestion) return null;
+        return { ...plan, suggestion };
+      }
+      case "update_sop": {
+        if (!context.guidelineTarget) return null;
+        const suggestion = await this.generateJsonObject({
+          prompt: `You are refining an existing SOP from a support conversation.
+
+CONVERSATION:
+${transcript}
+
+CURRENT SOP:
+When: ${context.guidelineTarget.condition}
+Then: ${context.guidelineTarget.instruction}
+
+Rules:
+- Make the minimum necessary change
+- Keep the SOP focused on the existing scenario unless the conversation proves it should be broadened
+- Return only valid JSON
+
+Return this exact shape:
+{"condition":"When ...","instruction":"The bot should ..."}`,
+          maxOutputTokens: 500,
+        });
+
+        if (!suggestion) return null;
+        return { ...plan, suggestion };
+      }
+      case "update_pdf": {
+        if (!context.pdfTarget) return null;
+        const suggestion = await this.generateJsonObject({
+          prompt: `You are refining an existing PDF knowledge resource based on a support conversation.
+
+CONVERSATION:
+${transcript}
+
+TARGET PDF:
+Title: ${context.pdfTarget.title}
+
+RELEVANT CURRENT EXCERPT:
+${context.pdfTarget.excerpt}
+
+Rules:
+- Do NOT rewrite the whole document
+- Use "replace" when an existing excerpt is wrong or incomplete
+- Use "append" only when the missing information should be added as a new short section
+- If using "replace", currentText must be copied exactly from the current excerpt
+- Keep changes narrow and retrieval-friendly
+- Return only valid JSON
+
+Return one of these exact shapes:
+{"mode":"replace","currentText":"exact text from excerpt","updatedText":"replacement text"}
+{"mode":"append","appendText":"new text to append"}`,
+          maxOutputTokens: 900,
+        });
+
+        if (!suggestion) return null;
+        return { ...plan, suggestion };
+      }
+      case "update_webpage": {
+        if (!context.webpageTarget) return null;
+        const suggestion = await this.generateJsonObject({
+          prompt: `You are refining an existing crawled web page resource based on a support conversation.
+
+CONVERSATION:
+${transcript}
+
+TARGET WEB PAGE:
+Resource: ${context.webpageTarget.resourceTitle}
+Page title: ${context.webpageTarget.pageTitle ?? "(untitled)"}
+URL: ${context.webpageTarget.url}
+
+RELEVANT CURRENT EXCERPT:
+${context.webpageTarget.excerpt}
+
+Rules:
+- Do NOT rewrite the whole page
+- Use "replace" when an existing excerpt is wrong or incomplete
+- Use "append" only when the missing information should be added as a short supplemental section
+- If using "replace", currentText must be copied exactly from the current excerpt
+- Keep changes narrow and retrieval-friendly
+- Return only valid JSON
+
+Return one of these exact shapes:
+{"mode":"replace","currentText":"exact text from excerpt","updatedText":"replacement text","pageUrl":"${context.webpageTarget.url}"}
+{"mode":"append","appendText":"new text to append","pageUrl":"${context.webpageTarget.url}"}`,
+          maxOutputTokens: 900,
+        });
+
+        if (!suggestion) return null;
+        return { ...plan, suggestion };
+      }
+      case "update_context": {
+        const suggestion = await this.generateJsonObject({
+          prompt: `You are updating high-level company context from a support conversation.
+
+CONVERSATION:
+${transcript}
+
+CURRENT COMPANY CONTEXT:
+${context.companyContext ?? "(none)"}
+
+Rules:
+- Only append high-level business or support context that belongs in company context
+- Do NOT duplicate product documentation, FAQ answers, or SOP behavior already better suited elsewhere
+- Return only valid JSON
+
+Return this exact shape:
+{"appendText":"..."}`,
+          maxOutputTokens: 500,
+        });
+
+        if (!suggestion) return null;
+        return { ...plan, suggestion };
+      }
+    }
+  }
+
+  async generateJsonObject(options: {
+    prompt: string;
+    maxOutputTokens: number;
+  }): Promise<Record<string, unknown> | null> {
+    try {
+      const { text } = await generateText({
+        model: this.model,
+        prompt: options.prompt,
+        temperature: 0.2,
+        maxOutputTokens: options.maxOutputTokens,
+      });
+
+      return parseJsonObject(text);
+    } catch {
+      return null;
     }
   }
 
@@ -637,5 +1013,21 @@ Respond with ONLY the question, nothing else.`,
     } catch {
       return "What services do you offer and how can I get started?";
     }
+  }
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const cleaned = text
+      .replace(/```json?\s*/g, "")
+      .replace(/```\s*/g, "")
+      .trim();
+    const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(objectMatch ? objectMatch[0] : cleaned);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
   }
 }

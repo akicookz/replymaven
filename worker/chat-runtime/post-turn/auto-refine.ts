@@ -1,16 +1,33 @@
-import { KnowledgeSuggestionService } from "../../services/knowledge-suggestion-service";
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import {
+  buildSuggestionFingerprint,
+  KnowledgeSuggestionService,
+  type SuggestionType,
+} from "../../services/knowledge-suggestion-service";
 import { ChatService } from "../../services/chat-service";
 import { ProjectService } from "../../services/project-service";
 import { GuidelineService } from "../../services/guideline-service";
-import { AiService } from "../../services/ai-service";
+import {
+  AiService,
+  type KnowledgeRefinementPlan,
+  type KnowledgeRefinementSuggestion,
+} from "../../services/ai-service";
 import { logError, logInfo } from "../../observability";
-import { type FaqPair } from "../../services/resource-service";
+import { ResourceService, type FaqPair } from "../../services/resource-service";
+import { type AppEnv } from "../../types";
+import {
+  buildRelevantContentSnippet,
+  selectRefinementShortlist,
+} from "./refinement-selection";
 
 export async function triggerAutoRefinementIfEnabled(options: {
   projectId: string;
   conversationId: string;
-  db: import("drizzle-orm/d1").DrizzleD1Database<Record<string, unknown>>;
-  env: { AI_MODEL: string; GEMINI_API_KEY: string; OPENAI_API_KEY: string };
+  db: DrizzleD1Database<Record<string, unknown>>;
+  env: Pick<
+    AppEnv,
+    "AI_MODEL" | "GEMINI_API_KEY" | "OPENAI_API_KEY" | "UPLOADS"
+  >;
   kv: KVNamespace;
   source?: string;
 }): Promise<void> {
@@ -40,37 +57,53 @@ export async function triggerAutoRefinementIfEnabled(options: {
     return;
   }
 
-  // Load existing knowledge context for the AI to compare against
+  const resourceService = new ResourceService(options.db, options.env.UPLOADS);
   const guidelineService = new GuidelineService(options.db);
   const enabledGuidelines = await guidelineService.getEnabledByProject(
     options.projectId,
   );
+  const resources = await resourceService.getResourcesByProject(options.projectId);
+  const faqResources = resources
+    .filter((resource) => resource.type === "faq")
+    .map((resource) => ({
+      id: resource.id,
+      title: resource.title,
+      pairs: parseFaqPairs(resource.content),
+    }));
+  const pdfResources = resources
+    .filter((resource) => resource.type === "pdf")
+    .map((resource) => ({
+      id: resource.id,
+      title: resource.title,
+      content: resource.content,
+    }));
+  const webpageResources = resources.filter(
+    (resource) => resource.type === "webpage",
+  );
+  const webpageCandidates = (
+    await Promise.all(
+      webpageResources.map(async (resource) => {
+        const pages = await resourceService.getCrawledPages(
+          resource.id,
+          options.projectId,
+        );
+        return pages
+          .filter((page) => page.status === "crawled")
+          .map((page) => ({
+            pageId: page.id,
+            resourceId: resource.id,
+            resourceTitle: resource.title,
+            pageTitle: page.pageTitle,
+            url: page.url,
+          }));
+      }),
+    )
+  ).flat();
 
-  // We need an R2 bucket for ResourceService, but we don't have it here.
-  // Instead, load FAQ resources directly from D1 (content column has JSON pairs).
-  const { resources } = await import("../../db/schema");
-  const { eq, and } = await import("drizzle-orm");
-  const faqResources = await options.db
-    .select()
-    .from(resources)
-    .where(
-      and(
-        eq(resources.projectId, options.projectId),
-        eq(resources.type, "faq"),
-      ),
-    );
-
-  const faqResourcesWithPairs = faqResources
-    .filter((r) => r.content)
-    .map((r) => {
-      let pairs: FaqPair[] = [];
-      try {
-        pairs = JSON.parse(r.content!) as FaqPair[];
-      } catch {
-        pairs = [];
-      }
-      return { id: r.id, title: r.title, pairs };
-    });
+  const suggestionService = new KnowledgeSuggestionService(options.db);
+  const pendingSuggestions = await suggestionService.getPendingByProject(
+    options.projectId,
+  );
 
   const aiService = new AiService({
     model: options.env.AI_MODEL,
@@ -83,62 +116,145 @@ export async function triggerAutoRefinementIfEnabled(options: {
     conversationId: options.conversationId,
     source,
     messageCount: messages.length,
-    faqCount: faqResourcesWithPairs.length,
+    faqCount: faqResources.length,
     guidelineCount: enabledGuidelines.length,
+    pdfCount: pdfResources.length,
+    webpageCount: webpageCandidates.length,
+    pendingSuggestionCount: pendingSuggestions.length,
     model: options.env.AI_MODEL,
   });
 
   try {
-    const suggestions = await aiService.generateKnowledgeRefinement(
-      messages.map((m) => ({ role: m.role, content: m.content })),
-      {
-        companyContext: settings.companyContext,
-        faqResources: faqResourcesWithPairs,
-        guidelines: enabledGuidelines.map((g) => ({
-          id: g.id,
-          condition: g.condition,
-          instruction: g.instruction,
-        })),
-      },
-    );
+    const conversationMessages = messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+    const shortlist = selectRefinementShortlist({
+      messages: conversationMessages,
+      faqs: faqResources,
+      sops: enabledGuidelines.map((guideline) => ({
+        id: guideline.id,
+        condition: guideline.condition,
+        instruction: guideline.instruction,
+      })),
+      pdfs: pdfResources,
+      webpages: webpageCandidates,
+      pendingSuggestions: pendingSuggestions.map((suggestion) => ({
+        id: suggestion.id,
+        type: suggestion.type,
+        summary: summarizePendingSuggestion(suggestion),
+      })),
+    });
+    const plans = await aiService.planKnowledgeRefinement(conversationMessages, {
+      companyContext: settings.companyContext,
+      faqCandidates: shortlist.faqCandidates,
+      guidelineCandidates: shortlist.sopCandidates,
+      pdfCandidates: shortlist.pdfCandidates.map((pdf) => ({
+        id: pdf.id,
+        title: pdf.title,
+        excerpt: buildRelevantContentSnippet(
+          pdf.content ?? "",
+          shortlist.conversationQuery,
+          1200,
+        ),
+      })),
+      webpageCandidates: shortlist.webpageCandidates,
+      pendingSuggestions: shortlist.pendingSuggestions,
+    });
 
-    if (!suggestions || suggestions.length === 0) {
+    if (!plans || plans.length === 0) {
       logInfo("auto_refine.skipped", {
         projectId: options.projectId,
         conversationId: options.conversationId,
         source,
-        reason: "no_suggestions",
+        reason: "no_plans",
         messageCount: messages.length,
       });
       return;
     }
 
-    logInfo("auto_refine.generated", {
+    logInfo("auto_refine.planned", {
       projectId: options.projectId,
       conversationId: options.conversationId,
       source,
-      suggestionCount: suggestions.length,
-      types: suggestions.map((s) => s.type),
+      planCount: plans.length,
+      types: plans.map((plan) => plan.type),
     });
 
-    const suggestionService = new KnowledgeSuggestionService(options.db);
-    for (const s of suggestions) {
+    const existingFingerprints = new Set(
+      pendingSuggestions.map((suggestion) =>
+        buildSuggestionFingerprint({
+          type: suggestion.type as SuggestionType,
+          targetResourceId: suggestion.targetResourceId,
+          targetGuidelineId: suggestion.targetGuidelineId,
+          targetPageId: suggestion.targetPageId,
+          suggestion: suggestion.suggestion,
+        }),
+      ),
+    );
+    const batchFingerprints = new Set<string>();
+    const guidelineMap = new Map(
+      enabledGuidelines.map((guideline) => [guideline.id, guideline]),
+    );
+    const faqMap = new Map(faqResources.map((faq) => [faq.id, faq]));
+    const pdfMap = new Map(pdfResources.map((pdf) => [pdf.id, pdf]));
+    const webpageMap = new Map(
+      webpageCandidates.map((page) => [page.pageId, page]),
+    );
+
+    for (const plan of plans) {
+      const generated = await generateSuggestionForPlan({
+        aiService,
+        conversationMessages,
+        companyContext: settings.companyContext,
+        conversationQuery: shortlist.conversationQuery,
+        plan,
+        faqMap,
+        guidelineMap,
+        pdfMap,
+        webpageMap,
+        resourceService,
+        projectId: options.projectId,
+      });
+      if (!generated) continue;
+
+      const fingerprint = buildSuggestionFingerprint({
+        type: generated.type as SuggestionType,
+        targetResourceId: generated.targetResourceId ?? null,
+        targetGuidelineId: generated.targetGuidelineId ?? null,
+        targetPageId: generated.targetPageId ?? null,
+        suggestion: generated.suggestion,
+      });
+
+      if (existingFingerprints.has(fingerprint) || batchFingerprints.has(fingerprint)) {
+        logInfo("auto_refine.skipped_duplicate", {
+          projectId: options.projectId,
+          conversationId: options.conversationId,
+          type: generated.type,
+          source,
+          fingerprint,
+        });
+        continue;
+      }
+
       const saved = await suggestionService.create({
         projectId: options.projectId,
-        type: s.type,
+        type: generated.type,
         status: "pending",
-        targetResourceId: s.targetResourceId ?? null,
-        targetGuidelineId: s.targetGuidelineId ?? null,
+        targetResourceId: generated.targetResourceId ?? null,
+        targetGuidelineId: generated.targetGuidelineId ?? null,
+        targetPageId: generated.targetPageId ?? null,
         sourceConversationId: options.conversationId,
-        suggestion: JSON.stringify(s.suggestion),
-        reasoning: s.reasoning,
+        suggestion: JSON.stringify(generated.suggestion),
+        reasoning: generated.reasoning,
       });
+      batchFingerprints.add(fingerprint);
 
       logInfo("auto_refine.saved", {
         projectId: options.projectId,
         conversationId: options.conversationId,
         suggestionId: saved.id,
-        type: s.type,
+        type: generated.type,
         source,
       });
     }
@@ -151,4 +267,297 @@ export async function triggerAutoRefinementIfEnabled(options: {
       model: options.env.AI_MODEL,
     });
   }
+}
+
+async function generateSuggestionForPlan(options: {
+  aiService: AiService;
+  conversationMessages: Array<{ role: string; content: string }>;
+  companyContext: string | null;
+  conversationQuery: string;
+  plan: KnowledgeRefinementPlan;
+  faqMap: Map<string, { id: string; title: string; pairs: FaqPair[] }>;
+  guidelineMap: Map<
+    string,
+    { id: string; condition: string; instruction: string }
+  >;
+  pdfMap: Map<string, { id: string; title: string; content: string | null }>;
+  webpageMap: Map<
+    string,
+    {
+      pageId: string;
+      resourceId: string;
+      resourceTitle: string;
+      pageTitle: string | null;
+      url: string;
+    }
+  >;
+  resourceService: ResourceService;
+  projectId: string;
+}): Promise<KnowledgeRefinementSuggestion | null> {
+  const plan = options.plan;
+  const faqTarget = plan.targetResourceId
+    ? options.faqMap.get(plan.targetResourceId)
+    : undefined;
+  const guidelineTarget = plan.targetGuidelineId
+    ? options.guidelineMap.get(plan.targetGuidelineId)
+    : undefined;
+  const pdfTarget = plan.targetResourceId
+    ? options.pdfMap.get(plan.targetResourceId)
+    : undefined;
+  const webpageTarget = plan.targetPageId
+    ? options.webpageMap.get(plan.targetPageId)
+    : undefined;
+
+  const webpageExcerpt =
+    plan.type === "update_webpage" && webpageTarget
+      ? buildRelevantContentSnippet(
+          (await options.resourceService.getCrawledPageContent(
+            webpageTarget.pageId,
+            webpageTarget.resourceId,
+            options.projectId,
+          )) ?? "",
+          options.conversationQuery,
+          2500,
+        )
+      : undefined;
+  const pdfExcerpt =
+    plan.type === "update_pdf" && pdfTarget
+      ? buildRelevantContentSnippet(
+          pdfTarget.content ?? "",
+          options.conversationQuery,
+          2500,
+        )
+      : undefined;
+
+  const generated = await options.aiService.generateKnowledgeSuggestionPayload(
+    options.conversationMessages,
+    plan,
+    {
+      companyContext: options.companyContext,
+      faqTarget,
+      guidelineTarget,
+      pdfTarget: pdfTarget
+        ? {
+            id: pdfTarget.id,
+            title: pdfTarget.title,
+            excerpt: pdfExcerpt ?? "",
+          }
+        : undefined,
+      webpageTarget:
+        webpageTarget && webpageExcerpt !== undefined
+          ? {
+              ...webpageTarget,
+              excerpt: webpageExcerpt,
+            }
+          : undefined,
+    },
+  );
+  if (!generated) return null;
+
+  return sanitizeGeneratedSuggestion(generated, {
+    faqTarget,
+    guidelineTarget,
+    pdfContent: pdfTarget?.content ?? "",
+    webpageContent: webpageExcerpt,
+  });
+}
+
+function sanitizeGeneratedSuggestion(
+  suggestion: KnowledgeRefinementSuggestion,
+  context: {
+    faqTarget?: { title: string; pairs: FaqPair[] };
+    guidelineTarget?: { condition: string; instruction: string };
+    pdfContent?: string;
+    webpageContent?: string;
+  },
+): KnowledgeRefinementSuggestion | null {
+  switch (suggestion.type) {
+    case "new_faq": {
+      const title = getTrimmedString(suggestion.suggestion, "title");
+      const pairs = sanitizeFaqPairs(
+        (suggestion.suggestion.pairs as unknown[]) ?? [],
+      );
+      if (!title || pairs.length === 0) return null;
+      return {
+        ...suggestion,
+        suggestion: { title, pairs },
+      };
+    }
+    case "update_faq": {
+      const title =
+        getTrimmedString(suggestion.suggestion, "title") ??
+        context.faqTarget?.title;
+      const pairs = sanitizeFaqPairs(
+        (suggestion.suggestion.pairs as unknown[]) ?? [],
+      );
+      if (!title || pairs.length === 0) return null;
+      if (
+        context.faqTarget &&
+        title === context.faqTarget.title &&
+        JSON.stringify(pairs) === JSON.stringify(context.faqTarget.pairs)
+      ) {
+        return null;
+      }
+      return {
+        ...suggestion,
+        suggestion: { title, pairs },
+      };
+    }
+    case "new_sop":
+    case "update_sop": {
+      const condition = getTrimmedString(suggestion.suggestion, "condition");
+      const instruction = getTrimmedString(suggestion.suggestion, "instruction");
+      if (!condition || !instruction) return null;
+      if (
+        suggestion.type === "update_sop" &&
+        context.guidelineTarget &&
+        condition === context.guidelineTarget.condition &&
+        instruction === context.guidelineTarget.instruction
+      ) {
+        return null;
+      }
+      return {
+        ...suggestion,
+        suggestion: { condition, instruction },
+      };
+    }
+    case "update_pdf":
+    case "update_webpage": {
+      const mode = getTrimmedString(suggestion.suggestion, "mode");
+      if (mode === "append") {
+        const appendText = getTrimmedString(suggestion.suggestion, "appendText");
+        if (!appendText) return null;
+        return {
+          ...suggestion,
+          suggestion: {
+            mode,
+            appendText,
+            pageUrl: getTrimmedString(suggestion.suggestion, "pageUrl"),
+          },
+        };
+      }
+      if (mode !== "replace") return null;
+      const currentText = getTrimmedString(suggestion.suggestion, "currentText");
+      const updatedText = getTrimmedString(suggestion.suggestion, "updatedText");
+      if (!currentText || !updatedText || currentText === updatedText) {
+        return null;
+      }
+      const content =
+        suggestion.type === "update_pdf"
+          ? context.pdfContent ?? ""
+          : context.webpageContent ?? "";
+      if (content && !content.includes(currentText)) {
+        return null;
+      }
+      return {
+        ...suggestion,
+        suggestion: {
+          mode,
+          currentText,
+          updatedText,
+          pageUrl: getTrimmedString(suggestion.suggestion, "pageUrl"),
+        },
+      };
+    }
+    case "update_context": {
+      const appendText = getTrimmedString(suggestion.suggestion, "appendText");
+      if (!appendText) return null;
+      return {
+        ...suggestion,
+        suggestion: { appendText },
+      };
+    }
+  }
+}
+
+function sanitizeFaqPairs(rawPairs: unknown[]): FaqPair[] {
+  const seenQuestions = new Set<string>();
+  const pairs: FaqPair[] = [];
+
+  for (const pair of rawPairs) {
+    if (!pair || typeof pair !== "object") continue;
+    const question = getTrimmedString(pair as Record<string, unknown>, "question");
+    const answer = getTrimmedString(pair as Record<string, unknown>, "answer");
+    if (!question || !answer) continue;
+
+    const normalizedQuestion = normalizeText(question);
+    if (seenQuestions.has(normalizedQuestion)) continue;
+
+    seenQuestions.add(normalizedQuestion);
+    pairs.push({ question, answer });
+    if (pairs.length >= 50) break;
+  }
+
+  return pairs;
+}
+
+function summarizePendingSuggestion(suggestion: {
+  type: string;
+  suggestion: string;
+  reasoning: string | null;
+}): string {
+  const payload = safeParseJson(suggestion.suggestion);
+
+  switch (suggestion.type) {
+    case "new_faq":
+    case "update_faq":
+      return `${getTrimmedString(payload, "title") ?? ""} ${extractPairQuestions(payload)}`.trim();
+    case "new_sop":
+    case "update_sop":
+      return `${getTrimmedString(payload, "condition") ?? ""} ${getTrimmedString(payload, "instruction") ?? ""}`.trim();
+    case "update_pdf":
+    case "update_webpage":
+      return `${getTrimmedString(payload, "appendText") ?? ""} ${getTrimmedString(payload, "updatedText") ?? ""}`.trim();
+    case "update_context":
+      return getTrimmedString(payload, "appendText") ?? suggestion.reasoning ?? "";
+    default:
+      return suggestion.reasoning ?? "";
+  }
+}
+
+function parseFaqPairs(content: string | null): FaqPair[] {
+  if (!content) return [];
+
+  try {
+    const parsed = JSON.parse(content) as FaqPair[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function extractPairQuestions(payload: Record<string, unknown>): string {
+  const rawPairs = Array.isArray(payload.pairs) ? payload.pairs : [];
+  return rawPairs
+    .map((pair) =>
+      pair && typeof pair === "object"
+        ? getTrimmedString(pair as Record<string, unknown>, "question")
+        : null,
+    )
+    .filter((question): question is string => !!question)
+    .join(" ");
+}
+
+function safeParseJson(value: string): Record<string, unknown> {
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function getTrimmedString(
+  payload: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = payload[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

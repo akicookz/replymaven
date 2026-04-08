@@ -3795,9 +3795,11 @@ const app = new Hono<HonoAppContext>()
 
     const typeFilter = c.req.query("type") as
       | "new_faq"
-      | "add_faq_entry"
+      | "update_faq"
       | "new_sop"
       | "update_sop"
+      | "update_pdf"
+      | "update_webpage"
       | "update_context"
       | undefined;
 

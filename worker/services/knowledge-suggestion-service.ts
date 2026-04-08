@@ -13,17 +13,21 @@ import { ProjectService } from "./project-service";
 
 export type SuggestionType =
   | "new_faq"
-  | "add_faq_entry"
+  | "update_faq"
   | "new_sop"
   | "update_sop"
+  | "update_pdf"
+  | "update_webpage"
   | "update_context";
 
 export interface SuggestionCounts {
   total: number;
   newFaq: number;
-  addFaqEntry: number;
+  updateFaq: number;
   newSop: number;
   updateSop: number;
+  updatePdf: number;
+  updateWebpage: number;
   updateContext: number;
 }
 
@@ -32,17 +36,60 @@ interface NewFaqPayload {
   pairs: FaqPair[];
 }
 
-interface AddFaqEntryPayload {
-  pairs: FaqPair[];
-}
-
 interface SopPayload {
   condition: string;
   instruction: string;
 }
 
+interface UpdateFaqPayload {
+  title: string;
+  pairs: FaqPair[];
+}
+
+interface UpdateResourcePayload {
+  mode: "replace" | "append";
+  currentText?: string;
+  updatedText?: string;
+  appendText?: string;
+  pageUrl?: string;
+}
+
 interface UpdateContextPayload {
   appendText: string;
+}
+
+export function buildSuggestionFingerprint(options: {
+  type: SuggestionType;
+  targetResourceId?: string | null;
+  targetGuidelineId?: string | null;
+  targetPageId?: string | null;
+  suggestion: string | Record<string, unknown>;
+}): string {
+  const payload =
+    typeof options.suggestion === "string"
+      ? safeParseJson(options.suggestion)
+      : options.suggestion;
+
+  switch (options.type) {
+    case "update_faq":
+      return `update_faq:${options.targetResourceId ?? "unknown"}`;
+    case "update_sop":
+      return `update_sop:${options.targetGuidelineId ?? "unknown"}`;
+    case "update_pdf":
+      return `update_pdf:${options.targetResourceId ?? "unknown"}`;
+    case "update_webpage":
+      return `update_webpage:${options.targetPageId ?? "unknown"}`;
+    case "update_context":
+      return "update_context";
+    case "new_faq":
+      return `new_faq:${normalizeFingerprintText(
+        getStringValue(payload, "title"),
+      )}`;
+    case "new_sop":
+      return `new_sop:${normalizeFingerprintText(
+        getStringValue(payload, "condition"),
+      )}`;
+  }
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -97,9 +144,11 @@ export class KnowledgeSuggestionService {
     const counts: SuggestionCounts = {
       total: 0,
       newFaq: 0,
-      addFaqEntry: 0,
+      updateFaq: 0,
       newSop: 0,
       updateSop: 0,
+      updatePdf: 0,
+      updateWebpage: 0,
       updateContext: 0,
     };
 
@@ -110,14 +159,20 @@ export class KnowledgeSuggestionService {
         case "new_faq":
           counts.newFaq = c;
           break;
-        case "add_faq_entry":
-          counts.addFaqEntry = c;
+        case "update_faq":
+          counts.updateFaq = c;
           break;
         case "new_sop":
           counts.newSop = c;
           break;
         case "update_sop":
           counts.updateSop = c;
+          break;
+        case "update_pdf":
+          counts.updatePdf = c;
+          break;
+        case "update_webpage":
+          counts.updateWebpage = c;
           break;
         case "update_context":
           counts.updateContext = c;
@@ -247,9 +302,9 @@ export class KnowledgeSuggestionService {
       case "new_faq":
         await this.applyNewFaq(payload as unknown as NewFaqPayload, projectId, r2);
         break;
-      case "add_faq_entry":
-        await this.applyAddFaqEntry(
-          payload as unknown as AddFaqEntryPayload,
+      case "update_faq":
+        await this.applyUpdateFaq(
+          payload as unknown as UpdateFaqPayload,
           projectId,
           suggestion.targetResourceId!,
           r2,
@@ -263,6 +318,23 @@ export class KnowledgeSuggestionService {
           payload as unknown as SopPayload,
           projectId,
           suggestion.targetGuidelineId!,
+        );
+        break;
+      case "update_pdf":
+        await this.applyUpdatePdf(
+          payload as unknown as UpdateResourcePayload,
+          projectId,
+          suggestion.targetResourceId!,
+          r2,
+        );
+        break;
+      case "update_webpage":
+        await this.applyUpdateWebpage(
+          payload as unknown as UpdateResourcePayload,
+          projectId,
+          suggestion.targetResourceId!,
+          suggestion.targetPageId!,
+          r2,
         );
         break;
       case "update_context":
@@ -295,8 +367,8 @@ export class KnowledgeSuggestionService {
     );
   }
 
-  private async applyAddFaqEntry(
-    payload: AddFaqEntryPayload,
+  private async applyUpdateFaq(
+    payload: UpdateFaqPayload,
     projectId: string,
     targetResourceId: string,
     r2: R2Bucket,
@@ -310,15 +382,11 @@ export class KnowledgeSuggestionService {
       throw new Error("Target FAQ resource not found");
     }
 
-    const existingPairs: FaqPair[] = resource.content
-      ? JSON.parse(resource.content)
-      : [];
-    const mergedPairs = [...existingPairs, ...payload.pairs];
     await resourceService.updateFaqResource(
       targetResourceId,
       projectId,
-      undefined,
-      mergedPairs,
+      payload.title,
+      payload.pairs,
     );
   }
 
@@ -361,4 +429,115 @@ export class KnowledgeSuggestionService {
       companyContext: newContext,
     });
   }
+
+  private async applyUpdatePdf(
+    payload: UpdateResourcePayload,
+    projectId: string,
+    targetResourceId: string,
+    r2: R2Bucket,
+  ): Promise<void> {
+    const resourceService = new ResourceService(this.db, r2);
+    const resource = await resourceService.getResourceById(
+      targetResourceId,
+      projectId,
+    );
+    if (!resource || resource.type !== "pdf") {
+      throw new Error("Target PDF resource not found");
+    }
+
+    const currentContent = resource.content ?? "";
+    const nextContent = applyTextSuggestion(currentContent, payload);
+    await resourceService.updateResourceContent(
+      targetResourceId,
+      projectId,
+      undefined,
+      nextContent,
+    );
+  }
+
+  private async applyUpdateWebpage(
+    payload: UpdateResourcePayload,
+    projectId: string,
+    targetResourceId: string,
+    targetPageId: string,
+    r2: R2Bucket,
+  ): Promise<void> {
+    const resourceService = new ResourceService(this.db, r2);
+    const resource = await resourceService.getResourceById(
+      targetResourceId,
+      projectId,
+    );
+    if (!resource || resource.type !== "webpage") {
+      throw new Error("Target webpage resource not found");
+    }
+
+    const pageContent = await resourceService.getCrawledPageContent(
+      targetPageId,
+      targetResourceId,
+      projectId,
+    );
+    if (pageContent === null) {
+      throw new Error("Target webpage page not found");
+    }
+
+    const nextContent = applyTextSuggestion(pageContent, payload);
+    const updated = await resourceService.updateCrawledPageContent(
+      targetPageId,
+      targetResourceId,
+      projectId,
+      nextContent,
+    );
+    if (!updated) {
+      throw new Error("Failed to update webpage page content");
+    }
+  }
+}
+
+function applyTextSuggestion(
+  content: string,
+  payload: UpdateResourcePayload,
+): string {
+  if (payload.mode === "append") {
+    if (!payload.appendText?.trim()) {
+      throw new Error("Append suggestion is missing appendText");
+    }
+
+    return content.trim()
+      ? `${content.trimEnd()}\n\n${payload.appendText.trim()}`
+      : payload.appendText.trim();
+  }
+
+  if (!payload.currentText?.trim() || !payload.updatedText?.trim()) {
+    throw new Error("Replace suggestion is missing currentText or updatedText");
+  }
+
+  if (!content.includes(payload.currentText)) {
+    throw new Error("Target text snippet no longer matches current content");
+  }
+
+  return content.replace(payload.currentText, payload.updatedText);
+}
+
+function safeParseJson(value: string): Record<string, unknown> {
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function getStringValue(
+  payload: Record<string, unknown>,
+  key: string,
+): string {
+  const value = payload[key];
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeFingerprintText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

@@ -347,9 +347,11 @@ export const knowledgeSuggestions = sqliteTable(
     type: text("type", {
       enum: [
         "new_faq",
-        "add_faq_entry",
+        "update_faq",
         "new_sop",
         "update_sop",
+        "update_pdf",
+        "update_webpage",
         "update_context",
       ],
     }).notNull(),
@@ -364,6 +366,9 @@ export const knowledgeSuggestions = sqliteTable(
       () => guidelines.id,
       { onDelete: "set null" },
     ),
+    targetPageId: text("target_page_id").references(() => crawledPages.id, {
+      onDelete: "set null",
+    }),
     sourceConversationId: text("source_conversation_id").references(
       () => conversations.id,
       { onDelete: "set null" },
