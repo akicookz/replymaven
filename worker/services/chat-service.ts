@@ -3,7 +3,6 @@ import { eq, desc, and, gt, ne, inArray, sql } from "drizzle-orm";
 import {
   conversations,
   messages,
-  cannedResponses,
   type ConversationRow,
   type NewConversationRow,
   type MessageRow,
@@ -400,29 +399,4 @@ export class ChatService {
     );
   }
 
-  // ─── Canned Responses ───────────────────────────────────────────────────────
-
-  async findCannedResponse(
-    projectId: string,
-    query: string,
-  ): Promise<{ trigger: string; response: string } | null> {
-    const approved = await this.db
-      .select()
-      .from(cannedResponses)
-      .where(
-        and(
-          eq(cannedResponses.projectId, projectId),
-          eq(cannedResponses.status, "approved"),
-        ),
-      );
-
-    // Simple keyword matching -- find the best match
-    const queryLower = query.toLowerCase();
-    for (const cr of approved) {
-      if (queryLower.includes(cr.trigger.toLowerCase())) {
-        return { trigger: cr.trigger, response: cr.response };
-      }
-    }
-    return null;
-  }
 }

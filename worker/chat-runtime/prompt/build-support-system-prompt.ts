@@ -4,7 +4,6 @@ export function buildSupportSystemPrompt(
   settings: SupportPromptSettings,
   projectName: string,
   ragContext: string,
-  cannedHint: string | null,
   conversationSummary: string | null,
   options?: SupportPromptOptions,
 ): string {
@@ -153,16 +152,6 @@ Knowledge-base retrieval returned only weak or partial matches for this question
 `;
   }
 
-  if (cannedHint) {
-    prompt += `<canned-response>
-This is a pre-approved answer for a common question. If it matches what the visitor is asking, use it as your response (you may adapt the wording to fit the conversation naturally).
-
-${cannedHint}
-</canned-response>
-
-`;
-  }
-
   if (conversationSummary) {
     prompt += `<conversation-summary>
 This is a summary of the conversation so far. Use it to stay on topic and avoid repeating information already covered.
@@ -219,8 +208,8 @@ ${guidelineEntries}
 
   prompt += `<response-rules>
 Answering questions:
-- Answer questions using ONLY information from the <about-the-company>, <knowledge-base>, and <canned-response> sections.
-- Use <about-the-company> only for broad company background. For product behavior, troubleshooting, setup, integrations, pricing, policy, and "how do I" questions, rely on <knowledge-base> or <canned-response>, not company background alone.
+- Answer questions using ONLY information from the <about-the-company> and <knowledge-base> sections.
+- Use <about-the-company> only for broad company background. For product behavior, troubleshooting, setup, integrations, pricing, policy, and "how do I" questions, rely on <knowledge-base>, not company background alone.
 - Extract specific answers and present them directly. Walk the visitor through solutions step-by-step when applicable.
 - If multiple solutions exist, present the most likely one first, then briefly mention alternatives.
 - Keep responses concise but complete. Use short paragraphs and bullet points.

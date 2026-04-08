@@ -80,6 +80,9 @@ export const projectSettings = sqliteTable(
     autoCannedDraft: integer("auto_canned_draft", { mode: "boolean" })
       .notNull()
       .default(true),
+    autoRefinement: integer("auto_refinement", { mode: "boolean" })
+      .notNull()
+      .default(true),
     autoCloseMinutes: integer("auto_close_minutes").default(30), // null = disabled
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
@@ -332,24 +335,41 @@ export const messages = sqliteTable(
 export type MessageRow = typeof messages.$inferSelect;
 export type NewMessageRow = typeof messages.$inferInsert;
 
-// ─── Canned Responses ─────────────────────────────────────────────────────────
+// ─── Knowledge Suggestions ────────────────────────────────────────────────────
 
-export const cannedResponses = sqliteTable(
-  "canned_responses",
+export const knowledgeSuggestions = sqliteTable(
+  "knowledge_suggestions",
   {
     id: text("id").primaryKey(),
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    trigger: text("trigger").notNull(),
-    response: text("response").notNull(),
-    status: text("status", { enum: ["draft", "approved", "rejected"] })
+    type: text("type", {
+      enum: [
+        "new_faq",
+        "add_faq_entry",
+        "new_sop",
+        "update_sop",
+        "update_context",
+      ],
+    }).notNull(),
+    status: text("status", { enum: ["pending", "approved", "rejected"] })
       .notNull()
-      .default("draft"),
+      .default("pending"),
+    targetResourceId: text("target_resource_id").references(
+      () => resources.id,
+      { onDelete: "set null" },
+    ),
+    targetGuidelineId: text("target_guideline_id").references(
+      () => guidelines.id,
+      { onDelete: "set null" },
+    ),
     sourceConversationId: text("source_conversation_id").references(
       () => conversations.id,
       { onDelete: "set null" },
     ),
+    suggestion: text("suggestion").notNull(), // JSON payload
+    reasoning: text("reasoning"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -359,13 +379,14 @@ export const cannedResponses = sqliteTable(
       .notNull(),
   },
   (table) => [
-    index("idx_canned_responses_project").on(table.projectId),
-    index("idx_canned_responses_status").on(table.status),
+    index("idx_knowledge_suggestions_project").on(table.projectId),
+    index("idx_knowledge_suggestions_status").on(table.status),
   ],
 );
 
-export type CannedResponseRow = typeof cannedResponses.$inferSelect;
-export type NewCannedResponseRow = typeof cannedResponses.$inferInsert;
+export type KnowledgeSuggestionRow = typeof knowledgeSuggestions.$inferSelect;
+export type NewKnowledgeSuggestionRow =
+  typeof knowledgeSuggestions.$inferInsert;
 
 // ─── Inquiry Config ───────────────────────────────────────────────────────
 
@@ -666,7 +687,7 @@ export const schema = {
   crawledPages,
   conversations,
   messages,
-  cannedResponses,
+  knowledgeSuggestions,
   inquiryConfig,
   inquiries,
   subscriptions,

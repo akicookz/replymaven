@@ -297,7 +297,6 @@ JSON:`,
       projectName,
       "", // no RAG context for directed responses
       null,
-      null,
       { agentHandbackInstructions: agentInstruction },
     );
 
@@ -331,128 +330,161 @@ JSON:`,
     }
   }
 
-  // ─── Auto-Draft Canned Response ──────────────────────────────────────────────
+  // ─── Knowledge Refinement ────────────────────────────────────────────────────
 
-  async generateCannedDraft(
+  async generateKnowledgeRefinement(
     conversationMessages: Array<{ role: string; content: string }>,
-  ): Promise<{ trigger: string; response: string } | null> {
+    existingContext: {
+      companyContext: string | null;
+      faqResources: Array<{
+        id: string;
+        title: string;
+        pairs: Array<{ question: string; answer: string }>;
+      }>;
+      guidelines: Array<{
+        id: string;
+        condition: string;
+        instruction: string;
+      }>;
+    },
+  ): Promise<
+    Array<{
+      type:
+        | "new_faq"
+        | "add_faq_entry"
+        | "new_sop"
+        | "update_sop"
+        | "update_context";
+      targetResourceId?: string;
+      targetGuidelineId?: string;
+      suggestion: Record<string, unknown>;
+      reasoning: string;
+    }>
+  > {
     const transcript = conversationMessages
       .map((m) => `${m.role}: ${m.content}`)
       .join("\n");
 
+    const faqSummary =
+      existingContext.faqResources.length > 0
+        ? existingContext.faqResources
+            .map(
+              (faq) =>
+                `FAQ "${faq.title}" (id: ${faq.id}):\n${faq.pairs.map((p) => `  Q: ${p.question}\n  A: ${p.answer}`).join("\n")}`,
+            )
+            .join("\n\n")
+        : "(none)";
+
+    const sopSummary =
+      existingContext.guidelines.length > 0
+        ? existingContext.guidelines
+            .map(
+              (g) =>
+                `SOP (id: ${g.id}):\n  When: ${g.condition}\n  Then: ${g.instruction}`,
+            )
+            .join("\n\n")
+        : "(none)";
+
+    const contextSummary = existingContext.companyContext || "(none)";
+
     try {
       const { text } = await generateText({
         model: this.model,
-        prompt: `Analyze this customer support conversation and generate a canned response that could be reused for similar future questions.
+        prompt: `You are a knowledge base analyst. Analyze this customer support conversation and identify improvements to the knowledge base.
 
 CONVERSATION:
 ${transcript}
 
-Respond ONLY with valid JSON in this exact format (no markdown, no code blocks):
-{"trigger": "short keyword or phrase that identifies the question type", "response": "the ideal concise response to give"}
+EXISTING KNOWLEDGE BASE:
 
-If the conversation is too short, trivial, or doesn't contain a clear reusable Q&A pattern, respond with exactly: null`,
+FAQs:
+${faqSummary}
+
+SOPs (Standard Operating Procedures):
+${sopSummary}
+
+Company Context:
+${contextSummary}
+
+Based on the conversation, suggest improvements. For each suggestion, pick the most appropriate type:
+- "add_faq_entry": Add Q&A pairs to an EXISTING FAQ resource (specify targetResourceId)
+- "new_faq": Create a NEW FAQ resource if no existing one fits (specify title + pairs)
+- "update_sop": Update an EXISTING SOP that was incomplete or wrong (specify targetGuidelineId + new condition/instruction)
+- "new_sop": Create a NEW SOP for a behavioral pattern not covered (specify condition/instruction)
+- "update_context": Append important company info that was missing from company context
+
+Rules:
+- Do NOT suggest duplicates of existing FAQ pairs or SOPs
+- Only suggest if the conversation reveals a genuine knowledge gap, incorrect info, or missing procedure
+- Prefer adding to existing FAQ resources over creating new ones
+- Be specific and actionable
+- If no improvements are needed, return an empty array
+
+Return ONLY valid JSON array (no markdown, no code blocks):
+[
+  {
+    "type": "add_faq_entry",
+    "targetResourceId": "existing-resource-id",
+    "suggestion": { "pairs": [{"question": "...", "answer": "..."}] },
+    "reasoning": "Why this improvement is needed"
+  },
+  {
+    "type": "new_sop",
+    "suggestion": { "condition": "When...", "instruction": "The bot should..." },
+    "reasoning": "Why this SOP is needed"
+  }
+]
+
+If no improvements are warranted, return exactly: []`,
         temperature: 0.3,
-        maxOutputTokens: 512,
+        maxOutputTokens: 1024,
       });
 
       const trimmed = text.trim();
-      if (!trimmed || trimmed === "null") return null;
+      if (!trimmed || trimmed === "[]" || trimmed === "null") return [];
 
       try {
-        const parsed = JSON.parse(trimmed) as {
-          trigger?: string;
-          response?: string;
-        };
-        if (parsed.trigger && parsed.response) {
-          return { trigger: parsed.trigger, response: parsed.response };
-        }
+        const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
+        const parsed = JSON.parse(
+          jsonMatch ? jsonMatch[0] : trimmed,
+        ) as Array<{
+          type: string;
+          targetResourceId?: string;
+          targetGuidelineId?: string;
+          suggestion: Record<string, unknown>;
+          reasoning: string;
+        }>;
+
+        const validTypes = new Set([
+          "new_faq",
+          "add_faq_entry",
+          "new_sop",
+          "update_sop",
+          "update_context",
+        ]);
+
+        return parsed.filter(
+          (s) =>
+            validTypes.has(s.type) &&
+            s.suggestion &&
+            typeof s.reasoning === "string",
+        ) as Array<{
+          type:
+            | "new_faq"
+            | "add_faq_entry"
+            | "new_sop"
+            | "update_sop"
+            | "update_context";
+          targetResourceId?: string;
+          targetGuidelineId?: string;
+          suggestion: Record<string, unknown>;
+          reasoning: string;
+        }>;
       } catch {
-        // Gemini may wrap in markdown code block -- try extracting JSON
-        const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try {
-            const parsed = JSON.parse(jsonMatch[0]) as {
-              trigger?: string;
-              response?: string;
-            };
-            if (parsed.trigger && parsed.response) {
-              return { trigger: parsed.trigger, response: parsed.response };
-            }
-          } catch {
-            // Give up
-          }
-        }
+        return [];
       }
     } catch {
-      // Silently fail
-    }
-
-    return null;
-  }
-
-  // ─── Rank Canned Responses ───────────────────────────────────────────────────
-
-  async rankCannedResponses(
-    query: string,
-    responses: Array<{ id: string; trigger: string; response: string }>,
-  ): Promise<
-    Array<{ id: string; trigger: string; response: string; score: number }>
-  > {
-    if (responses.length === 0) return [];
-
-    const numbered = responses
-      .map((r, i) => `${i + 1}. trigger: "${r.trigger}" | response: "${r.response}"`)
-      .join("\n");
-
-    try {
-      const { text } = await generateText({
-        model: this.model,
-        prompt: `You are ranking pre-written canned responses by relevance to a user query.
-
-QUERY:
-"${query}"
-
-CANNED RESPONSES:
-${numbered}
-
-Score each response 0.0–1.0 for how relevant it is to the query.
-Return ONLY a JSON array of objects with "index" (1-based) and "score" fields, sorted by score descending.
-Example: [{"index":1,"score":0.9},{"index":2,"score":0.1}]
-
-No markdown, no explanation.`,
-        temperature: 0.1,
-        maxOutputTokens: 256,
-      });
-
-      const trimmed = text.trim();
-      const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
-      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : trimmed) as Array<{
-        index: number;
-        score: number;
-      }>;
-
-      return parsed
-        .filter((r) => r.score > 0.3 && r.index >= 1 && r.index <= responses.length)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3)
-        .map((r) => ({
-          ...responses[r.index - 1],
-          score: r.score,
-        }));
-    } catch {
-      // Fallback: simple keyword overlap scoring
-      const queryWords = new Set(query.toLowerCase().split(/\s+/));
-      return responses
-        .map((r) => {
-          const triggerWords = r.trigger.toLowerCase().split(/\s+/);
-          const overlap = triggerWords.filter((w) => queryWords.has(w)).length;
-          const score = triggerWords.length > 0 ? overlap / triggerWords.length : 0;
-          return { ...r, score };
-        })
-        .filter((r) => r.score > 0.3)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3);
+      return [];
     }
   }
 
@@ -472,7 +504,6 @@ No markdown, no explanation.`,
       email: string;
       workTitle?: string | null;
     } | null,
-    matchingCannedResponse?: { trigger: string; response: string } | null,
   ): Promise<{ subject: string; body: string }> {
     const toneInstruction =
       settings.toneOfVoice === "custom" && settings.customTonePrompt
@@ -497,9 +528,7 @@ No markdown, no explanation.`,
       ? `End with this sign-off:\n\nBest regards,\n${senderInfo.name}${senderInfo.workTitle ? `\n${senderInfo.workTitle}` : ""}\n${projectName}\n${senderInfo.email}`
       : `End with an appropriate sign-off using "[Your name]" as placeholder`;
 
-    const cannedHint = matchingCannedResponse
-      ? `\nA pre-approved answer closely matches this inquiry. Use it as the core of your reply, adapting the wording naturally to fit the email format and tone:\n"${matchingCannedResponse.response}"\n`
-      : "";
+    const cannedHint = "";
 
     const { text } = await generateText({
       model: this.model,

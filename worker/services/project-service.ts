@@ -129,6 +129,7 @@ export class ProjectService {
         | "customTonePrompt"
         | "introMessage"
         | "autoCannedDraft"
+        | "autoRefinement"
         | "telegramBotToken"
         | "telegramChatId"
         | "companyName"

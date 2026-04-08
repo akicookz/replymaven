@@ -21,7 +21,6 @@ import {
   CheckCircle2,
   LogOut,
   ShieldBan,
-  Zap,
   Tag,
   FileText,
 } from "lucide-react";
@@ -114,12 +113,6 @@ interface SourceReference {
   type?: "webpage" | "pdf" | "faq";
 }
 
-interface CannedResponse {
-  id: string;
-  trigger: string;
-  response: string;
-  status: "draft" | "approved" | "rejected";
-}
 
 interface ConversationInquiry {
   id: string;
@@ -468,57 +461,6 @@ function Conversations() {
       return 5_000;
     },
   });
-
-  const { data: cannedResponses } = useQuery<CannedResponse[]>({
-    queryKey: ["canned-responses", projectId],
-    queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/canned-responses`);
-      if (!res.ok) throw new Error("Failed to fetch");
-      return res.json();
-    },
-  });
-
-  const approvedCanned = cannedResponses?.filter(
-    (cr) => cr.status === "approved",
-  );
-
-  // Find the last visitor message for AI-ranked suggestions
-  const lastVisitorMessage = convoDetail?.messages
-    ?.filter((m: Message) => m.role === "visitor")
-    .at(-1);
-
-  const { data: suggestionsData } = useQuery<{
-    suggestions: Array<{
-      id: string;
-      trigger: string;
-      response: string;
-      score: number;
-    }>;
-  }>({
-    queryKey: [
-      "canned-suggestions",
-      projectId,
-      lastVisitorMessage?.id,
-    ],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/projects/${projectId}/canned-responses/suggest`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: lastVisitorMessage!.content }),
-        },
-      );
-      if (!res.ok) throw new Error("Failed to fetch suggestions");
-      return res.json();
-    },
-    enabled:
-      !!lastVisitorMessage?.content &&
-      (approvedCanned?.length ?? 0) > 0,
-    staleTime: 60_000,
-  });
-
-  const suggestions = suggestionsData?.suggestions ?? [];
 
   const sendReply = useMutation({
     mutationFn: async (content: string) => {
@@ -1553,30 +1495,6 @@ function Conversations() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Canned Response Suggestions */}
-            {suggestions.length > 0 && (
-                <div className="px-3 py-1.5 flex gap-2 overflow-x-auto">
-                  {suggestions.map(
-                    (s: {
-                      id: string;
-                      trigger: string;
-                      response: string;
-                      score: number;
-                    }) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => setReplyText(s.response)}
-                        className="shrink-0 px-3 py-1.5 text-xs bg-primary/10 text-primary rounded-full hover:bg-primary/20 transition-colors max-w-[200px] truncate"
-                        title={s.response}
-                      >
-                        {s.trigger}
-                      </button>
-                    ),
-                  )}
-                </div>
-              )}
-
             {/* Reply Input */}
             <div className="px-3 py-2 bg-card border-t border-border">
               {convoDetail.conversation.status === "closed" && (
@@ -1598,44 +1516,6 @@ function Conversations() {
                 }}
                 className="flex items-end gap-2"
               >
-                {approvedCanned && approvedCanned.length > 0 && (
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-10 w-10 shrink-0 text-muted-foreground hover:text-foreground mb-0.5"
-                      >
-                        <Zap className="w-4 h-4" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      side="top"
-                      align="start"
-                      className="w-72 p-1 max-h-64 overflow-y-auto"
-                    >
-                      <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
-                        Canned responses
-                      </div>
-                      {approvedCanned.map((cr) => (
-                        <button
-                          key={cr.id}
-                          type="button"
-                          className="flex flex-col gap-0.5 w-full px-2 py-1.5 text-left rounded-lg hover:bg-accent transition-colors"
-                          onClick={() => setReplyText(cr.response)}
-                        >
-                          <span className="text-xs font-medium text-foreground truncate w-full">
-                            {cr.trigger}
-                          </span>
-                          <span className="text-xs text-muted-foreground line-clamp-2">
-                            {cr.response}
-                          </span>
-                        </button>
-                      ))}
-                    </PopoverContent>
-                  </Popover>
-                )}
                 <textarea
                   ref={replyTextareaRef}
                   value={replyText}

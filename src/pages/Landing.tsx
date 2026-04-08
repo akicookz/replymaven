@@ -1337,7 +1337,7 @@ function FeatureAnalytics() {
               improve over time
             </h2>
             <p className="text-muted-foreground leading-relaxed max-w-lg">
-              <span className="font-medium text-card-foreground">Conversation analytics</span>, response quality tracking, and auto-generated canned response drafts. See what your visitors are asking and how well your bot is performing.
+              <span className="font-medium text-card-foreground">Conversation analytics</span>, response quality tracking, and AI-powered knowledgebase refinement. See what your visitors are asking and let the AI suggest improvements to your knowledge base automatically.
             </p>
             <div className="grid grid-cols-2 gap-3 pt-2">
               {[

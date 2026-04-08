@@ -4,7 +4,7 @@ import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { users } from "./db/auth.schema";
-import { conversations, cannedResponses } from "./db/schema";
+import { conversations, knowledgeSuggestions } from "./db/schema";
 import { createAuth } from "./auth";
 import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
@@ -13,7 +13,7 @@ import { ChatService } from "./services/chat-service";
 import { ResourceService } from "./services/resource-service";
 import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
-import { CannedResponseService } from "./services/canned-response-service";
+import { KnowledgeSuggestionService } from "./services/knowledge-suggestion-service";
 import { DashboardService } from "./services/dashboard-service";
 import { CrawlService, type CrawlMessage } from "./services/crawl-service";
 import { EmailService } from "./services/email-service";
@@ -28,7 +28,7 @@ import {
 import { BillingService } from "./services/billing-service";
 import { TeamService } from "./services/team-service";
 import { handleWidgetMessageTurn } from "./chat-runtime/orchestration/handle-widget-message-turn";
-import { triggerAutoDraftIfEnabled } from "./chat-runtime/post-turn/auto-draft";
+import { triggerAutoRefinementIfEnabled } from "./chat-runtime/post-turn/auto-refine";
 import { buildToolRegistry } from "./chat-runtime/tools/build-tool-registry";
 import { toToolDefinition } from "./chat-runtime/types";
 import { logError, logInfo } from "./observability";
@@ -47,9 +47,7 @@ import {
   createConversationSchema,
   sendMessageSchema,
   agentReplySchema,
-  createCannedResponseSchema,
-  updateCannedResponseSchema,
-  suggestCannedResponseSchema,
+
   updateTelegramSchema,
   onboardingStep1Schema,
   onboardingContextSchema,
@@ -485,7 +483,7 @@ const app = new Hono<HonoAppContext>()
         if (result.closed && result.conversation) {
           conversation = result.conversation;
           c.executionCtx.waitUntil(
-            triggerAutoDraftIfEnabled({
+            triggerAutoRefinementIfEnabled({
               projectId: project.id,
               conversationId,
               db,
@@ -1060,7 +1058,7 @@ const app = new Hono<HonoAppContext>()
 
           // Auto-draft canned response in background
           c.executionCtx.waitUntil(
-            triggerAutoDraftIfEnabled({
+            triggerAutoRefinementIfEnabled({
               projectId,
               conversationId,
               db,
@@ -2970,24 +2968,6 @@ const app = new Hono<HonoAppContext>()
       .where(eq(users.id, user.id))
       .limit(1);
 
-    // Find best matching canned response
-    const cannedService = new CannedResponseService(db);
-    const allApproved = (await cannedService.getByProject(project.id)).filter(
-      (cr) => cr.status === "approved",
-    );
-
-    let topCannedMatch: { trigger: string; response: string } | null = null;
-    if (allApproved.length > 0) {
-      const queryText = Object.values(inquiryData).join(" ");
-      const ranked = await aiService.rankCannedResponses(
-        queryText,
-        allApproved.map((cr) => ({ id: cr.id, trigger: cr.trigger, response: cr.response })),
-      );
-      if (ranked.length > 0 && ranked[0].score > 0.5) {
-        topCannedMatch = { trigger: ranked[0].trigger, response: ranked[0].response };
-      }
-    }
-
     const reply = await aiService.composeInquiryReply(
       {
         toneOfVoice: settings?.toneOfVoice,
@@ -2998,7 +2978,6 @@ const app = new Hono<HonoAppContext>()
       settings?.companyName ?? project.name,
       inquiryData,
       { name: user.name, email: user.email, workTitle: userProfile?.workTitle },
-      topCannedMatch,
     );
 
     return c.json(reply);
@@ -3565,7 +3544,7 @@ const app = new Hono<HonoAppContext>()
         if (result.closed && result.conversation) {
           conversation = result.conversation;
           c.executionCtx.waitUntil(
-            triggerAutoDraftIfEnabled({
+            triggerAutoRefinementIfEnabled({
               projectId: project.id,
               conversationId: conversation.id,
               db,
@@ -3754,7 +3733,7 @@ const app = new Hono<HonoAppContext>()
 
     // Auto-draft canned response in background
     c.executionCtx.waitUntil(
-      triggerAutoDraftIfEnabled({
+      triggerAutoRefinementIfEnabled({
         projectId: project.id,
         conversationId: conversation.id,
         db,
@@ -3767,8 +3746,8 @@ const app = new Hono<HonoAppContext>()
     return c.json({ ok: true });
   })
 
-  // ─── Canned Responses ───────────────────────────────────────────────────────
-  .get("/api/projects/:id/canned-responses", async (c) => {
+  // ─── Knowledge Suggestions ──────────────────────────────────────────────────
+  .get("/api/projects/:id/knowledge-suggestions", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
@@ -3779,17 +3758,24 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const service = new CannedResponseService(db);
-    const responses = await service.getByProject(project.id);
-    return c.json(responses);
+    const typeFilter = c.req.query("type") as
+      | "new_faq"
+      | "add_faq_entry"
+      | "new_sop"
+      | "update_sop"
+      | "update_context"
+      | undefined;
+
+    const service = new KnowledgeSuggestionService(db);
+    const suggestions = await service.getPendingByProject(
+      project.id,
+      typeFilter,
+    );
+    return c.json(suggestions);
   })
-  .post("/api/projects/:id/canned-responses", async (c) => {
+  .get("/api/projects/:id/knowledge-suggestions/counts", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const body = await c.req.json();
-    const parsed = validate(createCannedResponseSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const db = c.get("db");
     const projectService = new ProjectService(db);
@@ -3798,37 +3784,13 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const service = new CannedResponseService(db);
-    try {
-      const cr = await service.create({
-        projectId: project.id,
-        trigger: parsed.data.trigger,
-        response: parsed.data.response,
-        status: "approved",
-      });
-      logInfo("canned_response.created", {
-        projectId: project.id,
-        cannedResponseId: cr.id,
-        source: "dashboard_manual",
-        triggerLength: parsed.data.trigger.length,
-        responseLength: parsed.data.response.length,
-      });
-      return c.json(cr, 201);
-    } catch (error) {
-      logError("canned_response.create_failed", error, {
-        projectId: project.id,
-        source: "dashboard_manual",
-      });
-      throw error;
-    }
+    const service = new KnowledgeSuggestionService(db);
+    const counts = await service.getPendingCountsByProject(project.id);
+    return c.json(counts);
   })
-  .patch("/api/projects/:id/canned-responses/:crId", async (c) => {
+  .post("/api/projects/:id/knowledge-suggestions/:sugId/approve", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const body = await c.req.json();
-    const parsed = validate(updateCannedResponseSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const db = c.get("db");
     const projectService = new ProjectService(db);
@@ -3837,57 +3799,30 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const service = new CannedResponseService(db);
+    const service = new KnowledgeSuggestionService(db);
     try {
-      const cr = await service.update(
-        c.req.param("crId"),
+      const result = await service.approve(
+        c.req.param("sugId"),
         project.id,
-        parsed.data,
+        c.env.UPLOADS,
       );
-      if (!cr) return c.json({ error: "Not found" }, 404);
-      logInfo("canned_response.updated", {
+      if (!result.success) {
+        return c.json({ error: result.error }, result.error === "Not found" ? 404 : 400);
+      }
+      logInfo("knowledge_suggestion.approved", {
         projectId: project.id,
-        cannedResponseId: cr.id,
-        fieldsUpdated: Object.keys(parsed.data),
-      });
-      return c.json(cr);
-    } catch (error) {
-      logError("canned_response.update_failed", error, {
-        projectId: project.id,
-        cannedResponseId: c.req.param("crId"),
-      });
-      throw error;
-    }
-  })
-  .post("/api/projects/:id/canned-responses/:crId/approve", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const service = new CannedResponseService(db);
-    try {
-      const approved = await service.approve(c.req.param("crId"), project.id);
-      if (!approved) return c.json({ error: "Not found" }, 404);
-      logInfo("canned_response.approved", {
-        projectId: project.id,
-        cannedResponseId: c.req.param("crId"),
+        suggestionId: c.req.param("sugId"),
       });
       return c.json({ ok: true });
     } catch (error) {
-      logError("canned_response.approve_failed", error, {
+      logError("knowledge_suggestion.approve_failed", error, {
         projectId: project.id,
-        cannedResponseId: c.req.param("crId"),
+        suggestionId: c.req.param("sugId"),
       });
       throw error;
     }
   })
-  .delete("/api/projects/:id/canned-responses/:crId", async (c) => {
+  .post("/api/projects/:id/knowledge-suggestions/:sugId/reject", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
@@ -3898,80 +3833,19 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const service = new CannedResponseService(db);
+    const service = new KnowledgeSuggestionService(db);
     try {
-      const deleted = await service.delete(c.req.param("crId"), project.id);
-      if (!deleted) return c.json({ error: "Not found" }, 404);
-      logInfo("canned_response.deleted", {
+      const rejected = await service.reject(c.req.param("sugId"), project.id);
+      if (!rejected) return c.json({ error: "Not found" }, 404);
+      logInfo("knowledge_suggestion.rejected", {
         projectId: project.id,
-        cannedResponseId: c.req.param("crId"),
+        suggestionId: c.req.param("sugId"),
       });
       return c.json({ ok: true });
     } catch (error) {
-      logError("canned_response.delete_failed", error, {
+      logError("knowledge_suggestion.reject_failed", error, {
         projectId: project.id,
-        cannedResponseId: c.req.param("crId"),
-      });
-      throw error;
-    }
-  })
-  .post("/api/projects/:id/canned-responses/suggest", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const body = await c.req.json();
-    const parsed = validate(suggestCannedResponseSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const cannedService = new CannedResponseService(db);
-    const allResponses = await cannedService.getByProject(project.id);
-    const approved = allResponses.filter((cr) => cr.status === "approved");
-
-    if (approved.length === 0) {
-      return c.json({ suggestions: [] });
-    }
-
-    const aiService = new AiService({
-      model: c.env.AI_MODEL,
-      geminiApiKey: c.env.GEMINI_API_KEY,
-      openaiApiKey: c.env.OPENAI_API_KEY,
-    });
-    logInfo("canned_response.suggest_started", {
-      projectId: project.id,
-      approvedCount: approved.length,
-      queryLength: parsed.data.query.length,
-      model: c.env.AI_MODEL,
-    });
-
-    try {
-      const suggestions = await aiService.rankCannedResponses(
-        parsed.data.query,
-        approved.map((cr) => ({
-          id: cr.id,
-          trigger: cr.trigger,
-          response: cr.response,
-        })),
-      );
-
-      logInfo("canned_response.suggest_completed", {
-        projectId: project.id,
-        approvedCount: approved.length,
-        suggestionCount: suggestions.length,
-      });
-
-      return c.json({ suggestions });
-    } catch (error) {
-      logError("canned_response.suggest_failed", error, {
-        projectId: project.id,
-        approvedCount: approved.length,
-        model: c.env.AI_MODEL,
+        suggestionId: c.req.param("sugId"),
       });
       throw error;
     }
@@ -4277,7 +4151,7 @@ async function handleScheduled(
 ): Promise<void> {
   const db = drizzle(env.DB);
 
-  // Find closed conversations that have no linked canned response draft
+  // Find closed conversations that have no linked knowledge suggestion
   const unprocessed = await db
     .select({
       id: conversations.id,
@@ -4287,9 +4161,9 @@ async function handleScheduled(
     .where(
       sql`${conversations.status} = 'closed'
         AND ${conversations.id} NOT IN (
-          SELECT ${cannedResponses.sourceConversationId}
-          FROM ${cannedResponses}
-          WHERE ${cannedResponses.sourceConversationId} IS NOT NULL
+          SELECT ${knowledgeSuggestions.sourceConversationId}
+          FROM ${knowledgeSuggestions}
+          WHERE ${knowledgeSuggestions.sourceConversationId} IS NOT NULL
         )`,
     )
     .limit(50);
@@ -4304,7 +4178,7 @@ async function handleScheduled(
     byProject.set(row.projectId, list);
   }
 
-  logInfo("auto_draft.cron_dispatch_started", {
+  logInfo("auto_refine.cron_dispatch_started", {
     conversationCount: unprocessed.length,
     projectCount: byProject.size,
   });
@@ -4312,7 +4186,7 @@ async function handleScheduled(
   for (const [projectId, conversationIds] of byProject) {
     for (const conversationId of conversationIds) {
       ctx.waitUntil(
-        triggerAutoDraftIfEnabled({
+        triggerAutoRefinementIfEnabled({
           projectId,
           conversationId,
           db,
@@ -4320,7 +4194,7 @@ async function handleScheduled(
           kv: env.CONVERSATIONS_CACHE,
           source: "scheduled_cron",
         }).catch((err) => {
-          logError("auto_draft.cron_dispatch_failed", err, {
+          logError("auto_refine.cron_dispatch_failed", err, {
             projectId,
             conversationId,
           });

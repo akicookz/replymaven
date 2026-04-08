@@ -60,7 +60,7 @@ const pricingPlans = [
       "10 projects",
       "2,000 messages / month",
       "5 seats",
-      "Auto-drafted canned responses",
+      "Auto knowledgebase refinement",
       "Custom CSS & branding",
       "Priority support",
     ],

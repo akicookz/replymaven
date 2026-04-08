@@ -5,7 +5,7 @@ import {
   conversations,
   messages,
   resources,
-  cannedResponses,
+  knowledgeSuggestions,
   inquiries,
 } from "../db";
 
@@ -80,17 +80,17 @@ export class DashboardService {
         )})`,
       );
 
-    // Get pending canned response drafts
-    const cannedDraftCounts = await this.db
+    // Get pending knowledge suggestions
+    const pendingSuggestionCounts = await this.db
       .select({ total: count() })
-      .from(cannedResponses)
+      .from(knowledgeSuggestions)
       .where(
         and(
-          sql`${cannedResponses.projectId} IN (${sql.join(
+          sql`${knowledgeSuggestions.projectId} IN (${sql.join(
             projectIds.map((id) => sql`${id}`),
             sql`, `,
           )})`,
-          eq(cannedResponses.status, "draft"),
+          eq(knowledgeSuggestions.status, "pending"),
         ),
       );
 
@@ -173,7 +173,7 @@ export class DashboardService {
       activeConversations: conversationCounts[0]?.active ?? 0,
       totalMessages: messageCounts[0]?.total ?? 0,
       totalResources: resourceCounts[0]?.total ?? 0,
-      pendingCannedDrafts: cannedDraftCounts[0]?.total ?? 0,
+      pendingSuggestions: pendingSuggestionCounts[0]?.total ?? 0,
       conversationsByDay,
       conversationsByStatus,
       recentConversations,

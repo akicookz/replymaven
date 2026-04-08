@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ArrowLeft, RefreshCw, Save } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, ExternalLink, Lightbulb, RefreshCw, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +17,7 @@ interface ProjectSettingsData {
   botName: string | null;
   agentName: string | null;
   autoCloseMinutes: number | null;
+  autoRefinement: boolean;
 }
 
 const toneOptions: ToneOfVoice[] = [
@@ -40,6 +41,7 @@ function CompanyInfo() {
     botName: "",
     agentName: "",
     autoCloseMinutes: 30 as number | null,
+    autoRefinement: true,
   });
 
   const { data: settings, isLoading } = useQuery<ProjectSettingsData>({
@@ -62,6 +64,7 @@ function CompanyInfo() {
       botName: settings.botName ?? "",
       agentName: settings.agentName ?? "",
       autoCloseMinutes: settings.autoCloseMinutes ?? 30,
+      autoRefinement: settings.autoRefinement ?? true,
     });
   }, [settings]);
 
@@ -89,6 +92,7 @@ function CompanyInfo() {
         botName: companyForm.botName.trim() || null,
         agentName: companyForm.agentName.trim() || null,
         autoCloseMinutes: companyForm.autoCloseMinutes,
+        autoRefinement: companyForm.autoRefinement,
       };
       const res = await fetch(`/api/projects/${projectId}/settings`, {
         method: "PUT",
@@ -147,6 +151,57 @@ function CompanyInfo() {
     },
   });
 
+  // ─── Context Suggestions ──────────────────────────────────────────────────
+
+  interface ContextSuggestion {
+    id: string;
+    type: "update_context";
+    sourceConversationId: string | null;
+    suggestion: string;
+    reasoning: string | null;
+  }
+
+  const { data: contextSuggestions } = useQuery<ContextSuggestion[]>({
+    queryKey: ["knowledge-suggestions-context", projectId],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions?type=update_context`,
+      );
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+
+  const approveContext = useMutation({
+    mutationFn: async (sugId: string) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions/${sugId}/approve`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error("Failed to approve");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-context", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-settings", projectId] });
+    },
+  });
+
+  const rejectContext = useMutation({
+    mutationFn: async (sugId: string) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions/${sugId}/reject`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error("Failed to reject");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-context", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+    },
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-3">
@@ -165,6 +220,77 @@ function CompanyInfo() {
           </p>
         </div>
       </div>
+
+      {/* Context Suggestions */}
+      {contextSuggestions && contextSuggestions.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Lightbulb className="w-4 h-4 text-primary" />
+            <h2 className="text-sm font-semibold text-foreground">
+              AI Suggestions
+            </h2>
+            <span className="inline-flex items-center justify-center px-1.5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
+              {contextSuggestions.length}
+            </span>
+          </div>
+          {contextSuggestions.map((s) => {
+            const payload = JSON.parse(s.suggestion);
+            return (
+              <div
+                key={s.id}
+                className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-primary/20 p-4 space-y-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-primary">
+                      Add to company context
+                    </p>
+                    {s.reasoning && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {s.reasoning}
+                      </p>
+                    )}
+                    {s.sourceConversationId && (
+                      <Link
+                        to={`/app/projects/${projectId}/conversations?id=${s.sourceConversationId}`}
+                        className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground mt-1"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        View conversation
+                      </Link>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => approveContext.mutate(s.id)}
+                      disabled={approveContext.isPending}
+                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+                      title="Approve and apply"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => rejectContext.mutate(s.id)}
+                      disabled={rejectContext.isPending}
+                      className="p-1.5 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+                      title="Dismiss"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <div className="bg-muted/30 rounded-xl p-3">
+                  <p className="text-xs text-foreground whitespace-pre-wrap">
+                    {payload.appendText}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
@@ -410,6 +536,40 @@ function CompanyInfo() {
               <span className="text-sm text-muted-foreground">minutes of inactivity</span>
             </div>
           )}
+        </div>
+
+        {/* ─── Auto-Refinement ──────────────────────────────────────────── */}
+        <div className="flex items-center justify-between">
+          <div>
+            <label className="text-sm font-medium text-foreground">
+              Auto-Suggest Knowledgebase Improvements
+            </label>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              After conversations close, the AI analyzes them and suggests improvements to your knowledge base.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={companyForm.autoRefinement}
+            onClick={() =>
+              setCompanyForm((prev) => ({
+                ...prev,
+                autoRefinement: !prev.autoRefinement,
+              }))
+            }
+            className={cn(
+              "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors",
+              companyForm.autoRefinement ? "bg-primary" : "bg-input",
+            )}
+          >
+            <span
+              className={cn(
+                "pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform mt-0.5",
+                companyForm.autoRefinement ? "translate-x-[22px]" : "translate-x-0.5",
+              )}
+            />
+          </button>
         </div>
 
         {isLoading && (

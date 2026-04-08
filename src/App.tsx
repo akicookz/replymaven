@@ -14,7 +14,6 @@ import Conversations from "./pages/Conversations";
 import Resources from "./pages/Resources";
 import QuickActions from "./pages/QuickActions";
 import WidgetConfig from "./pages/WidgetConfig";
-import CannedResponses from "./pages/CannedResponses";
 import Inquiries from "./pages/Inquiries";
 import CompanyInfo from "./pages/CompanyInfo";
 import Sops from "./pages/Sops";
@@ -170,10 +169,6 @@ function App() {
         <Route
           path="projects/:projectId/widget/*"
           element={<ProjectPageRedirect target="widget" />}
-        />
-        <Route
-          path="projects/:projectId/canned-responses"
-          element={<CannedResponses />}
         />
         <Route
           path="projects/:projectId/inquiries"

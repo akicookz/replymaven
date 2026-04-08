@@ -7,7 +7,6 @@ import {
   FolderOpen,
   Inbox,
   Palette,
-  Bot,
   LogOut,
   ChevronDown,
   Plus,
@@ -97,6 +96,19 @@ function Layout() {
   const openMobile = useCallback(() => setMobileOpen(true), []);
   const sidebarCtx = { openSidebar: openMobile };
 
+  const { data: suggestionCountsData } = useQuery<{ total: number }>({
+    queryKey: ["knowledge-suggestion-counts", currentProject?.id],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/projects/${currentProject!.id}/knowledge-suggestions/counts`,
+      );
+      if (!res.ok) return { total: 0 };
+      return res.json();
+    },
+    enabled: !!currentProject,
+    staleTime: 60_000,
+  });
+
   const mainNav = currentProject
     ? [
         {
@@ -113,6 +125,7 @@ function Layout() {
           label: "Knowledgebase",
           href: `/app/projects/${currentProject.id}/knowledgebase`,
           icon: FolderOpen,
+          badge: suggestionCountsData?.total ?? 0,
         },
         {
           label: "Inquiries",
@@ -134,11 +147,7 @@ function Layout() {
           href: `/app/projects/${currentProject.id}/quick-actions`,
           icon: Zap,
         },
-        {
-          label: "Canned Responses",
-          href: `/app/projects/${currentProject.id}/canned-responses`,
-          icon: Bot,
-        },
+
       ]
     : [];
 
@@ -166,7 +175,7 @@ function Layout() {
       : location.pathname.startsWith(item.href);
   }
 
-  function NavLink({ item }: { item: { label: string; href: string; icon: React.ComponentType<{ className?: string }> } }) {
+  function NavLink({ item }: { item: { label: string; href: string; icon: React.ComponentType<{ className?: string }>; badge?: number } }) {
     const active = isActive(item);
     return (
       <Link
@@ -180,6 +189,11 @@ function Layout() {
       >
         <item.icon className={cn("w-[18px] h-[18px] shrink-0", active && "text-card-foreground")} />
         {!collapsed && item.label}
+        {!collapsed && item.badge && item.badge > 0 ? (
+          <span className="ml-auto inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
+            {item.badge}
+          </span>
+        ) : null}
       </Link>
     );
   }

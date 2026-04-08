@@ -15,7 +15,7 @@ import {
   summarizeTeamRequest,
 } from "../llm/auxiliary-calls";
 import { streamSupportAgent } from "../agents/support-agent";
-import { triggerAutoDraftIfEnabled } from "../post-turn/auto-draft";
+import { triggerAutoRefinementIfEnabled } from "../post-turn/auto-refine";
 import { createTeamRequestSubmission } from "../post-turn/team-request";
 import {
   fallbackVerificationResult,
@@ -572,12 +572,6 @@ export async function handleWidgetMessageTurn(
         );
       }
 
-      currentStage = "find_canned_match";
-      const cannedMatch = await chatService.findCannedResponse(
-        context.project.id,
-        context.payload.content,
-      );
-
       const conversationMetadata = parseConversationMetadata(conversation.metadata);
       const agentHandbackInstructions =
         typeof conversationMetadata.agentHandbackInstructions === "string"
@@ -594,7 +588,6 @@ export async function handleWidgetMessageTurn(
         },
         context.project.name,
         retrieval.ragContext,
-        cannedMatch ? cannedMatch.response : null,
         conversationSummary,
         {
           hasTools: executionPlan.allowedTools.length > 0,
@@ -630,7 +623,7 @@ export async function handleWidgetMessageTurn(
         buildWidgetTurnLogContext(context, turnId, {
           toolCount: executionPlan.allowedTools.length,
           hasImage: Boolean(image),
-          cannedMatchStatus: cannedMatch ? "approved" : null,
+          cannedMatchStatus: null,
         }),
       );
 
@@ -979,7 +972,7 @@ export async function handleWidgetMessageTurn(
           buildWidgetTurnLogContext(context, turnId),
         );
         context.executionCtx.waitUntil(
-          triggerAutoDraftIfEnabled({
+          triggerAutoRefinementIfEnabled({
             projectId: context.project.id,
             conversationId: context.conversationId,
             db: context.db,

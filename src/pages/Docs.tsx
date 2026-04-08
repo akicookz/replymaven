@@ -122,7 +122,7 @@ const navItems: NavItem[] = [
       { id: "telegram", label: "Telegram" },
       { id: "inquiries", label: "Inquiries" },
       { id: "tone-of-voice", label: "Tone of Voice" },
-      { id: "canned-responses", label: "Canned Responses" },
+      { id: "knowledge-refinement", label: "Knowledge Refinement" },
     ],
   },
   {
@@ -1496,23 +1496,24 @@ window.ReplyMaven.setMetadata({
               </table>
             </div>
 
-            <SectionHeading id="canned-responses" level={3}>
-              Canned Responses
+            <SectionHeading id="knowledge-refinement" level={3}>
+              Knowledge Refinement
             </SectionHeading>
             <p className="text-muted-foreground leading-relaxed mb-4">
-              Canned responses are pre-written answers to common questions.
-              They're matched against visitor messages using keyword
-              matching and serve as strong hints to the AI.
+              After conversations close, the AI analyzes them and suggests
+              improvements to your knowledgebase. Suggestions can include
+              new FAQ entries, SOP updates, or company context enrichments.
             </p>
             <ul className="list-disc list-inside text-muted-foreground space-y-1 mb-4 ml-1">
               <li>
-                <strong>Manual</strong> -- Create canned responses in the
-                dashboard with a trigger keyword and response text
+                <strong>Automatic</strong> -- Enable auto-refinement in your
+                knowledgebase settings. The AI will analyze closed
+                conversations and create suggestions.
               </li>
               <li>
-                <strong>Auto-drafted</strong> -- After a conversation closes,
-                the AI analyzes it and generates draft canned responses. You
-                can approve, edit, or reject them from the dashboard.
+                <strong>Review</strong> -- Pending suggestions appear as
+                badges on your Knowledgebase page. Approve to auto-apply
+                changes, or reject to dismiss.
               </li>
             </ul>
 

@@ -4,17 +4,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   Building2,
+  Check,
   ChevronDown,
   ChevronRight,
   ChevronRightIcon,
   ClipboardList,
+  ExternalLink,
   FileText,
   Globe,
   HelpCircle,
+  Lightbulb,
   Plus,
   RefreshCw,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -45,6 +49,28 @@ interface CompanySettings {
   toneOfVoice: string;
 }
 
+interface SuggestionCounts {
+  total: number;
+  newFaq: number;
+  addFaqEntry: number;
+  newSop: number;
+  updateSop: number;
+  updateContext: number;
+}
+
+interface KnowledgeSuggestion {
+  id: string;
+  projectId: string;
+  type: "new_faq" | "add_faq_entry" | "new_sop" | "update_sop" | "update_context";
+  status: "pending" | "approved" | "rejected";
+  targetResourceId: string | null;
+  targetGuidelineId: string | null;
+  sourceConversationId: string | null;
+  suggestion: string;
+  reasoning: string | null;
+  createdAt: string;
+}
+
 function Resources() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
@@ -70,6 +96,65 @@ function Resources() {
   });
 
   const activeGuidelineCount = guidelinesData?.filter((g) => g.enabled).length ?? 0;
+
+  // ─── Knowledge Suggestions ──────────────────────────────────────────────────
+
+  const { data: suggestionCounts } = useQuery<SuggestionCounts>({
+    queryKey: ["knowledge-suggestion-counts", projectId],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions/counts`,
+      );
+      if (!res.ok) throw new Error("Failed to fetch suggestion counts");
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+
+  const { data: faqSuggestions } = useQuery<KnowledgeSuggestion[]>({
+    queryKey: ["knowledge-suggestions-faq", projectId],
+    queryFn: async () => {
+      const [newFaqs, addEntries] = await Promise.all([
+        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=new_faq`).then((r) => r.json()),
+        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=add_faq_entry`).then((r) => r.json()),
+      ]);
+      return [...newFaqs, ...addEntries];
+    },
+    staleTime: 60_000,
+  });
+
+  const approveSuggestion = useMutation({
+    mutationFn: async (sugId: string) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions/${sugId}/approve`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error("Failed to approve suggestion");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
+    },
+  });
+
+  const rejectSuggestion = useMutation({
+    mutationFn: async (sugId: string) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions/${sugId}/reject`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error("Failed to reject suggestion");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
+    },
+  });
+
+  const faqSuggestionCount = (suggestionCounts?.newFaq ?? 0) + (suggestionCounts?.addFaqEntry ?? 0);
+  const sopSuggestionCount = (suggestionCounts?.newSop ?? 0) + (suggestionCounts?.updateSop ?? 0);
+  const contextSuggestionCount = suggestionCounts?.updateContext ?? 0;
 
   // ─── Resource State ─────────────────────────────────────────────────────────
   const [showForm, setShowForm] = useState(false);
@@ -241,7 +326,14 @@ function Resources() {
               <ClipboardList className="w-5 h-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-foreground">SOPs</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-foreground">SOPs</p>
+                {sopSuggestionCount > 0 && (
+                  <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
+                    {sopSuggestionCount}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {activeGuidelineCount > 0
                   ? `${activeGuidelineCount} active guideline${activeGuidelineCount !== 1 ? "s" : ""}`
@@ -261,7 +353,14 @@ function Resources() {
               <Building2 className="w-5 h-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-foreground">Company Information</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-foreground">Company Information</p>
+                {contextSuggestionCount > 0 && (
+                  <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
+                    {contextSuggestionCount}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {companySettings?.companyName
                   ? `${companySettings.companyName} \u2014 ${companySettings.toneOfVoice} tone`
@@ -273,10 +372,107 @@ function Resources() {
         </Link>
       </div>
 
+      {/* ─── FAQ Suggestions ──────────────────────────────────────────────── */}
+      {faqSuggestions && faqSuggestions.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Lightbulb className="w-4 h-4 text-primary" />
+            <h2 className="text-sm font-semibold text-foreground">
+              AI Suggestions
+            </h2>
+            <span className="inline-flex items-center justify-center px-1.5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
+              {faqSuggestions.length}
+            </span>
+          </div>
+          {faqSuggestions.map((s) => {
+            const payload = JSON.parse(s.suggestion);
+            const pairs = s.type === "new_faq" ? payload.pairs : payload.pairs;
+            const targetResource = s.targetResourceId
+              ? resources?.find((r) => r.id === s.targetResourceId)
+              : null;
+
+            return (
+              <div
+                key={s.id}
+                className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-primary/20 p-4 space-y-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-primary">
+                      {s.type === "new_faq"
+                        ? `New FAQ: ${payload.title}`
+                        : `Add to: ${targetResource?.title ?? "FAQ resource"}`}
+                    </p>
+                    {s.reasoning && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {s.reasoning}
+                      </p>
+                    )}
+                    {s.sourceConversationId && (
+                      <Link
+                        to={`/app/projects/${projectId}/conversations?id=${s.sourceConversationId}`}
+                        className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground mt-1"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        View conversation
+                      </Link>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => approveSuggestion.mutate(s.id)}
+                      disabled={approveSuggestion.isPending}
+                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+                      title="Approve and apply"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => rejectSuggestion.mutate(s.id)}
+                      disabled={rejectSuggestion.isPending}
+                      className="p-1.5 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+                      title="Dismiss"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                {pairs && pairs.length > 0 && (
+                  <div className="space-y-2">
+                    {pairs.map((pair: { question: string; answer: string }, i: number) => (
+                      <div
+                        key={i}
+                        className="bg-muted/30 rounded-xl p-3 space-y-1"
+                      >
+                        <p className="text-xs font-medium text-foreground">
+                          Q: {pair.question}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          A: {pair.answer}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* ─── Resources ──────────────────────────────────────────────────────── */}
       <div className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg font-semibold text-foreground">Resources</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-foreground">Resources</h2>
+            {faqSuggestionCount > 0 && (
+              <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
+                {faqSuggestionCount}
+              </span>
+            )}
+          </div>
           <Button onClick={() => setShowForm(!showForm)}>
             <Plus className="w-4 h-4 mr-2" />
             Add Resource

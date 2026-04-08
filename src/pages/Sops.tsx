@@ -3,14 +3,17 @@ import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  Lightbulb,
+  Loader2,
+  Pencil,
   Plus,
   Trash2,
   AlertCircle,
-  Pencil,
-  ChevronDown,
-  ChevronRight,
   X,
-  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -209,6 +212,58 @@ function Sops() {
 
   const isPending = createGuideline.isPending || updateGuideline.isPending;
 
+  // ─── SOP Suggestions ────────────────────────────────────────────────────────
+
+  interface SopSuggestion {
+    id: string;
+    type: "new_sop" | "update_sop";
+    targetGuidelineId: string | null;
+    sourceConversationId: string | null;
+    suggestion: string;
+    reasoning: string | null;
+  }
+
+  const { data: sopSuggestions } = useQuery<SopSuggestion[]>({
+    queryKey: ["knowledge-suggestions-sop", projectId],
+    queryFn: async () => {
+      const [newSops, updateSops] = await Promise.all([
+        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=new_sop`).then((r) => r.json()),
+        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=update_sop`).then((r) => r.json()),
+      ]);
+      return [...newSops, ...updateSops];
+    },
+    staleTime: 60_000,
+  });
+
+  const approveSop = useMutation({
+    mutationFn: async (sugId: string) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions/${sugId}/approve`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error("Failed to approve");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-sop", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["guidelines", projectId] });
+    },
+  });
+
+  const rejectSop = useMutation({
+    mutationFn: async (sugId: string) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions/${sugId}/reject`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error("Failed to reject");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-sop", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+    },
+  });
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -233,6 +288,86 @@ function Sops() {
           </Button>
         )}
       </div>
+
+      {/* SOP Suggestions */}
+      {sopSuggestions && sopSuggestions.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Lightbulb className="w-4 h-4 text-primary" />
+            <h2 className="text-sm font-semibold text-foreground">
+              AI Suggestions
+            </h2>
+            <span className="inline-flex items-center justify-center px-1.5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
+              {sopSuggestions.length}
+            </span>
+          </div>
+          {sopSuggestions.map((s) => {
+            const payload = JSON.parse(s.suggestion);
+            const existingGuideline = s.targetGuidelineId
+              ? guidelines?.find((g) => g.id === s.targetGuidelineId)
+              : null;
+
+            return (
+              <div
+                key={s.id}
+                className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-primary/20 p-4 space-y-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-primary">
+                      {s.type === "new_sop"
+                        ? "New SOP"
+                        : `Update SOP: "${existingGuideline?.condition ?? "existing guideline"}"`}
+                    </p>
+                    {s.reasoning && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {s.reasoning}
+                      </p>
+                    )}
+                    {s.sourceConversationId && (
+                      <Link
+                        to={`/app/projects/${projectId}/conversations?id=${s.sourceConversationId}`}
+                        className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground mt-1"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        View conversation
+                      </Link>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => approveSop.mutate(s.id)}
+                      disabled={approveSop.isPending}
+                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+                      title="Approve and apply"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => rejectSop.mutate(s.id)}
+                      disabled={rejectSop.isPending}
+                      className="p-1.5 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+                      title="Dismiss"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <div className="bg-muted/30 rounded-xl p-3 space-y-1">
+                  <p className="text-xs font-medium text-foreground">
+                    When: {payload.condition}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Then: {payload.instruction}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Form */}
       {showForm && (

@@ -21,6 +21,7 @@ export const updateProjectSettingsSchema = z.object({
   introMessageDelay: z.number().int().min(0).max(30).optional(),
   introMessageDuration: z.number().int().min(0).max(120).optional(),
   autoCannedDraft: z.boolean().optional(),
+  autoRefinement: z.boolean().optional(),
   companyName: z.string().max(200).nullable().optional(),
   companyUrl: z
     .string()
@@ -180,22 +181,6 @@ export const updateConversationPublicSchema = z.object({
 // ─── Agent Reply ──────────────────────────────────────────────────────────────
 export const agentReplySchema = z.object({
   content: z.string().min(1, "Reply cannot be empty").max(5000),
-});
-
-// ─── Canned Responses ─────────────────────────────────────────────────────────
-export const createCannedResponseSchema = z.object({
-  trigger: z.string().min(1, "Trigger is required").max(500),
-  response: z.string().min(1, "Response is required").max(5000),
-});
-
-export const updateCannedResponseSchema = z.object({
-  trigger: z.string().min(1).max(500).optional(),
-  response: z.string().min(1).max(5000).optional(),
-  status: z.enum(["draft", "approved", "rejected"]).optional(),
-});
-
-export const suggestCannedResponseSchema = z.object({
-  query: z.string().min(1, "Query is required").max(2000),
 });
 
 // ─── Telegram ─────────────────────────────────────────────────────────────────
