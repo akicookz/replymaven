@@ -120,7 +120,7 @@ ${settings.companyContext}
 
   if (options?.faqContext) {
     prompt += `<priority-faqs>
-These FAQ excerpts are considered tier-1 knowledge because they are usually curated directly by the team. Check them before relying on lower-tier retrieved context.
+These are the project's compiled FAQ entries. They are tier-1 knowledge because they are usually curated directly by the team. Check them before relying on lower-tier retrieved context. Prefer these answers when they directly address the visitor's question.
 
 ${options.faqContext}
 </priority-faqs>

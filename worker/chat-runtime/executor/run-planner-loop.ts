@@ -90,6 +90,7 @@ interface RunPlannerLoopOptions {
     telegramChatId?: string | null;
   };
   guidelines: Array<{ condition: string; instruction: string }>;
+  compiledFaqContext: string;
   visitorInfo: { name: string | null; email: string | null };
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
@@ -441,6 +442,7 @@ async function executeCompose(options: {
   settings: SupportPromptSettings;
   projectName: string;
   guidelines: Array<{ condition: string; instruction: string }>;
+  compiledFaqContext: string;
   pageContext?: Record<string, string>;
   visitorInfo: { name: string | null; email: string | null };
   agentHandbackInstructions?: string | null;
@@ -466,7 +468,7 @@ async function executeCompose(options: {
       agentHandbackInstructions: options.agentHandbackInstructions,
       pageContext: options.pageContext,
       visitorInfo: options.visitorInfo,
-      faqContext: options.state.docsEvidence.faqContext,
+      faqContext: options.compiledFaqContext,
       groundingConfidence: options.state.docsEvidence.groundingConfidence,
       turnPlan: {
         intent: options.state.initialTurnPlan.intent,
@@ -1105,6 +1107,7 @@ export async function runPlannerLoop(
         settings: options.settings,
         projectName: options.project.name,
         guidelines: options.guidelines,
+        compiledFaqContext: options.compiledFaqContext,
         pageContext: options.pageContext,
         visitorInfo: options.visitorInfo,
         agentHandbackInstructions: options.agentHandbackInstructions,

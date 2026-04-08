@@ -35,6 +35,7 @@ describe("buildSupportSystemPrompt", () => {
     expect(prompt).not.toContain("<tools>");
     expect(prompt).not.toContain("<clarification-guidance>");
     expect(prompt).toContain("<priority-faqs>");
+    expect(prompt).toContain("compiled FAQ entries");
     expect(prompt).toContain("Treat <guidelines> and <priority-faqs> as tier-1 sources.");
     expect(prompt).toContain(
       "Human follow-up, contact collection, and inquiry submission are controlled by the runtime",

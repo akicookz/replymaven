@@ -10,6 +10,7 @@ import {
   summarizeConversation,
 } from "../llm/auxiliary-calls";
 import { runPlannerLoop } from "../executor/run-planner-loop";
+import { buildCompiledFaqContext } from "../prompt/build-compiled-faq-context";
 import { triggerAutoRefinementIfEnabled } from "../post-turn/auto-refine";
 import { buildUnsupportedFallback } from "../workflows/verify-answer";
 import {
@@ -33,6 +34,7 @@ import { ChatService } from "../../services/chat-service";
 import { GuidelineService } from "../../services/guideline-service";
 import { logError, logInfo, logWarn } from "../../observability";
 import { ProjectService } from "../../services/project-service";
+import { ResourceService } from "../../services/resource-service";
 import { TelegramService } from "../../services/telegram-service";
 import { ToolService } from "../../services/tool-service";
 import { isEncrypted, decryptHeaders } from "../../services/encryption-service";
@@ -261,6 +263,7 @@ export async function handleWidgetMessageTurn(
   );
   const toolService = new ToolService(context.db);
   const guidelineService = new GuidelineService(context.db);
+  const resourceService = new ResourceService(context.db, context.env.UPLOADS);
 
   logInfo(
     "widget_turn.started",
@@ -329,6 +332,18 @@ export async function handleWidgetMessageTurn(
   const enabledTools = await toolService.getEnabledTools(context.project.id);
   const enabledGuidelines = await guidelineService.getEnabledByProject(
     context.project.id,
+  );
+  const allResources = await resourceService.getResourcesByProject(
+    context.project.id,
+  );
+  const compiledFaqContext = buildCompiledFaqContext(
+    allResources
+      .filter((resource) => resource.type === "faq")
+      .sort((left, right) => left.title.localeCompare(right.title))
+      .map((resource) => ({
+        title: resource.title,
+        content: resource.content,
+      })),
   );
 
   if (enabledTools.length > 0) {
@@ -681,6 +696,7 @@ export async function handleWidgetMessageTurn(
           condition: guideline.condition,
           instruction: guideline.instruction,
         })),
+        compiledFaqContext,
         visitorInfo: {
           name: conversation.visitorName,
           email: conversation.visitorEmail,
