@@ -172,6 +172,7 @@ function Inquiries() {
   const [editSubject, setEditSubject] = useState("");
   const [editBody, setEditBody] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "new" | "replied" | "closed">("all");
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Reset view when sheet closes
   useEffect(() => {
@@ -360,10 +361,16 @@ function Inquiries() {
     closed: sorted.filter((s) => s.status === "closed").length,
   }), [sorted]);
 
-  const filtered = useMemo(
-    () => statusFilter === "all" ? sorted : sorted.filter((s) => s.status === statusFilter),
-    [sorted, statusFilter],
-  );
+  const filtered = useMemo(() => {
+    let result = statusFilter === "all" ? sorted : sorted.filter((s) => s.status === statusFilter);
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter((s) =>
+        Object.values(s.data).some((v) => v.toLowerCase().includes(q)),
+      );
+    }
+    return result;
+  }, [sorted, statusFilter, searchQuery]);
 
   return (
     <div className="space-y-6">
@@ -380,24 +387,36 @@ function Inquiries() {
         </div>
       </div>
 
-      {/* Status Filter Segments */}
+      {/* Filter Bar: Segment Control + Search */}
       {!isLoading && !isError && sorted.length > 0 && (
-        <div className="flex bg-muted rounded-lg p-0.5">
-          {(["all", "new", "replied", "closed"] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setStatusFilter(tab)}
-              className={cn(
-                "flex-1 text-center px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center justify-center gap-1.5",
-                statusFilter === tab
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {tab === "all" ? "All" : STATUS_CONFIG[tab as keyof typeof STATUS_CONFIG].label}
-              <span className="text-[10px] opacity-60">{counts[tab]}</span>
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <div className="inline-flex bg-muted rounded-lg p-0.5 shrink-0">
+            {(["all", "new", "replied", "closed"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setStatusFilter(tab)}
+                className={cn(
+                  "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
+                  statusFilter === tab
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {tab === "all" ? "All" : STATUS_CONFIG[tab as keyof typeof STATUS_CONFIG].label}
+                <span className="text-[10px] opacity-60">{counts[tab]}</span>
+              </button>
+            ))}
+          </div>
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search inquiries..."
+              className="w-full pl-9 pr-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
         </div>
       )}
 
@@ -428,7 +447,11 @@ function Inquiries() {
             <Inbox className="w-6 h-6 text-muted-foreground" />
           </div>
           <p className="text-sm text-muted-foreground">
-            {statusFilter === "all" ? "No inquiries yet." : `No ${statusFilter} inquiries.`}
+            {searchQuery
+              ? "No matching inquiries."
+              : statusFilter === "all"
+                ? "No inquiries yet."
+                : `No ${statusFilter} inquiries.`}
           </p>
         </div>
       )}
@@ -437,9 +460,8 @@ function Inquiries() {
       {selectedIds.size > 0 && (
         <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2.5 bg-card/80 backdrop-blur-xl rounded-xl border border-border">
           <Checkbox
-            checked={selectedIds.size === filtered.length}
+            checked={selectedIds.size === filtered.length && filtered.length > 0}
             onCheckedChange={toggleSelectAll}
-            className="mr-1"
           />
           <span className="text-sm font-medium text-foreground">
             {selectedIds.size} selected
