@@ -78,6 +78,7 @@ export interface SupportPromptOptions {
   agentHandbackInstructions?: string | null;
   pageContext?: Record<string, string>;
   visitorInfo?: { name: string | null; email: string | null };
+  faqContext?: string | null;
   groundingConfidence?: GroundingConfidence;
   turnPlan?: {
     intent: SupportIntent;
@@ -114,6 +115,8 @@ export interface PreparedRagChunk {
 
 export interface RagContextResult {
   context: string;
+  faqContext: string;
+  knowledgeBaseContext: string;
   topScore: number;
   selectedChunkCount: number;
   sources: SourceReference[];
@@ -254,6 +257,8 @@ export interface PlannerToolEvidence {
 
 export interface PlannerDocsEvidence {
   ragContext: string;
+  faqContext: string;
+  knowledgeBaseContext: string;
   sourceReferences: SourceReference[];
   groundingConfidence: GroundingConfidence;
   unresolvedKeys: string[];

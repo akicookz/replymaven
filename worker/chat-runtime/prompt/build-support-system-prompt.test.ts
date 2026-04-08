@@ -16,6 +16,7 @@ describe("buildSupportSystemPrompt", () => {
       "The visitor is asking about pricing.",
       {
         visitorInfo: { name: null, email: null },
+        faqContext: '<source file="faq.md">FAQ answer</source>',
         toolEvidenceSummary: '{"status":"ok"}',
         retrievalAttempted: true,
         groundingConfidence: "low",
@@ -33,6 +34,8 @@ describe("buildSupportSystemPrompt", () => {
     );
     expect(prompt).not.toContain("<tools>");
     expect(prompt).not.toContain("<clarification-guidance>");
+    expect(prompt).toContain("<priority-faqs>");
+    expect(prompt).toContain("Treat <guidelines> and <priority-faqs> as tier-1 sources.");
     expect(prompt).toContain(
       "Human follow-up, contact collection, and inquiry submission are controlled by the runtime",
     );

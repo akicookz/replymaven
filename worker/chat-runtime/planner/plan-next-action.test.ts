@@ -26,6 +26,8 @@ function createState(): PlannerLoopState {
     actionHistory: [],
     docsEvidence: {
       ragContext: "",
+      faqContext: "",
+      knowledgeBaseContext: "",
       sourceReferences: [],
       groundingConfidence: "none",
       unresolvedKeys: [],

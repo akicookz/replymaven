@@ -7,6 +7,8 @@ import { type GroundingConfidence, type RetrievedSearchChunk } from "../types";
 
 export interface RetrievalResult {
   ragContext: string;
+  faqContext: string;
+  knowledgeBaseContext: string;
   sourceReferences: SourceReference[];
   groundingConfidence: GroundingConfidence;
   unresolvedKeys: string[];
@@ -296,6 +298,8 @@ export async function runAiSearch(options: {
   if (options.queries.length === 0) {
     return {
       ragContext: "",
+      faqContext: "",
+      knowledgeBaseContext: "",
       sourceReferences: [],
       groundingConfidence: "none",
       unresolvedKeys: [],
@@ -357,6 +361,8 @@ export async function runAiSearch(options: {
   if (!ragSelection.context) {
     return {
       ragContext: "",
+      faqContext: "",
+      knowledgeBaseContext: "",
       sourceReferences: [],
       groundingConfidence: "none",
       unresolvedKeys: [],
@@ -375,6 +381,8 @@ export async function runAiSearch(options: {
 
   return {
     ragContext,
+    faqContext: ragSelection.faqContext,
+    knowledgeBaseContext: ragSelection.knowledgeBaseContext,
     sourceReferences: ragSelection.sources,
     groundingConfidence: ragConfident ? "high" : "low",
     unresolvedKeys: ragSelection.unresolvedKeys,

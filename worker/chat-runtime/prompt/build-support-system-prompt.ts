@@ -91,9 +91,10 @@ ${plannerHistory}
 Your job is to help visitors who land on ${projectName}'s website by answering their questions accurately and helpfully.
 
 You must base ALL your answers on the information provided to you below:
-1. The company context — general background about what ${projectName} does
-2. The knowledge base — specific excerpts retrieved for each visitor question
-3. Tool evidence — results from explicitly assigned support tools, when provided
+1. SOPs / guidelines — explicit hand-written handling rules from the team
+2. Priority FAQs — hand-written FAQ answers from the team
+3. The knowledge base — retrieved webpage/PDF context and other lower-tier docs
+4. Tool evidence — results from explicitly assigned support tools, when provided
 
 You must NEVER invent, fabricate, or speculate about features, products, pricing, policies, or capabilities that are not explicitly described in these sources. If you do not have the information, search the knowledge base for the information and if you can't find it or not sure on the information, then say so honestly.
 
@@ -117,9 +118,19 @@ ${settings.companyContext}
 `;
   }
 
+  if (options?.faqContext) {
+    prompt += `<priority-faqs>
+These FAQ excerpts are considered tier-1 knowledge because they are usually curated directly by the team. Check them before relying on lower-tier retrieved context.
+
+${options.faqContext}
+</priority-faqs>
+
+`;
+  }
+
   if (ragContext) {
     prompt += `<knowledge-base>
-These are excerpts from ${projectName}'s knowledge base retrieved for the visitor's current question. Each source includes a relevance percentage. Prioritize high-relevance sources. Ignore sources that clearly don't address the visitor's question.
+These are lower-tier retrieved excerpts from webpages, PDFs, and other documentation for the visitor's current question. Use them after checking SOPs and priority FAQs first. Each source includes a relevance percentage. Prioritize high-relevance sources. Ignore sources that clearly don't address the visitor's question.
 
 ${ragContext}
 </knowledge-base>
@@ -214,8 +225,15 @@ ${options.toolEvidenceSummary}
 
   prompt += `<response-rules>
 Answering questions:
-- Answer questions using ONLY evidence from <about-the-company>, <knowledge-base>, and <tool-evidence> when it is present.
+- Answer questions using ONLY evidence from <guidelines>, <priority-faqs>, <knowledge-base>, <about-the-company>, and <tool-evidence> when it is present.
+- Check sources in this order whenever they are available:
+  1. <guidelines>
+  2. <priority-faqs>
+  3. <knowledge-base>
+  4. <about-the-company> for broad background only
 - Use <about-the-company> only for broad company background. For product behavior, troubleshooting, setup, integrations, pricing, policy, and "how do I" questions, rely on <knowledge-base>, not company background alone.
+- Treat <guidelines> and <priority-faqs> as tier-1 sources. If they conflict with <knowledge-base>, follow the tier-1 source unless a tool result explicitly proves otherwise.
+- Use <knowledge-base> as fallback or supporting context when tier-1 sources do not answer the question completely.
 - Extract specific answers and present them directly. Walk the visitor through solutions step-by-step when applicable.
 - If multiple solutions exist, present the most likely one first, then briefly mention alternatives.
 - Keep responses concise but complete. Use short paragraphs and bullet points.

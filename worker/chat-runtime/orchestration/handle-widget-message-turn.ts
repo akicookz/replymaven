@@ -86,6 +86,8 @@ async function loadMessageImage(options: {
 function createEmptyRetrievalResult(): RetrievalResult {
   return {
     ragContext: "",
+    faqContext: "",
+    knowledgeBaseContext: "",
     sourceReferences: [],
     groundingConfidence: "none",
     unresolvedKeys: [],

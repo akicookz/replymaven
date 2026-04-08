@@ -55,7 +55,12 @@ export function buildRagContext(
   chunks: PreparedRagChunk[],
   sourceReferenceMap: Map<string, SourceReference>,
 ): RagContextResult {
-  const selected: Array<{ key: string; score: number; text: string }> = [];
+  const selectedFaqChunks: Array<{ key: string; score: number; text: string }> = [];
+  const selectedKnowledgeBaseChunks: Array<{
+    key: string;
+    score: number;
+    text: string;
+  }> = [];
   const sourceCounts = new Map<string, number>();
   const seenText = new Set<string>();
   const selectedSources: SourceReference[] = [];
@@ -63,56 +68,77 @@ export function buildRagContext(
   const unresolvedKeys = new Set<string>();
   let contextChars = 0;
 
-  for (const chunk of chunks) {
-    if (selected.length >= RAG_MAX_CHUNKS) break;
-    if (chunk.score < RAG_HARD_MIN_SCORE) continue;
-    if (selected.length >= 4 && chunk.score < RAG_PREFERRED_MIN_SCORE) continue;
+  const faqChunks = chunks.filter(
+    (chunk) => sourceReferenceMap.get(chunk.key)?.type === "faq",
+  );
+  const lowerTierChunks = chunks.filter(
+    (chunk) => sourceReferenceMap.get(chunk.key)?.type !== "faq",
+  );
 
-    const perSource = sourceCounts.get(chunk.key) ?? 0;
-    if (perSource >= RAG_MAX_CHUNKS_PER_SOURCE) continue;
+  function appendEligibleChunks(
+    candidates: PreparedRagChunk[],
+    target: Array<{ key: string; score: number; text: string }>,
+  ): void {
+    for (const chunk of candidates) {
+      const selectedCount =
+        selectedFaqChunks.length + selectedKnowledgeBaseChunks.length;
+      if (selectedCount >= RAG_MAX_CHUNKS) break;
+      if (chunk.score < RAG_HARD_MIN_SCORE) continue;
+      if (selectedCount >= 4 && chunk.score < RAG_PREFERRED_MIN_SCORE) continue;
 
-    const normalizedPrefix = chunk.text.slice(0, 220).toLowerCase();
-    const dedupeKey = `${chunk.key}:${normalizedPrefix}`;
-    if (seenText.has(dedupeKey)) continue;
+      const perSource = sourceCounts.get(chunk.key) ?? 0;
+      if (perSource >= RAG_MAX_CHUNKS_PER_SOURCE) continue;
 
-    const clippedText =
-      chunk.text.length > RAG_MAX_CHUNK_CHARS
-        ? `${chunk.text.slice(0, RAG_MAX_CHUNK_CHARS)}...`
-        : chunk.text;
+      const normalizedPrefix = chunk.text.slice(0, 220).toLowerCase();
+      const dedupeKey = `${chunk.key}:${normalizedPrefix}`;
+      if (seenText.has(dedupeKey)) continue;
 
-    if (contextChars >= RAG_MAX_CONTEXT_CHARS) break;
-    let finalText = clippedText;
-    if (contextChars + finalText.length > RAG_MAX_CONTEXT_CHARS) {
-      const remaining = RAG_MAX_CONTEXT_CHARS - contextChars;
-      if (remaining < 250) break;
-      finalText = `${finalText.slice(0, remaining)}...`;
+      const clippedText =
+        chunk.text.length > RAG_MAX_CHUNK_CHARS
+          ? `${chunk.text.slice(0, RAG_MAX_CHUNK_CHARS)}...`
+          : chunk.text;
+
+      if (contextChars >= RAG_MAX_CONTEXT_CHARS) break;
+      let finalText = clippedText;
+      if (contextChars + finalText.length > RAG_MAX_CONTEXT_CHARS) {
+        const remaining = RAG_MAX_CONTEXT_CHARS - contextChars;
+        if (remaining < 250) break;
+        finalText = `${finalText.slice(0, remaining)}...`;
+      }
+
+      target.push({
+        key: chunk.key,
+        score: chunk.score,
+        text: finalText,
+      });
+      sourceCounts.set(chunk.key, perSource + 1);
+      seenText.add(dedupeKey);
+      contextChars += finalText.length;
+
+      const sourceReference = sourceReferenceMap.get(chunk.key);
+      if (!sourceReference) {
+        unresolvedKeys.add(chunk.key);
+        continue;
+      }
+
+      const sourceDedupKey = getSourceReferenceDedupKey(sourceReference);
+      if (seenSourceKeys.has(sourceDedupKey)) continue;
+
+      seenSourceKeys.add(sourceDedupKey);
+      selectedSources.push(sourceReference);
     }
-
-    selected.push({
-      key: chunk.key,
-      score: chunk.score,
-      text: finalText,
-    });
-    sourceCounts.set(chunk.key, perSource + 1);
-    seenText.add(dedupeKey);
-    contextChars += finalText.length;
-
-    const sourceReference = sourceReferenceMap.get(chunk.key);
-    if (!sourceReference) {
-      unresolvedKeys.add(chunk.key);
-      continue;
-    }
-
-    const sourceDedupKey = getSourceReferenceDedupKey(sourceReference);
-    if (seenSourceKeys.has(sourceDedupKey)) continue;
-
-    seenSourceKeys.add(sourceDedupKey);
-    selectedSources.push(sourceReference);
   }
+
+  appendEligibleChunks(faqChunks, selectedFaqChunks);
+  appendEligibleChunks(lowerTierChunks, selectedKnowledgeBaseChunks);
+
+  const selected = [...selectedFaqChunks, ...selectedKnowledgeBaseChunks];
 
   if (selected.length === 0) {
     return {
       context: "",
+      faqContext: "",
+      knowledgeBaseContext: "",
       topScore: 0,
       selectedChunkCount: 0,
       sources: [],
@@ -120,6 +146,19 @@ export function buildRagContext(
     };
   }
 
+  function renderContext(
+    selectedChunks: Array<{ key: string; score: number; text: string }>,
+  ): string {
+    return selectedChunks
+      .map((chunk) => {
+        const relevance = (chunk.score * 100).toFixed(0);
+        return `<source file="${chunk.key}" relevance="${relevance}%">\n${chunk.text}\n</source>`;
+      })
+      .join("\n\n");
+  }
+
+  const faqContext = renderContext(selectedFaqChunks);
+  const knowledgeBaseContext = renderContext(selectedKnowledgeBaseChunks);
   const context = selected
     .map((chunk) => {
       const relevance = (chunk.score * 100).toFixed(0);
@@ -129,6 +168,8 @@ export function buildRagContext(
 
   return {
     context,
+    faqContext,
+    knowledgeBaseContext,
     topScore: selected[0]?.score ?? 0,
     selectedChunkCount: selected.length,
     sources: selectedSources,

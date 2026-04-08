@@ -108,6 +108,8 @@ interface RunPlannerLoopOptions {
 function createEmptyPlannerDocsEvidence(): PlannerDocsEvidence {
   return {
     ragContext: "",
+    faqContext: "",
+    knowledgeBaseContext: "",
     sourceReferences: [],
     groundingConfidence: "none",
     unresolvedKeys: [],
@@ -164,6 +166,11 @@ function mergeDocsEvidence(
 
   return {
     ragContext: mergeRagContextBlocks(current.ragContext, next.ragContext),
+    faqContext: mergeRagContextBlocks(current.faqContext, next.faqContext),
+    knowledgeBaseContext: mergeRagContextBlocks(
+      current.knowledgeBaseContext,
+      next.knowledgeBaseContext,
+    ),
     sourceReferences: [...sourceMap.values()],
     groundingConfidence,
     unresolvedKeys: [
@@ -452,13 +459,14 @@ async function executeCompose(options: {
   const systemPrompt = buildSupportSystemPrompt(
     options.settings,
     options.projectName,
-    options.state.docsEvidence.ragContext,
+    options.state.docsEvidence.knowledgeBaseContext,
     options.state.conversationSummary,
     {
       guidelines: options.guidelines,
       agentHandbackInstructions: options.agentHandbackInstructions,
       pageContext: options.pageContext,
       visitorInfo: options.visitorInfo,
+      faqContext: options.state.docsEvidence.faqContext,
       groundingConfidence: options.state.docsEvidence.groundingConfidence,
       turnPlan: {
         intent: options.state.initialTurnPlan.intent,
