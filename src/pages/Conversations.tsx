@@ -420,19 +420,13 @@ function Conversations() {
     refetchInterval: 15_000,
   });
 
-  // Sync first page into loaded conversations
+  // Sync first page into loaded conversations and handle filter changes
   useEffect(() => {
     if (convosPage?.conversations) {
       setLoadedConversations(convosPage.conversations);
       setHasMore(convosPage.hasMore);
     }
-  }, [convosPage]);
-
-  // Reset accumulated pages when filter changes
-  useEffect(() => {
-    setLoadedConversations([]);
-    setHasMore(true);
-  }, [statusFilter]);
+  }, [convosPage, statusFilter]);
 
   const loadMoreConversations = useMutation({
     mutationFn: async () => {

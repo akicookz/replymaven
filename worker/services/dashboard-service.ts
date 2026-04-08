@@ -173,7 +173,7 @@ export class DashboardService {
       activeConversations: conversationCounts[0]?.active ?? 0,
       totalMessages: messageCounts[0]?.total ?? 0,
       totalResources: resourceCounts[0]?.total ?? 0,
-      pendingSuggestions: pendingSuggestionCounts[0]?.total ?? 0,
+      pendingCannedDrafts: pendingSuggestionCounts[0]?.total ?? 0,
       conversationsByDay,
       conversationsByStatus,
       recentConversations,

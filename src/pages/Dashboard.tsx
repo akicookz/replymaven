@@ -133,9 +133,11 @@ function StatCard({
         </span>
       </div>
       <div className="flex items-end justify-between">
-        <span className="text-3xl font-bold text-foreground tracking-tight">
-          {value.toLocaleString()}
-        </span>
+        {value !== undefined && value !== null && (
+          <span className="text-3xl font-bold text-foreground tracking-tight">
+            {value.toLocaleString()}
+          </span>
+        )}
         {change && (
           <span
             className={cn(
