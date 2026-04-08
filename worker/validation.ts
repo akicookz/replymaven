@@ -310,6 +310,18 @@ export const createCheckoutSchema = z.object({
   cancelUrl: z.string().url(),
 });
 
+export const usageLogQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).default(0),
+  sortBy: z.enum(["botMessages", "createdAt"]).default("createdAt"),
+  sortOrder: z.enum(["asc", "desc"]).default("desc"),
+  status: z
+    .enum(["active", "waiting_agent", "agent_replied", "closed"])
+    .optional(),
+  metaKey: z.string().max(100).regex(/^[a-zA-Z0-9_]+$/, "Invalid metadata key").optional(),
+  metaValue: z.string().max(200).optional(),
+});
+
 // ─── Profile ──────────────────────────────────────────────────────────────
 
 export const updateProfileSchema = z.object({

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import {
   MessageSquare,
@@ -382,14 +382,25 @@ function getCloseReasonLabel(reason: string | null): string {
 
 function Conversations() {
   const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const [selectedConvo, setSelectedConvo] = useState<string | null>(null);
+  const [selectedConvo, setSelectedConvo] = useState<string | null>(
+    searchParams.get("conv"),
+  );
   const [replyText, setReplyText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "all">("all");
   const [expandedToolCards, setExpandedToolCards] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Clean up ?conv= param after consuming it
+  useEffect(() => {
+    if (searchParams.has("conv")) {
+      searchParams.delete("conv");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [loadedConversations, setLoadedConversations] = useState<Conversation[]>([]);
   const [hasMore, setHasMore] = useState(true);
@@ -1115,6 +1126,7 @@ function Conversations() {
                     </SheetHeader>
                     <div className="mt-4 px-4">
                       <DetailsPanel
+                        stats={[{ label: "AI Messages (Billed)", value: convoDetail.messages.filter((m) => m.role === "bot").length }]}
                         identity={[
                           convoDetail.conversation.visitorName ? { label: "Name", value: convoDetail.conversation.visitorName } : null,
                           convoDetail.conversation.visitorEmail ? { label: "Email", value: convoDetail.conversation.visitorEmail } : null,

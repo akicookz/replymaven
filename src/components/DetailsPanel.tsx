@@ -5,6 +5,8 @@ import { cn } from "@/lib/utils";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface DetailsPanelProps {
+  /** Read-only stats displayed at the top (e.g. AI message count) */
+  stats?: { label: string; value: string | number }[];
   /** Top-level identity fields (name, email, phone) shown first */
   identity?: { label: string; value: string }[];
   /** Key-value fields (inquiry form data or custom metadata) */
@@ -24,6 +26,19 @@ function formatMetaKey(key: string): string {
     .replace(/([A-Z])/g, " $1")
     .replace(/^./, (s) => s.toUpperCase())
     .trim();
+}
+
+// ─── Stat Card (read-only) ─────────────────────────────────────────────────────
+
+function StatCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="bg-muted/50 rounded-lg p-3">
+      <span className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+        {label}
+      </span>
+      <p className="text-sm font-medium text-foreground mt-0.5">{value}</p>
+    </div>
+  );
 }
 
 // ─── Copiable Card ────────────────────────────────────────────────────────────
@@ -107,12 +122,14 @@ function SystemSection({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 function DetailsPanel({
+  stats,
   identity,
   fields,
   fieldsLabel,
   systemFields,
   systemDefaultOpen = false,
 }: DetailsPanelProps) {
+  const hasStats = stats && stats.length > 0;
   const hasIdentity = identity && identity.length > 0;
   const fieldEntries = fields ? Object.entries(fields) : [];
   const hasFields = fieldEntries.length > 0;
@@ -120,6 +137,15 @@ function DetailsPanel({
 
   return (
     <div className="space-y-5">
+      {/* Stats (read-only) */}
+      {hasStats && (
+        <div className="space-y-1.5">
+          {stats.map((item) => (
+            <StatCard key={item.label} label={item.label} value={item.value} />
+          ))}
+        </div>
+      )}
+
       {/* Identity fields (name, email, phone) */}
       {hasIdentity && (
         <div className="space-y-1.5">
@@ -156,5 +182,5 @@ function DetailsPanel({
   );
 }
 
-export { DetailsPanel, CopyCard, formatMetaKey };
+export { DetailsPanel, CopyCard, StatCard, formatMetaKey };
 export default DetailsPanel;

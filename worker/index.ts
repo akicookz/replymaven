@@ -69,6 +69,7 @@ import {
   verifyEmailChangeSchema,
   createGuidelineSchema,
   updateGuidelineSchema,
+  usageLogQuerySchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -1626,6 +1627,28 @@ const app = new Hono<HonoAppContext>()
       },
       role: membership ? membership.role : "owner",
     });
+  })
+
+  // ─── Billing Usage Log ──────────────────────────────────────────────────────
+  .get("/api/billing/usage-log", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+    const db = c.get("db");
+    const billingService = new BillingService(db, c.env);
+
+    const parsed = validate(usageLogQuerySchema, c.req.query());
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const subscription =
+      await billingService.getSubscriptionByUserId(effectiveUserId);
+    const result = await billingService.getUsageLog(
+      effectiveUserId,
+      subscription,
+      parsed.data,
+    );
+    return c.json(result);
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
