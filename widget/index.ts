@@ -2246,6 +2246,7 @@
   // Typing indicator (lives inside messagesContainer — always last child)
   const typingRow = document.createElement("div");
   typingRow.className = "rm-typing-row";
+  typingRow.style.display = "none";
 
   const typingDots = document.createElement("div");
   typingDots.className = "rm-typing-dots";
@@ -2659,6 +2660,7 @@
       }
       introMessageText = null;
     }
+    ensureLatestMessageVisible();
     setTimeout(() => input.focus(), 100);
   }
 
@@ -4352,14 +4354,11 @@
 
   function showTyping(message?: string) {
     statusText.textContent = message ?? "Thinking";
-    typingRow.classList.add("visible");
-    scrollToBottom();
   }
 
   function hideTyping() {
     typingRow.classList.remove("visible");
     statusText.textContent = "Thinking";
-    scrollToBottom();
   }
 
   let _scrollDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -4371,6 +4370,17 @@
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
       });
     }, 50);
+  }
+
+  function ensureLatestMessageVisible() {
+    const settleDelays = [0, 80, 180, 320];
+    for (const delay of settleDelays) {
+      window.setTimeout(() => {
+        requestAnimationFrame(() => {
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        });
+      }, delay);
+    }
   }
 
   // ─── Tool Error Display ────────────────────────────────────────────────────
@@ -4980,7 +4990,7 @@
           }
         }
 
-        scrollToBottom();
+        ensureLatestMessageVisible();
       }
 
       // Don't start polling for closed conversations
@@ -5179,6 +5189,7 @@
         }
       }, 100);
     }
+    ensureLatestMessageVisible();
     // Don't auto-focus the chat input -- the home screen is shown first (non-inline variant)
   }
 

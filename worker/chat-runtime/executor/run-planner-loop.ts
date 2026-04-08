@@ -20,6 +20,7 @@ import { getSourceReferenceDedupKey } from "../retrieval/build-rag-context";
 import { runAiSearch, type RetrievalResult } from "../retrieval/run-ai-search";
 import { emitSseEvent } from "../streaming/map-agent-events-to-sse";
 import { streamSupportAgent } from "../agents/support-agent";
+import { stripTrailingSolicitedFollowUp } from "./strip-trailing-solicited-follow-up";
 import { executeHttpTool } from "../tools/http-tool-executor";
 import {
   buildUnsupportedFallback,
@@ -383,6 +384,17 @@ async function executeCompose(options: {
       verification.answer.trim() !== fullResponse.trim()
     ) {
       fullResponse = verification.answer.trim();
+      emitSseEvent(options.controller, options.encoder, { finalText: fullResponse });
+    }
+  }
+
+  if (
+    !fullResponse.includes("[NEW_INQUIRY]") &&
+    !fullResponse.includes("[RESOLVED]")
+  ) {
+    const strippedResponse = stripTrailingSolicitedFollowUp(fullResponse);
+    if (strippedResponse !== fullResponse.trim()) {
+      fullResponse = strippedResponse;
       emitSseEvent(options.controller, options.encoder, { finalText: fullResponse });
     }
   }
