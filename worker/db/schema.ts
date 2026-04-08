@@ -427,7 +427,11 @@ export const inquiries = sqliteTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id").references(() => conversations.id, {
+      onDelete: "set null",
+    }),
     visitorId: text("visitor_id"),
+    title: text("title").notNull().default("Inquiry"),
     data: text("data").notNull(), // JSON object of { fieldLabel: value }
     status: text("status", { enum: ["new", "replied", "closed"] })
       .notNull()
@@ -438,6 +442,7 @@ export const inquiries = sqliteTable(
   },
   (table) => [
     index("idx_inquiries_project").on(table.projectId),
+    uniqueIndex("idx_inquiries_conversation").on(table.conversationId),
   ],
 );
 

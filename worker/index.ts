@@ -8,7 +8,7 @@ import { conversations, knowledgeSuggestions } from "./db/schema";
 import { createAuth } from "./auth";
 import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
-import { WidgetService } from "./services/widget-service";
+import { buildInquiryTitle, WidgetService } from "./services/widget-service";
 import { ChatService } from "./services/chat-service";
 import { ResourceService } from "./services/resource-service";
 import { AiService } from "./services/ai-service";
@@ -765,6 +765,11 @@ const app = new Hono<HonoAppContext>()
       visitorName,
       visitorEmail,
     );
+    const inquiryTitle = buildInquiryTitle({
+      visitorName,
+      visitorEmail,
+      visitorId,
+    });
 
     let conversation =
       await chatService.getActiveConversationByVisitor(project.id, visitorId);
@@ -801,11 +806,13 @@ const app = new Hono<HonoAppContext>()
       });
     }
 
-    const submission = await widgetService.createInquiry(
-      project.id,
+    const submission = await widgetService.createInquiry({
+      projectId: project.id,
+      conversationId: conversation.id,
       visitorId,
-      inquiryData,
-    );
+      title: inquiryTitle,
+      data: inquiryData,
+    });
 
     const inquiryMessage = buildInquiryConversationMessage(inquiryData);
 
@@ -822,7 +829,11 @@ const app = new Hono<HonoAppContext>()
 
     // Notify via Telegram if configured
     const settings = await projectService.getSettings(project.id);
-    if (settings?.telegramBotToken && settings?.telegramChatId) {
+    if (
+      submission.created &&
+      settings?.telegramBotToken &&
+      settings?.telegramChatId
+    ) {
       const telegramService = new TelegramService(db);
       c.executionCtx.waitUntil(
         (conversation.status === "waiting_agent" ||
@@ -851,7 +862,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Notify project owner via email
-    if (c.env.RESEND_API_KEY) {
+    if (submission.created && c.env.RESEND_API_KEY) {
       const emailService = new EmailService(c.env.RESEND_API_KEY);
       const ownerEmail = await projectService.getOwnerEmail(project.id);
       if (ownerEmail) {
@@ -874,7 +885,8 @@ const app = new Hono<HonoAppContext>()
 
     return c.json(
       {
-        ...submission,
+        ...submission.inquiry,
+        created: submission.created,
         conversationId: conversation.id,
         conversationStatus: conversation.status,
         visitorEmail,

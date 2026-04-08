@@ -35,6 +35,19 @@ export function isVagueIssueReport(message: string): boolean {
   return tokens.length <= 12 || !hasSpecificContext;
 }
 
+function isTroubleshootingCheckRequest(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized) return false;
+
+  return (
+    /\b(check|test|verify|confirm)\b/.test(normalized) &&
+    /\b(work|working|works|installed|connected|configured|set up|setup|enabled|running)\b/.test(
+      normalized,
+    ) &&
+    /^(how|can|what|where|is|does|do)\b/.test(normalized)
+  );
+}
+
 const supportTurnPlanSchema = z.object({
   intent: z.enum([
     "how_to",
@@ -79,6 +92,18 @@ export function fallbackClassifySupportTurn(
       retrievalQueries: [currentMessage],
       broaderQueries: [currentMessage],
       followUpQuestion: null,
+    };
+  }
+
+  if (isTroubleshootingCheckRequest(currentMessage)) {
+    return {
+      intent: "troubleshoot",
+      summary:
+        "The visitor is trying to verify whether something is working and likely needs troubleshooting guidance.",
+      retrievalQueries: [currentMessage],
+      broaderQueries: [currentMessage],
+      followUpQuestion:
+        "What exact feature, page, step, or error are you seeing when you try to check it?",
     };
   }
 
@@ -183,6 +208,7 @@ You must produce:
 Rules:
 - Do not invent product-specific features or terminology.
 - Retrieval hints are only hints. Do not use them to decide tool policy.
+- Questions like "how do I check if X is working?" or "how can I verify X is connected?" are troubleshooting/docs turns, not lookup turns, unless they clearly require account-specific backend data.
 - For lookup turns, retrievalQueries can be empty if documentation is unlikely to help.
 - For clarify turns, keep retrieval light and focus on the one missing detail that unblocks help.
 - For handoff turns, retrievalQueries and broaderQueries should usually be empty.

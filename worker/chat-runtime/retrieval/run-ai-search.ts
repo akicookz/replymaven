@@ -16,10 +16,21 @@ export interface RetrievalResult {
 }
 
 type SearchRetrievalType = "hybrid" | "vector";
+type SearchResponseKind = "result_chunks" | "chunks" | "data" | "unknown";
 
 interface SearchPassResult {
-  results: Array<{ chunks?: RetrievedSearchChunk[] } | null | undefined>;
+  results: RetrievedSearchChunk[][];
   retrievalType: SearchRetrievalType;
+}
+
+interface NormalizedSearchResponse {
+  chunks: RetrievedSearchChunk[];
+  responseKind: SearchResponseKind;
+  success: boolean | null;
+  topLevelKeys: string[];
+  resultKeys: string[];
+  rawChunkCount: number;
+  rawDataCount: number;
 }
 
 function isHybridRetrievalUnavailableError(error: unknown): boolean {
@@ -31,6 +42,123 @@ function isHybridRetrievalUnavailableError(error: unknown): boolean {
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeChunkArray(chunks: unknown[]): RetrievedSearchChunk[] {
+  return chunks.flatMap((chunk) => {
+    if (!isRecord(chunk)) {
+      return [];
+    }
+
+    const item = isRecord(chunk.item) ? chunk.item : null;
+
+    return [
+      {
+        item:
+          item && typeof item.key === "string"
+            ? { key: item.key }
+            : undefined,
+        score: typeof chunk.score === "number" ? chunk.score : undefined,
+        text: typeof chunk.text === "string" ? chunk.text : undefined,
+      },
+    ];
+  });
+}
+
+function normalizeDataArray(data: unknown[]): RetrievedSearchChunk[] {
+  return data.flatMap((entry) => {
+    if (!isRecord(entry)) {
+      return [];
+    }
+
+    const filename =
+      typeof entry.filename === "string" ? entry.filename : undefined;
+    const score = typeof entry.score === "number" ? entry.score : undefined;
+    const content = Array.isArray(entry.content) ? entry.content : [];
+
+    return content.flatMap((part) => {
+      if (!isRecord(part) || typeof part.text !== "string") {
+        return [];
+      }
+
+      return [
+        {
+          item: filename ? { key: filename } : undefined,
+          score,
+          text: part.text,
+        },
+      ];
+    });
+  });
+}
+
+function normalizeSearchResponse(response: unknown): NormalizedSearchResponse {
+  if (!isRecord(response)) {
+    return {
+      chunks: [],
+      responseKind: "unknown",
+      success: null,
+      topLevelKeys: [],
+      resultKeys: [],
+      rawChunkCount: 0,
+      rawDataCount: 0,
+    };
+  }
+
+  const topLevelKeys = Object.keys(response).sort();
+  const success = typeof response.success === "boolean" ? response.success : null;
+  const result = isRecord(response.result) ? response.result : null;
+  const resultKeys = result ? Object.keys(result).sort() : [];
+
+  if (result && Array.isArray(result.chunks)) {
+    return {
+      chunks: normalizeChunkArray(result.chunks),
+      responseKind: "result_chunks",
+      success,
+      topLevelKeys,
+      resultKeys,
+      rawChunkCount: result.chunks.length,
+      rawDataCount: 0,
+    };
+  }
+
+  if (Array.isArray(response.chunks)) {
+    return {
+      chunks: normalizeChunkArray(response.chunks),
+      responseKind: "chunks",
+      success,
+      topLevelKeys,
+      resultKeys,
+      rawChunkCount: response.chunks.length,
+      rawDataCount: 0,
+    };
+  }
+
+  if (Array.isArray(response.data)) {
+    return {
+      chunks: normalizeDataArray(response.data),
+      responseKind: "data",
+      success,
+      topLevelKeys,
+      resultKeys,
+      rawChunkCount: 0,
+      rawDataCount: response.data.length,
+    };
+  }
+
+  return {
+    chunks: [],
+    responseKind: "unknown",
+    success,
+    topLevelKeys,
+    resultKeys,
+    rawChunkCount: 0,
+    rawDataCount: 0,
+  };
+}
+
 async function searchWithRetrievalType(options: {
   env: Pick<AppEnv, "AI">;
   projectId: string;
@@ -38,21 +166,22 @@ async function searchWithRetrievalType(options: {
   matchThreshold: number;
   maxResults: number;
   retrievalType: SearchRetrievalType;
-}): Promise<Array<{ chunks?: RetrievedSearchChunk[] } | null | undefined>> {
+}): Promise<RetrievedSearchChunk[][]> {
   return Promise.all(
-    options.queries.map((query) =>
-      options.env.AI.aiSearch()
+    options.queries.map(async (query, index) => {
+      const response = await options.env.AI.aiSearch()
         .get("supportbot")
         .search({
           messages: [{ role: "user", content: query }],
           ai_search_options: {
             retrieval: {
               retrieval_type: options.retrievalType,
+              // The generated Worker typings still expose the legacy filter shape.
               filters: {
-                type: "eq",
-                key: "folder",
-                value: `${options.projectId}/`,
-              },
+                folder: {
+                  $eq: `${options.projectId}/`,
+                },
+              } as never,
               max_num_results: options.maxResults,
               match_threshold: options.matchThreshold,
             },
@@ -64,8 +193,47 @@ async function searchWithRetrievalType(options: {
               model: "@cf/baai/bge-reranker-base",
             },
           },
-        }),
-    ),
+        });
+
+      const normalized = normalizeSearchResponse(response);
+
+      logInfo("ai_search.search_response_received", {
+        projectId: options.projectId,
+        queryIndex: index,
+        retrievalType: options.retrievalType,
+        matchThreshold: options.matchThreshold,
+        maxResults: options.maxResults,
+        filterFolder: `${options.projectId}/`,
+        responseKind: normalized.responseKind,
+        success: normalized.success,
+        topLevelKeys: normalized.topLevelKeys,
+        resultKeys: normalized.resultKeys,
+        rawChunkCount: normalized.rawChunkCount,
+        rawDataCount: normalized.rawDataCount,
+        normalizedChunkCount: normalized.chunks.length,
+      });
+
+      if (normalized.responseKind === "unknown") {
+        logWarn("ai_search.search_response_unrecognized", {
+          projectId: options.projectId,
+          queryIndex: index,
+          retrievalType: options.retrievalType,
+          topLevelKeys: normalized.topLevelKeys,
+          resultKeys: normalized.resultKeys,
+        });
+      } else if (normalized.chunks.length === 0) {
+        logWarn("ai_search.search_returned_no_chunks", {
+          projectId: options.projectId,
+          queryIndex: index,
+          retrievalType: options.retrievalType,
+          responseKind: normalized.responseKind,
+          success: normalized.success,
+          filterFolder: `${options.projectId}/`,
+        });
+      }
+
+      return normalized.chunks;
+    }),
   );
 }
 
@@ -150,9 +318,7 @@ export async function runAiSearch(options: {
   let searchResults = searchPass.results;
   activeRetrievalType = searchPass.retrievalType;
 
-  const mergedChunks = mergeRetrievedSearchChunks(
-    searchResults.map((result) => result?.chunks ?? []),
-  );
+  const mergedChunks = mergeRetrievedSearchChunks(searchResults);
   let prepared = prepareRagChunks(mergedChunks, options.projectId);
   const resourceService = new ResourceService(options.db, options.env.UPLOADS);
   let sourceReferenceMap = await resourceService.resolveSourceReferenceMap(
@@ -179,9 +345,7 @@ export async function runAiSearch(options: {
     searchResults = searchPass.results;
     activeRetrievalType = searchPass.retrievalType;
 
-    const broaderMergedChunks = mergeRetrievedSearchChunks(
-      searchResults.map((result) => result?.chunks ?? []),
-    );
+    const broaderMergedChunks = mergeRetrievedSearchChunks(searchResults);
     prepared = prepareRagChunks(broaderMergedChunks, options.projectId);
     sourceReferenceMap = await resourceService.resolveSourceReferenceMap(
       options.projectId,

@@ -44,6 +44,8 @@ import { DetailsPanel } from "@/components/DetailsPanel";
 
 interface InquirySubmission {
   id: string;
+  title: string;
+  conversationId: string | null;
   visitorId: string | null;
   data: Record<string, string>;
   status: "new" | "replied" | "closed";
@@ -366,6 +368,8 @@ function Inquiries() {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter((s) =>
+        s.title.toLowerCase().includes(q) ||
+        s.id.toLowerCase().includes(q) ||
         Object.values(s.data).some((v) => v.toLowerCase().includes(q)),
       );
     }
@@ -551,7 +555,7 @@ function Inquiries() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium text-foreground truncate">
-                      {primary?.value ?? "Inquiry"}
+                      {inquiry.title || primary?.value || "Inquiry"}
                     </p>
                     <Badge
                       variant="outline"
@@ -642,7 +646,7 @@ function DetailView({
     <>
       <SheetHeader>
         <div className="flex items-center gap-2">
-          <SheetTitle>Inquiry Details</SheetTitle>
+          <SheetTitle>{inquiry.title || "Inquiry Details"}</SheetTitle>
           <Badge
             variant="outline"
             className={cn("text-[10px]", statusCfg.className)}
@@ -652,6 +656,7 @@ function DetailView({
         </div>
         <SheetDescription>
           Submitted {formatTimeAgo(inquiry.createdAt)}
+          {inquiry.conversationId ? ` · Conversation ${inquiry.conversationId}` : ""}
         </SheetDescription>
       </SheetHeader>
 

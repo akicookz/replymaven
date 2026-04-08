@@ -120,6 +120,16 @@ function selectDiagnosticTools(
     .map((entry) => entry.tool);
 }
 
+function looksLikeTroubleshootingCheck(userMessage: string): boolean {
+  return (
+    /\b(check|test|verify|confirm)\b/i.test(userMessage) &&
+    /\b(work|working|works|broken|failing|failed|error|issue|problem|connected|configured|enabled|running)\b/i.test(
+      userMessage,
+    ) &&
+    /^(how|can|what|where|is|does|do)\b/i.test(userMessage.trim())
+  );
+}
+
 export function decideExecutionPath(options: {
   intent: SupportIntent;
   userMessage: string;
@@ -138,6 +148,17 @@ export function decideExecutionPath(options: {
       };
 
     case "lookup": {
+      if (looksLikeTroubleshootingCheck(options.userMessage)) {
+        const allowedTools = selectDiagnosticTools(rankedTools);
+        return {
+          path: "docs_first",
+          retrievalMode: "full",
+          allowBroaderRetry: true,
+          allowedTools,
+          toolChoice: allowedTools.length > 0 ? "auto" : "none",
+        };
+      }
+
       const { allowedTools, toolChoice } = selectLookupTools(rankedTools);
       if (allowedTools.length === 0) {
         return {

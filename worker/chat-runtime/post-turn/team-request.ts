@@ -2,7 +2,7 @@ import { EmailService } from "../../services/email-service";
 import { type ChatService } from "../../services/chat-service";
 import { type ProjectService } from "../../services/project-service";
 import { type TelegramService } from "../../services/telegram-service";
-import { type WidgetService } from "../../services/widget-service";
+import { buildInquiryTitle, type WidgetService } from "../../services/widget-service";
 import { logError, logInfo } from "../../observability";
 
 function formatSubmissionValue(value: string | null | undefined): string {
@@ -34,7 +34,12 @@ export async function createTeamRequestSubmission(params: {
     RESEND_API_KEY?: string;
   };
   executionCtx: ExecutionContext;
-}): Promise<{ submissionId: string; summary: string; telegramThreadId?: string }> {
+}): Promise<{
+  submissionId: string;
+  summary: string;
+  telegramThreadId?: string;
+  created: boolean;
+}> {
   const summary = params.summary.trim() || "Visitor asked for team follow-up.";
   logInfo("team_request.started", {
     projectId: params.project.id,
@@ -54,17 +59,33 @@ export async function createTeamRequestSubmission(params: {
     Email: params.email,
     Message: summary,
   };
+  const inquiryTitle = buildInquiryTitle({
+    visitorName: params.conversation.visitorName,
+    visitorEmail: params.conversation.visitorEmail,
+    visitorId: params.conversation.visitorId,
+  });
 
-  const submission = await params.widgetService.createInquiry(
-    params.project.id,
-    params.conversation.visitorId ?? undefined,
-    formData,
-  );
+  const submission = await params.widgetService.createInquiry({
+    projectId: params.project.id,
+    conversationId: params.conversation.id,
+    visitorId: params.conversation.visitorId ?? undefined,
+    title: inquiryTitle,
+    data: formData,
+  });
   logInfo("team_request.submission_created", {
     projectId: params.project.id,
     conversationId: params.conversation.id,
-    submissionId: submission.id,
+    submissionId: submission.inquiry.id,
+    created: submission.created,
   });
+
+  if (!submission.created) {
+    logInfo("team_request.reused_existing_submission", {
+      projectId: params.project.id,
+      conversationId: params.conversation.id,
+      submissionId: submission.inquiry.id,
+    });
+  }
 
   await params.chatService.updateConversation(
     params.conversation.id,
@@ -73,7 +94,7 @@ export async function createTeamRequestSubmission(params: {
       metadata: JSON.stringify({
         teamRequestPending: false,
         teamRequestSubmittedAt: new Date().toISOString(),
-        teamRequestSubmissionId: submission.id,
+        teamRequestSubmissionId: submission.inquiry.id,
         teamRequestSummary: summary,
       }),
     },
@@ -81,12 +102,13 @@ export async function createTeamRequestSubmission(params: {
   logInfo("team_request.conversation_updated", {
     projectId: params.project.id,
     conversationId: params.conversation.id,
-    submissionId: submission.id,
+    submissionId: submission.inquiry.id,
   });
 
   let telegramThreadId: string | undefined;
 
   if (
+    submission.created &&
     params.telegramService &&
     params.settings?.telegramBotToken &&
     params.settings?.telegramChatId
@@ -105,19 +127,19 @@ export async function createTeamRequestSubmission(params: {
       logInfo("team_request.telegram_notified", {
         projectId: params.project.id,
         conversationId: params.conversation.id,
-        submissionId: submission.id,
+        submissionId: submission.inquiry.id,
         telegramThreadId: telegramThreadId ?? null,
       });
     } catch (error) {
       logError("team_request.telegram_failed", error, {
         projectId: params.project.id,
         conversationId: params.conversation.id,
-        submissionId: submission.id,
+        submissionId: submission.inquiry.id,
       });
     }
   }
 
-  if (params.env.RESEND_API_KEY) {
+  if (submission.created && params.env.RESEND_API_KEY) {
     const emailService = new EmailService(params.env.RESEND_API_KEY);
     const ownerEmail = await params.projectService.getOwnerEmail(params.project.id);
     if (ownerEmail) {
@@ -126,7 +148,7 @@ export async function createTeamRequestSubmission(params: {
       logInfo("team_request.email_queued", {
         projectId: params.project.id,
         conversationId: params.conversation.id,
-        submissionId: submission.id,
+        submissionId: submission.inquiry.id,
       });
       params.executionCtx.waitUntil(
         emailService
@@ -140,7 +162,7 @@ export async function createTeamRequestSubmission(params: {
             logError("team_request.email_failed", err, {
               projectId: params.project.id,
               conversationId: params.conversation.id,
-              submissionId: submission.id,
+              submissionId: submission.inquiry.id,
             });
           }),
       );
@@ -150,9 +172,15 @@ export async function createTeamRequestSubmission(params: {
   logInfo("team_request.completed", {
     projectId: params.project.id,
     conversationId: params.conversation.id,
-    submissionId: submission.id,
+    submissionId: submission.inquiry.id,
+    created: submission.created,
     telegramThreadId: telegramThreadId ?? null,
   });
 
-  return { submissionId: submission.id, summary, telegramThreadId };
+  return {
+    submissionId: submission.inquiry.id,
+    summary,
+    telegramThreadId,
+    created: submission.created,
+  };
 }

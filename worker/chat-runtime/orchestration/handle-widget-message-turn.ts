@@ -10,6 +10,7 @@ import {
   fallbackClassifySupportTurn,
   fallbackExtractContactInfo,
   fallbackSummarizeTeamRequest,
+  isVagueIssueReport,
   reformulateQuery,
   summarizeConversation,
   summarizeTeamRequest,
@@ -18,6 +19,7 @@ import { streamSupportAgent } from "../agents/support-agent";
 import { triggerAutoRefinementIfEnabled } from "../post-turn/auto-refine";
 import { createTeamRequestSubmission } from "../post-turn/team-request";
 import {
+  buildUnsupportedFallback,
   fallbackVerificationResult,
   type VerificationResult,
   verifyAnswer,
@@ -27,6 +29,7 @@ import {
   runAiSearch,
   type RetrievalResult,
 } from "../retrieval/run-ai-search";
+import { classifyTaskScope } from "../workflows/classify-task-scope";
 import { decideExecutionPath } from "../workflows/decide-execution-path";
 import { createWidgetSseResponse } from "../streaming/create-widget-sse-response";
 import {
@@ -155,6 +158,124 @@ function getLastTeamMessageRole(
   }
 
   return null;
+}
+
+function visitorExplicitlyRequestedHuman(
+  history: Array<{ role: "visitor" | "bot" | "agent"; content: string }>,
+  latestMessage: string,
+): boolean {
+  const candidateMessages = [
+    latestMessage,
+    ...history
+      .filter((message) => message.role === "visitor")
+      .slice(-4)
+      .map((message) => message.content),
+  ];
+
+  return candidateMessages.some((message) => {
+    const normalized = message.toLowerCase();
+    const wantsHuman =
+      /\b(human|person|agent|engineer|support team|team member|representative|someone)\b/.test(
+        normalized,
+      );
+    const asksForContact =
+      /\b(help|talk|speak|contact|reach|connect|escalate|handoff|hand off|follow up)\b/.test(
+        normalized,
+      );
+
+    return wantsHuman && asksForContact;
+  });
+}
+
+function hasFocusedClarifyingQuestion(
+  history: Array<{ role: "visitor" | "bot" | "agent"; content: string }>,
+): boolean {
+  return history.some((message) => {
+    if (message.role !== "bot" && message.role !== "agent") {
+      return false;
+    }
+
+    if (!message.content.includes("?")) {
+      return false;
+    }
+
+    return /\b(exact|feature|page|step|error|code|setting|configuration|config|integration|url|link|screenshot|what happens|which)\b/i.test(
+      message.content,
+    );
+  });
+}
+
+function getExistingTeamRequestSubmissionId(
+  conversation: { metadata: string | null | undefined },
+): string | null {
+  const metadata = parseConversationMetadata(conversation.metadata);
+  const submissionId = metadata.teamRequestSubmissionId;
+
+  return typeof submissionId === "string" && submissionId.trim()
+    ? submissionId.trim()
+    : null;
+}
+
+function shouldAllowTeamRequest(options: {
+  conversation: {
+    status: string;
+    metadata: string | null | undefined;
+  };
+  conversationHistory: Array<{
+    role: "visitor" | "bot" | "agent";
+    content: string;
+  }>;
+  latestMessage: string;
+  turnIntent: string | null;
+  retrievalAttempted: boolean;
+  hadToolCalls: boolean;
+}): { allowed: boolean; reason: string } {
+  if (getExistingTeamRequestSubmissionId(options.conversation)) {
+    return { allowed: false, reason: "existing_submission" };
+  }
+
+  if (isAgentRequestedStatus(options.conversation.status)) {
+    return { allowed: false, reason: "already_in_agent_mode" };
+  }
+
+  if (
+    options.turnIntent === "handoff" ||
+    visitorExplicitlyRequestedHuman(
+      options.conversationHistory,
+      options.latestMessage,
+    )
+  ) {
+    return { allowed: true, reason: "explicit_human_request" };
+  }
+
+  if (isVagueIssueReport(options.latestMessage)) {
+    return { allowed: false, reason: "latest_issue_report_still_vague" };
+  }
+
+  if (!options.retrievalAttempted && !options.hadToolCalls) {
+    return { allowed: false, reason: "no_resolution_attempts" };
+  }
+
+  if (!hasFocusedClarifyingQuestion(options.conversationHistory)) {
+    return { allowed: false, reason: "no_focused_clarifying_question" };
+  }
+
+  return { allowed: true, reason: "troubleshooting_exhausted" };
+}
+
+function claimsUnavailableCapabilities(response: string): boolean {
+  if (!response.trim()) {
+    return false;
+  }
+
+  return (
+    /\b(i|i've|i have|i was able to)\b[^.!?\n]{0,100}\b(search(?:ed)?|browse(?:d)?|looked up|found|checked)\b[^.!?\n]{0,100}\b(web|internet|online|google|browser)\b/i.test(
+      response,
+    ) ||
+    /\baccording to google\b/i.test(response) ||
+    /\bi found (this|that|it) online\b/i.test(response) ||
+    /\bi checked the internet\b/i.test(response)
+  );
 }
 
 function buildWidgetTurnLogContext(
@@ -400,6 +521,57 @@ export async function handleWidgetMessageTurn(
       );
     }
 
+    async function emitAndSaveImmediateResponse(fullResponse: string): Promise<void> {
+      emitSseEvent(controller, encoder, { finalText: fullResponse });
+
+      currentStage = "save_bot_message";
+      const botMessage = await chatService.addMessage(
+        {
+          conversationId: context.conversationId,
+          role: "bot",
+          content: fullResponse,
+          sources: null,
+          senderName: settings?.botName ?? null,
+        },
+        context.project.id,
+      );
+
+      try {
+        await billingService.incrementMessageUsage(context.project.userId, ownerSub);
+      } catch (err) {
+        logError(
+          "widget_turn.message_usage_increment_failed",
+          err,
+          buildWidgetTurnLogContext(context, turnId, {
+            messageId: botMessage.id,
+          }),
+        );
+      }
+
+      logInfo(
+        "widget_turn.completed",
+        buildWidgetTurnLogContext(context, turnId, {
+          messageId: botMessage.id,
+          sourceCount: 0,
+          statusLatencyMs: telemetry.firstStatusAt
+            ? telemetry.firstStatusAt - telemetry.startedAt
+            : null,
+          firstTextLatencyMs: telemetry.firstTextAt
+            ? telemetry.firstTextAt - telemetry.startedAt
+            : null,
+          verifierRan: telemetry.verifierRan ?? false,
+          verifierVerdict: telemetry.verifierVerdict ?? null,
+          hadToolCalls: false,
+          stepCount: 0,
+        }),
+      );
+
+      emitSseEvent(controller, encoder, {
+        done: true,
+        messageId: botMessage.id,
+      });
+    }
+
     logInfo(
       "widget_turn.pipeline_started",
       buildWidgetTurnLogContext(context, turnId, {
@@ -434,6 +606,29 @@ export async function handleWidgetMessageTurn(
           requestedAgent,
         }),
       );
+
+      const scopeDecision = classifyTaskScope({
+        message: context.payload.content,
+        pageContext: context.payload.pageContext,
+      });
+      if (scopeDecision.kind !== "in_scope_support") {
+        turnIntent = scopeDecision.kind;
+        executionPath = "scope_blocked";
+        retrievalMode = "none";
+        currentStage = "scope_gate";
+        logWarn(
+          "widget_turn.scope_blocked",
+          buildWidgetTurnLogContext(context, turnId, {
+            decision: scopeDecision.kind,
+            reason: scopeDecision.reason,
+          }),
+        );
+        await emitAndSaveImmediateResponse(
+          scopeDecision.response ??
+            "I can only help with this product, website, and support-related questions here.",
+        );
+        return;
+      }
 
       currentStage = "classify_turn";
       let conversationSummary: string | null = null;
@@ -833,8 +1028,76 @@ export async function handleWidgetMessageTurn(
         }
       }
 
+      if (
+        retrieval.retrievalAttempted &&
+        retrieval.groundingConfidence === "none" &&
+        !eventState.hadToolCalls &&
+        !fullResponse.includes("[NEW_INQUIRY]") &&
+        !fullResponse.includes("[RESOLVED]")
+      ) {
+        const unsupportedFallback = turnPlan.followUpQuestion
+          ? `${buildUnsupportedFallback(context.payload.content)} ${turnPlan.followUpQuestion}`
+          : buildUnsupportedFallback(context.payload.content);
+
+        if (unsupportedFallback.trim() !== fullResponse.trim()) {
+          fullResponse = unsupportedFallback.trim();
+          logWarn(
+            "widget_turn.no_grounding_fallback_applied",
+            buildWidgetTurnLogContext(context, turnId, {
+              executionPath,
+              turnIntent,
+            }),
+          );
+          emitSseEvent(controller, encoder, { finalText: fullResponse });
+        }
+      }
+
+      if (claimsUnavailableCapabilities(fullResponse)) {
+        const capabilityFallback =
+          "I can't browse the web or use unassigned tools here. I can only help with this product or website using the provided documentation and any assigned support tools.";
+
+        if (capabilityFallback !== fullResponse.trim()) {
+          fullResponse = capabilityFallback;
+          logWarn(
+            "widget_turn.unavailable_capability_claim_blocked",
+            buildWidgetTurnLogContext(context, turnId, {
+              executionPath,
+              turnIntent,
+            }),
+          );
+          emitSseEvent(controller, encoder, { finalText: fullResponse });
+        }
+      }
+
       if (fullResponse.includes("[NEW_INQUIRY]")) {
-        currentStage = "team_request";
+        const teamRequestDecision = shouldAllowTeamRequest({
+          conversation,
+          conversationHistory,
+          latestMessage: context.payload.content,
+          turnIntent,
+          retrievalAttempted: retrieval.retrievalAttempted,
+          hadToolCalls: eventState.hadToolCalls,
+        });
+
+        if (!teamRequestDecision.allowed) {
+          const fallbackFollowUp =
+            turnPlan.followUpQuestion ??
+            "Could you share the exact feature, page, step, or error you're seeing?";
+
+          fullResponse = `I don't have enough detail yet to escalate this usefully. ${fallbackFollowUp}`;
+          logWarn(
+            "widget_turn.team_request_blocked",
+            buildWidgetTurnLogContext(context, turnId, {
+              reason: teamRequestDecision.reason,
+              turnIntent,
+              executionPath,
+              retrievalAttempted: retrieval.retrievalAttempted,
+              hadToolCalls: eventState.hadToolCalls,
+            }),
+          );
+          emitSseEvent(controller, encoder, { finalText: fullResponse });
+        } else {
+          currentStage = "team_request";
         let contactInfo: { name: string | null; email: string | null };
         try {
           contactInfo = await runWithModelFallback({
@@ -933,6 +1196,7 @@ export async function handleWidgetMessageTurn(
           "widget_turn.team_request_completed",
           buildWidgetTurnLogContext(context, turnId, {
             submissionId: submission.submissionId,
+            created: submission.created,
             telegramThreadId: submission.telegramThreadId ?? null,
           }),
         );
@@ -945,12 +1209,16 @@ export async function handleWidgetMessageTurn(
           );
         }
         fullResponse = fullResponse.replace("[NEW_INQUIRY]", "").trim();
-        if (!fullResponse) {
+        if (!submission.created) {
+          const agentLabel = settings?.agentName ?? "a team member";
+          fullResponse = `I've already forwarded this conversation to the team. ${agentLabel} will continue the follow-up there.`;
+        } else if (!fullResponse) {
           const agentLabel = settings?.agentName ?? "a team member";
           fullResponse = `I've forwarded this to the team. ${agentLabel} will follow up shortly!`;
         }
         emitSseEvent(controller, encoder, { inquiry: true });
         emitSseEvent(controller, encoder, { finalText: fullResponse });
+        }
       }
 
       if (fullResponse.includes("[RESOLVED]")) {

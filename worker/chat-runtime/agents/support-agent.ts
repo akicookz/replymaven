@@ -22,6 +22,10 @@ export async function streamSupportAgent(
   function toSdkToolChoice(
     toolChoice: AgentToolChoice | undefined,
   ): ToolChoice<Record<string, unknown>> {
+    if (availableToolNames.length === 0) {
+      return "none";
+    }
+
     return toolChoice ?? "auto";
   }
 
@@ -29,7 +33,7 @@ export async function streamSupportAgent(
     model,
     instructions: options.systemPrompt,
     tools: toolRegistry,
-    stopWhen: options.tools?.length ? stepCountIs(3) : undefined,
+    stopWhen: availableToolNames.length > 0 ? stepCountIs(3) : undefined,
     toolChoice: toSdkToolChoice(options.toolChoice),
     prepareStep: options.prepareStep
       ? (stepOptions) => {

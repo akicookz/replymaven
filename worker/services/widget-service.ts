@@ -194,24 +194,49 @@ export class WidgetService {
 
   // ─── Inquiries ──────────────────────────────────────────────────────────
 
-  async createInquiry(
-    projectId: string,
-    visitorId: string | undefined,
-    data: Record<string, string>,
-  ): Promise<InquiryRow> {
+  async createInquiry(options: {
+    projectId: string;
+    conversationId?: string | null;
+    visitorId?: string;
+    title: string;
+    data: Record<string, string>;
+  }): Promise<{ inquiry: InquiryRow; created: boolean }> {
+    if (options.conversationId) {
+      const existing = await this.getInquiryByConversationId(
+        options.projectId,
+        options.conversationId,
+      );
+      if (existing) {
+        await this.db
+          .update(inquiries)
+          .set({
+            visitorId: options.visitorId ?? existing.visitorId,
+            title: options.title,
+            data: JSON.stringify(options.data),
+          })
+          .where(eq(inquiries.id, existing.id));
+
+        return {
+          inquiry: (await this.getInquiryById(existing.id, options.projectId))!,
+          created: false,
+        };
+      }
+    }
+
     const id = crypto.randomUUID();
     await this.db.insert(inquiries).values({
       id,
-      projectId,
-      visitorId: visitorId ?? null,
-      data: JSON.stringify(data),
+      projectId: options.projectId,
+      conversationId: options.conversationId ?? null,
+      visitorId: options.visitorId ?? null,
+      title: options.title,
+      data: JSON.stringify(options.data),
     });
-    const rows = await this.db
-      .select()
-      .from(inquiries)
-      .where(eq(inquiries.id, id))
-      .limit(1);
-    return rows[0]!;
+
+    return {
+      inquiry: (await this.getInquiryById(id, options.projectId))!,
+      created: true,
+    };
   }
 
   async getInquiries(
@@ -235,6 +260,24 @@ export class WidgetService {
       .limit(1);
     if (!rows[0] || rows[0].projectId !== projectId) return null;
     return rows[0];
+  }
+
+  async getInquiryByConversationId(
+    projectId: string,
+    conversationId: string,
+  ): Promise<InquiryRow | null> {
+    const rows = await this.db
+      .select()
+      .from(inquiries)
+      .where(
+        and(
+          eq(inquiries.projectId, projectId),
+          eq(inquiries.conversationId, conversationId),
+        ),
+      )
+      .limit(1);
+
+    return rows[0] ?? null;
   }
 
   async updateInquiryStatus(
@@ -330,4 +373,32 @@ export class WidgetService {
           : null,
     };
   }
+}
+
+export function buildInquiryTitle(options: {
+  visitorName?: string | null;
+  visitorEmail?: string | null;
+  visitorId?: string | null;
+}): string {
+  const visitorName = options.visitorName?.trim() ?? "";
+  const visitorEmail = options.visitorEmail?.trim() ?? "";
+  const visitorId = options.visitorId?.trim() ?? "";
+
+  if (visitorName && visitorEmail) {
+    return `${visitorName} <${visitorEmail}>`;
+  }
+
+  if (visitorName) {
+    return visitorName;
+  }
+
+  if (visitorEmail) {
+    return visitorEmail;
+  }
+
+  if (visitorId) {
+    return `Visitor ${visitorId}`;
+  }
+
+  return "Inquiry";
 }
