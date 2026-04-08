@@ -163,7 +163,7 @@ export function decideExecutionPath(options: {
       if (allowedTools.length === 0) {
         return {
           path: "clarify_first",
-          retrievalMode: "light",
+          retrievalMode: "full",
           allowBroaderRetry: false,
           allowedTools: [],
           toolChoice: "none",
@@ -182,7 +182,7 @@ export function decideExecutionPath(options: {
     case "clarify":
       return {
         path: "clarify_first",
-        retrievalMode: "light",
+        retrievalMode: "full",
         allowBroaderRetry: false,
         allowedTools: [],
         toolChoice: "none",

@@ -3885,6 +3885,72 @@ const app = new Hono<HonoAppContext>()
       throw error;
     }
   })
+  .post("/api/projects/:id/knowledge-suggestions/bulk-approve", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    if (!body.ids || !Array.isArray(body.ids) || body.ids.length === 0) {
+      return c.json({ error: "Invalid ids array" }, 400);
+    }
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new KnowledgeSuggestionService(db);
+    try {
+      const result = await service.bulkApprove(body.ids, project.id, c.env.UPLOADS);
+      logInfo("knowledge_suggestion.bulk_approved", {
+        projectId: project.id,
+        succeeded: result.succeeded.length,
+        failed: result.failed.length,
+      });
+      return c.json(result);
+    } catch (error) {
+      logError("knowledge_suggestion.bulk_approve_failed", error, {
+        projectId: project.id,
+        ids: body.ids,
+      });
+      throw error;
+    }
+  })
+  .post("/api/projects/:id/knowledge-suggestions/bulk-reject", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    if (!body.ids || !Array.isArray(body.ids) || body.ids.length === 0) {
+      return c.json({ error: "Invalid ids array" }, 400);
+    }
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== user.id) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new KnowledgeSuggestionService(db);
+    try {
+      const result = await service.bulkReject(body.ids, project.id);
+      logInfo("knowledge_suggestion.bulk_rejected", {
+        projectId: project.id,
+        succeeded: result.succeeded.length,
+        failed: result.failed.length,
+      });
+      return c.json(result);
+    } catch (error) {
+      logError("knowledge_suggestion.bulk_reject_failed", error, {
+        projectId: project.id,
+        ids: body.ids,
+      });
+      throw error;
+    }
+  })
 
   // ─── Guidelines (SOPs) ──────────────────────────────────────────────────────
   .get("/api/projects/:id/guidelines", async (c) => {

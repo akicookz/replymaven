@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import FaqEditor from "@/components/faq-editor";
 import PdfResourceDetail from "@/components/pdf-detail";
@@ -74,6 +75,7 @@ interface KnowledgeSuggestion {
 function Resources() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
+  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
 
   // ─── Entry Card Queries ─────────────────────────────────────────────────────
 
@@ -147,6 +149,47 @@ function Resources() {
       if (!res.ok) throw new Error("Failed to reject suggestion");
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
+    },
+  });
+
+  const bulkApproveSuggestions = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions/bulk-approve`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to bulk approve suggestions");
+      return res.json();
+    },
+    onSuccess: () => {
+      setSelectedSuggestions(new Set());
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
+    },
+  });
+
+  const bulkRejectSuggestions = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions/bulk-reject`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to bulk reject suggestions");
+      return res.json();
+    },
+    onSuccess: () => {
+      setSelectedSuggestions(new Set());
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
     },
@@ -303,6 +346,29 @@ function Resources() {
     setExpandedId(expandedId === resourceId ? null : resourceId);
   }
 
+  function toggleSuggestionSelection(id: string) {
+    const newSelection = new Set(selectedSuggestions);
+    if (newSelection.has(id)) {
+      newSelection.delete(id);
+    } else {
+      newSelection.add(id);
+    }
+    setSelectedSuggestions(newSelection);
+  }
+
+  function toggleAllSuggestions() {
+    if (!faqSuggestions) return;
+
+    if (selectedSuggestions.size === faqSuggestions.length) {
+      setSelectedSuggestions(new Set());
+    } else {
+      setSelectedSuggestions(new Set(faqSuggestions.map(s => s.id)));
+    }
+  }
+
+  const hasSelectedSuggestions = selectedSuggestions.size > 0;
+  const allSuggestionsSelected = faqSuggestions && selectedSuggestions.size === faqSuggestions.length;
+
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-3">
@@ -375,14 +441,47 @@ function Resources() {
       {/* ─── FAQ Suggestions ──────────────────────────────────────────────── */}
       {faqSuggestions && faqSuggestions.length > 0 && (
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Lightbulb className="w-4 h-4 text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">
-              AI Suggestions
-            </h2>
-            <span className="inline-flex items-center justify-center px-1.5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
-              {faqSuggestions.length}
-            </span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={allSuggestionsSelected ?? false}
+                onCheckedChange={() => toggleAllSuggestions()}
+              />
+              <Lightbulb className="w-4 h-4 text-primary" />
+              <h2 className="text-sm font-semibold text-foreground">
+                AI Suggestions
+              </h2>
+              <span className="inline-flex items-center justify-center px-1.5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
+                {faqSuggestions.length}
+              </span>
+              {hasSelectedSuggestions && (
+                <span className="text-xs text-muted-foreground">
+                  ({selectedSuggestions.size} selected)
+                </span>
+              )}
+            </div>
+            {hasSelectedSuggestions && (
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => bulkApproveSuggestions.mutate(Array.from(selectedSuggestions))}
+                  disabled={bulkApproveSuggestions.isPending}
+                >
+                  <Check className="w-3.5 h-3.5 mr-1.5" />
+                  Approve {selectedSuggestions.size}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => bulkRejectSuggestions.mutate(Array.from(selectedSuggestions))}
+                  disabled={bulkRejectSuggestions.isPending}
+                >
+                  <X className="w-3.5 h-3.5 mr-1.5" />
+                  Reject {selectedSuggestions.size}
+                </Button>
+              </div>
+            )}
           </div>
           {faqSuggestions.map((s) => {
             const payload = JSON.parse(s.suggestion);
@@ -397,8 +496,14 @@ function Resources() {
                 className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-primary/20 p-4 space-y-3"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-primary">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <Checkbox
+                      checked={selectedSuggestions.has(s.id)}
+                      onCheckedChange={() => toggleSuggestionSelection(s.id)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-primary">
                       {s.type === "new_faq"
                         ? `New FAQ: ${payload.title}`
                         : `Add to: ${targetResource?.title ?? "FAQ resource"}`}
@@ -417,6 +522,7 @@ function Resources() {
                         View conversation
                       </Link>
                     )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button

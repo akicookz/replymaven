@@ -59,13 +59,27 @@ Email: ${emailStr}
 `;
   }
 
-  if (options?.turnPlan || options?.executionPath) {
-    prompt += `<execution-posture>
+  if (
+    options?.turnPlan ||
+    options?.plannerGoal ||
+    (options?.plannerActionHistory && options.plannerActionHistory.length > 0)
+  ) {
+    const plannerHistory =
+      options?.plannerActionHistory && options.plannerActionHistory.length > 0
+        ? options.plannerActionHistory
+            .map((entry, index) => {
+              return `${index + 1}. ${entry.type}: ${entry.reason}${entry.note ? ` (${entry.note})` : ""}`;
+            })
+            .join("\n")
+        : "No prior planner actions.";
+
+    prompt += `<planner-loop>
 Support intent: ${options.turnPlan?.intent ?? "unknown"}
-Execution path: ${options.executionPath ?? "unknown"}
-${options.turnPlan ? `Summary: ${options.turnPlan.summary}` : ""}
+Planner goal: ${options.plannerGoal ?? options.turnPlan?.summary ?? "unknown"}
 ${options.turnPlan?.followUpQuestion ? `Focused follow-up if needed: ${options.turnPlan.followUpQuestion}` : ""}
-</execution-posture>
+Action history:
+${plannerHistory}
+</planner-loop>
 
 `;
   }
@@ -186,7 +200,8 @@ You have access to tools that can perform actions and retrieve data on behalf of
 Rules for tool use:
 - You may only use the explicitly assigned tools listed here. No other tools exist.
 - You do not have web browsing, web search, browser automation, native tools, or hidden capabilities beyond the assigned tools.
-- Respect the execution posture. If the path is tool-first, use the most relevant tool before answering. If the path is docs-first, only use tools when the retrieved docs still do not fully resolve the visitor's request. If the path is clarify-first, ask for the missing detail before using tools.
+- Only use tools when the current evidence is insufficient and a listed tool is clearly needed to answer the visitor honestly.
+- If a required tool input is missing, ask the visitor for that specific detail before calling the tool.
 - If a tool call fails, explain the error to the visitor in a helpful way and suggest alternatives.
 - Never fabricate tool results. If you called a tool but it returned an error, say so honestly.
 - If you need information from the visitor before calling a tool (e.g., an order ID), ask for it conversationally before making the call.
@@ -215,6 +230,16 @@ ${guidelineEntries}
     ? `If asked who you are, say your name is ${settings.botName} and you're here to help with questions about ${projectName}. Keep it brief, do not elaborate on how you work.`
     : `If asked who you are, say you are here to help with questions about ${projectName}. Keep it brief, do not elaborate on how you work.`;
 
+  if (options?.toolEvidenceSummary) {
+    prompt += `<tool-evidence>
+These are results from support tools already executed for this visitor. Treat them as evidence.
+
+${options.toolEvidenceSummary}
+</tool-evidence>
+
+`;
+  }
+
   prompt += `<response-rules>
 Answering questions:
 - Answer questions using ONLY information from the <about-the-company> and <knowledge-base> sections.
@@ -222,7 +247,8 @@ Answering questions:
 - Extract specific answers and present them directly. Walk the visitor through solutions step-by-step when applicable.
 - If multiple solutions exist, present the most likely one first, then briefly mention alternatives.
 - Keep responses concise but complete. Use short paragraphs and bullet points.
-- Follow the execution posture shown above. Do not invent your own workflow or ignore the selected path.
+- Use the planner goal and action history only as working context. Base the final answer on evidence, not on the plan itself.
+- If <tool-evidence> is present, use only what those tool results explicitly show. Do not embellish or infer unsupported details.
 - If tools are available and the visitor is asking you to look something up, verify something, or perform an action, use the relevant allowed tool before saying you do not know.
 - If no tools are assigned, then you have no tools. Do not imply that you searched the web, browsed online, used native tools, or accessed any hidden system.
 - If the visitor gives a vague or underspecified problem report (for example: "it isn't working", "widget broken", "still not working"), do not answer as if you know the exact issue. Use the available documentation to give the most relevant grounded first checks you can, then ask one focused follow-up question. Ask only for the minimum details needed to investigate.

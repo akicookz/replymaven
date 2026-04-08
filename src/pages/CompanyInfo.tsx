@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, ArrowLeft, Check, ExternalLink, Lightbulb, RefreshCw, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 
 type ToneOfVoice = "professional" | "friendly" | "casual" | "formal" | "custom";
@@ -31,6 +32,7 @@ const toneOptions: ToneOfVoice[] = [
 function CompanyInfo() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
+  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
 
   const [companyForm, setCompanyForm] = useState({
     companyName: "",
@@ -202,6 +204,69 @@ function CompanyInfo() {
     },
   });
 
+  const bulkApproveContext = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions/bulk-approve`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to bulk approve");
+      return res.json();
+    },
+    onSuccess: () => {
+      setSelectedSuggestions(new Set());
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-context", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-settings", projectId] });
+    },
+  });
+
+  const bulkRejectContext = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/knowledge-suggestions/bulk-reject`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to bulk reject");
+      return res.json();
+    },
+    onSuccess: () => {
+      setSelectedSuggestions(new Set());
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-context", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+    },
+  });
+
+  function toggleSuggestionSelection(id: string) {
+    const newSelection = new Set(selectedSuggestions);
+    if (newSelection.has(id)) {
+      newSelection.delete(id);
+    } else {
+      newSelection.add(id);
+    }
+    setSelectedSuggestions(newSelection);
+  }
+
+  function toggleAllSuggestions() {
+    if (!contextSuggestions) return;
+    if (selectedSuggestions.size === contextSuggestions.length) {
+      setSelectedSuggestions(new Set());
+    } else {
+      setSelectedSuggestions(new Set(contextSuggestions.map(s => s.id)));
+    }
+  }
+
+  const hasSelectedSuggestions = selectedSuggestions.size > 0;
+  const allSuggestionsSelected = contextSuggestions && selectedSuggestions.size === contextSuggestions.length;
+
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-3">
@@ -224,14 +289,47 @@ function CompanyInfo() {
       {/* Context Suggestions */}
       {contextSuggestions && contextSuggestions.length > 0 && (
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Lightbulb className="w-4 h-4 text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">
-              AI Suggestions
-            </h2>
-            <span className="inline-flex items-center justify-center px-1.5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
-              {contextSuggestions.length}
-            </span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={allSuggestionsSelected ?? false}
+                onCheckedChange={() => toggleAllSuggestions()}
+              />
+              <Lightbulb className="w-4 h-4 text-primary" />
+              <h2 className="text-sm font-semibold text-foreground">
+                AI Suggestions
+              </h2>
+              <span className="inline-flex items-center justify-center px-1.5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
+                {contextSuggestions.length}
+              </span>
+              {hasSelectedSuggestions && (
+                <span className="text-xs text-muted-foreground">
+                  ({selectedSuggestions.size} selected)
+                </span>
+              )}
+            </div>
+            {hasSelectedSuggestions && (
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => bulkApproveContext.mutate(Array.from(selectedSuggestions))}
+                  disabled={bulkApproveContext.isPending}
+                >
+                  <Check className="w-3.5 h-3.5 mr-1.5" />
+                  Approve {selectedSuggestions.size}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => bulkRejectContext.mutate(Array.from(selectedSuggestions))}
+                  disabled={bulkRejectContext.isPending}
+                >
+                  <X className="w-3.5 h-3.5 mr-1.5" />
+                  Reject {selectedSuggestions.size}
+                </Button>
+              </div>
+            )}
           </div>
           {contextSuggestions.map((s) => {
             const payload = JSON.parse(s.suggestion);
@@ -241,8 +339,14 @@ function CompanyInfo() {
                 className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-primary/20 p-4 space-y-3"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-primary">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <Checkbox
+                      checked={selectedSuggestions.has(s.id)}
+                      onCheckedChange={() => toggleSuggestionSelection(s.id)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-primary">
                       Add to company context
                     </p>
                     {s.reasoning && (
@@ -259,6 +363,7 @@ function CompanyInfo() {
                         View conversation
                       </Link>
                     )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button

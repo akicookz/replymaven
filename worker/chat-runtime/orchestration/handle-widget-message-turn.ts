@@ -1,4 +1,3 @@
-import { buildSupportSystemPrompt } from "../prompt/build-support-system-prompt";
 import {
   createLanguageModel,
   createModelRuntimeState,
@@ -11,32 +10,22 @@ import {
   fallbackExtractContactInfo,
   fallbackSummarizeTeamRequest,
   isVagueIssueReport,
-  reformulateQuery,
   summarizeConversation,
   summarizeTeamRequest,
 } from "../llm/auxiliary-calls";
-import { streamSupportAgent } from "../agents/support-agent";
+import { runPlannerLoop } from "../executor/run-planner-loop";
 import { triggerAutoRefinementIfEnabled } from "../post-turn/auto-refine";
 import { createTeamRequestSubmission } from "../post-turn/team-request";
+import { buildUnsupportedFallback } from "../workflows/verify-answer";
 import {
-  buildUnsupportedFallback,
-  fallbackVerificationResult,
-  type VerificationResult,
-  verifyAnswer,
-} from "../workflows/verify-answer";
-import { buildRetrievalQueries } from "../retrieval/build-retrieval-queries";
-import {
-  runAiSearch,
   type RetrievalResult,
 } from "../retrieval/run-ai-search";
 import { classifyTaskScope } from "../workflows/classify-task-scope";
-import { decideExecutionPath } from "../workflows/decide-execution-path";
 import { createWidgetSseResponse } from "../streaming/create-widget-sse-response";
 import {
   createInitialAgentEventState,
   emitSseEvent,
   emitStatusEvent,
-  mapAgentStreamPartToSse,
 } from "../streaming/map-agent-events-to-sse";
 import {
   type SupportTurnPlan,
@@ -98,37 +87,6 @@ async function loadMessageImage(options: {
     console.error("Failed to fetch image for chat runtime:", err);
     return null;
   }
-}
-
-function shouldVerifyAnswer(options: {
-  userMessage: string;
-  fullResponse: string;
-  groundingConfidence: "high" | "low" | "none";
-  hadToolCalls: boolean;
-  hasEvidence: boolean;
-}): boolean {
-  if (!options.hasEvidence) return false;
-  if (!options.fullResponse.trim()) return false;
-  if (options.fullResponse.includes("[NEW_INQUIRY]")) return false;
-  if (options.fullResponse.includes("[RESOLVED]")) return false;
-
-  const looksLikeLookup =
-    /(how|why|can|does|where|pricing|policy|refund|billing|setup|configure|integration|api|error|issue|problem|plan)/i.test(
-      options.userMessage,
-    );
-  const draftedAnswerHasSpecificClaims =
-    /(\$|\b\d+\b|%|\bdays?\b|\bhours?\b|\bminutes?\b|\bmonths?\b|\byears?\b|\bgo to\b|\bclick\b|\bopen\b|\bselect\b|\benable\b|\bdisable\b|\bupgrade\b|\bcancel\b|\brefund\b)/i.test(
-      options.fullResponse,
-    ) || /(^|\n)(-|\d+\.)\s/.test(options.fullResponse);
-
-  return (
-    (looksLikeLookup || draftedAnswerHasSpecificClaims) &&
-    (
-      options.groundingConfidence !== "high" ||
-      options.hadToolCalls ||
-      draftedAnswerHasSpecificClaims
-    )
-  );
 }
 
 function createEmptyRetrievalResult(): RetrievalResult {
@@ -660,378 +618,128 @@ export async function handleWidgetMessageTurn(
         createLanguageModel(modelRuntime.activeConfig),
         conversationHistory,
       );
-      const executionPlan = decideExecutionPath({
-        intent: turnPlan.intent,
-        userMessage: context.payload.content,
-        enabledTools: availableTools,
-      });
       turnIntent = turnPlan.intent;
-      executionPath = executionPlan.path;
-      retrievalMode = executionPlan.retrievalMode;
+      executionPath = "agentic_loop";
+      retrievalMode = "bounded_actions";
       logInfo(
         "widget_turn.plan_computed",
         buildWidgetTurnLogContext(context, turnId, {
           intent: turnPlan.intent,
-          executionPath: executionPlan.path,
-          retrievalMode: executionPlan.retrievalMode,
+          executionPath,
+          retrievalMode,
           hasConversationSummary: Boolean(conversationSummary),
           hasFollowUpQuestion: Boolean(turnPlan.followUpQuestion),
-          allowedTools: getToolNames(executionPlan.allowedTools),
-          toolChoice:
-            typeof executionPlan.toolChoice === "string"
-              ? executionPlan.toolChoice
-              : executionPlan.toolChoice.toolName,
+          allowedTools: getToolNames(availableTools),
         }),
       );
-
-      if (executionPlan.retrievalMode !== "none") {
-        currentStage = "retrieval";
-        emitStatus("Searching docs...", "retrieval");
-        let searchQuery = context.payload.content;
-        try {
-          searchQuery = await runWithModelFallback({
-            runtime: modelRuntime,
-            stage: "reformulate_query",
-            logContext: buildWidgetTurnLogContext(context, turnId),
-            operation: async (activeConfig) => {
-              const activeModel = createLanguageModel(activeConfig);
-              return reformulateQuery(
-                activeModel,
-                conversationHistory,
-                context.payload.content,
-                { throwOnModelError: true },
-              );
-            },
-          });
-        } catch {
-          logWarn(
-            "widget_turn.reformulate_query_fallback_used",
-            buildWidgetTurnLogContext(context, turnId),
-          );
-        }
-        const retrievalQueries =
-          executionPlan.retrievalMode === "light"
-            ? turnPlan.retrievalQueries.length > 0
-              ? turnPlan.retrievalQueries
-              : [searchQuery]
-            : buildRetrievalQueries(
-                context.payload.content,
-                searchQuery,
-                turnPlan.retrievalQueries,
-              );
-        logInfo(
-          "widget_turn.retrieval_started",
-          buildWidgetTurnLogContext(context, turnId, {
-            queryCount: retrievalQueries.length,
-            broaderQueryCount: turnPlan.broaderQueries.length,
-            allowBroaderRetry: executionPlan.allowBroaderRetry,
-          }),
-        );
-
-        retrieval = await runAiSearch({
-          env: context.env,
-          db: context.db,
-          projectId: context.project.id,
-          queries: retrievalQueries,
-          broaderQueries: executionPlan.allowBroaderRetry
-            ? turnPlan.broaderQueries
-            : [],
-          allowBroaderRetry: executionPlan.allowBroaderRetry,
-        });
-        if (retrieval.droppedCrossTenant > 0) {
-          logWarn(
-            "widget_turn.retrieval_cross_tenant_dropped",
-            buildWidgetTurnLogContext(context, turnId, {
-              droppedCrossTenant: retrieval.droppedCrossTenant,
-            }),
-          );
-        }
-        if (retrieval.unresolvedKeys.length > 0) {
-          logWarn(
-            "widget_turn.retrieval_unresolved_sources",
-            buildWidgetTurnLogContext(context, turnId, {
-              unresolvedSourceCount: retrieval.unresolvedKeys.length,
-            }),
-          );
-        }
-        logInfo(
-          "widget_turn.retrieval_completed",
-          buildWidgetTurnLogContext(context, turnId, {
-            groundingConfidence: retrieval.groundingConfidence,
-            sourceCount: retrieval.sourceReferences.length,
-            retrievalAttempted: retrieval.retrievalAttempted,
-            broaderSearchAttempted: retrieval.broaderSearchAttempted,
-            unresolvedSourceCount: retrieval.unresolvedKeys.length,
-            droppedCrossTenant: retrieval.droppedCrossTenant,
-          }),
-        );
-      }
 
       const conversationMetadata = parseConversationMetadata(conversation.metadata);
       const agentHandbackInstructions =
         typeof conversationMetadata.agentHandbackInstructions === "string"
           ? conversationMetadata.agentHandbackInstructions
           : null;
+      currentStage = "planner_loop";
+      logInfo(
+        "widget_turn.loop_started",
+        buildWidgetTurnLogContext(context, turnId, {
+          availableTools: getToolNames(availableTools),
+          hasImage: Boolean(image),
+        }),
+      );
 
-      const systemPrompt = buildSupportSystemPrompt(
-        settings ?? {
+      const loopResult = await runPlannerLoop({
+        controller,
+        encoder,
+        modelRuntime,
+        telemetry,
+        currentMessage: context.payload.content,
+        pageContext: context.payload.pageContext,
+        conversationHistory,
+        conversationSummary,
+        turnPlan,
+        availableTools,
+        enabledToolRows: enabledTools,
+        toolService,
+        db: context.db,
+        env: context.env,
+        project: context.project,
+        conversationId: context.conversationId,
+        settings: settings ?? {
           toneOfVoice: "professional",
           customTonePrompt: null,
           companyContext: null,
           botName: null,
           agentName: null,
         },
-        context.project.name,
-        retrieval.ragContext,
-        conversationSummary,
-        {
-          hasTools: executionPlan.allowedTools.length > 0,
-          guidelines: enabledGuidelines.map((guideline) => ({
-            condition: guideline.condition,
-            instruction: guideline.instruction,
-          })),
-          agentHandbackInstructions,
-          pageContext: context.payload.pageContext,
-          visitorInfo: {
-            name: conversation.visitorName,
-            email: conversation.visitorEmail,
-          },
-          groundingConfidence: retrieval.groundingConfidence,
-          needsClarification:
-            executionPlan.path === "clarify_first" ||
-            Boolean(turnPlan.followUpQuestion),
-          turnPlan: {
-            intent: turnPlan.intent,
-            summary: turnPlan.summary,
-            followUpQuestion: turnPlan.followUpQuestion,
-          },
-          executionPath: executionPlan.path,
-          retrievalAttempted: retrieval.retrievalAttempted,
-          broaderSearchAttempted: retrieval.broaderSearchAttempted,
+        guidelines: enabledGuidelines.map((guideline) => ({
+          condition: guideline.condition,
+          instruction: guideline.instruction,
+        })),
+        visitorInfo: {
+          name: conversation.visitorName,
+          email: conversation.visitorEmail,
         },
-      );
-
-      currentStage = "stream_agent";
-      emitStatus("Writing the reply...", "compose");
-      logInfo(
-        "widget_turn.agent_stream_started",
-        buildWidgetTurnLogContext(context, turnId, {
-          toolCount: executionPlan.allowedTools.length,
-          hasImage: Boolean(image),
-          cannedMatchStatus: null,
-        }),
-      );
-
-      let streamTextStarted = false;
-      let toolActivityStarted = false;
-      eventState = await runWithModelFallback({
-        runtime: modelRuntime,
-        stage: "stream_agent",
-        logContext: buildWidgetTurnLogContext(context, turnId),
-        canRetry: () => !streamTextStarted && !toolActivityStarted,
-        getRetryContext: () => ({
-          streamTextStarted,
-          toolActivityStarted,
-        }),
-        operation: async (activeConfig) => {
-          const supportAgent = await streamSupportAgent(
-            { modelConfig: activeConfig },
-            {
-              systemPrompt,
-              conversationHistory,
-              userMessage: context.payload.content,
-              image,
-              tools: executionPlan.allowedTools,
-              toolChoice: executionPlan.toolChoice,
-              onToolCallStart: (info) => {
-                toolActivityStarted = true;
-                logInfo(
-                  "widget_turn.tool_call_started",
-                  buildWidgetTurnLogContext(context, turnId, {
-                    toolName: info.toolName,
-                    inputKeys: Object.keys(info.input ?? {}),
-                  }),
-                );
-                emitStatus("Checking connected systems...", "tool");
-              },
-              onToolCallFinish: (info) => {
-                const matchedTool = enabledTools.find(
-                  (tool) => tool.name === info.toolName,
-                );
-                if (matchedTool) {
-                  toolService
-                    .logExecution({
-                      toolId: matchedTool.id,
-                      conversationId: context.conversationId,
-                      input: info.input ?? {},
-                      output: info.output,
-                      status: info.success ? "success" : "error",
-                      duration: info.durationMs,
-                      errorMessage: info.error ? String(info.error) : null,
-                    })
-                    .catch((err) => {
-                      logError(
-                        "widget_turn.tool_execution_log_failed",
-                        err,
-                        buildWidgetTurnLogContext(context, turnId, {
-                          toolName: info.toolName,
-                        }),
-                      );
-                    });
-                }
-                logInfo(
-                  "widget_turn.tool_call_finished",
-                  buildWidgetTurnLogContext(context, turnId, {
-                    toolName: info.toolName,
-                    success: info.success,
-                    durationMs: info.durationMs,
-                  }),
-                );
-              },
-            },
-          );
-
-          let nextEventState = createInitialAgentEventState();
-          const emittedToolCalls = new Set<string>();
-          const toolCallStartTimes = new Map<string, number>();
-
-          for await (const part of supportAgent.fullStream) {
-            if (!telemetry.firstTextAt && part.type === "text-delta") {
-              telemetry.firstTextAt = Date.now();
-            }
-
-            if (part.type === "text-delta") {
-              streamTextStarted = true;
-            }
-            if (part.type === "tool-call" || part.type === "tool-result") {
-              toolActivityStarted = true;
-            }
-
-            nextEventState = mapAgentStreamPartToSse({
-              part,
-              controller,
-              encoder,
-              emittedToolCalls,
-              toolCallStartTimes,
-              state: nextEventState,
-            });
-
-            if (part.type === "tool-result" && !nextEventState.lastToolError) {
-              emitStatus("Writing the reply...", "compose");
-            }
-          }
-
-          return nextEventState;
-        },
+        agentHandbackInstructions,
+        image,
+        emitStatus,
+        closeSafeAiReplayWindow,
+        buildLogContext: (extra = {}) =>
+          buildWidgetTurnLogContext(context, turnId, extra),
       });
+      retrieval = loopResult.retrieval;
+      eventState = {
+        fullResponse: loopResult.fullResponse,
+        hadToolCalls: loopResult.hadToolCalls,
+        lastToolOutput: loopResult.lastToolOutput,
+        lastToolError: loopResult.lastToolError,
+        stepCount: loopResult.stepCount,
+      };
+
       logInfo(
-        "widget_turn.agent_stream_completed",
+        "widget_turn.loop_completed",
         buildWidgetTurnLogContext(context, turnId, {
           textLength: eventState.fullResponse.length,
           hadToolCalls: eventState.hadToolCalls,
           stepCount: eventState.stepCount,
+          terminationAction: loopResult.terminationAction,
+        }),
+      );
+
+      if (retrieval.droppedCrossTenant > 0) {
+        logWarn(
+          "widget_turn.retrieval_cross_tenant_dropped",
+          buildWidgetTurnLogContext(context, turnId, {
+            droppedCrossTenant: retrieval.droppedCrossTenant,
+          }),
+        );
+      }
+      if (retrieval.unresolvedKeys.length > 0) {
+        logWarn(
+          "widget_turn.retrieval_unresolved_sources",
+          buildWidgetTurnLogContext(context, turnId, {
+            unresolvedSourceCount: retrieval.unresolvedKeys.length,
+          }),
+        );
+      }
+      logInfo(
+        "widget_turn.retrieval_completed",
+        buildWidgetTurnLogContext(context, turnId, {
+          groundingConfidence: retrieval.groundingConfidence,
+          sourceCount: retrieval.sourceReferences.length,
+          retrievalAttempted: retrieval.retrievalAttempted,
+          broaderSearchAttempted: retrieval.broaderSearchAttempted,
+          unresolvedSourceCount: retrieval.unresolvedKeys.length,
+          droppedCrossTenant: retrieval.droppedCrossTenant,
         }),
       );
 
       let fullResponse = eventState.fullResponse;
 
-      if (eventState.hadToolCalls && !fullResponse.trim()) {
-        if (eventState.lastToolError) {
-          emitSseEvent(controller, encoder, {
-            toolError: {
-              message:
-                "The tool encountered an error while processing your request.",
-              detail: eventState.lastToolError,
-            },
-          });
-          fullResponse =
-            "I tried to look that up but the tool encountered an error. Could you try again?";
-        } else {
-          fullResponse =
-            "I found some information but had trouble processing it. Could you try rephrasing your question?";
-        }
-
-        emitSseEvent(controller, encoder, { text: fullResponse });
-      }
-
-      if (
-        shouldVerifyAnswer({
-          userMessage: context.payload.content,
-          fullResponse,
-          groundingConfidence: retrieval.groundingConfidence,
-          hadToolCalls: eventState.hadToolCalls,
-          hasEvidence:
-            retrieval.ragContext.trim().length > 0 ||
-            eventState.lastToolOutput != null,
-        })
-      ) {
-        telemetry.verifierRan = true;
-        currentStage = "verify_answer";
-        emitStatus("Checking factual claims against docs...", "verify");
-        logInfo(
-          "widget_turn.verification_started",
-          buildWidgetTurnLogContext(context, turnId, {
-            groundingConfidence: retrieval.groundingConfidence,
-            hadToolCalls: eventState.hadToolCalls,
-          }),
-        );
-
-        let verification: VerificationResult;
-        try {
-          verification = await runWithModelFallback({
-            runtime: modelRuntime,
-            stage: "verify_answer",
-            logContext: buildWidgetTurnLogContext(context, turnId),
-            operation: async (activeConfig) => {
-              const activeModel = createLanguageModel(activeConfig);
-              return verifyAnswer({
-                model: activeModel,
-                userMessage: context.payload.content,
-                draftedAnswer: fullResponse,
-                ragContext: retrieval.ragContext,
-                lastToolOutput: eventState.lastToolOutput,
-                verifyOptions: { throwOnModelError: true },
-              });
-            },
-          });
-        } catch {
-          verification = fallbackVerificationResult({
-            draftedAnswer: fullResponse,
-          });
-          logWarn(
-            "widget_turn.verification_fallback_used",
-            buildWidgetTurnLogContext(context, turnId),
-          );
-        }
-        telemetry.verifierVerdict = verification.verdict;
-        logInfo(
-          "widget_turn.verification_completed",
-          buildWidgetTurnLogContext(context, turnId, {
-            verdict: verification.verdict,
-            claimsChecked: verification.claims.length,
-            unsupportedClaims: verification.claims.filter(
-              (claim) => claim.status === "unsupported",
-            ).length,
-            partialClaims: verification.claims.filter(
-              (claim) => claim.status === "partial",
-            ).length,
-          }),
-        );
-
-        if (
-          verification.verdict !== "supported" &&
-          verification.answer.trim() &&
-          verification.answer.trim() !== fullResponse.trim()
-        ) {
-          fullResponse = verification.answer.trim();
-          emitSseEvent(controller, encoder, { finalText: fullResponse });
-        }
-      }
-
       if (
         retrieval.retrievalAttempted &&
         retrieval.groundingConfidence === "none" &&
         !eventState.hadToolCalls &&
+        loopResult.terminationAction !== "ask_user" &&
         !fullResponse.includes("[NEW_INQUIRY]") &&
         !fullResponse.includes("[RESOLVED]")
       ) {

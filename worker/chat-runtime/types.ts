@@ -91,6 +91,10 @@ export interface SupportPromptOptions {
     summary: string;
     followUpQuestion?: string | null;
   } | null;
+  plannerGoal?: string | null;
+  plannerActionHistory?: PlannerActionHistoryEntry[];
+  toolEvidenceSummary?: string | null;
+  allowedToolNames?: string[];
   executionPath?: ExecutionPath;
   retrievalAttempted?: boolean;
   broaderSearchAttempted?: boolean;
@@ -165,9 +169,115 @@ export interface SupportTurnPlan {
   followUpQuestion: string | null;
 }
 
+export type PlannerActionType =
+  | "search_docs"
+  | "call_tool"
+  | "ask_user"
+  | "compose"
+  | "stop";
+
+export interface PlannerSearchDocsAction {
+  type: "search_docs";
+  reason: string;
+  query: string;
+  broaderQueries?: string[];
+}
+
+export interface PlannerCallToolAction {
+  type: "call_tool";
+  reason: string;
+  toolName: string;
+  input: Record<string, unknown>;
+}
+
+export interface PlannerAskUserAction {
+  type: "ask_user";
+  reason: string;
+  question: string;
+}
+
+export interface PlannerComposeAction {
+  type: "compose";
+  reason: string;
+  answerStyle?: "direct" | "step_by_step" | "summary";
+}
+
+export interface PlannerStopAction {
+  type: "stop";
+  reason: string;
+}
+
+export type PlannerNextAction =
+  | PlannerSearchDocsAction
+  | PlannerCallToolAction
+  | PlannerAskUserAction
+  | PlannerComposeAction
+  | PlannerStopAction;
+
+export interface PlannerDecision {
+  goal: string;
+  nextAction: PlannerNextAction;
+}
+
+export interface PlannerActionHistoryEntry {
+  type: PlannerActionType;
+  reason: string;
+  query?: string;
+  broaderQueries?: string[];
+  toolName?: string;
+  input?: Record<string, unknown>;
+  outcome: "executed" | "completed" | "rejected";
+  note?: string | null;
+}
+
+export interface PlannerToolEvidence {
+  toolName: string;
+  input: Record<string, unknown>;
+  output: unknown;
+  error: string | null;
+  success: boolean;
+  durationMs: number;
+}
+
+export interface PlannerDocsEvidence {
+  ragContext: string;
+  sourceReferences: SourceReference[];
+  groundingConfidence: GroundingConfidence;
+  unresolvedKeys: string[];
+  droppedCrossTenant: number;
+  retrievalAttempted: boolean;
+  broaderSearchAttempted: boolean;
+  queries: string[];
+  broaderQueries: string[];
+}
+
+export interface PlannerLoopState {
+  goal: string;
+  stepCount: number;
+  conversationSummary: string | null;
+  initialTurnPlan: SupportTurnPlan;
+  actionHistory: PlannerActionHistoryEntry[];
+  docsEvidence: PlannerDocsEvidence;
+  toolEvidence: PlannerToolEvidence[];
+  missingInputs: string[];
+  finalDraft: string | null;
+  terminationReason: string | null;
+}
+
+export interface PlannerLoopResult {
+  fullResponse: string;
+  retrieval: PlannerDocsEvidence;
+  hadToolCalls: boolean;
+  lastToolOutput: unknown;
+  lastToolError: string | null;
+  stepCount: number;
+  terminationAction: PlannerActionType;
+  loopState: PlannerLoopState;
+}
+
 export interface ExecutionPathDecision {
   path: ExecutionPath;
-  retrievalMode: "none" | "light" | "full";
+  retrievalMode: "none" | "full";
   allowBroaderRetry: boolean;
   allowedTools: SupportToolDefinition[];
   toolChoice: AgentToolChoice;

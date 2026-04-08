@@ -188,11 +188,50 @@ export class KnowledgeSuggestionService {
     const existing = await this.getById(id, projectId);
     if (!existing || existing.status !== "pending") return false;
 
+    // Delete rejected suggestion from database
     await this.db
-      .update(knowledgeSuggestions)
-      .set({ status: "rejected" })
+      .delete(knowledgeSuggestions)
       .where(eq(knowledgeSuggestions.id, id));
     return true;
+  }
+
+  async bulkApprove(
+    ids: string[],
+    projectId: string,
+    r2: R2Bucket,
+  ): Promise<{ succeeded: string[]; failed: Array<{ id: string; error: string }> }> {
+    const succeeded: string[] = [];
+    const failed: Array<{ id: string; error: string }> = [];
+
+    for (const id of ids) {
+      const result = await this.approve(id, projectId, r2);
+      if (result.success) {
+        succeeded.push(id);
+      } else {
+        failed.push({ id, error: result.error ?? "Unknown error" });
+      }
+    }
+
+    return { succeeded, failed };
+  }
+
+  async bulkReject(
+    ids: string[],
+    projectId: string,
+  ): Promise<{ succeeded: string[]; failed: string[] }> {
+    const succeeded: string[] = [];
+    const failed: string[] = [];
+
+    for (const id of ids) {
+      const rejected = await this.reject(id, projectId);
+      if (rejected) {
+        succeeded.push(id);
+      } else {
+        failed.push(id);
+      }
+    }
+
+    return { succeeded, failed };
   }
 
   // ─── Apply Logic ────────────────────────────────────────────────────────────
