@@ -383,42 +383,74 @@ function sanitizeGeneratedSuggestion(
         suggestion: { title, pairs },
       };
     }
-    case "update_faq": {
-      const title =
-        getTrimmedString(suggestion.suggestion, "title") ??
-        context.faqTarget?.title;
-      const pairs = sanitizeFaqPairs(
-        (suggestion.suggestion.pairs as unknown[]) ?? [],
-      );
-      if (!title || pairs.length === 0) return null;
-      if (
-        context.faqTarget &&
-        title === context.faqTarget.title &&
-        JSON.stringify(pairs) === JSON.stringify(context.faqTarget.pairs)
-      ) {
-        return null;
-      }
+    case "add_faq_pair": {
+      const pair = suggestion.suggestion.pair as unknown;
+      if (!pair || typeof pair !== "object") return null;
+      const question = getTrimmedString(pair as Record<string, unknown>, "question");
+      const answer = getTrimmedString(pair as Record<string, unknown>, "answer");
+      if (!question || !answer) return null;
       return {
         ...suggestion,
-        suggestion: { title, pairs },
+        suggestion: { pair: { question, answer } },
       };
     }
-    case "new_sop":
-    case "update_sop": {
+    case "refine_faq_pair": {
+      const originalPair = suggestion.suggestion.originalPair as unknown;
+      const refinedPair = suggestion.suggestion.refinedPair as unknown;
+      if (!originalPair || typeof originalPair !== "object") return null;
+      if (!refinedPair || typeof refinedPair !== "object") return null;
+
+      const origQuestion = getTrimmedString(originalPair as Record<string, unknown>, "question");
+      const origAnswer = getTrimmedString(originalPair as Record<string, unknown>, "answer");
+      const refQuestion = getTrimmedString(refinedPair as Record<string, unknown>, "question");
+      const refAnswer = getTrimmedString(refinedPair as Record<string, unknown>, "answer");
+
+      if (!origQuestion || !origAnswer || !refQuestion || !refAnswer) return null;
+      if (origQuestion === refQuestion && origAnswer === refAnswer) return null;
+
+      return {
+        ...suggestion,
+        suggestion: {
+          originalPair: { question: origQuestion, answer: origAnswer },
+          refinedPair: { question: refQuestion, answer: refAnswer },
+        },
+      };
+    }
+    case "new_sop": {
       const condition = getTrimmedString(suggestion.suggestion, "condition");
       const instruction = getTrimmedString(suggestion.suggestion, "instruction");
       if (!condition || !instruction) return null;
-      if (
-        suggestion.type === "update_sop" &&
-        context.guidelineTarget &&
-        condition === context.guidelineTarget.condition &&
-        instruction === context.guidelineTarget.instruction
-      ) {
-        return null;
-      }
       return {
         ...suggestion,
         suggestion: { condition, instruction },
+      };
+    }
+    case "add_sop": {
+      const condition = getTrimmedString(suggestion.suggestion, "condition");
+      const instruction = getTrimmedString(suggestion.suggestion, "instruction");
+      if (!condition || !instruction) return null;
+      return {
+        ...suggestion,
+        suggestion: { condition, instruction },
+      };
+    }
+    case "refine_sop": {
+      const originalCondition = getTrimmedString(suggestion.suggestion, "originalCondition");
+      const originalInstruction = getTrimmedString(suggestion.suggestion, "originalInstruction");
+      const refinedCondition = getTrimmedString(suggestion.suggestion, "refinedCondition");
+      const refinedInstruction = getTrimmedString(suggestion.suggestion, "refinedInstruction");
+
+      if (!originalCondition || !originalInstruction || !refinedCondition || !refinedInstruction) return null;
+      if (originalCondition === refinedCondition && originalInstruction === refinedInstruction) return null;
+
+      return {
+        ...suggestion,
+        suggestion: {
+          originalCondition,
+          originalInstruction,
+          refinedCondition,
+          refinedInstruction,
+        },
       };
     }
     case "update_pdf":
@@ -500,11 +532,28 @@ function summarizePendingSuggestion(suggestion: {
 
   switch (suggestion.type) {
     case "new_faq":
-    case "update_faq":
       return `${getTrimmedString(payload, "title") ?? ""} ${extractPairQuestions(payload)}`.trim();
+    case "add_faq_pair": {
+      const pair = payload.pair as Record<string, unknown> | undefined;
+      const question = pair ? getTrimmedString(pair, "question") : null;
+      return question ?? suggestion.reasoning ?? "";
+    }
+    case "refine_faq_pair": {
+      const origPair = payload.originalPair as Record<string, unknown> | undefined;
+      const refPair = payload.refinedPair as Record<string, unknown> | undefined;
+      const origQuestion = origPair ? getTrimmedString(origPair, "question") : null;
+      const refQuestion = refPair ? getTrimmedString(refPair, "question") : null;
+      return `${origQuestion ?? ""} → ${refQuestion ?? ""}`.trim() || suggestion.reasoning || "";
+    }
     case "new_sop":
-    case "update_sop":
       return `${getTrimmedString(payload, "condition") ?? ""} ${getTrimmedString(payload, "instruction") ?? ""}`.trim();
+    case "add_sop":
+      return getTrimmedString(payload, "condition") ?? suggestion.reasoning ?? "";
+    case "refine_sop": {
+      const origCondition = getTrimmedString(payload, "originalCondition");
+      const refCondition = getTrimmedString(payload, "refinedCondition");
+      return `${origCondition ?? ""} → ${refCondition ?? ""}`.trim() || suggestion.reasoning || "";
+    }
     case "update_pdf":
     case "update_webpage":
       return `${getTrimmedString(payload, "appendText") ?? ""} ${getTrimmedString(payload, "updatedText") ?? ""}`.trim();

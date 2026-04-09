@@ -489,7 +489,7 @@ async function executeCompose(options: {
       retrievalAttempted: options.state.docsEvidence.retrievalAttempted,
       broaderSearchAttempted: options.state.docsEvidence.broaderSearchAttempted,
     },
-    options.currentMessage,
+    // options.currentMessage,
   );
 
   options.emitStatus("Writing the reply...", "compose");

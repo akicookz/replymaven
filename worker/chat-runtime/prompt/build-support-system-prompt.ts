@@ -6,7 +6,7 @@ export function buildSupportSystemPrompt(
   ragContext: string,
   conversationSummary: string | null,
   options?: SupportPromptOptions,
-  currentMessage?: string,
+  // currentMessage?: string,
 ): string {
   const toneInstructions: Record<string, string> = {
     professional: "Be concise, clear, and solution-oriented.",

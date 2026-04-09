@@ -21,9 +21,11 @@ interface AiServiceConfig {
 export interface KnowledgeRefinementPlan {
   type:
     | "new_faq"
-    | "update_faq"
+    | "add_faq_pair"
+    | "refine_faq_pair"
     | "new_sop"
-    | "update_sop"
+    | "add_sop"
+    | "refine_sop"
     | "update_pdf"
     | "update_webpage"
     | "update_context";
@@ -36,9 +38,11 @@ export interface KnowledgeRefinementPlan {
 export interface KnowledgeRefinementSuggestion {
   type:
     | "new_faq"
-    | "update_faq"
+    | "add_faq_pair"
+    | "refine_faq_pair"
     | "new_sop"
-    | "update_sop"
+    | "add_sop"
+    | "refine_sop"
     | "update_pdf"
     | "update_webpage"
     | "update_context";
@@ -457,19 +461,20 @@ Company Context:
 ${contextSummary}
 
 Pick the most appropriate actions. Use only these action types:
-- "update_faq": refine an EXISTING FAQ resource from the candidate list
-- "new_faq": create a NEW FAQ resource only when no existing FAQ candidate is a reasonable fit
-- "update_sop": refine an EXISTING SOP from the candidate list
-- "new_sop": create a NEW SOP only when no existing SOP candidate is a reasonable fit
+- "add_faq_pair": add ONE new Q&A pair to an EXISTING FAQ resource from the candidate list
+- "refine_faq_pair": refine ONE specific Q&A pair in an EXISTING FAQ resource from the candidate list${existingContext.faqCandidates.length === 0 ? '\n- "new_faq": create a NEW FAQ resource (only available when no FAQs exist yet)' : ''}
+- "add_sop": add ONE new SOP guideline
+- "refine_sop": refine ONE existing SOP from the candidate list
+- "new_sop": create a NEW SOP set only when no existing SOPs are related
 - "update_pdf": refine an EXISTING PDF from the candidate list
 - "update_webpage": refine an EXISTING web page from the candidate list
 - "update_context": append missing high-level company context when it does not belong in a FAQ, SOP, PDF, or webpage refinement
 
 Rules:
 - Return at most 3 actions
-- Prefer refining one of the provided existing candidates over creating something new
-- If a FAQ candidate even partially fits, choose "update_faq" instead of "new_faq"
-- If a SOP candidate even partially fits, choose "update_sop" instead of "new_sop"
+- Each FAQ/SOP action should be for exactly ONE pair/guideline only
+- For FAQs: Use "add_faq_pair" or "refine_faq_pair" instead of full resource updates
+- For SOPs: Use "add_sop" or "refine_sop" for individual guidelines
 - For PDFs and web pages, NEVER create a new resource suggestion. Only use "update_pdf" or "update_webpage"
 - Do NOT create a duplicate of an existing pending suggestion
 - Do NOT create multiple actions for the same target
@@ -479,15 +484,18 @@ Rules:
 Return ONLY valid JSON array (no markdown, no code blocks) in this format:
 [
   {
-    "type": "update_faq",
-    "targetResourceId": "existing-resource-id",
-    "reasoning": "Why this specific target should be refined"
+    "type": "add_faq_pair",
+    "targetResourceId": "existing-faq-id",
+    "reasoning": "Why this new Q&A pair should be added"
   },
   {
-    "type": "update_webpage",
-    "targetResourceId": "webpage-resource-id",
-    "targetPageId": "page-id",
-    "reasoning": "Why this specific web page should be refined"
+    "type": "refine_faq_pair",
+    "targetResourceId": "existing-faq-id",
+    "reasoning": "Why this specific Q&A pair needs refinement"
+  },
+  {
+    "type": "add_sop",
+    "reasoning": "Why this new guideline is needed"
   }
 ]
 
@@ -506,10 +514,12 @@ If no improvements are warranted, return exactly: []`,
         ) as Array<Record<string, unknown>>;
 
         const validTypes = new Set([
-          "new_faq",
-          "update_faq",
+          ...(existingContext.faqCandidates.length === 0 ? ["new_faq"] : []),
+          "add_faq_pair",
+          "refine_faq_pair",
           "new_sop",
-          "update_sop",
+          "add_sop",
+          "refine_sop",
           "update_pdf",
           "update_webpage",
           "update_context",
@@ -552,12 +562,16 @@ If no improvements are warranted, return exactly: []`,
           }
 
           switch (type) {
-            case "update_faq":
+            case "add_faq_pair":
+            case "refine_faq_pair":
               if (targetResourceId && faqIds.has(targetResourceId)) {
                 plans.push({ type, targetResourceId, reasoning });
               }
               break;
-            case "update_sop":
+            case "add_sop":
+              plans.push({ type, reasoning });
+              break;
+            case "refine_sop":
               if (targetGuidelineId && guidelineIds.has(targetGuidelineId)) {
                 plans.push({ type, targetGuidelineId, reasoning });
               }
@@ -581,6 +595,11 @@ If no improvements are warranted, return exactly: []`,
               }
               break;
             case "new_faq":
+              // Only allow new_faq when no existing FAQs
+              if (existingContext.faqCandidates.length === 0) {
+                plans.push({ type, reasoning });
+              }
+              break;
             case "new_sop":
             case "update_context":
               plans.push({ type, reasoning });
@@ -653,33 +672,57 @@ Return this exact shape:
         if (!suggestion) return null;
         return { ...plan, suggestion };
       }
-      case "update_faq": {
+      case "add_faq_pair": {
         if (!context.faqTarget) return null;
         const suggestion = await this.generateJsonObject({
-          prompt: `You are refining an existing FAQ resource based on a support conversation.
+          prompt: `You are adding ONE new Q&A pair to an existing FAQ based on a support conversation.
 
 CONVERSATION:
 ${transcript}
 
-CURRENT FAQ RESOURCE:
+EXISTING FAQ:
 Title: ${context.faqTarget.title}
-
-Pairs:
-${context.faqTarget.pairs
-  .map((pair) => `- Q: ${pair.question}\n  A: ${pair.answer}`)
-  .join("\n")}
+Current questions:
+${context.faqTarget.pairs.map((p) => `- ${p.question}`).join("\n")}
 
 Rules:
-- Return the FULL updated FAQ resource, not a partial patch
-- Make the minimum necessary changes
-- Prefer updating an existing matching pair instead of creating a near-duplicate pair
-- Preserve unrelated pairs
-- Do not exceed 50 pairs
+- Create exactly ONE new Q&A pair that addresses something from the conversation
+- Do not duplicate any existing question
+- Keep the answer concise and helpful
 - Return only valid JSON
 
 Return this exact shape:
-{"title":"FAQ title","pairs":[{"question":"...","answer":"..."}]}`,
-          maxOutputTokens: 1800,
+{"pair":{"question":"...","answer":"..."}}`,
+          maxOutputTokens: 500,
+        });
+
+        if (!suggestion) return null;
+        return { ...plan, suggestion };
+      }
+      case "refine_faq_pair": {
+        if (!context.faqTarget) return null;
+
+        // Find which pair from the conversation needs refinement
+        const suggestion = await this.generateJsonObject({
+          prompt: `You are refining ONE specific Q&A pair in an existing FAQ based on a support conversation.
+
+CONVERSATION:
+${transcript}
+
+EXISTING FAQ PAIRS:
+${context.faqTarget.pairs
+  .map((p, i) => `[${i}] Q: ${p.question}\n    A: ${p.answer}`)
+  .join("\n\n")}
+
+Rules:
+- Identify which ONE existing pair needs refinement based on the conversation
+- Provide the index, original pair, and refined version
+- Make the minimum necessary changes
+- Return only valid JSON
+
+Return this exact shape:
+{"pairIndex":0,"originalPair":{"question":"...","answer":"..."},"refinedPair":{"question":"...","answer":"..."}}`,
+          maxOutputTokens: 800,
         });
 
         if (!suggestion) return null;
@@ -706,10 +749,32 @@ Return this exact shape:
         if (!suggestion) return null;
         return { ...plan, suggestion };
       }
-      case "update_sop": {
+      case "add_sop": {
+        const suggestion = await this.generateJsonObject({
+          prompt: `You are creating ONE new SOP guideline based on a support conversation.
+
+CONVERSATION:
+${transcript}
+
+Rules:
+- Create exactly ONE guideline that addresses something from the conversation
+- The condition should describe when the SOP applies
+- The instruction should be actionable
+- Keep both condition and instruction clear and concise
+- Return only valid JSON
+
+Return this exact shape:
+{"condition":"When ...","instruction":"The bot should ..."}`,
+          maxOutputTokens: 500,
+        });
+
+        if (!suggestion) return null;
+        return { ...plan, suggestion };
+      }
+      case "refine_sop": {
         if (!context.guidelineTarget) return null;
         const suggestion = await this.generateJsonObject({
-          prompt: `You are refining an existing SOP from a support conversation.
+          prompt: `You are refining ONE existing SOP guideline based on a support conversation.
 
 CONVERSATION:
 ${transcript}
@@ -719,13 +784,14 @@ When: ${context.guidelineTarget.condition}
 Then: ${context.guidelineTarget.instruction}
 
 Rules:
-- Make the minimum necessary change
-- Keep the SOP focused on the existing scenario unless the conversation proves it should be broadened
+- Refine this specific guideline based on the conversation
+- Provide both original and refined versions
+- Make the minimum necessary changes
 - Return only valid JSON
 
 Return this exact shape:
-{"condition":"When ...","instruction":"The bot should ..."}`,
-          maxOutputTokens: 500,
+{"originalCondition":"${context.guidelineTarget.condition}","originalInstruction":"${context.guidelineTarget.instruction}","refinedCondition":"When ...","refinedInstruction":"The bot should ..."}`,
+          maxOutputTokens: 600,
         });
 
         if (!suggestion) return null;
@@ -818,6 +884,8 @@ Return this exact shape:
         if (!suggestion) return null;
         return { ...plan, suggestion };
       }
+      default:
+        return null;
     }
   }
 

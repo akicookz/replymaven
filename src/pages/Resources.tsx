@@ -66,9 +66,11 @@ interface KnowledgeSuggestion {
   projectId: string;
   type:
     | "new_faq"
-    | "update_faq"
+    | "add_faq_pair"
+    | "refine_faq_pair"
     | "new_sop"
-    | "update_sop"
+    | "add_sop"
+    | "refine_sop"
     | "update_pdf"
     | "update_webpage"
     | "update_context";
@@ -393,9 +395,20 @@ function Resources() {
   ) {
     switch (suggestion.type) {
       case "new_faq":
-        return `New FAQ: ${typeof payload.title === "string" ? payload.title : "Untitled FAQ"}`;
-      case "update_faq":
-        return `Refine FAQ: ${targetResource?.title ?? "FAQ resource"}`;
+        // Check if this is a legacy suggestion when FAQs already exist
+        const hasFAQs = resources?.some(r => r.type === "faq");
+        const title = typeof payload.title === "string" ? payload.title : "Untitled FAQ";
+        return hasFAQs ? `⚠️ New FAQ (Legacy): ${title}` : `New FAQ: ${title}`;
+      case "add_faq_pair":
+        return `Add FAQ Q&A: ${targetResource?.title ?? "FAQ resource"}`;
+      case "refine_faq_pair":
+        return `Refine FAQ Q&A: ${targetResource?.title ?? "FAQ resource"}`;
+      case "new_sop":
+        return `New Guideline`;
+      case "add_sop":
+        return `Add Guideline`;
+      case "refine_sop":
+        return `Refine Guideline`;
       case "update_pdf":
         return `Refine PDF: ${targetResource?.title ?? "PDF resource"}`;
       case "update_webpage":
@@ -413,7 +426,7 @@ function Resources() {
     suggestion: KnowledgeSuggestion,
     payload: Record<string, unknown>,
   ) {
-    if (suggestion.type === "new_faq" || suggestion.type === "update_faq") {
+    if (suggestion.type === "new_faq") {
       const pairs = Array.isArray(payload.pairs) ? payload.pairs : [];
       if (pairs.length === 0) return null;
 
@@ -433,6 +446,93 @@ function Resources() {
               </div>
             );
           })}
+        </div>
+      );
+    }
+
+    if (suggestion.type === "add_faq_pair") {
+      const pair = payload.pair as Record<string, unknown> | undefined;
+      if (!pair || typeof pair !== "object") return null;
+
+      return (
+        <div className="bg-emerald-500/10 rounded-xl p-3 space-y-1">
+          <p className="text-xs font-medium text-emerald-500">New Q&A to add:</p>
+          <p className="text-xs font-medium text-foreground">
+            Q: {typeof pair.question === "string" ? pair.question : ""}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            A: {typeof pair.answer === "string" ? pair.answer : ""}
+          </p>
+        </div>
+      );
+    }
+
+    if (suggestion.type === "refine_faq_pair") {
+      const originalPair = payload.originalPair as Record<string, unknown> | undefined;
+      const refinedPair = payload.refinedPair as Record<string, unknown> | undefined;
+
+      return (
+        <div className="space-y-2">
+          {originalPair && typeof originalPair === "object" && (
+            <div className="bg-red-500/10 rounded-xl p-3 space-y-1">
+              <p className="text-xs font-medium text-red-500">Original:</p>
+              <p className="text-xs font-medium text-foreground line-through">
+                Q: {typeof originalPair.question === "string" ? originalPair.question : ""}
+              </p>
+              <p className="text-xs text-muted-foreground line-through">
+                A: {typeof originalPair.answer === "string" ? originalPair.answer : ""}
+              </p>
+            </div>
+          )}
+          {refinedPair && typeof refinedPair === "object" && (
+            <div className="bg-emerald-500/10 rounded-xl p-3 space-y-1">
+              <p className="text-xs font-medium text-emerald-500">Refined:</p>
+              <p className="text-xs font-medium text-foreground">
+                Q: {typeof refinedPair.question === "string" ? refinedPair.question : ""}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                A: {typeof refinedPair.answer === "string" ? refinedPair.answer : ""}
+              </p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (suggestion.type === "new_sop" || suggestion.type === "add_sop") {
+      return (
+        <div className="bg-muted/30 rounded-xl p-3 space-y-1">
+          <p className="text-xs font-medium text-foreground">
+            When: {typeof payload.condition === "string" ? payload.condition : ""}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Then: {typeof payload.instruction === "string" ? payload.instruction : ""}
+          </p>
+        </div>
+      );
+    }
+
+    if (suggestion.type === "refine_sop") {
+      return (
+        <div className="space-y-2">
+          <div className="bg-red-500/10 rounded-xl p-3 space-y-1">
+            <p className="text-xs font-medium text-red-500">Original:</p>
+            <p className="text-xs font-medium text-foreground line-through">
+              When: {typeof payload.originalCondition === "string" ? payload.originalCondition : ""}
+            </p>
+            <p className="text-xs text-muted-foreground line-through">
+              Then: {typeof payload.originalInstruction === "string" ? payload.originalInstruction : ""}
+            </p>
+          </div>
+          <div className="bg-emerald-500/10 rounded-xl p-3 space-y-1">
+            <p className="text-xs font-medium text-emerald-500">Refined:</p>
+            <p className="text-xs font-medium text-foreground">
+              When: {typeof payload.refinedCondition === "string" ? payload.refinedCondition : ""}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Then: {typeof payload.refinedInstruction === "string" ? payload.refinedInstruction : ""}
+            </p>
+          </div>
         </div>
       );
     }

@@ -232,6 +232,13 @@
       "when": 1775036400000,
       "tag": "0032_resource_refinement_suggestions",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1775745219242,
+      "tag": "0033_giant_wild_pack",
+      "breakpoints": true
     }
   ]
 }

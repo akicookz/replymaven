@@ -13,9 +13,11 @@ import { ProjectService } from "./project-service";
 
 export type SuggestionType =
   | "new_faq"
-  | "update_faq"
+  | "add_faq_pair"
+  | "refine_faq_pair"
   | "new_sop"
-  | "update_sop"
+  | "add_sop"
+  | "refine_sop"
   | "update_pdf"
   | "update_webpage"
   | "update_context";
@@ -23,9 +25,11 @@ export type SuggestionType =
 export interface SuggestionCounts {
   total: number;
   newFaq: number;
-  updateFaq: number;
+  addFaqPair: number;
+  refineFaqPair: number;
   newSop: number;
-  updateSop: number;
+  addSop: number;
+  refineSop: number;
   updatePdf: number;
   updateWebpage: number;
   updateContext: number;
@@ -36,14 +40,26 @@ interface NewFaqPayload {
   pairs: FaqPair[];
 }
 
+interface AddFaqPairPayload {
+  pair: FaqPair;
+}
+
+interface RefineFaqPairPayload {
+  pairIndex: number;
+  originalPair: FaqPair;
+  refinedPair: FaqPair;
+}
+
 interface SopPayload {
   condition: string;
   instruction: string;
 }
 
-interface UpdateFaqPayload {
-  title: string;
-  pairs: FaqPair[];
+interface RefineSopPayload {
+  originalCondition: string;
+  originalInstruction: string;
+  refinedCondition: string;
+  refinedInstruction: string;
 }
 
 interface UpdateResourcePayload {
@@ -71,10 +87,22 @@ export function buildSuggestionFingerprint(options: {
       : options.suggestion;
 
   switch (options.type) {
-    case "update_faq":
-      return `update_faq:${options.targetResourceId ?? "unknown"}`;
-    case "update_sop":
-      return `update_sop:${options.targetGuidelineId ?? "unknown"}`;
+    case "add_faq_pair":
+      return `add_faq_pair:${options.targetResourceId}:${normalizeFingerprintText(
+        getStringValue((payload as Record<string, unknown>)?.pair, "question"),
+      )}`;
+    case "refine_faq_pair":
+      return `refine_faq_pair:${options.targetResourceId}:${normalizeFingerprintText(
+        getStringValue((payload as Record<string, unknown>)?.originalPair, "question"),
+      )}`;
+    case "add_sop":
+      return `add_sop:${normalizeFingerprintText(
+        getStringValue(payload, "condition"),
+      )}`;
+    case "refine_sop":
+      return `refine_sop:${options.targetGuidelineId}:${normalizeFingerprintText(
+        getStringValue(payload, "originalCondition"),
+      )}`;
     case "update_pdf":
       return `update_pdf:${options.targetResourceId ?? "unknown"}`;
     case "update_webpage":
@@ -144,9 +172,11 @@ export class KnowledgeSuggestionService {
     const counts: SuggestionCounts = {
       total: 0,
       newFaq: 0,
-      updateFaq: 0,
+      addFaqPair: 0,
+      refineFaqPair: 0,
       newSop: 0,
-      updateSop: 0,
+      addSop: 0,
+      refineSop: 0,
       updatePdf: 0,
       updateWebpage: 0,
       updateContext: 0,
@@ -159,14 +189,20 @@ export class KnowledgeSuggestionService {
         case "new_faq":
           counts.newFaq = c;
           break;
-        case "update_faq":
-          counts.updateFaq = c;
+        case "add_faq_pair":
+          counts.addFaqPair = c;
+          break;
+        case "refine_faq_pair":
+          counts.refineFaqPair = c;
           break;
         case "new_sop":
           counts.newSop = c;
           break;
-        case "update_sop":
-          counts.updateSop = c;
+        case "add_sop":
+          counts.addSop = c;
+          break;
+        case "refine_sop":
+          counts.refineSop = c;
           break;
         case "update_pdf":
           counts.updatePdf = c;
@@ -302,9 +338,17 @@ export class KnowledgeSuggestionService {
       case "new_faq":
         await this.applyNewFaq(payload as unknown as NewFaqPayload, projectId, r2);
         break;
-      case "update_faq":
-        await this.applyUpdateFaq(
-          payload as unknown as UpdateFaqPayload,
+      case "add_faq_pair":
+        await this.applyAddFaqPair(
+          payload as unknown as AddFaqPairPayload,
+          projectId,
+          suggestion.targetResourceId!,
+          r2,
+        );
+        break;
+      case "refine_faq_pair":
+        await this.applyRefineFaqPair(
+          payload as unknown as RefineFaqPairPayload,
           projectId,
           suggestion.targetResourceId!,
           r2,
@@ -313,9 +357,12 @@ export class KnowledgeSuggestionService {
       case "new_sop":
         await this.applyNewSop(payload as unknown as SopPayload, projectId);
         break;
-      case "update_sop":
-        await this.applyUpdateSop(
-          payload as unknown as SopPayload,
+      case "add_sop":
+        await this.applyAddSop(payload as unknown as SopPayload, projectId);
+        break;
+      case "refine_sop":
+        await this.applyRefineSop(
+          payload as unknown as RefineSopPayload,
           projectId,
           suggestion.targetGuidelineId!,
         );
@@ -367,8 +414,8 @@ export class KnowledgeSuggestionService {
     );
   }
 
-  private async applyUpdateFaq(
-    payload: UpdateFaqPayload,
+  private async applyAddFaqPair(
+    payload: AddFaqPairPayload,
     projectId: string,
     targetResourceId: string,
     r2: R2Bucket,
@@ -382,11 +429,59 @@ export class KnowledgeSuggestionService {
       throw new Error("Target FAQ resource not found");
     }
 
+    // Parse existing FAQ content
+    const existingContent = resource.content ? JSON.parse(resource.content) : { pairs: [] };
+    const updatedPairs = [...existingContent.pairs, payload.pair];
+
+    // Update with the new pair added
     await resourceService.updateFaqResource(
       targetResourceId,
       projectId,
-      payload.title,
-      payload.pairs,
+      resource.title,
+      updatedPairs,
+    );
+  }
+
+  private async applyRefineFaqPair(
+    payload: RefineFaqPairPayload,
+    projectId: string,
+    targetResourceId: string,
+    r2: R2Bucket,
+  ): Promise<void> {
+    const resourceService = new ResourceService(this.db, r2);
+    const resource = await resourceService.getResourceById(
+      targetResourceId,
+      projectId,
+    );
+    if (!resource || resource.type !== "faq") {
+      throw new Error("Target FAQ resource not found");
+    }
+
+    // Parse existing FAQ content
+    const existingContent = resource.content ? JSON.parse(resource.content) : { pairs: [] };
+    const updatedPairs = [...existingContent.pairs];
+
+    // Find and update the specific pair
+    if (payload.pairIndex >= 0 && payload.pairIndex < updatedPairs.length) {
+      updatedPairs[payload.pairIndex] = payload.refinedPair;
+    } else {
+      // Fallback: find by matching original question
+      const index = updatedPairs.findIndex(
+        p => p.question === payload.originalPair.question
+      );
+      if (index !== -1) {
+        updatedPairs[index] = payload.refinedPair;
+      } else {
+        throw new Error("FAQ pair to refine not found");
+      }
+    }
+
+    // Update with the refined pair
+    await resourceService.updateFaqResource(
+      targetResourceId,
+      projectId,
+      resource.title,
+      updatedPairs,
     );
   }
 
@@ -403,15 +498,28 @@ export class KnowledgeSuggestionService {
     });
   }
 
-  private async applyUpdateSop(
+  private async applyAddSop(
     payload: SopPayload,
+    projectId: string,
+  ): Promise<void> {
+    const guidelineService = new GuidelineService(this.db);
+    await guidelineService.create({
+      projectId,
+      condition: payload.condition,
+      instruction: payload.instruction,
+      enabled: true,
+    });
+  }
+
+  private async applyRefineSop(
+    payload: RefineSopPayload,
     projectId: string,
     targetGuidelineId: string,
   ): Promise<void> {
     const guidelineService = new GuidelineService(this.db);
     await guidelineService.update(targetGuidelineId, projectId, {
-      condition: payload.condition,
-      instruction: payload.instruction,
+      condition: payload.refinedCondition,
+      instruction: payload.refinedInstruction,
     });
   }
 
@@ -527,10 +635,11 @@ function safeParseJson(value: string): Record<string, unknown> {
 }
 
 function getStringValue(
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown> | unknown,
   key: string,
 ): string {
-  const value = payload[key];
+  if (!payload || typeof payload !== "object") return "";
+  const value = (payload as Record<string, unknown>)[key];
   return typeof value === "string" ? value : "";
 }
 

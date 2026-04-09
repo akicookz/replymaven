@@ -347,9 +347,11 @@ export const knowledgeSuggestions = sqliteTable(
     type: text("type", {
       enum: [
         "new_faq",
-        "update_faq",
+        "add_faq_pair",
+        "refine_faq_pair",
         "new_sop",
-        "update_sop",
+        "add_sop",
+        "refine_sop",
         "update_pdf",
         "update_webpage",
         "update_context",

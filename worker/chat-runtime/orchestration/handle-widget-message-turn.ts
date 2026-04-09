@@ -6,7 +6,7 @@ import {
 import {
   classifySupportTurn,
   fallbackClassifySupportTurn,
-  isVagueIssueReport,
+  // isVagueIssueReport,
   summarizeConversation,
 } from "../llm/auxiliary-calls";
 import { runPlannerLoop } from "../executor/run-planner-loop";
@@ -204,9 +204,9 @@ function shouldAllowTeamRequest(options: {
     return { allowed: true, reason: "explicit_human_request" };
   }
 
-  if (isVagueIssueReport(options.latestMessage)) {
-    return { allowed: false, reason: "latest_issue_report_still_vague" };
-  }
+  // if (isVagueIssueReport(options.latestMessage)) {
+  //   return { allowed: false, reason: "latest_issue_report_still_vague" };
+  // }
 
   if (!options.retrievalAttempted && !options.hadToolCalls) {
     return { allowed: false, reason: "no_resolution_attempts" };
