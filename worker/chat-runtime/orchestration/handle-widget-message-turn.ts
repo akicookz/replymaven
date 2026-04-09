@@ -541,6 +541,8 @@ export async function handleWidgetMessageTurn(
       });
     }
 
+    emitStatus("Thinking", "compose");
+
     logInfo(
       "widget_turn.pipeline_started",
       buildWidgetTurnLogContext(context, turnId, {

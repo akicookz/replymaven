@@ -2246,7 +2246,6 @@
   // Typing indicator (lives inside messagesContainer — always last child)
   const typingRow = document.createElement("div");
   typingRow.className = "rm-typing-row";
-  typingRow.style.display = "none";
 
   const typingDots = document.createElement("div");
   typingDots.className = "rm-typing-dots";
@@ -4353,7 +4352,9 @@
   }
 
   function showTyping(message?: string) {
+    typingRow.classList.add("visible");
     statusText.textContent = message ?? "Thinking";
+    scrollToBottom();
   }
 
   function hideTyping() {
