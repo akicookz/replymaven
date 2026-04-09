@@ -11,6 +11,11 @@ import {
 } from "../types";
 import { buildIntentAwareFollowUpQuestion } from "../workflows/build-intent-aware-follow-up";
 import { buildUnsupportedFallback } from "../workflows/verify-answer";
+import {
+  isDuplicateQuery,
+  getQuerySemanticGroup,
+  hasExhaustedSearchPatterns
+} from "./query-deduplication";
 
 interface ToolParameterDefinition {
   name: string;
@@ -456,17 +461,29 @@ Allowed next actions:
 
 Rules:
 - Output exactly one next action.
+- Priority order for finding answers: 1) Check SOPs/guidelines, 2) Check FAQs, 3) Search knowledge base multiple times
 - Prefer search_docs before call_tool when documentation can clarify expected product behavior.
+- Always attempt at least 3 different search_docs queries before concluding information is not available
+- Try: 1) exact terms, 2) synonyms/related terms, 3) broader category searches
+- Explicitly search for FAQ patterns like "how to", "what is", "why does"
 - Use call_tool only when a tool is clearly needed and the required inputs are available.
 - If a required tool input is missing, choose ask_user instead of guessing.
 - If the visitor explicitly asks for a human, do not route them back into normal docs troubleshooting unless the issue context is still missing.
 - Use offer_handoff only when you need visitor confirmation before forwarding.
 - Use collect_contact only when optional contact details would genuinely help follow-up and the visitor has not already declined to share them.
 - Use create_inquiry when the visitor wants human follow-up, there is enough issue context to forward, and either contact details are already known or the visitor has declined to share them.
-- Choose compose only when the existing docs evidence or tool evidence is enough to answer honestly.
+- When documentation is weak or missing, prefer search_docs with different queries over compose.
+- Exhaust at least 3 different search attempts before considering ask_user or offer_handoff.
+- Choose compose ONLY when SOPs, FAQs, or docs/tool evidence directly answers the question.
+- Do NOT compose answers based on general context or business domain knowledge without explicit documentation.
+- When partial information exists across tiers:
+  * Combine complementary information from different tiers only if no conflicts exist
+  * Clearly indicate confidence level when merging partial matches
+  * If tier-1 has partial info, do not supplement with lower-tier speculation
+  * Tier-1 partial answers are better than complete lower-tier answers
 - Never name a tool that is not in the assigned tools list.
 - Never repeat the same search query or same tool call unless you have a materially different reason.
-- If the current evidence is weak and the visitor did not provide enough detail, choose ask_user.
+- Only use ask_user when critical details are genuinely missing relative to the business context and what would be reasonable to expect.
 - If no safe action remains, choose stop.`,
   });
 
@@ -580,6 +597,9 @@ export function fallbackPlanNextAction(options: {
     };
   }
 
+  // Let the LLM decide if there's enough context to compose based on the business domain
+  // This decision should be made by the LLM in planNextAction, not through hardcoded patterns
+
   return {
     goal: options.state.goal,
     nextAction: {
@@ -610,6 +630,7 @@ export function sanitizePlannerDecision(
   const nextAction = options.decision.nextAction;
 
   if (nextAction.type === "search_docs") {
+    // Check for exact duplicate
     const queryKey = getSearchHistoryKey(nextAction.query);
     const alreadySearched = options.state.actionHistory.some(
       (entry) =>
@@ -618,7 +639,63 @@ export function sanitizePlannerDecision(
         getSearchHistoryKey(entry.query) === queryKey,
     );
 
-    if (alreadySearched) {
+    // Check for semantic duplicate
+    const previousQueries = options.state.actionHistory
+      .filter((entry) => entry.type === "search_docs" && entry.query)
+      .map((entry) => entry.query as string);
+
+    const isDuplicate = isDuplicateQuery(nextAction.query, previousQueries, 0.8);
+
+    if (alreadySearched || isDuplicate) {
+      // Check if we've exhausted search patterns for this semantic group
+      const semanticGroup = getQuerySemanticGroup(nextAction.query);
+      const semanticGroups = options.state.queryTracker?.semanticGroups || [];
+
+      if (hasExhaustedSearchPatterns(semanticGroup, semanticGroups, 3)) {
+        // We've tried enough variations, time to compose or ask for more info
+        if (
+          options.state.docsEvidence.ragContext.trim() ||
+          options.state.toolEvidence.length > 0
+        ) {
+          return {
+            goal: nextGoal,
+            nextAction: {
+              type: "compose",
+              reason: "Exhausted search variations; compose from gathered evidence.",
+            },
+          };
+        }
+
+        return {
+          goal: nextGoal,
+          nextAction: {
+            type: "ask_user",
+            reason: "Multiple search attempts with no results; need more specific information.",
+            question: buildClarificationQuestion(
+              options.turnPlan,
+              options.currentMessage,
+            ),
+          },
+        };
+      }
+
+      // Still within search attempts, but this specific query is duplicate
+      // Try to generate an alternative query
+      const searchCount = previousQueries.length;
+      if (searchCount < 3) {
+        // Continue with the original query but mark it as a variation attempt
+        return {
+          goal: nextGoal,
+          nextAction: {
+            ...nextAction,
+            reason: `Trying variation of search query (attempt ${searchCount + 1}/3)`,
+            query: nextAction.query.trim(),
+            broaderQueries:
+              nextAction.broaderQueries?.map((query) => query.trim()).filter(Boolean) ?? [],
+          },
+        };
+      }
+
       if (
         options.state.docsEvidence.ragContext.trim() ||
         options.state.toolEvidence.length > 0

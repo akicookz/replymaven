@@ -31,8 +31,17 @@ You must produce:
 - broaderQueries: broader second-pass documentation searches if focused docs miss
 - followUpQuestion: one focused question to ask when the request remains underspecified
 
+Important context assessment:
+- Consider the business context when determining if a message has enough detail
+- A message is NOT vague just because it's short - assess whether it provides enough context for the specific business domain
+- Consider industry-specific terminology and concepts when evaluating clarity
+- If the user mentions specific items, features, or issues relevant to their context, treat it as actionable
+
 Rules:
 - Do not invent product-specific features or terminology.
+- Assess message completeness based on what would be reasonable for the business context
+- A message mentioning specific business elements (products, services, features) has sufficient context
+- Only mark as "clarify" if genuinely ambiguous for any business context
 - Retrieval hints are only hints. Do not use them to decide tool policy or runtime escalation state.
 - Questions like "how do I check if X is working?" or "how can I verify X is connected?" are troubleshooting/docs turns, not lookup turns, unless they clearly require account-specific backend data.
 - For lookup turns, retrievalQueries can be empty if documentation is unlikely to help.

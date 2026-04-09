@@ -21,40 +21,7 @@ function shouldThrowOnModelError(options?: AuxiliaryCallOptions): boolean {
   return options?.throwOnModelError === true;
 }
 
-export function isVagueIssueReport(message: string): boolean {
-  const original = message.trim();
-  const normalized = original.toLowerCase();
-  if (!original) return false;
-
-  const vagueIssuePattern =
-    /\b(not working|isn't working|is not working|doesn't work|does not work|broken|issue|problem|help|stuck|failing|failed|error)\b/i;
-  const hasIssueSignal = vagueIssuePattern.test(normalized);
-  if (!hasIssueSignal) return false;
-
-  const tokens = original.split(/\s+/).filter(Boolean);
-  const hasSpecificContext =
-    /https?:\/\//i.test(original) ||
-    /["'`].+["'`]/.test(original) ||
-    /\b[A-Z]{2,}[A-Z0-9_-]*\d+[A-Z0-9_-]*\b/.test(original) ||
-    /\b\d{2,}\b/.test(original) ||
-    /\/[a-z0-9._/-]+/i.test(original) ||
-    /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i.test(original);
-
-  return tokens.length <= 12 || !hasSpecificContext;
-}
-
-function isTroubleshootingCheckRequest(message: string): boolean {
-  const normalized = message.trim().toLowerCase();
-  if (!normalized) return false;
-
-  return (
-    /\b(check|test|verify|confirm)\b/.test(normalized) &&
-    /\b(work|working|works|installed|connected|configured|set up|setup|enabled|running)\b/.test(
-      normalized,
-    ) &&
-    /^(how|can|what|where|is|does|do)\b/.test(normalized)
-  );
-}
+// Removed hardcoded pattern detection - let LLM assess message completeness
 
 const supportTurnPlanSchema = z.object({
   intent: z.enum([
@@ -112,19 +79,6 @@ export function fallbackClassifySupportTurn(
     };
   }
 
-  if (isTroubleshootingCheckRequest(currentMessage)) {
-    return {
-      intent: "troubleshoot",
-      summary:
-        "The visitor is trying to verify whether something is working and likely needs troubleshooting guidance.",
-      retrievalQueries: [currentMessage],
-      broaderQueries: [currentMessage],
-      followUpQuestion: buildIntentAwareFollowUpQuestion({
-        userMessage: currentMessage,
-        intent: "troubleshoot",
-      }),
-    };
-  }
 
   if (
     /\b(check|lookup|look up|find|show|status|track|verify|search|order|account|customer|booking|subscription)\b/.test(
@@ -140,18 +94,6 @@ export function fallbackClassifySupportTurn(
     };
   }
 
-  if (isVagueIssueReport(currentMessage)) {
-    return {
-      intent: "troubleshoot",
-      summary: "The visitor is reporting something broken or unclear.",
-      retrievalQueries: [currentMessage],
-      broaderQueries: [currentMessage],
-      followUpQuestion: buildIntentAwareFollowUpQuestion({
-        userMessage: currentMessage,
-        intent: "troubleshoot",
-      }),
-    };
-  }
 
   if (
     /^(how|where|when|can|does|do|is|are|what)\b/.test(normalized) ||
@@ -232,8 +174,7 @@ export async function reformulateQuery(
   currentMessage: string,
   options?: AuxiliaryCallOptions,
 ): Promise<string> {
-  const needsTroubleshootingExpansion = isVagueIssueReport(currentMessage);
-  if (conversationHistory.length <= 1 && !needsTroubleshootingExpansion) {
+  if (conversationHistory.length <= 1) {
     return currentMessage;
   }
 

@@ -26,6 +26,10 @@ import {
   fallbackPlanNextAction,
   sanitizePlannerDecision,
 } from "../planner/plan-next-action";
+import {
+  getQuerySemanticGroup,
+  normalizeQuery
+} from "../planner/query-deduplication";
 import { buildRetrievalQueries } from "../retrieval/build-retrieval-queries";
 import { getSourceReferenceDedupKey } from "../retrieval/build-rag-context";
 import { runAiSearch, type RetrievalResult } from "../retrieval/run-ai-search";
@@ -52,7 +56,7 @@ import {
   type ConversationTurnMessage,
 } from "../types";
 
-const MAX_PLANNER_STEPS = 5;
+const MAX_PLANNER_STEPS = 8; // Increased to allow more search attempts for thorough documentation checking
 
 interface RunPlannerLoopOptions {
   controller: ReadableStreamDefaultController;
@@ -233,6 +237,10 @@ function createInitialLoopState(
     handoffSummary: null,
     finalDraft: null,
     terminationReason: null,
+    queryTracker: {
+      normalizedQueries: new Map<string, number>(),
+      semanticGroups: [],
+    },
   };
 }
 
@@ -481,6 +489,7 @@ async function executeCompose(options: {
       retrievalAttempted: options.state.docsEvidence.retrievalAttempted,
       broaderSearchAttempted: options.state.docsEvidence.broaderSearchAttempted,
     },
+    options.currentMessage,
   );
 
   options.emitStatus("Writing the reply...", "compose");
@@ -688,6 +697,15 @@ export async function runPlannerLoop(
     const nextAction = sanitizedDecision.nextAction;
 
     if (nextAction.type === "search_docs") {
+      // Track semantic group for this query
+      const semanticGroup = getQuerySemanticGroup(nextAction.query);
+      loopState.queryTracker.semanticGroups.push(semanticGroup);
+
+      // Track normalized query count
+      const normalizedQuery = normalizeQuery(nextAction.query);
+      const currentCount = loopState.queryTracker.normalizedQueries.get(normalizedQuery) || 0;
+      loopState.queryTracker.normalizedQueries.set(normalizedQuery, currentCount + 1);
+
       pushActionHistory(loopState, {
         type: "search_docs",
         reason: nextAction.reason,

@@ -49,7 +49,7 @@ export function buildIntentAwareFollowUpQuestion(
 export function buildIntentAwareUnsupportedFallback(options: FollowUpOptions): string {
   const question = buildIntentAwareFollowUpQuestion(options);
 
-  if (isPricingLikeRequest(options)) {
+  if (options.intent === "policy") {
     return `I couldn't verify a reliable answer for that from the knowledge base I searched. ${question}`.trim();
   }
 
