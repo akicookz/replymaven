@@ -8,6 +8,11 @@ import {
   type MessageRow,
   type NewMessageRow,
 } from "../db";
+import {
+  type ConversationChatState,
+  createInitialChatState,
+  parseChatStateFromMetadata,
+} from "../chat-runtime/types";
 
 export class ChatService {
   constructor(
@@ -115,9 +120,21 @@ export class ChatService {
     data: Omit<NewConversationRow, "id" | "createdAt" | "updatedAt">,
   ): Promise<ConversationRow> {
     const id = crypto.randomUUID();
+
+    let metadata = data.metadata ?? null;
+    try {
+      const parsed = metadata ? JSON.parse(metadata) : {};
+      if (!parsed.chatState) {
+        parsed.chatState = createInitialChatState();
+      }
+      metadata = JSON.stringify(parsed);
+    } catch {
+      metadata = JSON.stringify({ chatState: createInitialChatState() });
+    }
+
     await this.db
       .insert(conversations)
-      .values({ id, ...data });
+      .values({ id, ...data, metadata });
     return (await this.getConversationById(id, data.projectId))!;
   }
 
@@ -345,6 +362,54 @@ export class ChatService {
       .orderBy(desc(conversations.updatedAt))
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  // ─── Chat State ─────────────────────────────────────────────────────────────
+
+  async getChatState(
+    conversationId: string,
+    projectId: string,
+  ): Promise<ConversationChatState> {
+    const conversation = await this.getConversationById(
+      conversationId,
+      projectId,
+    );
+    return parseChatStateFromMetadata(conversation?.metadata ?? null);
+  }
+
+  async saveChatState(
+    conversationId: string,
+    projectId: string,
+    chatState: ConversationChatState,
+  ): Promise<void> {
+    const conversation = await this.getConversationById(
+      conversationId,
+      projectId,
+    );
+    if (!conversation) return;
+
+    let existingMeta: Record<string, unknown> = {};
+    if (conversation.metadata) {
+      try {
+        existingMeta = JSON.parse(conversation.metadata) as Record<
+          string,
+          unknown
+        >;
+      } catch {
+        existingMeta = {};
+      }
+    }
+
+    const merged = { ...existingMeta, chatState };
+    await this.db
+      .update(conversations)
+      .set({ metadata: JSON.stringify(merged) })
+      .where(
+        and(
+          eq(conversations.id, conversationId),
+          eq(conversations.projectId, projectId),
+        ),
+      );
   }
 
   // ─── Messages ───────────────────────────────────────────────────────────────

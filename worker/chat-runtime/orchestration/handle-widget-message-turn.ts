@@ -1,11 +1,8 @@
 import {
   createLanguageModel,
   createModelRuntimeState,
-  runWithModelFallback,
 } from "../llm/create-language-model";
 import {
-  classifySupportTurn,
-  fallbackClassifySupportTurn,
   // isVagueIssueReport,
   summarizeConversation,
 } from "../llm/auxiliary-calls";
@@ -17,6 +14,12 @@ import {
   type RetrievalResult,
 } from "../retrieval/run-ai-search";
 import { classifyTaskScope } from "../workflows/classify-task-scope";
+import {
+  clarificationWasAskedBefore,
+  normalizeClarificationQuestion,
+  runFastPaths,
+} from "../workflows/fast-paths";
+import { routeIntent } from "../llm/intent-router";
 import { createWidgetSseResponse } from "../streaming/create-widget-sse-response";
 import {
   createInitialAgentEventState,
@@ -24,9 +27,13 @@ import {
   emitStatusEvent,
 } from "../streaming/map-agent-events-to-sse";
 import {
+  type ConversationChatState,
+  type RouterDecision,
+  type SupportIntent,
   type SupportTurnPlan,
   type TurnTelemetry,
   type WidgetMessageTurnContext,
+  parseChatStateFromMetadata,
   toToolDefinition,
 } from "../types";
 import { BillingService } from "../../services/billing-service";
@@ -328,14 +335,17 @@ export async function handleWidgetMessageTurn(
     return Response.json({ error: "Conversation not found" }, { status: 404 });
   }
 
-  const settings = await projectService.getSettings(context.project.id);
-  const enabledTools = await toolService.getEnabledTools(context.project.id);
-  const enabledGuidelines = await guidelineService.getEnabledByProject(
-    context.project.id,
+  let chatState: ConversationChatState = parseChatStateFromMetadata(
+    conversation.metadata,
   );
-  const allResources = await resourceService.getResourcesByProject(
-    context.project.id,
-  );
+
+  const [settings, enabledTools, enabledGuidelines, allResources] =
+    await Promise.all([
+      projectService.getSettings(context.project.id),
+      toolService.getEnabledTools(context.project.id),
+      guidelineService.getEnabledByProject(context.project.id),
+      resourceService.getResourcesByProject(context.project.id),
+    ]);
   const compiledFaqContext = buildCompiledFaqContext(
     allResources
       .filter((resource) => resource.type === "faq")
@@ -471,7 +481,10 @@ export async function handleWidgetMessageTurn(
     const modelRuntime = createModelRuntimeState(modelConfig);
     let safeAiReplayWindowClosed = false;
 
-    function emitStatus(message: string, phase: "retrieval" | "tool" | "verify" | "compose"): void {
+    function emitStatus(
+      message: string,
+      phase: "thinking" | "retrieval" | "tool" | "verify" | "compose",
+    ): void {
       if (!telemetry.firstStatusAt) {
         telemetry.firstStatusAt = Date.now();
       }
@@ -505,17 +518,36 @@ export async function handleWidgetMessageTurn(
         context.project.id,
       );
 
-      try {
-        await billingService.incrementMessageUsage(context.project.userId, ownerSub);
-      } catch (err) {
-        logError(
-          "widget_turn.message_usage_increment_failed",
-          err,
-          buildWidgetTurnLogContext(context, turnId, {
-            messageId: botMessage.id,
+      emitSseEvent(controller, encoder, {
+        done: true,
+        messageId: botMessage.id,
+      });
+
+      context.executionCtx.waitUntil(
+        chatService
+          .saveChatState(context.conversationId, context.project.id, chatState)
+          .catch((err) => {
+            logError(
+              "widget_turn.save_chat_state_failed",
+              err,
+              buildWidgetTurnLogContext(context, turnId),
+            );
           }),
-        );
-      }
+      );
+
+      context.executionCtx.waitUntil(
+        billingService
+          .incrementMessageUsage(context.project.userId, ownerSub)
+          .catch((err) => {
+            logError(
+              "widget_turn.message_usage_increment_failed",
+              err,
+              buildWidgetTurnLogContext(context, turnId, {
+                messageId: botMessage.id,
+              }),
+            );
+          }),
+      );
 
       logInfo(
         "widget_turn.completed",
@@ -534,14 +566,9 @@ export async function handleWidgetMessageTurn(
           stepCount: 0,
         }),
       );
-
-      emitSseEvent(controller, encoder, {
-        done: true,
-        messageId: botMessage.id,
-      });
     }
 
-    emitStatus("Thinking", "compose");
+    emitStatus("Thinking", "thinking");
 
     logInfo(
       "widget_turn.pipeline_started",
@@ -601,39 +628,199 @@ export async function handleWidgetMessageTurn(
         return;
       }
 
-      currentStage = "classify_turn";
+      currentStage = "fast_path";
+      const isFirstVisitorMessage =
+        conversationHistory.filter((m) => m.role === "visitor").length === 1;
+      const fastPath = runFastPaths({
+        message: context.payload.content,
+        chatState,
+        botName: settings?.botName ?? null,
+        agentName: settings?.agentName ?? null,
+        projectName: context.project.name,
+        isFirstVisitorMessage,
+      });
+      if (fastPath.kind !== "none" && fastPath.response) {
+        turnIntent = fastPath.kind;
+        executionPath = "fast_path";
+        retrievalMode = "none";
+        logInfo(
+          "widget_turn.fast_path_matched",
+          buildWidgetTurnLogContext(context, turnId, {
+            kind: fastPath.kind,
+            reason: fastPath.reason,
+            escalate: Boolean(fastPath.escalate),
+          }),
+        );
+        if (fastPath.stripClarificationState) {
+          chatState = {
+            ...chatState,
+            askedClarifications: [],
+            clarificationAttempts: 0,
+            lastBotQuestion: null,
+          };
+        }
+        if (fastPath.escalate) {
+          chatState = {
+            ...chatState,
+            state: "escalating",
+            pendingHandoffReason:
+              fastPath.escalationReason ?? fastPath.reason ?? null,
+            lastIntent: fastPath.kind,
+          };
+        } else {
+          chatState = {
+            ...chatState,
+            lastIntent: fastPath.kind,
+          };
+        }
+        await emitAndSaveImmediateResponse(fastPath.response);
+        return;
+      }
+
+      currentStage = "route_intent";
       let conversationSummary: string | null = null;
-      let turnPlan: SupportTurnPlan;
+      let routerDecision: RouterDecision;
       try {
-        turnPlan = await runWithModelFallback({
-          runtime: modelRuntime,
-          stage: "classify_turn",
-          logContext: buildWidgetTurnLogContext(context, turnId),
-          operation: async (activeConfig) => {
-            const activeModel = createLanguageModel(activeConfig);
-            return classifySupportTurn(
-              activeModel,
-              conversationHistory,
-              context.payload.content,
-              context.payload.pageContext,
-              { throwOnModelError: true },
-            );
-          },
+        routerDecision = await routeIntent({
+          modelRuntime,
+          conversationHistory,
+          currentMessage: context.payload.content,
+          chatState,
+          pageContext: context.payload.pageContext,
+          projectName: context.project.name,
+          throwOnModelError: true,
         });
       } catch {
-        turnPlan = fallbackClassifySupportTurn(context.payload.content);
+        routerDecision = await routeIntent({
+          modelRuntime,
+          conversationHistory,
+          currentMessage: context.payload.content,
+          chatState,
+          pageContext: context.payload.pageContext,
+          projectName: context.project.name,
+        });
         logWarn(
-          "widget_turn.plan_heuristic_fallback_used",
+          "widget_turn.router_heuristic_fallback_used",
           buildWidgetTurnLogContext(context, turnId),
         );
       }
-      conversationSummary = await summarizeConversation(
-        createLanguageModel(modelRuntime.activeConfig),
-        conversationHistory,
-      );
+
+      // Dedupe clarifying questions: if the router proposes a question we've
+      // already asked, force escalation instead of looping.
+      if (
+        routerDecision.intent === "clarify" &&
+        routerDecision.suggestedClarification &&
+        clarificationWasAskedBefore(
+          chatState,
+          routerDecision.suggestedClarification,
+        )
+      ) {
+        routerDecision = {
+          ...routerDecision,
+          intent: "handoff",
+          escalate: true,
+          escalationReason:
+            routerDecision.escalationReason ?? "duplicate_clarification",
+          suggestedClarification: null,
+          canAnswerDirectly: false,
+          needsRetrieval: false,
+          isRepeatedClarification: true,
+        };
+        logWarn(
+          "widget_turn.duplicate_clarification_escalated",
+          buildWidgetTurnLogContext(context, turnId),
+        );
+      }
+
+      const mappedIntent: SupportIntent =
+        routerDecision.intent === "greeting" ||
+        routerDecision.intent === "resolved" ||
+        routerDecision.intent === "chit_chat" ||
+        routerDecision.intent === "out_of_scope"
+          ? "how_to"
+          : (routerDecision.intent as SupportIntent);
+
+      const turnPlan: SupportTurnPlan = {
+        intent: mappedIntent,
+        summary: routerDecision.summary,
+        retrievalQueries: routerDecision.needsRetrieval
+          ? routerDecision.retrievalQueries
+          : [],
+        broaderQueries: [],
+        followUpQuestion:
+          routerDecision.intent === "clarify"
+            ? routerDecision.suggestedClarification
+            : null,
+      };
+
+      if (routerDecision.needsRetrieval) {
+        try {
+          conversationSummary = await summarizeConversation(
+            createLanguageModel(modelRuntime.activeConfig),
+            conversationHistory,
+          );
+        } catch {
+          conversationSummary = null;
+        }
+      }
+
       turnIntent = turnPlan.intent;
-      executionPath = "agentic_loop";
-      retrievalMode = "bounded_actions";
+      executionPath = routerDecision.escalate ? "router_handoff" : "agentic_loop";
+      retrievalMode = routerDecision.needsRetrieval
+        ? "bounded_actions"
+        : "none";
+
+      logInfo(
+        "widget_turn.router_decided",
+        buildWidgetTurnLogContext(context, turnId, {
+          intent: routerDecision.intent,
+          confidence: routerDecision.confidence,
+          escalate: routerDecision.escalate,
+          needsRetrieval: routerDecision.needsRetrieval,
+          canAnswerDirectly: routerDecision.canAnswerDirectly,
+          retrievalQueryCount: routerDecision.retrievalQueries.length,
+        }),
+      );
+
+      // Track clarify attempts + question history so anti-loop can fire next turn.
+      if (
+        routerDecision.intent === "clarify" &&
+        routerDecision.suggestedClarification
+      ) {
+        const normalized = normalizeClarificationQuestion(
+          routerDecision.suggestedClarification,
+        );
+        const alreadyTracked = chatState.askedClarifications.some(
+          (prior) => normalizeClarificationQuestion(prior) === normalized,
+        );
+        chatState = {
+          ...chatState,
+          state: "clarifying",
+          clarificationAttempts: chatState.clarificationAttempts + 1,
+          askedClarifications: alreadyTracked
+            ? chatState.askedClarifications
+            : [
+                ...chatState.askedClarifications,
+                routerDecision.suggestedClarification,
+              ],
+          lastBotQuestion: routerDecision.suggestedClarification,
+          lastIntent: routerDecision.intent,
+        };
+      } else if (routerDecision.escalate) {
+        chatState = {
+          ...chatState,
+          state: "escalating",
+          pendingHandoffReason:
+            routerDecision.escalationReason ?? routerDecision.intent,
+          lastIntent: routerDecision.intent,
+        };
+      } else {
+        chatState = {
+          ...chatState,
+          state: "answering",
+          lastIntent: routerDecision.intent,
+        };
+      }
       logInfo(
         "widget_turn.plan_computed",
         buildWidgetTurnLogContext(context, turnId, {
@@ -860,17 +1047,42 @@ export async function handleWidgetMessageTurn(
         context.project.id,
       );
 
-      try {
-        await billingService.incrementMessageUsage(context.project.userId, ownerSub);
-      } catch (err) {
-        logError(
-          "widget_turn.message_usage_increment_failed",
-          err,
-          buildWidgetTurnLogContext(context, turnId, {
-            messageId: botMessage.id,
+      emitSseEvent(controller, encoder, {
+        done: true,
+        messageId: botMessage.id,
+        sources:
+          retrieval.sourceReferences.length > 0
+            ? retrieval.sourceReferences
+            : undefined,
+      });
+
+      context.executionCtx.waitUntil(
+        chatService
+          .saveChatState(context.conversationId, context.project.id, chatState)
+          .catch((err) => {
+            logError(
+              "widget_turn.save_chat_state_failed",
+              err,
+              buildWidgetTurnLogContext(context, turnId, {
+                messageId: botMessage.id,
+              }),
+            );
           }),
-        );
-      }
+      );
+
+      context.executionCtx.waitUntil(
+        billingService
+          .incrementMessageUsage(context.project.userId, ownerSub)
+          .catch((err) => {
+            logError(
+              "widget_turn.message_usage_increment_failed",
+              err,
+              buildWidgetTurnLogContext(context, turnId, {
+                messageId: botMessage.id,
+              }),
+            );
+          }),
+      );
 
       if (eventState.hadToolCalls) {
         toolService
@@ -903,15 +1115,6 @@ export async function handleWidgetMessageTurn(
           stepCount: eventState.stepCount,
         }),
       );
-
-      emitSseEvent(controller, encoder, {
-        done: true,
-        messageId: botMessage.id,
-        sources:
-          retrieval.sourceReferences.length > 0
-            ? retrieval.sourceReferences
-            : undefined,
-      });
     } catch (err) {
       logError(
         "widget_turn.failed",

@@ -484,6 +484,13 @@ Rules:
 - Never name a tool that is not in the assigned tools list.
 - Never repeat the same search query or same tool call unless you have a materially different reason.
 - Only use ask_user when critical details are genuinely missing relative to the business context and what would be reasonable to expect.
+
+Anti-loop rules (CRITICAL):
+- If action history already contains one or more ask_user entries, do NOT choose ask_user again. Instead choose offer_handoff, create_inquiry, or compose with best-effort grounding.
+- Never repeat the same ask_user question or a paraphrase of it. Cross-check the action history before picking ask_user.
+- If the visitor already provided an image, URL, page context, or specific feature name, do NOT ask what feature/page they mean. Use what they gave you.
+- If the visitor shows frustration signals ("useless", "not helping", "stop asking", "I already said"), immediately prefer offer_handoff over any further ask_user.
+
 - If no safe action remains, choose stop.`,
   });
 

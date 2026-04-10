@@ -145,8 +145,99 @@ export interface SupportAgentResult {
 }
 
 export interface WidgetStatusPayload {
-  phase: "retrieval" | "tool" | "verify" | "compose";
+  phase: "thinking" | "retrieval" | "tool" | "verify" | "compose";
   message: string;
+}
+
+export type ConversationChatStateName =
+  | "active"
+  | "clarifying"
+  | "answering"
+  | "escalating"
+  | "agent_mode";
+
+export interface ConversationChatState {
+  state: ConversationChatStateName;
+  askedClarifications: string[];
+  clarificationAttempts: number;
+  lastBotQuestion: string | null;
+  frustrationScore: number;
+  lastIntent: string | null;
+  pendingHandoffReason: string | null;
+}
+
+export function createInitialChatState(): ConversationChatState {
+  return {
+    state: "active",
+    askedClarifications: [],
+    clarificationAttempts: 0,
+    lastBotQuestion: null,
+    frustrationScore: 0,
+    lastIntent: null,
+    pendingHandoffReason: null,
+  };
+}
+
+export function parseChatStateFromMetadata(
+  metadata: string | null,
+): ConversationChatState {
+  if (!metadata) return createInitialChatState();
+  try {
+    const parsed = JSON.parse(metadata) as Record<string, unknown>;
+    const chat = parsed.chatState as Partial<ConversationChatState> | undefined;
+    if (!chat || typeof chat !== "object") return createInitialChatState();
+    return {
+      state:
+        typeof chat.state === "string"
+          ? (chat.state as ConversationChatStateName)
+          : "active",
+      askedClarifications: Array.isArray(chat.askedClarifications)
+        ? chat.askedClarifications.filter((q): q is string => typeof q === "string")
+        : [],
+      clarificationAttempts:
+        typeof chat.clarificationAttempts === "number"
+          ? chat.clarificationAttempts
+          : 0,
+      lastBotQuestion:
+        typeof chat.lastBotQuestion === "string" ? chat.lastBotQuestion : null,
+      frustrationScore:
+        typeof chat.frustrationScore === "number" ? chat.frustrationScore : 0,
+      lastIntent:
+        typeof chat.lastIntent === "string" ? chat.lastIntent : null,
+      pendingHandoffReason:
+        typeof chat.pendingHandoffReason === "string"
+          ? chat.pendingHandoffReason
+          : null,
+    };
+  } catch {
+    return createInitialChatState();
+  }
+}
+
+export type RouterIntent =
+  | "greeting"
+  | "how_to"
+  | "troubleshoot"
+  | "lookup"
+  | "policy"
+  | "clarify"
+  | "handoff"
+  | "resolved"
+  | "chit_chat"
+  | "out_of_scope";
+
+export interface RouterDecision {
+  intent: RouterIntent;
+  confidence: "high" | "medium" | "low";
+  needsRetrieval: boolean;
+  retrievalQueries: string[];
+  escalate: boolean;
+  escalationReason: string | null;
+  isRepeatedClarification: boolean;
+  varyClarificationApproach: boolean;
+  suggestedClarification: string | null;
+  canAnswerDirectly: boolean;
+  summary: string;
 }
 
 export interface ChatRuntimeAiConfig {
