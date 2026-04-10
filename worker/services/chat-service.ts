@@ -76,6 +76,41 @@ export class ChatService {
     return { all, open: all - closed, closed };
   }
 
+  async getConversationUpdatesSince(
+    projectId: string,
+    since: Date,
+    limit = 100,
+  ): Promise<
+    Array<{
+      id: string;
+      status: ConversationRow["status"];
+      lastActivityAt: Date;
+      updatedAt: Date;
+      visitorName: string | null;
+      visitorEmail: string | null;
+    }>
+  > {
+    const rows = await this.db
+      .select({
+        id: conversations.id,
+        status: conversations.status,
+        lastActivityAt: conversations.lastActivityAt,
+        updatedAt: conversations.updatedAt,
+        visitorName: conversations.visitorName,
+        visitorEmail: conversations.visitorEmail,
+      })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.projectId, projectId),
+          gt(conversations.lastActivityAt, since),
+        ),
+      )
+      .orderBy(desc(conversations.lastActivityAt))
+      .limit(limit);
+    return rows;
+  }
+
   async createConversation(
     data: Omit<NewConversationRow, "id" | "createdAt" | "updatedAt">,
   ): Promise<ConversationRow> {

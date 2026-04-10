@@ -3631,7 +3631,42 @@ const app = new Hono<HonoAppContext>()
       conversations: convos,
       counts,
       hasMore: convos.length === limit,
+      serverTime: Date.now(),
     });
+  })
+  .get("/api/projects/:id/conversations/updates", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const sinceParam = c.req.query("since");
+    const since = sinceParam ? parseInt(sinceParam, 10) : 0;
+    if (!Number.isFinite(since) || since < 0) {
+      return c.json({ error: "Invalid since parameter" }, 400);
+    }
+
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const serverTime = Date.now();
+
+    // If no since timestamp provided, return empty updates plus current counts.
+    // The client should establish its baseline using the main list query.
+    if (since === 0) {
+      const counts = await chatService.getConversationCounts(project.id);
+      return c.json({ updates: [], counts, serverTime });
+    }
+
+    const [updates, counts] = await Promise.all([
+      chatService.getConversationUpdatesSince(project.id, new Date(since)),
+      chatService.getConversationCounts(project.id),
+    ]);
+
+    return c.json({ updates, counts, serverTime });
   })
   .get("/api/projects/:id/conversations/:convId", async (c) => {
     const user = c.get("user");

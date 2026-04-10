@@ -79,6 +79,29 @@ interface Conversation {
   visitorLastOnlineAt: string | null;
   createdAt: string;
   updatedAt: string;
+  lastActivityAt?: string | null;
+}
+
+interface ConversationsPage {
+  conversations: Conversation[];
+  counts: { all: number; open: number; closed: number };
+  hasMore: boolean;
+  serverTime?: number;
+}
+
+interface ConversationUpdate {
+  id: string;
+  status: string;
+  lastActivityAt: string;
+  updatedAt: string;
+  visitorName: string | null;
+  visitorEmail: string | null;
+}
+
+interface ConversationUpdatesResponse {
+  updates: ConversationUpdate[];
+  counts: { all: number; open: number; closed: number };
+  serverTime: number;
 }
 
 interface ToolExecutionInfo {
@@ -385,7 +408,7 @@ function Conversations() {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const [selectedConvo, setSelectedConvo] = useState<string | null>(
-    searchParams.get("conv"),
+    searchParams.get("id"),
   );
   const [replyText, setReplyText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -394,22 +417,67 @@ function Conversations() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Clean up ?conv= param after consuming it
+  // Sync selectedConvo <-> ?id= URL param so deep links work and shares are stable
   useEffect(() => {
-    if (searchParams.has("conv")) {
-      searchParams.delete("conv");
-      setSearchParams(searchParams, { replace: true });
+    const current = searchParams.get("id");
+    if (selectedConvo && current !== selectedConvo) {
+      const next = new URLSearchParams(searchParams);
+      next.set("id", selectedConvo);
+      setSearchParams(next, { replace: true });
+    } else if (!selectedConvo && current) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("id");
+      setSearchParams(next, { replace: true });
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedConvo]);
 
   const [loadedConversations, setLoadedConversations] = useState<Conversation[]>([]);
   const [hasMore, setHasMore] = useState(true);
+  const [serverTimeBaseline, setServerTimeBaseline] = useState<number | null>(null);
 
-  const { data: convosPage, isLoading, isFetching } = useQuery<{
-    conversations: Conversation[];
-    counts: { all: number; open: number; closed: number };
-    hasMore: boolean;
-  }>({
+  // Per-project client-side last-read tracking for unread badges
+  const lastReadStorageKey = `replymaven:lastRead:${projectId ?? "unknown"}`;
+  const [lastReadMap, setLastReadMap] = useState<Record<string, number>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = window.localStorage.getItem(`replymaven:lastRead:${projectId ?? "unknown"}`);
+      return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  function persistLastReadMap(next: Record<string, number>) {
+    setLastReadMap(next);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(lastReadStorageKey, JSON.stringify(next));
+      } catch {
+        // ignore storage errors (quota, private mode)
+      }
+    }
+  }
+
+  function markConversationRead(convId: string) {
+    const next = { ...lastReadMap, [convId]: Date.now() };
+    persistLastReadMap(next);
+  }
+
+  function getActivityMs(convo: Conversation): number {
+    const raw = convo.lastActivityAt ?? convo.updatedAt;
+    const ms = raw ? new Date(raw).getTime() : 0;
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  function isUnread(convo: Conversation): boolean {
+    if (selectedConvo === convo.id) return false;
+    const activity = getActivityMs(convo);
+    const read = lastReadMap[convo.id] ?? 0;
+    return activity > read;
+  }
+
+  const { data: convosPage, isLoading } = useQuery<ConversationsPage>({
     queryKey: ["conversations", projectId, statusFilter],
     queryFn: async () => {
       const res = await fetch(`/api/projects/${projectId}/conversations?status=${statusFilter}&limit=25&offset=0`);
@@ -417,7 +485,6 @@ function Conversations() {
       return res.json();
     },
     placeholderData: keepPreviousData,
-    refetchInterval: 15_000,
   });
 
   // Sync first page into loaded conversations and handle filter changes
@@ -426,7 +493,88 @@ function Conversations() {
       setLoadedConversations(convosPage.conversations);
       setHasMore(convosPage.hasMore);
     }
+    if (convosPage?.serverTime) {
+      setServerTimeBaseline(convosPage.serverTime);
+    }
   }, [convosPage, statusFilter]);
+
+  // Lightweight polling: only fetch conversation updates (id + activity),
+  // not the entire list. Patch the local list in place to avoid UI jank.
+  const { data: updatesData } = useQuery<ConversationUpdatesResponse>({
+    queryKey: ["conversation-updates", projectId, serverTimeBaseline],
+    queryFn: async () => {
+      const since = serverTimeBaseline ?? 0;
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/updates?since=${since}`,
+      );
+      if (!res.ok) throw new Error("Failed to fetch updates");
+      return res.json();
+    },
+    enabled: !!projectId && serverTimeBaseline != null,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
+  });
+
+  // Merge incoming updates into the local list without any opacity/fetch jank
+  useEffect(() => {
+    if (!updatesData) return;
+
+    // Advance the baseline so the next poll is a small delta
+    if (updatesData.serverTime) {
+      setServerTimeBaseline(updatesData.serverTime);
+    }
+
+    if (updatesData.updates.length === 0) return;
+
+    const updateMap = new Map(updatesData.updates.map((u) => [u.id, u]));
+
+    setLoadedConversations((prev) => {
+      let changed = false;
+      const next = prev.map((c) => {
+        const u = updateMap.get(c.id);
+        if (!u) return c;
+        changed = true;
+        updateMap.delete(c.id);
+        return {
+          ...c,
+          status: u.status,
+          lastActivityAt: u.lastActivityAt,
+          updatedAt: u.updatedAt,
+          visitorName: u.visitorName ?? c.visitorName,
+          visitorEmail: u.visitorEmail ?? c.visitorEmail,
+        };
+      });
+      // Any updates left in the map are for conversations not yet loaded.
+      // We don't have full records for them, so we skip; the next refresh
+      // or load-more will bring them in. Counts already reflect them.
+      if (!changed) return prev;
+      // Re-sort by activity desc so freshly active convos float to the top
+      next.sort((a, b) => getActivityMs(b) - getActivityMs(a));
+      return next;
+    });
+
+    // Also patch the cached query data so status-filter switches stay consistent
+    queryClient.setQueryData<ConversationsPage | undefined>(
+      ["conversations", projectId, statusFilter],
+      (old) => {
+        if (!old) return old;
+        const patched = old.conversations.map((c) => {
+          const u = updateMap.get(c.id) ?? updatesData.updates.find((x) => x.id === c.id);
+          if (!u) return c;
+          return {
+            ...c,
+            status: u.status,
+            lastActivityAt: u.lastActivityAt,
+            updatedAt: u.updatedAt,
+            visitorName: u.visitorName ?? c.visitorName,
+            visitorEmail: u.visitorEmail ?? c.visitorEmail,
+          };
+        });
+        return { ...old, counts: updatesData.counts, conversations: patched };
+      },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [updatesData]);
 
   const loadMoreConversations = useMutation({
     mutationFn: async () => {
@@ -442,7 +590,13 @@ function Conversations() {
     },
   });
 
-  const { data: convoDetail, isPending: isDetailLoading } = useQuery<{
+  const {
+    data: convoDetail,
+    isPending: isDetailLoading,
+    isError: isDetailError,
+    error: detailError,
+    refetch: refetchDetail,
+  } = useQuery<{
     conversation: Conversation;
     messages: Message[];
     botName: string | null;
@@ -454,11 +608,17 @@ function Conversations() {
       const res = await fetch(
         `/api/projects/${projectId}/conversations/${selectedConvo}`,
       );
-      if (!res.ok) throw new Error("Failed to fetch");
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(
+          body || `Failed to load conversation (status ${res.status})`,
+        );
+      }
       return res.json();
     },
     enabled: !!selectedConvo,
     placeholderData: keepPreviousData,
+    retry: 1,
     refetchInterval: (query) => {
       if (!selectedConvo) return false;
       const status = query.state.data?.conversation?.status;
@@ -466,6 +626,20 @@ function Conversations() {
       return 5_000;
     },
   });
+
+  // Mark the open conversation as read whenever its latest activity advances
+  useEffect(() => {
+    if (!selectedConvo) return;
+    const activity = convoDetail?.conversation
+      ? getActivityMs(convoDetail.conversation as Conversation)
+      : Date.now();
+    const current = lastReadMap[selectedConvo] ?? 0;
+    if (activity > current) {
+      const next = { ...lastReadMap, [selectedConvo]: activity };
+      persistLastReadMap(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedConvo, convoDetail?.conversation?.lastActivityAt, convoDetail?.conversation?.updatedAt]);
 
   const sendReply = useMutation({
     mutationFn: async (content: string) => {
@@ -748,11 +922,12 @@ function Conversations() {
         </div>
 
         {/* List */}
-        <div className={cn("flex-1 overflow-y-auto transition-opacity", isFetching && !isLoading && "opacity-60")}>
+        <div className="flex-1 overflow-y-auto">
           {filteredConversations.map((convo) => {
             const meta = parseMeta(convo.metadata);
             const preview = getLastMessagePreview(convo);
             const isSelected = selectedConvo === convo.id;
+            const unread = isUnread(convo);
             const presenceState = getVisitorPresenceState({
               visitorLastSeenAt: convo.visitorLastSeenAt,
               visitorPresence: convo.visitorPresence,
@@ -761,7 +936,10 @@ function Conversations() {
             return (
               <button
                 key={convo.id}
-                onClick={() => setSelectedConvo(convo.id)}
+                onClick={() => {
+                  setSelectedConvo(convo.id);
+                  markConversationRead(convo.id);
+                }}
                 className={cn(
                   "w-full flex items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
                   isSelected && "bg-primary/10",
@@ -786,7 +964,12 @@ function Conversations() {
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-foreground truncate flex items-center gap-1.5">
+                    <span
+                      className={cn(
+                        "text-sm truncate flex items-center gap-1.5 text-foreground",
+                        unread ? "font-bold" : "font-semibold",
+                      )}
+                    >
                       {meta.country && (
                         <span className="text-base leading-none">
                           {countryToFlag(meta.country)}
@@ -794,31 +977,53 @@ function Conversations() {
                       )}
                       {getVisitorDisplayName(convo)}
                     </span>
-                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                    <span
+                      className={cn(
+                        "text-[11px] whitespace-nowrap",
+                        unread
+                          ? "text-primary font-semibold"
+                          : "text-muted-foreground",
+                      )}
+                    >
                       {getConversationActivityLabel(convo)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2 mt-0.5">
-                    <p className="text-xs text-muted-foreground truncate">
+                    <p
+                      className={cn(
+                        "text-xs truncate",
+                        unread
+                          ? "text-foreground font-medium"
+                          : "text-muted-foreground",
+                      )}
+                    >
                       {preview
                         ? preview.slice(0, 50) + (preview.length > 50 ? "..." : "")
                         : convo.visitorEmail ?? meta.city
                           ? [meta.city, meta.country].filter(Boolean).join(", ")
                           : convo.visitorId}
                     </p>
-                    {convo.status !== "closed" && convo.status !== "active" && (
-                      <span
-                        className={cn(
-                          "text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap",
-                          convo.status === "waiting_agent" &&
-                            "bg-status-waiting/10 text-status-waiting",
-                          convo.status === "agent_replied" &&
-                            "bg-status-replied/10 text-status-replied",
-                        )}
-                      >
-                        {getStatusLabel(convo.status)}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {convo.status !== "closed" && convo.status !== "active" && (
+                        <span
+                          className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap",
+                            convo.status === "waiting_agent" &&
+                              "bg-status-waiting/10 text-status-waiting",
+                            convo.status === "agent_replied" &&
+                              "bg-status-replied/10 text-status-replied",
+                          )}
+                        >
+                          {getStatusLabel(convo.status)}
+                        </span>
+                      )}
+                      {unread && (
+                        <span
+                          aria-label="Unread"
+                          className="w-2 h-2 rounded-full bg-primary"
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
               </button>
@@ -885,6 +1090,46 @@ function Conversations() {
               </div>
               <div className="flex justify-start">
                 <div className="h-12 w-44 bg-muted/30 rounded-lg rounded-tl-none animate-pulse" />
+              </div>
+            </div>
+          </div>
+        ) : selectedConvo && isDetailError ? (
+          <div className="flex-1 flex flex-col">
+            <div className="px-4 py-3 flex items-center gap-3 bg-card md:hidden">
+              <button
+                onClick={() => setSelectedConvo(null)}
+                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground shrink-0"
+                aria-label="Back to list"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <span className="text-sm font-semibold text-foreground">
+                Conversation
+              </span>
+            </div>
+            <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+              <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mb-3">
+                <AlertCircle className="w-6 h-6 text-destructive" />
+              </div>
+              <h3 className="text-sm font-semibold text-foreground">
+                Couldn't load conversation
+              </h3>
+              <p className="text-xs text-muted-foreground max-w-xs mt-1">
+                {detailError instanceof Error
+                  ? detailError.message
+                  : "Something went wrong while loading this conversation."}
+              </p>
+              <div className="flex items-center gap-2 mt-4">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSelectedConvo(null)}
+                >
+                  Back to list
+                </Button>
+                <Button size="sm" onClick={() => refetchDetail()}>
+                  Try again
+                </Button>
               </div>
             </div>
           </div>
