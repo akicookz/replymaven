@@ -80,6 +80,27 @@ export class TeamService {
   }
 
   /**
+   * Find a pending invite for the given email across all owners. Used after
+   * sign-in to detect that the user should be routed to accept an invite
+   * instead of the owner onboarding flow.
+   */
+  async getPendingInviteForEmail(
+    email: string,
+  ): Promise<TeamMemberRow | null> {
+    const rows = await this.db
+      .select()
+      .from(teamMembers)
+      .where(
+        and(
+          eq(teamMembers.email, email),
+          eq(teamMembers.status, "pending"),
+        ),
+      )
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  /**
    * For a given userId, check if they are a team member of someone else's account.
    * Returns the team membership if found (ownerId + role), null if the user is an owner.
    */
@@ -184,8 +205,17 @@ export class TeamService {
   async acceptInvite(inviteId: string, userId: string, userEmail: string): Promise<void> {
     const invite = await this.getMemberById(inviteId);
     if (!invite) throw new Error("Invite not found");
-    if (invite.status !== "pending") throw new Error("Invite is no longer valid");
     if (invite.email !== userEmail) throw new Error("This invite is for a different email");
+
+    // Idempotent: if the invite is already accepted by this same user, treat
+    // as success so concurrent accept calls (React StrictMode, retries, etc.)
+    // don't flip the UI into an error state.
+    if (invite.status === "accepted") {
+      if (invite.userId === userId) return;
+      throw new Error("Invite is no longer valid");
+    }
+
+    if (invite.status !== "pending") throw new Error("Invite is no longer valid");
 
     await this.db
       .update(teamMembers)

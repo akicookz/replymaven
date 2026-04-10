@@ -33,8 +33,14 @@ export async function triggerAutoRefinementIfEnabled(options: {
 }): Promise<void> {
   const source = options.source ?? "unknown";
   const projectService = new ProjectService(options.db);
+  const suggestionService = new KnowledgeSuggestionService(options.db);
+
   const settings = await projectService.getSettings(options.projectId);
-  if (!settings?.autoRefinement) {
+  const count = await suggestionService.getPendingCountsByProject(
+    options.projectId,
+  );
+
+  if (!settings?.autoRefinement || count.total >= 10) {
     logInfo("auto_refine.skipped", {
       projectId: options.projectId,
       conversationId: options.conversationId,
@@ -62,7 +68,10 @@ export async function triggerAutoRefinementIfEnabled(options: {
   const enabledGuidelines = await guidelineService.getEnabledByProject(
     options.projectId,
   );
-  const resources = await resourceService.getResourcesByProject(options.projectId);
+  const resources = await resourceService.getResourcesByProject(
+    options.projectId,
+  );
+
   const faqResources = resources
     .filter((resource) => resource.type === "faq")
     .map((resource) => ({
@@ -100,7 +109,6 @@ export async function triggerAutoRefinementIfEnabled(options: {
     )
   ).flat();
 
-  const suggestionService = new KnowledgeSuggestionService(options.db);
   const pendingSuggestions = await suggestionService.getPendingByProject(
     options.projectId,
   );
@@ -145,22 +153,25 @@ export async function triggerAutoRefinementIfEnabled(options: {
         summary: summarizePendingSuggestion(suggestion),
       })),
     });
-    const plans = await aiService.planKnowledgeRefinement(conversationMessages, {
-      companyContext: settings.companyContext,
-      faqCandidates: shortlist.faqCandidates,
-      guidelineCandidates: shortlist.sopCandidates,
-      pdfCandidates: shortlist.pdfCandidates.map((pdf) => ({
-        id: pdf.id,
-        title: pdf.title,
-        excerpt: buildRelevantContentSnippet(
-          pdf.content ?? "",
-          shortlist.conversationQuery,
-          1200,
-        ),
-      })),
-      webpageCandidates: shortlist.webpageCandidates,
-      pendingSuggestions: shortlist.pendingSuggestions,
-    });
+    const plans = await aiService.planKnowledgeRefinement(
+      conversationMessages,
+      {
+        companyContext: settings.companyContext,
+        faqCandidates: shortlist.faqCandidates,
+        guidelineCandidates: shortlist.sopCandidates,
+        pdfCandidates: shortlist.pdfCandidates.map((pdf) => ({
+          id: pdf.id,
+          title: pdf.title,
+          excerpt: buildRelevantContentSnippet(
+            pdf.content ?? "",
+            shortlist.conversationQuery,
+            1200,
+          ),
+        })),
+        webpageCandidates: shortlist.webpageCandidates,
+        pendingSuggestions: shortlist.pendingSuggestions,
+      },
+    );
 
     if (!plans || plans.length === 0) {
       logInfo("auto_refine.skipped", {
@@ -226,7 +237,10 @@ export async function triggerAutoRefinementIfEnabled(options: {
         suggestion: generated.suggestion,
       });
 
-      if (existingFingerprints.has(fingerprint) || batchFingerprints.has(fingerprint)) {
+      if (
+        existingFingerprints.has(fingerprint) ||
+        batchFingerprints.has(fingerprint)
+      ) {
         logInfo("auto_refine.skipped_duplicate", {
           projectId: options.projectId,
           conversationId: options.conversationId,
@@ -386,8 +400,14 @@ function sanitizeGeneratedSuggestion(
     case "add_faq_pair": {
       const pair = suggestion.suggestion.pair as unknown;
       if (!pair || typeof pair !== "object") return null;
-      const question = getTrimmedString(pair as Record<string, unknown>, "question");
-      const answer = getTrimmedString(pair as Record<string, unknown>, "answer");
+      const question = getTrimmedString(
+        pair as Record<string, unknown>,
+        "question",
+      );
+      const answer = getTrimmedString(
+        pair as Record<string, unknown>,
+        "answer",
+      );
       if (!question || !answer) return null;
       return {
         ...suggestion,
@@ -400,12 +420,25 @@ function sanitizeGeneratedSuggestion(
       if (!originalPair || typeof originalPair !== "object") return null;
       if (!refinedPair || typeof refinedPair !== "object") return null;
 
-      const origQuestion = getTrimmedString(originalPair as Record<string, unknown>, "question");
-      const origAnswer = getTrimmedString(originalPair as Record<string, unknown>, "answer");
-      const refQuestion = getTrimmedString(refinedPair as Record<string, unknown>, "question");
-      const refAnswer = getTrimmedString(refinedPair as Record<string, unknown>, "answer");
+      const origQuestion = getTrimmedString(
+        originalPair as Record<string, unknown>,
+        "question",
+      );
+      const origAnswer = getTrimmedString(
+        originalPair as Record<string, unknown>,
+        "answer",
+      );
+      const refQuestion = getTrimmedString(
+        refinedPair as Record<string, unknown>,
+        "question",
+      );
+      const refAnswer = getTrimmedString(
+        refinedPair as Record<string, unknown>,
+        "answer",
+      );
 
-      if (!origQuestion || !origAnswer || !refQuestion || !refAnswer) return null;
+      if (!origQuestion || !origAnswer || !refQuestion || !refAnswer)
+        return null;
       if (origQuestion === refQuestion && origAnswer === refAnswer) return null;
 
       return {
@@ -418,7 +451,10 @@ function sanitizeGeneratedSuggestion(
     }
     case "new_sop": {
       const condition = getTrimmedString(suggestion.suggestion, "condition");
-      const instruction = getTrimmedString(suggestion.suggestion, "instruction");
+      const instruction = getTrimmedString(
+        suggestion.suggestion,
+        "instruction",
+      );
       if (!condition || !instruction) return null;
       return {
         ...suggestion,
@@ -427,7 +463,10 @@ function sanitizeGeneratedSuggestion(
     }
     case "add_sop": {
       const condition = getTrimmedString(suggestion.suggestion, "condition");
-      const instruction = getTrimmedString(suggestion.suggestion, "instruction");
+      const instruction = getTrimmedString(
+        suggestion.suggestion,
+        "instruction",
+      );
       if (!condition || !instruction) return null;
       return {
         ...suggestion,
@@ -435,13 +474,35 @@ function sanitizeGeneratedSuggestion(
       };
     }
     case "refine_sop": {
-      const originalCondition = getTrimmedString(suggestion.suggestion, "originalCondition");
-      const originalInstruction = getTrimmedString(suggestion.suggestion, "originalInstruction");
-      const refinedCondition = getTrimmedString(suggestion.suggestion, "refinedCondition");
-      const refinedInstruction = getTrimmedString(suggestion.suggestion, "refinedInstruction");
+      const originalCondition = getTrimmedString(
+        suggestion.suggestion,
+        "originalCondition",
+      );
+      const originalInstruction = getTrimmedString(
+        suggestion.suggestion,
+        "originalInstruction",
+      );
+      const refinedCondition = getTrimmedString(
+        suggestion.suggestion,
+        "refinedCondition",
+      );
+      const refinedInstruction = getTrimmedString(
+        suggestion.suggestion,
+        "refinedInstruction",
+      );
 
-      if (!originalCondition || !originalInstruction || !refinedCondition || !refinedInstruction) return null;
-      if (originalCondition === refinedCondition && originalInstruction === refinedInstruction) return null;
+      if (
+        !originalCondition ||
+        !originalInstruction ||
+        !refinedCondition ||
+        !refinedInstruction
+      )
+        return null;
+      if (
+        originalCondition === refinedCondition &&
+        originalInstruction === refinedInstruction
+      )
+        return null;
 
       return {
         ...suggestion,
@@ -457,7 +518,10 @@ function sanitizeGeneratedSuggestion(
     case "update_webpage": {
       const mode = getTrimmedString(suggestion.suggestion, "mode");
       if (mode === "append") {
-        const appendText = getTrimmedString(suggestion.suggestion, "appendText");
+        const appendText = getTrimmedString(
+          suggestion.suggestion,
+          "appendText",
+        );
         if (!appendText) return null;
         return {
           ...suggestion,
@@ -469,15 +533,21 @@ function sanitizeGeneratedSuggestion(
         };
       }
       if (mode !== "replace") return null;
-      const currentText = getTrimmedString(suggestion.suggestion, "currentText");
-      const updatedText = getTrimmedString(suggestion.suggestion, "updatedText");
+      const currentText = getTrimmedString(
+        suggestion.suggestion,
+        "currentText",
+      );
+      const updatedText = getTrimmedString(
+        suggestion.suggestion,
+        "updatedText",
+      );
       if (!currentText || !updatedText || currentText === updatedText) {
         return null;
       }
       const content =
         suggestion.type === "update_pdf"
-          ? context.pdfContent ?? ""
-          : context.webpageContent ?? "";
+          ? (context.pdfContent ?? "")
+          : (context.webpageContent ?? "");
       if (content && !content.includes(currentText)) {
         return null;
       }
@@ -508,7 +578,10 @@ function sanitizeFaqPairs(rawPairs: unknown[]): FaqPair[] {
 
   for (const pair of rawPairs) {
     if (!pair || typeof pair !== "object") continue;
-    const question = getTrimmedString(pair as Record<string, unknown>, "question");
+    const question = getTrimmedString(
+      pair as Record<string, unknown>,
+      "question",
+    );
     const answer = getTrimmedString(pair as Record<string, unknown>, "answer");
     if (!question || !answer) continue;
 
@@ -539,26 +612,46 @@ function summarizePendingSuggestion(suggestion: {
       return question ?? suggestion.reasoning ?? "";
     }
     case "refine_faq_pair": {
-      const origPair = payload.originalPair as Record<string, unknown> | undefined;
-      const refPair = payload.refinedPair as Record<string, unknown> | undefined;
-      const origQuestion = origPair ? getTrimmedString(origPair, "question") : null;
-      const refQuestion = refPair ? getTrimmedString(refPair, "question") : null;
-      return `${origQuestion ?? ""} → ${refQuestion ?? ""}`.trim() || suggestion.reasoning || "";
+      const origPair = payload.originalPair as
+        | Record<string, unknown>
+        | undefined;
+      const refPair = payload.refinedPair as
+        | Record<string, unknown>
+        | undefined;
+      const origQuestion = origPair
+        ? getTrimmedString(origPair, "question")
+        : null;
+      const refQuestion = refPair
+        ? getTrimmedString(refPair, "question")
+        : null;
+      return (
+        `${origQuestion ?? ""} → ${refQuestion ?? ""}`.trim() ||
+        suggestion.reasoning ||
+        ""
+      );
     }
     case "new_sop":
       return `${getTrimmedString(payload, "condition") ?? ""} ${getTrimmedString(payload, "instruction") ?? ""}`.trim();
     case "add_sop":
-      return getTrimmedString(payload, "condition") ?? suggestion.reasoning ?? "";
+      return (
+        getTrimmedString(payload, "condition") ?? suggestion.reasoning ?? ""
+      );
     case "refine_sop": {
       const origCondition = getTrimmedString(payload, "originalCondition");
       const refCondition = getTrimmedString(payload, "refinedCondition");
-      return `${origCondition ?? ""} → ${refCondition ?? ""}`.trim() || suggestion.reasoning || "";
+      return (
+        `${origCondition ?? ""} → ${refCondition ?? ""}`.trim() ||
+        suggestion.reasoning ||
+        ""
+      );
     }
     case "update_pdf":
     case "update_webpage":
       return `${getTrimmedString(payload, "appendText") ?? ""} ${getTrimmedString(payload, "updatedText") ?? ""}`.trim();
     case "update_context":
-      return getTrimmedString(payload, "appendText") ?? suggestion.reasoning ?? "";
+      return (
+        getTrimmedString(payload, "appendText") ?? suggestion.reasoning ?? ""
+      );
     default:
       return suggestion.reasoning ?? "";
   }

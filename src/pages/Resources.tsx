@@ -128,14 +128,14 @@ function Resources() {
   const { data: faqSuggestions } = useQuery<KnowledgeSuggestion[]>({
     queryKey: ["knowledge-suggestions-faq", projectId],
     queryFn: async () => {
-      const [newFaqs, updateFaqs, updatePdfs, updateWebpages] =
-        await Promise.all([
-        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=new_faq`).then((r) => r.json()),
-        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=update_faq`).then((r) => r.json()),
-        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=update_pdf`).then((r) => r.json()),
-        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=update_webpage`).then((r) => r.json()),
-        ]);
-      return [...newFaqs, ...updateFaqs, ...updatePdfs, ...updateWebpages];
+      // Just fetch all pending suggestions - no type filter needed
+      const res = await fetch(`/api/projects/${projectId}/knowledge-suggestions`);
+      if (!res.ok) throw new Error("Failed to fetch suggestions");
+      const allSuggestions = await res.json();
+      // Filter to only resource-related suggestions (exclude SOPs and context)
+      return allSuggestions.filter((s: KnowledgeSuggestion) =>
+        ["new_faq", "add_faq_pair", "refine_faq_pair", "update_pdf", "update_webpage"].includes(s.type)
+      );
     },
     staleTime: 60_000,
   });

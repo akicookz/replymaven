@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Outlet, Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Outlet, Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
@@ -50,11 +50,23 @@ function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const params = useParams<{ projectId?: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: session } = useSession();
   const { data: subData } = useSubscription();
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [forceProfileSetup, setForceProfileSetup] = useState(false);
+
+  // Open the profile setup dialog when the URL contains ?setup=profile
+  // (e.g. right after a team member accepts an invite).
+  useEffect(() => {
+    if (searchParams.get("setup") === "profile") {
+      setForceProfileSetup(true);
+      searchParams.delete("setup");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const { data: projects } = useQuery<Project[]>({
     queryKey: ["projects"],
@@ -201,9 +213,16 @@ function Layout() {
   const userName = session?.user?.name ?? "User";
   const userEmail = session?.user?.email ?? "";
   const showProfileSetup =
-    !!profile &&
-    !profile.profileSetupCompletedAt &&
-    !profile.profileSetupDismissedAt;
+    forceProfileSetup ||
+    (!!profile &&
+      !profile.profileSetupCompletedAt &&
+      !profile.profileSetupDismissedAt);
+
+  function handleProfileSetupChange(open: boolean) {
+    if (!open) {
+      setForceProfileSetup(false);
+    }
+  }
 
   return (
     <div className="flex h-screen bg-background">
@@ -462,7 +481,7 @@ function Layout() {
       {/* Profile setup prompt (shows once after onboarding) */}
       <ProfileSetupDialog
         open={showProfileSetup}
-        onOpenChange={() => {}}
+        onOpenChange={handleProfileSetupChange}
       />
     </div>
   );

@@ -1486,7 +1486,7 @@ function FeatureWidgetAndHandoff() {
 
 function Landing() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const [authOpen, setAuthOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<{
     plan: string;
@@ -1503,16 +1503,6 @@ function Landing() {
   const currentInterval = isLoggedIn
     ? (subData?.subscription?.interval as "monthly" | "annual" | undefined) ?? null
     : null;
-
-  // Auto-open auth modal when ?show_auth=true is in the URL
-  useEffect(() => {
-    if (searchParams.get("show_auth") === "true") {
-      setAuthOpen(true);
-      // Clean up the URL param
-      searchParams.delete("show_auth");
-      setSearchParams(searchParams, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
 
   function handlePricingCta(planId: "starter" | "standard" | "business", interval: "monthly" | "annual") {
     // If the user is already logged in, skip the auth modal and go straight to onboarding/checkout
@@ -1537,8 +1527,12 @@ function Landing() {
     navigate("/app/account");
   }
 
+  // Check if there's a callback parameter in the URL for team invites
+  const callbackParam = searchParams.get("callback");
   const authCallbackUrl = selectedPlan
     ? `/app/onboarding?plan=${selectedPlan.plan}&interval=${selectedPlan.interval}`
+    : callbackParam
+    ? callbackParam
     : "/app";
 
   return (

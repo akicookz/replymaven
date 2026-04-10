@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { signIn } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
@@ -10,12 +12,35 @@ import {
 } from "@/components/ui/dialog";
 
 interface AuthModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   callbackURL?: string;
 }
 
 function AuthModal({ open, onOpenChange, callbackURL = "/app" }: AuthModalProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [internalOpen, setInternalOpen] = useState(false);
+
+  // Self-handle ?show_auth=true in the URL so any page that renders <AuthModal>
+  // gets the auto-open behavior for free.
+  useEffect(() => {
+    if (searchParams.get("show_auth") === "true") {
+      setInternalOpen(true);
+      onOpenChange?.(true);
+      searchParams.delete("show_auth");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams, onOpenChange]);
+
+  const isControlled = open !== undefined;
+  const isOpen = isControlled ? open : internalOpen;
+
+  function handleOpenChange(next: boolean) {
+    if (!isControlled) setInternalOpen(next);
+    onOpenChange?.(next);
+  }
+
+
   async function handleSocialLogin(provider: "google" | "github") {
     await signIn.social({
       provider,
@@ -24,7 +49,7 @@ function AuthModal({ open, onOpenChange, callbackURL = "/app" }: AuthModalProps)
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader className="text-left">
           <Logo size="lg" iconOnly className="mb-1" />

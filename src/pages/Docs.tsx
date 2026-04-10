@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import AuthModal from "@/components/AuthModal";
 import { Logo } from "@/components/Logo";
 import {
@@ -311,17 +311,7 @@ function IC({ children }: { children: React.ReactNode }) {
 
 function Docs() {
   const [activeSection, setActiveSection] = useState("installation");
-  const [searchParams, setSearchParams] = useSearchParams();
   const [authOpen, setAuthOpen] = useState(false);
-
-  // Auto-open auth modal when ?show_auth=true is in the URL
-  useEffect(() => {
-    if (searchParams.get("show_auth") === "true") {
-      setAuthOpen(true);
-      searchParams.delete("show_auth");
-      setSearchParams(searchParams, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
 
   // Track scroll position to highlight active nav item
   useEffect(() => {

@@ -228,11 +228,14 @@ function Sops() {
   const { data: sopSuggestions } = useQuery<SopSuggestion[]>({
     queryKey: ["knowledge-suggestions-sop", projectId],
     queryFn: async () => {
-      const [newSops, updateSops] = await Promise.all([
-        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=new_sop`).then((r) => r.json()),
-        fetch(`/api/projects/${projectId}/knowledge-suggestions?type=update_sop`).then((r) => r.json()),
-      ]);
-      return [...newSops, ...updateSops];
+      // Just fetch all pending suggestions - no type filter needed
+      const res = await fetch(`/api/projects/${projectId}/knowledge-suggestions`);
+      if (!res.ok) throw new Error("Failed to fetch suggestions");
+      const allSuggestions = await res.json();
+      // Filter to only SOP-related suggestions
+      return allSuggestions.filter((s: SopSuggestion) =>
+        ["new_sop", "add_sop", "refine_sop"].includes(s.type)
+      );
     },
     staleTime: 60_000,
   });

@@ -7,6 +7,7 @@ import AuthGuard from "./components/AuthGuard";
 import OnboardingGuard from "./components/OnboardingGuard";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Landing from "./pages/Landing";
+import { useSubscription } from "./hooks/use-subscription";
 
 import Dashboard from "./pages/Dashboard";
 import Onboarding from "./pages/Onboarding";
@@ -22,25 +23,59 @@ import Team from "./pages/Team";
 import Billing from "./pages/Billing";
 import AuthCallback from "./pages/AuthCallback";
 import Docs from "./pages/Docs";
+import TeamAccept from "./pages/TeamAccept";
 
 // ─── Redirect /app to first project's dashboard ──────────────────────────────
 function DashboardRedirect() {
-  const { data: projects, isLoading } = useQuery<{ id: string }[]>({
+  const { data: subData, isPending: subPending } = useSubscription();
+  const isTeamMember =
+    subData?.role === "admin" || subData?.role === "member";
+
+  const { data: projects, isPending: projectsPending } = useQuery<
+    { id: string }[]
+  >({
     queryKey: ["projects"],
     queryFn: async () => {
       const res = await fetch("/api/projects");
       if (!res.ok) throw new Error("Failed to fetch projects");
       return res.json();
     },
+    enabled: !subPending,
   });
 
-  if (isLoading) return null;
+  // Wait for both the role and the projects list before deciding where to go.
+  if (subPending || projectsPending || subData === undefined) return null;
 
-  if (!projects || projects.length === 0) {
-    return <Navigate to="/app/onboarding" replace />;
+  if (projects && projects.length > 0) {
+    return <Navigate to={`/app/projects/${projects[0].id}`} replace />;
   }
 
-  return <Navigate to={`/app/projects/${projects[0].id}`} replace />;
+  // Team members must never be redirected to onboarding -- they access the
+  // owner's projects. If the owner genuinely has no projects there's nothing
+  // to show, so render a placeholder rather than bouncing to onboarding.
+  if (isTeamMember) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-background">
+        <div className="text-muted-foreground">
+          No projects available yet. Ask your team owner to create one.
+        </div>
+      </div>
+    );
+  }
+
+  // If the newly-authenticated user has a pending invite for their email,
+  // route them straight to the accept page instead of the owner onboarding
+  // flow. Once accepted, they come back here as a team member.
+  if (subData.pendingInvite) {
+    return (
+      <Navigate
+        to={`/app/team/accept/${subData.pendingInvite.id}`}
+        replace
+      />
+    );
+  }
+
+  return <Navigate to="/app/onboarding" replace />;
 }
 
 function ProjectPageRedirect({
@@ -87,6 +122,16 @@ function App() {
             <AuthGuard>
               <Onboarding />
             </AuthGuard>
+          </ErrorBoundary>
+        }
+      />
+
+      {/* Team invite accept -- standalone page */}
+      <Route
+        path="/app/team/accept/:inviteId"
+        element={
+          <ErrorBoundary>
+            <TeamAccept />
           </ErrorBoundary>
         }
       />

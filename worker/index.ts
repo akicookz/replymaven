@@ -47,7 +47,6 @@ import {
   createConversationSchema,
   sendMessageSchema,
   agentReplySchema,
-
   updateTelegramSchema,
   onboardingStep1Schema,
   onboardingContextSchema,
@@ -146,9 +145,7 @@ function isLikelyEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-function extractInquiryEmail(
-  formData: Record<string, string>,
-): string | null {
+function extractInquiryEmail(formData: Record<string, string>): string | null {
   for (const [key, value] of Object.entries(formData)) {
     if (!/email/i.test(key)) continue;
     if (isLikelyEmail(value)) return value.trim();
@@ -157,9 +154,7 @@ function extractInquiryEmail(
   return null;
 }
 
-function extractInquiryName(
-  formData: Record<string, string>,
-): string | null {
+function extractInquiryName(formData: Record<string, string>): string | null {
   for (const [key, value] of Object.entries(formData)) {
     const normalizedKey = key.trim().toLowerCase();
     if (normalizedKey.includes("company")) continue;
@@ -771,8 +766,10 @@ const app = new Hono<HonoAppContext>()
       visitorId,
     });
 
-    let conversation =
-      await chatService.getActiveConversationByVisitor(project.id, visitorId);
+    let conversation = await chatService.getActiveConversationByVisitor(
+      project.id,
+      visitorId,
+    );
 
     if (conversation) {
       const updatedConversation = await chatService.updateConversation(
@@ -916,17 +913,19 @@ const app = new Hono<HonoAppContext>()
         ok: boolean;
         result?: Array<{
           message?: {
-            chat: { id: number; type: string; title?: string; first_name?: string };
+            chat: {
+              id: number;
+              type: string;
+              title?: string;
+              first_name?: string;
+            };
           };
         }>;
         description?: string;
       }>();
 
       if (!data.ok) {
-        return c.json(
-          { error: data.description ?? "Invalid bot token" },
-          400,
-        );
+        return c.json({ error: data.description ?? "Invalid bot token" }, 400);
       }
 
       const seen = new Set<number>();
@@ -1293,8 +1292,15 @@ const app = new Hono<HonoAppContext>()
       domain = undefined;
     }
 
-    // Check if this user already has a project with this slug (idempotent re-entry)
-    const existing = await projectService.getProjectBySlug(user.id, baseSlug);
+    // Resolve to owner's id so team members see/create projects on the owner's
+    // account, not under their own user id (which would orphan the project).
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+
+    // Check if this owner already has a project with this slug (idempotent re-entry)
+    const existing = await projectService.getProjectBySlug(
+      effectiveUserId,
+      baseSlug,
+    );
     if (existing) {
       // Reuse the existing project — update its settings and return it
       await projectService.updateSettings(existing.id, {
@@ -1306,11 +1312,14 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Generate a unique slug (appends -2, -3, etc. if needed)
-    const slug = await projectService.generateUniqueSlug(user.id, baseSlug);
+    const slug = await projectService.generateUniqueSlug(
+      effectiveUserId,
+      baseSlug,
+    );
 
-    // Create the project
+    // Create the project under the owner's account
     const project = await projectService.createProject({
-      userId: user.id,
+      userId: effectiveUserId,
       name: parsed.data.websiteName,
       slug,
       domain,
@@ -1336,7 +1345,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(
       c.req.param("projectId"),
     );
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -1439,7 +1448,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(
       c.req.param("projectId"),
     );
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -1464,7 +1473,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(
       c.req.param("projectId"),
     );
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -1484,7 +1493,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(
       c.req.param("projectId"),
     );
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -1511,7 +1520,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(
       c.req.param("projectId"),
     );
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -1596,9 +1605,19 @@ const app = new Hono<HonoAppContext>()
 
     const subscription =
       await billingService.getSubscriptionByUserId(effectiveUserId);
-    const currentUsage = await billingService.getUsage(effectiveUserId, subscription);
+    const currentUsage = await billingService.getUsage(
+      effectiveUserId,
+      subscription,
+    );
     const seatCount = await teamService.getSeatCount(effectiveUserId);
     const membership = await teamService.getTeamMembership(user.id);
+
+    // If the user is not already an accepted team member, surface any pending
+    // invite so the client can route them to /app/team/accept/:id after login
+    // instead of the owner onboarding flow.
+    const pendingInvite = membership
+      ? null
+      : await teamService.getPendingInviteForEmail(user.email);
 
     if (!subscription) {
       return c.json({
@@ -1608,7 +1627,8 @@ const app = new Hono<HonoAppContext>()
         usagePeriodEnd: null,
         limits: null,
         seats: { current: 1, max: 0 },
-        role: "owner",
+        role: membership ? membership.role : "owner",
+        pendingInvite: pendingInvite ? { id: pendingInvite.id } : null,
       });
     }
 
@@ -1638,6 +1658,7 @@ const app = new Hono<HonoAppContext>()
         max: limits.maxSeats,
       },
       role: membership ? membership.role : "owner",
+      pendingInvite: pendingInvite ? { id: pendingInvite.id } : null,
     });
   })
 
@@ -1705,8 +1726,10 @@ const app = new Hono<HonoAppContext>()
     const updates: Record<string, unknown> = {};
     updates.profileSetupCompletedAt = new Date();
     if (parsed.data.name !== undefined) updates.name = parsed.data.name;
-    if (parsed.data.workTitle !== undefined) updates.workTitle = parsed.data.workTitle;
-    if (parsed.data.profilePicture !== undefined) updates.profilePicture = parsed.data.profilePicture;
+    if (parsed.data.workTitle !== undefined)
+      updates.workTitle = parsed.data.workTitle;
+    if (parsed.data.profilePicture !== undefined)
+      updates.profilePicture = parsed.data.profilePicture;
 
     if (Object.keys(updates).length > 0) {
       await db.update(users).set(updates).where(eq(users.id, user.id));
@@ -1852,7 +1875,10 @@ const app = new Hono<HonoAppContext>()
     const normalizedEmail = newEmail.toLowerCase();
 
     if (normalizedEmail === user.email.toLowerCase()) {
-      return c.json({ error: "New email is the same as your current email" }, 400);
+      return c.json(
+        { error: "New email is the same as your current email" },
+        400,
+      );
     }
 
     const db = c.get("db");
@@ -1868,7 +1894,9 @@ const app = new Hono<HonoAppContext>()
     // Generate OTP via Better Auth emailOTP plugin (no user-existence check)
     const auth = createAuth(c.env, c.req.raw.cf as CfProperties);
     const api = auth.api as typeof auth.api & {
-      createVerificationOTP: (opts: { body: { email: string; type: string } }) => Promise<string>;
+      createVerificationOTP: (opts: {
+        body: { email: string; type: string };
+      }) => Promise<string>;
     };
     const otp = await api.createVerificationOTP({
       body: { email: normalizedEmail, type: "email-verification" },
@@ -1907,7 +1935,9 @@ const app = new Hono<HonoAppContext>()
     const { otp } = parsed.data;
 
     // Read pending intent from KV
-    const intentRaw = await c.env.CONVERSATIONS_CACHE.get(`email-change:${user.id}`);
+    const intentRaw = await c.env.CONVERSATIONS_CACHE.get(
+      `email-change:${user.id}`,
+    );
     if (!intentRaw) {
       return c.json({ error: "No pending email change or it expired" }, 400);
     }
@@ -1921,7 +1951,10 @@ const app = new Hono<HonoAppContext>()
     if (intent.attempts >= 5) {
       await c.env.CONVERSATIONS_CACHE.delete(`email-change:${user.id}`);
       return c.json(
-        { error: "Too many incorrect attempts. Please request a new code.", code: "too_many_attempts" },
+        {
+          error: "Too many incorrect attempts. Please request a new code.",
+          code: "too_many_attempts",
+        },
         403,
       );
     }
@@ -1937,9 +1970,10 @@ const app = new Hono<HonoAppContext>()
       const remaining = 5 - intent.attempts;
       return c.json(
         {
-          error: remaining > 0
-            ? `Incorrect code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`
-            : "Too many incorrect attempts. Please request a new code.",
+          error:
+            remaining > 0
+              ? `Incorrect code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`
+              : "Too many incorrect attempts. Please request a new code.",
           code: remaining > 0 ? "invalid_otp" : "too_many_attempts",
         },
         remaining > 0 ? 400 : 403,
@@ -2021,7 +2055,34 @@ const app = new Hono<HonoAppContext>()
         parsed.data.email,
         parsed.data.role,
       );
-      return c.json(member);
+
+      // Send invitation email
+      let emailSent = true;
+      let emailError: string | undefined;
+      try {
+        const emailService = new EmailService(c.env.RESEND_API_KEY);
+        const acceptUrl = `https://replymaven.com/app/team/accept/${member.id}`;
+        await emailService.sendTeamInviteEmail(
+          parsed.data.email,
+          user.name ?? "A team member",
+          user.email,
+          parsed.data.role,
+          acceptUrl,
+        );
+      } catch (emailErr) {
+        console.error("Failed to send team invite email:", emailErr);
+        emailSent = false;
+        emailError =
+          emailErr instanceof Error
+            ? emailErr.message
+            : "Failed to send invitation email";
+      }
+
+      return c.json({
+        ...member,
+        emailSent,
+        emailError,
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to invite member";
@@ -2116,10 +2177,11 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
     const db = c.get("db");
     const projectId = c.req.query("projectId");
     const dashboardService = new DashboardService(db);
-    const stats = await dashboardService.getStats(user.id, projectId);
+    const stats = await dashboardService.getStats(effectiveUserId, projectId);
     return c.json(stats);
   })
 
@@ -2128,19 +2190,21 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
     const db = c.get("db");
     const service = new ProjectService(db);
-    const projects = await service.getProjectsByUserId(user.id);
+    const projects = await service.getProjectsByUserId(effectiveUserId);
     return c.json(projects);
   })
   .get("/api/projects/:id", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
     const db = c.get("db");
     const service = new ProjectService(db);
     const project = await service.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== effectiveUserId) {
       return c.json({ error: "Not found" }, 404);
     }
     return c.json(project);
@@ -2171,9 +2235,9 @@ const app = new Hono<HonoAppContext>()
 
     const service = new ProjectService(db);
     const baseSlug = slugify(parsed.data.name);
-    const slug = await service.generateUniqueSlug(user.id, baseSlug);
+    const slug = await service.generateUniqueSlug(effectiveUserId, baseSlug);
     const project = await service.createProject({
-      userId: user.id,
+      userId: effectiveUserId,
       name: parsed.data.name,
       slug,
       domain: parsed.data.domain,
@@ -2189,11 +2253,12 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(updateProjectSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
     const db = c.get("db");
     const service = new ProjectService(db);
     const project = await service.updateProject(
       c.req.param("id"),
-      user.id,
+      effectiveUserId,
       parsed.data,
     );
     if (!project) return c.json({ error: "Not found" }, 404);
@@ -2203,9 +2268,13 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
     const db = c.get("db");
     const service = new ProjectService(db);
-    const deleted = await service.deleteProject(c.req.param("id"), user.id);
+    const deleted = await service.deleteProject(
+      c.req.param("id"),
+      effectiveUserId,
+    );
     if (!deleted) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
   })
@@ -2218,7 +2287,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2259,7 +2328,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2276,7 +2345,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2352,7 +2421,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2383,7 +2452,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2403,7 +2472,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2422,7 +2491,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2467,7 +2536,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2487,7 +2556,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2508,7 +2577,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2562,7 +2631,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2638,7 +2707,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2719,7 +2788,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2739,7 +2808,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2824,7 +2893,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2850,7 +2919,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2880,7 +2949,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2902,14 +2971,12 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
     const widgetService = new WidgetService(db);
-    const submissions = await widgetService.getInquiries(
-      project.id,
-    );
+    const submissions = await widgetService.getInquiries(project.id);
     return c.json(
       submissions.map((s) => ({
         ...s,
@@ -2931,7 +2998,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2955,7 +3022,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2977,7 +3044,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -2994,7 +3061,10 @@ const app = new Hono<HonoAppContext>()
       geminiApiKey: c.env.GEMINI_API_KEY,
       openaiApiKey: c.env.OPENAI_API_KEY,
     });
-    const inquiryData = JSON.parse(inquiry.data || "{}") as Record<string, string>;
+    const inquiryData = JSON.parse(inquiry.data || "{}") as Record<
+      string,
+      string
+    >;
 
     // Fetch user's work title for email signature
     const [userProfile] = await db
@@ -3026,7 +3096,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3041,7 +3111,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3176,7 +3246,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3195,7 +3265,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3326,7 +3396,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3345,7 +3415,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3395,7 +3465,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3423,7 +3493,7 @@ const app = new Hono<HonoAppContext>()
       const db = c.get("db");
       const projectService = new ProjectService(db);
       const project = await projectService.getProjectById(c.req.param("id"));
-      if (!project || project.userId !== user.id) {
+      if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
         return c.json({ error: "Not found" }, 404);
       }
 
@@ -3444,7 +3514,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3471,7 +3541,7 @@ const app = new Hono<HonoAppContext>()
       const db = c.get("db");
       const projectService = new ProjectService(db);
       const project = await projectService.getProjectById(c.req.param("id"));
-      if (!project || project.userId !== user.id) {
+      if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
         return c.json({ error: "Not found" }, 404);
       }
 
@@ -3494,7 +3564,7 @@ const app = new Hono<HonoAppContext>()
       const db = c.get("db");
       const projectService = new ProjectService(db);
       const project = await projectService.getProjectById(c.req.param("id"));
-      if (!project || project.userId !== user.id) {
+      if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
         return c.json({ error: "Not found" }, 404);
       }
 
@@ -3521,29 +3591,47 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
-    const statusFilter = (c.req.query("status") as "open" | "closed" | "all") ?? "all";
-    const limit = Math.min(parseInt(c.req.query("limit") ?? "25", 10) || 25, 100);
+    const statusFilter =
+      (c.req.query("status") as "open" | "closed" | "all") ?? "all";
+    const limit = Math.min(
+      parseInt(c.req.query("limit") ?? "25", 10) || 25,
+      100,
+    );
     const offset = parseInt(c.req.query("offset") ?? "0", 10) || 0;
     const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
 
     // Lazy auto-close stale conversations (single query, no double fetch)
     const settings = await projectService.getSettings(project.id);
-    let convos = await chatService.getConversationsByProject(project.id, limit, offset, statusFilter);
+    let convos = await chatService.getConversationsByProject(
+      project.id,
+      limit,
+      offset,
+      statusFilter,
+    );
     if (settings?.autoCloseMinutes && statusFilter !== "closed") {
-      const closedIds = await chatService.checkAndCloseStaleForProject(convos, settings.autoCloseMinutes);
+      const closedIds = await chatService.checkAndCloseStaleForProject(
+        convos,
+        settings.autoCloseMinutes,
+      );
       if (closedIds.length > 0) {
-        convos = convos.map((c) => closedIds.includes(c.id) ? { ...c, status: "closed" as const } : c);
+        convos = convos.map((c) =>
+          closedIds.includes(c.id) ? { ...c, status: "closed" as const } : c,
+        );
         if (statusFilter === "open") {
           convos = convos.filter((c) => c.status !== "closed");
         }
       }
     }
     const counts = await chatService.getConversationCounts(project.id);
-    return c.json({ conversations: convos, counts, hasMore: convos.length === limit });
+    return c.json({
+      conversations: convos,
+      counts,
+      hasMore: convos.length === limit,
+    });
   })
   .get("/api/projects/:id/conversations/:convId", async (c) => {
     const user = c.get("user");
@@ -3552,7 +3640,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3594,9 +3682,14 @@ const app = new Hono<HonoAppContext>()
 
     const toolService = new ToolService(db);
     // Try KV cache first for messages, fall back to D1
-    const cachedMsgs = await chatService.getFromCache(conversation.id, project.id);
+    const cachedMsgs = await chatService.getFromCache(
+      conversation.id,
+      project.id,
+    );
     const [msgs, toolExecs] = await Promise.all([
-      cachedMsgs ? Promise.resolve(cachedMsgs) : chatService.getMessages(conversation.id),
+      cachedMsgs
+        ? Promise.resolve(cachedMsgs)
+        : chatService.getMessages(conversation.id),
       toolService.getExecutionsByConversation(conversation.id),
     ]);
 
@@ -3611,19 +3704,20 @@ const app = new Hono<HonoAppContext>()
 
     const messagesWithTools = msgs.map((msg) => ({
       ...msg,
-      toolExecutions: execsByMessageId.get(msg.id)?.map((ex) => ({
-        id: ex.id,
-        toolName: ex.toolName,
-        displayName: ex.displayName,
-        method: ex.method,
-        input: ex.input ? JSON.parse(ex.input) : null,
-        output: ex.output ? JSON.parse(ex.output) : null,
-        status: ex.status,
-        httpStatus: ex.httpStatus,
-        duration: ex.duration,
-        errorMessage: ex.errorMessage,
-        createdAt: ex.createdAt,
-      })) ?? [],
+      toolExecutions:
+        execsByMessageId.get(msg.id)?.map((ex) => ({
+          id: ex.id,
+          toolName: ex.toolName,
+          displayName: ex.displayName,
+          method: ex.method,
+          input: ex.input ? JSON.parse(ex.input) : null,
+          output: ex.output ? JSON.parse(ex.output) : null,
+          status: ex.status,
+          httpStatus: ex.httpStatus,
+          duration: ex.duration,
+          errorMessage: ex.errorMessage,
+          createdAt: ex.createdAt,
+        })) ?? [],
     }));
 
     // Fetch associated inquiry if one was created from this conversation
@@ -3675,7 +3769,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3697,7 +3791,8 @@ const app = new Hono<HonoAppContext>()
       .from(users)
       .where(eq(users.id, user.id))
       .limit(1);
-    const avatar = userProfile[0]?.profilePicture ?? userProfile[0]?.image ?? null;
+    const avatar =
+      userProfile[0]?.profilePicture ?? userProfile[0]?.image ?? null;
 
     // Reopen closed conversations before adding the message
     if (conversation.status === "closed") {
@@ -3731,7 +3826,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3789,21 +3884,29 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
-    const typeFilter = c.req.query("type") as
-      | "new_faq"
-      | "add_faq_pair"
-      | "refine_faq_pair"
-      | "new_sop"
-      | "add_sop"
-      | "refine_sop"
-      | "update_pdf"
-      | "update_webpage"
-      | "update_context"
+    // Support both single type and multiple types (comma-separated)
+    const typeParam = c.req.query("type");
+    let typeFilter:
+      | Array<
+          | "new_faq"
+          | "add_faq_pair"
+          | "refine_faq_pair"
+          | "new_sop"
+          | "add_sop"
+          | "refine_sop"
+          | "update_pdf"
+          | "update_webpage"
+          | "update_context"
+        >
       | undefined;
+
+    if (typeParam) {
+      typeFilter = typeParam.split(",") as typeof typeFilter;
+    }
 
     const service = new KnowledgeSuggestionService(db);
     const suggestions = await service.getPendingByProject(
@@ -3819,7 +3922,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3834,7 +3937,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3846,7 +3949,10 @@ const app = new Hono<HonoAppContext>()
         c.env.UPLOADS,
       );
       if (!result.success) {
-        return c.json({ error: result.error }, result.error === "Not found" ? 404 : 400);
+        return c.json(
+          { error: result.error },
+          result.error === "Not found" ? 404 : 400,
+        );
       }
       logInfo("knowledge_suggestion.approved", {
         projectId: project.id,
@@ -3868,7 +3974,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3901,13 +4007,17 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
     const service = new KnowledgeSuggestionService(db);
     try {
-      const result = await service.bulkApprove(body.ids, project.id, c.env.UPLOADS);
+      const result = await service.bulkApprove(
+        body.ids,
+        project.id,
+        c.env.UPLOADS,
+      );
       logInfo("knowledge_suggestion.bulk_approved", {
         projectId: project.id,
         succeeded: result.succeeded.length,
@@ -3934,7 +4044,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3964,7 +4074,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3983,7 +4093,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -3993,7 +4103,10 @@ const app = new Hono<HonoAppContext>()
     const count = await service.countByProject(project.id);
     if (count >= 50) {
       return c.json(
-        { error: "Maximum 50 guidelines per project. Delete an existing one first." },
+        {
+          error:
+            "Maximum 50 guidelines per project. Delete an existing one first.",
+        },
         400,
       );
     }
@@ -4018,7 +4131,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -4039,7 +4152,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -4058,7 +4171,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -4091,7 +4204,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 
@@ -4116,7 +4229,7 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== user.id) {
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
       return c.json({ error: "Not found" }, 404);
     }
 

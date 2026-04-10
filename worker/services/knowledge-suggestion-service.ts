@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import {
   knowledgeSuggestions,
   type KnowledgeSuggestionRow,
@@ -127,9 +127,11 @@ export class KnowledgeSuggestionService {
 
   async getPendingByProject(
     projectId: string,
-    typeFilter?: SuggestionType,
+    typeFilter?: SuggestionType | SuggestionType[],
   ): Promise<KnowledgeSuggestionRow[]> {
     if (typeFilter) {
+      // Handle both single type and array of types
+      const types = Array.isArray(typeFilter) ? typeFilter : [typeFilter];
       return this.db
         .select()
         .from(knowledgeSuggestions)
@@ -137,7 +139,7 @@ export class KnowledgeSuggestionService {
           and(
             eq(knowledgeSuggestions.projectId, projectId),
             eq(knowledgeSuggestions.status, "pending"),
-            eq(knowledgeSuggestions.type, typeFilter),
+            inArray(knowledgeSuggestions.type, types),
           ),
         );
     }

@@ -23,6 +23,7 @@ interface SubscriptionData {
     max: number;
   };
   role: "owner" | "admin" | "member";
+  pendingInvite: { id: string } | null;
 }
 
 export function useSubscription() {

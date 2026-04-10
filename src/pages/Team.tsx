@@ -11,6 +11,8 @@ import {
   Trash2,
   Clock,
   CheckCircle2,
+  Link,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +37,8 @@ import { MobileMenuButton } from "@/components/PageHeader";
 function InviteForm({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"admin" | "member">("member");
+  const [inviteData, setInviteData] = useState<{ id: string; emailSent: boolean; emailError?: string } | null>(null);
+  const [copied, setCopied] = useState(false);
   const queryClient = useQueryClient();
 
   const inviteMutation = useMutation({
@@ -50,11 +54,75 @@ function InviteForm({ onClose }: { onClose: () => void }) {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["team"] });
-      onClose();
+      setInviteData(data);
     },
   });
+
+  const copyInviteLink = () => {
+    if (!inviteData) return;
+    const inviteUrl = `${window.location.origin}/app/team/accept/${inviteData.id}`;
+    navigator.clipboard.writeText(inviteUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  if (inviteData) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl bg-green-500/10 border border-green-500/20 p-4">
+          <p className="text-sm font-medium text-green-600 mb-1">Invitation sent!</p>
+          <p className="text-sm text-muted-foreground">
+            {inviteData.emailSent
+              ? `We've sent an invitation email to ${email}.`
+              : `The invitation was created but the email couldn't be sent. Share the link below:`}
+          </p>
+          {(!inviteData.emailSent || inviteData.emailError) && (
+            <p className="text-xs text-yellow-600 mt-2">
+              {inviteData.emailError || "Email might have landed in spam. Share the invite link manually."}
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">Invite Link</label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={`${window.location.origin}/app/team/accept/${inviteData.id}`}
+              readOnly
+              className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-muted/50 text-foreground text-sm font-mono"
+            />
+            <Button
+              variant="outline"
+              onClick={copyInviteLink}
+              className="shrink-0"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4 mr-2" />
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <Link className="w-4 h-4 mr-2" />
+                  Copy
+                </>
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            This link will remain valid for 7 days.
+          </p>
+        </div>
+
+        <Button onClick={onClose} className="w-full">
+          Done
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -134,6 +202,7 @@ function MemberRow({
   isOwnerView: boolean;
 }) {
   const queryClient = useQueryClient();
+  const [copied, setCopied] = useState(false);
 
   const removeMutation = useMutation({
     mutationFn: async () => {
@@ -160,6 +229,13 @@ function MemberRow({
   });
 
   const isPending = member.status === "pending";
+
+  const copyInviteLink = () => {
+    const inviteUrl = `${window.location.origin}/app/team/accept/${member.id}`;
+    navigator.clipboard.writeText(inviteUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div className="flex items-center gap-4 px-4 py-3 rounded-xl border border-border">
@@ -194,37 +270,67 @@ function MemberRow({
         </div>
       </div>
 
-      {isOwnerView && (
-        <Popover>
-          <PopoverTrigger asChild>
-            <button className="p-1.5 rounded-md hover:bg-accent text-muted-foreground transition-colors">
-              <MoreHorizontal className="w-4 h-4" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-48 p-1">
-            <button
-              onClick={() =>
-                roleMutation.mutate(
-                  member.role === "admin" ? "member" : "admin",
-                )
-              }
-              disabled={roleMutation.isPending}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-            >
-              <Shield className="w-4 h-4" />
-              {member.role === "admin" ? "Demote to Member" : "Promote to Admin"}
-            </button>
-            <button
-              onClick={() => removeMutation.mutate()}
-              disabled={removeMutation.isPending}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-destructive hover:bg-destructive/10 transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              Remove
-            </button>
-          </PopoverContent>
-        </Popover>
-      )}
+      <div className="flex items-center gap-2">
+        {isPending && (
+          <button
+            onClick={copyInviteLink}
+            className="p-1.5 rounded-md hover:bg-accent text-muted-foreground transition-colors"
+            title="Copy invite link"
+          >
+            {copied ? (
+              <Check className="w-4 h-4 text-green-600" />
+            ) : (
+              <Link className="w-4 h-4" />
+            )}
+          </button>
+        )}
+
+        {isOwnerView && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button className="p-1.5 rounded-md hover:bg-accent text-muted-foreground transition-colors">
+                <MoreHorizontal className="w-4 h-4" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-48 p-1">
+              {isPending && (
+                <>
+                  <button
+                    onClick={copyInviteLink}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <Link className="w-4 h-4" />
+                    Copy Invite Link
+                  </button>
+                  <div className="h-px bg-border my-1" />
+                </>
+              )}
+              {!isPending && (
+                <button
+                  onClick={() =>
+                    roleMutation.mutate(
+                      member.role === "admin" ? "member" : "admin",
+                    )
+                  }
+                  disabled={roleMutation.isPending}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  <Shield className="w-4 h-4" />
+                  {member.role === "admin" ? "Demote to Member" : "Promote to Admin"}
+                </button>
+              )}
+              <button
+                onClick={() => removeMutation.mutate()}
+                disabled={removeMutation.isPending}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-destructive hover:bg-destructive/10 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                {isPending ? "Cancel Invite" : "Remove"}
+              </button>
+            </PopoverContent>
+          </Popover>
+        )}
+      </div>
     </div>
   );
 }
