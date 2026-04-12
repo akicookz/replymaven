@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { Toaster } from "sonner";
 
 import Layout from "./components/Layout";
 import AccountLayout from "./components/AccountLayout";
@@ -105,6 +106,13 @@ function ProjectPageRedirect({
 
 function App() {
   return (
+    <>
+    <Toaster
+      position="bottom-right"
+      toastOptions={{
+        className: "!bg-card !text-foreground !border-border",
+      }}
+    />
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/docs" element={<Docs />} />
@@ -229,6 +237,7 @@ function App() {
         />
       </Route>
     </Routes>
+    </>
   );
 }
 

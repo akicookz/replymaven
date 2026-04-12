@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { AlertCircle, ArrowLeft, Check, ExternalLink, Lightbulb, RefreshCw, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -115,7 +116,9 @@ function CompanyInfo() {
       queryClient.invalidateQueries({
         queryKey: ["project-settings", projectId],
       });
+      toast.success("Settings saved");
     },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const [lastContextRefreshSource, setLastContextRefreshSource] = useState<
@@ -150,7 +153,9 @@ function CompanyInfo() {
       queryClient.invalidateQueries({
         queryKey: ["project-settings", projectId],
       });
+      toast.success("Context refreshed");
     },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   // ─── Context Suggestions ──────────────────────────────────────────────────
@@ -187,7 +192,9 @@ function CompanyInfo() {
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-context", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-settings", projectId] });
+      toast.success("Suggestion approved");
     },
+    onError: () => toast.error("Failed to approve suggestion"),
   });
 
   const rejectContext = useMutation({
@@ -201,7 +208,9 @@ function CompanyInfo() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-context", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+      toast.success("Suggestion dismissed");
     },
+    onError: () => toast.error("Failed to dismiss suggestion"),
   });
 
   const bulkApproveContext = useMutation({
@@ -222,7 +231,9 @@ function CompanyInfo() {
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-context", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
       queryClient.invalidateQueries({ queryKey: ["project-settings", projectId] });
+      toast.success("Suggestions approved");
     },
+    onError: () => toast.error("Failed to approve suggestions"),
   });
 
   const bulkRejectContext = useMutation({
@@ -242,7 +253,9 @@ function CompanyInfo() {
       setSelectedSuggestions(new Set());
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-context", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+      toast.success("Suggestions dismissed");
     },
+    onError: () => toast.error("Failed to dismiss suggestions"),
   });
 
   function toggleSuggestionSelection(id: string) {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   Inbox,
   AlertCircle,
@@ -233,7 +234,9 @@ function Inquiries() {
       if (selectedInquiry?.id === updated.id) {
         setSelectedInquiry(updated);
       }
+      toast.success(`Marked as ${updated.status}`);
     },
+    onError: () => toast.error("Failed to update status"),
   });
 
   const composeMutation = useMutation({
@@ -251,6 +254,7 @@ function Inquiries() {
       setEditBody(data.body);
       setView("compose");
     },
+    onError: () => toast.error("Failed to compose reply"),
   });
 
   const bulkStatusMutation = useMutation({
@@ -279,7 +283,9 @@ function Inquiries() {
           old?.map((s) => (ids.includes(s.id) ? { ...s, status } : s)) ?? [],
       );
       setSelectedIds(new Set());
+      toast.success(`${ids.length} item${ids.length > 1 ? "s" : ""} marked as ${status}`);
     },
+    onError: () => toast.error("Failed to update"),
   });
 
   // ─── Handlers ───────────────────────────────────────────────────────────────

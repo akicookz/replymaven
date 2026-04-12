@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   AlertCircle,
   Building2,
@@ -152,7 +153,9 @@ function Resources() {
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
       queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
+      toast.success("Suggestion approved");
     },
+    onError: () => toast.error("Failed to approve suggestion"),
   });
 
   const rejectSuggestion = useMutation({
@@ -166,7 +169,9 @@ function Resources() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
+      toast.success("Suggestion dismissed");
     },
+    onError: () => toast.error("Failed to dismiss suggestion"),
   });
 
   const bulkApproveSuggestions = useMutation({
@@ -187,7 +192,9 @@ function Resources() {
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
       queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
+      toast.success("Suggestions approved");
     },
+    onError: () => toast.error("Failed to approve suggestions"),
   });
 
   const bulkRejectSuggestions = useMutation({
@@ -207,7 +214,9 @@ function Resources() {
       setSelectedSuggestions(new Set());
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
+      toast.success("Suggestions dismissed");
     },
+    onError: () => toast.error("Failed to dismiss suggestions"),
   });
 
   const resourceSuggestionCount =
@@ -301,7 +310,9 @@ function Resources() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
+      toast.success("Resource deleted");
     },
+    onError: () => toast.error("Failed to delete resource"),
   });
 
   const reindex = useMutation({
@@ -314,7 +325,9 @@ function Resources() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
+      toast.success("Reindexing started");
     },
+    onError: () => toast.error("Failed to reindex"),
   });
 
   const typeIcons = {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   ArrowLeft,
   Check,
@@ -93,6 +94,7 @@ function Sops() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["guidelines", projectId] });
       resetForm();
+      toast.success("Guideline created");
     },
     onError: (err: Error) => {
       setFormError(err.message);
@@ -128,6 +130,7 @@ function Sops() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["guidelines", projectId] });
       resetForm();
+      toast.success("Guideline updated");
     },
     onError: (err: Error) => {
       setFormError(err.message);
@@ -145,7 +148,9 @@ function Sops() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["guidelines", projectId] });
       if (expandedId) setExpandedId(null);
+      toast.success("Guideline deleted");
     },
+    onError: () => toast.error("Failed to delete guideline"),
   });
 
   const toggleGuideline = useMutation({
@@ -170,6 +175,7 @@ function Sops() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["guidelines", projectId] });
     },
+    onError: () => toast.error("Failed to toggle guideline"),
   });
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -252,7 +258,9 @@ function Sops() {
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-sop", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
       queryClient.invalidateQueries({ queryKey: ["guidelines", projectId] });
+      toast.success("Suggestion approved");
     },
+    onError: () => toast.error("Failed to approve suggestion"),
   });
 
   const rejectSop = useMutation({
@@ -266,7 +274,9 @@ function Sops() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-sop", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+      toast.success("Suggestion dismissed");
     },
+    onError: () => toast.error("Failed to dismiss suggestion"),
   });
 
   const bulkApproveSops = useMutation({
@@ -287,7 +297,9 @@ function Sops() {
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-sop", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
       queryClient.invalidateQueries({ queryKey: ["guidelines", projectId] });
+      toast.success("Suggestions approved");
     },
+    onError: () => toast.error("Failed to approve suggestions"),
   });
 
   const bulkRejectSops = useMutation({
@@ -307,7 +319,9 @@ function Sops() {
       setSelectedSuggestions(new Set());
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-sop", projectId] });
       queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
+      toast.success("Suggestions dismissed");
     },
+    onError: () => toast.error("Failed to dismiss suggestions"),
   });
 
   function toggleSuggestionSelection(id: string) {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   MessageSquare,
   Send,
@@ -706,6 +707,7 @@ function Conversations() {
           context.previous,
         );
       }
+      toast.error("Failed to send reply");
     },
     onSettled: () => {
       queryClient.invalidateQueries({
@@ -746,7 +748,9 @@ function Conversations() {
           };
         },
       );
+      toast.success("Email sent");
     },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const closeConversation = useMutation({
@@ -811,6 +815,7 @@ function Conversations() {
       if (context?.previousList) {
         queryClient.setQueryData(["conversations", projectId, statusFilter], context.previousList);
       }
+      toast.error("Failed to close conversation");
     },
     onSettled: (_data, _error, { convId }) => {
       queryClient.invalidateQueries({

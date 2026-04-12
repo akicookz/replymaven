@@ -431,9 +431,8 @@ export class KnowledgeSuggestionService {
       throw new Error("Target FAQ resource not found");
     }
 
-    // Parse existing FAQ content
-    const existingContent = resource.content ? JSON.parse(resource.content) : { pairs: [] };
-    const updatedPairs = [...existingContent.pairs, payload.pair];
+    const existingPairs = resource.content ? JSON.parse(resource.content) : [];
+    const updatedPairs = [...(Array.isArray(existingPairs) ? existingPairs : []), payload.pair];
 
     // Update with the new pair added
     await resourceService.updateFaqResource(
@@ -459,9 +458,8 @@ export class KnowledgeSuggestionService {
       throw new Error("Target FAQ resource not found");
     }
 
-    // Parse existing FAQ content
-    const existingContent = resource.content ? JSON.parse(resource.content) : { pairs: [] };
-    const updatedPairs = [...existingContent.pairs];
+    const existingPairs = resource.content ? JSON.parse(resource.content) : [];
+    const updatedPairs = [...(Array.isArray(existingPairs) ? existingPairs : [])];
 
     // Find and update the specific pair
     if (payload.pairIndex >= 0 && payload.pairIndex < updatedPairs.length) {
