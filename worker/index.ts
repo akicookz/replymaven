@@ -2,9 +2,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { users } from "./db/auth.schema";
-import { conversations, knowledgeSuggestions } from "./db/schema";
 import { createAuth } from "./auth";
 import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
@@ -4698,71 +4697,8 @@ async function handleQueue(
   }
 }
 
-// ─── Scheduled (Cron) ─────────────────────────────────────────────────────────
-
-async function handleScheduled(
-  _event: ScheduledEvent,
-  env: Env,
-  ctx: ExecutionContext,
-): Promise<void> {
-  const db = drizzle(env.DB);
-
-  // Find closed conversations that have no linked knowledge suggestion
-  const unprocessed = await db
-    .select({
-      id: conversations.id,
-      projectId: conversations.projectId,
-    })
-    .from(conversations)
-    .where(
-      sql`${conversations.status} = 'closed'
-        AND ${conversations.id} NOT IN (
-          SELECT ${knowledgeSuggestions.sourceConversationId}
-          FROM ${knowledgeSuggestions}
-          WHERE ${knowledgeSuggestions.sourceConversationId} IS NOT NULL
-        )`,
-    )
-    .limit(50);
-
-  if (unprocessed.length === 0) return;
-
-  // Group by project to check settings once per project
-  const byProject = new Map<string, string[]>();
-  for (const row of unprocessed) {
-    const list = byProject.get(row.projectId) ?? [];
-    list.push(row.id);
-    byProject.set(row.projectId, list);
-  }
-
-  logInfo("auto_refine.cron_dispatch_started", {
-    conversationCount: unprocessed.length,
-    projectCount: byProject.size,
-  });
-
-  for (const [projectId, conversationIds] of byProject) {
-    for (const conversationId of conversationIds) {
-      ctx.waitUntil(
-        triggerAutoRefinementIfEnabled({
-          projectId,
-          conversationId,
-          db,
-          env,
-          kv: env.CONVERSATIONS_CACHE,
-          source: "scheduled_cron",
-        }).catch((err) => {
-          logError("auto_refine.cron_dispatch_failed", err, {
-            projectId,
-            conversationId,
-          });
-        }),
-      );
-    }
-  }
-}
-
 // ─── Export ───────────────────────────────────────────────────────────────────
 export default {
   fetch: app.fetch,
   queue: handleQueue,
-  scheduled: handleScheduled,
 };

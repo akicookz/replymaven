@@ -63,9 +63,6 @@
       },
     ],
   },
-  "triggers": {
-    "crons": ["0 */6 * * *"]
-  },
   "vars": {
     "BETTER_AUTH_URL": "https://replymaven.com",
     "CF_ACCOUNT_ID": "35bc7a4522237728214ba9d54c36002e",

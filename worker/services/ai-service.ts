@@ -460,25 +460,29 @@ ${webpageSummary}
 Company Context:
 ${contextSummary}
 
-Identify the SINGLE most impactful knowledge gap revealed by this conversation. Pick exactly ONE action type:
+Determine whether this conversation reveals CLEARLY MISSING information in the knowledge base — information that does not exist anywhere in the current resources. Pick at most ONE action type:
 - "add_faq_pair": add ONE new Q&A pair to an EXISTING FAQ resource from the candidate list
-- "refine_faq_pair": refine ONE specific Q&A pair in an EXISTING FAQ resource from the candidate list${existingContext.faqCandidates.length === 0 ? '\n- "new_faq": create a NEW FAQ resource (only available when no FAQs exist yet)' : ''}
+- "refine_faq_pair": refine ONE specific Q&A pair ONLY when it contains factually incorrect information${existingContext.faqCandidates.length === 0 ? '\n- "new_faq": create a NEW FAQ resource (only available when no FAQs exist yet)' : ''}
 - "add_sop": add ONE new SOP guideline
-- "refine_sop": refine ONE existing SOP from the candidate list
+- "refine_sop": refine ONE existing SOP ONLY when it contains factually incorrect instructions
 - "new_sop": create a NEW SOP set only when no existing SOPs are related
-- "update_pdf": refine an EXISTING PDF from the candidate list
-- "update_webpage": refine an EXISTING web page from the candidate list
-- "update_context": append missing high-level company context when it does not belong in a FAQ, SOP, PDF, or webpage refinement
+- "update_pdf": update an EXISTING PDF ONLY when it contains factually incorrect information
+- "update_webpage": update an EXISTING web page ONLY when it contains factually incorrect information
+- "update_context": append missing high-level company context when it does not belong in a FAQ, SOP, PDF, or webpage
 
-Rules:
-- Return EXACTLY 1 action — the single most valuable improvement. Never return more than one.
-- Choose the best-fit type: if the gap is a factual Q&A, use FAQ. If it is a behavioral procedure, use SOP. If existing content is wrong, use refine/update.
+STRICT QUALITY RULES:
+- Return [] (empty) for MOST conversations. Only the rare conversation that exposes genuinely missing knowledge should produce a suggestion.
+- ONLY suggest when concrete, new information is CLEARLY MISSING from ALL existing resources. The bot must have been unable to answer or gave a wrong answer because the information simply does not exist.
+- NEVER suggest rewording, rephrasing, better formatting, or stylistic improvements. Those are NOT valid suggestions.
+- NEVER suggest adding information that is already covered in any existing resource, even if worded differently.
+- NEVER suggest refinements just because the conversation touched on a topic — the information must be provably absent.
+- If the bot successfully answered the visitor's question using existing knowledge, return [].
+- If the conversation is casual (greetings, thanks, small talk), return [].
+- If a pending suggestion ALREADY covers the same topic (even with different wording), return [].
+- Return EXACTLY 0 or 1 action. Never return more than one.
 - For FAQs: Use "add_faq_pair" or "refine_faq_pair" instead of full resource updates
 - For SOPs: Use "add_sop" or "refine_sop" for individual guidelines
 - For PDFs and web pages, NEVER create a new resource suggestion. Only use "update_pdf" or "update_webpage"
-- If a pending suggestion ALREADY covers the same topic (even with different wording), return []
-- Only suggest an action if the conversation reveals a genuine gap, incorrect content, or missing procedure
-- If no improvements are needed, return []
 
 Return ONLY valid JSON array (no markdown, no code blocks) in this format:
 [
