@@ -7,7 +7,10 @@ import {
   summarizeConversation,
 } from "../llm/auxiliary-calls";
 import { runPlannerLoop } from "../executor/run-planner-loop";
-import { buildCompiledFaqContext } from "../prompt/build-compiled-faq-context";
+import {
+  findBestFaqMatch,
+  getOrBuildCompiledFaqContext,
+} from "../prompt/build-compiled-faq-context";
 import { triggerAutoRefinementIfEnabled } from "../post-turn/auto-refine";
 import { buildUnsupportedFallback } from "../workflows/verify-answer";
 import {
@@ -15,7 +18,18 @@ import {
 } from "../retrieval/run-ai-search";
 import { classifyTaskScope } from "../workflows/classify-task-scope";
 import {
+  classifyHandoffSop,
+  type HandoffSopDecision,
+} from "../workflows/classify-handoff-sop";
+import {
+  classifyInquiryRefinement,
+  type InquiryRefinementDecision,
+} from "../workflows/classify-inquiry-refinement";
+import {
   clarificationWasAskedBefore,
+  detectClarificationLoop,
+  detectExplicitEscalation,
+  detectFrustration,
   normalizeClarificationQuestion,
   runFastPaths,
 } from "../workflows/fast-paths";
@@ -26,6 +40,7 @@ import {
   emitSseEvent,
   emitStatusEvent,
 } from "../streaming/map-agent-events-to-sse";
+import { stripInternalTokens } from "../streaming/internal-tokens";
 import {
   type ConversationChatState,
   type RouterDecision,
@@ -44,6 +59,11 @@ import { ProjectService } from "../../services/project-service";
 import { ResourceService } from "../../services/resource-service";
 import { TelegramService } from "../../services/telegram-service";
 import { ToolService } from "../../services/tool-service";
+import {
+  WidgetService,
+  parseInquiryData,
+} from "../../services/widget-service";
+import { type InquiryFieldSpec } from "../types";
 import { isEncrypted, decryptHeaders } from "../../services/encryption-service";
 
 function parseConversationMetadata(
@@ -168,17 +188,6 @@ function hasFocusedClarifyingQuestion(
   });
 }
 
-function getExistingTeamRequestSubmissionId(
-  conversation: { metadata: string | null | undefined },
-): string | null {
-  const metadata = parseConversationMetadata(conversation.metadata);
-  const submissionId = metadata.teamRequestSubmissionId;
-
-  return typeof submissionId === "string" && submissionId.trim()
-    ? submissionId.trim()
-    : null;
-}
-
 function shouldAllowTeamRequest(options: {
   conversation: {
     status: string;
@@ -193,10 +202,6 @@ function shouldAllowTeamRequest(options: {
   retrievalAttempted: boolean;
   hadToolCalls: boolean;
 }): { allowed: boolean; reason: string } {
-  if (getExistingTeamRequestSubmissionId(options.conversation)) {
-    return { allowed: false, reason: "existing_submission" };
-  }
-
   if (isAgentRequestedStatus(options.conversation.status)) {
     return { allowed: false, reason: "already_in_agent_mode" };
   }
@@ -271,6 +276,7 @@ export async function handleWidgetMessageTurn(
   const toolService = new ToolService(context.db);
   const guidelineService = new GuidelineService(context.db);
   const resourceService = new ResourceService(context.db, context.env.UPLOADS);
+  const widgetService = new WidgetService(context.db);
 
   logInfo(
     "widget_turn.started",
@@ -339,22 +345,99 @@ export async function handleWidgetMessageTurn(
     conversation.metadata,
   );
 
-  const [settings, enabledTools, enabledGuidelines, allResources] =
-    await Promise.all([
-      projectService.getSettings(context.project.id),
-      toolService.getEnabledTools(context.project.id),
-      guidelineService.getEnabledByProject(context.project.id),
-      resourceService.getResourcesByProject(context.project.id),
-    ]);
-  const compiledFaqContext = buildCompiledFaqContext(
-    allResources
-      .filter((resource) => resource.type === "faq")
-      .sort((left, right) => left.title.localeCompare(right.title))
-      .map((resource) => ({
-        title: resource.title,
-        content: resource.content,
-      })),
+  // When the frontend ships its own last-N turns we skip the server-side
+  // prefetch entirely. Otherwise we fetch KV/D1 history in parallel with the
+  // other setup fetches so the serial `load_history` stage inside the SSE
+  // callback becomes a no-op lookup on the already-resolved value. This
+  // shaves one round-trip off the happy path without changing the fallback
+  // order (KV -> D1) that the load_history branch already relied on.
+  const clientSuppliedHistory =
+    Array.isArray(context.payload.history) &&
+    context.payload.history.length > 0;
+
+  const [
+    settings,
+    enabledTools,
+    enabledGuidelines,
+    allResources,
+    existingInquiryRow,
+    inquiryConfigRow,
+    parallelPrefetchedHistory,
+  ] = await Promise.all([
+    projectService.getSettings(context.project.id),
+    toolService.getEnabledTools(context.project.id),
+    guidelineService.getEnabledByProject(context.project.id),
+    resourceService.getResourcesByProject(context.project.id),
+    widgetService.getInquiryByConversationId(
+      context.project.id,
+      context.conversationId,
+    ),
+    widgetService.getInquiryConfig(context.project.id),
+    clientSuppliedHistory
+      ? Promise.resolve(
+          null as Awaited<ReturnType<typeof chatService.getMessages>> | null,
+        )
+      : chatService
+          .getFromCache(context.conversationId, context.project.id)
+          .then(
+            (
+              cached,
+            ):
+              | Promise<Awaited<ReturnType<typeof chatService.getMessages>>>
+              | Awaited<ReturnType<typeof chatService.getMessages>> =>
+              cached ?? chatService.getMessages(context.conversationId),
+          ),
+  ]);
+  const sortedFaqResources = allResources
+    .filter((resource) => resource.type === "faq")
+    .sort((left, right) => left.title.localeCompare(right.title));
+  // Cache the compiled FAQ context per (project, fingerprint) in KV for 5
+  // minutes. Fingerprint is derived from each FAQ resource's id + updatedAt,
+  // so the cache invalidates automatically whenever any FAQ is edited. KV
+  // read/write failures fall through to the synchronous build.
+  const compiledFaqContext = await getOrBuildCompiledFaqContext({
+    kv: context.env.CONVERSATIONS_CACHE,
+    projectId: context.project.id,
+    fingerprintResources: sortedFaqResources.map((resource) => ({
+      id: resource.id,
+      updatedAt: resource.updatedAt,
+    })),
+    faqResources: sortedFaqResources.map((resource) => ({
+      title: resource.title,
+      content: resource.content,
+    })),
+  });
+
+  const faqMatchHint = findBestFaqMatch(
+    sortedFaqResources.map((resource) => ({
+      title: resource.title,
+      content: resource.content,
+    })),
+    context.payload.content,
   );
+
+  const existingInquiry: Record<string, string> | null = existingInquiryRow
+    ? parseInquiryData(existingInquiryRow.data)
+    : null;
+  let inquiryFields: InquiryFieldSpec[] | null = null;
+  if (inquiryConfigRow?.fields) {
+    try {
+      const parsed = JSON.parse(inquiryConfigRow.fields) as unknown;
+      if (Array.isArray(parsed)) {
+        inquiryFields = parsed
+          .filter(
+            (entry): entry is InquiryFieldSpec =>
+              typeof entry === "object" &&
+              entry !== null &&
+              typeof (entry as { label?: unknown }).label === "string" &&
+              typeof (entry as { type?: unknown }).type === "string" &&
+              typeof (entry as { required?: unknown }).required === "boolean",
+          );
+      }
+    } catch {
+      inquiryFields = null;
+    }
+  }
 
   if (enabledTools.length > 0) {
     if (!context.checkRateLimit(`toolmsg:${context.project.id}`, 100, 60_000)) {
@@ -421,8 +504,13 @@ export async function handleWidgetMessageTurn(
   );
 
   const requestedAgent = isAgentRequestedStatus(conversation.status);
+  // Agent-mode silence detection needs an authoritative server copy of the
+  // conversation (client-shipped history may be trimmed). Reuse the parallel
+  // prefetch whenever it's populated; otherwise fetch now for the client-
+  // supplied-history + requestedAgent edge case.
   const prefetchedHistory = requestedAgent
-    ? ((await chatService.getFromCache(
+    ? (parallelPrefetchedHistory ??
+      (await chatService.getFromCache(
         context.conversationId,
         context.project.id,
       )) ??
@@ -467,6 +555,14 @@ export async function handleWidgetMessageTurn(
 
   return createWidgetSseResponse(async (controller, encoder) => {
     const telemetry: TurnTelemetry = { startedAt: Date.now() };
+
+    // Emit the first status event before any other work so the widget can
+    // replace its optimistic local typing indicator with the real backend
+    // phase immediately after the SSE connection opens. Status events are
+    // cheap (one SSE frame) and function declarations below are hoisted,
+    // so calling emitStatus here is safe.
+    emitStatus("Thinking", "thinking");
+
     let currentStage = "load_message_image";
     let retrieval = createEmptyRetrievalResult();
     let eventState = createInitialAgentEventState();
@@ -504,14 +600,15 @@ export async function handleWidgetMessageTurn(
     }
 
     async function emitAndSaveImmediateResponse(fullResponse: string): Promise<void> {
-      emitSseEvent(controller, encoder, { finalText: fullResponse });
+      const cleanResponse = stripInternalTokens(fullResponse);
+      emitSseEvent(controller, encoder, { finalText: cleanResponse });
 
       currentStage = "save_bot_message";
       const botMessage = await chatService.addMessage(
         {
           conversationId: context.conversationId,
           role: "bot",
-          content: fullResponse,
+          content: cleanResponse,
           sources: null,
           senderName: settings?.botName ?? null,
         },
@@ -564,11 +661,16 @@ export async function handleWidgetMessageTurn(
           verifierVerdict: telemetry.verifierVerdict ?? null,
           hadToolCalls: false,
           stepCount: 0,
+          routerMs: telemetry.routerMs ?? null,
+          loopMs: telemetry.loopMs ?? null,
+          composeMs: telemetry.composeMs ?? null,
+          verifierMs: telemetry.verifierMs ?? null,
+          plannerStepMs: telemetry.plannerStepMs ?? null,
+          retrievalMs: telemetry.retrievalMs ?? null,
+          toolCallMs: telemetry.toolCallMs ?? null,
         }),
       );
     }
-
-    emitStatus("Thinking", "thinking");
 
     logInfo(
       "widget_turn.pipeline_started",
@@ -586,22 +688,55 @@ export async function handleWidgetMessageTurn(
       });
 
       currentStage = "load_history";
-      const history =
-        (await chatService.getFromCache(context.conversationId, context.project.id)) ??
-        prefetchedHistory ??
-        (await chatService.getMessages(context.conversationId));
-      const conversationHistory = history
-        .filter((message) => message.role !== "bot" || message.content)
-        .slice(-20)
-        .map((message) => ({
-          role: message.role as "visitor" | "bot" | "agent",
-          content: message.content,
-        }));
+      const clientHistory = context.payload.history;
+      const usedClientHistory =
+        Array.isArray(clientHistory) && clientHistory.length > 0;
+      let conversationHistory: Array<{
+        role: "visitor" | "bot" | "agent";
+        content: string;
+      }>;
+      if (usedClientHistory) {
+        // Frontend-supplied history does NOT include the just-received visitor
+        // message, so append it here for shape parity with the DB/KV path where
+        // the visitor message is persisted before SSE opens.
+        const normalized = clientHistory
+          .filter((message) => message.role !== "bot" || message.content)
+          .map((message) => ({
+            role: message.role as "visitor" | "bot" | "agent",
+            content: message.content,
+          }));
+        normalized.push({
+          role: "visitor",
+          content: context.payload.content,
+        });
+        conversationHistory = normalized.slice(-10);
+      } else {
+        // `parallelPrefetchedHistory` already ran `getFromCache` -> `getMessages`
+        // concurrently with the other setup fetches. Prefer it; fall back only
+        // if somehow absent (defensive — should never happen on the server-side
+        // branch since we only resolve to null when client shipped history).
+        const history =
+          parallelPrefetchedHistory ??
+          prefetchedHistory ??
+          (await chatService.getFromCache(
+            context.conversationId,
+            context.project.id,
+          )) ??
+          (await chatService.getMessages(context.conversationId));
+        conversationHistory = history
+          .filter((message) => message.role !== "bot" || message.content)
+          .slice(-10)
+          .map((message) => ({
+            role: message.role as "visitor" | "bot" | "agent",
+            content: message.content,
+          }));
+      }
       logInfo(
         "widget_turn.history_loaded",
         buildWidgetTurnLogContext(context, turnId, {
           historyCount: conversationHistory.length,
           requestedAgent,
+          source: usedClientHistory ? "client" : "server",
         }),
       );
 
@@ -648,38 +783,93 @@ export async function handleWidgetMessageTurn(
           buildWidgetTurnLogContext(context, turnId, {
             kind: fastPath.kind,
             reason: fastPath.reason,
-            escalate: Boolean(fastPath.escalate),
           }),
         );
-        if (fastPath.stripClarificationState) {
-          chatState = {
-            ...chatState,
-            askedClarifications: [],
-            clarificationAttempts: 0,
-            lastBotQuestion: null,
-          };
-        }
-        if (fastPath.escalate) {
-          chatState = {
-            ...chatState,
-            state: "escalating",
-            pendingHandoffReason:
-              fastPath.escalationReason ?? fastPath.reason ?? null,
-            lastIntent: fastPath.kind,
-          };
-        } else {
-          chatState = {
-            ...chatState,
-            lastIntent: fastPath.kind,
-          };
-        }
+        chatState = {
+          ...chatState,
+          lastIntent: fastPath.kind,
+        };
         await emitAndSaveImmediateResponse(fastPath.response);
         return;
       }
 
+      const explicitEscalation = detectExplicitEscalation(
+        context.payload.content,
+      );
+      const visitorFrustrated = detectFrustration(context.payload.content);
+      const clarificationLoop = detectClarificationLoop({
+        chatState,
+        currentMessage: context.payload.content,
+        frustrated: visitorFrustrated,
+      });
+      const handoffEligibleTurn =
+        explicitEscalation.matched ||
+        visitorFrustrated ||
+        clarificationLoop.shouldEscalate;
+      const handoffEligibleReason = explicitEscalation.matched
+        ? explicitEscalation.reason
+        : clarificationLoop.shouldEscalate
+          ? clarificationLoop.reason
+          : visitorFrustrated
+            ? "visitor_frustrated"
+            : null;
+      if (handoffEligibleTurn) {
+        logInfo(
+          "widget_turn.handoff_eligible_turn",
+          buildWidgetTurnLogContext(context, turnId, {
+            reason: handoffEligibleReason,
+            explicitEscalation: explicitEscalation.matched,
+            frustrated: visitorFrustrated,
+            clarificationLoop: clarificationLoop.shouldEscalate,
+            clarificationAttempts: chatState.clarificationAttempts,
+          }),
+        );
+      }
+
+      const handoffSopDecision: HandoffSopDecision = classifyHandoffSop({
+        message: context.payload.content,
+        chatState,
+        retrievalAttempted: false,
+        groundingConfidence: "none",
+        handoffEligibleTurn,
+        handoffEligibleReason,
+      });
+      if (handoffSopDecision.shouldOverride) {
+        logInfo(
+          "widget_turn.handoff_sop_override",
+          buildWidgetTurnLogContext(context, turnId, {
+            trigger: handoffSopDecision.trigger,
+            reason: handoffSopDecision.reason,
+            priority: handoffSopDecision.priority,
+          }),
+        );
+      }
+
+      const inquiryRefinementDecision: InquiryRefinementDecision | null =
+        existingInquiry && inquiryFields && inquiryFields.length > 0
+          ? classifyInquiryRefinement({
+              message: context.payload.content,
+              inquiryFields,
+              existingData: existingInquiry,
+              hasExistingInquiry: true,
+            })
+          : null;
+      if (inquiryRefinementDecision?.isRefinement) {
+        logInfo(
+          "widget_turn.inquiry_refinement_detected",
+          buildWidgetTurnLogContext(context, turnId, {
+            signals: inquiryRefinementDecision.signals,
+            extractedKeys: Object.keys(inquiryRefinementDecision.extracted),
+            reason: inquiryRefinementDecision.reason,
+          }),
+        );
+      }
+
       currentStage = "route_intent";
+      emitStatus("Understanding your message...", "thinking");
       let conversationSummary: string | null = null;
       let routerDecision: RouterDecision;
+      const routerStartedAt = Date.now();
       try {
         routerDecision = await routeIntent({
           modelRuntime,
@@ -704,6 +894,7 @@ export async function handleWidgetMessageTurn(
           buildWidgetTurnLogContext(context, turnId),
         );
       }
+      telemetry.routerMs = Date.now() - routerStartedAt;
 
       // Dedupe clarifying questions: if the router proposes a question we've
       // already asked, force escalation instead of looping.
@@ -754,6 +945,7 @@ export async function handleWidgetMessageTurn(
       };
 
       if (routerDecision.needsRetrieval) {
+        emitStatus("Searching docs...", "retrieval");
         try {
           conversationSummary = await summarizeConversation(
             createLanguageModel(modelRuntime.activeConfig),
@@ -844,9 +1036,12 @@ export async function handleWidgetMessageTurn(
         buildWidgetTurnLogContext(context, turnId, {
           availableTools: getToolNames(availableTools),
           hasImage: Boolean(image),
+          handoffEligibleTurn,
+          handoffEligibleReason,
         }),
       );
 
+      const loopStartedAt = Date.now();
       const loopResult = await runPlannerLoop({
         controller,
         encoder,
@@ -857,6 +1052,10 @@ export async function handleWidgetMessageTurn(
         conversationHistory,
         conversationSummary,
         turnPlan,
+        handoffEligibleTurn,
+        handoffEligibleReason,
+        handoffSopDecision,
+        inquiryRefinementDecision,
         availableTools,
         enabledToolRows: enabledTools,
         toolService,
@@ -873,6 +1072,7 @@ export async function handleWidgetMessageTurn(
           visitorEmail: conversation.visitorEmail,
           status: conversation.status,
           metadata: conversation.metadata,
+          telegramThreadId: conversation.telegramThreadId ?? null,
         },
         settings: settings ?? {
           toneOfVoice: "professional",
@@ -890,8 +1090,11 @@ export async function handleWidgetMessageTurn(
           name: conversation.visitorName,
           email: conversation.visitorEmail,
         },
+        existingInquiry,
+        inquiryFields,
         agentHandbackInstructions,
         image,
+        faqMatchHint,
         emitStatus,
         shouldAllowTeamRequest: ({ retrievalAttempted, hadToolCalls }) =>
           shouldAllowTeamRequest({
@@ -906,13 +1109,16 @@ export async function handleWidgetMessageTurn(
         buildLogContext: (extra = {}) =>
           buildWidgetTurnLogContext(context, turnId, extra),
       });
+      telemetry.loopMs = Date.now() - loopStartedAt;
       retrieval = loopResult.retrieval;
       eventState = {
+        ...createInitialAgentEventState(),
         fullResponse: loopResult.fullResponse,
         hadToolCalls: loopResult.hadToolCalls,
         lastToolOutput: loopResult.lastToolOutput,
         lastToolError: loopResult.lastToolError,
         stepCount: loopResult.stepCount,
+        detectedInternalTokens: loopResult.detectedInternalTokens,
       };
 
       logInfo(
@@ -965,7 +1171,7 @@ export async function handleWidgetMessageTurn(
           "collect_contact",
           "create_inquiry",
         ].includes(loopResult.terminationAction) &&
-        !fullResponse.includes("[RESOLVED]")
+        !loopResult.detectedInternalTokens.includes("[RESOLVED]")
       ) {
         const unsupportedFallback = buildUnsupportedFallback(
           context.payload.content,
@@ -1002,7 +1208,7 @@ export async function handleWidgetMessageTurn(
         }
       }
 
-      if (fullResponse.includes("[RESOLVED]")) {
+      if (loopResult.detectedInternalTokens.includes("[RESOLVED]")) {
         currentStage = "close_conversation";
         await chatService.updateConversationStatus(
           context.conversationId,
@@ -1010,10 +1216,11 @@ export async function handleWidgetMessageTurn(
           "closed",
           "bot_resolved",
         );
-        fullResponse = fullResponse.replace(
-          "[RESOLVED]",
-          "Glad I could help! Feel free to reach out anytime if you have more questions.",
-        );
+        const resolvedMessage =
+          "Glad I could help! Feel free to reach out anytime if you have more questions.";
+        fullResponse = fullResponse.trim()
+          ? `${fullResponse.trim()}\n\n${resolvedMessage}`
+          : resolvedMessage;
         emitSseEvent(controller, encoder, { resolved: true });
         emitSseEvent(controller, encoder, { finalText: fullResponse });
         logInfo(
@@ -1047,13 +1254,13 @@ export async function handleWidgetMessageTurn(
         context.project.id,
       );
 
+      const MAX_SOURCES = 3;
+      const cappedSources = retrieval.sourceReferences.slice(0, MAX_SOURCES);
+
       emitSseEvent(controller, encoder, {
         done: true,
         messageId: botMessage.id,
-        sources:
-          retrieval.sourceReferences.length > 0
-            ? retrieval.sourceReferences
-            : undefined,
+        sources: cappedSources.length > 0 ? cappedSources : undefined,
       });
 
       context.executionCtx.waitUntil(
@@ -1113,6 +1320,13 @@ export async function handleWidgetMessageTurn(
           verifierVerdict: telemetry.verifierVerdict ?? null,
           hadToolCalls: eventState.hadToolCalls,
           stepCount: eventState.stepCount,
+          routerMs: telemetry.routerMs ?? null,
+          loopMs: telemetry.loopMs ?? null,
+          composeMs: telemetry.composeMs ?? null,
+          verifierMs: telemetry.verifierMs ?? null,
+          plannerStepMs: telemetry.plannerStepMs ?? null,
+          retrievalMs: telemetry.retrievalMs ?? null,
+          toolCallMs: telemetry.toolCallMs ?? null,
         }),
       );
     } catch (err) {

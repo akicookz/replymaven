@@ -263,6 +263,13 @@ function getSearchHistoryKey(query: string): string {
   return normalizeValue(query);
 }
 
+function hasGatheredEvidence(state: PlannerLoopState): boolean {
+  return (
+    state.docsEvidence.ragContext.trim().length > 0 ||
+    state.toolEvidence.length > 0
+  );
+}
+
 function getToolHistoryKey(
   toolName: string,
   input: Record<string, unknown>,
@@ -654,25 +661,22 @@ export function sanitizePlannerDecision(
     const isDuplicate = isDuplicateQuery(nextAction.query, previousQueries, 0.8);
 
     if (alreadySearched || isDuplicate) {
-      // Check if we've exhausted search patterns for this semantic group
+      // 1. Evidence already gathered → compose, regardless of search count.
+      if (hasGatheredEvidence(options.state)) {
+        return {
+          goal: nextGoal,
+          nextAction: {
+            type: "compose",
+            reason: "The same documentation search already ran; compose from gathered evidence.",
+          },
+        };
+      }
+
+      // 2. No evidence + exhausted semantic patterns → ask_user.
       const semanticGroup = getQuerySemanticGroup(nextAction.query);
       const semanticGroups = options.state.queryTracker?.semanticGroups || [];
 
       if (hasExhaustedSearchPatterns(semanticGroup, semanticGroups, 3)) {
-        // We've tried enough variations, time to compose or ask for more info
-        if (
-          options.state.docsEvidence.ragContext.trim() ||
-          options.state.toolEvidence.length > 0
-        ) {
-          return {
-            goal: nextGoal,
-            nextAction: {
-              type: "compose",
-              reason: "Exhausted search variations; compose from gathered evidence.",
-            },
-          };
-        }
-
         return {
           goal: nextGoal,
           nextAction: {
@@ -686,41 +690,41 @@ export function sanitizePlannerDecision(
         };
       }
 
-      // Still within search attempts, but this specific query is duplicate
-      // Try to generate an alternative query
-      const searchCount = previousQueries.length;
-      if (searchCount < 3) {
-        // Continue with the original query but mark it as a variation attempt
+      // 3. No evidence, not exhausted → try a genuinely unused query from the plan.
+      const unusedVariation =
+        options.turnPlan.retrievalQueries.find(
+          (query) =>
+            query.trim().length > 0 &&
+            !previousQueries.some(
+              (prev) => getSearchHistoryKey(prev) === getSearchHistoryKey(query),
+            ),
+        ) ??
+        options.turnPlan.broaderQueries.find(
+          (query) =>
+            query.trim().length > 0 &&
+            !previousQueries.some(
+              (prev) => getSearchHistoryKey(prev) === getSearchHistoryKey(query),
+            ),
+        );
+
+      if (unusedVariation) {
         return {
           goal: nextGoal,
           nextAction: {
-            ...nextAction,
-            reason: `Trying variation of search query (attempt ${searchCount + 1}/3)`,
-            query: nextAction.query.trim(),
-            broaderQueries:
-              nextAction.broaderQueries?.map((query) => query.trim()).filter(Boolean) ?? [],
+            type: "search_docs",
+            reason: `Trying alternate query variation from plan (attempt ${previousQueries.length + 1}/3).`,
+            query: unusedVariation.trim(),
+            broaderQueries: [],
           },
         };
       }
 
-      if (
-        options.state.docsEvidence.ragContext.trim() ||
-        options.state.toolEvidence.length > 0
-      ) {
-        return {
-          goal: nextGoal,
-          nextAction: {
-            type: "compose",
-            reason: "The same documentation search already ran; compose from gathered evidence.",
-          },
-        };
-      }
-
+      // 4. No unused variations left → ask_user.
       return {
         goal: nextGoal,
         nextAction: {
           type: "ask_user",
-          reason: "The same docs query already failed and more detail is required.",
+          reason: "The same docs query already failed and no unused variations remain.",
           question: buildClarificationQuestion(
             options.turnPlan,
             options.currentMessage,

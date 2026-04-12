@@ -54,22 +54,34 @@ export class TelegramService {
     fields: Record<string, string>,
     dashboardBaseUrl: string,
     projectId: string,
+    options?: {
+      isUpdate?: boolean;
+      replyToMessageId?: number;
+    },
   ): Promise<number | null> {
     const fieldLines = Object.entries(fields)
       .map(([key, val]) => `<b>${escapeHtml(key)}:</b> ${escapeHtml(val)}`)
       .join("\n");
 
     const projectLink = `${dashboardBaseUrl}/app/projects/${projectId}/inquiries`;
+    const headline = options?.isUpdate
+      ? `<b>Inquiry updated</b>`
+      : `<b>New inquiry submitted</b>`;
 
     const text = [
-      `<b>New inquiry submitted</b>`,
+      headline,
       ``,
       fieldLines,
       ``,
       `<a href="${projectLink}">View on dashboard</a>`,
     ].join("\n");
 
-    const result = await this.sendMessage(botToken, chatId, text);
+    const result = await this.sendMessage(
+      botToken,
+      chatId,
+      text,
+      options?.replyToMessageId,
+    );
     return result.message_id ?? null;
   }
 

@@ -14,6 +14,28 @@ import {
 } from "../db";
 import { users } from "../db/auth.schema";
 
+export function parseInquiryData(raw: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(
+      parsed as Record<string, unknown>,
+    )) {
+      if (typeof value === "string") {
+        result[key] = value;
+      } else if (value != null) {
+        result[key] = String(value);
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
 export class WidgetService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
 
@@ -200,25 +222,31 @@ export class WidgetService {
     visitorId?: string;
     title: string;
     data: Record<string, string>;
-  }): Promise<{ inquiry: InquiryRow; created: boolean }> {
+    appendMode?: boolean;
+  }): Promise<{ inquiry: InquiryRow; created: boolean; appended: boolean }> {
     if (options.conversationId) {
       const existing = await this.getInquiryByConversationId(
         options.projectId,
         options.conversationId,
       );
       if (existing) {
+        const mergedData = options.appendMode
+          ? { ...parseInquiryData(existing.data), ...options.data }
+          : options.data;
+
         await this.db
           .update(inquiries)
           .set({
             visitorId: options.visitorId ?? existing.visitorId,
             title: options.title,
-            data: JSON.stringify(options.data),
+            data: JSON.stringify(mergedData),
           })
           .where(eq(inquiries.id, existing.id));
 
         return {
           inquiry: (await this.getInquiryById(existing.id, options.projectId))!,
           created: false,
+          appended: Boolean(options.appendMode),
         };
       }
     }
@@ -236,6 +264,7 @@ export class WidgetService {
     return {
       inquiry: (await this.getInquiryById(id, options.projectId))!,
       created: true,
+      appended: false,
     };
   }
 

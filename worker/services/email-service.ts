@@ -127,9 +127,11 @@ export class EmailService {
     projectName: string;
     formData: Record<string, string>;
     dashboardUrl: string;
+    isUpdate?: boolean;
   }): Promise<void> {
     try {
-      const { ownerEmail, projectName, formData, dashboardUrl } = details;
+      const { ownerEmail, projectName, formData, dashboardUrl, isUpdate } =
+        details;
 
       const entries = Object.entries(formData);
       const fieldsHtml = entries
@@ -140,12 +142,17 @@ export class EmailService {
         )
         .join("");
 
+      const subject = isUpdate
+        ? `Inquiry updated - ${projectName}`
+        : `New inquiry - ${projectName}`;
+      const heading = isUpdate ? "Inquiry Updated" : "New Inquiry";
+
       await this.resend.emails.send({
         from: `${projectName} <noreply@updates.replymaven.com>`,
         to: ownerEmail,
-        subject: `New inquiry - ${projectName}`,
+        subject,
         html: wrapEmail(`
-<p class="email-heading" style="${HEADING_STYLE} margin: 0 0 20px;">New Inquiry</p>
+<p class="email-heading" style="${HEADING_STYLE} margin: 0 0 20px;">${heading}</p>
 <div class="email-card" style="${CARD_STYLE} margin: 0 0 24px;">
 ${fieldsHtml}
 </div>

@@ -1,19 +1,11 @@
 import { type ConversationChatState } from "../types";
 
-export type FastPathKind =
-  | "escalation"
-  | "loop_breaker"
-  | "greeting"
-  | "resolved"
-  | "none";
+export type FastPathKind = "greeting" | "resolved" | "none";
 
 export interface FastPathResult {
   kind: FastPathKind;
   reason: string;
   response?: string;
-  escalate?: boolean;
-  escalationReason?: string;
-  stripClarificationState?: boolean;
 }
 
 const ESCALATION_PATTERNS: RegExp[] = [
@@ -154,44 +146,8 @@ function buildGreetingResponse(
   return `Hi! I'm ${name}, here to help with questions about ${projectName}. What can I help you with today?`;
 }
 
-function buildHandoffResponse(agentName: string | null): string {
-  const label = agentName ?? "a team member";
-  return `Got it — let me connect you with ${label}. I'll forward this conversation now. [HANDOFF_REQUESTED]`;
-}
-
 export function runFastPaths(input: FastPathInput): FastPathResult {
-  const { message, chatState, isFirstVisitorMessage } = input;
-
-  const frustrated = detectFrustration(message);
-  const explicitEscalation = detectExplicitEscalation(message);
-
-  if (explicitEscalation.matched) {
-    return {
-      kind: "escalation",
-      reason: explicitEscalation.reason,
-      response: buildHandoffResponse(input.agentName),
-      escalate: true,
-      escalationReason: explicitEscalation.reason,
-      stripClarificationState: true,
-    };
-  }
-
-  const loopDetection = detectClarificationLoop({
-    chatState,
-    currentMessage: message,
-    frustrated,
-  });
-
-  if (loopDetection.shouldEscalate) {
-    return {
-      kind: "loop_breaker",
-      reason: loopDetection.reason,
-      response: buildHandoffResponse(input.agentName),
-      escalate: true,
-      escalationReason: loopDetection.reason,
-      stripClarificationState: true,
-    };
-  }
+  const { message, isFirstVisitorMessage } = input;
 
   if (isFirstVisitorMessage && detectGreeting(message)) {
     return {

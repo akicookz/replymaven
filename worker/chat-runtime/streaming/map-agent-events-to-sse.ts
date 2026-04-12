@@ -1,4 +1,11 @@
 import { type WidgetStatusPayload } from "../types";
+import {
+  createStreamingStripState,
+  flushStreamingStripState,
+  type InternalToken,
+  stripInternalTokensStreaming,
+  type StreamingStripState,
+} from "./internal-tokens";
 
 export interface AgentEventState {
   fullResponse: string;
@@ -6,6 +13,8 @@ export interface AgentEventState {
   lastToolOutput: unknown;
   lastToolError: string | null;
   stepCount: number;
+  stripState: StreamingStripState;
+  detectedInternalTokens: InternalToken[];
 }
 
 export function createInitialAgentEventState(): AgentEventState {
@@ -15,7 +24,29 @@ export function createInitialAgentEventState(): AgentEventState {
     lastToolOutput: null,
     lastToolError: null,
     stepCount: 0,
+    stripState: createStreamingStripState(),
+    detectedInternalTokens: [],
   };
+}
+
+export function finalizeAgentEventState(
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  state: AgentEventState,
+): AgentEventState {
+  const flushed = flushStreamingStripState(state.stripState);
+  const nextState = { ...state };
+  if (flushed.emit) {
+    nextState.fullResponse += flushed.emit;
+    emitSseEvent(controller, encoder, { text: flushed.emit });
+  }
+  if (flushed.tokens.length > 0) {
+    nextState.detectedInternalTokens = [
+      ...state.detectedInternalTokens,
+      ...flushed.tokens,
+    ];
+  }
+  return nextState;
 }
 
 export function emitSseEvent(
@@ -47,8 +78,18 @@ export function mapAgentStreamPartToSse(options: {
   const nextState = { ...options.state };
 
   if (part.type === "text-delta") {
-    nextState.fullResponse += String(part.text ?? "");
-    emitSseEvent(controller, encoder, { text: String(part.text ?? "") });
+    const delta = String(part.text ?? "");
+    const result = stripInternalTokensStreaming(nextState.stripState, delta);
+    if (result.emit) {
+      nextState.fullResponse += result.emit;
+      emitSseEvent(controller, encoder, { text: result.emit });
+    }
+    if (result.tokens.length > 0) {
+      nextState.detectedInternalTokens = [
+        ...nextState.detectedInternalTokens,
+        ...result.tokens,
+      ];
+    }
     return nextState;
   }
 

@@ -25,6 +25,16 @@
   const scriptOrigin = new URL(script.src).origin;
   const baseUrl = scriptOrigin.replace(/^(https?:\/\/)widget\./, "$1");
 
+  try {
+    const link = document.createElement("link");
+    link.rel = "preconnect";
+    link.href = baseUrl;
+    link.crossOrigin = "anonymous";
+    document.head.appendChild(link);
+  } catch {
+    /* non-fatal */
+  }
+
   // ─── State ──────────────────────────────────────────────────────────────────
   let isOpen = false;
   let conversationId: string | null = null;
@@ -45,6 +55,49 @@
   let lastNewMessageAt: number = Date.now();
   const renderedMessageIds = new Set<string>();
   let unreadCount = 0;
+
+  // In-memory conversation history buffer (last N {role, content} pairs).
+  // Sent to the backend on each new message so the server can skip the
+  // D1/KV history fetch entirely on the happy path.
+  const HISTORY_BUFFER_LIMIT = 20;
+  const conversationHistoryBuffer: Array<{
+    role: "visitor" | "bot" | "agent";
+    content: string;
+  }> = [];
+
+  function pushHistoryEntry(role: string, content: string): void {
+    if (role !== "visitor" && role !== "bot" && role !== "agent") return;
+    const trimmed = (content ?? "").toString();
+    if (!trimmed) return;
+    conversationHistoryBuffer.push({
+      role: role as "visitor" | "bot" | "agent",
+      content: trimmed,
+    });
+    if (conversationHistoryBuffer.length > HISTORY_BUFFER_LIMIT * 2) {
+      conversationHistoryBuffer.splice(
+        0,
+        conversationHistoryBuffer.length - HISTORY_BUFFER_LIMIT,
+      );
+    }
+  }
+
+  function updateLastBotHistoryEntry(content: string): void {
+    if (!content) return;
+    for (let i = conversationHistoryBuffer.length - 1; i >= 0; i--) {
+      if (conversationHistoryBuffer[i].role === "bot") {
+        conversationHistoryBuffer[i].content = content;
+        return;
+      }
+    }
+    pushHistoryEntry("bot", content);
+  }
+
+  function getHistoryPayload(): Array<{
+    role: "visitor" | "bot" | "agent";
+    content: string;
+  }> {
+    return conversationHistoryBuffer.slice(-HISTORY_BUFFER_LIMIT);
+  }
 
   // Send guard -- prevents duplicate message sends
   let isSending = false;
@@ -621,25 +674,34 @@
       align-self: flex-start;
     }
     .rm-message-avatar {
-      width: 28px;
-      height: 28px;
-      min-width: 28px;
+      width: 18px;
+      height: 18px;
+      min-width: 18px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      margin-bottom: 2px;
     }
     .rm-message-avatar.rm-icon-avatar {
-      border-radius: 8px;
+      border-radius: 5px;
     }
     .rm-message-avatar svg {
-      width: 14px;
-      height: 14px;
+      width: 10px;
+      height: 10px;
     }
     .rm-message-avatar.hidden {
-      visibility: hidden;
+      display: none;
+    }
+    .rm-msg-footer {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 3px;
+      padding-left: 2px;
+    }
+    .rm-msg-footer.hidden {
+      display: none;
     }
     .rm-message-row.rm-role-change {
       margin-top: 8px;
@@ -672,7 +734,7 @@
     .rm-msg-col {
       display: flex;
       flex-direction: column;
-      gap: 1px;
+      gap: 0;
       min-width: 0;
     }
     .rm-msg-status {
@@ -689,16 +751,16 @@
     }
     .rm-sender-label {
       font-size: 11px;
-      font-weight: 600;
-      margin-bottom: 0;
+      font-weight: 500;
+      line-height: 1;
     }
     .rm-sender-label.bot {
       color: var(--rm-bot-text, #18181b);
-      opacity: 0.5;
+      opacity: 0.4;
     }
     .rm-sender-label.agent {
       color: var(--rm-primary, #2563eb);
-      opacity: 0.7;
+      opacity: 0.6;
     }
 
     /* ─── Typing Indicator ────────────────────────────────────────────────── */
@@ -741,6 +803,7 @@
       font-size: 12px;
       font-weight: 500;
       color: var(--rm-text-muted);
+      transition: opacity 0.15s ease-out;
     }
     @keyframes rm-bounce {
       0%, 60%, 100% {
@@ -1322,8 +1385,8 @@
       margin-bottom: 0;
     }
     .rm-message ul, .rm-message ol {
-      margin: 4px 0 8px 18px;
-      padding-left: 0;
+      margin: 4px 0 8px 0;
+      padding-left: 20px;
     }
     .rm-message li {
       margin-bottom: 3px;
@@ -1355,51 +1418,76 @@
 
     /* ─── Source Links ────────────────────────────────────────────────────── */
     .rm-sources {
-      margin-top: 8px;
-      padding-top: 6px;
-      border-top: 1px solid var(--rm-border-subtle);
+      margin-top: 10px;
       display: flex;
-      flex-direction: column;
-      gap: 3px;
+      gap: 4px;
     }
-    .rm-source-link {
+
+    .rm-source-chip {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      text-decoration: none;
-      font-size: 11px;
-      line-height: 1.3;
-      transition: opacity 0.2s;
-      max-width: 100%;
-      cursor: default;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--rm-bot-bg, #ffffff);
+      border: 1px solid var(--rm-border-subtle, rgba(0,0,0,0.08));
       color: var(--rm-text-muted);
-    }
-    a.rm-source-link {
+      text-decoration: none;
+      transition: opacity 0.2s;
+      cursor: default;
+      position: relative;
       cursor: pointer;
+
     }
-    a.rm-source-link:hover {
-      opacity: 0.7;
-    }
-    .rm-source-icon {
-      display: inline-flex;
-      flex-shrink: 0;
-    }
-    .rm-source-link svg {
+
+
+    .rm-source-chip svg {
       width: 12px;
       height: 12px;
-      flex-shrink: 0;
     }
-    .rm-source-type {
+
+    .rm-source-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--rm-bot-bg, #ffffff);
+      color: var(--rm-text-muted);
+      border: 1px solid var(--rm-border-subtle, rgba(0,0,0,0.08));
+      font-size: 9px;
       font-weight: 600;
-      flex-shrink: 0;
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.02em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
     }
-    .rm-source-title {
+    .rm-source-tooltip {
+      display: inline-block;
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 0;
+      background: var(--rm-bot-bg, #ffffff);
+      color: var(--rm-bot-text, #18181b);
+      font-size: 11px;
+      line-height: 1.3;
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--rm-border-subtle, rgba(0,0,0,0.08));
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      white-space: nowrap;
+      max-width: 200px;
       overflow: hidden;
       text-overflow: ellipsis;
-      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.12s ease-out;
+      z-index: 10;
+    }
+    .rm-source-chip:hover .rm-source-tooltip {
+      opacity: 1;
     }
 
     /* ─── Inquiry Form ────────────────────────────────────────────────────── */
@@ -2256,6 +2344,14 @@
   const statusText = document.createElement("span");
   statusText.className = "rm-status-text";
   statusText.textContent = "Thinking";
+  // Expose status updates to assistive tech so screen readers announce each
+  // phase change ("Searching docs", "Writing the reply", etc.) without
+  // stealing focus. `aria-live="polite"` queues updates, `role="status"`
+  // identifies it as a live status region, `aria-atomic="true"` ensures the
+  // full label is read on every change instead of just the diff.
+  statusText.setAttribute("role", "status");
+  statusText.setAttribute("aria-live", "polite");
+  statusText.setAttribute("aria-atomic", "true");
 
   typingRow.appendChild(typingDots);
   typingRow.appendChild(statusText);
@@ -2643,18 +2739,21 @@
             avatar.style.display = "flex";
             avatar.style.alignItems = "center";
             avatar.style.justifyContent = "center";
-            avatar.style.fontSize = "12px";
+            avatar.style.fontSize = "9px";
             avatar.style.fontWeight = "600";
           }
-          avatar.classList.remove("hidden");
         }
-        // Add author name label above the message inside the column wrapper
-        const col = msgEl.parentElement;
-        if (col) {
-          const nameLabel = document.createElement("div");
-          nameLabel.className = "rm-sender-label bot";
+        const nameLabel = msgRow.querySelector(
+          ".rm-sender-label",
+        ) as HTMLElement | null;
+        if (nameLabel) {
           nameLabel.textContent = introMessageAuthor.name;
-          col.insertBefore(nameLabel, msgEl);
+        }
+        const footer = msgRow.querySelector(
+          ".rm-msg-footer",
+        ) as HTMLElement | null;
+        if (footer) {
+          footer.classList.remove("hidden");
         }
       }
       introMessageText = null;
@@ -2869,23 +2968,23 @@
       const olMatch = line.match(/^[\s]*\d+[.)]\s+(.*)/);
 
       if (ulMatch) {
-        if (!inUl) {
-          output.push("<ul>");
-          inUl = true;
-        }
         if (inOl) {
           output.push("</ol>");
           inOl = false;
         }
+        if (!inUl) {
+          output.push("<ul>");
+          inUl = true;
+        }
         output.push(`<li>${ulMatch[1]}</li>`);
       } else if (olMatch) {
-        if (!inOl) {
-          output.push("<ol>");
-          inOl = true;
-        }
         if (inUl) {
           output.push("</ul>");
           inUl = false;
+        }
+        if (!inOl) {
+          output.push("<ol>");
+          inOl = true;
         }
         output.push(`<li>${olMatch[1]}</li>`);
       } else {
@@ -3797,9 +3896,6 @@
         }
       }
 
-      // Show typing indicator
-      showTyping();
-
       // Pause polling during SSE streaming to prevent duplicate messages
       isStreaming = true;
       stopPolling();
@@ -3813,6 +3909,23 @@
           ...pageContext,
         };
         body.pageContext = ctx;
+
+        // Ship the last N turns so the server can skip its D1/KV history
+        // fetch on the happy path. addMessageToUI already pushed the current
+        // visitor message into the buffer, so we drop the trailing visitor
+        // entry to avoid duplicating it with `content` (the backend appends
+        // content as a synthetic visitor entry when client history is used).
+        const historyPayload = getHistoryPayload();
+        const trailing = historyPayload[historyPayload.length - 1];
+        const historyForServer =
+          trailing &&
+          trailing.role === "visitor" &&
+          trailing.content === messageText
+            ? historyPayload.slice(0, -1)
+            : historyPayload;
+        if (historyForServer.length > 0) {
+          body.history = historyForServer;
+        }
 
         const res = await fetch(
           `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`,
@@ -3840,8 +3953,13 @@
         if (lastVisitorStatusEl) {
           const statusEl = lastVisitorStatusEl;
           statusEl.textContent = "Sent";
-          setTimeout(() => { statusEl.style.opacity = "0"; }, 2000);
+          setTimeout(() => {
+            statusEl.style.opacity = "0";
+          }, 2000);
         }
+
+        // Show typing only after the server has accepted the message
+        showTyping();
 
         // After a real agent reply, the server returns JSON instead of SSE.
         const contentType = res.headers.get("content-type") || "";
@@ -3902,8 +4020,8 @@
                   continue;
                 }
 
-                if (data.status?.message) {
-                  showTyping(data.status.message);
+                if (data.status?.message || data.status?.phase) {
+                  showTyping(data.status.message, data.status.phase);
                   continue;
                 }
 
@@ -3980,12 +4098,12 @@
                     hideTyping();
                     botMessageEl = addMessageToUI("bot", botMessage);
                   } else {
-                    // Debounce markdown rendering — show plaintext immediately, render markdown at most every 80ms
                     botMessageEl.textContent = botMessage;
                     if (markdownRenderTimer) clearTimeout(markdownRenderTimer);
                     markdownRenderTimer = setTimeout(() => {
-                      if (botMessageEl) botMessageEl.innerHTML = renderMarkdown(botMessage);
-                    }, 80) as unknown as number;
+                      if (botMessageEl)
+                        botMessageEl.innerHTML = renderMarkdown(botMessage);
+                    }, 120) as unknown as number;
                   }
                   scrollToBottom();
                 }
@@ -3993,9 +4111,18 @@
                 if (data.done) {
                   hideTyping();
                   // Stream complete -- clear debounce timer and render final markdown
-                  if (markdownRenderTimer) { clearTimeout(markdownRenderTimer); markdownRenderTimer = null; }
+                  if (markdownRenderTimer) {
+                    clearTimeout(markdownRenderTimer);
+                    markdownRenderTimer = null;
+                  }
                   if (botMessageEl && botMessage) {
                     botMessageEl.innerHTML = renderMarkdown(botMessage);
+                  }
+                  // Persist the complete final bot text to the history buffer.
+                  // addMessageToUI was called with the first partial chunk, so
+                  // we patch the last bot entry to hold the final assembled text.
+                  if (botMessage) {
+                    updateLastBotHistoryEntry(botMessage);
                   }
                   // Add source links if present
                   if (data.sources && data.sources.length > 0 && botMessageEl) {
@@ -4115,6 +4242,10 @@
       renderedMessageIds.add(messageId);
     }
 
+    // Record in the in-memory history buffer so we can ship the last N turns
+    // with subsequent POSTs and skip the server-side D1/KV history fetch.
+    pushHistoryEntry(role, content);
+
     const primaryColor = getPrimaryColor();
     const isRoleChange = lastMessageRole !== null && lastMessageRole !== role;
 
@@ -4130,7 +4261,6 @@
       avatar.className = "rm-message-avatar";
 
       if (role === "agent" && senderAvatar) {
-        // Agent with profile picture
         avatar.style.backgroundColor = "transparent";
         const avatarImg = document.createElement("img");
         avatarImg.src = resolveUrl(senderAvatar);
@@ -4141,20 +4271,17 @@
         avatarImg.style.objectFit = "cover";
         avatar.appendChild(avatarImg);
       } else if (role === "agent" && senderName) {
-        // Agent with initials
         avatar.style.backgroundColor = `rgba(${hexToRgb(primaryColor)}, 0.15)`;
         avatar.style.color = primaryColor;
-        avatar.style.fontSize = "12px";
+        avatar.style.fontSize = "9px";
         avatar.style.fontWeight = "600";
         avatar.textContent = senderName.charAt(0).toUpperCase();
       } else if (role === "agent") {
-        // Agent fallback — person icon
         avatar.classList.add("rm-icon-avatar");
         avatar.style.backgroundColor = `rgba(${hexToRgb(primaryColor)}, 0.12)`;
         avatar.style.color = primaryColor;
         avatar.innerHTML = ICONS.person;
       } else {
-        // Bot avatar — custom avatarUrl or AI sparkle icon
         const avatarUrl = config?.widget?.avatarUrl;
         if (avatarUrl) {
           avatar.style.backgroundColor = "transparent";
@@ -4174,42 +4301,12 @@
         }
       }
 
-      // Show avatar on the latest message only — hide previous same-role avatar
-      if (lastMessageRole === role) {
-        const prevRows = messagesContainer.querySelectorAll(
-          `.rm-message-row.${role}`,
-        );
-        if (prevRows.length > 0) {
-          const prevAvatar =
-            prevRows[prevRows.length - 1].querySelector(".rm-message-avatar");
-          if (prevAvatar) prevAvatar.classList.add("hidden");
-        }
-      }
-
-      row.appendChild(avatar);
-
-      // Column wrapper for label + bubble
       const col = document.createElement("div");
       col.className = "rm-msg-col";
 
-      // Sender name label — show on role change for bot/agent
-      if (isRoleChange) {
-        const label = document.createElement("div");
-        label.className = `rm-sender-label ${role}`;
-        if (role === "bot") {
-          label.textContent = senderName || config?.botName || "AI Assistant";
-        } else {
-          label.textContent =
-            senderName || config?.agentName || "Support Agent";
-        }
-        col.appendChild(label);
-      }
-
-      // Message bubble
       msgEl = document.createElement("div");
       msgEl.className = "rm-message";
 
-      // Render image inside bubble if present
       if (imageUrl) {
         const img = document.createElement("img");
         img.className = "rm-message-image";
@@ -4221,12 +4318,38 @@
         msgEl.appendChild(img);
       }
 
-      // Bot/agent messages: render markdown
       const textContainer = document.createElement("div");
       textContainer.innerHTML = renderMarkdown(content);
       msgEl.appendChild(textContainer);
 
       col.appendChild(msgEl);
+
+      const footer = document.createElement("div");
+      footer.className = "rm-msg-footer";
+
+      if (lastMessageRole === role) {
+        const prevRows = messagesContainer.querySelectorAll(
+          `.rm-message-row.${role}`,
+        );
+        if (prevRows.length > 0) {
+          const prevFooter =
+            prevRows[prevRows.length - 1].querySelector(".rm-msg-footer");
+          if (prevFooter) prevFooter.classList.add("hidden");
+        }
+      }
+
+      footer.appendChild(avatar);
+
+      const label = document.createElement("div");
+      label.className = `rm-sender-label ${role}`;
+      if (role === "bot") {
+        label.textContent = senderName || config?.botName || "AI Assistant";
+      } else {
+        label.textContent = senderName || config?.agentName || "Support Agent";
+      }
+      footer.appendChild(label);
+
+      col.appendChild(footer);
       row.appendChild(col);
     } else {
       // Visitor messages — no avatar, no column wrapper
@@ -4296,29 +4419,24 @@
   ): void {
     if (!sources || sources.length === 0) return;
 
+    const capped = sources.slice(0, 3);
     const sourcesContainer = document.createElement("div");
     sourcesContainer.className = "rm-sources";
 
-    for (const source of sources) {
-      // Determine icon based on source type
+    capped.forEach((source, index) => {
       const sourceType = source.type || "webpage";
       let iconSvg: string;
-      let typeLabel: string;
       if (sourceType === "pdf") {
         iconSvg = ICONS.docs;
-        typeLabel = "Docs";
       } else if (sourceType === "faq") {
         iconSvg = ICONS.circleQuestion;
-        typeLabel = "FAQ";
       } else {
         iconSvg = ICONS.globe;
-        typeLabel = "Website";
       }
 
-      // Use <a> for clickable webpages, <span> for non-linkable PDFs/FAQs
       const isClickable = sourceType === "webpage" && source.url;
       const el = document.createElement(isClickable ? "a" : "span");
-      el.className = "rm-source-link";
+      el.className = "rm-source-chip";
 
       if (isClickable) {
         (el as HTMLAnchorElement).href = source.url!;
@@ -4326,34 +4444,51 @@
         (el as HTMLAnchorElement).rel = "noopener noreferrer";
       }
 
-      // Icon
-      const iconEl = document.createElement("span");
-      iconEl.className = "rm-source-icon";
-      iconEl.innerHTML = iconSvg;
+      el.innerHTML = iconSvg;
 
-      // Type label
-      const labelEl = document.createElement("span");
-      labelEl.className = "rm-source-type";
-      labelEl.textContent = typeLabel;
+      const badge = document.createElement("span");
+      badge.className = "rm-source-badge";
+      badge.textContent = String(index + 1);
+      el.appendChild(badge);
 
-      // Title (truncated via CSS)
-      const titleEl = document.createElement("span");
-      titleEl.className = "rm-source-title";
-      titleEl.textContent = source.title;
+      const tooltip = document.createElement("span");
+      tooltip.className = "rm-source-tooltip";
+      tooltip.textContent = source.title;
+      el.appendChild(tooltip);
 
-      el.appendChild(iconEl);
-      el.appendChild(labelEl);
-      el.appendChild(titleEl);
       sourcesContainer.appendChild(el);
-    }
+    });
 
-    // Append sources inside the message bubble, after the text
     msgEl.appendChild(sourcesContainer);
   }
 
-  function showTyping(message?: string) {
+  // Stable user-facing labels per backend phase. The widget owns the copy so
+  // we never surface raw backend strings and can localize later without
+  // touching the worker. Falls back to the backend `message` when the phase is
+  // unknown, and finally to "Thinking" when neither is provided.
+  const PHASE_LABELS: Record<string, string> = {
+    thinking: "Thinking\u2026",
+    retrieval: "Searching docs\u2026",
+    tool: "Checking connected systems\u2026",
+    verify: "Checking facts\u2026",
+    compose: "Writing the reply\u2026",
+  };
+
+  function showTyping(message?: string, phase?: string) {
     typingRow.classList.add("visible");
-    statusText.textContent = message ?? "Thinking";
+    const label = (phase && PHASE_LABELS[phase]) || message || "Thinking";
+    if (statusText.textContent !== label) {
+      statusText.style.opacity = "0";
+      setTimeout(() => {
+        statusText.textContent = label;
+        statusText.style.opacity = "1";
+      }, 150);
+    }
+    if (phase) {
+      statusText.dataset.phase = phase;
+    } else {
+      delete statusText.dataset.phase;
+    }
     scrollToBottom();
   }
 

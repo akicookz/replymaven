@@ -4,6 +4,8 @@ import { type ToolRow } from "../db";
 import { type ProjectSettingsRow } from "../db";
 import { type AppEnv } from "../types";
 import { type SourceReference } from "../services/resource-service";
+import { type InternalToken } from "./streaming/internal-tokens";
+import { type HandoffSopDecision } from "./workflows/classify-handoff-sop";
 
 export type GroundingConfidence = "high" | "low" | "none";
 export type SupportIntent =
@@ -73,6 +75,12 @@ export interface SupportAgentStreamOptions {
   onToolCallFinish?: (info: ToolCallFinishInfo) => void;
 }
 
+export interface InquiryFieldSpec {
+  label: string;
+  type: string;
+  required: boolean;
+}
+
 export interface SupportPromptOptions {
   guidelines?: Array<{ condition: string; instruction: string }>;
   agentHandbackInstructions?: string | null;
@@ -90,6 +98,9 @@ export interface SupportPromptOptions {
   toolEvidenceSummary?: string | null;
   retrievalAttempted?: boolean;
   broaderSearchAttempted?: boolean;
+  existingInquiry?: Record<string, string> | null;
+  inquiryFields?: InquiryFieldSpec[] | null;
+  handoffSopDecision?: HandoffSopDecision | null;
 }
 
 export type SupportPromptSettings = Pick<
@@ -393,6 +404,7 @@ export interface PlannerLoopResult {
   stepCount: number;
   terminationAction: PlannerActionType;
   loopState: PlannerLoopState;
+  detectedInternalTokens: InternalToken[];
 }
 
 export interface SupportAgentDependencies {
@@ -414,6 +426,7 @@ export interface WidgetMessageTurnContext {
     content: string;
     imageUrl?: string | null;
     pageContext?: Record<string, string>;
+    history?: ConversationTurnMessage[];
   };
 }
 
@@ -435,6 +448,13 @@ export interface TurnTelemetry {
   firstTextAt?: number;
   verifierRan?: boolean;
   verifierVerdict?: "supported" | "unsupported" | "revised";
+  routerMs?: number;
+  loopMs?: number;
+  composeMs?: number;
+  verifierMs?: number;
+  plannerStepMs?: number[];
+  retrievalMs?: number[];
+  toolCallMs?: number[];
 }
 
 export function toToolDefinition(tool: ToolRow): SupportToolDefinition {

@@ -639,6 +639,7 @@ const app = new Hono<HonoAppContext>()
         content: parsed.data.content,
         imageUrl: parsed.data.imageUrl,
         pageContext: parsed.data.pageContext,
+        history: parsed.data.history,
       },
     });
   })

@@ -166,6 +166,15 @@ export const sendMessageSchema = z.object({
   content: z.string().min(1, "Message cannot be empty").max(5000),
   imageUrl: z.string().max(500).optional(),
   pageContext: z.record(z.string(), z.string()).optional(),
+  history: z
+    .array(
+      z.object({
+        role: z.enum(["visitor", "bot", "agent"]),
+        content: z.string().max(10000),
+      }),
+    )
+    .max(10)
+    .optional(),
 });
 
 export const updateVisitorEmailSchema = z.object({

@@ -34,9 +34,19 @@ import { buildRetrievalQueries } from "../retrieval/build-retrieval-queries";
 import { getSourceReferenceDedupKey } from "../retrieval/build-rag-context";
 import { runAiSearch, type RetrievalResult } from "../retrieval/run-ai-search";
 import { emitSseEvent } from "../streaming/map-agent-events-to-sse";
+import {
+  createStreamingStripState,
+  detectInternalTokens,
+  flushStreamingStripState,
+  type InternalToken,
+  stripInternalTokensStreaming,
+} from "../streaming/internal-tokens";
 import { streamSupportAgent } from "../agents/support-agent";
 import { stripTrailingSolicitedFollowUp } from "./strip-trailing-solicited-follow-up";
+import { promoteActionForHandoffOverride } from "./promote-action-for-handoff-override";
 import { executeHttpTool } from "../tools/http-tool-executor";
+import { type HandoffSopDecision } from "../workflows/classify-handoff-sop";
+import { type InquiryRefinementDecision } from "../workflows/classify-inquiry-refinement";
 import {
   buildUnsupportedFallback,
   fallbackVerificationResult,
@@ -44,6 +54,7 @@ import {
   verifyAnswer,
 } from "../workflows/verify-answer";
 import {
+  type InquiryFieldSpec,
   type PlannerActionHistoryEntry,
   type PlannerDocsEvidence,
   type PlannerLoopResult,
@@ -68,6 +79,8 @@ interface RunPlannerLoopOptions {
   conversationHistory: ConversationTurnMessage[];
   conversationSummary: string | null;
   turnPlan: SupportTurnPlan;
+  handoffEligibleTurn: boolean;
+  handoffEligibleReason: string | null;
   availableTools: SupportToolDefinition[];
   enabledToolRows: ToolRow[];
   toolService: ToolService;
@@ -87,6 +100,7 @@ interface RunPlannerLoopOptions {
     visitorEmail: string | null;
     status: string;
     metadata: string | null | undefined;
+    telegramThreadId?: string | null;
   };
   settings: SupportPromptSettings & {
     companyName?: string | null;
@@ -96,11 +110,16 @@ interface RunPlannerLoopOptions {
   guidelines: Array<{ condition: string; instruction: string }>;
   compiledFaqContext: string;
   visitorInfo: { name: string | null; email: string | null };
+  existingInquiry?: Record<string, string> | null;
+  inquiryFields?: InquiryFieldSpec[] | null;
+  handoffSopDecision?: HandoffSopDecision | null;
+  inquiryRefinementDecision?: InquiryRefinementDecision | null;
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
+  faqMatchHint?: { question: string; answer: string; score: number } | null;
   emitStatus: (
     message: string,
-    phase: "retrieval" | "tool" | "verify" | "compose",
+    phase: "thinking" | "retrieval" | "tool" | "verify" | "compose",
   ) => void;
   shouldAllowTeamRequest: (options: {
     retrievalAttempted: boolean;
@@ -331,13 +350,18 @@ function visitorDeclinedContactDetails(message: string): boolean {
 function shouldVerifyAnswer(options: {
   userMessage: string;
   fullResponse: string;
+  detectedInternalTokens: InternalToken[];
   groundingConfidence: "high" | "low" | "none";
   hadToolCalls: boolean;
   hasEvidence: boolean;
+  faqOnlyEvidence?: boolean;
 }): boolean {
   if (!options.hasEvidence) return false;
   if (!options.fullResponse.trim()) return false;
-  if (options.fullResponse.includes("[RESOLVED]")) return false;
+  if (options.detectedInternalTokens.includes("[RESOLVED]")) return false;
+  if (options.groundingConfidence === "high" && options.faqOnlyEvidence && !options.hadToolCalls) {
+    return false;
+  }
 
   const looksLikeLookup =
     /(how|why|can|does|where|pricing|policy|refund|billing|setup|configure|integration|api|error|issue|problem|plan)/i.test(
@@ -453,11 +477,14 @@ async function executeCompose(options: {
   compiledFaqContext: string;
   pageContext?: Record<string, string>;
   visitorInfo: { name: string | null; email: string | null };
+  existingInquiry?: Record<string, string> | null;
+  inquiryFields?: InquiryFieldSpec[] | null;
+  handoffSopDecision?: HandoffSopDecision | null;
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
   emitStatus: (
     message: string,
-    phase: "retrieval" | "tool" | "verify" | "compose",
+    phase: "thinking" | "retrieval" | "tool" | "verify" | "compose",
   ) => void;
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
   closeSafeAiReplayWindow: (reason: string) => void;
@@ -465,6 +492,7 @@ async function executeCompose(options: {
   fullResponse: string;
   lastToolOutput: unknown;
   lastToolError: string | null;
+  detectedInternalTokens: InternalToken[];
 }> {
   const systemPrompt = buildSupportSystemPrompt(
     options.settings,
@@ -488,6 +516,9 @@ async function executeCompose(options: {
       toolEvidenceSummary: summarizeToolEvidence(options.state.toolEvidence),
       retrievalAttempted: options.state.docsEvidence.retrievalAttempted,
       broaderSearchAttempted: options.state.docsEvidence.broaderSearchAttempted,
+      existingInquiry: options.existingInquiry,
+      inquiryFields: options.inquiryFields,
+      handoffSopDecision: options.handoffSopDecision,
     },
     // options.currentMessage,
   );
@@ -518,6 +549,8 @@ async function executeCompose(options: {
   });
 
   let fullResponse = "";
+  const stripState = createStreamingStripState();
+  const detectedInternalTokens: InternalToken[] = [];
   for await (const part of supportAgent.fullStream) {
     if (part.type !== "text-delta") {
       continue;
@@ -531,16 +564,41 @@ async function executeCompose(options: {
       options.closeSafeAiReplayWindow("compose_started");
     }
 
-    fullResponse += part.text;
-    emitSseEvent(options.controller, options.encoder, { text: part.text });
+    const delta = String(part.text ?? "");
+    const stripResult = stripInternalTokensStreaming(stripState, delta);
+    if (stripResult.tokens.length > 0) {
+      detectedInternalTokens.push(...stripResult.tokens);
+    }
+    if (stripResult.emit) {
+      fullResponse += stripResult.emit;
+      emitSseEvent(options.controller, options.encoder, {
+        text: stripResult.emit,
+      });
+    }
+  }
+
+  const flushed = flushStreamingStripState(stripState);
+  if (flushed.tokens.length > 0) {
+    detectedInternalTokens.push(...flushed.tokens);
+  }
+  if (flushed.emit) {
+    fullResponse += flushed.emit;
+    emitSseEvent(options.controller, options.encoder, {
+      text: flushed.emit,
+    });
   }
 
   if (!fullResponse.trim()) {
-    fullResponse = buildStopResponse({
+    const rawStopResponse = buildStopResponse({
       currentMessage: options.currentMessage,
       turnPlan: options.state.initialTurnPlan,
       state: options.state,
     });
+    const stopPresence = detectInternalTokens(rawStopResponse);
+    if (stopPresence.tokens.length > 0) {
+      detectedInternalTokens.push(...stopPresence.tokens);
+    }
+    fullResponse = stopPresence.cleaned;
     emitSseEvent(options.controller, options.encoder, {
       finalText: fullResponse,
     });
@@ -550,16 +608,22 @@ async function executeCompose(options: {
     shouldVerifyAnswer({
       userMessage: options.currentMessage,
       fullResponse,
+      detectedInternalTokens,
       groundingConfidence: options.state.docsEvidence.groundingConfidence,
       hadToolCalls: options.state.toolEvidence.length > 0,
       hasEvidence:
         options.state.docsEvidence.ragContext.trim().length > 0 ||
         options.state.toolEvidence.length > 0,
+      faqOnlyEvidence:
+        options.state.docsEvidence.faqContext.trim().length > 0 &&
+        options.state.docsEvidence.knowledgeBaseContext.trim().length === 0 &&
+        options.state.toolEvidence.length === 0,
     })
   ) {
     options.telemetry.verifierRan = true;
     options.emitStatus("Checking factual claims against docs...", "verify");
 
+    const verifierStart = Date.now();
     let verification: VerificationResult;
     try {
       verification = await runWithModelFallback({
@@ -587,6 +651,7 @@ async function executeCompose(options: {
         options.buildLogContext(),
       );
     }
+    options.telemetry.verifierMs = Date.now() - verifierStart;
 
     options.telemetry.verifierVerdict = verification.verdict;
     if (
@@ -594,14 +659,18 @@ async function executeCompose(options: {
       verification.answer.trim() &&
       verification.answer.trim() !== fullResponse.trim()
     ) {
-      fullResponse = verification.answer.trim();
+      const verifierPresence = detectInternalTokens(verification.answer.trim());
+      if (verifierPresence.tokens.length > 0) {
+        detectedInternalTokens.push(...verifierPresence.tokens);
+      }
+      fullResponse = verifierPresence.cleaned;
       emitSseEvent(options.controller, options.encoder, {
         finalText: fullResponse,
       });
     }
   }
 
-  if (!fullResponse.includes("[RESOLVED]")) {
+  if (!detectedInternalTokens.includes("[RESOLVED]")) {
     const strippedResponse = stripTrailingSolicitedFollowUp(fullResponse);
     if (strippedResponse !== fullResponse.trim()) {
       fullResponse = strippedResponse;
@@ -615,6 +684,7 @@ async function executeCompose(options: {
     fullResponse,
     lastToolOutput: options.state.toolEvidence.at(-1)?.output ?? null,
     lastToolError: options.state.toolEvidence.at(-1)?.error ?? null,
+    detectedInternalTokens,
   };
 }
 
@@ -626,6 +696,16 @@ export async function runPlannerLoop(
     options.conversationSummary,
     options.visitorInfo,
   );
+
+  if (options.faqMatchHint) {
+    loopState.docsEvidence = {
+      ...loopState.docsEvidence,
+      faqContext: `Q: ${options.faqMatchHint.question}\nA: ${options.faqMatchHint.answer}`,
+      groundingConfidence: options.faqMatchHint.score >= 0.9 ? "high" : "low",
+      retrievalAttempted: true,
+    };
+  }
+
   let lastToolOutput: unknown = null;
   let lastToolError: string | null = null;
   let hadToolCalls = false;
@@ -645,7 +725,11 @@ export async function runPlannerLoop(
   }
 
   while (loopState.stepCount < MAX_PLANNER_STEPS) {
+    if (loopState.stepCount > 0) {
+      options.emitStatus("Thinking...", "thinking");
+    }
     let plannerDecision;
+    const plannerStepStart = Date.now();
     try {
       plannerDecision = await runWithModelFallback({
         runtime: options.modelRuntime,
@@ -681,6 +765,8 @@ export async function runPlannerLoop(
         }),
       );
     }
+    if (!options.telemetry.plannerStepMs) options.telemetry.plannerStepMs = [];
+    options.telemetry.plannerStepMs.push(Date.now() - plannerStepStart);
 
     const sanitizedDecision = sanitizePlannerDecision({
       decision: plannerDecision,
@@ -694,7 +780,22 @@ export async function runPlannerLoop(
     loopState.goal = sanitizedDecision.goal;
     loopState.stepCount += 1;
 
-    const nextAction = sanitizedDecision.nextAction;
+    const rawNextAction = sanitizedDecision.nextAction;
+    const promotionResult = promoteActionForHandoffOverride({
+      action: rawNextAction,
+      handoffSopDecision: options.handoffSopDecision,
+      missingContactFields: getMissingContactFields(loopState),
+      contactDeclined: loopState.contactDeclined,
+    });
+    const nextAction = promotionResult.action;
+    if (promotionResult.promoted && promotionResult.promotionNote) {
+      pushActionHistory(loopState, {
+        type: nextAction.type,
+        reason: promotionResult.promotionNote,
+        outcome: "executed",
+        note: `hard-promoted from ${rawNextAction.type}`,
+      });
+    }
 
     if (nextAction.type === "search_docs") {
       // Track semantic group for this query
@@ -715,7 +816,7 @@ export async function runPlannerLoop(
         note: null,
       });
 
-      options.emitStatus("Searching docs...", "retrieval");
+      options.emitStatus("Searching knowledge base...", "retrieval");
       let searchQuery = nextAction.query;
       try {
         searchQuery = await runWithModelFallback({
@@ -748,6 +849,7 @@ export async function runPlannerLoop(
         [nextAction.query],
       );
       const broaderQueries = nextAction.broaderQueries ?? [];
+      const retrievalStart = Date.now();
       const retrieval = await runAiSearch({
         env: options.env,
         db: options.db,
@@ -756,6 +858,8 @@ export async function runPlannerLoop(
         broaderQueries,
         allowBroaderRetry: broaderQueries.length > 0,
       });
+      if (!options.telemetry.retrievalMs) options.telemetry.retrievalMs = [];
+      options.telemetry.retrievalMs.push(Date.now() - retrievalStart);
 
       loopState.docsEvidence = mergeDocsEvidence(
         loopState.docsEvidence,
@@ -794,6 +898,8 @@ export async function runPlannerLoop(
         ? await executeHttpTool(toolDef, nextAction.input)
         : { error: "Tool definition missing." };
       const durationMs = Date.now() - toolStartedAt;
+      if (!options.telemetry.toolCallMs) options.telemetry.toolCallMs = [];
+      options.telemetry.toolCallMs.push(durationMs);
       const errorMessage = output.error ? String(output.error) : null;
 
       emitSseEvent(options.controller, options.encoder, {
@@ -882,6 +988,7 @@ export async function runPlannerLoop(
         stepCount: loopState.stepCount,
         terminationAction: "offer_handoff",
         loopState,
+        detectedInternalTokens: [],
       };
     }
 
@@ -911,6 +1018,7 @@ export async function runPlannerLoop(
         stepCount: loopState.stepCount,
         terminationAction: "collect_contact",
         loopState,
+        detectedInternalTokens: [],
       };
     }
 
@@ -945,6 +1053,7 @@ export async function runPlannerLoop(
           stepCount: loopState.stepCount,
           terminationAction: "create_inquiry",
           loopState,
+          detectedInternalTokens: [],
         };
       }
 
@@ -977,10 +1086,16 @@ export async function runPlannerLoop(
             visitorId: options.conversation.visitorId,
             visitorName: loopState.knownVisitorName,
             visitorEmail: loopState.knownVisitorEmail,
+            telegramThreadId: options.conversation.telegramThreadId ?? null,
           },
           conversationHistory: options.conversationHistory,
           summary,
           email: loopState.knownVisitorEmail ?? "not provided",
+          inquiryFields: options.inquiryFields,
+          existingInquiry: options.existingInquiry,
+          extractedRefinementData:
+            options.inquiryRefinementDecision?.extracted ?? null,
+          appendMode: Boolean(options.existingInquiry),
           settings: options.settings,
           env: {
             BETTER_AUTH_URL: options.env.BETTER_AUTH_URL,
@@ -1016,6 +1131,7 @@ export async function runPlannerLoop(
           stepCount: loopState.stepCount,
           terminationAction: "create_inquiry",
           loopState,
+          detectedInternalTokens: [],
         };
       }
 
@@ -1053,9 +1169,14 @@ export async function runPlannerLoop(
       }
 
       const agentLabel = options.settings.agentName ?? "a team member";
-      const fullResponse = submission.created
-        ? `I've forwarded this to the team. ${agentLabel} will follow up shortly!`
-        : `I've already forwarded this conversation to the team. ${agentLabel} will continue the follow-up there.`;
+      let fullResponse: string;
+      if (submission.appended) {
+        fullResponse = `I've added those details to your existing request. ${agentLabel} will follow up shortly!`;
+      } else if (submission.created) {
+        fullResponse = `I've forwarded this to the team. ${agentLabel} will follow up shortly!`;
+      } else {
+        fullResponse = `I've already forwarded this conversation to the team. ${agentLabel} will continue the follow-up there.`;
+      }
       pushActionHistory(loopState, {
         type: "create_inquiry",
         reason: nextAction.reason,
@@ -1077,6 +1198,7 @@ export async function runPlannerLoop(
         stepCount: loopState.stepCount,
         terminationAction: "create_inquiry",
         loopState,
+        detectedInternalTokens: [],
       };
     }
 
@@ -1103,6 +1225,7 @@ export async function runPlannerLoop(
         stepCount: loopState.stepCount,
         terminationAction: "ask_user",
         loopState,
+        detectedInternalTokens: [],
       };
     }
 
@@ -1114,6 +1237,7 @@ export async function runPlannerLoop(
         note: nextAction.answerStyle ?? null,
       });
 
+      const composeStart = Date.now();
       const composeResult = await executeCompose({
         controller: options.controller,
         encoder: options.encoder,
@@ -1128,12 +1252,16 @@ export async function runPlannerLoop(
         compiledFaqContext: options.compiledFaqContext,
         pageContext: options.pageContext,
         visitorInfo: options.visitorInfo,
+        existingInquiry: options.existingInquiry,
+        inquiryFields: options.inquiryFields,
+        handoffSopDecision: options.handoffSopDecision,
         agentHandbackInstructions: options.agentHandbackInstructions,
         image: options.image,
         emitStatus: options.emitStatus,
         buildLogContext: options.buildLogContext,
         closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
       });
+      options.telemetry.composeMs = Date.now() - composeStart;
 
       loopState.finalDraft = composeResult.fullResponse;
       loopState.terminationReason = nextAction.reason;
@@ -1146,6 +1274,7 @@ export async function runPlannerLoop(
         stepCount: loopState.stepCount,
         terminationAction: "compose",
         loopState,
+        detectedInternalTokens: composeResult.detectedInternalTokens,
       };
     }
 
@@ -1174,6 +1303,7 @@ export async function runPlannerLoop(
       stepCount: loopState.stepCount,
       terminationAction: "stop",
       loopState,
+      detectedInternalTokens: [],
     };
   }
 
@@ -1203,5 +1333,6 @@ export async function runPlannerLoop(
     stepCount: loopState.stepCount,
     terminationAction: "stop",
     loopState,
+    detectedInternalTokens: [],
   };
 }

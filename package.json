@@ -14,6 +14,7 @@
 		"db:migrate:dev": "bun run wrangler d1 migrations apply --local DB",
 		"db:migrate:prod": "bun run wrangler d1 migrations apply --remote DB",
 		"widget:build": "vite build --config widget/vite.config.ts && cp dist-widget/widget-embed.js public/widget-embed.js",
+		"widget:watch": "vite build --config widget/vite.config.ts --watch --outDir public --emptyOutDir false",
 		"widget:upload": "wrangler r2 object put replymaven-widget/widget-embed.js --file dist-widget/widget-embed.js --content-type application/javascript --remote",
 		"widget:deploy": "bun run widget:build && bun run widget:upload",
 		"deploy:full": "bun run build && bun run widget:deploy && wrangler deploy && bun run db:migrate:prod"
