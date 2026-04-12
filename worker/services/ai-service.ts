@@ -427,7 +427,7 @@ JSON:`,
         ? existingContext.pendingSuggestions
             .map(
               (suggestion) =>
-                `Pending ${suggestion.type} (${suggestion.id}): ${suggestion.summary}`,
+                `- [${suggestion.type}] ${suggestion.summary}`,
             )
             .join("\n")
         : "(none)";
@@ -442,7 +442,7 @@ JSON:`,
 CONVERSATION:
 ${transcript}
 
-PENDING SUGGESTIONS TO AVOID DUPLICATING:
+ALREADY PENDING SUGGESTIONS (DO NOT duplicate these topics, even with different wording):
 ${pendingSummary}
 
 DETERMINISTICALLY SELECTED FAQ CANDIDATES:
@@ -460,7 +460,7 @@ ${webpageSummary}
 Company Context:
 ${contextSummary}
 
-Pick the most appropriate actions. Use only these action types:
+Identify the SINGLE most impactful knowledge gap revealed by this conversation. Pick exactly ONE action type:
 - "add_faq_pair": add ONE new Q&A pair to an EXISTING FAQ resource from the candidate list
 - "refine_faq_pair": refine ONE specific Q&A pair in an EXISTING FAQ resource from the candidate list${existingContext.faqCandidates.length === 0 ? '\n- "new_faq": create a NEW FAQ resource (only available when no FAQs exist yet)' : ''}
 - "add_sop": add ONE new SOP guideline
@@ -471,13 +471,12 @@ Pick the most appropriate actions. Use only these action types:
 - "update_context": append missing high-level company context when it does not belong in a FAQ, SOP, PDF, or webpage refinement
 
 Rules:
-- Return at most 3 actions
-- Each FAQ/SOP action should be for exactly ONE pair/guideline only
+- Return EXACTLY 1 action — the single most valuable improvement. Never return more than one.
+- Choose the best-fit type: if the gap is a factual Q&A, use FAQ. If it is a behavioral procedure, use SOP. If existing content is wrong, use refine/update.
 - For FAQs: Use "add_faq_pair" or "refine_faq_pair" instead of full resource updates
 - For SOPs: Use "add_sop" or "refine_sop" for individual guidelines
 - For PDFs and web pages, NEVER create a new resource suggestion. Only use "update_pdf" or "update_webpage"
-- Do NOT create a duplicate of an existing pending suggestion
-- Do NOT create multiple actions for the same target
+- If a pending suggestion ALREADY covers the same topic (even with different wording), return []
 - Only suggest an action if the conversation reveals a genuine gap, incorrect content, or missing procedure
 - If no improvements are needed, return []
 
@@ -607,7 +606,7 @@ If no improvements are warranted, return exactly: []`,
           }
         }
 
-        return plans;
+        return plans.slice(0, 1);
       } catch {
         return [];
       }

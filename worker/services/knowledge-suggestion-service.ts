@@ -628,6 +628,74 @@ function applyTextSuggestion(
   return content.replace(payload.currentText, payload.updatedText);
 }
 
+export function isSemanticallyDuplicate(
+  newSuggestion: { type: string; suggestion: string | Record<string, unknown>; reasoning: string },
+  existingSuggestions: Array<{ type: string; suggestion: string; reasoning: string | null }>,
+  threshold = 0.5,
+): boolean {
+  const newText = extractSuggestionText(newSuggestion);
+  const newTokens = tokenizeForDedup(newText);
+  if (newTokens.size === 0) return false;
+
+  for (const existing of existingSuggestions) {
+    const existingText = extractSuggestionText(existing);
+    const existingTokens = tokenizeForDedup(existingText);
+    if (existingTokens.size === 0) continue;
+
+    let overlap = 0;
+    for (const token of newTokens) {
+      if (existingTokens.has(token)) overlap++;
+    }
+    const score = overlap / Math.min(newTokens.size, existingTokens.size);
+    if (score >= threshold) return true;
+  }
+  return false;
+}
+
+function extractSuggestionText(suggestion: {
+  type: string;
+  suggestion: string | Record<string, unknown>;
+  reasoning: string | null;
+}): string {
+  const payload =
+    typeof suggestion.suggestion === "string"
+      ? safeParseJson(suggestion.suggestion)
+      : suggestion.suggestion;
+
+  const parts: string[] = [];
+  if (suggestion.reasoning) parts.push(suggestion.reasoning);
+
+  for (const value of Object.values(payload)) {
+    if (typeof value === "string") {
+      parts.push(value);
+    } else if (value && typeof value === "object") {
+      for (const v of Object.values(value as Record<string, unknown>)) {
+        if (typeof v === "string") parts.push(v);
+      }
+    }
+  }
+  return parts.join(" ");
+}
+
+const DEDUP_STOP_WORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how",
+  "i", "in", "is", "it", "of", "on", "or", "our", "the", "their", "them",
+  "this", "to", "we", "what", "when", "where", "with", "you", "your",
+  "should", "bot", "customer", "user", "they", "can", "will", "not", "do",
+]);
+
+function tokenizeForDedup(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(" ")
+      .filter((t) => t.length >= 3 && !DEDUP_STOP_WORDS.has(t)),
+  );
+}
+
 function safeParseJson(value: string): Record<string, unknown> {
   try {
     return JSON.parse(value) as Record<string, unknown>;

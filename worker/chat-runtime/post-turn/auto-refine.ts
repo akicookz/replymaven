@@ -1,6 +1,7 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import {
   buildSuggestionFingerprint,
+  isSemanticallyDuplicate,
   KnowledgeSuggestionService,
   type SuggestionType,
 } from "../../services/knowledge-suggestion-service";
@@ -247,6 +248,29 @@ export async function triggerAutoRefinementIfEnabled(options: {
           type: generated.type,
           source,
           fingerprint,
+        });
+        continue;
+      }
+
+      if (
+        isSemanticallyDuplicate(
+          {
+            type: generated.type,
+            suggestion: generated.suggestion,
+            reasoning: generated.reasoning,
+          },
+          pendingSuggestions.map((s) => ({
+            type: s.type,
+            suggestion: s.suggestion,
+            reasoning: s.reasoning,
+          })),
+        )
+      ) {
+        logInfo("auto_refine.skipped_semantic_duplicate", {
+          projectId: options.projectId,
+          conversationId: options.conversationId,
+          type: generated.type,
+          source,
         });
         continue;
       }
