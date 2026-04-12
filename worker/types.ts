@@ -50,6 +50,7 @@ export interface AppEnv extends Env {
   STRIPE_STANDARD_ANNUAL_PRICE_ID: string;
   STRIPE_BUSINESS_MONTHLY_PRICE_ID: string;
   STRIPE_BUSINESS_ANNUAL_PRICE_ID: string;
+  RESEND_WEBHOOK_SECRET: string;
   UPLOADS: R2Bucket;
   CONVERSATIONS_CACHE: KVNamespace;
   AI: Ai;

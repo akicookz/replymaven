@@ -1,0 +1,1 @@
+ALTER TABLE `messages` ADD `emailed_at` integer;

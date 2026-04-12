@@ -23,6 +23,7 @@ import {
   ShieldBan,
   Tag,
   FileText,
+  Mail,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -127,6 +128,7 @@ interface Message {
   senderAvatar?: string | null;
   userId?: string | null;
   createdAt: string;
+  emailedAt?: string | null;
   toolExecutions?: ToolExecutionInfo[];
 }
 
@@ -471,6 +473,7 @@ function Conversations() {
   }
 
   function isUnread(convo: Conversation): boolean {
+    if (convo.status === "closed") return false;
     if (selectedConvo === convo.id) return false;
     const activity = getActivityMs(convo);
     const read = lastReadMap[convo.id] ?? 0;
@@ -714,6 +717,38 @@ function Conversations() {
     },
   });
 
+  const sendEmail = useMutation({
+    mutationFn: async (messageId: string) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${selectedConvo}/send-email`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messageId }),
+        },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed" }));
+        throw new Error(err.error ?? "Failed to send email");
+      }
+      return res.json() as Promise<{ ok: boolean; emailedAt: string }>;
+    },
+    onSuccess: (data, messageId) => {
+      queryClient.setQueryData(
+        ["conversation-detail", selectedConvo],
+        (old: { conversation: Conversation; messages: Message[]; botName: string | null; agentName: string | null; inquiry: ConversationInquiry | null } | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            messages: old.messages.map((m) =>
+              m.id === messageId ? { ...m, emailedAt: data.emailedAt } : m,
+            ),
+          };
+        },
+      );
+    },
+  });
+
   const closeConversation = useMutation({
     mutationFn: async ({
       convId,
@@ -816,17 +851,18 @@ function Conversations() {
   });
 
   // Get last message for sidebar preview
-  function getLastMessagePreview(convo: Conversation): string | null {
-    // We only have the full message list for the selected conversation
-    // For sidebar, we'd need to fetch individually or include in the list endpoint
-    // For now, return null (could be enhanced later)
+  function getLastMessagePreview(convo: Conversation): { text: string; emailed: boolean } | null {
     if (selectedConvo === convo.id && threadItems.length > 0) {
       const last = threadItems[threadItems.length - 1];
       if (last.kind === "inquiry") {
-        return "Inquiry submitted";
+        return { text: "Inquiry submitted", emailed: false };
       }
 
-      return last.message.content;
+      const isOutbound = last.message.role === "agent" || last.message.role === "bot";
+      return {
+        text: last.message.content,
+        emailed: isOutbound && !!last.message.emailedAt,
+      };
     }
     return null;
   }
@@ -991,17 +1027,22 @@ function Conversations() {
                   <div className="flex items-center justify-between gap-2 mt-0.5">
                     <p
                       className={cn(
-                        "text-xs truncate",
+                        "text-xs truncate flex items-center gap-1",
                         unread
                           ? "text-foreground font-medium"
                           : "text-muted-foreground",
                       )}
                     >
-                      {preview
-                        ? preview.slice(0, 50) + (preview.length > 50 ? "..." : "")
-                        : convo.visitorEmail ?? meta.city
-                          ? [meta.city, meta.country].filter(Boolean).join(", ")
-                          : convo.visitorId}
+                      {preview?.emailed && (
+                        <Mail className="w-3 h-3 shrink-0 text-status-replied/70" />
+                      )}
+                      <span className="truncate">
+                        {preview
+                          ? preview.text.slice(0, 50) + (preview.text.length > 50 ? "..." : "")
+                          : convo.visitorEmail ?? meta.city
+                            ? [meta.city, meta.country].filter(Boolean).join(", ")
+                            : convo.visitorId}
+                      </span>
                     </p>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {convo.status !== "closed" && convo.status !== "active" && (
@@ -1734,9 +1775,36 @@ function Conversations() {
                               {isVisitor && (
                                 <Check className="w-3 h-3 text-muted-foreground/40" />
                               )}
+                              {msg.emailedAt && (
+                                <Mail className="w-3 h-3 text-status-replied/70" />
+                              )}
                             </>
                           )}
                         </div>
+
+                        {/* Send as Email button for agent/bot messages */}
+                        {(isAgent || isBot) && !(msg as Message & { _optimistic?: boolean })._optimistic && (
+                          <div className="flex justify-end mt-1">
+                            {msg.emailedAt ? (
+                              <span className="text-[10px] text-muted-foreground/60 flex items-center gap-1">
+                                <Mail className="w-3 h-3" />
+                                Emailed {timeAgo(msg.emailedAt)}
+                              </span>
+                            ) : convoDetail?.conversation?.visitorEmail ? (
+                              <button
+                                type="button"
+                                onClick={() => sendEmail.mutate(msg.id)}
+                                disabled={sendEmail.isPending}
+                                className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                              >
+                                <Mail className="w-3 h-3" />
+                                {sendEmail.isPending && sendEmail.variables === msg.id
+                                  ? "Sending..."
+                                  : "Send as Email"}
+                              </button>
+                            ) : null}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

@@ -261,6 +261,51 @@ ${msg.body}
     }
   }
 
+  async sendAgentMessageEmail(details: {
+    to: string;
+    projectSlug: string;
+    projectName: string;
+    conversationId: string;
+    agentName: string;
+    agentAvatar: string | null;
+    messageContent: string;
+    dashboardUrl: string;
+  }): Promise<void> {
+    const {
+      to,
+      projectSlug,
+      projectName,
+      conversationId,
+      agentName,
+      messageContent,
+      dashboardUrl,
+    } = details;
+
+    const lines = escapeHtml(messageContent)
+      .split("\n")
+      .map((line) => (line.trim() === "" ? "<br/>" : `<p style="margin: 0 0 4px;">${line}</p>`))
+      .join("");
+
+    await this.resend.emails.send({
+      from: `${projectName} <${projectSlug}@updates.replymaven.com>`,
+      replyTo: `${projectSlug}@updates.replymaven.com`,
+      to,
+      subject: `New reply from ${escapeHtml(agentName)} - ${projectName}`,
+      headers: {
+        "X-Conversation-Id": conversationId,
+        "X-Project-Slug": projectSlug,
+      },
+      html: wrapEmail(`
+<p class="email-heading" style="${HEADING_STYLE} margin: 0 0 20px;">${escapeHtml(agentName)} replied</p>
+<div class="email-card" style="${CARD_STYLE} margin: 0 0 24px;">
+  <div style="font-size: 15px; ${BODY_TEXT} line-height: 1.6;">${lines}</div>
+</div>
+<a href="${dashboardUrl}" class="email-button" style="${BUTTON_STYLE}">View Conversation</a>
+<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">You can reply to this email to continue the conversation.</p>
+      `),
+    });
+  }
+
   async sendSubscriptionRecoveredEmail(
     to: string,
     name: string,

@@ -239,6 +239,13 @@
       "when": 1775745219242,
       "tag": "0033_giant_wild_pack",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1775983207625,
+      "tag": "0034_broken_gorilla_man",
+      "breakpoints": true
     }
   ]
 }

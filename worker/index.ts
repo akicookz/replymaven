@@ -69,6 +69,7 @@ import {
   createGuidelineSchema,
   updateGuidelineSchema,
   usageLogQuerySchema,
+  sendMessageAsEmailSchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -1199,6 +1200,245 @@ const app = new Hono<HonoAppContext>()
   // ─── Widget Embed JS (redirect to R2 custom domain) ────────────────────────
   .get("/api/widget-embed.js", (c) => {
     return c.redirect("https://widget.replymaven.com/widget-embed.js", 301);
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // INBOUND EMAIL WEBHOOK (public, no auth — Resend sends email.received events)
+  // ═══════════════════════════════════════════════════════════════════════════
+  .post("/api/webhooks/inbound-mail", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`inbound-mail:${ip}`, 30, 60_000)) {
+      return c.json({ ok: true });
+    }
+
+    const svixId = c.req.header("svix-id");
+    const svixTimestamp = c.req.header("svix-timestamp");
+    const svixSignature = c.req.header("svix-signature");
+
+    if (!svixId || !svixTimestamp || !svixSignature) {
+      return c.json({ error: "Missing webhook signature headers" }, 400);
+    }
+
+    const rawBody = await c.req.text();
+
+    const secret = c.env.RESEND_WEBHOOK_SECRET;
+    if (!secret) {
+      console.error("[InboundEmail] RESEND_WEBHOOK_SECRET not configured");
+      return c.json({ ok: true });
+    }
+
+    const secretBytes = Uint8Array.from(
+      atob(secret.startsWith("whsec_") ? secret.slice(6) : secret),
+      (ch) => ch.charCodeAt(0),
+    );
+    const signedContent = `${svixId}.${svixTimestamp}.${rawBody}`;
+    const hmacKey = await crypto.subtle.importKey(
+      "raw",
+      secretBytes,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const signatureBytes = await crypto.subtle.sign(
+      "HMAC",
+      hmacKey,
+      new TextEncoder().encode(signedContent),
+    );
+    const expectedSignature = btoa(
+      String.fromCharCode(...new Uint8Array(signatureBytes)),
+    );
+
+    const signatures = svixSignature.split(" ");
+    const verified = signatures.some((sig) => {
+      if (!sig.includes(",")) return false;
+      const [version, sigValue] = sig.split(",");
+      if (version !== "v1" || !sigValue) return false;
+      if (sigValue.length !== expectedSignature.length) return false;
+      let mismatch = 0;
+      for (let i = 0; i < sigValue.length; i++) {
+        mismatch |= sigValue.charCodeAt(i) ^ expectedSignature.charCodeAt(i);
+      }
+      return mismatch === 0;
+    });
+    if (!verified) {
+      console.error("[InboundEmail] Webhook signature verification failed");
+      return c.json({ error: "Invalid signature" }, 400);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let payload: any;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      return c.json({ error: "Invalid JSON" }, 400);
+    }
+
+    if (payload.type !== "email.received") {
+      return c.json({ ok: true });
+    }
+
+    const emailId = payload.data?.email_id;
+    const fromAddress = payload.data?.from;
+    const toAddresses: string[] = payload.data?.to ?? [];
+
+    if (!emailId || !fromAddress || toAddresses.length === 0) {
+      console.error("[InboundEmail] Missing required fields in payload");
+      return c.json({ ok: true });
+    }
+
+    // Extract project slug from to address ({slug}@updates.replymaven.com)
+    let projectSlug: string | null = null;
+    for (const addr of toAddresses) {
+      const match = addr.match(/^([^@]+)@updates\.replymaven\.com$/i);
+      if (match) {
+        projectSlug = match[1];
+        break;
+      }
+    }
+
+    if (!projectSlug || projectSlug === "noreply") {
+      return c.json({ ok: true });
+    }
+
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(projectSlug);
+    if (!project) {
+      console.error(`[InboundEmail] Project not found for slug: ${projectSlug}`);
+      return c.json({ ok: true });
+    }
+
+    // Fetch full email content from Resend API
+    let emailText = "";
+    try {
+      const emailRes = await fetch(
+        `https://api.resend.com/emails/received/${emailId}`,
+        {
+          headers: { Authorization: `Bearer ${c.env.RESEND_API_KEY}` },
+        },
+      );
+      if (emailRes.ok) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const emailData = (await emailRes.json()) as any;
+        emailText = (emailData.text ?? "").trim();
+        if (!emailText && emailData.html) {
+          emailText = emailData.html
+            .replace(/<[^>]*>/g, "")
+            .replace(/&nbsp;/g, " ")
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .trim();
+        }
+      } else {
+        console.error(
+          `[InboundEmail] Failed to fetch email content: ${emailRes.status}`,
+        );
+        return c.json({ ok: true });
+      }
+    } catch (err) {
+      console.error("[InboundEmail] Error fetching email content:", err);
+      return c.json({ ok: true });
+    }
+
+    if (!emailText) {
+      return c.json({ ok: true });
+    }
+
+    // Strip quoted reply content (lines starting with ">", "On ... wrote:", etc.)
+    const lines = emailText.split("\n");
+    const cleanLines: string[] = [];
+    for (const line of lines) {
+      if (/^On .+ wrote:$/i.test(line.trim())) break;
+      if (/^-{2,}\s*Original Message/i.test(line.trim())) break;
+      if (/^_{2,}/.test(line.trim())) break;
+      if (line.trim().startsWith(">")) continue;
+      cleanLines.push(line);
+    }
+    const cleanedText = cleanLines.join("\n").trim();
+    if (!cleanedText) {
+      return c.json({ ok: true });
+    }
+
+    // Find the conversation by sender email
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    let senderEmail: string;
+    if (typeof fromAddress === "string") {
+      senderEmail = fromAddress;
+    } else if (typeof fromAddress === "object" && fromAddress?.address) {
+      senderEmail = fromAddress.address;
+    } else {
+      console.error("[InboundEmail] Unexpected from address format:", fromAddress);
+      return c.json({ ok: true });
+    }
+
+    const conversation = await chatService.getRecentConversationByVisitorEmail(
+      project.id,
+      senderEmail,
+    );
+    if (!conversation) {
+      console.error(
+        `[InboundEmail] No conversation found for email: ${senderEmail} in project: ${project.id}`,
+      );
+      return c.json({ ok: true });
+    }
+
+    // Idempotency: check if this email was already processed
+    const existingMessages = await chatService.getMessagesSince(
+      conversation.id,
+      Date.now() - 5 * 60 * 1000,
+    );
+    const alreadyProcessed = existingMessages.some(
+      (m) => m.role === "visitor" && m.content === cleanedText,
+    );
+    if (alreadyProcessed) {
+      return c.json({ ok: true });
+    }
+
+    if (conversation.status === "closed") {
+      await chatService.reopenConversation(conversation.id, project.id);
+    }
+
+    await chatService.addMessage(
+      {
+        conversationId: conversation.id,
+        role: "visitor",
+        content: cleanedText,
+        sources: null,
+      },
+      project.id,
+    );
+
+    // If in agent mode, forward to Telegram
+    if (
+      conversation.status === "waiting_agent" ||
+      conversation.status === "agent_replied"
+    ) {
+      try {
+        const telegramService = new TelegramService(db);
+        const tgSettings = await telegramService.getTelegramSettings(
+          project.id,
+        );
+        if (tgSettings?.telegramBotToken && tgSettings?.telegramChatId) {
+          const replyTo = conversation.telegramThreadId
+            ? parseInt(conversation.telegramThreadId, 10)
+            : undefined;
+          await telegramService.forwardVisitorMessage(
+            tgSettings.telegramBotToken,
+            tgSettings.telegramChatId,
+            conversation.visitorName ?? senderEmail,
+            `[via email] ${cleanedText}`,
+            conversation.id,
+            replyTo,
+          );
+        }
+      } catch (err) {
+        console.error("[InboundEmail] Telegram forward failed:", err);
+      }
+    }
+
+    return c.json({ ok: true });
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -3854,6 +4094,68 @@ const app = new Hono<HonoAppContext>()
     );
 
     return c.json(message, 201);
+  })
+  .post("/api/projects/:id/conversations/:convId/send-email", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(sendMessageAsEmailSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const conversation = await chatService.getConversationById(
+      c.req.param("convId"),
+      project.id,
+    );
+    if (!conversation) {
+      return c.json({ error: "Conversation not found" }, 404);
+    }
+
+    if (!conversation.visitorEmail) {
+      return c.json({ error: "No visitor email address" }, 400);
+    }
+
+    const message = await chatService.getMessageById(parsed.data.messageId);
+    if (!message || message.conversationId !== conversation.id) {
+      return c.json({ error: "Message not found" }, 404);
+    }
+
+    if (message.role !== "agent" && message.role !== "bot") {
+      return c.json({ error: "Only agent or bot messages can be emailed" }, 400);
+    }
+
+    if (message.emailedAt) {
+      return c.json({ error: "Message already emailed" }, 400);
+    }
+
+    const ip = c.req.header("cf-connecting-ip") ?? "unknown";
+    if (!checkRateLimit(`email:${ip}`, 20, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const emailService = new EmailService(c.env.RESEND_API_KEY);
+    await emailService.sendAgentMessageEmail({
+      to: conversation.visitorEmail,
+      projectSlug: project.slug,
+      projectName: project.name,
+      conversationId: conversation.id,
+      agentName: message.senderName ?? user.name ?? "Support",
+      agentAvatar: message.senderAvatar ?? null,
+      messageContent: message.content,
+      dashboardUrl: `https://replymaven.com/app/projects/${project.id}/conversations/${conversation.id}`,
+    });
+
+    await chatService.markMessageAsEmailed(message.id);
+
+    return c.json({ ok: true, emailedAt: new Date().toISOString() });
   })
   .post("/api/projects/:id/conversations/:convId/close", async (c) => {
     const user = c.get("user");

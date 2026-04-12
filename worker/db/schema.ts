@@ -325,6 +325,7 @@ export const messages = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
+    emailedAt: integer("emailed_at", { mode: "timestamp" }),
   },
   (table) => [
     index("idx_messages_conversation").on(table.conversationId),

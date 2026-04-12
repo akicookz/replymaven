@@ -192,6 +192,11 @@ export const agentReplySchema = z.object({
   content: z.string().min(1, "Reply cannot be empty").max(5000),
 });
 
+// ─── Send Message as Email ────────────────────────────────────────────────────
+export const sendMessageAsEmailSchema = z.object({
+  messageId: z.string().min(1),
+});
+
 // ─── Telegram ─────────────────────────────────────────────────────────────────
 export const updateTelegramSchema = z.object({
   telegramBotToken: z.string().max(255).optional(),

@@ -364,6 +364,24 @@ export class ChatService {
     return rows[0] ?? null;
   }
 
+  async getRecentConversationByVisitorEmail(
+    projectId: string,
+    email: string,
+  ): Promise<ConversationRow | null> {
+    const rows = await this.db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.projectId, projectId),
+          eq(conversations.visitorEmail, email),
+        ),
+      )
+      .orderBy(desc(conversations.updatedAt))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
   // ─── Chat State ─────────────────────────────────────────────────────────────
 
   async getChatState(
@@ -460,6 +478,22 @@ export class ChatService {
       .where(eq(messages.id, id))
       .limit(1);
     return rows[0]!;
+  }
+
+  async getMessageById(messageId: string): Promise<MessageRow | null> {
+    const rows = await this.db
+      .select()
+      .from(messages)
+      .where(eq(messages.id, messageId))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async markMessageAsEmailed(messageId: string): Promise<void> {
+    await this.db
+      .update(messages)
+      .set({ emailedAt: new Date() })
+      .where(eq(messages.id, messageId));
   }
 
   // ─── KV Cache ───────────────────────────────────────────────────────────────
