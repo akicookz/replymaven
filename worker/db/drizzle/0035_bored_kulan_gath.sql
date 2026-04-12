@@ -1,0 +1,3 @@
+ALTER TABLE `conversations` ADD `chat_state` text;--> statement-breakpoint
+UPDATE `conversations` SET `chat_state` = json_extract(`metadata`, '$.chatState') WHERE `metadata` IS NOT NULL AND json_extract(`metadata`, '$.chatState') IS NOT NULL;--> statement-breakpoint
+UPDATE `conversations` SET `metadata` = json_remove(`metadata`, '$.chatState') WHERE `metadata` IS NOT NULL AND json_extract(`metadata`, '$.chatState') IS NOT NULL;

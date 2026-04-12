@@ -191,6 +191,9 @@ const SYSTEM_META_KEYS = new Set([
   "pageTitle",
   "online",
   "agentHandbackInstructions",
+  "teamRequestPending",
+  "teamRequestSubmittedAt",
+  "teamRequestSubmissionId",
 ]);
 
 function splitMetadata(meta: ConversationMeta): {

@@ -399,18 +399,26 @@ function Sops() {
                   size="sm"
                   variant="default"
                   onClick={() => bulkApproveSops.mutate(Array.from(selectedSuggestions))}
-                  disabled={bulkApproveSops.isPending}
+                  disabled={bulkApproveSops.isPending || bulkRejectSops.isPending}
                 >
-                  <Check className="w-3.5 h-3.5 mr-1.5" />
+                  {bulkApproveSops.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5 mr-1.5" />
+                  )}
                   Approve {selectedSuggestions.size}
                 </Button>
                 <Button
                   size="sm"
                   variant="destructive"
                   onClick={() => bulkRejectSops.mutate(Array.from(selectedSuggestions))}
-                  disabled={bulkRejectSops.isPending}
+                  disabled={bulkRejectSops.isPending || bulkApproveSops.isPending}
                 >
-                  <X className="w-3.5 h-3.5 mr-1.5" />
+                  {bulkRejectSops.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <X className="w-3.5 h-3.5 mr-1.5" />
+                  )}
                   Reject {selectedSuggestions.size}
                 </Button>
               </div>
@@ -461,19 +469,27 @@ function Sops() {
                       type="button"
                       onClick={() => approveSop.mutate(s.id)}
                       disabled={approveSop.isPending}
-                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
                       title="Approve and apply"
                     >
-                      <Check className="w-3.5 h-3.5" />
+                      {approveSop.isPending && approveSop.variables === s.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
                     </button>
                     <button
                       type="button"
                       onClick={() => rejectSop.mutate(s.id)}
                       disabled={rejectSop.isPending}
-                      className="p-1.5 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+                      className="p-1.5 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50"
                       title="Dismiss"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      {rejectSop.isPending && rejectSop.variables === s.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <X className="w-3.5 h-3.5" />
+                      )}
                     </button>
                   </div>
                 </div>

@@ -15,6 +15,7 @@ import {
   Globe,
   HelpCircle,
   Lightbulb,
+  Loader2,
   Plus,
   RefreshCw,
   Trash2,
@@ -686,18 +687,26 @@ function Resources() {
                   size="sm"
                   variant="default"
                   onClick={() => bulkApproveSuggestions.mutate(Array.from(selectedSuggestions))}
-                  disabled={bulkApproveSuggestions.isPending}
+                  disabled={bulkApproveSuggestions.isPending || bulkRejectSuggestions.isPending}
                 >
-                  <Check className="w-3.5 h-3.5 mr-1.5" />
+                  {bulkApproveSuggestions.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5 mr-1.5" />
+                  )}
                   Approve {selectedSuggestions.size}
                 </Button>
                 <Button
                   size="sm"
                   variant="destructive"
                   onClick={() => bulkRejectSuggestions.mutate(Array.from(selectedSuggestions))}
-                  disabled={bulkRejectSuggestions.isPending}
+                  disabled={bulkRejectSuggestions.isPending || bulkApproveSuggestions.isPending}
                 >
-                  <X className="w-3.5 h-3.5 mr-1.5" />
+                  {bulkRejectSuggestions.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <X className="w-3.5 h-3.5 mr-1.5" />
+                  )}
                   Reject {selectedSuggestions.size}
                 </Button>
               </div>
@@ -746,19 +755,27 @@ function Resources() {
                       type="button"
                       onClick={() => approveSuggestion.mutate(s.id)}
                       disabled={approveSuggestion.isPending}
-                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
                       title="Approve and apply"
                     >
-                      <Check className="w-3.5 h-3.5" />
+                      {approveSuggestion.isPending && approveSuggestion.variables === s.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
                     </button>
                     <button
                       type="button"
                       onClick={() => rejectSuggestion.mutate(s.id)}
                       disabled={rejectSuggestion.isPending}
-                      className="p-1.5 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+                      className="p-1.5 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50"
                       title="Dismiss"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      {rejectSuggestion.isPending && rejectSuggestion.variables === s.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <X className="w-3.5 h-3.5" />
+                      )}
                     </button>
                   </div>
                 </div>

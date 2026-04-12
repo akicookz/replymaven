@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertCircle, ArrowLeft, Check, ExternalLink, Lightbulb, RefreshCw, Save, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, ExternalLink, Lightbulb, Loader2, RefreshCw, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -327,18 +327,26 @@ function CompanyInfo() {
                   size="sm"
                   variant="default"
                   onClick={() => bulkApproveContext.mutate(Array.from(selectedSuggestions))}
-                  disabled={bulkApproveContext.isPending}
+                  disabled={bulkApproveContext.isPending || bulkRejectContext.isPending}
                 >
-                  <Check className="w-3.5 h-3.5 mr-1.5" />
+                  {bulkApproveContext.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5 mr-1.5" />
+                  )}
                   Approve {selectedSuggestions.size}
                 </Button>
                 <Button
                   size="sm"
                   variant="destructive"
                   onClick={() => bulkRejectContext.mutate(Array.from(selectedSuggestions))}
-                  disabled={bulkRejectContext.isPending}
+                  disabled={bulkRejectContext.isPending || bulkApproveContext.isPending}
                 >
-                  <X className="w-3.5 h-3.5 mr-1.5" />
+                  {bulkRejectContext.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <X className="w-3.5 h-3.5 mr-1.5" />
+                  )}
                   Reject {selectedSuggestions.size}
                 </Button>
               </div>
@@ -383,19 +391,27 @@ function CompanyInfo() {
                       type="button"
                       onClick={() => approveContext.mutate(s.id)}
                       disabled={approveContext.isPending}
-                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
                       title="Approve and apply"
                     >
-                      <Check className="w-3.5 h-3.5" />
+                      {approveContext.isPending && approveContext.variables === s.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
                     </button>
                     <button
                       type="button"
                       onClick={() => rejectContext.mutate(s.id)}
                       disabled={rejectContext.isPending}
-                      className="p-1.5 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+                      className="p-1.5 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50"
                       title="Dismiss"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      {rejectContext.isPending && rejectContext.variables === s.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <X className="w-3.5 h-3.5" />
+                      )}
                     </button>
                   </div>
                 </div>

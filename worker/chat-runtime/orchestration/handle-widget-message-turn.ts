@@ -48,7 +48,7 @@ import {
   type SupportTurnPlan,
   type TurnTelemetry,
   type WidgetMessageTurnContext,
-  parseChatStateFromMetadata,
+  parseChatState,
   toToolDefinition,
 } from "../types";
 import { BillingService } from "../../services/billing-service";
@@ -341,8 +341,8 @@ export async function handleWidgetMessageTurn(
     return Response.json({ error: "Conversation not found" }, { status: 404 });
   }
 
-  let chatState: ConversationChatState = parseChatStateFromMetadata(
-    conversation.metadata,
+  let chatState: ConversationChatState = parseChatState(
+    conversation.chatState,
   );
 
   // When the frontend ships its own last-N turns we skip the server-side

@@ -189,13 +189,12 @@ export function createInitialChatState(): ConversationChatState {
   };
 }
 
-export function parseChatStateFromMetadata(
-  metadata: string | null,
+export function parseChatState(
+  raw: string | null,
 ): ConversationChatState {
-  if (!metadata) return createInitialChatState();
+  if (!raw) return createInitialChatState();
   try {
-    const parsed = JSON.parse(metadata) as Record<string, unknown>;
-    const chat = parsed.chatState as Partial<ConversationChatState> | undefined;
+    const chat = JSON.parse(raw) as Partial<ConversationChatState>;
     if (!chat || typeof chat !== "object") return createInitialChatState();
     return {
       state:

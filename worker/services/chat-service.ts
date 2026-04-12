@@ -11,7 +11,7 @@ import {
 import {
   type ConversationChatState,
   createInitialChatState,
-  parseChatStateFromMetadata,
+  parseChatState,
 } from "../chat-runtime/types";
 
 export class ChatService {
@@ -121,20 +121,13 @@ export class ChatService {
   ): Promise<ConversationRow> {
     const id = crypto.randomUUID();
 
-    let metadata = data.metadata ?? null;
-    try {
-      const parsed = metadata ? JSON.parse(metadata) : {};
-      if (!parsed.chatState) {
-        parsed.chatState = createInitialChatState();
-      }
-      metadata = JSON.stringify(parsed);
-    } catch {
-      metadata = JSON.stringify({ chatState: createInitialChatState() });
-    }
-
     await this.db
       .insert(conversations)
-      .values({ id, ...data, metadata });
+      .values({
+        id,
+        ...data,
+        chatState: JSON.stringify(createInitialChatState()),
+      });
     return (await this.getConversationById(id, data.projectId))!;
   }
 
@@ -392,7 +385,7 @@ export class ChatService {
       conversationId,
       projectId,
     );
-    return parseChatStateFromMetadata(conversation?.metadata ?? null);
+    return parseChatState(conversation?.chatState ?? null);
   }
 
   async saveChatState(
@@ -400,28 +393,9 @@ export class ChatService {
     projectId: string,
     chatState: ConversationChatState,
   ): Promise<void> {
-    const conversation = await this.getConversationById(
-      conversationId,
-      projectId,
-    );
-    if (!conversation) return;
-
-    let existingMeta: Record<string, unknown> = {};
-    if (conversation.metadata) {
-      try {
-        existingMeta = JSON.parse(conversation.metadata) as Record<
-          string,
-          unknown
-        >;
-      } catch {
-        existingMeta = {};
-      }
-    }
-
-    const merged = { ...existingMeta, chatState };
     await this.db
       .update(conversations)
-      .set({ metadata: JSON.stringify(merged) })
+      .set({ chatState: JSON.stringify(chatState) })
       .where(
         and(
           eq(conversations.id, conversationId),

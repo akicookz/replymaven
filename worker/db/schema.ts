@@ -280,6 +280,7 @@ export const conversations = sqliteTable(
     }),
     telegramThreadId: text("telegram_thread_id"),
     metadata: text("metadata"), // JSON string
+    chatState: text("chat_state"), // JSON string – AI runtime state (separate from metadata)
     lastActivityAt: integer("last_activity_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
