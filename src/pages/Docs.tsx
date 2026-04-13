@@ -20,6 +20,7 @@ import {
   Smartphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import ThemeToggle from "@/components/ThemeToggle";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -157,9 +158,9 @@ function CodeBlock({
   }
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden my-4">
+    <div className="rounded-xl bg-muted/20 overflow-hidden my-4">
       {title && (
-        <div className="bg-muted/50 px-4 py-2 border-b border-border flex items-center justify-between">
+        <div className="bg-muted/50 px-4 py-2 flex items-center justify-between">
           <span className="text-xs font-medium text-muted-foreground">
             {title}
           </span>
@@ -169,7 +170,7 @@ function CodeBlock({
         </div>
       )}
       <div className="relative group">
-        <pre className="bg-[#1a1a2e] text-[#e2e8f0] p-4 overflow-x-auto text-[13px] leading-relaxed font-mono">
+        <pre className="bg-code text-code-foreground p-4 overflow-x-auto text-[13px] leading-relaxed font-mono">
           <code>{code}</code>
         </pre>
         <button
@@ -200,14 +201,14 @@ function Callout({
   children: React.ReactNode;
 }) {
   const styles = {
-    info: "bg-primary/[0.04] border-primary/15 text-foreground",
-    warning: "bg-warning/[0.06] border-warning/20 text-foreground",
-    tip: "bg-success/[0.06] border-success/20 text-foreground",
+    info: "bg-primary/[0.04] text-foreground",
+    warning: "bg-warning/[0.06] text-foreground",
+    tip: "bg-success/[0.06] text-foreground",
   };
   const labels = { info: "Note", warning: "Warning", tip: "Tip" };
 
   return (
-    <div className={`rounded-xl border p-4 my-4 ${styles[type]}`}>
+    <div className={`rounded-xl p-4 my-4 ${styles[type]}`}>
       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
         {title ?? labels[type]}
       </p>
@@ -229,7 +230,7 @@ function PropTable({
     <div className="rounded-xl border border-border overflow-hidden my-4">
       <table className="w-full text-sm">
         <thead>
-          <tr className="bg-muted/40 border-b border-border text-left">
+          <tr className="bg-muted/40 text-left">
             <th className="px-4 py-2.5 font-semibold text-foreground">
               Property
             </th>
@@ -246,7 +247,7 @@ function PropTable({
           {rows.map((row) => (
             <tr
               key={row.name}
-              className="border-b border-border last:border-b-0"
+              className=""
             >
               <td className="px-4 py-2.5 font-mono text-[13px] text-primary whitespace-nowrap">
                 {row.name}
@@ -334,7 +335,7 @@ function Docs() {
   return (
     <div className="min-h-screen bg-background">
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
+      <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl">
         <div className="max-w-[1400px] mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <Link to="/">
@@ -345,6 +346,7 @@ function Docs() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <Button
               variant="outline"
               className="rounded-full h-8 text-[13px] px-4"
@@ -364,7 +366,7 @@ function Docs() {
 
       <div className="max-w-[1400px] mx-auto flex pt-14">
         {/* ── Sidebar Navigation ──────────────────────────────────────── */}
-        <aside className="hidden lg:block w-64 shrink-0 border-r border-border sticky top-14 h-[calc(100vh-56px)] overflow-y-auto py-6 px-4">
+        <aside className="hidden lg:block w-64 shrink-0 sticky top-14 h-[calc(100vh-56px)] overflow-y-auto py-6 px-4">
           <nav className="space-y-1">
             {navItems.map((item) => (
               <div key={item.id}>
@@ -399,7 +401,7 @@ function Docs() {
           <div className="max-w-3xl">
             {/* Hero */}
             <div className="mb-12">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/[0.06] border border-primary/10 text-xs text-primary font-medium mb-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/[0.06] text-xs text-primary font-medium mb-4">
                 <Code className="w-3 h-3" />
                 Developer Documentation
               </div>
@@ -650,10 +652,10 @@ window.ReplyMaven.toggle();`}
               immediately to all pages using your widget.
             </p>
 
-            <div className="rounded-xl border border-border overflow-hidden my-4">
+            <div className="rounded-xl bg-muted/20 overflow-hidden my-4">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-muted/40 border-b border-border text-left">
+                  <tr className="bg-muted/40 text-left">
                     <th className="px-4 py-2.5 font-semibold text-foreground">
                       Setting
                     </th>
@@ -663,7 +665,7 @@ window.ReplyMaven.toggle();`}
                   </tr>
                 </thead>
                 <tbody className="text-muted-foreground">
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-medium text-foreground">
                       Brand Color
                     </td>
@@ -674,7 +676,7 @@ window.ReplyMaven.toggle();`}
                       with this color as a tint.
                     </td>
                   </tr>
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-medium text-foreground">
                       Brand Text
                     </td>
@@ -683,7 +685,7 @@ window.ReplyMaven.toggle();`}
                       Hex format (e.g., #ffffff).
                     </td>
                   </tr>
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-medium text-foreground">
                       Font Family
                     </td>
@@ -692,7 +694,7 @@ window.ReplyMaven.toggle();`}
                       font stack.
                     </td>
                   </tr>
-                  <tr className="border-b border-border last:border-b-0">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-medium text-foreground">
                       Border Radius
                     </td>
@@ -1154,7 +1156,7 @@ window.ReplyMaven.setMetadata({
             <p className="text-muted-foreground leading-relaxed mb-4">
               Every conversation goes through these states:
             </p>
-            <div className="rounded-xl border border-border p-5 my-4 space-y-3">
+            <div className="rounded-xl bg-muted/20 p-5 my-4 space-y-3">
               <div className="flex items-center gap-3">
                 <span className="w-24 text-[13px] font-mono font-medium text-primary">
                   active
@@ -1428,10 +1430,10 @@ window.ReplyMaven.setMetadata({
               Choose how the AI communicates with your visitors. Available
               presets:
             </p>
-            <div className="rounded-xl border border-border overflow-hidden my-4">
+            <div className="rounded-xl bg-muted/20 overflow-hidden my-4">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-muted/40 border-b border-border text-left">
+                  <tr className="bg-muted/40 text-left">
                     <th className="px-4 py-2.5 font-semibold text-foreground">
                       Tone
                     </th>
@@ -1441,7 +1443,7 @@ window.ReplyMaven.setMetadata({
                   </tr>
                 </thead>
                 <tbody className="text-muted-foreground">
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-medium text-foreground">
                       Professional
                     </td>
@@ -1449,7 +1451,7 @@ window.ReplyMaven.setMetadata({
                       Clear, polished, and business-appropriate
                     </td>
                   </tr>
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-medium text-foreground">
                       Friendly
                     </td>
@@ -1457,7 +1459,7 @@ window.ReplyMaven.setMetadata({
                       Warm and approachable, with a conversational feel
                     </td>
                   </tr>
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-medium text-foreground">
                       Casual
                     </td>
@@ -1465,7 +1467,7 @@ window.ReplyMaven.setMetadata({
                       Relaxed and informal, like chatting with a friend
                     </td>
                   </tr>
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-medium text-foreground">
                       Formal
                     </td>
@@ -1473,7 +1475,7 @@ window.ReplyMaven.setMetadata({
                       Structured and authoritative, suitable for enterprise
                     </td>
                   </tr>
-                  <tr className="border-b border-border last:border-b-0">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-medium text-foreground">
                       Custom
                     </td>
@@ -1591,10 +1593,10 @@ style-src 'self' 'unsafe-inline';`}
             <p className="text-muted-foreground leading-relaxed mb-4">
               All methods available on <IC>window.ReplyMaven</IC>:
             </p>
-            <div className="rounded-xl border border-border overflow-hidden my-4">
+            <div className="rounded-xl bg-muted/20 overflow-hidden my-4">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-muted/40 border-b border-border text-left">
+                  <tr className="bg-muted/40 text-left">
                     <th className="px-4 py-2.5 font-semibold text-foreground">
                       Method
                     </th>
@@ -1604,25 +1606,25 @@ style-src 'self' 'unsafe-inline';`}
                   </tr>
                 </thead>
                 <tbody className="text-muted-foreground">
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-mono text-[13px] text-primary whitespace-nowrap">
                       open()
                     </td>
                     <td className="px-4 py-2.5">Open the chat widget</td>
                   </tr>
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-mono text-[13px] text-primary whitespace-nowrap">
                       close()
                     </td>
                     <td className="px-4 py-2.5">Close the chat widget</td>
                   </tr>
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-mono text-[13px] text-primary whitespace-nowrap">
                       toggle()
                     </td>
                     <td className="px-4 py-2.5">Toggle the widget open or closed</td>
                   </tr>
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-mono text-[13px] text-primary whitespace-nowrap">
                       sendMessage(text)
                     </td>
@@ -1630,7 +1632,7 @@ style-src 'self' 'unsafe-inline';`}
                       Send a message. Opens the widget if closed.
                     </td>
                   </tr>
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-mono text-[13px] text-primary whitespace-nowrap">
                       {"identify({ ... })"}
                     </td>
@@ -1639,7 +1641,7 @@ style-src 'self' 'unsafe-inline';`}
                       Syncs retroactively if conversation exists.
                     </td>
                   </tr>
-                  <tr className="border-b border-border">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-mono text-[13px] text-primary whitespace-nowrap">
                       {"setMetadata({ ... })"}
                     </td>
@@ -1648,7 +1650,7 @@ style-src 'self' 'unsafe-inline';`}
                       metadata.
                     </td>
                   </tr>
-                  <tr className="border-b border-border last:border-b-0">
+                  <tr className="">
                     <td className="px-4 py-2.5 font-mono text-[13px] text-primary whitespace-nowrap">
                       requestNotifications()
                     </td>
@@ -1661,7 +1663,7 @@ style-src 'self' 'unsafe-inline';`}
             </div>
 
             {/* ── CTA ─────────────────────────────────────────────────── */}
-            <div className="mt-16 rounded-2xl border border-border bg-card p-8 text-center">
+            <div className="mt-16 rounded-2xl bg-card p-8 text-center">
               <div className="w-12 h-12 rounded-xl bg-primary/[0.08] flex items-center justify-center mx-auto mb-4">
                 <Smartphone className="w-6 h-6 text-primary" />
               </div>

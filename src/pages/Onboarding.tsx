@@ -363,7 +363,7 @@ function Step2({
         </div>
 
         {/* Skeleton: URL bar with progress */}
-        <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-4">
+        <div className="rounded-xl bg-muted/30 p-4 space-y-4">
           <div className="flex items-center gap-3">
             <Globe className="w-4 h-4 text-muted-foreground animate-pulse" />
             <div className="h-4 w-48 rounded-md bg-muted animate-pulse" />
@@ -376,7 +376,7 @@ function Step2({
         </div>
 
         {/* Skeleton: Extracted content lines */}
-        <div className="rounded-xl border border-border bg-muted/30 p-5 space-y-3">
+        <div className="rounded-xl bg-muted/30 p-5 space-y-3">
           <div className="h-3 w-24 rounded bg-muted animate-pulse" />
           <div className="space-y-2.5">
             <div className="h-3.5 w-full rounded bg-muted animate-pulse" />
@@ -865,13 +865,13 @@ function Step4({
           Embed Code
         </label>
         <div className="relative">
-          <pre className="px-4 py-3 rounded-xl bg-muted/50 border border-border text-xs font-mono overflow-x-auto text-foreground">
+          <pre className="px-4 py-3 rounded-xl bg-muted/50 text-xs font-mono overflow-x-auto text-foreground">
             {embedCode}
           </pre>
           <button
             type="button"
             onClick={() => copyToClipboard(embedCode, "embed")}
-            className="absolute top-2 right-2 p-1.5 rounded-lg bg-background/80 border border-border hover:bg-muted transition-colors"
+            className="absolute top-2 right-2 p-1.5 rounded-lg bg-background/80 hover:bg-muted transition-colors"
             title="Copy embed code"
           >
             {copied ? (
@@ -891,7 +891,7 @@ function Step4({
         <label className="text-sm font-medium text-foreground">
           Try sending this message
         </label>
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary/5 border border-primary/20">
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary/5">
           <p className="flex-1 text-sm text-foreground">
             {sampleData?.question ?? "Loading a question for you..."}
           </p>

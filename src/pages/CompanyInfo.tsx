@@ -357,7 +357,7 @@ function CompanyInfo() {
             return (
               <div
                 key={s.id}
-                className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-primary/20 p-4 space-y-3"
+                className="bg-white/[0.04] backdrop-blur-xl rounded-2xl bg-primary/5 p-4 space-y-3"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -426,7 +426,7 @@ function CompanyInfo() {
         </div>
       )}
 
-      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-4">
+      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl p-6 space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
           <div className="flex flex-col sm:flex-row gap-2">
             <Button

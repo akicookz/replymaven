@@ -374,7 +374,7 @@ function Profile() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border p-6 space-y-6">
+      <div className="rounded-xl bg-card p-6 space-y-6">
         {/* Avatar */}
         <div className="flex items-center gap-5">
           <button

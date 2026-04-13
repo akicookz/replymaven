@@ -235,7 +235,7 @@ function CrawledPageItem({
   };
 
   return (
-    <div className="rounded-lg border border-border overflow-hidden">
+    <div className="rounded-lg bg-muted/20 overflow-hidden">
       <div
         className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors"
         onClick={() => setExpanded(!expanded)}
@@ -283,7 +283,7 @@ function CrawledPageItem({
       </div>
 
       {expanded && (
-        <div className="border-t border-border px-3 py-3 bg-muted/20">
+        <div className="px-3 py-3 bg-muted/20">
           {page.status === "pending" && (
             <p className="text-sm text-muted-foreground">
               This page is still being crawled...

@@ -19,6 +19,7 @@ import {
   Zap,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
+import ThemeToggle from "@/components/ThemeToggle";
 import ProfileSetupDialog from "@/components/ProfileSetupDialog";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
@@ -29,7 +30,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
+
 
 interface Project {
   id: string;
@@ -237,7 +238,7 @@ function Layout() {
       {/* Sidebar */}
       <aside
         className={cn(
-          "flex flex-col border-r border-sidebar-border bg-sidebar transition-all duration-200",
+          "flex flex-col bg-sidebar transition-all duration-200",
           // Desktop: static sidebar
           "hidden md:flex",
           collapsed ? "md:w-[68px]" : "md:w-60",
@@ -284,7 +285,7 @@ function Layout() {
           <div className="px-3 pb-3">
             <Popover open={selectorOpen} onOpenChange={setSelectorOpen}>
               <PopoverTrigger asChild>
-                <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-background text-sm hover:bg-accent transition-colors">
+                <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/50 text-sm hover:bg-accent transition-colors">
                   <span className="truncate font-medium flex-1 text-left text-foreground text-[13px]">
                     {currentProject.name}
                   </span>
@@ -316,7 +317,7 @@ function Layout() {
                     </button>
                   ))}
                 </div>
-                <Separator className="my-1" />
+                <div className="h-px bg-muted my-1" />
                 <Link
                   to="/app/new-project"
                   onClick={() => setSelectorOpen(false)}
@@ -415,7 +416,7 @@ function Layout() {
         )}
 
         {/* User */}
-        <div className="px-3 pb-3 pt-2 border-t border-sidebar-border">
+        <div className="px-3 pb-3 pt-2">
           <Popover>
             <PopoverTrigger asChild>
               <button className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-accent transition-colors">
@@ -456,7 +457,12 @@ function Layout() {
                 <CreditCard className="w-4 h-4 shrink-0" />
                 Billing
               </Link>
-              <Separator className="my-1" />
+              <div className="h-px bg-muted my-1" />
+              <div className="flex items-center justify-between px-3 py-2">
+                <span className="text-sm text-muted-foreground">Theme</span>
+                <ThemeToggle />
+              </div>
+              <div className="h-px bg-muted my-1" />
               <button
                 onClick={handleSignOut}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"

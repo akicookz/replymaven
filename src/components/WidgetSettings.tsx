@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import type { WidgetConfigData } from "@/hooks/use-widget-settings";
 
 const WIDGET_CARD_CLASS_NAME =
-  "bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border shadow-none";
+  "bg-white/[0.04] backdrop-blur-xl rounded-2xl shadow-none";
 
 interface SaveState {
   mutate: () => void;
@@ -180,7 +180,7 @@ export function WidgetPreviewPanel({
               </pre>
               <button
                 onClick={() => navigator.clipboard.writeText(embedSnippet)}
-                className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-background border border-border hover:bg-muted"
+                className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-background hover:bg-muted"
                 title="Copy"
               >
                 <Copy className="w-3.5 h-3.5" />
@@ -227,7 +227,7 @@ export function WidgetPreviewPanel({
         </CardHeader>
         <CardContent>
           <div
-            className="rounded-xl overflow-hidden border border-border"
+            className="rounded-xl overflow-hidden"
             style={{ height: "min(700px, calc(100vh - 12rem))" }}
           >
             <iframe

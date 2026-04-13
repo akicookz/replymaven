@@ -1,6 +1,8 @@
+import { useState, useEffect, useCallback } from "react";
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Toaster } from "sonner";
+import { ThemeContext, getStoredTheme, storeTheme } from "@/lib/theme";
 
 import Layout from "./components/Layout";
 import AccountLayout from "./components/AccountLayout";
@@ -105,8 +107,28 @@ function ProjectPageRedirect({
 }
 
 function App() {
+  const [theme, setThemeState] = useState<"light" | "dark">(getStoredTheme);
+
+  const setTheme = useCallback((t: "light" | "dark") => {
+    setThemeState(t);
+    storeTheme(t);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setThemeState((prev) => {
+      const next = prev === "dark" ? "light" : "dark";
+      storeTheme(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.remove("light", "dark");
+    document.documentElement.classList.add(theme);
+  }, [theme]);
+
   return (
-    <>
+    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
     <Toaster
       position="bottom-right"
       toastOptions={{
@@ -237,7 +259,7 @@ function App() {
         />
       </Route>
     </Routes>
-    </>
+    </ThemeContext.Provider>
   );
 }
 

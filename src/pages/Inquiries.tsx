@@ -148,15 +148,15 @@ function buildMailUrl(
 const STATUS_CONFIG = {
   new: {
     label: "New",
-    className: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    className: "bg-blue-500/10 text-blue-400",
   },
   replied: {
     label: "Replied",
-    className: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    className: "bg-emerald-500/10 text-emerald-400",
   },
   closed: {
     label: "Closed",
-    className: "bg-muted text-muted-foreground border-border",
+    className: "bg-muted text-muted-foreground",
   },
 };
 
@@ -428,7 +428,7 @@ function Inquiries() {
             />
           </div>
           {selectedIds.size > 0 && (
-            <div className="flex ml-auto items-center gap-2 px-3 py-2 bg-card/80 backdrop-blur-xl rounded-xl border border-border">
+            <div className="flex ml-auto items-center gap-2 px-3 py-2 bg-card/80 backdrop-blur-xl rounded-xl">
               <Checkbox
                 checked={selectedIds.size === filtered.length && filtered.length > 0}
                 onCheckedChange={toggleSelectAll}
@@ -533,10 +533,8 @@ function Inquiries() {
                 key={inquiry.id}
                 onClick={() => handleOpenInquiry(inquiry)}
                 className={cn(
-                  "flex items-center gap-3 px-4 py-3 bg-card/50 rounded-xl border cursor-pointer hover:bg-accent/30 transition-colors group",
-                  isSelected
-                    ? "border-primary/40 bg-primary/5"
-                    : "border-border",
+                  "flex items-center gap-3 px-4 py-3 bg-card/50 rounded-xl cursor-pointer hover:bg-accent/30 transition-colors group",
+                  isSelected && "ring-1 ring-primary/40 bg-primary/5",
                 )}
               >
                 {/* Checkbox */}

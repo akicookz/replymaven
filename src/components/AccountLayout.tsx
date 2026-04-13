@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
+import ThemeToggle from "@/components/ThemeToggle";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { MobileSidebarContext } from "@/lib/mobile-sidebar";
@@ -53,7 +54,7 @@ function AccountLayout() {
       {/* Sidebar */}
       <aside
         className={cn(
-          "flex flex-col border-r border-sidebar-border bg-sidebar w-60 transition-all duration-200",
+          "flex flex-col bg-sidebar w-60 transition-all duration-200",
           // Desktop: static sidebar
           "hidden md:flex",
           // Mobile: slide-out overlay
@@ -116,7 +117,7 @@ function AccountLayout() {
         </nav>
 
         {/* User */}
-        <div className="px-3 pb-3 pt-2 border-t border-sidebar-border">
+        <div className="px-3 pb-3 pt-2">
           <div className="flex items-center gap-3 px-2 py-2">
             <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
               {userName.charAt(0).toUpperCase()}
@@ -129,6 +130,7 @@ function AccountLayout() {
                 {userEmail}
               </p>
             </div>
+            <ThemeToggle />
             <button
               onClick={handleSignOut}
               className="p-1.5 rounded-md hover:bg-accent text-muted-foreground transition-colors"

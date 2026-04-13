@@ -123,7 +123,7 @@ function StatCard({
   change?: { value: number; positive: boolean };
 }) {
   return (
-    <div className="bg-card rounded-xl border border-border p-5 flex flex-col gap-3">
+    <div className="bg-card rounded-xl p-5 flex flex-col gap-3">
       <div className="flex items-center gap-3">
         <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center">
           <Icon className="w-[18px] h-[18px] text-muted-foreground" />
@@ -245,19 +245,19 @@ function Dashboard() {
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
-              className="h-[104px] rounded-xl bg-card border border-border animate-pulse"
+              className="h-[104px] rounded-xl bg-card animate-pulse"
             />
           ))}
         </div>
         {/* Chart + actions skeleton */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="h-[340px] rounded-xl bg-card border border-border animate-pulse" />
-          <div className="h-[340px] rounded-xl bg-card border border-border animate-pulse" />
+          <div className="h-[340px] rounded-xl bg-card animate-pulse" />
+          <div className="h-[340px] rounded-xl bg-card animate-pulse" />
         </div>
         {/* Table + status skeleton */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 h-[280px] rounded-xl bg-card border border-border animate-pulse" />
-          <div className="h-[280px] rounded-xl bg-card border border-border animate-pulse" />
+          <div className="lg:col-span-2 h-[280px] rounded-xl bg-card animate-pulse" />
+          <div className="h-[280px] rounded-xl bg-card animate-pulse" />
         </div>
       </div>
     );
@@ -392,7 +392,7 @@ function Dashboard() {
       {/* Chart + Quick Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Conversations Chart */}
-        <div className="bg-card rounded-xl border border-border p-6">
+        <div className="bg-card rounded-xl p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-sm font-semibold text-foreground">
               Conversations over time
@@ -448,7 +448,7 @@ function Dashboard() {
         </div>
 
         {/* Activity Timeline */}
-        <div className="bg-card rounded-xl border border-border p-6">
+        <div className="bg-card rounded-xl p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-sm font-semibold text-foreground">
               Recent Inquiries
@@ -568,7 +568,7 @@ function Dashboard() {
                     </div>
                     <span
                       className={cn(
-                        "text-[11px] font-medium px-2 py-0.5 rounded-full border w-fit capitalize",
+                        "text-[11px] font-medium px-2 py-0.5 rounded-full w-fit capitalize",
                         STATUS_BADGE_STYLES[convo.status] ??
                         "bg-status-closed/10 text-status-closed border-status-closed/25",
                       )}

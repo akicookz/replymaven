@@ -563,7 +563,7 @@ function WidgetConfig() {
           <button
             type="button"
             onClick={() => navigator.clipboard.writeText(state.embedSnippet)}
-            className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-background border border-border hover:bg-muted"
+            className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-background hover:bg-muted"
             title="Copy"
           >
             <Copy className="w-3.5 h-3.5" />
@@ -581,7 +581,7 @@ function WidgetConfig() {
             {pages.map((page, index) => (
               <span
                 key={page}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/50 border border-border text-sm font-mono"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/50 text-sm font-mono"
               >
                 {page}
                 <button
@@ -595,7 +595,7 @@ function WidgetConfig() {
             ))}
           </div>
         ) : (
-          <div className="px-3 py-2 rounded-lg bg-muted/30 border border-dashed border-border text-sm text-muted-foreground">
+          <div className="px-3 py-2 rounded-lg bg-muted/30 border-2 border-dashed border-muted text-sm text-muted-foreground">
             No page rules set. The widget will show on all pages.
           </div>
         )}

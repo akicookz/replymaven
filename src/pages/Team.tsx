@@ -71,7 +71,7 @@ function InviteForm({ onClose }: { onClose: () => void }) {
   if (inviteData) {
     return (
       <div className="space-y-4">
-        <div className="rounded-xl bg-green-500/10 border border-green-500/20 p-4">
+        <div className="rounded-xl bg-green-500/10 p-4">
           <p className="text-sm font-medium text-green-600 mb-1">Invitation sent!</p>
           <p className="text-sm text-muted-foreground">
             {inviteData.emailSent
@@ -238,7 +238,7 @@ function MemberRow({
   };
 
   return (
-    <div className="flex items-center gap-4 px-4 py-3 rounded-xl border border-border">
+    <div className="flex items-center gap-4 px-4 py-3 rounded-xl bg-card">
       <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
         {member.email.charAt(0).toUpperCase()}
       </div>
@@ -302,7 +302,7 @@ function MemberRow({
                     <Link className="w-4 h-4" />
                     Copy Invite Link
                   </button>
-                  <div className="h-px bg-border my-1" />
+                  <div className="h-px bg-muted my-1" />
                 </>
               )}
               {!isPending && (
@@ -383,7 +383,7 @@ function Team() {
 
       {/* Invite Form */}
       {showInvite && (
-        <div className="rounded-xl border border-border p-6">
+        <div className="rounded-xl bg-card p-6">
           <h3 className="text-sm font-semibold text-foreground mb-4">
             Invite a team member
           </h3>
@@ -394,7 +394,7 @@ function Team() {
       {/* Owner Row */}
       <div className="space-y-2">
         <p className="text-sm font-medium text-muted-foreground px-1">Owner</p>
-        <div className="flex items-center gap-4 px-4 py-3 rounded-xl border border-border bg-muted/30">
+        <div className="flex items-center gap-4 px-4 py-3 rounded-xl bg-muted/30">
           <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
             {(session?.user?.name ?? session?.user?.email ?? "O").charAt(0).toUpperCase()}
           </div>
@@ -429,7 +429,7 @@ function Team() {
       )}
 
       {members.length === 0 && !showInvite && (
-        <div className="rounded-xl border border-border p-8 text-center space-y-3">
+        <div className="rounded-xl bg-card p-8 text-center space-y-3">
           <Users className="w-10 h-10 text-muted-foreground mx-auto" />
           <div className="space-y-1">
             <p className="font-medium text-foreground">No team members yet</p>

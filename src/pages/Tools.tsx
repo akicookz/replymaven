@@ -505,7 +505,7 @@ export function ToolsPanel({
 
       {/* Tool limit warning */}
       {!showLogs && (tools?.length ?? 0) >= 20 && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-warning/10 border border-warning/25 text-warning text-sm">
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-warning/10 text-warning text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
           Maximum of 20 tools reached. Delete an existing tool to add a new one.
         </div>
@@ -513,7 +513,7 @@ export function ToolsPanel({
 
       {/* ─── Create / Edit Form ──────────────────────────────────────────── */}
       {!showLogs && showForm && (
-        <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-6 space-y-5">
+        <div className="bg-card rounded-2xl p-6 space-y-5">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">
               {editingId ? "Edit Tool" : "New Tool"}
@@ -583,7 +583,7 @@ export function ToolsPanel({
             </div>
 
             {/* HTTP Config */}
-            <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
+            <div className="space-y-4 rounded-xl bg-muted/20 p-4">
               <h3 className="text-sm font-semibold text-foreground">HTTP Configuration</h3>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Endpoint</label>
@@ -635,7 +635,7 @@ export function ToolsPanel({
             </div>
 
             {/* Headers */}
-            <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+            <div className="space-y-3 rounded-xl bg-muted/20 p-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-foreground">Headers</h3>
                 <Button type="button" variant="ghost" size="sm" onClick={addHeader} className="h-7 text-xs">
@@ -676,7 +676,7 @@ export function ToolsPanel({
             </div>
 
             {/* Parameters */}
-            <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+            <div className="space-y-3 rounded-xl bg-muted/20 p-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-foreground">Parameters</h3>
                 <Button
@@ -698,7 +698,7 @@ export function ToolsPanel({
               )}
               <div className="space-y-2">
                 {form.parameters.map((param, i) => (
-                  <div key={i} className="rounded-lg border border-border bg-background p-3 space-y-2">
+                  <div key={i} className="rounded-lg bg-background p-3 space-y-2">
                     <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                       <input
                         type="text"
@@ -753,7 +753,7 @@ export function ToolsPanel({
             </div>
 
             {/* Response Mapping */}
-            <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
+            <div className="space-y-3 rounded-xl bg-muted/20 p-4">
               <div>
                 <h3 className="text-sm font-semibold text-foreground">Response Mapping</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">Optional. Configure how the API response is processed.</p>
@@ -834,8 +834,8 @@ export function ToolsPanel({
               {/* ─── Telegram Preset Tool ──────────────────────────────────── */}
               <div
                 className={cn(
-                  "bg-white/[0.04] backdrop-blur-xl rounded-xl border overflow-hidden",
-                  telegramConfigured ? "border-border" : "border-dashed border-border",
+                  "bg-card rounded-xl overflow-hidden",
+                  telegramConfigured ? "" : "border-2 border-dashed border-muted",
                 )}
               >
                 {/* Telegram Row */}
@@ -919,7 +919,7 @@ export function ToolsPanel({
 
                 {/* Telegram Expanded Details (configured, not editing) */}
                 {telegramExpanded && telegramConfigured && !telegramEditing && !telegramTesting && (
-                  <div className="border-t border-border px-4 py-4 space-y-4">
+                  <div className="px-4 py-4 space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                       <div>
                         <p className="text-xs font-medium text-muted-foreground mb-1">Bot Token</p>
@@ -945,7 +945,7 @@ export function ToolsPanel({
 
                 {/* Telegram Edit Form */}
                 {telegramExpanded && telegramEditing && (
-                  <div className="border-t border-border px-4 py-4 space-y-4 bg-muted/20">
+                  <div className="px-4 py-4 space-y-4 bg-muted/20">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-semibold text-foreground">
                         {telegramConfigured ? "Edit Telegram Configuration" : "Set Up Telegram Handoff"}
@@ -1101,7 +1101,7 @@ export function ToolsPanel({
 
                 {/* Telegram Test Panel */}
                 {telegramExpanded && telegramTesting && telegramConfigured && (
-                  <div className="border-t border-border px-4 py-4 space-y-3 bg-muted/20">
+                  <div className="px-4 py-4 space-y-3 bg-muted/20">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-semibold text-foreground">Test Connection</h4>
                       <button
@@ -1134,8 +1134,8 @@ export function ToolsPanel({
                         className={cn(
                           "rounded-lg p-3 text-xs max-h-48 overflow-auto",
                           telegramTestResult.success
-                            ? "bg-success/10 border border-success/25 text-success"
-                            : "bg-destructive/10 border border-destructive/25 text-destructive",
+                            ? "bg-success/10 text-success"
+                            : "bg-destructive/10 text-destructive",
                         )}
                       >
                         {telegramTestResult.message}
@@ -1149,7 +1149,7 @@ export function ToolsPanel({
               {tools?.map((tool) => (
                 <div
                   key={tool.id}
-                  className="bg-white/[0.04] backdrop-blur-xl rounded-xl border border-border overflow-hidden"
+                  className="bg-card rounded-xl overflow-hidden"
                 >
                   {/* Tool Row */}
                   <div
@@ -1222,7 +1222,7 @@ export function ToolsPanel({
 
                   {/* Expanded Details */}
                   {expandedId === tool.id && (
-                    <div className="border-t border-border px-4 py-4 space-y-4">
+                    <div className="px-4 py-4 space-y-4">
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                         <div>
                           <p className="text-xs font-medium text-muted-foreground mb-1">Machine Name</p>
@@ -1276,7 +1276,7 @@ export function ToolsPanel({
 
                   {/* Test Panel */}
                   {testingId === tool.id && (
-                    <div className="border-t border-border px-4 py-4 space-y-3 bg-muted/20">
+                    <div className="px-4 py-4 space-y-3 bg-muted/20">
                       <div className="flex items-center justify-between">
                         <h4 className="text-sm font-semibold text-foreground">Test Tool</h4>
                         <button
@@ -1338,8 +1338,8 @@ export function ToolsPanel({
                           className={cn(
                             "rounded-lg p-3 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto",
                             testResult.success
-                              ? "bg-success/10 border border-success/25 text-success"
-                              : "bg-destructive/10 border border-destructive/25 text-destructive",
+                              ? "bg-success/10 text-success"
+                              : "bg-destructive/10 text-destructive",
                           )}
                         >
                           {typeof testResult.data === "string"
@@ -1409,7 +1409,7 @@ export function ToolsPanel({
                   return (
                     <div
                       key={exec.id}
-                      className="bg-white/[0.04] backdrop-blur-xl rounded-xl border border-border overflow-hidden"
+                      className="bg-card rounded-xl overflow-hidden"
                     >
                       {/* Summary row */}
                       <button
@@ -1448,7 +1448,7 @@ export function ToolsPanel({
 
                       {/* Expanded details */}
                       {isLogExpanded && (
-                        <div className="border-t border-border/50 px-4 py-3 space-y-3">
+                        <div className="px-4 py-3 space-y-3">
                           {/* Input */}
                           <div>
                             <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">

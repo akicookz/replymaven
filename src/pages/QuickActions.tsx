@@ -408,7 +408,7 @@ function ActionsTab({
   return (
     <div className="space-y-6">
       {/* Add Action Form */}
-      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl border border-border p-5 space-y-4">
+      <div className="bg-card rounded-2xl p-5 space-y-4">
         <h3 className="text-sm font-semibold text-foreground">Add action</h3>
 
         <form
@@ -464,7 +464,7 @@ function ActionsTab({
                   className={cn(
                     "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
                     newIcon === opt.value
-                      ? "bg-primary text-primary-foreground"
+                      ? "bg-brand text-white"
                       : "bg-muted text-muted-foreground hover:bg-muted/80",
                   )}
                   title={opt.label}
@@ -549,7 +549,7 @@ function ActionsTab({
             return (
               <div
                 key={action.id}
-                className="bg-white/[0.04] backdrop-blur-xl rounded-xl border border-border overflow-hidden group"
+                className="bg-card rounded-xl overflow-hidden group"
               >
                 {/* Collapsed Row */}
                 <div
@@ -611,7 +611,7 @@ function ActionsTab({
 
                 {/* Expanded Edit Panel */}
                 {isExpanded && (
-                  <div className="border-t border-border px-4 py-4 space-y-4">
+                  <div className="px-4 py-4 space-y-4">
                     {/* Label */}
                     <div className="space-y-2">
                       <Label className="text-xs text-muted-foreground">Label</Label>
@@ -658,7 +658,7 @@ function ActionsTab({
                             className={cn(
                               "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
                               editForm.icon === opt.value
-                                ? "bg-primary text-primary-foreground"
+                                ? "bg-brand text-white"
                                 : "bg-muted text-muted-foreground hover:bg-muted/80",
                             )}
                             title={opt.label}
@@ -755,7 +755,7 @@ function ActionsTab({
                                           <ChevronDown className="w-3.5 h-3.5" />
                                         </button>
                                       </div>
-                                      <div className="w-7 h-7 rounded-md bg-muted border border-border flex items-center justify-center shrink-0">
+                                      <div className="w-7 h-7 rounded-md bg-muted flex items-center justify-center shrink-0">
                                         {field.type === "textarea" ? (
                                           <AlignLeft className="w-3.5 h-3.5 text-muted-foreground" />
                                         ) : (
@@ -784,7 +784,7 @@ function ActionsTab({
                               )}
 
                               {editForm.inquiryFields.length === 0 && (
-                                <div className="py-6 text-center border border-dashed border-border rounded-xl">
+                                <div className="py-6 text-center border-2 border-dashed border-muted rounded-xl">
                                   <Type className="w-6 h-6 mx-auto text-muted-foreground/40 mb-2" />
                                   <p className="text-xs text-muted-foreground">
                                     No fields yet. Add your first field below.
@@ -793,7 +793,7 @@ function ActionsTab({
                               )}
 
                               {editForm.inquiryFields.length < 10 && (
-                                <div className="space-y-3 p-3 bg-background rounded-xl border border-dashed border-border">
+                                <div className="space-y-3 p-3 bg-background rounded-xl border-2 border-dashed border-muted">
                                   <div className="flex flex-col sm:flex-row gap-2">
                                     <Input
                                       type="text"

@@ -256,7 +256,7 @@ function UsageLog() {
 
   if (isError) {
     return (
-      <div className="rounded-xl border border-border p-6 text-center space-y-2">
+      <div className="rounded-xl bg-card p-6 text-center space-y-2">
         <AlertTriangle className="w-6 h-6 text-muted-foreground mx-auto" />
         <p className="text-sm text-muted-foreground">Failed to load usage log.</p>
       </div>
@@ -264,7 +264,7 @@ function UsageLog() {
   }
 
   return (
-    <div className="rounded-xl border border-border p-6 space-y-4">
+    <div className="rounded-xl bg-card p-6 space-y-4">
       <div>
         <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
           <MessageSquare className="w-5 h-5" />
@@ -531,7 +531,7 @@ function Billing() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-border p-8 text-center space-y-4">
+        <div className="rounded-xl bg-card p-8 text-center space-y-4">
           <CreditCard className="w-10 h-10 text-muted-foreground mx-auto" />
           <div className="space-y-1">
             <p className="font-medium text-foreground">No active subscription</p>
@@ -563,7 +563,7 @@ function Billing() {
 
       {/* Trial Banner */}
       {sub.status === "trialing" && trialDays > 0 && (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200">
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50">
           <Clock className="w-5 h-5 text-blue-600 shrink-0" />
           <div>
             <p className="text-sm font-medium text-blue-900">
@@ -578,7 +578,7 @@ function Billing() {
 
       {/* Past Due Banner */}
       {sub.status === "past_due" && (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center px-4 py-3 rounded-xl bg-yellow-50 border border-yellow-200">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center px-4 py-3 rounded-xl bg-yellow-50">
           <div className="flex items-start gap-3 flex-1">
             <AlertTriangle className="w-5 h-5 text-yellow-600 shrink-0 mt-0.5" />
             <div>
@@ -603,7 +603,7 @@ function Billing() {
       )}
 
       {/* Current Plan */}
-      <div className="rounded-xl border border-border p-6 space-y-4">
+      <div className="rounded-xl bg-card p-6 space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground">
@@ -637,7 +637,7 @@ function Billing() {
 
       {/* Usage */}
       {limits && (
-        <div className="rounded-xl border border-border p-6 space-y-4">
+        <div className="rounded-xl bg-card p-6 space-y-4">
           <div className="flex items-baseline justify-between">
             <h2 className="text-lg font-semibold text-foreground">Usage</h2>
             {data?.usagePeriodStart && data?.usagePeriodEnd && (

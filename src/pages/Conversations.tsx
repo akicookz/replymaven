@@ -149,18 +149,18 @@ interface ConversationInquiry {
 
 type ThreadItem =
   | {
-      kind: "message";
-      id: string;
-      createdAt: string;
-      message: Message;
-    }
+    kind: "message";
+    id: string;
+    createdAt: string;
+    message: Message;
+  }
   | {
-      kind: "inquiry";
-      id: string;
-      createdAt: string;
-      inquiry: ConversationInquiry;
-      fields: Array<[string, string]>;
-    };
+    kind: "inquiry";
+    id: string;
+    createdAt: string;
+    inquiry: ConversationInquiry;
+    fields: Array<[string, string]>;
+  };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -194,6 +194,7 @@ const SYSTEM_META_KEYS = new Set([
   "teamRequestPending",
   "teamRequestSubmittedAt",
   "teamRequestSubmissionId",
+  "teamRequestSummary",
 ]);
 
 function splitMetadata(meta: ConversationMeta): {
@@ -916,8 +917,8 @@ function Conversations() {
   if (isLoading) {
     return (
       <div className="-m-4 md:-m-8 h-screen flex">
-        <div className="w-full md:w-[360px] border-r border-border bg-card/30">
-          <div className="p-4 border-b border-border">
+        <div className="w-full md:w-[360px] bg-card/30">
+          <div className="p-4">
             <div className="h-8 w-40 rounded-lg bg-muted animate-pulse" />
           </div>
           <div className="p-3 space-y-2">
@@ -950,7 +951,7 @@ function Conversations() {
       {/* ─── Left Panel: Conversation List ─────────────────────────────── */}
       <div
         className={cn(
-          "flex flex-col border-r border-border bg-card transition-all",
+          "flex flex-col bg-card transition-all",
           // On mobile: show full width when no convo selected, hide when convo selected
           selectedConvo ? "hidden md:flex md:w-[360px]" : "w-full md:w-[360px]",
         )}
@@ -1096,9 +1097,9 @@ function Conversations() {
                           className={cn(
                             "text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap",
                             convo.status === "waiting_agent" &&
-                              "bg-status-waiting/10 text-status-waiting",
+                            "bg-status-waiting/10 text-status-waiting",
                             convo.status === "agent_replied" &&
-                              "bg-status-replied/10 text-status-replied",
+                            "bg-status-replied/10 text-status-replied",
                           )}
                         >
                           {getStatusLabel(convo.status)}
@@ -1298,13 +1299,13 @@ function Conversations() {
                   className={cn(
                     "text-xs px-2.5 py-1 rounded-full font-medium",
                     convoDetail.conversation.status === "active" &&
-                      "bg-status-active/10 text-status-active",
+                    "bg-status-active/10 text-status-active",
                     convoDetail.conversation.status === "waiting_agent" &&
-                      "bg-status-waiting/10 text-status-waiting",
+                    "bg-status-waiting/10 text-status-waiting",
                     convoDetail.conversation.status === "agent_replied" &&
-                      "bg-status-replied/10 text-status-replied",
+                    "bg-status-replied/10 text-status-replied",
                     convoDetail.conversation.status === "closed" &&
-                      "bg-status-closed/10 text-status-closed",
+                    "bg-status-closed/10 text-status-closed",
                   )}
                 >
                   {convoDetail.conversation.status === "closed"
@@ -1366,7 +1367,7 @@ function Conversations() {
                         <ShieldBan className="w-4 h-4 text-destructive" />
                         Spam
                       </button>
-                      <div className="my-1 mx-2 border-t border-border/50" />
+                      <div className="my-1 mx-2 h-px bg-muted" />
                       <button
                         type="button"
                         className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-lg hover:bg-destructive/10 transition-colors text-destructive"
@@ -1512,7 +1513,7 @@ function Conversations() {
                 const showDateSep =
                   prevItem &&
                   new Date(item.createdAt).toDateString() !==
-                    new Date(prevItem.createdAt).toDateString();
+                  new Date(prevItem.createdAt).toDateString();
 
                 if (item.kind === "inquiry") {
                   const inq = item.inquiry;
@@ -1542,11 +1543,11 @@ function Conversations() {
                               className={cn(
                                 "text-[10px] px-1.5 py-0.5 rounded-full ml-1",
                                 inq.status === "new" &&
-                                  "bg-blue-500/10 text-blue-400",
+                                "bg-blue-500/10 text-blue-400",
                                 inq.status === "replied" &&
-                                  "bg-emerald-500/10 text-emerald-400",
+                                "bg-emerald-500/10 text-emerald-400",
                                 inq.status === "closed" &&
-                                  "bg-muted text-muted-foreground",
+                                "bg-muted text-muted-foreground",
                               )}
                             >
                               {inq.status === "new"
@@ -1642,7 +1643,7 @@ function Conversations() {
                             return (
                               <div
                                 key={exec.id}
-                                className="bg-white/[0.03] backdrop-blur-sm rounded-lg border border-border/50 overflow-hidden"
+                                className="bg-white/[0.03] backdrop-blur-sm rounded-lg overflow-hidden"
                               >
                                 {/* Card header — always visible */}
                                 <button
@@ -1680,7 +1681,7 @@ function Conversations() {
 
                                 {/* Expandable details */}
                                 {isExpanded && (
-                                  <div className="border-t border-border/30">
+                                  <div>
                                     {/* Input parameters */}
                                     {exec.input && Object.keys(exec.input).length > 0 && (
                                       <div className="px-3 py-2">
@@ -1737,11 +1738,11 @@ function Conversations() {
                         className={cn(
                           "relative max-w-[85%] sm:max-w-[65%] rounded-lg px-3 py-2 shadow-sm overflow-hidden",
                           isVisitor &&
-                            "bg-muted/50 text-foreground rounded-tl-none",
+                          "bg-muted/50 text-foreground rounded-tl-none",
                           isBot &&
-                            "bg-primary/[0.07] text-foreground rounded-tr-none",
+                          "bg-primary/[0.07] text-foreground rounded-tr-none",
                           isAgent &&
-                            "bg-primary/[0.10] text-foreground rounded-tr-none border-l-2 border-status-replied/50",
+                          "bg-primary/[0.10] text-foreground rounded-tr-none",
                         )}
                       >
                         {/* Role label for bot/agent */}
@@ -1780,7 +1781,7 @@ function Conversations() {
                             const sources: SourceReference[] = JSON.parse(msg.sources);
                             if (!Array.isArray(sources) || sources.length === 0) return null;
                             return (
-                              <div className="mt-1.5 pt-1.5 border-t border-border/30 space-y-0.5">
+                              <div className="mt-1.5 pt-1.5 space-y-0.5">
                                 {sources.map((src, i) => {
                                   const srcType = src.type || "webpage";
                                   const typeLabel = srcType === "pdf" ? "Docs" : srcType === "faq" ? "FAQ" : "Website";
@@ -1877,7 +1878,7 @@ function Conversations() {
             </div>
 
             {/* Reply Input */}
-            <div className="px-3 py-2 bg-card border-t border-border">
+            <div className="px-3 py-2 bg-card">
               {convoDetail.conversation.status === "closed" && (
                 <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-muted-foreground">
                   <XCircle className="w-3 h-3" />

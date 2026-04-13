@@ -51,7 +51,7 @@ function ColorPicker({ value, onChange, className }: ColorPickerProps) {
           )}
         >
           <span
-            className="size-5 shrink-0 rounded-lg border border-border shadow-sm"
+            className="size-5 shrink-0 rounded-lg shadow-sm"
             style={{ backgroundColor: value }}
           />
           <span className="flex-1 text-left font-mono text-xs text-muted-foreground uppercase">
@@ -66,13 +66,13 @@ function ColorPicker({ value, onChange, className }: ColorPickerProps) {
           type="color"
           value={value}
           onChange={handleNativeColorChange}
-          className="h-32 w-full cursor-pointer rounded-lg border border-border p-1"
+          className="h-32 w-full cursor-pointer rounded-lg p-1"
         />
 
         {/* Hex input with preview swatch */}
         <div className="flex items-center gap-2">
           <span
-            className="size-8 shrink-0 rounded-lg border border-border shadow-sm"
+            className="size-8 shrink-0 rounded-lg shadow-sm"
             style={{ backgroundColor: value }}
           />
           <Input

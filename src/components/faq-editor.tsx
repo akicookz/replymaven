@@ -213,7 +213,7 @@ function FaqEditor({
         {pairs.map((pair, index) => (
           <div
             key={index}
-            className="relative bg-muted/30 rounded-xl border border-border p-4 space-y-3"
+            className="relative bg-muted/30 rounded-xl p-4 space-y-3"
           >
             {pairs.length > 1 && (
               <button
