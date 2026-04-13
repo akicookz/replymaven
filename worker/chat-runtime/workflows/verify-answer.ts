@@ -1,6 +1,5 @@
 import { generateObject, type LanguageModel } from "ai";
 import { z } from "zod";
-import { buildIntentAwareUnsupportedFallback } from "./build-intent-aware-follow-up";
 import { type SupportIntent } from "../types";
 
 const claimAssessmentSchema = z.object({
@@ -33,14 +32,9 @@ interface VerifyAnswerOptions {
   throwOnModelError?: boolean;
 }
 
-export function buildUnsupportedFallback(
-  userMessage: string,
-  intent?: SupportIntent | null,
-): string {
-  return buildIntentAwareUnsupportedFallback({
-    userMessage,
-    intent,
-  });
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function buildUnsupportedFallback(userMessage: string, intent?: SupportIntent | null): string {
+  return "I couldn't verify that reliably from the knowledge base I searched. Could you share a bit more detail about what you need help with?";
 }
 
 export function fallbackVerificationResult(options: {
@@ -74,10 +68,10 @@ export async function verifyAnswer(options: {
 
   if (!options.ragContext.trim() && !options.lastToolOutput) {
     return {
-      verdict: "unsupported",
-      answer: buildUnsupportedFallback(options.userMessage, options.intent),
+      verdict: "supported",
+      answer: options.draftedAnswer,
       claims: [],
-      summary: "No evidence available for verification.",
+      summary: null,
     };
   }
 

@@ -9,12 +9,8 @@ import {
   type SupportToolDefinition,
   type SupportTurnPlan,
 } from "../types";
-import { buildIntentAwareFollowUpQuestion } from "../workflows/build-intent-aware-follow-up";
-import { buildUnsupportedFallback } from "../workflows/verify-answer";
 import {
   isDuplicateQuery,
-  getQuerySemanticGroup,
-  hasExhaustedSearchPatterns
 } from "./query-deduplication";
 
 interface ToolParameterDefinition {
@@ -277,19 +273,6 @@ function getToolHistoryKey(
   return `${normalizeValue(toolName)}:${JSON.stringify(input, Object.keys(input).sort())}`;
 }
 
-function buildClarificationQuestion(
-  turnPlan: SupportTurnPlan,
-  currentMessage: string,
-): string {
-  return (
-    turnPlan.followUpQuestion ??
-    buildIntentAwareFollowUpQuestion({
-      userMessage: currentMessage,
-      intent: turnPlan.intent,
-    })
-  );
-}
-
 function isExplicitHumanRequest(message: string): boolean {
   const normalized = normalizeValue(message);
   if (!normalized) return false;
@@ -466,6 +449,17 @@ Allowed next actions:
 - compose: answer now using the gathered evidence
 - stop: no safe next action remains
 
+Message classification (YOU are the classifier — there is no separate routing step):
+- Greetings ("hi", "hello", "hey", "good morning"): choose compose with answerStyle "direct". No search needed.
+- Resolution signals ("thanks", "that worked", "got it", "it's ok now", "never mind", "all good", "no worries"): choose compose with answerStyle "direct". The compose step will produce [RESOLVED]. No search needed.
+- Frustration/anger ("this is useless", "not helping", profanity, "I already told you"): choose offer_handoff immediately. Do NOT search docs or ask clarifying questions.
+- Explicit human requests ("talk to a person", "live agent", "speak to someone"): choose offer_handoff if issue context is thin, or collect_contact/create_inquiry if context is sufficient.
+- Account actions ("cancel my account", "delete my data", "close my account"): choose offer_handoff immediately. These require human authorization and cannot be handled by the bot.
+- Chit-chat or off-topic ("what's the weather", "tell me a joke"): choose compose with answerStyle "direct" to politely redirect.
+- Affirmative confirmations ("yes", "yeah", "please do", "go ahead") when the last bot message offered a handoff: choose collect_contact or create_inquiry to proceed with the handoff flow.
+- Contact detail responses (visitor provides name/email after being asked): recognize as contact info and proceed to create_inquiry.
+- Declining contact details ("no email", "prefer not to share", "continue here"): proceed to create_inquiry without contact details.
+
 Rules:
 - Output exactly one next action.
 - Priority order for finding answers: 1) Check SOPs/guidelines, 2) Check FAQs, 3) Search knowledge base multiple times
@@ -481,7 +475,7 @@ Rules:
 - Use create_inquiry when the visitor wants human follow-up, there is enough issue context to forward, and either contact details are already known or the visitor has declined to share them.
 - When documentation is weak or missing, prefer search_docs with different queries over compose.
 - Exhaust at least 3 different search attempts before considering ask_user or offer_handoff.
-- Choose compose ONLY when SOPs, FAQs, or docs/tool evidence directly answers the question.
+- Choose compose ONLY when SOPs, FAQs, or docs/tool evidence directly answers the question, OR when you are responding to a greeting, resolution signal, chit-chat, or off-topic message.
 - Do NOT compose answers based on general context or business domain knowledge without explicit documentation.
 - When partial information exists across tiers:
   * Combine complementary information from different tiers only if no conflicts exist
@@ -497,6 +491,7 @@ Anti-loop rules (CRITICAL):
 - Never repeat the same ask_user question or a paraphrase of it. Cross-check the action history before picking ask_user.
 - If the visitor already provided an image, URL, page context, or specific feature name, do NOT ask what feature/page they mean. Use what they gave you.
 - If the visitor shows frustration signals ("useless", "not helping", "stop asking", "I already said"), immediately prefer offer_handoff over any further ask_user.
+- If the visitor says the issue is resolved or thanks you, choose compose — do NOT search docs or ask further questions.
 
 - If no safe action remains, choose stop.`,
   });
@@ -611,18 +606,11 @@ export function fallbackPlanNextAction(options: {
     };
   }
 
-  // Let the LLM decide if there's enough context to compose based on the business domain
-  // This decision should be made by the LLM in planNextAction, not through hardcoded patterns
-
   return {
     goal: options.state.goal,
     nextAction: {
-      type: "ask_user",
-      reason: "The request still needs a concrete detail to continue.",
-      question: buildClarificationQuestion(
-        options.turnPlan,
-        options.currentMessage,
-      ),
+      type: "compose",
+      reason: "No documentation found; compose a response acknowledging the gap.",
     },
   };
 }
@@ -672,25 +660,7 @@ export function sanitizePlannerDecision(
         };
       }
 
-      // 2. No evidence + exhausted semantic patterns → ask_user.
-      const semanticGroup = getQuerySemanticGroup(nextAction.query);
-      const semanticGroups = options.state.queryTracker?.semanticGroups || [];
-
-      if (hasExhaustedSearchPatterns(semanticGroup, semanticGroups, 3)) {
-        return {
-          goal: nextGoal,
-          nextAction: {
-            type: "ask_user",
-            reason: "Multiple search attempts with no results; need more specific information.",
-            question: buildClarificationQuestion(
-              options.turnPlan,
-              options.currentMessage,
-            ),
-          },
-        };
-      }
-
-      // 3. No evidence, not exhausted → try a genuinely unused query from the plan.
+      // 2. No evidence, not exhausted → try a genuinely unused query from the plan.
       const unusedVariation =
         options.turnPlan.retrievalQueries.find(
           (query) =>
@@ -719,16 +689,12 @@ export function sanitizePlannerDecision(
         };
       }
 
-      // 4. No unused variations left → ask_user.
+      // 4. No unused variations left → compose so the LLM can say it couldn't find docs.
       return {
         goal: nextGoal,
         nextAction: {
-          type: "ask_user",
-          reason: "The same docs query already failed and no unused variations remain.",
-          question: buildClarificationQuestion(
-            options.turnPlan,
-            options.currentMessage,
-          ),
+          type: "compose",
+          reason: "All search variations exhausted with no results; compose a response acknowledging the gap.",
         },
       };
     }
@@ -764,12 +730,8 @@ export function sanitizePlannerDecision(
       return {
         goal: nextGoal,
         nextAction: {
-          type: "ask_user",
-          reason: "The requested tool is not available, so narrow the issue with one question.",
-          question: buildClarificationQuestion(
-            options.turnPlan,
-            options.currentMessage,
-          ),
+          type: "compose",
+          reason: "The requested tool is not available; compose using whatever evidence exists.",
         },
       };
     }
@@ -850,12 +812,8 @@ export function sanitizePlannerDecision(
       return {
         goal: nextGoal,
         nextAction: {
-          type: "ask_user",
-          reason: "Compose is not allowed because the current evidence is still empty.",
-          question: buildUnsupportedFallback(
-            options.currentMessage,
-            options.turnPlan.intent,
-          ),
+          ...nextAction,
+          reason: "No evidence was found in the knowledge base; compose a response acknowledging that.",
         },
       };
     }

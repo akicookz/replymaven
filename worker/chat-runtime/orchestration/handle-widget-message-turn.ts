@@ -3,7 +3,7 @@ import {
   createModelRuntimeState,
 } from "../llm/create-language-model";
 import {
-  // isVagueIssueReport,
+  classifySupportTurn,
   summarizeConversation,
 } from "../llm/auxiliary-calls";
 import { runPlannerLoop } from "../executor/run-planner-loop";
@@ -12,28 +12,14 @@ import {
   getOrBuildCompiledFaqContext,
 } from "../prompt/build-compiled-faq-context";
 import { triggerAutoRefinementIfEnabled } from "../post-turn/auto-refine";
-import { buildUnsupportedFallback } from "../workflows/verify-answer";
 import {
   type RetrievalResult,
 } from "../retrieval/run-ai-search";
 import { classifyTaskScope } from "../workflows/classify-task-scope";
 import {
-  classifyHandoffSop,
-  type HandoffSopDecision,
-} from "../workflows/classify-handoff-sop";
-import {
   classifyInquiryRefinement,
   type InquiryRefinementDecision,
 } from "../workflows/classify-inquiry-refinement";
-import {
-  clarificationWasAskedBefore,
-  detectClarificationLoop,
-  detectExplicitEscalation,
-  detectFrustration,
-  normalizeClarificationQuestion,
-  runFastPaths,
-} from "../workflows/fast-paths";
-import { routeIntent } from "../llm/intent-router";
 import { createWidgetSseResponse } from "../streaming/create-widget-sse-response";
 import {
   createInitialAgentEventState,
@@ -43,9 +29,6 @@ import {
 import { stripInternalTokens } from "../streaming/internal-tokens";
 import {
   type ConversationChatState,
-  type RouterDecision,
-  type SupportIntent,
-  type SupportTurnPlan,
   type TurnTelemetry,
   type WidgetMessageTurnContext,
   parseChatState,
@@ -143,92 +126,16 @@ function getLastTeamMessageRole(
   return null;
 }
 
-function visitorExplicitlyRequestedHuman(
-  history: Array<{ role: "visitor" | "bot" | "agent"; content: string }>,
-  latestMessage: string,
-): boolean {
-  const candidateMessages = [
-    latestMessage,
-    ...history
-      .filter((message) => message.role === "visitor")
-      .slice(-4)
-      .map((message) => message.content),
-  ];
-
-  return candidateMessages.some((message) => {
-    const normalized = message.toLowerCase();
-    const wantsHuman =
-      /\b(human|person|agent|engineer|support team|team member|representative|someone)\b/.test(
-        normalized,
-      );
-    const asksForContact =
-      /\b(help|talk|speak|contact|reach|connect|escalate|handoff|hand off|follow up)\b/.test(
-        normalized,
-      );
-
-    return wantsHuman && asksForContact;
-  });
-}
-
-function hasFocusedClarifyingQuestion(
-  history: Array<{ role: "visitor" | "bot" | "agent"; content: string }>,
-): boolean {
-  return history.some((message) => {
-    if (message.role !== "bot" && message.role !== "agent") {
-      return false;
-    }
-
-    if (!message.content.includes("?")) {
-      return false;
-    }
-
-    return /\b(exact|feature|page|step|error|code|setting|configuration|config|integration|url|link|screenshot|what happens|which)\b/i.test(
-      message.content,
-    );
-  });
-}
-
 function shouldAllowTeamRequest(options: {
   conversation: {
     status: string;
-    metadata: string | null | undefined;
   };
-  conversationHistory: Array<{
-    role: "visitor" | "bot" | "agent";
-    content: string;
-  }>;
-  latestMessage: string;
-  turnIntent: string | null;
-  retrievalAttempted: boolean;
-  hadToolCalls: boolean;
 }): { allowed: boolean; reason: string } {
   if (isAgentRequestedStatus(options.conversation.status)) {
     return { allowed: false, reason: "already_in_agent_mode" };
   }
 
-  if (
-    options.turnIntent === "handoff" ||
-    visitorExplicitlyRequestedHuman(
-      options.conversationHistory,
-      options.latestMessage,
-    )
-  ) {
-    return { allowed: true, reason: "explicit_human_request" };
-  }
-
-  // if (isVagueIssueReport(options.latestMessage)) {
-  //   return { allowed: false, reason: "latest_issue_report_still_vague" };
-  // }
-
-  if (!options.retrievalAttempted && !options.hadToolCalls) {
-    return { allowed: false, reason: "no_resolution_attempts" };
-  }
-
-  if (!hasFocusedClarifyingQuestion(options.conversationHistory)) {
-    return { allowed: false, reason: "no_focused_clarifying_question" };
-  }
-
-  return { allowed: true, reason: "troubleshooting_exhausted" };
+  return { allowed: true, reason: "planner_decided" };
 }
 
 function claimsUnavailableCapabilities(response: string): boolean {
@@ -763,88 +670,6 @@ export async function handleWidgetMessageTurn(
         return;
       }
 
-      currentStage = "fast_path";
-      const isFirstVisitorMessage =
-        conversationHistory.filter((m) => m.role === "visitor").length === 1;
-      const fastPath = runFastPaths({
-        message: context.payload.content,
-        chatState,
-        botName: settings?.botName ?? null,
-        agentName: settings?.agentName ?? null,
-        projectName: context.project.name,
-        isFirstVisitorMessage,
-      });
-      if (fastPath.kind !== "none" && fastPath.response) {
-        turnIntent = fastPath.kind;
-        executionPath = "fast_path";
-        retrievalMode = "none";
-        logInfo(
-          "widget_turn.fast_path_matched",
-          buildWidgetTurnLogContext(context, turnId, {
-            kind: fastPath.kind,
-            reason: fastPath.reason,
-          }),
-        );
-        chatState = {
-          ...chatState,
-          lastIntent: fastPath.kind,
-        };
-        await emitAndSaveImmediateResponse(fastPath.response);
-        return;
-      }
-
-      const explicitEscalation = detectExplicitEscalation(
-        context.payload.content,
-      );
-      const visitorFrustrated = detectFrustration(context.payload.content);
-      const clarificationLoop = detectClarificationLoop({
-        chatState,
-        currentMessage: context.payload.content,
-        frustrated: visitorFrustrated,
-      });
-      const handoffEligibleTurn =
-        explicitEscalation.matched ||
-        visitorFrustrated ||
-        clarificationLoop.shouldEscalate;
-      const handoffEligibleReason = explicitEscalation.matched
-        ? explicitEscalation.reason
-        : clarificationLoop.shouldEscalate
-          ? clarificationLoop.reason
-          : visitorFrustrated
-            ? "visitor_frustrated"
-            : null;
-      if (handoffEligibleTurn) {
-        logInfo(
-          "widget_turn.handoff_eligible_turn",
-          buildWidgetTurnLogContext(context, turnId, {
-            reason: handoffEligibleReason,
-            explicitEscalation: explicitEscalation.matched,
-            frustrated: visitorFrustrated,
-            clarificationLoop: clarificationLoop.shouldEscalate,
-            clarificationAttempts: chatState.clarificationAttempts,
-          }),
-        );
-      }
-
-      const handoffSopDecision: HandoffSopDecision = classifyHandoffSop({
-        message: context.payload.content,
-        chatState,
-        retrievalAttempted: false,
-        groundingConfidence: "none",
-        handoffEligibleTurn,
-        handoffEligibleReason,
-      });
-      if (handoffSopDecision.shouldOverride) {
-        logInfo(
-          "widget_turn.handoff_sop_override",
-          buildWidgetTurnLogContext(context, turnId, {
-            trigger: handoffSopDecision.trigger,
-            reason: handoffSopDecision.reason,
-            priority: handoffSopDecision.priority,
-          }),
-        );
-      }
-
       const inquiryRefinementDecision: InquiryRefinementDecision | null =
         existingInquiry && inquiryFields && inquiryFields.length > 0
           ? classifyInquiryRefinement({
@@ -865,86 +690,19 @@ export async function handleWidgetMessageTurn(
         );
       }
 
-      currentStage = "route_intent";
+      currentStage = "classify_turn";
       emitStatus("Understanding your message...", "thinking");
       let conversationSummary: string | null = null;
-      let routerDecision: RouterDecision;
-      const routerStartedAt = Date.now();
-      try {
-        routerDecision = await routeIntent({
-          modelRuntime,
-          conversationHistory,
-          currentMessage: context.payload.content,
-          chatState,
-          pageContext: context.payload.pageContext,
-          projectName: context.project.name,
-          throwOnModelError: true,
-        });
-      } catch {
-        routerDecision = await routeIntent({
-          modelRuntime,
-          conversationHistory,
-          currentMessage: context.payload.content,
-          chatState,
-          pageContext: context.payload.pageContext,
-          projectName: context.project.name,
-        });
-        logWarn(
-          "widget_turn.router_heuristic_fallback_used",
-          buildWidgetTurnLogContext(context, turnId),
-        );
-      }
-      telemetry.routerMs = Date.now() - routerStartedAt;
+      const classifyStartedAt = Date.now();
+      const turnPlan = await classifySupportTurn(
+        createLanguageModel(modelRuntime.activeConfig),
+        conversationHistory,
+        context.payload.content,
+        context.payload.pageContext,
+      );
+      telemetry.routerMs = Date.now() - classifyStartedAt;
 
-      // Dedupe clarifying questions: if the router proposes a question we've
-      // already asked, force escalation instead of looping.
-      if (
-        routerDecision.intent === "clarify" &&
-        routerDecision.suggestedClarification &&
-        clarificationWasAskedBefore(
-          chatState,
-          routerDecision.suggestedClarification,
-        )
-      ) {
-        routerDecision = {
-          ...routerDecision,
-          intent: "handoff",
-          escalate: true,
-          escalationReason:
-            routerDecision.escalationReason ?? "duplicate_clarification",
-          suggestedClarification: null,
-          canAnswerDirectly: false,
-          needsRetrieval: false,
-          isRepeatedClarification: true,
-        };
-        logWarn(
-          "widget_turn.duplicate_clarification_escalated",
-          buildWidgetTurnLogContext(context, turnId),
-        );
-      }
-
-      const mappedIntent: SupportIntent =
-        routerDecision.intent === "greeting" ||
-        routerDecision.intent === "resolved" ||
-        routerDecision.intent === "chit_chat" ||
-        routerDecision.intent === "out_of_scope"
-          ? "how_to"
-          : (routerDecision.intent as SupportIntent);
-
-      const turnPlan: SupportTurnPlan = {
-        intent: mappedIntent,
-        summary: routerDecision.summary,
-        retrievalQueries: routerDecision.needsRetrieval
-          ? routerDecision.retrievalQueries
-          : [],
-        broaderQueries: [],
-        followUpQuestion:
-          routerDecision.intent === "clarify"
-            ? routerDecision.suggestedClarification
-            : null,
-      };
-
-      if (routerDecision.needsRetrieval) {
+      if (turnPlan.retrievalQueries.length > 0) {
         emitStatus("Searching docs...", "retrieval");
         try {
           conversationSummary = await summarizeConversation(
@@ -957,62 +715,16 @@ export async function handleWidgetMessageTurn(
       }
 
       turnIntent = turnPlan.intent;
-      executionPath = routerDecision.escalate ? "router_handoff" : "agentic_loop";
-      retrievalMode = routerDecision.needsRetrieval
+      executionPath = "agentic_loop";
+      retrievalMode = turnPlan.retrievalQueries.length > 0
         ? "bounded_actions"
         : "none";
 
-      logInfo(
-        "widget_turn.router_decided",
-        buildWidgetTurnLogContext(context, turnId, {
-          intent: routerDecision.intent,
-          confidence: routerDecision.confidence,
-          escalate: routerDecision.escalate,
-          needsRetrieval: routerDecision.needsRetrieval,
-          canAnswerDirectly: routerDecision.canAnswerDirectly,
-          retrievalQueryCount: routerDecision.retrievalQueries.length,
-        }),
-      );
-
-      // Track clarify attempts + question history so anti-loop can fire next turn.
-      if (
-        routerDecision.intent === "clarify" &&
-        routerDecision.suggestedClarification
-      ) {
-        const normalized = normalizeClarificationQuestion(
-          routerDecision.suggestedClarification,
-        );
-        const alreadyTracked = chatState.askedClarifications.some(
-          (prior) => normalizeClarificationQuestion(prior) === normalized,
-        );
-        chatState = {
-          ...chatState,
-          state: "clarifying",
-          clarificationAttempts: chatState.clarificationAttempts + 1,
-          askedClarifications: alreadyTracked
-            ? chatState.askedClarifications
-            : [
-                ...chatState.askedClarifications,
-                routerDecision.suggestedClarification,
-              ],
-          lastBotQuestion: routerDecision.suggestedClarification,
-          lastIntent: routerDecision.intent,
-        };
-      } else if (routerDecision.escalate) {
-        chatState = {
-          ...chatState,
-          state: "escalating",
-          pendingHandoffReason:
-            routerDecision.escalationReason ?? routerDecision.intent,
-          lastIntent: routerDecision.intent,
-        };
-      } else {
-        chatState = {
-          ...chatState,
-          state: "answering",
-          lastIntent: routerDecision.intent,
-        };
-      }
+      chatState = {
+        ...chatState,
+        state: "answering",
+        lastIntent: turnPlan.intent,
+      };
       logInfo(
         "widget_turn.plan_computed",
         buildWidgetTurnLogContext(context, turnId, {
@@ -1036,8 +748,6 @@ export async function handleWidgetMessageTurn(
         buildWidgetTurnLogContext(context, turnId, {
           availableTools: getToolNames(availableTools),
           hasImage: Boolean(image),
-          handoffEligibleTurn,
-          handoffEligibleReason,
         }),
       );
 
@@ -1052,9 +762,6 @@ export async function handleWidgetMessageTurn(
         conversationHistory,
         conversationSummary,
         turnPlan,
-        handoffEligibleTurn,
-        handoffEligibleReason,
-        handoffSopDecision,
         inquiryRefinementDecision,
         availableTools,
         enabledToolRows: enabledTools,
@@ -1096,14 +803,9 @@ export async function handleWidgetMessageTurn(
         image,
         faqMatchHint,
         emitStatus,
-        shouldAllowTeamRequest: ({ retrievalAttempted, hadToolCalls }) =>
+        shouldAllowTeamRequest: () =>
           shouldAllowTeamRequest({
             conversation,
-            conversationHistory,
-            latestMessage: context.payload.content,
-            turnIntent,
-            retrievalAttempted,
-            hadToolCalls,
           }),
         closeSafeAiReplayWindow,
         buildLogContext: (extra = {}) =>
@@ -1160,36 +862,6 @@ export async function handleWidgetMessageTurn(
       );
 
       let fullResponse = eventState.fullResponse;
-
-      if (
-        retrieval.retrievalAttempted &&
-        retrieval.groundingConfidence === "none" &&
-        !eventState.hadToolCalls &&
-        ![
-          "ask_user",
-          "offer_handoff",
-          "collect_contact",
-          "create_inquiry",
-        ].includes(loopResult.terminationAction) &&
-        !loopResult.detectedInternalTokens.includes("[RESOLVED]")
-      ) {
-        const unsupportedFallback = buildUnsupportedFallback(
-          context.payload.content,
-          turnPlan.intent,
-        );
-
-        if (unsupportedFallback.trim() !== fullResponse.trim()) {
-          fullResponse = unsupportedFallback.trim();
-          logWarn(
-            "widget_turn.no_grounding_fallback_applied",
-            buildWidgetTurnLogContext(context, turnId, {
-              executionPath,
-              turnIntent,
-            }),
-          );
-          emitSseEvent(controller, encoder, { finalText: fullResponse });
-        }
-      }
 
       if (claimsUnavailableCapabilities(fullResponse)) {
         const capabilityFallback =

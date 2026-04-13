@@ -11,6 +11,7 @@ export interface RetrievalResult {
   knowledgeBaseContext: string;
   sourceReferences: SourceReference[];
   groundingConfidence: GroundingConfidence;
+  topScore: number;
   unresolvedKeys: string[];
   droppedCrossTenant: number;
   retrievalAttempted: boolean;
@@ -365,6 +366,7 @@ export async function runAiSearch(options: {
       knowledgeBaseContext: "",
       sourceReferences: [],
       groundingConfidence: "none",
+      topScore: 0,
       unresolvedKeys: [],
       droppedCrossTenant: prepared.droppedCrossTenant,
       retrievalAttempted: true,
@@ -385,6 +387,7 @@ export async function runAiSearch(options: {
     knowledgeBaseContext: ragSelection.knowledgeBaseContext,
     sourceReferences: ragSelection.sources,
     groundingConfidence: ragConfident ? "high" : "low",
+    topScore: ragSelection.topScore,
     unresolvedKeys: ragSelection.unresolvedKeys,
     droppedCrossTenant: prepared.droppedCrossTenant,
     retrievalAttempted: true,

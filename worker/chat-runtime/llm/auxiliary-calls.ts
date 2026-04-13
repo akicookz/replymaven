@@ -11,7 +11,6 @@ import {
   buildSummarizeConversationPrompt,
   buildSummarizeTeamRequestPrompt,
 } from "./support-prompt-builders";
-import { buildIntentAwareFollowUpQuestion } from "../workflows/build-intent-aware-follow-up";
 
 interface AuxiliaryCallOptions {
   throwOnModelError?: boolean;
@@ -72,10 +71,7 @@ export function fallbackClassifySupportTurn(
       summary: "The visitor is asking about plans, billing, or policy details.",
       retrievalQueries: [currentMessage],
       broaderQueries: [currentMessage],
-      followUpQuestion: buildIntentAwareFollowUpQuestion({
-        userMessage: currentMessage,
-        intent: "policy",
-      }),
+      followUpQuestion: null,
     };
   }
 
@@ -115,10 +111,7 @@ export function fallbackClassifySupportTurn(
     summary: "The request is too underspecified and needs a focused follow-up.",
     retrievalQueries: [currentMessage],
     broaderQueries: [],
-    followUpQuestion: buildIntentAwareFollowUpQuestion({
-      userMessage: currentMessage,
-      intent: "clarify",
-    }),
+    followUpQuestion: null,
   };
 }
 

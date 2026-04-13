@@ -43,15 +43,10 @@ import {
 } from "../streaming/internal-tokens";
 import { streamSupportAgent } from "../agents/support-agent";
 import { stripTrailingSolicitedFollowUp } from "./strip-trailing-solicited-follow-up";
-import { promoteActionForHandoffOverride } from "./promote-action-for-handoff-override";
 import { executeHttpTool } from "../tools/http-tool-executor";
-import { type HandoffSopDecision } from "../workflows/classify-handoff-sop";
 import { type InquiryRefinementDecision } from "../workflows/classify-inquiry-refinement";
 import {
   buildUnsupportedFallback,
-  fallbackVerificationResult,
-  type VerificationResult,
-  verifyAnswer,
 } from "../workflows/verify-answer";
 import {
   type InquiryFieldSpec,
@@ -79,8 +74,6 @@ interface RunPlannerLoopOptions {
   conversationHistory: ConversationTurnMessage[];
   conversationSummary: string | null;
   turnPlan: SupportTurnPlan;
-  handoffEligibleTurn: boolean;
-  handoffEligibleReason: string | null;
   availableTools: SupportToolDefinition[];
   enabledToolRows: ToolRow[];
   toolService: ToolService;
@@ -112,7 +105,6 @@ interface RunPlannerLoopOptions {
   visitorInfo: { name: string | null; email: string | null };
   existingInquiry?: Record<string, string> | null;
   inquiryFields?: InquiryFieldSpec[] | null;
-  handoffSopDecision?: HandoffSopDecision | null;
   inquiryRefinementDecision?: InquiryRefinementDecision | null;
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
@@ -121,10 +113,7 @@ interface RunPlannerLoopOptions {
     message: string,
     phase: "thinking" | "retrieval" | "tool" | "verify" | "compose",
   ) => void;
-  shouldAllowTeamRequest: (options: {
-    retrievalAttempted: boolean;
-    hadToolCalls: boolean;
-  }) => { allowed: boolean; reason: string };
+  shouldAllowTeamRequest: () => { allowed: boolean; reason: string };
   closeSafeAiReplayWindow: (reason: string) => void;
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
 }
@@ -136,6 +125,7 @@ function createEmptyPlannerDocsEvidence(): PlannerDocsEvidence {
     knowledgeBaseContext: "",
     sourceReferences: [],
     groundingConfidence: "none",
+    topScore: 0,
     unresolvedKeys: [],
     droppedCrossTenant: 0,
     retrievalAttempted: false,
@@ -188,6 +178,8 @@ function mergeDocsEvidence(
         ? "low"
         : "none";
 
+  const topScore = Math.max(current.topScore, next.topScore);
+
   return {
     ragContext: mergeRagContextBlocks(current.ragContext, next.ragContext),
     faqContext: mergeRagContextBlocks(current.faqContext, next.faqContext),
@@ -197,6 +189,7 @@ function mergeDocsEvidence(
     ),
     sourceReferences: [...sourceMap.values()],
     groundingConfidence,
+    topScore,
     unresolvedKeys: [
       ...new Set([...current.unresolvedKeys, ...next.unresolvedKeys]),
     ],
@@ -347,39 +340,6 @@ function visitorDeclinedContactDetails(message: string): boolean {
   );
 }
 
-function shouldVerifyAnswer(options: {
-  userMessage: string;
-  fullResponse: string;
-  detectedInternalTokens: InternalToken[];
-  groundingConfidence: "high" | "low" | "none";
-  hadToolCalls: boolean;
-  hasEvidence: boolean;
-  faqOnlyEvidence?: boolean;
-}): boolean {
-  if (!options.hasEvidence) return false;
-  if (!options.fullResponse.trim()) return false;
-  if (options.detectedInternalTokens.includes("[RESOLVED]")) return false;
-  if (options.groundingConfidence === "high" && options.faqOnlyEvidence && !options.hadToolCalls) {
-    return false;
-  }
-
-  const looksLikeLookup =
-    /(how|why|can|does|where|pricing|policy|refund|billing|setup|configure|integration|api|error|issue|problem|plan)/i.test(
-      options.userMessage,
-    );
-  const draftedAnswerHasSpecificClaims =
-    /(\$|\b\d+\b|%|\bdays?\b|\bhours?\b|\bminutes?\b|\bmonths?\b|\byears?\b|\bgo to\b|\bclick\b|\bopen\b|\bselect\b|\benable\b|\bdisable\b|\bupgrade\b|\bcancel\b|\brefund\b)/i.test(
-      options.fullResponse,
-    ) || /(^|\n)(-|\d+\.)\s/.test(options.fullResponse);
-
-  return (
-    (looksLikeLookup || draftedAnswerHasSpecificClaims) &&
-    (options.groundingConfidence !== "high" ||
-      options.hadToolCalls ||
-      draftedAnswerHasSpecificClaims)
-  );
-}
-
 function buildStopResponse(options: {
   currentMessage: string;
   turnPlan: SupportTurnPlan;
@@ -479,7 +439,6 @@ async function executeCompose(options: {
   visitorInfo: { name: string | null; email: string | null };
   existingInquiry?: Record<string, string> | null;
   inquiryFields?: InquiryFieldSpec[] | null;
-  handoffSopDecision?: HandoffSopDecision | null;
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
   emitStatus: (
@@ -506,6 +465,7 @@ async function executeCompose(options: {
       visitorInfo: options.visitorInfo,
       faqContext: options.compiledFaqContext,
       groundingConfidence: options.state.docsEvidence.groundingConfidence,
+      topScore: options.state.docsEvidence.topScore,
       turnPlan: {
         intent: options.state.initialTurnPlan.intent,
         summary: options.state.initialTurnPlan.summary,
@@ -518,7 +478,6 @@ async function executeCompose(options: {
       broaderSearchAttempted: options.state.docsEvidence.broaderSearchAttempted,
       existingInquiry: options.existingInquiry,
       inquiryFields: options.inquiryFields,
-      handoffSopDecision: options.handoffSopDecision,
     },
     // options.currentMessage,
   );
@@ -604,72 +563,6 @@ async function executeCompose(options: {
     });
   }
 
-  if (
-    shouldVerifyAnswer({
-      userMessage: options.currentMessage,
-      fullResponse,
-      detectedInternalTokens,
-      groundingConfidence: options.state.docsEvidence.groundingConfidence,
-      hadToolCalls: options.state.toolEvidence.length > 0,
-      hasEvidence:
-        options.state.docsEvidence.ragContext.trim().length > 0 ||
-        options.state.toolEvidence.length > 0,
-      faqOnlyEvidence:
-        options.state.docsEvidence.faqContext.trim().length > 0 &&
-        options.state.docsEvidence.knowledgeBaseContext.trim().length === 0 &&
-        options.state.toolEvidence.length === 0,
-    })
-  ) {
-    options.telemetry.verifierRan = true;
-    options.emitStatus("Checking factual claims against docs...", "verify");
-
-    const verifierStart = Date.now();
-    let verification: VerificationResult;
-    try {
-      verification = await runWithModelFallback({
-        runtime: options.modelRuntime,
-        stage: "verify_answer",
-        logContext: options.buildLogContext(),
-        operation: async (activeConfig) => {
-          return verifyAnswer({
-            model: createLanguageModel(activeConfig),
-            userMessage: options.currentMessage,
-            intent: options.state.initialTurnPlan.intent,
-            draftedAnswer: fullResponse,
-            ragContext: options.state.docsEvidence.ragContext,
-            lastToolOutput: options.state.toolEvidence.at(-1)?.output,
-            verifyOptions: { throwOnModelError: true },
-          });
-        },
-      });
-    } catch {
-      verification = fallbackVerificationResult({
-        draftedAnswer: fullResponse,
-      });
-      logWarn(
-        "widget_turn.verification_fallback_used",
-        options.buildLogContext(),
-      );
-    }
-    options.telemetry.verifierMs = Date.now() - verifierStart;
-
-    options.telemetry.verifierVerdict = verification.verdict;
-    if (
-      verification.verdict !== "supported" &&
-      verification.answer.trim() &&
-      verification.answer.trim() !== fullResponse.trim()
-    ) {
-      const verifierPresence = detectInternalTokens(verification.answer.trim());
-      if (verifierPresence.tokens.length > 0) {
-        detectedInternalTokens.push(...verifierPresence.tokens);
-      }
-      fullResponse = verifierPresence.cleaned;
-      emitSseEvent(options.controller, options.encoder, {
-        finalText: fullResponse,
-      });
-    }
-  }
-
   if (!detectedInternalTokens.includes("[RESOLVED]")) {
     const strippedResponse = stripTrailingSolicitedFollowUp(fullResponse);
     if (strippedResponse !== fullResponse.trim()) {
@@ -702,6 +595,7 @@ export async function runPlannerLoop(
       ...loopState.docsEvidence,
       faqContext: `Q: ${options.faqMatchHint.question}\nA: ${options.faqMatchHint.answer}`,
       groundingConfidence: options.faqMatchHint.score >= 0.9 ? "high" : "low",
+      topScore: options.faqMatchHint.score,
       retrievalAttempted: true,
     };
   }
@@ -780,22 +674,7 @@ export async function runPlannerLoop(
     loopState.goal = sanitizedDecision.goal;
     loopState.stepCount += 1;
 
-    const rawNextAction = sanitizedDecision.nextAction;
-    const promotionResult = promoteActionForHandoffOverride({
-      action: rawNextAction,
-      handoffSopDecision: options.handoffSopDecision,
-      missingContactFields: getMissingContactFields(loopState),
-      contactDeclined: loopState.contactDeclined,
-    });
-    const nextAction = promotionResult.action;
-    if (promotionResult.promoted && promotionResult.promotionNote) {
-      pushActionHistory(loopState, {
-        type: nextAction.type,
-        reason: promotionResult.promotionNote,
-        outcome: "executed",
-        note: `hard-promoted from ${rawNextAction.type}`,
-      });
-    }
+    const nextAction = sanitizedDecision.nextAction;
 
     if (nextAction.type === "search_docs") {
       // Track semantic group for this query
@@ -1023,38 +902,16 @@ export async function runPlannerLoop(
     }
 
     if (nextAction.type === "create_inquiry") {
-      const teamRequestDecision = options.shouldAllowTeamRequest({
-        retrievalAttempted: loopState.docsEvidence.retrievalAttempted,
-        hadToolCalls,
-      });
+      const teamRequestDecision = options.shouldAllowTeamRequest();
 
       if (!teamRequestDecision.allowed) {
-        const fullResponse = `I don't have enough detail yet to escalate this usefully. ${buildUnsupportedFallback(
-          options.currentMessage,
-          options.turnPlan.intent,
-        )}`;
         pushActionHistory(loopState, {
           type: "create_inquiry",
           reason: `${nextAction.reason} Blocked: ${teamRequestDecision.reason}.`,
           outcome: "rejected",
-          note: fullResponse,
+          note: teamRequestDecision.reason,
         });
-        loopState.finalDraft = fullResponse;
-        loopState.terminationReason = teamRequestDecision.reason;
-        emitSseEvent(options.controller, options.encoder, {
-          finalText: fullResponse,
-        });
-        return {
-          fullResponse,
-          retrieval: loopState.docsEvidence,
-          hadToolCalls,
-          lastToolOutput,
-          lastToolError,
-          stepCount: loopState.stepCount,
-          terminationAction: "create_inquiry",
-          loopState,
-          detectedInternalTokens: [],
-        };
+        continue;
       }
 
       const summary =
@@ -1254,7 +1111,6 @@ export async function runPlannerLoop(
         visitorInfo: options.visitorInfo,
         existingInquiry: options.existingInquiry,
         inquiryFields: options.inquiryFields,
-        handoffSopDecision: options.handoffSopDecision,
         agentHandbackInstructions: options.agentHandbackInstructions,
         image: options.image,
         emitStatus: options.emitStatus,

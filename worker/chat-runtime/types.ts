@@ -5,7 +5,6 @@ import { type ProjectSettingsRow } from "../db";
 import { type AppEnv } from "../types";
 import { type SourceReference } from "../services/resource-service";
 import { type InternalToken } from "./streaming/internal-tokens";
-import { type HandoffSopDecision } from "./workflows/classify-handoff-sop";
 
 export type GroundingConfidence = "high" | "low" | "none";
 export type SupportIntent =
@@ -88,6 +87,7 @@ export interface SupportPromptOptions {
   visitorInfo?: { name: string | null; email: string | null };
   faqContext?: string | null;
   groundingConfidence?: GroundingConfidence;
+  topScore?: number;
   turnPlan?: {
     intent: SupportIntent;
     summary: string;
@@ -100,7 +100,6 @@ export interface SupportPromptOptions {
   broaderSearchAttempted?: boolean;
   existingInquiry?: Record<string, string> | null;
   inquiryFields?: InquiryFieldSpec[] | null;
-  handoffSopDecision?: HandoffSopDecision | null;
 }
 
 export type SupportPromptSettings = Pick<
@@ -224,32 +223,6 @@ export function parseChatState(
   }
 }
 
-export type RouterIntent =
-  | "greeting"
-  | "how_to"
-  | "troubleshoot"
-  | "lookup"
-  | "policy"
-  | "clarify"
-  | "handoff"
-  | "resolved"
-  | "chit_chat"
-  | "out_of_scope";
-
-export interface RouterDecision {
-  intent: RouterIntent;
-  confidence: "high" | "medium" | "low";
-  needsRetrieval: boolean;
-  retrievalQueries: string[];
-  escalate: boolean;
-  escalationReason: string | null;
-  isRepeatedClarification: boolean;
-  varyClarificationApproach: boolean;
-  suggestedClarification: string | null;
-  canAnswerDirectly: boolean;
-  summary: string;
-}
-
 export interface ChatRuntimeAiConfig {
   model: string;
   geminiApiKey: string;
@@ -362,6 +335,7 @@ export interface PlannerDocsEvidence {
   knowledgeBaseContext: string;
   sourceReferences: SourceReference[];
   groundingConfidence: GroundingConfidence;
+  topScore: number;
   unresolvedKeys: string[];
   droppedCrossTenant: number;
   retrievalAttempted: boolean;

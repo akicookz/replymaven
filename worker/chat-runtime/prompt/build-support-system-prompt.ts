@@ -17,7 +17,6 @@ export function buildSupportSystemPrompt(
   ragContext: string,
   conversationSummary: string | null,
   options?: SupportPromptOptions,
-  // currentMessage?: string,
 ): string {
   const toneInstructions: Record<string, string> = {
     professional: "Be concise, clear, and solution-oriented.",
@@ -254,27 +253,6 @@ ${options.agentHandbackInstructions}
 `;
   }
 
-  if (options?.handoffSopDecision?.shouldOverride) {
-    const decision = options.handoffSopDecision;
-    prompt += `<handoff-sop-override>
-The runtime classifier has determined this turn requires a handoff-oriented response. This overrides normal answer flow.
-
-- Trigger: ${decision.trigger}
-- Priority: ${decision.priority}
-- Reason: ${decision.reason}
-
-Steering rules:
-- Do NOT ask another clarifying question this turn.
-- Do NOT attempt a speculative best-effort answer that is not directly grounded in tier-1 sources or tool evidence.
-- Acknowledge the visitor's situation briefly and naturally.
-- Posture the response toward connecting the visitor with the team. Runtime controls the actual handoff mechanics — do not claim you already forwarded anything, and do not invent escalation tokens.
-- If contact details are already on file, do not re-ask for them.
-- Keep it short. One short paragraph is enough.
-</handoff-sop-override>
-
-`;
-  }
-
   if (
     options?.turnPlan ||
     options?.plannerGoal ||
@@ -320,38 +298,46 @@ ${trimToCharBudget(ragContext, MAX_RAG_CONTEXT_CHARS)}
 `;
   }
 
-  if (
-    options?.retrievalAttempted &&
-    options?.groundingConfidence === "none"
-  ) {
-    prompt += `<grounding-status>
-No relevant knowledge-base excerpts were retrieved for this question.
+  if (options?.retrievalAttempted) {
+    const score = options?.topScore ?? 0;
+    const confidence = options?.groundingConfidence ?? "none";
 
-${options?.broaderSearchAttempted ? "A broader second-pass documentation search was also attempted and still did not find a concrete match.\n" : ""}
+    const hasTier1Evidence = !!(options?.faqContext?.trim() || (options?.guidelines && options.guidelines.length > 0));
 
-For product behavior, troubleshooting, setup steps, integrations, pricing, policy, feature availability, or documentation questions:
-- First verify this isn't covered in the documentation
-- Say clearly: "I couldn't find this information in the documentation."
-- Do NOT provide any suggestions or workarounds not explicitly documented
-- Offer to forward the question to the team for a proper answer
-- Ask if there's a different way you can search for what they need
+    if (!hasTier1Evidence && confidence === "none") {
+      prompt += `<grounding-status>
+No relevant documentation was found for this question (relevance: ${score.toFixed(2)}).
+${options?.broaderSearchAttempted ? "A broader follow-up search was also attempted with no results.\n" : ""}
+Confidence tier: NONE — You have no evidence to work with.
+- Clearly convey that you could not find information about this topic in the documentation. Use your own words and match the configured tone.
+- Do not provide suggestions or workarounds that are not explicitly documented.
+- Offer to forward the question to the team for a proper answer.
 - Do not turn missing grounding into a human handoff promise. Runtime owns escalation state.
 </grounding-status>
 
 `;
-  } else if (
-    options?.retrievalAttempted &&
-    options?.groundingConfidence === "low"
-  ) {
-    prompt += `<grounding-status>
-Knowledge-base retrieval returned only weak or partial matches for this question.
+    } else if (!hasTier1Evidence && confidence === "low") {
+      prompt += `<grounding-status>
+Documentation retrieval returned only weak or partial matches (relevance: ${score.toFixed(2)}).
 
-- Use only explicit facts that are clearly supported by the retrieved excerpts.
-- Do NOT fill in missing steps, settings, limits, policies, or product behavior from assumption.
-- If the excerpts do not directly answer the question, say you could not find a reliable answer in the knowledge base.
+Confidence tier: LOW — You have some evidence but it may not directly answer the question.
+- Naturally communicate that your answer is based on limited documentation. Use your own words and match the configured tone — do not use a scripted phrase.
+- Use only explicit facts from the retrieved excerpts. Do not fill gaps with assumptions.
+- If the excerpts do not directly answer the question, say so honestly.
 </grounding-status>
 
 `;
+    } else if (!hasTier1Evidence && confidence === "high" && score < 0.8) {
+      prompt += `<grounding-status>
+Documentation retrieval found relevant matches (relevance: ${score.toFixed(2)}).
+
+Confidence tier: MODERATE — Evidence is relevant but not a strong direct match.
+- Naturally signal that your answer is drawn from the documentation without being fully certain. Use your own words and match the configured tone.
+- Stick closely to the retrieved excerpts. Do not embellish or add details not present in the evidence.
+</grounding-status>
+
+`;
+    }
   }
 
   if (options?.toolEvidenceSummary) {
