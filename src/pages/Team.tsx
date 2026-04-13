@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   Link,
   Check,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -441,9 +442,22 @@ function Team() {
       )}
 
       {seatCurrent >= seatMax && (
-        <p className="text-sm text-muted-foreground text-center">
-          You've reached your seat limit. Upgrade your plan for more seats.
-        </p>
+        <div className="flex items-center gap-3 rounded-xl bg-primary/5 px-4 py-3">
+          <Lock className="w-4 h-4 text-primary shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-foreground">Seat limit reached</p>
+            <p className="text-xs text-muted-foreground">
+              You&apos;re using all {seatMax} seat{seatMax !== 1 ? "s" : ""} on your current plan. Upgrade to invite more team members.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => { window.location.href = "/app/onboarding?step=4"; }}
+          >
+            Upgrade
+          </Button>
+        </div>
       )}
     </div>
   );

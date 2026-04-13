@@ -606,7 +606,7 @@ function Resources() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Link
           to={`/app/projects/${projectId}/knowledgebase/sops`}
-          className="bg-white/[0.04] backdrop-blur-xl rounded-2xl p-5 hover:bg-muted/20 transition-all group"
+          className="bg-card rounded-2xl p-5 hover:bg-muted/20 transition-all group"
         >
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
@@ -633,7 +633,7 @@ function Resources() {
 
         <Link
           to={`/app/projects/${projectId}/knowledgebase/company-info`}
-          className="bg-white/[0.04] backdrop-blur-xl rounded-2xl p-5 hover:bg-muted/20 transition-all group"
+          className="bg-card rounded-2xl p-5 hover:bg-muted/20 transition-all group"
         >
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
@@ -721,7 +721,7 @@ function Resources() {
             return (
               <div
                 key={s.id}
-                className="bg-white/[0.04] backdrop-blur-xl rounded-2xl bg-primary/5 p-4 space-y-3"
+                className="bg-card rounded-2xl bg-primary/5 p-4 space-y-3"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -804,7 +804,7 @@ function Resources() {
         </div>
 
         {showForm && (
-          <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl p-6 space-y-4">
+          <div className="bg-card rounded-2xl p-6 space-y-4">
             <div className="flex gap-2">
               <Button
                 variant={formType === "webpage" ? "default" : "outline"}
@@ -960,7 +960,7 @@ function Resources() {
               return (
                 <div
                   key={resource.id}
-                  className="bg-white/[0.04] backdrop-blur-xl rounded-xl overflow-hidden"
+                  className="bg-card rounded-xl overflow-hidden"
                 >
                   <div
                     className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"

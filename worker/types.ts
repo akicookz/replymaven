@@ -24,6 +24,7 @@ export interface PlanLimits {
   telegram: boolean;
   customTone: boolean;
   autoCannedDraft: boolean;
+  autoRefinement: boolean;
   customCss: boolean;
   tools: boolean;
 }

@@ -15,7 +15,10 @@ import {
 } from "../../services/ai-service";
 import { logError, logInfo } from "../../observability";
 import { ResourceService, type FaqPair } from "../../services/resource-service";
-import { type AppEnv } from "../../types";
+import { BillingService } from "../../services/billing-service";
+import { type AppEnv, type Plan } from "../../types";
+import { subscriptions } from "../../db/schema";
+import { eq } from "drizzle-orm";
 import {
   buildRelevantContentSnippet,
   selectRefinementShortlist,
@@ -49,6 +52,28 @@ export async function triggerAutoRefinementIfEnabled(options: {
       reason: "disabled",
     });
     return;
+  }
+
+  const project = await projectService.getProjectById(options.projectId);
+  if (project) {
+    const subRows = await options.db
+      .select()
+      .from(subscriptions)
+      .where(eq(subscriptions.userId, project.userId))
+      .limit(1);
+    const sub = subRows[0] ?? null;
+    const limits = sub
+      ? BillingService.getPlanLimits(sub.plan as Plan)
+      : null;
+    if (!limits?.autoRefinement) {
+      logInfo("auto_refine.skipped", {
+        projectId: options.projectId,
+        conversationId: options.conversationId,
+        source,
+        reason: "plan_not_allowed",
+      });
+      return;
+    }
   }
 
   const chatService = new ChatService(options.db, options.kv);

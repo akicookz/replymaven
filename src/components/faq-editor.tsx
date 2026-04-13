@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Save, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,10 +29,18 @@ function FaqEditor({
     { question: "", answer: "" },
   ]);
   const [error, setError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
-  // Load existing FAQ data when editing
-  const { isLoading: isLoadingContent } = useQuery<{
+  const { data: resources } = useQuery<
+    Array<{ id: string; title: string; type: string }>
+  >({
+    queryKey: ["resources", projectId],
+    enabled: mode === "edit" && !!resourceId,
+  });
+
+  const existingResource = resources?.find((r) => r.id === resourceId);
+
+  const { data: contentData, isLoading: isLoadingContent } = useQuery<{
     content: string | null;
     pairs?: FaqPair[];
   }>({
@@ -44,58 +52,30 @@ function FaqEditor({
       if (!res.ok) throw new Error("Failed to fetch content");
       return res.json();
     },
-    enabled: mode === "edit" && !!resourceId && !loaded,
-  });
-
-  // Load existing resource for title
-  const { data: resources } = useQuery<
-    Array<{ id: string; title: string; type: string }>
-  >({
-    queryKey: ["resources", projectId],
     enabled: mode === "edit" && !!resourceId,
   });
 
-  // Populate form when content loads
-  const existingResource = resources?.find((r) => r.id === resourceId);
+  useEffect(() => {
+    if (initialized || !contentData || !existingResource) return;
 
-  useQuery<{ content: string | null; pairs?: FaqPair[] }>({
-    queryKey: ["resource-content-populate", projectId, resourceId],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/projects/${projectId}/resources/${resourceId}/content`,
-      );
-      if (!res.ok) throw new Error("Failed to fetch content");
-      const data = (await res.json()) as {
-        content: string | null;
-        pairs?: FaqPair[];
-      };
+    setTitle(existingResource.title);
 
-      if (!loaded) {
-        if (existingResource) {
-          setTitle(existingResource.title);
-        }
-        if (data.pairs && data.pairs.length > 0) {
-          setPairs(data.pairs);
-        } else if (data.content) {
-          // Try to parse legacy content into pairs
-          const legacyPairs = parseLegacyFaqContent(data.content);
-          if (legacyPairs.length > 0) {
-            setPairs(legacyPairs);
-          }
-        }
-        setLoaded(true);
+    if (contentData.pairs && contentData.pairs.length > 0) {
+      setPairs(contentData.pairs);
+    } else if (contentData.content) {
+      const legacyPairs = parseLegacyFaqContent(contentData.content);
+      if (legacyPairs.length > 0) {
+        setPairs(legacyPairs);
       }
+    }
 
-      return data;
-    },
-    enabled: mode === "edit" && !!resourceId && !!existingResource && !loaded,
-  });
+    setInitialized(true);
+  }, [contentData, existingResource, initialized]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       setError(null);
 
-      // Validate pairs
       const validPairs = pairs.filter(
         (p) => p.question.trim() && p.answer.trim(),
       );
@@ -128,7 +108,6 @@ function FaqEditor({
         return res.json();
       }
 
-      // Edit mode
       const res = await fetch(
         `/api/projects/${projectId}/resources/${resourceId}`,
         {
@@ -181,7 +160,7 @@ function FaqEditor({
     setPairs(updated);
   }
 
-  if (mode === "edit" && isLoadingContent && !loaded) {
+  if (mode === "edit" && (isLoadingContent || !initialized)) {
     return (
       <div className="flex items-center justify-center py-8">
         <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -296,7 +275,6 @@ function FaqEditor({
 }
 
 function parseLegacyFaqContent(content: string): FaqPair[] {
-  // Try to parse "Q: ... A: ..." format
   const pairs: FaqPair[] = [];
   const lines = content.split("\n");
   let currentQuestion = "";
@@ -330,7 +308,6 @@ function parseLegacyFaqContent(content: string): FaqPair[] {
   return pairs;
 }
 
-// Suppress unused warning — parseLegacyFaqContent is used above
 void parseLegacyFaqContent;
 
 export default FaqEditor;

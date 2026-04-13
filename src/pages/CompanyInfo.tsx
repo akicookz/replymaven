@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertCircle, ArrowLeft, Check, ExternalLink, Lightbulb, Loader2, RefreshCw, Save, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, ExternalLink, Lightbulb, Loader2, Lock, RefreshCw, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { useSubscription } from "@/hooks/use-subscription";
+import { canAccessFeature } from "@/lib/plan";
 
 type ToneOfVoice = "professional" | "friendly" | "casual" | "formal" | "custom";
 
@@ -34,6 +36,8 @@ function CompanyInfo() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
+  const { data: subData } = useSubscription();
+  const canAutoRefine = canAccessFeature(subData?.limits ?? null, "autoRefinement");
 
   const [companyForm, setCompanyForm] = useState({
     companyName: "",
@@ -357,7 +361,7 @@ function CompanyInfo() {
             return (
               <div
                 key={s.id}
-                className="bg-white/[0.04] backdrop-blur-xl rounded-2xl bg-primary/5 p-4 space-y-3"
+                className="bg-card rounded-2xl bg-primary/5 p-4 space-y-3"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -426,7 +430,7 @@ function CompanyInfo() {
         </div>
       )}
 
-      <div className="bg-white/[0.04] backdrop-blur-xl rounded-2xl p-6 space-y-4">
+      <div className="bg-card rounded-2xl p-6 space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
           <div className="flex flex-col sm:flex-row gap-2">
             <Button
@@ -673,37 +677,59 @@ function CompanyInfo() {
         </div>
 
         {/* ─── Auto-Refinement ──────────────────────────────────────────── */}
-        <div className="flex items-center justify-between">
-          <div>
-            <label className="text-sm font-medium text-foreground">
-              Auto-Suggest Knowledgebase Improvements
-            </label>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              After conversations close, the AI analyzes them and suggests improvements to your knowledge base.
-            </p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={companyForm.autoRefinement}
-            onClick={() =>
-              setCompanyForm((prev) => ({
-                ...prev,
-                autoRefinement: !prev.autoRefinement,
-              }))
-            }
-            className={cn(
-              "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors",
-              companyForm.autoRefinement ? "bg-primary" : "bg-input",
-            )}
-          >
-            <span
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-sm font-medium text-foreground">
+                Auto-Suggest Knowledgebase Improvements
+              </label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                After conversations close, the AI analyzes them and suggests improvements to your knowledge base.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={canAutoRefine && companyForm.autoRefinement}
+              disabled={!canAutoRefine}
+              onClick={() =>
+                setCompanyForm((prev) => ({
+                  ...prev,
+                  autoRefinement: !prev.autoRefinement,
+                }))
+              }
               className={cn(
-                "pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform mt-0.5",
-                companyForm.autoRefinement ? "translate-x-[22px]" : "translate-x-0.5",
+                "relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors",
+                canAutoRefine ? "cursor-pointer" : "cursor-not-allowed opacity-50",
+                canAutoRefine && companyForm.autoRefinement ? "bg-primary" : "bg-input",
               )}
-            />
-          </button>
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform mt-0.5",
+                  canAutoRefine && companyForm.autoRefinement ? "translate-x-[22px]" : "translate-x-0.5",
+                )}
+              />
+            </button>
+          </div>
+          {!canAutoRefine && (
+            <div className="flex items-center gap-3 rounded-xl bg-primary/5 px-4 py-3">
+              <Lock className="w-4 h-4 text-primary shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-foreground">Standard plan required</p>
+                <p className="text-xs text-muted-foreground">
+                  Auto-suggest knowledgebase improvements is available on the Standard plan and above.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => { window.location.href = "/app/onboarding?step=4"; }}
+              >
+                Upgrade
+              </Button>
+            </div>
+          )}
         </div>
 
         {isLoading && (
