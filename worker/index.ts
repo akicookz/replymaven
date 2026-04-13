@@ -26,6 +26,7 @@ import {
 } from "./services/encryption-service";
 import { BillingService } from "./services/billing-service";
 import { TeamService } from "./services/team-service";
+import { VisitorBanService } from "./services/visitor-ban-service";
 import { handleWidgetMessageTurn } from "./chat-runtime/orchestration/handle-widget-message-turn";
 import { triggerAutoRefinementIfEnabled } from "./chat-runtime/post-turn/auto-refine";
 import { buildToolRegistry } from "./chat-runtime/tools/build-tool-registry";
@@ -69,6 +70,7 @@ import {
   updateGuidelineSchema,
   usageLogQuerySchema,
   sendMessageAsEmailSchema,
+  banVisitorSchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -393,6 +395,16 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(createConversationSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
+    const banService = new VisitorBanService(db);
+    const ban = await banService.isVisitorBanned(
+      project.id,
+      parsed.data.visitorId,
+      parsed.data.visitorEmail,
+    );
+    if (ban) {
+      return c.json({ banned: true, reason: ban.reason }, 403);
+    }
+
     // Enrich metadata with geo data from Cloudflare headers
     const cf = c.req.raw.cf as CfProperties | undefined;
     const geoMeta: Record<string, string> = {
@@ -620,6 +632,23 @@ const app = new Hono<HonoAppContext>()
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectBySlugPublic(slug);
     if (!project) return c.json({ error: "Project not found" }, 404);
+
+    const chatServiceForBan = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const convForBan = await chatServiceForBan.getConversationById(
+      conversationId,
+      project.id,
+    );
+    if (convForBan) {
+      const banService = new VisitorBanService(db);
+      const ban = await banService.isVisitorBanned(
+        project.id,
+        convForBan.visitorId,
+        convForBan.visitorEmail,
+      );
+      if (ban) {
+        return c.json({ banned: true, reason: ban.reason }, 403);
+      }
+    }
 
     const body = await c.req.json();
     const parsed = validate(sendMessageSchema, body);
@@ -1085,6 +1114,31 @@ const app = new Hono<HonoAppContext>()
             tgSettings.telegramBotToken,
             tgSettings.telegramChatId,
             "Conversation closed.",
+            message.message_id,
+          );
+        } else if (result.action === "ban") {
+          const banService = new VisitorBanService(db);
+          await banService.banVisitor({
+            projectId,
+            visitorId: conversation.visitorId,
+            visitorEmail: conversation.visitorEmail ?? null,
+            reason: result.reason,
+            bannedBy: "agent",
+            bannedFromConversationId: conversationId,
+            expiresAt: null,
+          });
+
+          await chatService.updateConversationStatus(
+            conversationId,
+            projectId,
+            "closed",
+            "spam",
+          );
+
+          await telegramService.sendMessage(
+            tgSettings.telegramBotToken,
+            tgSettings.telegramChatId,
+            `Visitor banned and conversation closed.${result.reason ? ` Reason: ${result.reason}` : ""}`,
             message.message_id,
           );
         } else if (result.action === "respond") {
@@ -4209,6 +4263,100 @@ const app = new Hono<HonoAppContext>()
         source: "manual_close",
       }),
     );
+
+    return c.json({ ok: true });
+  })
+
+  // ─── Visitor Bans ──────────────────────────────────────────────────────────
+  .post("/api/projects/:id/visitors/ban", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(banVisitorSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const banService = new VisitorBanService(db);
+    const existing = await banService.isVisitorBanned(
+      project.id,
+      parsed.data.visitorId,
+      parsed.data.visitorEmail,
+    );
+    if (existing) {
+      return c.json({ error: "Visitor is already banned" }, 409);
+    }
+
+    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    if (parsed.data.conversationId) {
+      await chatService.updateConversationStatus(
+        parsed.data.conversationId,
+        project.id,
+        "closed",
+        "spam",
+      );
+    }
+
+    const ban = await banService.banVisitor({
+      projectId: project.id,
+      visitorId: parsed.data.visitorId,
+      visitorEmail: parsed.data.visitorEmail ?? null,
+      reason: parsed.data.reason ?? null,
+      bannedBy: "dashboard",
+      bannedFromConversationId: parsed.data.conversationId ?? null,
+      expiresAt: parsed.data.expiresAt
+        ? new Date(parsed.data.expiresAt)
+        : null,
+    });
+
+    return c.json(ban, 201);
+  })
+  .get("/api/projects/:id/visitors/banned", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const limit = Math.min(
+      parseInt(c.req.query("limit") ?? "50", 10) || 50,
+      100,
+    );
+    const offset = parseInt(c.req.query("offset") ?? "0", 10) || 0;
+
+    const banService = new VisitorBanService(db);
+    const bans = await banService.getBannedVisitors(project.id, limit, offset);
+    const total = await banService.getBanCount(project.id);
+
+    return c.json({ bans, total });
+  })
+  .delete("/api/projects/:id/visitors/ban/:banId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const banService = new VisitorBanService(db);
+    const deleted = await banService.unbanVisitor(
+      c.req.param("banId"),
+      project.id,
+    );
+    if (!deleted) return c.json({ error: "Ban not found" }, 404);
 
     return c.json({ ok: true });
   })

@@ -365,6 +365,15 @@ export const updateTeamMemberRoleSchema = z.object({
   role: z.enum(["admin", "member"]),
 });
 
+// ─── Visitor Bans ────────────────────────────────────────────────────────────
+export const banVisitorSchema = z.object({
+  visitorId: z.string().min(1).max(100),
+  visitorEmail: z.string().email().nullable().optional(),
+  reason: z.string().max(500).optional(),
+  conversationId: z.string().min(1).optional(),
+  expiresAt: z.string().datetime().nullable().optional(),
+});
+
 // ─── Guidelines (SOPs) ───────────────────────────────────────────────────────
 
 export const createGuidelineSchema = z.object({

@@ -253,6 +253,13 @@
       "when": 1776036867736,
       "tag": "0035_bored_kulan_gath",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1776039509016,
+      "tag": "0036_gorgeous_lightspeed",
+      "breakpoints": true
     }
   ]
 }

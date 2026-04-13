@@ -235,6 +235,7 @@ export class AiService {
     | { action: "close" }
     | { action: "handback"; instructions: string }
     | { action: "respond"; instructions: string }
+    | { action: "ban"; reason: string }
   > {
     try {
       const { text } = await generateText({
@@ -243,7 +244,7 @@ export class AiService {
 
 "${agentText}"
 
-Determine the agent's intent. There are exactly three possible intents:
+Determine the agent's intent. There are exactly four possible intents:
 
 1. CLOSE — The agent is saying the conversation is done, resolved, finished, or should be closed.
    Examples: "we're done here", "this is resolved", "all sorted, customer is happy", "close this one"
@@ -254,6 +255,9 @@ Determine the agent's intent. There are exactly three possible intents:
 3. RESPOND — The agent wants the bot to immediately respond to the visitor with specific information or in a specific way. The visitor WILL see the bot's response.
    Examples: "explain how the refund process works", "tell them about our pricing plans", "answer their question about shipping", "take over", "you handle it from here"
 
+4. BAN — The agent wants to ban/block this visitor from using the chat. Used for spam, abuse, or harassment.
+   Examples: "ban this user", "block them", "this is spam, ban", "ban for harassment", "block this spammer"
+
 Key distinction between HANDBACK and RESPOND:
 - HANDBACK = secret instructions for the bot's behavior (visitor never sees the instruction itself)
 - RESPOND = the agent wants the bot to generate a visible response to the visitor right now
@@ -263,6 +267,7 @@ Respond with ONLY a valid JSON object, no other text:
 For CLOSE: {"action":"close"}
 For HANDBACK: {"action":"handback","instructions":"<the private instructions>"}
 For RESPOND: {"action":"respond","instructions":"<what the bot should respond about>"}
+For BAN: {"action":"ban","reason":"<reason for the ban>"}
 
 JSON:`,
         temperature: 0,
@@ -271,6 +276,12 @@ JSON:`,
 
       const parsed = JSON.parse(text.trim());
       if (parsed.action === "close") return { action: "close" };
+      if (parsed.action === "ban") {
+        return {
+          action: "ban",
+          reason: parsed.reason ?? "Banned by agent",
+        };
+      }
       if (parsed.action === "respond") {
         return {
           action: "respond",
@@ -282,7 +293,6 @@ JSON:`,
         instructions: parsed.instructions ?? "",
       };
     } catch {
-      // Default to respond with the full text as instructions
       return { action: "respond", instructions: agentText };
     }
   }

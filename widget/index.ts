@@ -48,6 +48,7 @@
   let config: Record<string, any> | null = null;
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let _isHandedOff = false;
+  let isBanned = false;
 
   // Polling state
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -2565,6 +2566,21 @@
     }
   }
 
+  function showBannedState() {
+    isBanned = true;
+    input.disabled = true;
+    input.placeholder = "You have been blocked from this chat";
+    sendBtn.disabled = true;
+    if (isInlineBarVariant) {
+      inlineBarInput.disabled = true;
+      inlineBarInput.placeholder = "You have been blocked from this chat";
+    }
+    addMessageToUI(
+      "bot",
+      "You are no longer able to send messages in this chat.",
+    );
+  }
+
   function expandInlineBar() {
     if (inlineBarExpanded) return;
     inlineBarExpanded = true;
@@ -3818,6 +3834,11 @@
         startHeartbeat();
         // Hide inline action bubbles once conversation starts
         inlineBarActions.classList.remove("has-actions");
+      } else if (res.status === 403) {
+        const data = await res.json().catch(() => null);
+        if (data?.banned) {
+          showBannedState();
+        }
       }
     } catch (err) {
       console.error("[ReplyMaven] Failed to create conversation:", err);
@@ -3825,6 +3846,7 @@
   }
 
   async function handleSendMessage(text: string) {
+    if (isBanned) return;
     // Prevent duplicate sends
     if (isSending) return;
     isSending = true;
@@ -3938,6 +3960,13 @@
 
         if (!res.ok) {
           hideTyping();
+          if (res.status === 403) {
+            const data = await res.json().catch(() => null);
+            if (data?.banned) {
+              showBannedState();
+              return;
+            }
+          }
           if (lastVisitorStatusEl) {
             lastVisitorStatusEl.textContent = "Failed to send";
             lastVisitorStatusEl.classList.add("failed");

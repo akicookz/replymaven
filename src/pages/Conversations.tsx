@@ -756,6 +756,44 @@ function Conversations() {
     onError: (err: Error) => toast.error(err.message),
   });
 
+  const banVisitor = useMutation({
+    mutationFn: async ({
+      convId,
+      visitorId,
+      visitorEmail,
+    }: {
+      convId: string;
+      visitorId: string;
+      visitorEmail: string | null;
+    }) => {
+      const res = await fetch(`/api/projects/${projectId}/visitors/ban`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          visitorId,
+          visitorEmail: visitorEmail ?? undefined,
+          conversationId: convId,
+          reason: "Banned from dashboard",
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed" }));
+        throw new Error(err.error ?? "Failed to ban visitor");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success("Visitor banned");
+      queryClient.invalidateQueries({
+        queryKey: ["conversation-detail", selectedConvo],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["conversations", projectId],
+      });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const closeConversation = useMutation({
     mutationFn: async ({
       convId,
@@ -1327,6 +1365,22 @@ function Conversations() {
                       >
                         <ShieldBan className="w-4 h-4 text-destructive" />
                         Spam
+                      </button>
+                      <div className="my-1 mx-2 border-t border-border/50" />
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-lg hover:bg-destructive/10 transition-colors text-destructive"
+                        disabled={banVisitor.isPending}
+                        onClick={() =>
+                          banVisitor.mutate({
+                            convId: convoDetail.conversation.id,
+                            visitorId: convoDetail.conversation.visitorId,
+                            visitorEmail: convoDetail.conversation.visitorEmail,
+                          })
+                        }
+                      >
+                        <ShieldBan className="w-4 h-4" />
+                        {banVisitor.isPending ? "Banning..." : "Ban Visitor"}
                       </button>
                     </PopoverContent>
                   </Popover>

@@ -689,6 +689,45 @@ export const guidelines = sqliteTable(
 export type GuidelineRow = typeof guidelines.$inferSelect;
 export type NewGuidelineRow = typeof guidelines.$inferInsert;
 
+// ─── Visitor Bans ────────────────────────────────────────────────────────────
+
+export const visitorBans = sqliteTable(
+  "visitor_bans",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    visitorId: text("visitor_id").notNull(),
+    visitorEmail: text("visitor_email"),
+    reason: text("reason"),
+    bannedBy: text("banned_by", { enum: ["dashboard", "agent"] })
+      .notNull()
+      .default("dashboard"),
+    bannedFromConversationId: text("banned_from_conversation_id").references(
+      () => conversations.id,
+      { onDelete: "set null" },
+    ),
+    expiresAt: integer("expires_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    index("idx_visitor_bans_project_visitor").on(
+      table.projectId,
+      table.visitorId,
+    ),
+    index("idx_visitor_bans_project_email").on(
+      table.projectId,
+      table.visitorEmail,
+    ),
+  ],
+);
+
+export type VisitorBanRow = typeof visitorBans.$inferSelect;
+export type NewVisitorBanRow = typeof visitorBans.$inferInsert;
+
 // ─── Unified Schema Object ────────────────────────────────────────────────────
 
 export const schema = {
@@ -711,4 +750,5 @@ export const schema = {
   tools,
   toolExecutions,
   guidelines,
+  visitorBans,
 } as const;
