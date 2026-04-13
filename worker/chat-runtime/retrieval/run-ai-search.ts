@@ -307,6 +307,7 @@ export async function runAiSearch(options: {
       droppedCrossTenant: 0,
       retrievalAttempted: false,
       broaderSearchAttempted: false,
+      topScore: 0,
     };
   }
 

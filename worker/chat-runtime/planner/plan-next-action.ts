@@ -447,7 +447,7 @@ Allowed next actions:
 - collect_contact: ask only for the missing name/email needed for a team follow-up
 - create_inquiry: create the actual team follow-up request in runtime
 - compose: answer now using the gathered evidence
-- stop: no safe next action remains
+- stop: no further search or tool action is useful; compose a best-effort answer using whatever evidence was gathered, or acknowledge the gap honestly
 
 Message classification (YOU are the classifier — there is no separate routing step):
 - Greetings ("hi", "hello", "hey", "good morning"): choose compose with answerStyle "direct". No search needed.
@@ -493,7 +493,7 @@ Anti-loop rules (CRITICAL):
 - If the visitor shows frustration signals ("useless", "not helping", "stop asking", "I already said"), immediately prefer offer_handoff over any further ask_user.
 - If the visitor says the issue is resolved or thanks you, choose compose — do NOT search docs or ask further questions.
 
-- If no safe action remains, choose stop.`,
+- If no safe action remains, choose stop. The runtime will still compose a reply using available evidence or a candid acknowledgment that no concrete answer was found.`,
   });
 
   return {
@@ -514,8 +514,8 @@ export function fallbackPlanNextAction(options: {
     return {
       goal: options.state.goal,
       nextAction: {
-        type: "stop",
-        reason: "Planner step limit reached.",
+        type: "compose",
+        reason: "Planner step limit reached; compose best-effort answer.",
       },
     };
   }
@@ -622,8 +622,8 @@ export function sanitizePlannerDecision(
     return {
       goal: options.state.goal,
       nextAction: {
-        type: "stop",
-        reason: "Planner step limit reached.",
+        type: "compose",
+        reason: "Planner step limit reached; compose best-effort answer.",
       },
     };
   }
@@ -775,8 +775,8 @@ export function sanitizePlannerDecision(
       return {
         goal: nextGoal,
         nextAction: {
-          type: "stop",
-          reason: "The same tool call already ran and no new evidence path remains.",
+          type: "compose",
+          reason: "The same tool call already ran and no new evidence path remains; compose best-effort answer.",
         },
       };
     }

@@ -36,7 +36,6 @@ import { runAiSearch, type RetrievalResult } from "../retrieval/run-ai-search";
 import { emitSseEvent } from "../streaming/map-agent-events-to-sse";
 import {
   createStreamingStripState,
-  detectInternalTokens,
   flushStreamingStripState,
   type InternalToken,
   stripInternalTokensStreaming,
@@ -45,9 +44,6 @@ import { streamSupportAgent } from "../agents/support-agent";
 import { stripTrailingSolicitedFollowUp } from "./strip-trailing-solicited-follow-up";
 import { executeHttpTool } from "../tools/http-tool-executor";
 import { type InquiryRefinementDecision } from "../workflows/classify-inquiry-refinement";
-import {
-  buildUnsupportedFallback,
-} from "../workflows/verify-answer";
 import {
   type InquiryFieldSpec,
   type PlannerActionHistoryEntry,
@@ -340,23 +336,6 @@ function visitorDeclinedContactDetails(message: string): boolean {
   );
 }
 
-function buildStopResponse(options: {
-  currentMessage: string;
-  turnPlan: SupportTurnPlan;
-  state: PlannerLoopState;
-}): string {
-  if (
-    options.state.docsEvidence.ragContext.trim() ||
-    options.state.toolEvidence.length > 0
-  ) {
-    return "I've reached the end of the reliable checks I can do here. Share one more concrete detail and I'll try again.";
-  }
-
-  return buildUnsupportedFallback(
-    options.currentMessage,
-    options.turnPlan.intent,
-  );
-}
 
 async function populateKnownVisitorInfo(options: {
   modelRuntime: ModelRuntimeState;
@@ -547,21 +526,6 @@ async function executeCompose(options: {
     });
   }
 
-  if (!fullResponse.trim()) {
-    const rawStopResponse = buildStopResponse({
-      currentMessage: options.currentMessage,
-      turnPlan: options.state.initialTurnPlan,
-      state: options.state,
-    });
-    const stopPresence = detectInternalTokens(rawStopResponse);
-    if (stopPresence.tokens.length > 0) {
-      detectedInternalTokens.push(...stopPresence.tokens);
-    }
-    fullResponse = stopPresence.cleaned;
-    emitSseEvent(options.controller, options.encoder, {
-      finalText: fullResponse,
-    });
-  }
 
   if (!detectedInternalTokens.includes("[RESOLVED]")) {
     const strippedResponse = stripTrailingSolicitedFollowUp(fullResponse);
@@ -1138,57 +1102,136 @@ export async function runPlannerLoop(
       type: "stop",
       reason: nextAction.reason,
       outcome: "completed",
-      note: null,
+      note: "falling through to best-effort compose",
     });
-    const fullResponse = buildStopResponse({
-      currentMessage: options.currentMessage,
-      turnPlan: options.turnPlan,
-      state: loopState,
-    });
-    loopState.finalDraft = fullResponse;
     loopState.terminationReason = nextAction.reason;
-    emitSseEvent(options.controller, options.encoder, {
-      finalText: fullResponse,
+
+    try {
+      const stopComposeResult = await executeCompose({
+        controller: options.controller,
+        encoder: options.encoder,
+        modelRuntime: options.modelRuntime,
+        telemetry: options.telemetry,
+        currentMessage: options.currentMessage,
+        conversationHistory: options.conversationHistory,
+        state: loopState,
+        settings: options.settings,
+        projectName: options.project.name,
+        guidelines: options.guidelines,
+        compiledFaqContext: options.compiledFaqContext,
+        pageContext: options.pageContext,
+        visitorInfo: options.visitorInfo,
+        existingInquiry: options.existingInquiry,
+        inquiryFields: options.inquiryFields,
+        agentHandbackInstructions: options.agentHandbackInstructions,
+        image: options.image,
+        emitStatus: options.emitStatus,
+        buildLogContext: options.buildLogContext,
+        closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
+      });
+
+      loopState.finalDraft = stopComposeResult.fullResponse;
+      return {
+        fullResponse: stopComposeResult.fullResponse,
+        retrieval: loopState.docsEvidence,
+        hadToolCalls,
+        lastToolOutput: stopComposeResult.lastToolOutput,
+        lastToolError: stopComposeResult.lastToolError,
+        stepCount: loopState.stepCount,
+        terminationAction: "stop",
+        loopState,
+        detectedInternalTokens: stopComposeResult.detectedInternalTokens,
+      };
+    } catch (error) {
+      logError(
+        "widget_turn.stop_compose_failed",
+        error,
+        options.buildLogContext(),
+      );
+      const fallback = "I'm sorry, something went wrong on my end. Please try again or reach out to the team for help.";
+      emitSseEvent(options.controller, options.encoder, {
+        finalText: fallback,
+      });
+      loopState.finalDraft = fallback;
+      return {
+        fullResponse: fallback,
+        retrieval: loopState.docsEvidence,
+        hadToolCalls,
+        lastToolOutput,
+        lastToolError: error instanceof Error ? error.message : "Compose failed",
+        stepCount: loopState.stepCount,
+        terminationAction: "stop",
+        loopState,
+        detectedInternalTokens: [],
+      };
+    }
+  }
+
+  loopState.terminationReason = "Planner step limit reached.";
+  pushActionHistory(loopState, {
+    type: "stop",
+    reason: "Planner step limit reached.",
+    outcome: "completed",
+    note: "falling through to best-effort compose",
+  });
+
+  try {
+    const limitComposeResult = await executeCompose({
+      controller: options.controller,
+      encoder: options.encoder,
+      modelRuntime: options.modelRuntime,
+      telemetry: options.telemetry,
+      currentMessage: options.currentMessage,
+      conversationHistory: options.conversationHistory,
+      state: loopState,
+      settings: options.settings,
+      projectName: options.project.name,
+      guidelines: options.guidelines,
+      compiledFaqContext: options.compiledFaqContext,
+      pageContext: options.pageContext,
+      visitorInfo: options.visitorInfo,
+      existingInquiry: options.existingInquiry,
+      inquiryFields: options.inquiryFields,
+      agentHandbackInstructions: options.agentHandbackInstructions,
+      image: options.image,
+      emitStatus: options.emitStatus,
+      buildLogContext: options.buildLogContext,
+      closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
     });
+
+    loopState.finalDraft = limitComposeResult.fullResponse;
     return {
-      fullResponse,
+      fullResponse: limitComposeResult.fullResponse,
+      retrieval: loopState.docsEvidence,
+      hadToolCalls,
+      lastToolOutput: limitComposeResult.lastToolOutput,
+      lastToolError: limitComposeResult.lastToolError,
+      stepCount: loopState.stepCount,
+      terminationAction: "stop",
+      loopState,
+      detectedInternalTokens: limitComposeResult.detectedInternalTokens,
+    };
+  } catch (error) {
+    logError(
+      "widget_turn.step_limit_compose_failed",
+      error,
+      options.buildLogContext(),
+    );
+    const fallback = "I'm sorry, something went wrong on my end. Please try again or reach out to the team for help.";
+    emitSseEvent(options.controller, options.encoder, {
+      finalText: fallback,
+    });
+    loopState.finalDraft = fallback;
+    return {
+      fullResponse: fallback,
       retrieval: loopState.docsEvidence,
       hadToolCalls,
       lastToolOutput,
-      lastToolError,
+      lastToolError: error instanceof Error ? error.message : "Compose failed",
       stepCount: loopState.stepCount,
       terminationAction: "stop",
       loopState,
       detectedInternalTokens: [],
     };
   }
-
-  const fullResponse = buildStopResponse({
-    currentMessage: options.currentMessage,
-    turnPlan: options.turnPlan,
-    state: loopState,
-  });
-  loopState.finalDraft = fullResponse;
-  loopState.terminationReason = "Planner step limit reached.";
-  pushActionHistory(loopState, {
-    type: "stop",
-    reason: "Planner step limit reached.",
-    outcome: "completed",
-    note: null,
-  });
-  emitSseEvent(options.controller, options.encoder, {
-    finalText: fullResponse,
-  });
-
-  return {
-    fullResponse,
-    retrieval: loopState.docsEvidence,
-    hadToolCalls,
-    lastToolOutput,
-    lastToolError,
-    stepCount: loopState.stepCount,
-    terminationAction: "stop",
-    loopState,
-    detectedInternalTokens: [],
-  };
 }
