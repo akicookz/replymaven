@@ -258,6 +258,58 @@
 }
 
 
+/* ─── Chat Markdown Prose ──────────────────────────────────────────────────── */
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3,
+.prose-chat h4,
+.prose-chat h5,
+.prose-chat h6 {
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 8px 0 4px;
+}
+.prose-chat h1:first-child,
+.prose-chat h2:first-child,
+.prose-chat h3:first-child,
+.prose-chat h4:first-child,
+.prose-chat h5:first-child,
+.prose-chat h6:first-child {
+  margin-top: 0;
+}
+.prose-chat h1 { font-size: 1.25em; }
+.prose-chat h2 { font-size: 1.15em; }
+.prose-chat h3 { font-size: 1.05em; }
+.prose-chat h4,
+.prose-chat h5,
+.prose-chat h6 { font-size: 1em; }
+.prose-chat p {
+  margin: 0 0 6px;
+}
+.prose-chat p:last-child {
+  margin-bottom: 0;
+}
+.prose-chat ul,
+.prose-chat ol {
+  margin: 4px 0 6px;
+  padding-left: 20px;
+}
+.prose-chat ul { list-style: disc; }
+.prose-chat ol { list-style: decimal; }
+.prose-chat li {
+  margin-bottom: 2px;
+}
+.prose-chat code {
+  background: var(--muted);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+}
+.prose-chat strong {
+  font-weight: 600;
+}
+
 /* Color input swatch styling */
 input[type="color"]::-webkit-color-swatch-wrapper {
   padding: 2px;

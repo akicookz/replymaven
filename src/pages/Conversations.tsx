@@ -46,7 +46,7 @@ import {
   getVisitorPresenceState,
   type VisitorPresenceState,
 } from "@/lib/conversation-presence";
-import { cn } from "@/lib/utils";
+import { cn, renderMarkdown } from "@/lib/utils";
 
 interface ConversationMeta {
   url?: string;
@@ -1771,9 +1771,16 @@ function Conversations() {
                         )}
 
                         {/* Message content */}
-                        <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                          {msg.content}
-                        </p>
+                        {msg.role === "visitor" ? (
+                          <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                            {msg.content}
+                          </p>
+                        ) : (
+                          <div
+                            className="text-[13.5px] leading-relaxed break-words [overflow-wrap:anywhere] prose-chat"
+                            dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                          />
+                        )}
 
                         {/* Source links */}
                         {isBot && msg.sources && (() => {

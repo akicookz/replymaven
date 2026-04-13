@@ -1395,6 +1395,25 @@
     .rm-message li:last-child {
       margin-bottom: 0;
     }
+    .rm-message h1,
+    .rm-message h2,
+    .rm-message h3,
+    .rm-message h4,
+    .rm-message h5,
+    .rm-message h6 {
+      font-weight: 500;
+      line-height: 1.3;
+      margin: 6px 0 2px;
+      font-size: 1em;
+    }
+    .rm-message h1:first-child,
+    .rm-message h2:first-child,
+    .rm-message h3:first-child,
+    .rm-message h4:first-child,
+    .rm-message h5:first-child,
+    .rm-message h6:first-child {
+      margin-top: 0;
+    }
     .rm-message strong {
       font-weight: 600;
     }
@@ -2980,10 +2999,16 @@
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
+      const headingMatch = line.match(/^(#{1,6})\s+(.*)/);
       const ulMatch = line.match(/^[\s]*[-*]\s+(.*)/);
       const olMatch = line.match(/^[\s]*\d+[.)]\s+(.*)/);
 
-      if (ulMatch) {
+      if (headingMatch) {
+        if (inUl) { output.push("</ul>"); inUl = false; }
+        if (inOl) { output.push("</ol>"); inOl = false; }
+        const level = headingMatch[1].length;
+        output.push(`<h${level}>${headingMatch[2]}</h${level}>`);
+      } else if (ulMatch) {
         if (inOl) {
           output.push("</ol>");
           inOl = false;
@@ -3014,7 +3039,6 @@
         }
         const trimmed = line.trim();
         if (trimmed === "") {
-          // Empty line — paragraph break (only if next line has content)
           continue;
         }
         output.push(trimmed);
@@ -3036,6 +3060,7 @@
 
     for (const item of output) {
       if (
+        item.startsWith("<h") ||
         item.startsWith("<ul>") ||
         item.startsWith("</ul>") ||
         item.startsWith("<ol>") ||
