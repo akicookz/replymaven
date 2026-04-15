@@ -179,12 +179,11 @@ async function searchWithRetrievalType(options: {
           ai_search_options: {
             retrieval: {
               retrieval_type: options.retrievalType,
-              // The generated Worker typings still expose the legacy filter shape.
               filters: {
-                folder: {
-                  $eq: `${options.projectId}/`,
-                },
-              } as never,
+                key: "folder",
+                type: "eq",
+                value: `${options.projectId}/`,
+              },
               max_num_results: options.maxResults,
               match_threshold: options.matchThreshold,
             },
