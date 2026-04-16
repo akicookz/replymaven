@@ -59,7 +59,7 @@ describe("documentation-only behavior", () => {
     expect(prompt).not.toContain("best-effort suggestion");
 
     // Should say to rely only on documented facts
-    expect(prompt).toContain("Use only explicit facts that are clearly supported by the retrieved excerpts");
+    expect(prompt).toContain("Use only explicit facts from the retrieved excerpts");
   });
 
   test("instructs to say 'not in documentation' when no grounding", () => {
@@ -75,8 +75,8 @@ describe("documentation-only behavior", () => {
     );
 
     // Should use generic "documentation" instead of exposing SOPs/FAQs
-    expect(prompt).toContain("I couldn't find this information in the documentation");
-    expect(prompt).toContain("Do NOT provide any suggestions or workarounds not explicitly documented");
+    expect(prompt).toContain("Clearly convey that you could not find information about this topic in the documentation");
+    expect(prompt).toContain("Do not provide suggestions or workarounds that are not explicitly documented");
   });
 
   test("maintains FAQ context as tier-1 source", () => {

@@ -1,6 +1,6 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { type ToolRow } from "../../db";
-import { logError, logWarn } from "../../observability";
+import { logError, logInfo, logWarn } from "../../observability";
 import { type ChatService } from "../../services/chat-service";
 import { type ProjectService } from "../../services/project-service";
 import { TelegramService } from "../../services/telegram-service";
@@ -18,6 +18,7 @@ import {
   fallbackExtractContactInfo,
   fallbackSummarizeTeamRequest,
   reformulateQuery,
+  reformulateSearchQueries,
   summarizeTeamRequest,
 } from "../llm/auxiliary-calls";
 import { createTeamRequestSubmission } from "../post-turn/team-request";
@@ -98,6 +99,7 @@ interface RunPlannerLoopOptions {
   };
   guidelines: Array<{ condition: string; instruction: string }>;
   compiledFaqContext: string;
+  hasIndexedResources: boolean;
   visitorInfo: { name: string | null; email: string | null };
   existingInquiry?: Record<string, string> | null;
   inquiryFields?: InquiryFieldSpec[] | null;
@@ -245,6 +247,7 @@ function createInitialLoopState(
     handoffSummary: null,
     finalDraft: null,
     terminationReason: null,
+    reformulationUsed: false,
     queryTracker: {
       normalizedQueries: new Map<string, number>(),
       semanticGroups: [],
@@ -586,42 +589,71 @@ export async function runPlannerLoop(
     if (loopState.stepCount > 0) {
       options.emitStatus("Thinking...", "thinking");
     }
+
+    const retrievalExhausted =
+      loopState.docsEvidence.retrievalAttempted &&
+      loopState.docsEvidence.sourceReferences.length === 0 &&
+      loopState.reformulationUsed;
+    const hasNoTools = options.availableTools.length === 0;
+    const shouldForceCompose =
+      retrievalExhausted &&
+      hasNoTools &&
+      loopState.toolEvidence.length === 0 &&
+      !loopState.handoffRequested;
+
     let plannerDecision;
     const plannerStepStart = Date.now();
-    try {
-      plannerDecision = await runWithModelFallback({
-        runtime: options.modelRuntime,
-        stage: "plan_next_action",
-        logContext: options.buildLogContext({
-          loopStep: loopState.stepCount + 1,
-        }),
-        operation: async (activeConfig) => {
-          return planNextAction({
-            model: createLanguageModel(activeConfig),
-            conversationHistory: options.conversationHistory,
-            currentMessage: options.currentMessage,
-            pageContext: options.pageContext,
-            turnPlan: options.turnPlan,
-            availableTools: options.availableTools,
-            state: loopState,
-          });
+    if (shouldForceCompose) {
+      plannerDecision = {
+        goal: loopState.goal,
+        nextAction: {
+          type: "compose" as const,
+          reason:
+            "Retrieval exhausted and no tools available; compose best-effort answer.",
         },
-      });
-    } catch {
-      plannerDecision = fallbackPlanNextAction({
-        conversationHistory: options.conversationHistory,
-        currentMessage: options.currentMessage,
-        turnPlan: options.turnPlan,
-        availableTools: options.availableTools,
-        state: loopState,
-        maxSteps: MAX_PLANNER_STEPS,
-      });
-      logWarn(
-        "widget_turn.plan_next_action_fallback_used",
+      };
+      logInfo(
+        "widget_turn.plan_next_action_force_compose",
         options.buildLogContext({
           loopStep: loopState.stepCount + 1,
         }),
       );
+    } else {
+      try {
+        plannerDecision = await runWithModelFallback({
+          runtime: options.modelRuntime,
+          stage: "plan_next_action",
+          logContext: options.buildLogContext({
+            loopStep: loopState.stepCount + 1,
+          }),
+          operation: async (activeConfig) => {
+            return planNextAction({
+              model: createLanguageModel(activeConfig),
+              conversationHistory: options.conversationHistory,
+              currentMessage: options.currentMessage,
+              pageContext: options.pageContext,
+              turnPlan: options.turnPlan,
+              availableTools: options.availableTools,
+              state: loopState,
+            });
+          },
+        });
+      } catch {
+        plannerDecision = fallbackPlanNextAction({
+          conversationHistory: options.conversationHistory,
+          currentMessage: options.currentMessage,
+          turnPlan: options.turnPlan,
+          availableTools: options.availableTools,
+          state: loopState,
+          maxSteps: MAX_PLANNER_STEPS,
+        });
+        logWarn(
+          "widget_turn.plan_next_action_fallback_used",
+          options.buildLogContext({
+            loopStep: loopState.stepCount + 1,
+          }),
+        );
+      }
     }
     if (!options.telemetry.plannerStepMs) options.telemetry.plannerStepMs = [];
     options.telemetry.plannerStepMs.push(Date.now() - plannerStepStart);
@@ -650,6 +682,25 @@ export async function runPlannerLoop(
       const currentCount = loopState.queryTracker.normalizedQueries.get(normalizedQuery) || 0;
       loopState.queryTracker.normalizedQueries.set(normalizedQuery, currentCount + 1);
 
+      if (!options.hasIndexedResources) {
+        pushActionHistory(loopState, {
+          type: "search_docs",
+          reason: nextAction.reason,
+          query: nextAction.query,
+          broaderQueries: nextAction.broaderQueries,
+          outcome: "completed",
+          note: "skipped: project has no indexed resources",
+        });
+        loopState.docsEvidence = {
+          ...loopState.docsEvidence,
+          retrievalAttempted: true,
+          broaderSearchAttempted: true,
+          queries: [...new Set([...loopState.docsEvidence.queries, nextAction.query])],
+        };
+        loopState.reformulationUsed = true;
+        continue;
+      }
+
       pushActionHistory(loopState, {
         type: "search_docs",
         reason: nextAction.reason,
@@ -661,29 +712,40 @@ export async function runPlannerLoop(
 
       options.emitStatus("Searching knowledge base...", "retrieval");
       let searchQuery = nextAction.query;
-      try {
-        searchQuery = await runWithModelFallback({
-          runtime: options.modelRuntime,
-          stage: "reformulate_query",
-          logContext: options.buildLogContext({
-            loopStep: loopState.stepCount,
-          }),
-          operation: async (activeConfig) => {
-            return reformulateQuery(
-              createLanguageModel(activeConfig),
-              options.conversationHistory,
-              nextAction.query,
-              { throwOnModelError: true },
-            );
-          },
-        });
-      } catch {
-        logWarn(
-          "widget_turn.reformulate_query_fallback_used",
-          options.buildLogContext({
-            loopStep: loopState.stepCount,
-          }),
-        );
+      const normalizedPlannerQuery = nextAction.query.trim().toLowerCase();
+      const normalizedCurrentMessage = options.currentMessage
+        .trim()
+        .toLowerCase();
+      const plannerAlreadyReformulated =
+        normalizedPlannerQuery !== normalizedCurrentMessage &&
+        normalizedPlannerQuery.length > 0;
+      const shouldReformulate =
+        options.conversationHistory.length > 1 && !plannerAlreadyReformulated;
+      if (shouldReformulate) {
+        try {
+          searchQuery = await runWithModelFallback({
+            runtime: options.modelRuntime,
+            stage: "reformulate_query",
+            logContext: options.buildLogContext({
+              loopStep: loopState.stepCount,
+            }),
+            operation: async (activeConfig) => {
+              return reformulateQuery(
+                createLanguageModel(activeConfig),
+                options.conversationHistory,
+                nextAction.query,
+                { throwOnModelError: true },
+              );
+            },
+          });
+        } catch {
+          logWarn(
+            "widget_turn.reformulate_query_fallback_used",
+            options.buildLogContext({
+              loopStep: loopState.stepCount,
+            }),
+          );
+        }
       }
 
       const retrievalQueries = buildRetrievalQueries(
@@ -710,6 +772,71 @@ export async function runPlannerLoop(
         retrievalQueries,
         broaderQueries,
       );
+
+      if (
+        retrieval.sourceReferences.length === 0 &&
+        !loopState.reformulationUsed
+      ) {
+        loopState.reformulationUsed = true;
+        const failedQueries = [
+          ...retrievalQueries,
+          ...broaderQueries,
+        ];
+        let reformulatedQueries: string[] = [];
+        try {
+          reformulatedQueries = await runWithModelFallback({
+            runtime: options.modelRuntime,
+            stage: "reformulate_search_queries",
+            logContext: options.buildLogContext({
+              loopStep: loopState.stepCount,
+            }),
+            operation: async (activeConfig) => {
+              return reformulateSearchQueries(
+                createLanguageModel(activeConfig),
+                {
+                  conversationHistory: options.conversationHistory,
+                  currentMessage: options.currentMessage,
+                  failedQueries,
+                  intent: options.turnPlan.intent ?? undefined,
+                  pageContext: options.pageContext,
+                },
+                { throwOnModelError: true },
+              );
+            },
+          });
+        } catch {
+          logWarn(
+            "widget_turn.reformulate_search_queries_failed",
+            options.buildLogContext({
+              loopStep: loopState.stepCount,
+            }),
+          );
+        }
+
+        if (reformulatedQueries.length > 0) {
+          options.emitStatus("Trying alternative search...", "retrieval");
+          const reformulatedRetrievalStart = Date.now();
+          const reformulatedRetrieval = await runAiSearch({
+            env: options.env,
+            db: options.db,
+            projectId: options.project.id,
+            queries: reformulatedQueries,
+            allowBroaderRetry: false,
+          });
+          if (!options.telemetry.retrievalMs) options.telemetry.retrievalMs = [];
+          options.telemetry.retrievalMs.push(
+            Date.now() - reformulatedRetrievalStart,
+          );
+
+          loopState.docsEvidence = mergeDocsEvidence(
+            loopState.docsEvidence,
+            reformulatedRetrieval,
+            reformulatedQueries,
+            [],
+          );
+        }
+      }
+
       continue;
     }
 

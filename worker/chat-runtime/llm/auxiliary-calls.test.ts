@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { fallbackClassifySupportTurn } from "./auxiliary-calls";
+import {
+  dedupeReformulatedQueries,
+  fallbackClassifySupportTurn,
+  reformulateSearchQueries,
+} from "./auxiliary-calls";
+import { createLanguageModel } from "./create-language-model";
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const hasGeminiKey = !!GEMINI_API_KEY;
+const llmDescribe = hasGeminiKey ? describe : describe.skip;
 
 describe("auxiliary-calls - industry agnostic", () => {
   describe("fallbackClassifySupportTurn", () => {
@@ -9,7 +18,7 @@ describe("auxiliary-calls - industry agnostic", () => {
       );
       // The fallback is simple and can't determine context without LLM
       expect(result.intent).toBe("clarify");
-      expect(result.followUpQuestion).toBeTruthy();
+      expect(result.followUpQuestion).toBeNull();
     });
 
     test("fallback recognizes explicit handoff request", () => {
@@ -49,7 +58,165 @@ describe("auxiliary-calls - industry agnostic", () => {
         "help"
       );
       expect(result.intent).toBe("clarify");
-      expect(result.followUpQuestion).toBeTruthy();
+      expect(result.followUpQuestion).toBeNull();
     });
   });
+});
+
+describe("dedupeReformulatedQueries", () => {
+  test("returns empty array when no candidates", () => {
+    expect(dedupeReformulatedQueries([], ["billing"])).toEqual([]);
+  });
+
+  test("removes exact duplicates of failed queries", () => {
+    const result = dedupeReformulatedQueries(
+      ["billing", "invoice history"],
+      ["billing"],
+    );
+    expect(result).toEqual(["invoice history"]);
+  });
+
+  test("matches failed queries case-insensitively", () => {
+    const result = dedupeReformulatedQueries(
+      ["BILLING", "Billing", "Payment History"],
+      ["billing"],
+    );
+    expect(result).toEqual(["Payment History"]);
+  });
+
+  test("matches failed queries ignoring surrounding whitespace", () => {
+    const result = dedupeReformulatedQueries(
+      ["  billing  ", "refund policy"],
+      ["billing"],
+    );
+    expect(result).toEqual(["refund policy"]);
+  });
+
+  test("dedupes candidates against each other", () => {
+    const result = dedupeReformulatedQueries(
+      ["invoice", "INVOICE", "Invoice", "payment"],
+      [],
+    );
+    expect(result).toEqual(["invoice", "payment"]);
+  });
+
+  test("drops empty and whitespace-only candidates", () => {
+    const result = dedupeReformulatedQueries(
+      ["", "   ", "refund", "\t\n"],
+      [],
+    );
+    expect(result).toEqual(["refund"]);
+  });
+
+  test("trims whitespace on retained candidates", () => {
+    const result = dedupeReformulatedQueries(
+      ["  refund policy  "],
+      [],
+    );
+    expect(result).toEqual(["refund policy"]);
+  });
+
+  test("preserves order of first occurrence", () => {
+    const result = dedupeReformulatedQueries(
+      ["a", "b", "c", "A", "B", "d"],
+      [],
+    );
+    expect(result).toEqual(["a", "b", "c", "d"]);
+  });
+
+  test("returns empty array when every candidate is a failed query", () => {
+    const result = dedupeReformulatedQueries(
+      ["billing", "invoice"],
+      ["billing", "invoice"],
+    );
+    expect(result).toEqual([]);
+  });
+});
+
+describe("reformulateSearchQueries - short-circuit", () => {
+  test("returns empty array when failedQueries is empty without calling the model", async () => {
+    // Passing a null model proves the short-circuit runs before any LLM call.
+    const result = await reformulateSearchQueries(
+      null as never,
+      {
+        conversationHistory: [],
+        currentMessage: "anything",
+        failedQueries: [],
+      },
+    );
+    expect(result).toEqual([]);
+  });
+});
+
+llmDescribe("reformulateSearchQueries (LLM integration)", () => {
+  function createModel() {
+    return createLanguageModel({
+      model: "gemini-3-flash-preview",
+      geminiApiKey: GEMINI_API_KEY!,
+      openaiApiKey: null,
+    });
+  }
+
+  test("returns queries that differ from every failed query", async () => {
+    const failedQueries = ["billing page", "payment issues"];
+    const result = await reformulateSearchQueries(
+      createModel(),
+      {
+        conversationHistory: [
+          { role: "visitor", content: "I was charged twice last month." },
+        ],
+        currentMessage: "I was charged twice last month.",
+        failedQueries,
+        intent: "policy",
+      },
+    );
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.length).toBeLessThanOrEqual(3);
+
+    const failedSet = new Set(failedQueries.map((q) => q.toLowerCase()));
+    for (const query of result) {
+      expect(failedSet.has(query.toLowerCase())).toBe(false);
+      expect(query.length).toBeGreaterThan(0);
+    }
+  }, 15_000);
+
+  test("returns [] and does not throw when model fails (default options)", async () => {
+    const result = await reformulateSearchQueries(
+      createLanguageModel({
+        model: "gemini-3-flash-preview",
+        geminiApiKey: "invalid-key",
+        openaiApiKey: null,
+      }),
+      {
+        conversationHistory: [],
+        currentMessage: "test",
+        failedQueries: ["something"],
+      },
+    );
+    expect(result).toEqual([]);
+  }, 15_000);
+
+  test("throws when throwOnModelError is true and model fails", async () => {
+    let threw = false;
+    try {
+      await reformulateSearchQueries(
+        createLanguageModel({
+          model: "gemini-3-flash-preview",
+          geminiApiKey: "invalid-key",
+          openaiApiKey: null,
+        }),
+        {
+          conversationHistory: [],
+          currentMessage: "test",
+          failedQueries: ["something"],
+        },
+        { throwOnModelError: true },
+      );
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+  }, 15_000);
 });

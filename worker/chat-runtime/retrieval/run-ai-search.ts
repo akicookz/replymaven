@@ -36,13 +36,59 @@ interface NormalizedSearchResponse {
   rawDataCount: number;
 }
 
-function isHybridRetrievalUnavailableError(error: unknown): boolean {
+export const hybridUnavailableProjects = new Set<string>();
+
+const HYBRID_UNAVAILABLE_KV_TTL_SECONDS = 24 * 60 * 60;
+
+function hybridUnavailableKvKey(projectId: string): string {
+  return `hybrid_unavailable:${projectId}`;
+}
+
+export function isHybridRetrievalUnavailableError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
 
   return (
     error.message.includes("retrieval_type 'hybrid' is not available") &&
     error.message.includes("keyword indexing is disabled")
   );
+}
+
+export async function resolveRetrievalType(
+  projectId: string,
+  kv?: KVNamespace,
+): Promise<SearchRetrievalType> {
+  if (hybridUnavailableProjects.has(projectId)) {
+    return "vector";
+  }
+
+  if (kv) {
+    try {
+      const cached = await kv.get(hybridUnavailableKvKey(projectId));
+      if (cached) {
+        hybridUnavailableProjects.add(projectId);
+        return "vector";
+      }
+    } catch {
+      // KV read failures fall through to hybrid attempt.
+    }
+  }
+
+  return "hybrid";
+}
+
+async function markHybridUnavailable(
+  projectId: string,
+  kv?: KVNamespace,
+): Promise<void> {
+  hybridUnavailableProjects.add(projectId);
+  if (!kv) return;
+  try {
+    await kv.put(hybridUnavailableKvKey(projectId), "1", {
+      expirationTtl: HYBRID_UNAVAILABLE_KV_TTL_SECONDS,
+    });
+  } catch {
+    // KV write failures are non-fatal; the in-memory cache still helps within this isolate.
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -180,10 +226,10 @@ async function searchWithRetrievalType(options: {
             retrieval: {
               retrieval_type: options.retrievalType,
               filters: {
-                key: "folder",
-                type: "eq",
-                value: `${options.projectId}/`,
-              },
+                folder: {
+                  $eq: `${options.projectId}/`,
+                },
+              } as never,
               max_num_results: options.maxResults,
               match_threshold: options.matchThreshold,
             },
@@ -246,6 +292,7 @@ async function executeSearchPass(options: {
   matchThreshold: number;
   maxResults: number;
   retrievalType: SearchRetrievalType;
+  kv?: KVNamespace;
 }): Promise<SearchPassResult> {
   try {
     return {
@@ -257,6 +304,8 @@ async function executeSearchPass(options: {
       options.retrievalType === "hybrid" &&
       isHybridRetrievalUnavailableError(error)
     ) {
+      await markHybridUnavailable(options.projectId, options.kv);
+
       logWarn("ai_search.retrieval_type_fallback", {
         projectId: options.projectId,
         attemptedRetrievalType: "hybrid",
@@ -264,6 +313,7 @@ async function executeSearchPass(options: {
         queryCount: options.queries.length,
         matchThreshold: options.matchThreshold,
         maxResults: options.maxResults,
+        cached: true,
       });
 
       const results = await searchWithRetrievalType({
@@ -288,7 +338,7 @@ async function executeSearchPass(options: {
 }
 
 export async function runAiSearch(options: {
-  env: Pick<AppEnv, "AI" | "UPLOADS">;
+  env: Pick<AppEnv, "AI" | "UPLOADS"> & { CONVERSATIONS_CACHE?: KVNamespace };
   db: import("drizzle-orm/d1").DrizzleD1Database<Record<string, unknown>>;
   projectId: string;
   queries: string[];
@@ -310,8 +360,12 @@ export async function runAiSearch(options: {
     };
   }
 
+  const kv = options.env.CONVERSATIONS_CACHE;
   let broaderSearchAttempted = false;
-  let activeRetrievalType: SearchRetrievalType = "hybrid";
+  let activeRetrievalType: SearchRetrievalType = await resolveRetrievalType(
+    options.projectId,
+    kv,
+  );
   let searchPass = await executeSearchPass({
     env: options.env,
     projectId: options.projectId,
@@ -319,6 +373,7 @@ export async function runAiSearch(options: {
     matchThreshold: 0.2,
     maxResults: 12,
     retrievalType: activeRetrievalType,
+    kv,
   });
   let searchResults = searchPass.results;
   activeRetrievalType = searchPass.retrievalType;
@@ -346,6 +401,7 @@ export async function runAiSearch(options: {
       matchThreshold: 0.1,
       maxResults: 18,
       retrievalType: activeRetrievalType,
+      kv,
     });
     searchResults = searchPass.results;
     activeRetrievalType = searchPass.retrievalType;

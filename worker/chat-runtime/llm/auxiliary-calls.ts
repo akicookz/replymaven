@@ -1,4 +1,4 @@
-import { generateObject, generateText, type LanguageModel } from "ai";
+import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 import {
   type ConversationTurnMessage,
@@ -8,6 +8,7 @@ import {
   buildClassifySupportTurnPrompt,
   buildExtractContactInfoPrompt,
   buildReformulateQueryPrompt,
+  buildReformulateSearchQueriesPrompt,
   buildSummarizeConversationPrompt,
   buildSummarizeTeamRequestPrompt,
 } from "./support-prompt-builders";
@@ -34,7 +35,11 @@ const supportTurnPlanSchema = z.object({
   summary: z.string().min(1).max(220),
   retrievalQueries: z.array(z.string().min(3).max(180)).max(4),
   broaderQueries: z.array(z.string().min(3).max(180)).max(4),
-  followUpQuestion: z.string().max(220).nullable().optional(),
+  followUpQuestion: z.string().max(220).nullable(),
+});
+
+const reformulateSearchQueriesSchema = z.object({
+  queries: z.array(z.string().min(3).max(180)).min(1).max(3),
 });
 
 export function fallbackClassifySupportTurn(
@@ -134,9 +139,9 @@ export async function classifySupportTurn(
       : "None";
 
   try {
-    const { object } = await generateObject({
+    const { output: object } = await generateText({
       model,
-      schema: supportTurnPlanSchema,
+      output: Output.object({ schema: supportTurnPlanSchema }),
       temperature: 0,
       maxOutputTokens: 384,
       prompt: buildClassifySupportTurnPrompt({
@@ -145,6 +150,10 @@ export async function classifySupportTurn(
         pageContextBlock,
       }),
     });
+
+    if (!object) {
+      throw new Error("AI_NoObjectGeneratedError: model did not produce a valid structured output");
+    }
 
     return {
       intent: object.intent,
@@ -194,6 +203,121 @@ export async function reformulateQuery(
     }
     return currentMessage;
   }
+}
+
+export async function reformulateSearchQueries(
+  model: LanguageModel,
+  params: {
+    conversationHistory: ConversationTurnMessage[];
+    currentMessage: string;
+    failedQueries: string[];
+    intent?: string;
+    pageContext?: Record<string, string>;
+  },
+  options?: AuxiliaryCallOptions,
+): Promise<string[]> {
+  if (params.failedQueries.length === 0) {
+    return [];
+  }
+
+  const recentHistory = params.conversationHistory.slice(-6);
+  const transcript = recentHistory
+    .map((message) => `${message.role}: ${message.content}`)
+    .join("\n");
+  const pageContextBlock =
+    params.pageContext && Object.keys(params.pageContext).length > 0
+      ? Object.entries(params.pageContext)
+          .map(([key, value]) => `${key}: ${value}`)
+          .join("\n")
+      : "None";
+
+  try {
+    const result = await generateText({
+      model,
+      output: Output.object({ schema: reformulateSearchQueriesSchema }),
+      temperature: 0.3,
+      maxOutputTokens: 256,
+      prompt: buildReformulateSearchQueriesPrompt({
+        transcript,
+        currentMessage: params.currentMessage,
+        failedQueries: params.failedQueries,
+        intent: params.intent,
+        pageContextBlock,
+      }),
+    });
+
+    const object =
+      result.output ??
+      recoverStructuredOutput(result.text ?? "", reformulateSearchQueriesSchema);
+    if (!object) {
+      const error = new Error(
+        "model did not produce a valid structured output",
+      );
+      error.name = "AI_NoObjectGeneratedError";
+      throw error;
+    }
+
+    return dedupeReformulatedQueries(object.queries, params.failedQueries);
+  } catch (error) {
+    if (shouldThrowOnModelError(options)) {
+      throw error;
+    }
+    return [];
+  }
+}
+
+function recoverStructuredOutput<T extends z.ZodTypeAny>(
+  text: string,
+  schema: T,
+): z.infer<T> | null {
+  if (!text.trim()) return null;
+
+  const trimmed = text.trim();
+  const candidates: string[] = [];
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenced?.[1]) candidates.push(fenced[1]);
+
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+
+  candidates.push(trimmed);
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      const validated = schema.safeParse(parsed);
+      if (validated.success) return validated.data;
+    } catch {
+      // try next candidate
+    }
+  }
+
+  return null;
+}
+
+export function dedupeReformulatedQueries(
+  candidates: string[],
+  failedQueries: string[],
+): string[] {
+  const failedSet = new Set(
+    failedQueries.map((query) => query.trim().toLowerCase()),
+  );
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const query of candidates) {
+    const normalized = query.trim();
+    if (!normalized) continue;
+    const lower = normalized.toLowerCase();
+    if (failedSet.has(lower)) continue;
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    deduped.push(normalized);
+  }
+  return deduped;
 }
 
 export async function summarizeConversation(

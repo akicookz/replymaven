@@ -1,4 +1,4 @@
-import { generateObject, type LanguageModel } from "ai";
+import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 import {
   type ConversationTurnMessage,
@@ -6,6 +6,7 @@ import {
   type PlannerAskUserAction,
   type PlannerDecision,
   type PlannerLoopState,
+  type PlannerNextAction,
   type SupportToolDefinition,
   type SupportTurnPlan,
 } from "../types";
@@ -41,52 +42,72 @@ interface SanitizePlannerDecisionOptions {
   maxSteps: number;
 }
 
-const plannerActionSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("search_docs"),
-    reason: z.string().min(1).max(220),
-    query: z.string().min(3).max(220),
-    broaderQueries: z.array(z.string().min(3).max(220)).max(3).optional(),
-  }),
-  z.object({
-    type: z.literal("call_tool"),
-    reason: z.string().min(1).max(220),
-    toolName: z.string().min(1).max(120),
-    input: z.record(z.string(), z.unknown()),
-  }),
-  z.object({
-    type: z.literal("ask_user"),
-    reason: z.string().min(1).max(220),
-    question: z.string().min(1).max(220),
-  }),
-  z.object({
-    type: z.literal("offer_handoff"),
-    reason: z.string().min(1).max(220),
-  }),
-  z.object({
-    type: z.literal("collect_contact"),
-    reason: z.string().min(1).max(220),
-    missingFields: z.array(z.enum(["name", "email"])).min(1).max(2),
-  }),
-  z.object({
-    type: z.literal("create_inquiry"),
-    reason: z.string().min(1).max(220),
-  }),
-  z.object({
-    type: z.literal("compose"),
-    reason: z.string().min(1).max(220),
-    answerStyle: z.enum(["direct", "step_by_step", "summary"]).optional(),
-  }),
-  z.object({
-    type: z.literal("stop"),
-    reason: z.string().min(1).max(220),
-  }),
-]);
-
 const plannerDecisionSchema = z.object({
-  goal: z.string().min(1).max(220),
-  nextAction: plannerActionSchema,
+  goal: z.string().min(1).max(220).describe("Current planner goal."),
+  actionType: z
+    .enum([
+      "search_docs",
+      "call_tool",
+      "ask_user",
+      "offer_handoff",
+      "collect_contact",
+      "create_inquiry",
+      "compose",
+      "stop",
+    ])
+    .describe("The single next action to take."),
+  reason: z
+    .string()
+    .min(1)
+    .max(300)
+    .describe("One-sentence justification for why this action was chosen."),
+  query: z
+    .string()
+    .max(220)
+    .nullable()
+    .describe(
+      "Search query (required when actionType is search_docs; null otherwise).",
+    ),
+  broaderQueries: z
+    .array(z.string().max(220))
+    .max(3)
+    .nullable()
+    .describe(
+      "Broader fallback queries (only for search_docs; null otherwise).",
+    ),
+  toolName: z
+    .string()
+    .max(120)
+    .nullable()
+    .describe(
+      "Tool name to call (required when actionType is call_tool; null otherwise).",
+    ),
+  toolInput: z
+    .looseObject({})
+    .nullable()
+    .describe(
+      "Tool input parameters (required when actionType is call_tool; null otherwise).",
+    ),
+  question: z
+    .string()
+    .max(220)
+    .nullable()
+    .describe(
+      "Question to ask the visitor (required when actionType is ask_user; null otherwise).",
+    ),
+  missingFields: z
+    .array(z.enum(["name", "email"]))
+    .max(2)
+    .nullable()
+    .describe(
+      "Missing contact fields (required when actionType is collect_contact; null otherwise).",
+    ),
+  answerStyle: z
+    .enum(["direct", "step_by_step", "summary"])
+    .nullable()
+    .describe("Answer style hint (only for compose; null otherwise)."),
 });
+
 
 function normalizeValue(value: string): string {
   return value.trim().toLowerCase();
@@ -393,12 +414,14 @@ export async function planNextAction(
           .join("\n")
       : "None";
 
-  const { object } = await generateObject({
+  const result = await generateText({
     model: options.model,
-    schema: plannerDecisionSchema,
+    output: Output.object({ schema: plannerDecisionSchema }),
     temperature: 0,
-    maxOutputTokens: 600,
-    prompt: `Choose the next bounded action for a support-chat planner.
+    maxOutputTokens: 1200,
+    prompt: `Return ONLY a single valid JSON object matching the schema — no prose, no markdown fences.
+
+Choose the next bounded action for a support-chat planner.
 
 Conversation:
 ${transcript || "No prior conversation"}
@@ -462,20 +485,17 @@ Message classification (YOU are the classifier — there is no separate routing 
 
 Rules:
 - Output exactly one next action.
-- Priority order for finding answers: 1) Check SOPs/guidelines, 2) Check FAQs, 3) Search knowledge base multiple times
+- Priority order for finding answers: 1) Check SOPs/guidelines, 2) Check FAQs, 3) Search the knowledge base
 - Prefer search_docs before call_tool when documentation can clarify expected product behavior.
-- Always attempt at least 3 different search_docs queries before concluding information is not available
-- Try: 1) exact terms, 2) synonyms/related terms, 3) broader category searches
-- Explicitly search for FAQ patterns like "how to", "what is", "why does"
+- A single well-formed search_docs query is usually enough. The runtime will automatically reformulate and retry once if no results come back, so do not stack redundant queries.
 - Use call_tool only when a tool is clearly needed and the required inputs are available.
 - If a required tool input is missing, choose ask_user instead of guessing.
 - If the visitor explicitly asks for a human, do not route them back into normal docs troubleshooting unless the issue context is still missing.
 - Use offer_handoff only when you need visitor confirmation before forwarding.
 - Use collect_contact only when optional contact details would genuinely help follow-up and the visitor has not already declined to share them.
 - Use create_inquiry when the visitor wants human follow-up, there is enough issue context to forward, and either contact details are already known or the visitor has declined to share them.
-- When documentation is weak or missing, prefer search_docs with different queries over compose.
-- Exhaust at least 3 different search attempts before considering ask_user or offer_handoff.
-- Choose compose ONLY when SOPs, FAQs, or docs/tool evidence directly answers the question, OR when you are responding to a greeting, resolution signal, chit-chat, or off-topic message.
+- After search_docs returns evidence, prefer compose. After search_docs returns nothing even after the runtime's automatic reformulation, prefer compose with an honest acknowledgment over endless retries.
+- Choose compose ONLY when SOPs, FAQs, or docs/tool evidence directly answers the question, OR when you are responding to a greeting, resolution signal, chit-chat, or off-topic message, OR when documentation searches have already been exhausted.
 - Do NOT compose answers based on general context or business domain knowledge without explicit documentation.
 - When partial information exists across tiers:
   * Combine complementary information from different tiers only if no conflicts exist
@@ -496,10 +516,78 @@ Anti-loop rules (CRITICAL):
 - If no safe action remains, choose stop. The runtime will still compose a reply using available evidence or a candid acknowledgment that no concrete answer was found.`,
   });
 
+  const object =
+    result?.output ?? recoverPlannerDecisionFromText(result?.text ?? "");
+  if (!object) {
+    const error = new Error(
+      "model did not produce a valid structured output",
+    );
+    error.name = "AI_NoObjectGeneratedError";
+    throw error;
+  }
+
   return {
     goal: object.goal,
-    nextAction: object.nextAction,
+    nextAction: {
+      type: object.actionType,
+      reason: object.reason,
+      query: object.query ?? undefined,
+      broaderQueries: object.broaderQueries ?? undefined,
+      toolName: object.toolName ?? undefined,
+      input: object.toolInput ?? undefined,
+      question: object.question ?? undefined,
+      missingFields:
+        (object.missingFields ?? undefined) as
+          | Array<"name" | "email">
+          | undefined,
+      answerStyle: object.answerStyle ?? undefined,
+    } as PlannerNextAction,
   };
+}
+
+function recoverPlannerDecisionFromText(
+  text: string,
+): z.infer<typeof plannerDecisionSchema> | null {
+  if (!text.trim()) return null;
+
+  const candidates = extractJsonObjectCandidates(text);
+  for (const candidate of candidates) {
+    const parsed = plannerDecisionSchema.safeParse(candidate);
+    if (parsed.success) {
+      return parsed.data;
+    }
+  }
+  return null;
+}
+
+function extractJsonObjectCandidates(text: string): unknown[] {
+  const trimmed = text.trim();
+  const candidates: unknown[] = [];
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenced?.[1]) {
+    const parsed = tryParseJson(fenced[1]);
+    if (parsed !== undefined) candidates.push(parsed);
+  }
+
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    const parsed = tryParseJson(trimmed.slice(firstBrace, lastBrace + 1));
+    if (parsed !== undefined) candidates.push(parsed);
+  }
+
+  const direct = tryParseJson(trimmed);
+  if (direct !== undefined) candidates.push(direct);
+
+  return candidates;
+}
+
+function tryParseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
 }
 
 export function fallbackPlanNextAction(options: {
@@ -660,41 +748,13 @@ export function sanitizePlannerDecision(
         };
       }
 
-      // 2. No evidence, not exhausted → try a genuinely unused query from the plan.
-      const unusedVariation =
-        options.turnPlan.retrievalQueries.find(
-          (query) =>
-            query.trim().length > 0 &&
-            !previousQueries.some(
-              (prev) => getSearchHistoryKey(prev) === getSearchHistoryKey(query),
-            ),
-        ) ??
-        options.turnPlan.broaderQueries.find(
-          (query) =>
-            query.trim().length > 0 &&
-            !previousQueries.some(
-              (prev) => getSearchHistoryKey(prev) === getSearchHistoryKey(query),
-            ),
-        );
-
-      if (unusedVariation) {
-        return {
-          goal: nextGoal,
-          nextAction: {
-            type: "search_docs",
-            reason: `Trying alternate query variation from plan (attempt ${previousQueries.length + 1}/3).`,
-            query: unusedVariation.trim(),
-            broaderQueries: [],
-          },
-        };
-      }
-
-      // 4. No unused variations left → compose so the LLM can say it couldn't find docs.
+      // 2. No evidence and duplicate query → compose; the runtime's reformulation pass
+      //    already had its chance, so further retries will not produce new results.
       return {
         goal: nextGoal,
         nextAction: {
           type: "compose",
-          reason: "All search variations exhausted with no results; compose a response acknowledging the gap.",
+          reason: "Documentation search already ran without results; compose a response acknowledging the gap.",
         },
       };
     }

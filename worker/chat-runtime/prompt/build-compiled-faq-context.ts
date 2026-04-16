@@ -193,8 +193,10 @@ export async function getOrBuildCompiledFaqContext(params: {
   projectId: string;
   fingerprintResources: FaqCacheFingerprintResource[];
   faqResources: FaqLikeResource[];
+  executionCtx?: ExecutionContext;
 }): Promise<string> {
-  const { kv, projectId, fingerprintResources, faqResources } = params;
+  const { kv, projectId, fingerprintResources, faqResources, executionCtx } =
+    params;
   const cacheKey = buildCompiledFaqCacheKey(projectId, fingerprintResources);
 
   try {
@@ -208,12 +210,17 @@ export async function getOrBuildCompiledFaqContext(params: {
 
   const compiled = buildCompiledFaqContext(faqResources);
 
-  try {
-    await kv.put(cacheKey, compiled, {
+  const kvPut = kv
+    .put(cacheKey, compiled, {
       expirationTtl: COMPILED_FAQ_CACHE_TTL_SECONDS,
+    })
+    .catch(() => {
+      // Cache write failures are non-fatal.
     });
-  } catch {
-    // Cache write failures are non-fatal.
+  if (executionCtx) {
+    executionCtx.waitUntil(kvPut);
+  } else {
+    await kvPut;
   }
 
   return compiled;

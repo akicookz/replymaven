@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { fallbackPlanNextAction, sanitizePlannerDecision } from "./plan-next-action";
+import { fallbackPlanNextAction, planNextAction, sanitizePlannerDecision } from "./plan-next-action";
 import {
   type PlannerDecision,
   type PlannerLoopState,
   type SupportToolDefinition,
   type SupportTurnPlan,
 } from "../types";
+import { createLanguageModel } from "../llm/create-language-model";
 
 function createTurnPlan(): SupportTurnPlan {
   return {
@@ -48,6 +49,7 @@ function createState(): PlannerLoopState {
     handoffSummary: null,
     finalDraft: null,
     terminationReason: null,
+    reformulationUsed: false,
   };
 }
 
@@ -211,7 +213,7 @@ describe("sanitizePlannerDecision", () => {
       },
     });
 
-    expect(sanitized.nextAction.type).toBe("stop");
+    expect(sanitized.nextAction.type).toBe("compose");
   });
 
   test("asks for contact once before creating inquiry when contact info is missing", () => {
@@ -358,4 +360,166 @@ describe("fallbackPlanNextAction", () => {
     expect(decision.nextAction.type).not.toBe("create_inquiry");
     expect(decision.nextAction.type).not.toBe("collect_contact");
   });
+});
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const hasGeminiKey = !!GEMINI_API_KEY;
+
+const llmDescribe = hasGeminiKey ? describe : describe.skip;
+
+llmDescribe("planNextAction (LLM integration)", () => {
+  function createModel() {
+    return createLanguageModel({
+      model: "gemini-3-flash-preview",
+      geminiApiKey: GEMINI_API_KEY!,
+      openaiApiKey: null,
+    });
+  }
+
+  test("greeting produces compose action", async () => {
+    const state = createState();
+    state.docsEvidence.retrievalAttempted = true;
+
+    const decision = await planNextAction({
+      model: createModel(),
+      conversationHistory: [],
+      currentMessage: "Hello!",
+      turnPlan: {
+        intent: "greeting",
+        summary: "The visitor is greeting the bot.",
+        retrievalQueries: [],
+        broaderQueries: [],
+        followUpQuestion: null,
+      },
+      availableTools: [],
+      state,
+    });
+
+    expect(decision.nextAction.type).toBe("compose");
+  }, 15_000);
+
+  test("product question triggers search_docs when no evidence", async () => {
+    const decision = await planNextAction({
+      model: createModel(),
+      conversationHistory: [],
+      currentMessage: "How do I set up the chat widget on my website?",
+      turnPlan: {
+        intent: "how_to",
+        summary: "The visitor wants to install the chat widget.",
+        retrievalQueries: ["chat widget setup", "install widget"],
+        broaderQueries: ["widget installation guide"],
+        followUpQuestion: null,
+      },
+      availableTools: [],
+      state: createState(),
+    });
+
+    expect(decision.nextAction.type).toBe("search_docs");
+  }, 15_000);
+
+  test("resolution signal produces compose action", async () => {
+    const state = createState();
+    state.docsEvidence.retrievalAttempted = true;
+    state.docsEvidence.ragContext = "<source>Widget docs</source>";
+    state.docsEvidence.groundingConfidence = "high";
+
+    const decision = await planNextAction({
+      model: createModel(),
+      conversationHistory: [
+        { role: "visitor", content: "How do I install the widget?" },
+        { role: "bot", content: "Add the script tag to your HTML head section." },
+      ],
+      currentMessage: "Thanks, that worked!",
+      turnPlan: {
+        intent: "resolution",
+        summary: "The visitor confirms the issue is resolved.",
+        retrievalQueries: [],
+        broaderQueries: [],
+        followUpQuestion: null,
+      },
+      availableTools: [],
+      state,
+    });
+
+    expect(decision.nextAction.type).toBe("compose");
+  }, 15_000);
+
+  test("explicit human request triggers handoff flow", async () => {
+    const state = createState();
+    state.docsEvidence.retrievalAttempted = true;
+
+    const decision = await planNextAction({
+      model: createModel(),
+      conversationHistory: [
+        { role: "visitor", content: "My billing is completely wrong and I need this fixed." },
+        { role: "bot", content: "I understand the concern. Could you share more details?" },
+      ],
+      currentMessage: "I want to talk to a real person.",
+      turnPlan: {
+        intent: "handoff",
+        summary: "The visitor wants to speak with a human agent about billing.",
+        retrievalQueries: [],
+        broaderQueries: [],
+        followUpQuestion: null,
+      },
+      availableTools: [],
+      state,
+    });
+
+    expect(["offer_handoff", "collect_contact", "create_inquiry"]).toContain(
+      decision.nextAction.type,
+    );
+  }, 15_000);
+
+  test("tool call scenario with available inputs", async () => {
+    const state = createState();
+    state.docsEvidence.retrievalAttempted = true;
+    state.docsEvidence.ragContext = "<source>Check widget via the tool.</source>";
+    state.docsEvidence.groundingConfidence = "low";
+
+    const decision = await planNextAction({
+      model: createModel(),
+      conversationHistory: [
+        { role: "visitor", content: "The widget on https://example.com/pricing is not showing." },
+      ],
+      currentMessage: "The widget on https://example.com/pricing is not showing.",
+      turnPlan: {
+        intent: "troubleshoot",
+        summary: "Widget not visible on pricing page.",
+        retrievalQueries: ["widget not showing"],
+        broaderQueries: ["widget troubleshooting"],
+        followUpQuestion: null,
+      },
+      availableTools: [createTool()],
+      state,
+    });
+
+    expect(["call_tool", "search_docs", "compose"]).toContain(decision.nextAction.type);
+    if (decision.nextAction.type === "call_tool") {
+      expect(decision.nextAction.toolName).toBe("check_widget_status");
+    }
+  }, 15_000);
+
+  test("decision always has goal and nextAction with type", async () => {
+    const decision = await planNextAction({
+      model: createModel(),
+      conversationHistory: [],
+      currentMessage: "What is your refund policy?",
+      turnPlan: {
+        intent: "policy",
+        summary: "The visitor is asking about the refund policy.",
+        retrievalQueries: ["refund policy"],
+        broaderQueries: ["policies"],
+        followUpQuestion: null,
+      },
+      availableTools: [],
+      state: createState(),
+    });
+
+    expect(decision).toHaveProperty("goal");
+    expect(decision).toHaveProperty("nextAction");
+    expect(typeof decision.goal).toBe("string");
+    expect(decision.goal.length).toBeGreaterThan(0);
+    expect(decision.nextAction).toHaveProperty("type");
+  }, 15_000);
 });

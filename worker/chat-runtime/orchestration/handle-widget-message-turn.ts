@@ -1,9 +1,11 @@
 import {
   createLanguageModel,
   createModelRuntimeState,
+  runWithModelFallback,
 } from "../llm/create-language-model";
 import {
   classifySupportTurn,
+  fallbackClassifySupportTurn,
   summarizeConversation,
 } from "../llm/auxiliary-calls";
 import { runPlannerLoop } from "../executor/run-planner-loop";
@@ -186,6 +188,11 @@ export async function handleWidgetMessageTurn(
   const resourceService = new ResourceService(context.db, context.env.UPLOADS);
   const widgetService = new WidgetService(context.db);
 
+  const startedAt = Date.now();
+  const stageTimings: Record<string, number> = {};
+  function markStage(name: string): void {
+    stageTimings[name] = Date.now() - startedAt;
+  }
   logInfo(
     "widget_turn.started",
     buildWidgetTurnLogContext(context, turnId, {
@@ -196,74 +203,17 @@ export async function handleWidgetMessageTurn(
     }),
   );
 
-  const ownerSub = await billingService.getSubscriptionByUserId(
-    context.project.userId,
-  );
-  if (!ownerSub || !billingService.isSubscriptionActive(ownerSub)) {
-    logWarn(
-      "widget_turn.blocked",
-      buildWidgetTurnLogContext(context, turnId, {
-        reason: "subscription_inactive",
-      }),
-    );
-    return Response.json(
-      {
-        error:
-          "This chatbot is currently unavailable. Please contact the site owner.",
-        code: "subscription_inactive",
-      },
-      { status: 503 },
-    );
-  }
-
-  const messageCheck = await billingService.checkMessageLimit(
-    context.project.userId,
-  );
-  if (!messageCheck.allowed) {
-    logWarn(
-      "widget_turn.blocked",
-      buildWidgetTurnLogContext(context, turnId, {
-        reason: "message_limit_reached",
-      }),
-    );
-    return Response.json(
-      {
-        error: "Message limit reached. Please contact the site owner.",
-        code: "message_limit_reached",
-      },
-      { status: 429 },
-    );
-  }
-
-  let conversation = await chatService.getConversationById(
-    context.conversationId,
-    context.project.id,
-  );
-  if (!conversation) {
-    logWarn(
-      "widget_turn.blocked",
-      buildWidgetTurnLogContext(context, turnId, {
-        reason: "conversation_not_found",
-      }),
-    );
-    return Response.json({ error: "Conversation not found" }, { status: 404 });
-  }
-
-  let chatState: ConversationChatState = parseChatState(
-    conversation.chatState,
-  );
-
-  // When the frontend ships its own last-N turns we skip the server-side
-  // prefetch entirely. Otherwise we fetch KV/D1 history in parallel with the
-  // other setup fetches so the serial `load_history` stage inside the SSE
-  // callback becomes a no-op lookup on the already-resolved value. This
-  // shaves one round-trip off the happy path without changing the fallback
-  // order (KV -> D1) that the load_history branch already relied on.
   const clientSuppliedHistory =
     Array.isArray(context.payload.history) &&
     context.payload.history.length > 0;
 
+  // Fire every independent read in a single parallel wave so we only pay one
+  // D1/KV round-trip for all setup data. Subscription gating still runs first
+  // conceptually via the `ownerSub`/`messageCheck` results; denied requests
+  // pay for a few extra reads, which is fine — those branches are rare.
   const [
+    ownerSub,
+    conversationLookup,
     settings,
     enabledTools,
     enabledGuidelines,
@@ -272,6 +222,11 @@ export async function handleWidgetMessageTurn(
     inquiryConfigRow,
     parallelPrefetchedHistory,
   ] = await Promise.all([
+    billingService.getSubscriptionByUserId(context.project.userId),
+    chatService.getConversationById(
+      context.conversationId,
+      context.project.id,
+    ),
     projectService.getSettings(context.project.id),
     toolService.getEnabledTools(context.project.id),
     guidelineService.getEnabledByProject(context.project.id),
@@ -296,9 +251,67 @@ export async function handleWidgetMessageTurn(
               cached ?? chatService.getMessages(context.conversationId),
           ),
   ]);
+  markStage("parallel_prefetch_done");
+
+  if (!ownerSub || !billingService.isSubscriptionActive(ownerSub)) {
+    logWarn(
+      "widget_turn.blocked",
+      buildWidgetTurnLogContext(context, turnId, {
+        reason: "subscription_inactive",
+      }),
+    );
+    return Response.json(
+      {
+        error:
+          "This chatbot is currently unavailable. Please contact the site owner.",
+        code: "subscription_inactive",
+      },
+      { status: 503 },
+    );
+  }
+
+  const messageCheck = await billingService.checkMessageLimit(
+    context.project.userId,
+    ownerSub,
+  );
+  markStage("message_limit_checked");
+  if (!messageCheck.allowed) {
+    logWarn(
+      "widget_turn.blocked",
+      buildWidgetTurnLogContext(context, turnId, {
+        reason: "message_limit_reached",
+      }),
+    );
+    return Response.json(
+      {
+        error: "Message limit reached. Please contact the site owner.",
+        code: "message_limit_reached",
+      },
+      { status: 429 },
+    );
+  }
+
+  let conversation = conversationLookup;
+  if (!conversation) {
+    logWarn(
+      "widget_turn.blocked",
+      buildWidgetTurnLogContext(context, turnId, {
+        reason: "conversation_not_found",
+      }),
+    );
+    return Response.json({ error: "Conversation not found" }, { status: 404 });
+  }
+
+  let chatState: ConversationChatState = parseChatState(
+    conversation.chatState,
+  );
+
   const sortedFaqResources = allResources
     .filter((resource) => resource.type === "faq")
     .sort((left, right) => left.title.localeCompare(right.title));
+  const hasIndexedResources = allResources.some(
+    (resource) => resource.status === "indexed",
+  );
   // Cache the compiled FAQ context per (project, fingerprint) in KV for 5
   // minutes. Fingerprint is derived from each FAQ resource's id + updatedAt,
   // so the cache invalidates automatically whenever any FAQ is edited. KV
@@ -314,7 +327,9 @@ export async function handleWidgetMessageTurn(
       title: resource.title,
       content: resource.content,
     })),
+    executionCtx: context.executionCtx,
   });
+  markStage("faq_context_built");
 
   const faqMatchHint = findBestFaqMatch(
     sortedFaqResources.map((resource) => ({
@@ -409,7 +424,9 @@ export async function handleWidgetMessageTurn(
       imageUrl,
     },
     context.project.id,
+    { executionCtx: context.executionCtx },
   );
+  markStage("visitor_message_saved");
 
   const requestedAgent = isAgentRequestedStatus(conversation.status);
   // Agent-mode silence detection needs an authoritative server copy of the
@@ -580,12 +597,14 @@ export async function handleWidgetMessageTurn(
       );
     }
 
+    markStage("sse_stream_opened");
     logInfo(
       "widget_turn.pipeline_started",
       buildWidgetTurnLogContext(context, turnId, {
         conversationStatus: conversation.status,
         availableToolNames: getToolNames(availableTools),
         guidelineCount: enabledGuidelines.length,
+        stageTimings,
       }),
     );
 
@@ -693,26 +712,39 @@ export async function handleWidgetMessageTurn(
 
       currentStage = "classify_turn";
       emitStatus("Understanding your message...", "thinking");
-      let conversationSummary: string | null = null;
       const classifyStartedAt = Date.now();
-      const turnPlan = await classifySupportTurn(
-        createLanguageModel(modelRuntime.activeConfig),
-        conversationHistory,
-        context.payload.content,
-        context.payload.pageContext,
-      );
+      const buildRouterLogContext = (extra: Record<string, unknown> = {}) =>
+        buildWidgetTurnLogContext(context, turnId, extra);
+      const [turnPlan, conversationSummary] = await Promise.all([
+        runWithModelFallback({
+          runtime: modelRuntime,
+          stage: "classify_support_turn",
+          logContext: buildRouterLogContext(),
+          operation: async (activeConfig) =>
+            classifySupportTurn(
+              createLanguageModel(activeConfig),
+              conversationHistory,
+              context.payload.content,
+              context.payload.pageContext,
+              { throwOnModelError: true },
+            ),
+        }).catch(() => fallbackClassifySupportTurn(context.payload.content)),
+        runWithModelFallback({
+          runtime: modelRuntime,
+          stage: "summarize_conversation",
+          logContext: buildRouterLogContext(),
+          operation: async (activeConfig) =>
+            summarizeConversation(
+              createLanguageModel(activeConfig),
+              conversationHistory,
+              { throwOnModelError: true },
+            ),
+        }).catch(() => null),
+      ]);
       telemetry.routerMs = Date.now() - classifyStartedAt;
 
       if (turnPlan.retrievalQueries.length > 0) {
         emitStatus("Searching docs...", "retrieval");
-        try {
-          conversationSummary = await summarizeConversation(
-            createLanguageModel(modelRuntime.activeConfig),
-            conversationHistory,
-          );
-        } catch {
-          conversationSummary = null;
-        }
       }
 
       turnIntent = turnPlan.intent;
@@ -794,6 +826,7 @@ export async function handleWidgetMessageTurn(
           instruction: guideline.instruction,
         })),
         compiledFaqContext,
+        hasIndexedResources,
         visitorInfo: {
           name: conversation.visitorName,
           email: conversation.visitorEmail,

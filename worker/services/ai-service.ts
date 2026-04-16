@@ -53,6 +53,149 @@ export interface KnowledgeRefinementSuggestion {
   reasoning: string;
 }
 
+export interface KnowledgeRefinementContext {
+  companyContext: string | null;
+  faqCandidates: Array<{
+    id: string;
+    title: string;
+    pairs: Array<{ question: string; answer: string }>;
+  }>;
+  guidelineCandidates: Array<{
+    id: string;
+    condition: string;
+    instruction: string;
+  }>;
+  pdfCandidates: Array<{
+    id: string;
+    title: string;
+    excerpt: string;
+  }>;
+  webpageCandidates: Array<{
+    pageId: string;
+    resourceId: string;
+    resourceTitle: string;
+    pageTitle: string | null;
+    url: string;
+  }>;
+  pendingSuggestions: Array<{
+    id: string;
+    type: string;
+    summary: string;
+  }>;
+}
+
+export function parseAndFilterPlans(
+  rawText: string,
+  existingContext: KnowledgeRefinementContext,
+): KnowledgeRefinementPlan[] {
+  const trimmed = rawText.trim();
+  if (!trimmed || trimmed === "[]" || trimmed === "null") return [];
+
+  try {
+    const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
+    const parsed = JSON.parse(
+      jsonMatch ? jsonMatch[0] : trimmed,
+    ) as Array<Record<string, unknown>>;
+
+    const validTypes = new Set([
+      ...(existingContext.faqCandidates.length === 0 ? ["new_faq"] : []),
+      "add_faq_pair",
+      "refine_faq_pair",
+      "new_sop",
+      "add_sop",
+      "refine_sop",
+      "update_pdf",
+      "update_webpage",
+      "update_context",
+    ]);
+    const faqIds = new Set(
+      existingContext.faqCandidates.map((faq) => faq.id),
+    );
+    const guidelineIds = new Set(
+      existingContext.guidelineCandidates.map((guideline) => guideline.id),
+    );
+    const pdfIds = new Set(
+      existingContext.pdfCandidates.map((pdf) => pdf.id),
+    );
+    const webpagePages = new Map(
+      existingContext.webpageCandidates.map((page) => [page.pageId, page]),
+    );
+
+    const plans: KnowledgeRefinementPlan[] = [];
+
+    for (const entry of parsed) {
+      const type =
+        typeof entry.type === "string" ? entry.type : undefined;
+      const targetResourceId =
+        typeof entry.targetResourceId === "string"
+          ? entry.targetResourceId
+          : undefined;
+      const targetGuidelineId =
+        typeof entry.targetGuidelineId === "string"
+          ? entry.targetGuidelineId
+          : undefined;
+      const targetPageId =
+        typeof entry.targetPageId === "string"
+          ? entry.targetPageId
+          : undefined;
+      const reasoning =
+        typeof entry.reasoning === "string" ? entry.reasoning : undefined;
+
+      if (!type || !reasoning || !validTypes.has(type)) {
+        continue;
+      }
+
+      switch (type) {
+        case "add_faq_pair":
+        case "refine_faq_pair":
+          if (targetResourceId && faqIds.has(targetResourceId)) {
+            plans.push({ type, targetResourceId, reasoning });
+          }
+          break;
+        case "add_sop":
+          plans.push({ type, reasoning });
+          break;
+        case "refine_sop":
+          if (targetGuidelineId && guidelineIds.has(targetGuidelineId)) {
+            plans.push({ type, targetGuidelineId, reasoning });
+          }
+          break;
+        case "update_pdf":
+          if (targetResourceId && pdfIds.has(targetResourceId)) {
+            plans.push({ type, targetResourceId, reasoning });
+          }
+          break;
+        case "update_webpage":
+          if (targetPageId && targetResourceId) {
+            const page = webpagePages.get(targetPageId);
+            if (page && page.resourceId === targetResourceId) {
+              plans.push({
+                type,
+                targetResourceId,
+                targetPageId,
+                reasoning,
+              });
+            }
+          }
+          break;
+        case "new_faq":
+          if (existingContext.faqCandidates.length === 0) {
+            plans.push({ type, reasoning });
+          }
+          break;
+        case "new_sop":
+        case "update_context":
+          plans.push({ type, reasoning });
+          break;
+      }
+    }
+
+    return plans.slice(0, 1);
+  } catch {
+    return [];
+  }
+}
+
 export class AiService {
   private model;
 
@@ -354,36 +497,7 @@ JSON:`,
 
   async planKnowledgeRefinement(
     conversationMessages: Array<{ role: string; content: string }>,
-    existingContext: {
-      companyContext: string | null;
-      faqCandidates: Array<{
-        id: string;
-        title: string;
-        pairs: Array<{ question: string; answer: string }>;
-      }>;
-      guidelineCandidates: Array<{
-        id: string;
-        condition: string;
-        instruction: string;
-      }>;
-      pdfCandidates: Array<{
-        id: string;
-        title: string;
-        excerpt: string;
-      }>;
-      webpageCandidates: Array<{
-        pageId: string;
-        resourceId: string;
-        resourceTitle: string;
-        pageTitle: string | null;
-        url: string;
-      }>;
-      pendingSuggestions: Array<{
-        id: string;
-        type: string;
-        summary: string;
-      }>;
-    },
+    existingContext: KnowledgeRefinementContext,
   ): Promise<KnowledgeRefinementPlan[]> {
     const transcript = conversationMessages
       .map((m) => `${m.role}: ${m.content}`)
@@ -517,113 +631,7 @@ If no improvements are warranted, return exactly: []`,
         maxOutputTokens: 1200,
       });
 
-      const trimmed = text.trim();
-      if (!trimmed || trimmed === "[]" || trimmed === "null") return [];
-
-      try {
-        const jsonMatch = trimmed.match(/\[[\s\S]*\]/);
-        const parsed = JSON.parse(
-          jsonMatch ? jsonMatch[0] : trimmed,
-        ) as Array<Record<string, unknown>>;
-
-        const validTypes = new Set([
-          ...(existingContext.faqCandidates.length === 0 ? ["new_faq"] : []),
-          "add_faq_pair",
-          "refine_faq_pair",
-          "new_sop",
-          "add_sop",
-          "refine_sop",
-          "update_pdf",
-          "update_webpage",
-          "update_context",
-        ]);
-        const faqIds = new Set(
-          existingContext.faqCandidates.map((faq) => faq.id),
-        );
-        const guidelineIds = new Set(
-          existingContext.guidelineCandidates.map((guideline) => guideline.id),
-        );
-        const pdfIds = new Set(
-          existingContext.pdfCandidates.map((pdf) => pdf.id),
-        );
-        const webpagePages = new Map(
-          existingContext.webpageCandidates.map((page) => [page.pageId, page]),
-        );
-
-        const plans: KnowledgeRefinementPlan[] = [];
-
-        for (const entry of parsed) {
-          const type =
-            typeof entry.type === "string" ? entry.type : undefined;
-          const targetResourceId =
-            typeof entry.targetResourceId === "string"
-              ? entry.targetResourceId
-              : undefined;
-          const targetGuidelineId =
-            typeof entry.targetGuidelineId === "string"
-              ? entry.targetGuidelineId
-              : undefined;
-          const targetPageId =
-            typeof entry.targetPageId === "string"
-              ? entry.targetPageId
-              : undefined;
-          const reasoning =
-            typeof entry.reasoning === "string" ? entry.reasoning : undefined;
-
-          if (!type || !reasoning || !validTypes.has(type)) {
-            continue;
-          }
-
-          switch (type) {
-            case "add_faq_pair":
-            case "refine_faq_pair":
-              if (targetResourceId && faqIds.has(targetResourceId)) {
-                plans.push({ type, targetResourceId, reasoning });
-              }
-              break;
-            case "add_sop":
-              plans.push({ type, reasoning });
-              break;
-            case "refine_sop":
-              if (targetGuidelineId && guidelineIds.has(targetGuidelineId)) {
-                plans.push({ type, targetGuidelineId, reasoning });
-              }
-              break;
-            case "update_pdf":
-              if (targetResourceId && pdfIds.has(targetResourceId)) {
-                plans.push({ type, targetResourceId, reasoning });
-              }
-              break;
-            case "update_webpage":
-              if (targetPageId && targetResourceId) {
-                const page = webpagePages.get(targetPageId);
-                if (page && page.resourceId === targetResourceId) {
-                  plans.push({
-                    type,
-                    targetResourceId,
-                    targetPageId,
-                    reasoning,
-                  });
-                }
-              }
-              break;
-            case "new_faq":
-              // Only allow new_faq when no existing FAQs
-              if (existingContext.faqCandidates.length === 0) {
-                plans.push({ type, reasoning });
-              }
-              break;
-            case "new_sop":
-            case "update_context":
-              plans.push({ type, reasoning });
-              break;
-          }
-        }
-
-        return plans.slice(0, 1);
-      } catch {
-        return [];
-      }
+      return parseAndFilterPlans(text, existingContext);
     } catch {
       return [];
     }

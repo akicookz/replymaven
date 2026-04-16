@@ -15,7 +15,6 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 - **Quick actions and quick topics** -- configurable buttons and topic suggestions shown above the chat input.
 - **Intro message** -- the first bot message visitors see when they open the widget.
 - **Telegram live agent handoff** -- when the bot cannot answer or the visitor requests a human, the conversation is relayed to the user's Telegram. Agent replies in Telegram are synced back to the widget. When a conversation is in agent mode, the AI is completely silenced and visitor messages are forwarded to Telegram. Agents use `@BotName` commands to hand back to AI (with optional instructions), close conversations, or instruct the bot to respond immediately. New bookings, conversations, and contact form submissions also trigger Telegram notifications when configured.
-- **Canned response auto-drafting** -- after a conversation ends, the AI analyzes it and generates draft canned responses. Users approve or reject drafts from the dashboard.
 
 ---
 

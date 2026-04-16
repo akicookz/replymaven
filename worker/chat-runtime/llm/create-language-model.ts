@@ -57,6 +57,57 @@ function buildLogContext(
   };
 }
 
+function summarizeError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    const record = error as unknown as Record<string, unknown>;
+    const cause = record.cause;
+    const data = record.data;
+    const responseBody =
+      typeof record.responseBody === "string"
+        ? record.responseBody.slice(0, 1000)
+        : undefined;
+    return {
+      errorName: error.name,
+      errorMessage: error.message.slice(0, 800),
+      errorStatus:
+        typeof record.status === "number"
+          ? record.status
+          : typeof record.statusCode === "number"
+            ? record.statusCode
+            : undefined,
+      errorUrl: typeof record.url === "string" ? record.url : undefined,
+      errorResponseBody: responseBody,
+      errorData:
+        data && typeof data === "object"
+          ? JSON.stringify(data).slice(0, 800)
+          : undefined,
+      errorCause:
+        cause instanceof Error
+          ? { name: cause.name, message: cause.message.slice(0, 400) }
+          : undefined,
+    };
+  }
+
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    return {
+      errorName: typeof record.name === "string" ? record.name : "unknown",
+      errorMessage:
+        typeof record.message === "string"
+          ? record.message.slice(0, 800)
+          : JSON.stringify(record).slice(0, 800),
+      errorStatus:
+        typeof record.status === "number"
+          ? record.status
+          : typeof record.statusCode === "number"
+            ? record.statusCode
+            : undefined,
+    };
+  }
+
+  return { errorName: "unknown", errorMessage: String(error).slice(0, 800) };
+}
+
 function isStatusCodeCandidate(value: unknown): boolean {
   return typeof value === "number" && value >= 400;
 }
@@ -70,9 +121,16 @@ function getRecordValue(
 
 export function isProviderLikeError(error: unknown): boolean {
   if (error instanceof Error) {
+    if (
+      error.name === "AI_NoObjectGeneratedError" ||
+      error.name === "AI_NoOutputGeneratedError"
+    ) {
+      return true;
+    }
+
     const normalized = `${error.name} ${error.message}`.toLowerCase();
     if (
-      /(api|provider|model|rate limit|quota|timeout|timed out|overloaded|service unavailable|gateway|upstream|network|fetch failed|connection|socket|stream|unauthorized|forbidden|authentication|invalid api key|503|502|504|500)/.test(
+      /(api|provider|rate limit|quota|timeout|timed out|overloaded|service unavailable|gateway|upstream|network|fetch failed|connection|socket|stream|unauthorized|forbidden|authentication|invalid api key|503|502|504|500)/.test(
         normalized,
       )
     ) {
@@ -143,11 +201,19 @@ export async function runWithModelFallback<T>(
   try {
     return await options.operation(options.runtime.activeConfig);
   } catch (error) {
+    const errorSummary = summarizeError(error);
+
+    logWarn(
+      "ai_primary.failed",
+      buildLogContext(options, errorSummary),
+    );
+
     if (!isProviderLikeError(error)) {
       logWarn(
         "ai_fallback.suppressed",
         buildLogContext(options, {
           reason: "non_provider_error",
+          ...errorSummary,
         }),
       );
       throw error;
@@ -158,6 +224,7 @@ export async function runWithModelFallback<T>(
         "ai_fallback.suppressed",
         buildLogContext(options, {
           reason: "fallback_already_used",
+          ...errorSummary,
         }),
       );
       throw error;
@@ -168,6 +235,7 @@ export async function runWithModelFallback<T>(
         "ai_fallback.suppressed",
         buildLogContext(options, {
           reason: "fallback_unavailable",
+          ...errorSummary,
         }),
       );
       throw error;
@@ -181,6 +249,7 @@ export async function runWithModelFallback<T>(
         "ai_fallback.suppressed",
         buildLogContext(options, {
           reason: "retry_guard_blocked",
+          ...errorSummary,
         }),
       );
       throw error;
@@ -192,6 +261,7 @@ export async function runWithModelFallback<T>(
       buildLogContext(options, {
         primaryModel: options.runtime.activeConfig.model,
         fallbackModel: fallbackConfig.model,
+        ...errorSummary,
       }),
     );
 
@@ -215,6 +285,7 @@ export async function runWithModelFallback<T>(
         buildLogContext(options, {
           primaryModel: options.runtime.activeConfig.model,
           fallbackModel: fallbackConfig.model,
+          ...summarizeError(fallbackError),
         }),
       );
       throw fallbackError;

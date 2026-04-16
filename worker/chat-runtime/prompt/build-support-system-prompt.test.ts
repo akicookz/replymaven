@@ -181,69 +181,7 @@ describe("buildSupportSystemPrompt", () => {
     expect(prompt).toContain("Missing required fields: Email");
   });
 
-  test("renders handoff-sop-override block when classifier decision shouldOverride is true", () => {
-    const prompt = buildSupportSystemPrompt(
-      BASE_SETTINGS,
-      "ReplyMaven",
-      "",
-      "",
-      {
-        handoffSopDecision: {
-          shouldOverride: true,
-          trigger: "visitor_frustrated",
-          priority: "high",
-          reason: "Visitor used frustrated language after two clarification attempts.",
-        },
-      },
-    );
-
-    expect(prompt).toContain("<handoff-sop-override>");
-    expect(prompt).toContain("</handoff-sop-override>");
-    expect(prompt).toContain("Trigger: visitor_frustrated");
-    expect(prompt).toContain("Priority: high");
-    expect(prompt).toContain(
-      "Visitor used frustrated language after two clarification attempts.",
-    );
-    expect(prompt).toContain("Do NOT ask another clarifying question this turn.");
-    expect(prompt).toContain(
-      "Runtime controls the actual handoff mechanics",
-    );
-  });
-
-  test("omits handoff-sop-override block when decision is null", () => {
-    const prompt = buildSupportSystemPrompt(
-      BASE_SETTINGS,
-      "ReplyMaven",
-      "",
-      "",
-      {
-        handoffSopDecision: null,
-      },
-    );
-
-    expect(prompt).not.toContain("<handoff-sop-override>");
-  });
-
-  test("omits handoff-sop-override block when shouldOverride is false", () => {
-    const prompt = buildSupportSystemPrompt(
-      BASE_SETTINGS,
-      "ReplyMaven",
-      "",
-      "",
-      {
-        handoffSopDecision: {
-          shouldOverride: false,
-          trigger: "none",
-          priority: "low",
-          reason: "No override conditions detected.",
-        },
-      },
-    );
-
-    expect(prompt).not.toContain("<handoff-sop-override>");
-  });
-
-  test("omits handoff-sop-override block when decision is absent", () => {
+  test("does not render handoff-sop-override block", () => {
     const prompt = buildSupportSystemPrompt(BASE_SETTINGS, "ReplyMaven", "", "");
 
     expect(prompt).not.toContain("<handoff-sop-override>");

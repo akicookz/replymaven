@@ -800,8 +800,12 @@ export class BillingService {
 
   async checkMessageLimit(
     userId: string,
+    prefetchedSub?: SubscriptionRow | null,
   ): Promise<{ allowed: boolean; used: number; max: number }> {
-    const sub = await this.getSubscriptionByUserId(userId);
+    const sub =
+      prefetchedSub !== undefined
+        ? prefetchedSub
+        : await this.getSubscriptionByUserId(userId);
     if (!sub) return { allowed: false, used: 0, max: 0 };
 
     const limits = BillingService.getPlanLimits(sub.plan as Plan);

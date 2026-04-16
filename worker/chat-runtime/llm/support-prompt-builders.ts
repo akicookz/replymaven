@@ -4,6 +4,14 @@ interface PromptBlockOptions {
   pageContextBlock?: string;
 }
 
+interface ReformulateSearchQueriesPromptOptions {
+  transcript: string;
+  currentMessage: string;
+  failedQueries: string[];
+  intent?: string;
+  pageContextBlock?: string;
+}
+
 export function buildClassifySupportTurnPrompt(
   options: PromptBlockOptions,
 ): string {
@@ -51,6 +59,43 @@ Rules:
 - If a product, page, step, error, pricing topic, or integration is mentioned, include it in retrieval queries when relevant.
 - Broader queries should be more general than focused queries, but still relevant to the issue.
 - Keep queries short and search-friendly.`;
+}
+
+export function buildReformulateSearchQueriesPrompt(
+  options: ReformulateSearchQueriesPromptOptions,
+): string {
+  const failedQueriesBlock = options.failedQueries
+    .map((query, index) => `${index + 1}. ${query}`)
+    .join("\n");
+
+  return `The following knowledge base searches returned no useful results. Rewrite them into 1-3 alternative search queries that are likely to retrieve relevant documentation.
+
+Conversation:
+${options.transcript || "No prior conversation"}
+
+Latest user message:
+${options.currentMessage}
+
+${options.intent ? `Detected intent: ${options.intent}` : ""}
+
+Page context:
+${options.pageContextBlock ?? "None"}
+
+Failed queries (returned no results):
+${failedQueriesBlock}
+
+Generate alternative queries that:
+- Use different keywords or synonyms (e.g. "billing" -> "invoice", "payment", "subscription")
+- Broaden or narrow the scope as appropriate
+- Try related concepts the docs may use instead (e.g. "not working" -> "troubleshooting", "common errors")
+- Reflect typical documentation phrasing rather than the visitor's literal words
+- Stay grounded in the conversation; do not invent product features
+
+Rules:
+- Return 1 to 3 queries, ordered from most to least promising
+- Each query must be different from every failed query above
+- Keep queries short and search-friendly (under 180 characters)
+- Do not repeat queries that are semantically identical to each other`;
 }
 
 export function buildReformulateQueryPrompt(

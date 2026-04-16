@@ -362,6 +362,7 @@ export interface PlannerLoopState {
   handoffSummary: string | null;
   finalDraft: string | null;
   terminationReason: string | null;
+  reformulationUsed: boolean;
   queryTracker: {
     normalizedQueries: Map<string, number>; // normalized query -> search count
     semanticGroups: string[]; // track semantic groups of similar queries

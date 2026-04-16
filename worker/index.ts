@@ -520,18 +520,11 @@ const app = new Hono<HonoAppContext>()
       }
     }
 
-    // Try KV cache first
-    const cached = await chatService.getFromCache(conversationId, project.id);
-    if (cached) {
-      return c.json({
-        messages: cached,
-        status: conversation.status,
-      });
-    }
-
-    const msgs = await chatService.getMessages(conversationId);
+    const msgs = await chatService.getFromCache(conversationId, project.id, {
+      populateOnMiss: { executionCtx: c.executionCtx },
+    });
     return c.json({
-      messages: msgs,
+      messages: msgs ?? [],
       status: conversation.status,
     });
   })

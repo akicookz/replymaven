@@ -432,26 +432,33 @@ export class ChatService {
 
   async addMessage(
     data: Omit<NewMessageRow, "id" | "createdAt">,
-    projectId: string,
+    _projectId: string,
+    _options?: { executionCtx?: ExecutionContext },
   ): Promise<MessageRow> {
     const id = crypto.randomUUID();
-    await this.db.insert(messages).values({ id, ...data });
-
     const now = new Date();
-    await this.db
-      .update(conversations)
-      .set({ updatedAt: now, lastActivityAt: now })
-      .where(eq(conversations.id, data.conversationId));
 
-    // Update KV cache
-    await this.updateKVCache(data.conversationId, projectId);
+    await Promise.all([
+      this.db.insert(messages).values({ id, createdAt: now, ...data }),
+      this.db
+        .update(conversations)
+        .set({ updatedAt: now, lastActivityAt: now })
+        .where(eq(conversations.id, data.conversationId)),
+    ]);
 
-    const rows = await this.db
-      .select()
-      .from(messages)
-      .where(eq(messages.id, id))
-      .limit(1);
-    return rows[0]!;
+    return {
+      id,
+      conversationId: data.conversationId,
+      role: data.role,
+      content: data.content,
+      imageUrl: data.imageUrl ?? null,
+      sources: data.sources ?? null,
+      senderName: data.senderName ?? null,
+      senderAvatar: data.senderAvatar ?? null,
+      userId: data.userId ?? null,
+      createdAt: now,
+      emailedAt: null,
+    };
   }
 
   async getMessageById(messageId: string): Promise<MessageRow | null> {
@@ -479,32 +486,35 @@ export class ChatService {
   async getFromCache(
     conversationId: string,
     projectId: string,
+    options?: { populateOnMiss?: { executionCtx?: ExecutionContext } },
   ): Promise<MessageRow[] | null> {
     const cached = await this.kv.get(
       this.cacheKey(projectId, conversationId),
       "json",
     );
-    return cached as MessageRow[] | null;
-  }
+    if (cached) {
+      return cached as MessageRow[];
+    }
 
-  async updateKVCache(
-    conversationId: string,
-    projectId: string,
-  ): Promise<void> {
-    const recentMessages = await this.db
-      .select()
-      .from(messages)
-      .where(eq(messages.conversationId, conversationId))
-      .orderBy(desc(messages.createdAt))
-      .limit(50);
+    if (!options?.populateOnMiss) {
+      return null;
+    }
 
-    // Store in reverse order (oldest first)
-    const ordered = recentMessages.reverse();
-    await this.kv.put(
-      this.cacheKey(projectId, conversationId),
-      JSON.stringify(ordered),
-      { expirationTtl: 86400 },
-    );
+    const rows = await this.getMessages(conversationId);
+    const populate = this.kv
+      .put(
+        this.cacheKey(projectId, conversationId),
+        JSON.stringify(rows.slice(-20)),
+        { expirationTtl: 86400 },
+      )
+      .catch(() => {
+        // Cache write failures are non-fatal.
+      });
+    const executionCtx = options.populateOnMiss.executionCtx;
+    if (executionCtx) {
+      executionCtx.waitUntil(populate);
+    }
+    return rows;
   }
 
 }

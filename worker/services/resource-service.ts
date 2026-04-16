@@ -536,8 +536,14 @@ export class ResourceService {
     const sourceMap = new Map<string, SourceReference>();
     const uniqueFilenames = [...new Set(filenames)];
 
-    for (const filename of uniqueFilenames) {
-      const source = await this.resolveSourceReference(projectId, filename);
+    const resolved = await Promise.all(
+      uniqueFilenames.map(async (filename) => ({
+        filename,
+        source: await this.resolveSourceReference(projectId, filename),
+      })),
+    );
+
+    for (const { filename, source } of resolved) {
       if (source) {
         sourceMap.set(filename, source);
       }
