@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { extractText } from "unpdf";
 import {
   resources,
@@ -322,6 +322,7 @@ export class ResourceService {
     projectId: string,
     title: string | undefined,
     pairs: FaqPair[],
+    description?: string | null,
   ): Promise<ResourceRow | null> {
     const resource = await this.getResourceById(id, projectId);
     if (!resource || resource.type !== "faq") return null;
@@ -331,6 +332,9 @@ export class ResourceService {
     };
     if (title) {
       updates.title = title;
+    }
+    if (description !== undefined) {
+      updates.description = description;
     }
 
     await this.db
@@ -535,17 +539,164 @@ export class ResourceService {
   ): Promise<Map<string, SourceReference>> {
     const sourceMap = new Map<string, SourceReference>();
     const uniqueFilenames = [...new Set(filenames)];
+    if (uniqueFilenames.length === 0) {
+      return sourceMap;
+    }
 
-    const resolved = await Promise.all(
-      uniqueFilenames.map(async (filename) => ({
-        filename,
-        source: await this.resolveSourceReference(projectId, filename),
-      })),
+    const projectPrefix = `${projectId}/`;
+
+    // Filenames that follow the `{projectId}/{resourceId}-text.md` or
+    // `{projectId}/{resourceId}.pdf` patterns resolve to PDF resources; pull
+    // the candidate resource ids up front so we can batch a single resources
+    // lookup for them.
+    const pdfResourceIdByFilename = new Map<string, string>();
+    for (const filename of uniqueFilenames) {
+      if (!filename.startsWith(projectPrefix)) continue;
+      if (filename.endsWith("-text.md")) {
+        const id = filename
+          .slice(projectPrefix.length, -"-text.md".length)
+          .trim();
+        if (id) pdfResourceIdByFilename.set(filename, id);
+      } else if (filename.endsWith(".pdf")) {
+        const id = filename
+          .slice(projectPrefix.length, -".pdf".length)
+          .trim();
+        if (id) pdfResourceIdByFilename.set(filename, id);
+      }
+    }
+
+    // Three batched D1 reads cover every resolution path:
+    //   1. crawled pages indexed by r2_key → webpage sources
+    //   2. resources indexed by id → PDFs referenced via filename pattern
+    //   3. resources indexed by r2_key → catch-all for FAQ/PDF/webpage with
+    //      no crawled_pages row.
+    const crawledPageRows = await this.db
+      .select({
+        r2Key: crawledPages.r2Key,
+        url: crawledPages.url,
+        resourceId: crawledPages.resourceId,
+        pageTitle: crawledPages.pageTitle,
+      })
+      .from(crawledPages)
+      .where(
+        and(
+          eq(crawledPages.projectId, projectId),
+          inArray(crawledPages.r2Key, uniqueFilenames),
+        ),
+      );
+
+    const crawledPageByFilename = new Map<
+      string,
+      (typeof crawledPageRows)[number]
+    >();
+    for (const row of crawledPageRows) {
+      if (row.r2Key) crawledPageByFilename.set(row.r2Key, row);
+    }
+
+    const crawledResourceIds = [
+      ...new Set(crawledPageRows.map((row) => row.resourceId)),
+    ];
+    const pdfResourceIds = [...new Set(pdfResourceIdByFilename.values())];
+    const resourceIdsToLookup = [
+      ...new Set([...crawledResourceIds, ...pdfResourceIds]),
+    ];
+
+    const [resourcesById, resourcesByKey] = await Promise.all([
+      resourceIdsToLookup.length === 0
+        ? Promise.resolve([] as Array<{
+            id: string;
+            type: "webpage" | "pdf" | "faq";
+            title: string;
+            url: string | null;
+          }>)
+        : this.db
+            .select({
+              id: resources.id,
+              type: resources.type,
+              title: resources.title,
+              url: resources.url,
+            })
+            .from(resources)
+            .where(
+              and(
+                eq(resources.projectId, projectId),
+                inArray(resources.id, resourceIdsToLookup),
+              ),
+            ),
+      this.db
+        .select({
+          r2Key: resources.r2Key,
+          type: resources.type,
+          title: resources.title,
+          url: resources.url,
+        })
+        .from(resources)
+        .where(
+          and(
+            eq(resources.projectId, projectId),
+            inArray(resources.r2Key, uniqueFilenames),
+          ),
+        ),
+    ]);
+
+    const resourceRowById = new Map(
+      resourcesById.map((row) => [row.id, row] as const),
     );
+    const resourceRowByR2Key = new Map<
+      string,
+      (typeof resourcesByKey)[number]
+    >();
+    for (const row of resourcesByKey) {
+      if (row.r2Key) resourceRowByR2Key.set(row.r2Key, row);
+    }
 
-    for (const { filename, source } of resolved) {
-      if (source) {
-        sourceMap.set(filename, source);
+    for (const filename of uniqueFilenames) {
+      const crawled = crawledPageByFilename.get(filename);
+      if (crawled) {
+        const parent = resourceRowById.get(crawled.resourceId);
+        if (parent && parent.type === "webpage" && crawled.url) {
+          sourceMap.set(filename, {
+            title: crawled.pageTitle || parent.title,
+            url: crawled.url,
+            type: "webpage",
+          });
+          continue;
+        }
+      }
+
+      const pdfResourceId = pdfResourceIdByFilename.get(filename);
+      if (pdfResourceId) {
+        const pdf = resourceRowById.get(pdfResourceId);
+        if (pdf && pdf.type === "pdf") {
+          sourceMap.set(filename, {
+            title: pdf.title,
+            url: null,
+            type: "pdf",
+          });
+          continue;
+        }
+      }
+
+      const byKey = resourceRowByR2Key.get(filename);
+      if (!byKey) continue;
+      if (byKey.type === "webpage" && byKey.url) {
+        sourceMap.set(filename, {
+          title: byKey.title,
+          url: byKey.url,
+          type: "webpage",
+        });
+      } else if (byKey.type === "pdf") {
+        sourceMap.set(filename, {
+          title: byKey.title,
+          url: null,
+          type: "pdf",
+        });
+      } else if (byKey.type === "faq") {
+        sourceMap.set(filename, {
+          title: byKey.title,
+          url: null,
+          type: "faq",
+        });
       }
     }
 
@@ -586,123 +737,6 @@ export class ResourceService {
         `## Q: ${pair.question}\n\n${pair.answer}`,
     );
     return `# FAQ: ${title}\n\n${sections.join("\n\n---\n\n")}`;
-  }
-
-  private async resolveSourceReference(
-    projectId: string,
-    filename: string,
-  ): Promise<SourceReference | null> {
-    const crawledPageRows = await this.db
-      .select({
-        url: crawledPages.url,
-        resourceId: crawledPages.resourceId,
-        pageTitle: crawledPages.pageTitle,
-      })
-      .from(crawledPages)
-      .where(
-        and(
-          eq(crawledPages.r2Key, filename),
-          eq(crawledPages.projectId, projectId),
-        ),
-      )
-      .limit(1);
-
-    if (crawledPageRows.length > 0) {
-      const page = crawledPageRows[0];
-      const parentRows = await this.db
-        .select({ type: resources.type, title: resources.title })
-        .from(resources)
-        .where(eq(resources.id, page.resourceId))
-        .limit(1);
-
-      if (parentRows.length > 0 && parentRows[0].type === "webpage" && page.url) {
-        return {
-          title: page.pageTitle || parentRows[0].title,
-          url: page.url,
-          type: "webpage",
-        };
-      }
-    }
-
-    const projectPrefix = `${projectId}/`;
-
-    if (filename.startsWith(projectPrefix) && filename.endsWith("-text.md")) {
-      const resourceId = filename
-        .slice(projectPrefix.length, -"-text.md".length)
-        .trim();
-      if (resourceId) {
-        const resource = await this.getSourceResourceById(projectId, resourceId);
-        if (resource?.type === "pdf") {
-          return { title: resource.title, url: null, type: "pdf" };
-        }
-      }
-    }
-
-    if (filename.startsWith(projectPrefix) && filename.endsWith(".pdf")) {
-      const resourceId = filename.slice(projectPrefix.length, -".pdf".length).trim();
-      if (resourceId) {
-        const resource = await this.getSourceResourceById(projectId, resourceId);
-        if (resource?.type === "pdf") {
-          return { title: resource.title, url: null, type: "pdf" };
-        }
-      }
-    }
-
-    const resourceRows = await this.db
-      .select({
-        type: resources.type,
-        title: resources.title,
-        url: resources.url,
-      })
-      .from(resources)
-      .where(
-        and(
-          eq(resources.r2Key, filename),
-          eq(resources.projectId, projectId),
-        ),
-      )
-      .limit(1);
-
-    if (resourceRows.length === 0) {
-      return null;
-    }
-
-    const resource = resourceRows[0];
-    if (resource.type === "webpage" && resource.url) {
-      return { title: resource.title, url: resource.url, type: "webpage" };
-    }
-
-    if (resource.type === "pdf") {
-      return { title: resource.title, url: null, type: "pdf" };
-    }
-
-    if (resource.type === "faq") {
-      return { title: resource.title, url: null, type: "faq" };
-    }
-
-    return null;
-  }
-
-  private async getSourceResourceById(
-    projectId: string,
-    resourceId: string,
-  ): Promise<{ type: "webpage" | "pdf" | "faq"; title: string; url: string | null } | null> {
-    const resourceRows = await this.db
-      .select({
-        type: resources.type,
-        title: resources.title,
-        url: resources.url,
-      })
-      .from(resources)
-      .where(
-        and(
-          eq(resources.id, resourceId),
-          eq(resources.projectId, projectId),
-        ),
-      )
-      .limit(1);
-
-    return resourceRows[0] ?? null;
   }
 
   private getSourceReferenceDedupKey(source: SourceReference): string {

@@ -35,7 +35,7 @@ function getProvider(model: string): AiProvider {
 function hasApiKey(provider: AiProvider, config: ChatRuntimeAiConfig): boolean {
   const apiKey =
     provider === "openai" ? config.openaiApiKey : config.geminiApiKey;
-  return apiKey.trim().length > 0;
+  return typeof apiKey === "string" && apiKey.trim().length > 0;
 }
 
 function buildLogContext(
@@ -157,12 +157,12 @@ export function createLanguageModel(
   config: ChatRuntimeAiConfig,
 ): LanguageModel {
   if (isOpenAiModel(config.model)) {
-    const provider = createOpenAI({ apiKey: config.openaiApiKey });
+    const provider = createOpenAI({ apiKey: config.openaiApiKey ?? "" });
     return provider(config.model);
   }
 
   const provider = createGoogleGenerativeAI({
-    apiKey: config.geminiApiKey,
+    apiKey: config.geminiApiKey ?? "",
   });
   return provider(config.model);
 }

@@ -3,8 +3,10 @@ import {
   dedupeReformulatedQueries,
   fallbackClassifySupportTurn,
   reformulateSearchQueries,
+  selectFaqSets,
 } from "./auxiliary-calls";
 import { createLanguageModel } from "./create-language-model";
+import { type LanguageModel } from "ai";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const hasGeminiKey = !!GEMINI_API_KEY;
@@ -219,4 +221,63 @@ llmDescribe("reformulateSearchQueries (LLM integration)", () => {
     }
     expect(threw).toBe(true);
   }, 15_000);
+});
+
+describe("selectFaqSets - short-circuits and failure modes", () => {
+  const stubModel = {} as unknown as LanguageModel;
+
+  test("returns empty array when no FAQ sets exist", async () => {
+    const result = await selectFaqSets(stubModel, {
+      conversationHistory: [],
+      currentMessage: "any",
+      faqSets: [],
+    });
+    expect(result).toEqual([]);
+  });
+
+  test("returns single id without calling model when only one set exists", async () => {
+    const result = await selectFaqSets(stubModel, {
+      conversationHistory: [],
+      currentMessage: "any",
+      faqSets: [
+        { id: "only-set", title: "Only FAQ", description: null },
+      ],
+    });
+    expect(result).toEqual(["only-set"]);
+  });
+
+  test("swallows model errors and returns [] by default", async () => {
+    const throwingModel = {} as unknown as LanguageModel;
+    const result = await selectFaqSets(throwingModel, {
+      conversationHistory: [],
+      currentMessage: "any",
+      faqSets: [
+        { id: "a", title: "A", description: "alpha topics" },
+        { id: "b", title: "B", description: "beta topics" },
+      ],
+    });
+    expect(result).toEqual([]);
+  });
+
+  test("throws when throwOnModelError is true and model is unusable", async () => {
+    const throwingModel = {} as unknown as LanguageModel;
+    let threw = false;
+    try {
+      await selectFaqSets(
+        throwingModel,
+        {
+          conversationHistory: [],
+          currentMessage: "any",
+          faqSets: [
+            { id: "a", title: "A", description: "alpha topics" },
+            { id: "b", title: "B", description: "beta topics" },
+          ],
+        },
+        { throwOnModelError: true },
+      );
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+  });
 });

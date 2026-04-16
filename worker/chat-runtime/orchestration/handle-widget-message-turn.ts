@@ -6,6 +6,7 @@ import {
 import {
   classifySupportTurn,
   fallbackClassifySupportTurn,
+  selectFaqSets,
   summarizeConversation,
 } from "../llm/auxiliary-calls";
 import { runPlannerLoop } from "../executor/run-planner-loop";
@@ -49,6 +50,7 @@ import {
   parseInquiryData,
 } from "../../services/widget-service";
 import { type InquiryFieldSpec } from "../types";
+import { type MessageRow } from "../../db";
 import { isEncrypted, decryptHeaders } from "../../services/encryption-service";
 
 function parseConversationMetadata(
@@ -179,10 +181,7 @@ export async function handleWidgetMessageTurn(
   const turnId = crypto.randomUUID();
   const projectService = new ProjectService(context.db);
   const billingService = new BillingService(context.db, context.env);
-  const chatService = new ChatService(
-    context.db,
-    context.env.CONVERSATIONS_CACHE,
-  );
+  const chatService = new ChatService(context.db);
   const toolService = new ToolService(context.db);
   const guidelineService = new GuidelineService(context.db);
   const resourceService = new ResourceService(context.db, context.env.UPLOADS);
@@ -237,19 +236,8 @@ export async function handleWidgetMessageTurn(
     ),
     widgetService.getInquiryConfig(context.project.id),
     clientSuppliedHistory
-      ? Promise.resolve(
-          null as Awaited<ReturnType<typeof chatService.getMessages>> | null,
-        )
-      : chatService
-          .getFromCache(context.conversationId, context.project.id)
-          .then(
-            (
-              cached,
-            ):
-              | Promise<Awaited<ReturnType<typeof chatService.getMessages>>>
-              | Awaited<ReturnType<typeof chatService.getMessages>> =>
-              cached ?? chatService.getMessages(context.conversationId),
-          ),
+      ? Promise.resolve<MessageRow[] | null>(null)
+      : chatService.getMessages(context.conversationId),
   ]);
   markStage("parallel_prefetch_done");
 
@@ -312,24 +300,6 @@ export async function handleWidgetMessageTurn(
   const hasIndexedResources = allResources.some(
     (resource) => resource.status === "indexed",
   );
-  // Cache the compiled FAQ context per (project, fingerprint) in KV for 5
-  // minutes. Fingerprint is derived from each FAQ resource's id + updatedAt,
-  // so the cache invalidates automatically whenever any FAQ is edited. KV
-  // read/write failures fall through to the synchronous build.
-  const compiledFaqContext = await getOrBuildCompiledFaqContext({
-    kv: context.env.CONVERSATIONS_CACHE,
-    projectId: context.project.id,
-    fingerprintResources: sortedFaqResources.map((resource) => ({
-      id: resource.id,
-      updatedAt: resource.updatedAt,
-    })),
-    faqResources: sortedFaqResources.map((resource) => ({
-      title: resource.title,
-      content: resource.content,
-    })),
-    executionCtx: context.executionCtx,
-  });
-  markStage("faq_context_built");
 
   const faqMatchHint = findBestFaqMatch(
     sortedFaqResources.map((resource) => ({
@@ -338,6 +308,7 @@ export async function handleWidgetMessageTurn(
     })),
     context.payload.content,
   );
+  markStage("faq_match_checked");
 
   const existingInquiry: Record<string, string> | null = existingInquiryRow
     ? parseInquiryData(existingInquiryRow.data)
@@ -416,29 +387,22 @@ export async function handleWidgetMessageTurn(
   }
 
   const imageUrl = context.payload.imageUrl ?? null;
-  await chatService.addMessage(
-    {
-      conversationId: context.conversationId,
-      role: "visitor",
-      content: context.payload.content,
-      imageUrl,
-    },
-    context.project.id,
-    { executionCtx: context.executionCtx },
-  );
+  await chatService.addMessage({
+    conversationId: context.conversationId,
+    role: "visitor",
+    content: context.payload.content,
+    imageUrl,
+  });
   markStage("visitor_message_saved");
 
   const requestedAgent = isAgentRequestedStatus(conversation.status);
-  // Agent-mode silence detection needs an authoritative server copy of the
-  // conversation (client-shipped history may be trimmed). Reuse the parallel
-  // prefetch whenever it's populated; otherwise fetch now for the client-
-  // supplied-history + requestedAgent edge case.
+  // This is a pre-visitor-insert snapshot of the conversation — sufficient
+  // for agent-mode silence detection because we only inspect the last
+  // bot/agent role via `getLastTeamMessageRole`. Reuse the parallel prefetch
+  // when populated; otherwise fetch now for the client-supplied-history +
+  // requestedAgent edge case.
   const prefetchedHistory = requestedAgent
     ? (parallelPrefetchedHistory ??
-      (await chatService.getFromCache(
-        context.conversationId,
-        context.project.id,
-      )) ??
       (await chatService.getMessages(context.conversationId)))
     : null;
   const shouldSilenceForAgent =
@@ -529,16 +493,13 @@ export async function handleWidgetMessageTurn(
       emitSseEvent(controller, encoder, { finalText: cleanResponse });
 
       currentStage = "save_bot_message";
-      const botMessage = await chatService.addMessage(
-        {
-          conversationId: context.conversationId,
-          role: "bot",
-          content: cleanResponse,
-          sources: null,
-          senderName: settings?.botName ?? null,
-        },
-        context.project.id,
-      );
+      const botMessage = await chatService.addMessage({
+        conversationId: context.conversationId,
+        role: "bot",
+        content: cleanResponse,
+        sources: null,
+        senderName: settings?.botName ?? null,
+      });
 
       emitSseEvent(controller, encoder, {
         done: true,
@@ -623,9 +584,10 @@ export async function handleWidgetMessageTurn(
         content: string;
       }>;
       if (usedClientHistory) {
-        // Frontend-supplied history does NOT include the just-received visitor
-        // message, so append it here for shape parity with the DB/KV path where
-        // the visitor message is persisted before SSE opens.
+        // Frontend-supplied history never includes the just-received visitor
+        // message, so we unconditionally append it (no dedup guard needed —
+        // in contrast to the server branch, which may or may not already
+        // contain this turn depending on prefetch timing).
         const normalized = clientHistory
           .filter((message) => message.role !== "bot" || message.content)
           .map((message) => ({
@@ -638,25 +600,32 @@ export async function handleWidgetMessageTurn(
         });
         conversationHistory = normalized.slice(-10);
       } else {
-        // `parallelPrefetchedHistory` already ran `getFromCache` -> `getMessages`
-        // concurrently with the other setup fetches. Prefer it; fall back only
-        // if somehow absent (defensive — should never happen on the server-side
-        // branch since we only resolve to null when client shipped history).
+        // `parallelPrefetchedHistory` ran concurrently with setup BEFORE the
+        // visitor message was saved, so we need to append the current visitor
+        // turn. The fresh `getMessages` fallback, by contrast, runs AFTER the
+        // insert and already contains it — hence the dedup guard below.
         const history =
           parallelPrefetchedHistory ??
           prefetchedHistory ??
-          (await chatService.getFromCache(
-            context.conversationId,
-            context.project.id,
-          )) ??
           (await chatService.getMessages(context.conversationId));
-        conversationHistory = history
+        const normalized = history
           .filter((message) => message.role !== "bot" || message.content)
-          .slice(-10)
           .map((message) => ({
             role: message.role as "visitor" | "bot" | "agent",
             content: message.content,
           }));
+        const alreadyHasCurrentTurn =
+          normalized.length > 0 &&
+          normalized[normalized.length - 1].role === "visitor" &&
+          normalized[normalized.length - 1].content ===
+            context.payload.content;
+        if (!alreadyHasCurrentTurn) {
+          normalized.push({
+            role: "visitor",
+            content: context.payload.content,
+          });
+        }
+        conversationHistory = normalized.slice(-10);
       }
       logInfo(
         "widget_turn.history_loaded",
@@ -715,33 +684,119 @@ export async function handleWidgetMessageTurn(
       const classifyStartedAt = Date.now();
       const buildRouterLogContext = (extra: Record<string, unknown> = {}) =>
         buildWidgetTurnLogContext(context, turnId, extra);
-      const [turnPlan, conversationSummary] = await Promise.all([
-        runWithModelFallback({
-          runtime: modelRuntime,
-          stage: "classify_support_turn",
-          logContext: buildRouterLogContext(),
-          operation: async (activeConfig) =>
-            classifySupportTurn(
-              createLanguageModel(activeConfig),
-              conversationHistory,
-              context.payload.content,
-              context.payload.pageContext,
-              { throwOnModelError: true },
-            ),
-        }).catch(() => fallbackClassifySupportTurn(context.payload.content)),
-        runWithModelFallback({
-          runtime: modelRuntime,
-          stage: "summarize_conversation",
-          logContext: buildRouterLogContext(),
-          operation: async (activeConfig) =>
-            summarizeConversation(
-              createLanguageModel(activeConfig),
-              conversationHistory,
-              { throwOnModelError: true },
-            ),
-        }).catch(() => null),
-      ]);
+      type FaqSelection =
+        | { outcome: "none_available" }
+        | { outcome: "single"; ids: string[] }
+        | { outcome: "selected"; ids: string[] }
+        | { outcome: "failed" };
+      const [turnPlan, conversationSummary, faqSelection] =
+        await Promise.all([
+          runWithModelFallback({
+            runtime: modelRuntime,
+            stage: "classify_support_turn",
+            logContext: buildRouterLogContext(),
+            operation: async (activeConfig) =>
+              classifySupportTurn(
+                createLanguageModel(activeConfig),
+                conversationHistory,
+                context.payload.content,
+                context.payload.pageContext,
+                { throwOnModelError: true },
+              ),
+          }).catch(() =>
+            fallbackClassifySupportTurn(context.payload.content),
+          ),
+          runWithModelFallback({
+            runtime: modelRuntime,
+            stage: "summarize_conversation",
+            logContext: buildRouterLogContext(),
+            operation: async (activeConfig) =>
+              summarizeConversation(
+                createLanguageModel(activeConfig),
+                conversationHistory,
+                { throwOnModelError: true },
+              ),
+          }).catch(() => null),
+          (async (): Promise<FaqSelection> => {
+            if (sortedFaqResources.length === 0) {
+              return { outcome: "none_available" };
+            }
+            if (sortedFaqResources.length === 1) {
+              return { outcome: "single", ids: [sortedFaqResources[0].id] };
+            }
+            try {
+              const ids = await runWithModelFallback({
+                runtime: modelRuntime,
+                stage: "select_faq_sets",
+                logContext: buildRouterLogContext(),
+                operation: async (activeConfig) =>
+                  selectFaqSets(
+                    createLanguageModel(activeConfig),
+                    {
+                      conversationHistory,
+                      currentMessage: context.payload.content,
+                      pageContext: context.payload.pageContext,
+                      faqSets: sortedFaqResources.map((resource) => ({
+                        id: resource.id,
+                        title: resource.title,
+                        description: resource.description,
+                      })),
+                    },
+                    { throwOnModelError: true },
+                  ),
+              });
+              return { outcome: "selected", ids };
+            } catch {
+              return { outcome: "failed" };
+            }
+          })(),
+        ]);
       telemetry.routerMs = Date.now() - classifyStartedAt;
+
+      // Fail-open: when the selector failed (not "returned empty"), include
+      // all FAQ sets so the model still has tier-1 context. The
+      // MAX_COMPILED_FAQ_CHARS budget keeps prompt size bounded.
+      const selectedFaqResources =
+        faqSelection.outcome === "failed"
+          ? sortedFaqResources
+          : faqSelection.outcome === "none_available"
+            ? []
+            : sortedFaqResources.filter((resource) =>
+                faqSelection.ids.includes(resource.id),
+              );
+      const selectedFaqSetIds =
+        faqSelection.outcome === "failed"
+          ? sortedFaqResources.map((r) => r.id)
+          : faqSelection.outcome === "none_available"
+            ? []
+            : faqSelection.ids;
+      const compiledFaqContext = await getOrBuildCompiledFaqContext({
+        kv: context.env.CONVERSATIONS_CACHE,
+        projectId: context.project.id,
+        fingerprintResources: selectedFaqResources.map((resource) => ({
+          id: resource.id,
+          updatedAt: resource.updatedAt,
+          content: resource.content,
+        })),
+        faqResources: selectedFaqResources.map((resource) => ({
+          title: resource.title,
+          content: resource.content,
+        })),
+        executionCtx: context.executionCtx,
+      });
+      logInfo(
+        "widget_turn.faq_sets_selected",
+        buildWidgetTurnLogContext(context, turnId, {
+          totalFaqSets: sortedFaqResources.length,
+          selectorOutcome: faqSelection.outcome,
+          selectedIds: selectedFaqSetIds,
+          selectedTitles: selectedFaqResources.map((r) => r.title),
+          compiledFaqChars: compiledFaqContext.length,
+          faqHintFired: Boolean(faqMatchHint),
+          faqHintQuestion: faqMatchHint?.question ?? null,
+          faqHintScore: faqMatchHint?.score ?? null,
+        }),
+      );
 
       if (turnPlan.retrievalQueries.length > 0) {
         emitStatus("Searching docs...", "retrieval");
@@ -946,19 +1001,16 @@ export async function handleWidgetMessageTurn(
       }
 
       currentStage = "save_bot_message";
-      const botMessage = await chatService.addMessage(
-        {
-          conversationId: context.conversationId,
-          role: "bot",
-          content: fullResponse,
-          sources:
-            retrieval.sourceReferences.length > 0
-              ? JSON.stringify(retrieval.sourceReferences)
-              : null,
-          senderName: settings?.botName ?? null,
-        },
-        context.project.id,
-      );
+      const botMessage = await chatService.addMessage({
+        conversationId: context.conversationId,
+        role: "bot",
+        content: fullResponse,
+        sources:
+          retrieval.sourceReferences.length > 0
+            ? JSON.stringify(retrieval.sourceReferences)
+            : null,
+        senderName: settings?.botName ?? null,
+      });
 
       const MAX_SOURCES = 3;
       const cappedSources = retrieval.sourceReferences.slice(0, MAX_SOURCES);

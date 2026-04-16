@@ -194,6 +194,7 @@ export const resources = sqliteTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     type: text("type", { enum: ["webpage", "pdf", "faq"] }).notNull(),
     title: text("title").notNull(),
+    description: text("description"),
     url: text("url"),
     r2Key: text("r2_key"),
     content: text("content"),

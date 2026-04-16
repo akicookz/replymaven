@@ -6,6 +6,6 @@
     "lib": ["ES2023"],
     "erasableSyntaxOnly": false
   },
-  "include": ["./worker-configuration.d.ts", "./worker"],
+  "include": ["./worker-configuration.d.ts", "./worker", "./shared"],
   "exclude": ["./worker/**/*.test.ts", "./worker/**/*.spec.ts"]
 }

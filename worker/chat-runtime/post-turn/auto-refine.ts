@@ -76,7 +76,7 @@ export async function triggerAutoRefinementIfEnabled(options: {
     }
   }
 
-  const chatService = new ChatService(options.db, options.kv);
+  const chatService = new ChatService(options.db);
   const messages = await chatService.getMessages(options.conversationId);
   if (messages.length < 2) {
     logInfo("auto_refine.skipped", {

@@ -1,12 +1,13 @@
 import { describe, expect, test, beforeEach } from "bun:test";
 import {
+  clearHybridUnavailableCache,
   hybridUnavailableProjects,
   isHybridRetrievalUnavailableError,
   resolveRetrievalType,
 } from "./run-ai-search";
 
 beforeEach(() => {
-  hybridUnavailableProjects.clear();
+  clearHybridUnavailableCache();
 });
 
 describe("isHybridRetrievalUnavailableError", () => {

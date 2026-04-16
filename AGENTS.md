@@ -540,9 +540,14 @@ api_keys
 
 ### KV Namespace: CONVERSATIONS_CACHE
 
-- Key format: `conv:{conversationId}` -- JSON of recent messages (last 50)
-- TTL: 24 hours (auto-evict stale conversations)
-- Purpose: Fast reads for active chat sessions without hitting D1
+Shared general-purpose KV namespace. The name is historical -- it no longer caches conversations. Current consumers:
+
+- `email-change:{userId}` -- pending email change verification tokens
+- `faq:{version}:{projectId}:{fingerprint}` -- compiled FAQ prompt text, keyed by a content-hash fingerprint (`worker/chat-runtime/prompt/build-compiled-faq-context.ts`). 5-minute TTL.
+- `hybrid_unavailable:{projectId}` -- remembers which projects cannot serve hybrid retrieval so new Worker isolates skip the failed attempt (`worker/chat-runtime/retrieval/run-ai-search.ts`). 24-hour TTL.
+- Auto-refine flow uses it for transient state.
+
+Do NOT re-add conversation-message caching here -- prior attempts introduced stale-snapshot bugs in the widget. Message reads should hit D1 via `ChatService.getMessages` / `ChatService.getMessagesSince` directly.
 
 ---
 
@@ -702,7 +707,7 @@ After a conversation closes:
 |---------|------|------|---------|
 | `DB` | D1 Database | `supportbot-db` | Primary data store (legacy name, kept for compatibility) |
 | `UPLOADS` | R2 Bucket | `supportbot-uploads` | PDFs, images, widget bundle (legacy name, kept for compatibility) |
-| `CONVERSATIONS_CACHE` | KV Namespace | `supportbot-kv` | Active conversation cache (legacy name, kept for compatibility) |
+| `CONVERSATIONS_CACHE` | KV Namespace | `supportbot-kv` | Shared KV: email-change tokens, compiled FAQ cache, hybrid-unavailable cache, auto-refine state (legacy name kept) |
 | `AI` | Workers AI | -- | AI Search binding (`env.AI.autorag(...)`) |
 | `ASSETS` | Assets | -- | SPA static assets |
 

@@ -417,6 +417,7 @@ async function executeCompose(options: {
   projectName: string;
   guidelines: Array<{ condition: string; instruction: string }>;
   compiledFaqContext: string;
+  faqMatchHint?: { question: string; answer: string; score: number } | null;
   pageContext?: Record<string, string>;
   visitorInfo: { name: string | null; email: string | null };
   existingInquiry?: Record<string, string> | null;
@@ -446,6 +447,7 @@ async function executeCompose(options: {
       pageContext: options.pageContext,
       visitorInfo: options.visitorInfo,
       faqContext: options.compiledFaqContext,
+      faqMatchHint: options.faqMatchHint ?? null,
       groundingConfidence: options.state.docsEvidence.groundingConfidence,
       topScore: options.state.docsEvidence.topScore,
       turnPlan: {
@@ -558,9 +560,13 @@ export async function runPlannerLoop(
   );
 
   if (options.faqMatchHint) {
+    // Wrap the seed in a <source> block so `mergeRagContextBlocks` (which
+    // splits on `\n\n(?=<source )`) can dedupe it consistently with other
+    // evidence blocks added later in the loop.
+    const hintBlock = `<source type="faq-match" score="${options.faqMatchHint.score.toFixed(2)}">\nQ: ${options.faqMatchHint.question}\nA: ${options.faqMatchHint.answer}\n</source>`;
     loopState.docsEvidence = {
       ...loopState.docsEvidence,
-      faqContext: `Q: ${options.faqMatchHint.question}\nA: ${options.faqMatchHint.answer}`,
+      faqContext: hintBlock,
       groundingConfidence: options.faqMatchHint.score >= 0.9 ? "high" : "low",
       topScore: options.faqMatchHint.score,
       retrievalAttempted: true,
@@ -601,9 +607,34 @@ export async function runPlannerLoop(
       loopState.toolEvidence.length === 0 &&
       !loopState.handoffRequested;
 
+    // High-confidence FAQ match → skip planner + retrieval entirely on the
+    // first step. The answer is already in hand and any further search just
+    // adds noise and latency.
+    const shouldFaqFastPath =
+      loopState.stepCount === 0 &&
+      !loopState.handoffRequested &&
+      !!options.faqMatchHint &&
+      options.faqMatchHint.score >= 0.9;
+
     let plannerDecision;
     const plannerStepStart = Date.now();
-    if (shouldForceCompose) {
+    if (shouldFaqFastPath) {
+      plannerDecision = {
+        goal: loopState.goal,
+        nextAction: {
+          type: "compose" as const,
+          reason:
+            "High-confidence FAQ match; compose directly from the curated answer.",
+        },
+      };
+      logInfo(
+        "widget_turn.plan_next_action_faq_fast_path",
+        options.buildLogContext({
+          faqHintScore: options.faqMatchHint?.score ?? null,
+          faqHintQuestion: options.faqMatchHint?.question ?? null,
+        }),
+      );
+    } else if (shouldForceCompose) {
       plannerDecision = {
         goal: loopState.goal,
         nextAction: {
@@ -635,6 +666,8 @@ export async function runPlannerLoop(
               turnPlan: options.turnPlan,
               availableTools: options.availableTools,
               state: loopState,
+              faqContext: options.compiledFaqContext,
+              guidelines: options.guidelines,
             });
           },
         });
@@ -1198,6 +1231,7 @@ export async function runPlannerLoop(
         projectName: options.project.name,
         guidelines: options.guidelines,
         compiledFaqContext: options.compiledFaqContext,
+        faqMatchHint: options.faqMatchHint ?? null,
         pageContext: options.pageContext,
         visitorInfo: options.visitorInfo,
         existingInquiry: options.existingInquiry,
@@ -1246,6 +1280,7 @@ export async function runPlannerLoop(
         projectName: options.project.name,
         guidelines: options.guidelines,
         compiledFaqContext: options.compiledFaqContext,
+        faqMatchHint: options.faqMatchHint ?? null,
         pageContext: options.pageContext,
         visitorInfo: options.visitorInfo,
         existingInquiry: options.existingInquiry,
@@ -1315,6 +1350,7 @@ export async function runPlannerLoop(
       projectName: options.project.name,
       guidelines: options.guidelines,
       compiledFaqContext: options.compiledFaqContext,
+      faqMatchHint: options.faqMatchHint ?? null,
       pageContext: options.pageContext,
       visitorInfo: options.visitorInfo,
       existingInquiry: options.existingInquiry,

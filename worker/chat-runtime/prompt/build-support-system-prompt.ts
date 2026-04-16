@@ -2,7 +2,7 @@ import { type SupportPromptOptions, type SupportPromptSettings } from "../types"
 
 const MAX_RAG_CONTEXT_CHARS = 12_000;
 const MAX_COMPANY_CONTEXT_CHARS = 4_000;
-const MAX_FAQ_CONTEXT_CHARS = 8_000;
+const MAX_FAQ_CONTEXT_CHARS = 22_000;
 const MAX_TOOL_EVIDENCE_CHARS = 4_000;
 const MAX_CONVERSATION_SUMMARY_CHARS = 2_000;
 
@@ -94,12 +94,14 @@ ${guidelineEntries}
 
   prompt += `<response-rules>
 Answering questions:
-- Answer questions using ONLY evidence from <guidelines>, <priority-faqs>, <knowledge-base>, <about-the-company>, and <tool-evidence> when it is present.
+- Answer questions using ONLY evidence from <priority-faq-match>, <guidelines>, <priority-faqs>, <knowledge-base>, <about-the-company>, and <tool-evidence> when it is present.
+- If <priority-faq-match> is present, it IS the answer to the visitor's current question. Use the answer from that block directly unless the visitor's latest turn makes it clearly inapplicable. Do NOT claim the documentation lacks this information.
 - Check sources in this order whenever they are available:
-  1. <guidelines>
-  2. <priority-faqs>
-  3. <knowledge-base>
-  4. <about-the-company> for broad background only
+  1. <priority-faq-match> (already-identified FAQ Q/A for this exact question)
+  2. <guidelines>
+  3. <priority-faqs>
+  4. <knowledge-base>
+  5. <about-the-company> for broad background only
 - Use <about-the-company> only for broad company background. For product behavior, troubleshooting, setup, integrations, pricing, policy, and "how do I" questions, rely on <knowledge-base>, not company background alone.
 - Treat <guidelines> and <priority-faqs> as tier-1 sources. If they conflict with <knowledge-base>, follow the tier-1 source unless a tool result explicitly proves otherwise.
 - ALWAYS trust SOPs and FAQs over any other source. These are hand-written by the team and represent the official position.
@@ -274,6 +276,17 @@ ${options.turnPlan?.followUpQuestion ? `Focused follow-up if needed: ${options.t
 Action history:
 ${plannerHistory}
 </planner-loop>
+
+`;
+  }
+
+  if (options?.faqMatchHint) {
+    prompt += `<priority-faq-match>
+The visitor's current question closely matches a curated FAQ below (tier-1, match score ${options.faqMatchHint.score.toFixed(2)}). Use this answer directly unless the visitor's latest turn makes it clearly inapplicable. Do not claim the documentation lacks this information.
+
+Q: ${options.faqMatchHint.question}
+A: ${options.faqMatchHint.answer}
+</priority-faq-match>
 
 `;
   }

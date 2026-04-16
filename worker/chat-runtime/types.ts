@@ -86,6 +86,7 @@ export interface SupportPromptOptions {
   pageContext?: Record<string, string>;
   visitorInfo?: { name: string | null; email: string | null };
   faqContext?: string | null;
+  faqMatchHint?: { question: string; answer: string; score: number } | null;
   groundingConfidence?: GroundingConfidence;
   topScore?: number;
   turnPlan?: {
@@ -225,8 +226,8 @@ export function parseChatState(
 
 export interface ChatRuntimeAiConfig {
   model: string;
-  geminiApiKey: string;
-  openaiApiKey: string;
+  geminiApiKey: string | null;
+  openaiApiKey: string | null;
 }
 
 export interface SupportTurnPlan {

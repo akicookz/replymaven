@@ -18,10 +18,12 @@ describe("documentation-only behavior", () => {
       {},
     );
 
-    // Check that SOPs and FAQs are prioritized
-    expect(prompt).toContain("1. <guidelines>");
-    expect(prompt).toContain("2. <priority-faqs>");
-    expect(prompt).toContain("3. <knowledge-base>");
+    // Check that SOPs and FAQs are prioritized (match-hint first when present,
+    // then guidelines, then priority FAQs, then knowledge base).
+    expect(prompt).toContain("1. <priority-faq-match>");
+    expect(prompt).toContain("2. <guidelines>");
+    expect(prompt).toContain("3. <priority-faqs>");
+    expect(prompt).toContain("4. <knowledge-base>");
     expect(prompt).toContain("ALWAYS trust SOPs and FAQs over any other source");
   });
 

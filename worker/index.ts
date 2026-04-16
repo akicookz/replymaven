@@ -418,7 +418,7 @@ const app = new Hono<HonoAppContext>()
     const userAgent = c.req.header("user-agent");
     if (userAgent) geoMeta.userAgent = userAgent;
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     const conversation = await chatService.createConversation({
       projectId: project.id,
       visitorId: parsed.data.visitorId,
@@ -446,7 +446,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectBySlugPublic(slug);
     if (!project) return c.json({ error: "Project not found" }, 404);
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     const conversation = await chatService.getActiveConversationByVisitor(
       project.id,
       visitorId,
@@ -470,7 +470,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectBySlugPublic(slug);
     if (!project) return c.json({ error: "Project not found" }, 404);
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     let conversation = await chatService.getConversationById(
       conversationId,
       project.id,
@@ -520,11 +520,9 @@ const app = new Hono<HonoAppContext>()
       }
     }
 
-    const msgs = await chatService.getFromCache(conversationId, project.id, {
-      populateOnMiss: { executionCtx: c.executionCtx },
-    });
+    const msgs = await chatService.getMessages(conversationId);
     return c.json({
-      messages: msgs ?? [],
+      messages: msgs,
       status: conversation.status,
     });
   })
@@ -552,7 +550,7 @@ const app = new Hono<HonoAppContext>()
       // No body or invalid JSON — default to active
     }
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     const conversation = await chatService.updateVisitorLastSeen(
       conversationId,
       project.id,
@@ -626,7 +624,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectBySlugPublic(slug);
     if (!project) return c.json({ error: "Project not found" }, 404);
 
-    const chatServiceForBan = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatServiceForBan = new ChatService(db);
     const convForBan = await chatServiceForBan.getConversationById(
       conversationId,
       project.id,
@@ -685,7 +683,7 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(updateVisitorEmailSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     const conversation = await chatService.getConversationById(
       conversationId,
       project.id,
@@ -722,7 +720,7 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(updateConversationPublicSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     const conversation = await chatService.getConversationById(
       conversationId,
       project.id,
@@ -765,7 +763,7 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const widgetService = new WidgetService(db);
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
 
     // Verify inquiry form is enabled
     const formConfig = await widgetService.getInquiryConfig(project.id);
@@ -836,16 +834,13 @@ const app = new Hono<HonoAppContext>()
 
     const inquiryMessage = buildInquiryConversationMessage(inquiryData);
 
-    await chatService.addMessage(
-      {
-        conversationId: conversation.id,
-        role: "visitor",
-        content: inquiryMessage,
-        imageUrl: null,
-        sources: null,
-      },
-      project.id,
-    );
+    await chatService.addMessage({
+      conversationId: conversation.id,
+      role: "visitor",
+      content: inquiryMessage,
+      imageUrl: null,
+      sources: null,
+    });
 
     // Notify via Telegram if configured
     const settings = await projectService.getSettings(project.id);
@@ -994,7 +989,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     const projectService = new ProjectService(db);
     const projectSettings = await projectService.getSettings(projectId);
     const botName = projectSettings?.botName;
@@ -1172,15 +1167,12 @@ const app = new Hono<HonoAppContext>()
           );
 
           // Store the bot response as a message
-          await chatService.addMessage(
-            {
-              conversationId,
-              role: "bot",
-              content: responseText,
-              senderName: projectSettings?.botName ?? null,
-            },
-            projectId,
-          );
+          await chatService.addMessage({
+            conversationId,
+            role: "bot",
+            content: responseText,
+            senderName: projectSettings?.botName ?? null,
+          });
 
           await telegramService.sendMessage(
             tgSettings.telegramBotToken,
@@ -1224,15 +1216,12 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Normal agent reply — store and forward to visitor
-    await chatService.addMessage(
-      {
-        conversationId,
-        role: "agent",
-        content: message.text,
-        senderName: message.from?.first_name ?? null,
-      },
-      projectId,
-    );
+    await chatService.addMessage({
+      conversationId,
+      role: "agent",
+      content: message.text,
+      senderName: message.from?.first_name ?? null,
+    });
 
     await chatService.updateConversationStatus(
       conversationId,
@@ -1408,7 +1397,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Find the conversation by sender email
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     let senderEmail: string;
     if (typeof fromAddress === "string") {
       senderEmail = fromAddress;
@@ -1446,15 +1435,12 @@ const app = new Hono<HonoAppContext>()
       await chatService.reopenConversation(conversation.id, project.id);
     }
 
-    await chatService.addMessage(
-      {
-        conversationId: conversation.id,
-        role: "visitor",
-        content: cleanedText,
-        sources: null,
-      },
-      project.id,
-    );
+    await chatService.addMessage({
+      conversationId: conversation.id,
+      role: "visitor",
+      content: cleanedText,
+      sources: null,
+    });
 
     // If in agent mode, forward to Telegram
     if (
@@ -3473,6 +3459,7 @@ const app = new Hono<HonoAppContext>()
         projectId: project.id,
         type: "faq",
         title: parsed.data.title,
+        description: parsed.data.description ?? null,
         content: JSON.stringify(parsed.data.pairs),
       });
 
@@ -3725,6 +3712,7 @@ const app = new Hono<HonoAppContext>()
         project.id,
         parsed.data.title,
         parsed.data.pairs,
+        parsed.data.description ?? null,
       );
       if (!updated) return c.json({ error: "Update failed" }, 500);
       return c.json(updated);
@@ -3889,7 +3877,7 @@ const app = new Hono<HonoAppContext>()
       100,
     );
     const offset = parseInt(c.req.query("offset") ?? "0", 10) || 0;
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
 
     // Lazy auto-close stale conversations (single query, no double fetch)
     const settings = await projectService.getSettings(project.id);
@@ -3938,7 +3926,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Invalid since parameter" }, 400);
     }
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     const serverTime = Date.now();
 
     // If no since timestamp provided, return empty updates plus current counts.
@@ -3966,7 +3954,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     let conversation = await chatService.getConversationById(
       c.req.param("convId"),
       project.id,
@@ -4003,15 +3991,8 @@ const app = new Hono<HonoAppContext>()
     }
 
     const toolService = new ToolService(db);
-    // Try KV cache first for messages, fall back to D1
-    const cachedMsgs = await chatService.getFromCache(
-      conversation.id,
-      project.id,
-    );
     const [msgs, toolExecs] = await Promise.all([
-      cachedMsgs
-        ? Promise.resolve(cachedMsgs)
-        : chatService.getMessages(conversation.id),
+      chatService.getMessages(conversation.id),
       toolService.getExecutionsByConversation(conversation.id),
     ]);
 
@@ -4095,7 +4076,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     const conversation = await chatService.getConversationById(
       c.req.param("convId"),
       project.id,
@@ -4121,17 +4102,14 @@ const app = new Hono<HonoAppContext>()
       await chatService.reopenConversation(conversation.id, project.id);
     }
 
-    const message = await chatService.addMessage(
-      {
-        conversationId: conversation.id,
-        role: "agent",
-        content: parsed.data.content,
-        userId: user.id,
-        senderName: user.name,
-        senderAvatar: avatar,
-      },
-      project.id,
-    );
+    const message = await chatService.addMessage({
+      conversationId: conversation.id,
+      role: "agent",
+      content: parsed.data.content,
+      userId: user.id,
+      senderName: user.name,
+      senderAvatar: avatar,
+    });
 
     await chatService.updateConversationStatus(
       conversation.id,
@@ -4156,7 +4134,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     const conversation = await chatService.getConversationById(
       c.req.param("convId"),
       project.id,
@@ -4214,7 +4192,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     const conversation = await chatService.getConversationById(
       c.req.param("convId"),
       project.id,
@@ -4286,7 +4264,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Visitor is already banned" }, 409);
     }
 
-    const chatService = new ChatService(db, c.env.CONVERSATIONS_CACHE);
+    const chatService = new ChatService(db);
     if (parsed.data.conversationId) {
       await chatService.updateConversationStatus(
         parsed.data.conversationId,

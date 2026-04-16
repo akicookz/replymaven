@@ -30,6 +30,16 @@ interface PlanNextActionOptions {
   turnPlan: SupportTurnPlan;
   availableTools: SupportToolDefinition[];
   state: PlannerLoopState;
+  faqContext?: string | null;
+  guidelines?: Array<{ condition: string; instruction: string }>;
+}
+
+const PLANNER_FAQ_CHAR_BUDGET = 3500;
+const PLANNER_GUIDELINES_CHAR_BUDGET = 2000;
+
+function trimToBudget(text: string, budget: number): string {
+  if (text.length <= budget) return text;
+  return `${text.slice(0, budget).trimEnd()}\n\n[...truncated]`;
 }
 
 interface SanitizePlannerDecisionOptions {
@@ -414,6 +424,23 @@ export async function planNextAction(
           .join("\n")
       : "None";
 
+  const guidelinesBlock =
+    options.guidelines && options.guidelines.length > 0
+      ? trimToBudget(
+          options.guidelines
+            .map(
+              (guideline) =>
+                `- When: ${guideline.condition}\n  Then: ${guideline.instruction}`,
+            )
+            .join("\n\n"),
+          PLANNER_GUIDELINES_CHAR_BUDGET,
+        )
+      : "None assigned.";
+
+  const faqBlock = options.faqContext?.trim()
+    ? trimToBudget(options.faqContext.trim(), PLANNER_FAQ_CHAR_BUDGET)
+    : "None.";
+
   const result = await generateText({
     model: options.model,
     output: Output.object({ schema: plannerDecisionSchema }),
@@ -431,6 +458,12 @@ ${options.currentMessage}
 
 Page context:
 ${pageContextBlock}
+
+SOPs / Guidelines (tier-1, trust these first):
+${guidelinesBlock}
+
+FAQs (tier-1, trust these second):
+${faqBlock}
 
 Initial turn analysis:
 - intent: ${options.turnPlan.intent}
@@ -486,6 +519,8 @@ Message classification (YOU are the classifier — there is no separate routing 
 Rules:
 - Output exactly one next action.
 - Priority order for finding answers: 1) Check SOPs/guidelines, 2) Check FAQs, 3) Search the knowledge base
+- If the SOPs/Guidelines or FAQs shown above directly cover the visitor's question, choose compose immediately. Do NOT call search_docs — the knowledge base is a lower-tier source and will only add noise.
+- Only call search_docs when neither the SOPs nor the FAQs address the question.
 - Prefer search_docs before call_tool when documentation can clarify expected product behavior.
 - A single well-formed search_docs query is usually enough. The runtime will automatically reformulate and retry once if no results come back, so do not stack redundant queries.
 - Use call_tool only when a tool is clearly needed and the required inputs are available.
@@ -534,7 +569,13 @@ Anti-loop rules (CRITICAL):
       query: object.query ?? undefined,
       broaderQueries: object.broaderQueries ?? undefined,
       toolName: object.toolName ?? undefined,
-      input: object.toolInput ?? undefined,
+      // `call_tool` downstream indexes into `input[param.name]`; default to
+      // an empty record when the model returns null so we fall through to
+      // the missing-required-inputs path instead of crashing.
+      input:
+        object.actionType === "call_tool"
+          ? (object.toolInput ?? {})
+          : (object.toolInput ?? undefined),
       question: object.question ?? undefined,
       missingFields:
         (object.missingFields ?? undefined) as
@@ -545,7 +586,7 @@ Anti-loop rules (CRITICAL):
   };
 }
 
-function recoverPlannerDecisionFromText(
+export function recoverPlannerDecisionFromText(
   text: string,
 ): z.infer<typeof plannerDecisionSchema> | null {
   if (!text.trim()) return null;

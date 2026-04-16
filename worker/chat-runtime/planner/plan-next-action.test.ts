@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { fallbackPlanNextAction, planNextAction, sanitizePlannerDecision } from "./plan-next-action";
+import {
+  fallbackPlanNextAction,
+  planNextAction,
+  recoverPlannerDecisionFromText,
+  sanitizePlannerDecision,
+} from "./plan-next-action";
 import {
   type PlannerDecision,
   type PlannerLoopState,
@@ -522,4 +527,53 @@ llmDescribe("planNextAction (LLM integration)", () => {
     expect(decision.goal.length).toBeGreaterThan(0);
     expect(decision.nextAction).toHaveProperty("type");
   }, 15_000);
+});
+
+describe("recoverPlannerDecisionFromText", () => {
+  const validJson = JSON.stringify({
+    goal: "Answer the question",
+    actionType: "compose",
+    reason: "FAQ covers this",
+    query: null,
+    broaderQueries: null,
+    toolName: null,
+    toolInput: null,
+    question: null,
+    missingFields: null,
+    answerStyle: "direct",
+  });
+
+  test("returns null for empty input", () => {
+    expect(recoverPlannerDecisionFromText("")).toBeNull();
+    expect(recoverPlannerDecisionFromText("   ")).toBeNull();
+  });
+
+  test("parses a plain JSON response", () => {
+    const result = recoverPlannerDecisionFromText(validJson);
+    expect(result).not.toBeNull();
+    expect(result?.actionType).toBe("compose");
+  });
+
+  test("parses JSON inside a markdown fence", () => {
+    const text = `Here is the decision:\n\n\`\`\`json\n${validJson}\n\`\`\`\n`;
+    const result = recoverPlannerDecisionFromText(text);
+    expect(result?.actionType).toBe("compose");
+  });
+
+  test("extracts JSON from surrounding prose using brace boundaries", () => {
+    const text = `The planner thinks: ${validJson} — that's the plan.`;
+    const result = recoverPlannerDecisionFromText(text);
+    expect(result?.actionType).toBe("compose");
+  });
+
+  test("returns null when no valid JSON can be recovered", () => {
+    expect(
+      recoverPlannerDecisionFromText("just a prose answer, no JSON here"),
+    ).toBeNull();
+  });
+
+  test("returns null when JSON does not match schema", () => {
+    const invalid = JSON.stringify({ actionType: "nonexistent_type" });
+    expect(recoverPlannerDecisionFromText(invalid)).toBeNull();
+  });
 });

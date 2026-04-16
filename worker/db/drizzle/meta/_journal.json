@@ -260,6 +260,13 @@
       "when": 1776039509016,
       "tag": "0036_gorgeous_lightspeed",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1776338067172,
+      "tag": "0037_thin_sandman",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  FAQ_DESCRIPTION_MAX_CHARS,
+  FAQ_PAIR_MAX_CHARS,
+  FAQ_SET_MAX_CHARS,
+  getFaqSetTotalLength,
+} from "../shared/faq-limits";
 
 // ─── Projects ─────────────────────────────────────────────────────────────────
 export const createProjectSchema = z.object({
@@ -116,10 +122,31 @@ export const updateQuickActionSchema = z.object({
 
 // ─── Resources ────────────────────────────────────────────────────────────────
 
-export const faqPairSchema = z.object({
-  question: z.string().min(1, "Question is required").max(500),
-  answer: z.string().min(1, "Answer is required").max(5000),
-});
+export const faqPairSchema = z
+  .object({
+    question: z.string().min(1, "Question is required").max(500),
+    answer: z.string().min(1, "Answer is required").max(5000),
+  })
+  .refine(
+    (pair) => pair.question.length + pair.answer.length <= FAQ_PAIR_MAX_CHARS,
+    { message: `Q&A pair exceeds ${FAQ_PAIR_MAX_CHARS} characters` },
+  );
+
+const faqPairsArraySchema = z
+  .array(faqPairSchema)
+  .min(1, "At least one Q&A pair is required")
+  .max(50, "Maximum 50 Q&A pairs allowed")
+  .refine((pairs) => getFaqSetTotalLength(pairs) <= FAQ_SET_MAX_CHARS, {
+    message: `FAQ set exceeds ${FAQ_SET_MAX_CHARS} total characters`,
+  });
+
+const faqDescriptionSchema = z
+  .string()
+  .max(
+    FAQ_DESCRIPTION_MAX_CHARS,
+    `Description must be ${FAQ_DESCRIPTION_MAX_CHARS} characters or fewer`,
+  )
+  .optional();
 
 export const createResourceSchema = z.object({
   type: z.enum(["webpage", "pdf", "faq"]),
@@ -131,18 +158,14 @@ export const createResourceSchema = z.object({
 export const createFaqResourceSchema = z.object({
   type: z.literal("faq"),
   title: z.string().min(1, "Title is required").max(200),
-  pairs: z
-    .array(faqPairSchema)
-    .min(1, "At least one Q&A pair is required")
-    .max(50, "Maximum 50 Q&A pairs allowed"),
+  description: faqDescriptionSchema,
+  pairs: faqPairsArraySchema,
 });
 
 export const updateFaqResourceSchema = z.object({
   title: z.string().min(1, "Title is required").max(200).optional(),
-  pairs: z
-    .array(faqPairSchema)
-    .min(1, "At least one Q&A pair is required")
-    .max(50, "Maximum 50 Q&A pairs allowed"),
+  description: faqDescriptionSchema,
+  pairs: faqPairsArraySchema,
 });
 
 export const updateResourceContentSchema = z.object({

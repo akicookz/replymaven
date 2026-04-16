@@ -9,6 +9,7 @@ import {
   buildExtractContactInfoPrompt,
   buildReformulateQueryPrompt,
   buildReformulateSearchQueriesPrompt,
+  buildSelectFaqSetsPrompt,
   buildSummarizeConversationPrompt,
   buildSummarizeTeamRequestPrompt,
 } from "./support-prompt-builders";
@@ -41,6 +42,75 @@ const supportTurnPlanSchema = z.object({
 const reformulateSearchQueriesSchema = z.object({
   queries: z.array(z.string().min(3).max(180)).min(1).max(3),
 });
+
+const selectFaqSetsSchema = z.object({
+  selectedIds: z.array(z.string().min(1).max(100)).max(2),
+});
+
+interface SelectFaqSetsParams {
+  conversationHistory: ConversationTurnMessage[];
+  currentMessage: string;
+  pageContext?: Record<string, string>;
+  faqSets: Array<{ id: string; title: string; description: string | null }>;
+}
+
+export async function selectFaqSets(
+  model: LanguageModel,
+  params: SelectFaqSetsParams,
+  options?: AuxiliaryCallOptions,
+): Promise<string[]> {
+  if (params.faqSets.length === 0) {
+    return [];
+  }
+
+  // When there's only one set, always use it — no need to consult the model.
+  if (params.faqSets.length === 1) {
+    return [params.faqSets[0].id];
+  }
+
+  const recentHistory = params.conversationHistory.slice(-4);
+  const transcript = recentHistory
+    .map((message) => `${message.role}: ${message.content}`)
+    .join("\n");
+  const pageContextBlock =
+    params.pageContext && Object.keys(params.pageContext).length > 0
+      ? Object.entries(params.pageContext)
+          .map(([key, value]) => `${key}: ${value}`)
+          .join("\n")
+      : "None";
+
+  try {
+    const result = await generateText({
+      model,
+      output: Output.object({ schema: selectFaqSetsSchema }),
+      temperature: 0,
+      maxOutputTokens: 128,
+      prompt: buildSelectFaqSetsPrompt({
+        transcript,
+        currentMessage: params.currentMessage,
+        pageContextBlock,
+        faqSets: params.faqSets,
+      }),
+    });
+
+    const object = result.output;
+    if (!object) {
+      const error = new Error(
+        "model did not produce a valid structured output",
+      );
+      error.name = "AI_NoObjectGeneratedError";
+      throw error;
+    }
+
+    const validIds = new Set(params.faqSets.map((set) => set.id));
+    return object.selectedIds.filter((id) => validIds.has(id));
+  } catch (error) {
+    if (shouldThrowOnModelError(options)) {
+      throw error;
+    }
+    return [];
+  }
+}
 
 export function fallbackClassifySupportTurn(
   currentMessage: string,

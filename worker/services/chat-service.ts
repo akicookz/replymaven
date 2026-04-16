@@ -15,10 +15,7 @@ import {
 } from "../chat-runtime/types";
 
 export class ChatService {
-  constructor(
-    private db: DrizzleD1Database<Record<string, unknown>>,
-    private kv: KVNamespace,
-  ) {}
+  constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
 
   // ─── Conversations ──────────────────────────────────────────────────────────
 
@@ -432,8 +429,6 @@ export class ChatService {
 
   async addMessage(
     data: Omit<NewMessageRow, "id" | "createdAt">,
-    _projectId: string,
-    _options?: { executionCtx?: ExecutionContext },
   ): Promise<MessageRow> {
     const id = crypto.randomUUID();
     const now = new Date();
@@ -475,46 +470,6 @@ export class ChatService {
       .update(messages)
       .set({ emailedAt: new Date() })
       .where(eq(messages.id, messageId));
-  }
-
-  // ─── KV Cache ───────────────────────────────────────────────────────────────
-
-  private cacheKey(projectId: string, conversationId: string): string {
-    return `conv:${projectId}:${conversationId}`;
-  }
-
-  async getFromCache(
-    conversationId: string,
-    projectId: string,
-    options?: { populateOnMiss?: { executionCtx?: ExecutionContext } },
-  ): Promise<MessageRow[] | null> {
-    const cached = await this.kv.get(
-      this.cacheKey(projectId, conversationId),
-      "json",
-    );
-    if (cached) {
-      return cached as MessageRow[];
-    }
-
-    if (!options?.populateOnMiss) {
-      return null;
-    }
-
-    const rows = await this.getMessages(conversationId);
-    const populate = this.kv
-      .put(
-        this.cacheKey(projectId, conversationId),
-        JSON.stringify(rows.slice(-20)),
-        { expirationTtl: 86400 },
-      )
-      .catch(() => {
-        // Cache write failures are non-fatal.
-      });
-    const executionCtx = options.populateOnMiss.executionCtx;
-    if (executionCtx) {
-      executionCtx.waitUntil(populate);
-    }
-    return rows;
   }
 
 }

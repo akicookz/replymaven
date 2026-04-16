@@ -38,6 +38,14 @@ interface NormalizedSearchResponse {
 
 export const hybridUnavailableProjects = new Set<string>();
 
+/**
+ * Clear the in-memory hybrid-unavailable cache. Intended for tests; calling
+ * in production defeats the point of the cache.
+ */
+export function clearHybridUnavailableCache(): void {
+  hybridUnavailableProjects.clear();
+}
+
 const HYBRID_UNAVAILABLE_KV_TTL_SECONDS = 24 * 60 * 60;
 
 function hybridUnavailableKvKey(projectId: string): string {
