@@ -690,6 +690,44 @@ export const guidelines = sqliteTable(
 export type GuidelineRow = typeof guidelines.$inferSelect;
 export type NewGuidelineRow = typeof guidelines.$inferInsert;
 
+// ─── Greetings ────────────────────────────────────────────────────────────────
+
+export const greetings = sqliteTable(
+  "greetings",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    imageUrl: text("image_url"),
+    title: text("title").notNull(),
+    description: text("description"),
+    ctaText: text("cta_text"),
+    ctaLink: text("cta_link"),
+    authorId: text("author_id").references(() => authSchema.users.id, {
+      onDelete: "set null",
+    }),
+    allowedPages: text("allowed_pages"),
+    delaySeconds: integer("delay_seconds").notNull().default(3),
+    durationSeconds: integer("duration_seconds").notNull().default(15),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("idx_greetings_project_sort").on(table.projectId, table.sortOrder),
+  ],
+);
+
+export type GreetingRow = typeof greetings.$inferSelect;
+export type NewGreetingRow = typeof greetings.$inferInsert;
+
 // ─── Visitor Bans ────────────────────────────────────────────────────────────
 
 export const visitorBans = sqliteTable(
@@ -752,4 +790,5 @@ export const schema = {
   toolExecutions,
   guidelines,
   visitorBans,
+  greetings,
 } as const;

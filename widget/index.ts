@@ -511,6 +511,190 @@
       }
     }
 
+    /* ─── Greetings Stack (welcome + news cards) ───────────────────────── */
+    .rm-greeting-stack {
+      position: absolute;
+      bottom: 76px;
+      width: 320px;
+      max-width: 320px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+      font-family: inherit;
+    }
+    .rm-widget-container.bottom-right .rm-greeting-stack {
+      right: 12px;
+      align-items: flex-end;
+    }
+    .rm-widget-container.bottom-left .rm-greeting-stack {
+      left: 12px;
+      align-items: flex-start;
+    }
+    .rm-widget-container.center-inline .rm-greeting-stack {
+      display: none;
+    }
+    .rm-greeting-card {
+      width: 100%;
+      background: var(--rm-bg, #ffffff);
+      border: 0.5px solid var(--rm-glow-border, rgba(0,0,0,0.08));
+      border-radius: calc(var(--rm-chat-radius, 16px) * 1.2);
+      box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.35s ease, transform 0.35s ease, max-height 0.35s ease;
+      pointer-events: auto;
+      position: relative;
+      max-height: 600px;
+    }
+    .rm-greeting-card[data-bg-style="blurred"] {
+      background: rgba(0,0,0,0.18);
+      backdrop-filter: blur(24px) saturate(1.4);
+      -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    }
+    .rm-greeting-card.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .rm-greeting-card.dismissed {
+      opacity: 0;
+      transform: translateY(8px);
+      max-height: 0;
+      margin: 0;
+      pointer-events: none;
+    }
+    .rm-greeting-image {
+      display: block;
+      width: 100%;
+      height: 140px;
+      object-fit: cover;
+    }
+    .rm-greeting-body {
+      padding: 14px 16px 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .rm-greeting-card.compact .rm-greeting-body {
+      flex-direction: row;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 36px 10px 10px;
+    }
+    .rm-greeting-card.compact {
+      cursor: pointer;
+    }
+    .rm-greeting-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+    .rm-greeting-avatar-fallback {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--rm-accent-bg);
+      color: var(--rm-accent-text);
+    }
+    .rm-greeting-avatar-fallback svg {
+      height: 22px;
+      width: auto;
+    }
+    .rm-greeting-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      flex: 1;
+    }
+    .rm-greeting-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--rm-text, #18181b);
+      line-height: 1.35;
+    }
+    .rm-greeting-card.compact .rm-greeting-title {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rm-greeting-desc {
+      font-size: 13px;
+      color: var(--rm-text-secondary, #52525b);
+      line-height: 1.45;
+    }
+    .rm-greeting-card.compact .rm-greeting-desc {
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .rm-greeting-cta {
+      align-self: flex-start;
+      margin-top: 6px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: var(--rm-primary, #2563eb);
+      color: var(--rm-brand-text, #ffffff);
+      font-size: 13px;
+      font-weight: 600;
+      border: 0;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: opacity 0.2s ease;
+    }
+    .rm-greeting-cta:hover {
+      opacity: 0.9;
+    }
+    .rm-greeting-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 0;
+      background: rgba(0,0,0,0.5);
+      color: #ffffff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      z-index: 1;
+    }
+    .rm-greeting-card[data-bg-style="blurred"] .rm-greeting-close {
+      background: rgba(255,255,255,0.18);
+    }
+    .rm-greeting-close svg {
+      width: 12px;
+      height: 12px;
+    }
+    .rm-trigger.active ~ .rm-greeting-stack {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    @media (max-width: 480px) {
+      .rm-greeting-stack {
+        width: calc(100vw - 24px);
+        max-width: calc(100vw - 24px);
+      }
+      .rm-greeting-image {
+        height: 120px;
+      }
+    }
+
     /* ─── Chat Window ─────────────────────────────────────────────────────── */
     .rm-chat-window {
       position: absolute;
@@ -2499,9 +2683,14 @@
   let introPillTimer: ReturnType<typeof setTimeout> | null = null;
   let introPillDelayTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // ─── Greeting Stack (welcome + news cards) ──────────────────────────────────
+  const greetingStack = document.createElement("div");
+  greetingStack.className = "rm-greeting-stack";
+
   container.appendChild(chatWindow);
   container.appendChild(trigger);
   container.appendChild(introPill);
+  container.appendChild(greetingStack);
   document.body.appendChild(container);
 
   // ─── Inline Bar DOM (created once, shown only for inline-bar variant) ───────
@@ -2564,6 +2753,30 @@
     avatar: string | null;
     workTitle: string | null;
   } | null = null;
+
+  interface GreetingPublic {
+    id: string;
+    enabled: boolean;
+    imageUrl: string | null;
+    title: string;
+    description: string | null;
+    ctaText: string | null;
+    ctaLink: string | null;
+    author: {
+      id: string;
+      name: string;
+      avatar: string | null;
+      workTitle: string | null;
+    } | null;
+    allowedPages: string[] | null;
+    delaySeconds: number;
+    durationSeconds: number;
+    sortOrder: number;
+  }
+
+  let greetingsList: GreetingPublic[] = [];
+  const greetingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const greetingDurationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   let placeholderTexts: string[] = ["Ask a question..."];
   let placeholderIndex = 0;
@@ -3125,9 +3338,16 @@
               hiddenByPageTargeting = true;
               stopPolling();
               stopHeartbeat();
+              hideGreetingStack();
             } else if (matchesCurrentPage(patterns)) {
               container.style.display = "";
               hiddenByPageTargeting = false;
+              if (!isOpen && !conversationId) renderGreetings();
+            } else if (matchesCurrentPage(patterns) === false && isOpen) {
+              // chat is open – do nothing, let user finish
+            } else {
+              // Per-greeting visibility may have changed — re-render
+              if (!isOpen && !conversationId) renderGreetings();
             }
           };
 
@@ -3642,12 +3862,32 @@
         };
       }
 
-      // Intro message — stored for lazy display on first chat open
-      if (loadedConfig.introMessage) {
-        introMessageText = loadedConfig.introMessage;
+      // Greetings — pop-out cards (welcome + news) and lazy first-message
+      if (Array.isArray(loadedConfig.greetings)) {
+        greetingsList = loadedConfig.greetings as GreetingPublic[];
+      } else {
+        greetingsList = [];
       }
-      if (loadedConfig.introMessageAuthor) {
-        introMessageAuthor = loadedConfig.introMessageAuthor;
+
+      // Derive lazy in-thread first-message from the first compact greeting
+      // (no image, no CTA). Rich cards only live in the popout, not the chat
+      // thread.
+      const firstCompact = greetingsList.find(
+        (g) => g.enabled && !g.imageUrl && !g.ctaText && !g.ctaLink,
+      );
+      if (firstCompact) {
+        introMessageText = firstCompact.title;
+        introMessageAuthor = firstCompact.author
+          ? {
+              name: firstCompact.author.name,
+              avatar: firstCompact.author.avatar,
+              workTitle: firstCompact.author.workTitle,
+            }
+          : null;
+      } else if (loadedConfig.introMessage) {
+        // Back-compat: legacy config payload
+        introMessageText = loadedConfig.introMessage;
+        introMessageAuthor = loadedConfig.introMessageAuthor ?? null;
       }
 
       // ─── Prompt-type Quick Actions as Chat Pills ────────────────────────────
@@ -5229,9 +5469,9 @@
       // Silently ignore
     }
 
-    // No active conversation found — show intro message pill if configured
-    if (!conversationId && introMessageText && !isOpen) {
-      showIntroPill();
+    // No active conversation found — show greetings stack
+    if (!conversationId && !isOpen) {
+      renderGreetings();
     }
   }
 
@@ -5248,38 +5488,216 @@
     }
   }
 
-  function showIntroPill() {
-    const senderName =
-      introMessageAuthor?.name || config?.widget?.headerText || "Chat with us";
-    introPillTitle.textContent = senderName;
-    const text = introMessageText ?? "";
-    introPillDesc.textContent =
-      text.length > 120 ? text.substring(0, 120) + "..." : text;
+  // ─── Greetings (welcome + news cards) ───────────────────────────────────────
 
-    const avatarUrl = introMessageAuthor?.avatar
-      ? resolveUrl(introMessageAuthor.avatar)
-      : config?.widget?.avatarUrl
-        ? resolveUrl(config.widget.avatarUrl)
-        : null;
-    updatePillAvatar(avatarUrl);
-
-    const delay = (config?.introMessageDelay ?? 1) * 1000;
-    const duration = (config?.introMessageDuration ?? 15) * 1000;
-
-    if (introPillDelayTimer) clearTimeout(introPillDelayTimer);
-    introPillDelayTimer = setTimeout(() => {
-      introPillDelayTimer = null;
-      introPill.classList.remove("rm-intro-hidden");
-      introPill.classList.add("visible");
-    }, delay);
-
-    if (duration > 0) {
-      if (introPillTimer) clearTimeout(introPillTimer);
-      introPillTimer = setTimeout(() => {
-        introPill.classList.add("rm-intro-hidden");
-        introPillTimer = null;
-      }, delay + duration);
+  function getDismissedGreetingIds(): string[] {
+    try {
+      const raw = localStorage.getItem(getStorageKey("greetings_dismissed"));
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as unknown;
+      return Array.isArray(parsed)
+        ? parsed.filter((v): v is string => typeof v === "string")
+        : [];
+    } catch {
+      return [];
     }
+  }
+
+  function addDismissedGreetingId(id: string): void {
+    const set = new Set(getDismissedGreetingIds());
+    set.add(id);
+    try {
+      localStorage.setItem(
+        getStorageKey("greetings_dismissed"),
+        JSON.stringify([...set]),
+      );
+    } catch {
+      // localStorage may be unavailable
+    }
+  }
+
+  function isGreetingDismissed(id: string): boolean {
+    return getDismissedGreetingIds().includes(id);
+  }
+
+  function clearGreetingTimers(): void {
+    for (const timer of greetingTimers.values()) clearTimeout(timer);
+    for (const timer of greetingDurationTimers.values()) clearTimeout(timer);
+    greetingTimers.clear();
+    greetingDurationTimers.clear();
+  }
+
+  function buildGreetingCard(
+    greeting: GreetingPublic,
+    options: { force: boolean },
+  ): HTMLElement {
+    const card = document.createElement("div");
+    card.className = "rm-greeting-card";
+    card.setAttribute("data-greeting-id", greeting.id);
+
+    const bgStyle = config?.widget?.backgroundStyle || "solid";
+    card.dataset.bgStyle = bgStyle;
+
+    const isRich = Boolean(greeting.imageUrl) || Boolean(greeting.ctaText);
+    if (!isRich) card.classList.add("compact");
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "rm-greeting-close";
+    close.setAttribute("aria-label", "Dismiss");
+    close.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    close.onclick = (e) => {
+      e.stopPropagation();
+      dismissGreetingCard(card, greeting.id, !options.force);
+    };
+    card.appendChild(close);
+
+    if (greeting.imageUrl) {
+      const img = document.createElement("img");
+      img.className = "rm-greeting-image";
+      img.src = resolveUrl(greeting.imageUrl);
+      img.alt = "";
+      card.appendChild(img);
+    }
+
+    const body = document.createElement("div");
+    body.className = "rm-greeting-body";
+
+    if (!isRich) {
+      const avatarUrl = greeting.author?.avatar
+        ? resolveUrl(greeting.author.avatar)
+        : config?.widget?.avatarUrl
+          ? resolveUrl(config.widget.avatarUrl)
+          : null;
+      if (avatarUrl) {
+        const avatar = document.createElement("img");
+        avatar.className = "rm-greeting-avatar";
+        avatar.src = avatarUrl;
+        avatar.alt = "";
+        body.appendChild(avatar);
+      } else {
+        const fallback = document.createElement("div");
+        fallback.className = "rm-greeting-avatar-fallback";
+        fallback.innerHTML = ICONS.chat;
+        body.appendChild(fallback);
+      }
+    }
+
+    const text = document.createElement("div");
+    text.className = "rm-greeting-text";
+
+    const title = document.createElement("div");
+    title.className = "rm-greeting-title";
+    title.textContent = greeting.author?.name && !isRich
+      ? greeting.author.name
+      : greeting.title;
+    text.appendChild(title);
+
+    const desc = document.createElement("div");
+    desc.className = "rm-greeting-desc";
+    desc.textContent =
+      greeting.author?.name && !isRich
+        ? greeting.title
+        : greeting.description ?? "";
+    if (desc.textContent) text.appendChild(desc);
+
+    if (isRich && greeting.description) {
+      // already added above when author check fails
+    }
+
+    body.appendChild(text);
+
+    if (greeting.ctaText && greeting.ctaLink) {
+      const cta = document.createElement("a");
+      cta.className = "rm-greeting-cta";
+      cta.href = greeting.ctaLink;
+      cta.target = "_blank";
+      cta.rel = "noopener noreferrer";
+      cta.textContent = greeting.ctaText;
+      cta.onclick = () => {
+        addDismissedGreetingId(greeting.id);
+      };
+      text.appendChild(cta);
+    }
+
+    card.appendChild(body);
+
+    if (!isRich) {
+      card.onclick = () => toggleChatWidget();
+    }
+
+    return card;
+  }
+
+  function dismissGreetingCard(
+    card: HTMLElement,
+    id: string,
+    persist: boolean,
+  ): void {
+    if (persist) addDismissedGreetingId(id);
+    card.classList.add("dismissed");
+    const delayTimer = greetingTimers.get(id);
+    if (delayTimer) {
+      clearTimeout(delayTimer);
+      greetingTimers.delete(id);
+    }
+    const durationTimer = greetingDurationTimers.get(id);
+    if (durationTimer) {
+      clearTimeout(durationTimer);
+      greetingDurationTimers.delete(id);
+    }
+    setTimeout(() => {
+      if (card.parentElement) card.parentElement.removeChild(card);
+    }, 350);
+  }
+
+  function renderGreetings(options?: { force?: boolean }): void {
+    const force = options?.force ?? false;
+    clearGreetingTimers();
+    greetingStack.innerHTML = "";
+
+    if (isOpen) return;
+    if (hiddenByPageTargeting) return;
+    if (isBanned) return;
+
+    const visible = greetingsList.filter((g) => {
+      if (!g.enabled) return false;
+      if (!force && isGreetingDismissed(g.id)) return false;
+      if (g.allowedPages && g.allowedPages.length > 0) {
+        if (!matchesCurrentPage(g.allowedPages)) return false;
+      }
+      return true;
+    });
+
+    for (const greeting of visible) {
+      const card = buildGreetingCard(greeting, { force });
+      greetingStack.appendChild(card);
+
+      const delayMs = Math.max(0, greeting.delaySeconds) * 1000;
+      const showTimer = setTimeout(() => {
+        greetingTimers.delete(greeting.id);
+        card.classList.add("visible");
+      }, delayMs);
+      greetingTimers.set(greeting.id, showTimer);
+
+      if (greeting.durationSeconds > 0) {
+        const durationMs = greeting.durationSeconds * 1000;
+        const hideTimer = setTimeout(() => {
+          greetingDurationTimers.delete(greeting.id);
+          // Auto-hide does not persist dismissal — the card just disappears
+          // until the next navigation/render.
+          dismissGreetingCard(card, greeting.id, false);
+        }, delayMs + durationMs);
+        greetingDurationTimers.set(greeting.id, hideTimer);
+      }
+    }
+  }
+
+  function hideGreetingStack(): void {
+    clearGreetingTimers();
+    const cards = greetingStack.querySelectorAll(".rm-greeting-card");
+    cards.forEach((c) => c.classList.add("dismissed"));
   }
 
   // ─── Server Sync for Identity/Metadata ──────────────────────────────────────
@@ -5347,6 +5765,8 @@
       introPillTimer = null;
     }
     introPill.classList.add("rm-intro-hidden");
+    // Hide greeting stack without dismissing — re-shows when chat closes.
+    hideGreetingStack();
     // Lock body scroll on mobile to prevent background scrolling
     if (isMobileViewport()) {
       document.body.style.overflow = "hidden";
@@ -5397,6 +5817,10 @@
       inlineBar.classList.remove("hidden");
       inlineBar.classList.remove("chat-active");
       collapseInlineBar();
+    }
+    // Re-render greetings (skip dismissed ones) when no active conversation.
+    if (!conversationId) {
+      renderGreetings();
     }
   }
 
@@ -5453,6 +5877,29 @@
     openInquiryForm: () => {
       if (!isOpen) openChatWidget();
       showFormScreen();
+    },
+    showGreetings: () => {
+      renderGreetings({ force: true });
+    },
+    dismissGreeting: (id?: string) => {
+      if (id) {
+        const card = greetingStack.querySelector(
+          `[data-greeting-id="${id}"]`,
+        ) as HTMLElement | null;
+        if (card) {
+          dismissGreetingCard(card, id, true);
+        } else {
+          addDismissedGreetingId(id);
+        }
+        return;
+      }
+      const cards = Array.from(
+        greetingStack.querySelectorAll(".rm-greeting-card"),
+      ) as HTMLElement[];
+      for (const card of cards) {
+        const cardId = card.getAttribute("data-greeting-id");
+        if (cardId) dismissGreetingCard(card, cardId, true);
+      }
     },
   };
 

@@ -6,6 +6,7 @@ import {
   useQueryClient,
   type UseMutationResult,
 } from "@tanstack/react-query";
+import type { GreetingData } from "./use-greetings";
 
 export interface WidgetConfigData {
   id: string;
@@ -34,13 +35,6 @@ export interface AuthorOption {
   workTitle: string | null;
 }
 
-interface ProjectSettingsData {
-  introMessage?: string;
-  introMessageDelay?: number;
-  introMessageDuration?: number;
-  introMessageAuthorId?: string | null;
-}
-
 interface ProjectData {
   slug: string;
 }
@@ -61,10 +55,6 @@ export const BACKGROUND_STYLES = [
 export interface WidgetSettingsState {
   project?: ProjectData;
   form: Partial<WidgetConfigData>;
-  introMessage: string;
-  introMessageDelay: number;
-  introMessageDuration: number;
-  introMessageAuthorId: string | null;
   authors?: AuthorOption[];
   avatarUploading: boolean;
   bannerUploading: boolean;
@@ -77,12 +67,9 @@ export interface WidgetSettingsState {
   bannerInputRef: RefObject<HTMLInputElement | null>;
   iframeRef: RefObject<HTMLIFrameElement | null>;
   save: UseMutationResult<WidgetConfigData, Error, void>;
-  setIntroMessage: Dispatch<SetStateAction<string>>;
-  setIntroMessageDelay: Dispatch<SetStateAction<number>>;
-  setIntroMessageDuration: Dispatch<SetStateAction<number>>;
-  setIntroMessageAuthorId: Dispatch<SetStateAction<string | null>>;
   setPageInput: Dispatch<SetStateAction<string>>;
   setPreviewMode: Dispatch<SetStateAction<"home" | "chat">>;
+  setPreviewGreetings: (greetings: GreetingData[]) => void;
   updateForm: (updates: Partial<WidgetConfigData>) => void;
   handleImageUpload: (
     file: File,
@@ -93,14 +80,34 @@ export interface WidgetSettingsState {
   uploadBanner: (file: File) => Promise<void>;
 }
 
+interface PreviewGreetingPayload {
+  id: string;
+  enabled: boolean;
+  imageUrl: string | null;
+  title: string;
+  description: string | null;
+  ctaText: string | null;
+  ctaLink: string | null;
+  author: {
+    id: string;
+    name: string;
+    avatar: string | null;
+    workTitle: string | null;
+  } | null;
+  allowedPages: string[] | null;
+  delaySeconds: number;
+  durationSeconds: number;
+  sortOrder: number;
+}
+
 function buildPreviewHtml(options: {
   projectSlug: string;
   form: Partial<WidgetConfigData>;
-  introMessage: string;
-  introMessageDelay: number;
-  introMessageDuration: number;
+  greetings: PreviewGreetingPayload[];
   previewMode: "home" | "chat";
 }): string {
+  const firstGreeting = options.greetings[0] ?? null;
+
   const configPayload = {
     widget: {
       primaryColor: options.form.primaryColor ?? "#2563eb",
@@ -121,9 +128,17 @@ function buildPreviewHtml(options: {
       allowedPages: null,
     },
     quickActions: [],
-    introMessage: options.introMessage,
-    introMessageDelay: options.introMessageDelay,
-    introMessageDuration: options.introMessageDuration,
+    greetings: options.greetings,
+    introMessage: firstGreeting?.title ?? "",
+    introMessageAuthor: firstGreeting?.author
+      ? {
+          name: firstGreeting.author.name,
+          avatar: firstGreeting.author.avatar,
+          workTitle: firstGreeting.author.workTitle,
+        }
+      : null,
+    introMessageDelay: firstGreeting?.delaySeconds ?? 1,
+    introMessageDuration: firstGreeting?.durationSeconds ?? 15,
     botName: null,
     contactForm: null,
   };
@@ -153,6 +168,14 @@ function buildPreviewHtml(options: {
     }
     return origFetch.call(this, url, opts);
   };
+  // Reset dismissed greetings on each preview render so the popup re-shows.
+  try {
+    Object.keys(localStorage).forEach(function (k) {
+      if (k.indexOf('rm:') === 0 && k.indexOf(':greetings_dismissed') !== -1) {
+        localStorage.removeItem(k);
+      }
+    });
+  } catch (e) {}
 </script>
 <script src="https://widget.replymaven.com/widget-embed.js" data-project="${options.projectSlug}"></script>
 <script>
@@ -172,31 +195,17 @@ function buildPreviewHtml(options: {
 export function useWidgetSettings(projectId: string): WidgetSettingsState {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<Partial<WidgetConfigData>>({});
-  const [introMessage, setIntroMessage] = useState(
-    "Hi there! How can I help you today?",
-  );
-  const [introMessageDelay, setIntroMessageDelay] = useState(1);
-  const [introMessageDuration, setIntroMessageDuration] = useState(15);
-  const [introMessageAuthorId, setIntroMessageAuthorId] = useState<
-    string | null
-  >(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
   const [pageInput, setPageInput] = useState("");
   const [previewMode, setPreviewMode] = useState<"home" | "chat">("home");
-  const [
-    debouncedPreviewState,
-    setDebouncedPreviewState,
-  ] = useState<{
+  const [previewGreetings, setPreviewGreetings] = useState<GreetingData[]>([]);
+  const [debouncedPreviewState, setDebouncedPreviewState] = useState<{
     form: Partial<WidgetConfigData>;
-    introMessage: string;
-    introMessageDelay: number;
-    introMessageDuration: number;
+    greetings: GreetingData[];
   }>({
     form: {},
-    introMessage: "Hi there! How can I help you today?",
-    introMessageDelay: 1,
-    introMessageDuration: 15,
+    greetings: [],
   });
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -223,16 +232,6 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
     enabled: !!projectId,
   });
 
-  const { data: settingsData } = useQuery<ProjectSettingsData>({
-    queryKey: ["project-settings", projectId],
-    queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/settings`);
-      if (!res.ok) throw new Error("Failed to fetch project settings");
-      return res.json();
-    },
-    enabled: !!projectId,
-  });
-
   const { data: authors } = useQuery<AuthorOption[]>({
     queryKey: ["team-authors"],
     queryFn: async () => {
@@ -249,27 +248,12 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
   }, [data]);
 
   useEffect(() => {
-    if (settingsData?.introMessage != null) {
-      setIntroMessage(settingsData.introMessage);
-    }
-    if (settingsData?.introMessageDelay != null) {
-      setIntroMessageDelay(settingsData.introMessageDelay);
-    }
-    if (settingsData?.introMessageDuration != null) {
-      setIntroMessageDuration(settingsData.introMessageDuration);
-    }
-    if (settingsData?.introMessageAuthorId !== undefined) {
-      setIntroMessageAuthorId(settingsData.introMessageAuthorId ?? null);
-    }
-  }, [settingsData]);
-
-  useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedPreviewState({ form, introMessage, introMessageDelay, introMessageDuration });
+      setDebouncedPreviewState({ form, greetings: previewGreetings });
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [form, introMessage, introMessageDelay, introMessageDuration]);
+  }, [form, previewGreetings]);
 
   useEffect(() => {
     if (form.position === "center-inline") {
@@ -280,45 +264,56 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
   }, [form.position]);
 
   const previewHtml = useMemo(() => {
+    const authorMap = new Map(
+      (authors ?? []).map((a) => [
+        a.id,
+        {
+          id: a.id,
+          name: a.name,
+          avatar: a.avatar,
+          workTitle: a.workTitle,
+        },
+      ]),
+    );
+
+    const previewPayload: PreviewGreetingPayload[] = debouncedPreviewState.greetings
+      .filter((g) => g.enabled)
+      .map((g) => ({
+        id: g.id,
+        enabled: g.enabled,
+        imageUrl: g.imageUrl,
+        title: g.title,
+        description: g.description,
+        ctaText: g.ctaText,
+        ctaLink: g.ctaLink,
+        author: g.authorId ? authorMap.get(g.authorId) ?? null : null,
+        allowedPages: g.allowedPages,
+        delaySeconds: g.delaySeconds,
+        durationSeconds: g.durationSeconds,
+        sortOrder: g.sortOrder,
+      }));
+
     return buildPreviewHtml({
       projectSlug: project?.slug ?? "preview",
       form: debouncedPreviewState.form,
-      introMessage: debouncedPreviewState.introMessage,
-      introMessageDelay: debouncedPreviewState.introMessageDelay,
-      introMessageDuration: debouncedPreviewState.introMessageDuration,
+      greetings: previewPayload,
       previewMode,
     });
-  }, [debouncedPreviewState, previewMode, project?.slug]);
+  }, [debouncedPreviewState, previewMode, project?.slug, authors]);
 
   const save = useMutation<WidgetConfigData, Error, void>({
     mutationFn: async () => {
-      const [widgetRes, settingsRes] = await Promise.all([
-        fetch(`/api/projects/${projectId}/widget-config`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
-        }),
-        fetch(`/api/projects/${projectId}/settings`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            introMessage,
-            introMessageDelay,
-            introMessageDuration,
-            introMessageAuthorId,
-          }),
-        }),
-      ]);
+      const res = await fetch(`/api/projects/${projectId}/widget-config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
 
-      if (!widgetRes.ok) throw new Error("Failed to save widget config");
-      if (!settingsRes.ok) throw new Error("Failed to save widget settings");
-      return widgetRes.json();
+      if (!res.ok) throw new Error("Failed to save widget config");
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["widget-config", projectId] });
-      queryClient.invalidateQueries({
-        queryKey: ["project-settings", projectId],
-      });
     },
   });
 
@@ -364,10 +359,6 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
   return {
     project,
     form,
-    introMessage,
-    introMessageDelay,
-    introMessageDuration,
-    introMessageAuthorId,
     authors,
     avatarUploading,
     bannerUploading,
@@ -380,12 +371,9 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
     bannerInputRef,
     iframeRef,
     save,
-    setIntroMessage,
-    setIntroMessageDelay,
-    setIntroMessageDuration,
-    setIntroMessageAuthorId,
     setPageInput,
     setPreviewMode,
+    setPreviewGreetings,
     updateForm,
     handleImageUpload,
     uploadAvatar,

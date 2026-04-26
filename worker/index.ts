@@ -71,6 +71,9 @@ import {
   usageLogQuerySchema,
   sendMessageAsEmailSchema,
   banVisitorSchema,
+  createGreetingSchema,
+  updateGreetingSchema,
+  reorderGreetingsSchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -2836,6 +2839,128 @@ const app = new Hono<HonoAppContext>()
     const widgetService = new WidgetService(db);
     const deleted = await widgetService.deleteQuickAction(
       c.req.param("actionId"),
+      project.id,
+    );
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true });
+  })
+
+  // ─── Greetings ───────────────────────────────────────────────────────────────
+  .get("/api/projects/:id/greetings", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const rows = await widgetService.getGreetings(project.id);
+    const greetings = rows.map((row) => ({
+      id: row.id,
+      enabled: row.enabled,
+      imageUrl: row.imageUrl,
+      title: row.title,
+      description: row.description,
+      ctaText: row.ctaText,
+      ctaLink: row.ctaLink,
+      authorId: row.authorId,
+      allowedPages: row.allowedPages
+        ? (JSON.parse(row.allowedPages) as string[])
+        : null,
+      delaySeconds: row.delaySeconds,
+      durationSeconds: row.durationSeconds,
+      sortOrder: row.sortOrder,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+    return c.json(greetings);
+  })
+  .post("/api/projects/:id/greetings", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(createGreetingSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+
+    const existing = await widgetService.getGreetings(project.id);
+    if (existing.length >= 50) {
+      return c.json({ error: "Maximum of 50 greetings allowed" }, 400);
+    }
+
+    const row = await widgetService.createGreeting(project.id, parsed.data);
+    return c.json(row, 201);
+  })
+  .patch("/api/projects/:id/greetings/reorder", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(reorderGreetingsSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    await widgetService.reorderGreetings(project.id, parsed.data.ids);
+    return c.json({ ok: true });
+  })
+  .patch("/api/projects/:id/greetings/:greetingId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateGreetingSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const updated = await widgetService.updateGreeting(
+      c.req.param("greetingId"),
+      project.id,
+      parsed.data,
+    );
+    if (!updated) return c.json({ error: "Not found" }, 404);
+    return c.json(updated);
+  })
+  .delete("/api/projects/:id/greetings/:greetingId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const deleted = await widgetService.deleteGreeting(
+      c.req.param("greetingId"),
       project.id,
     );
     if (!deleted) return c.json({ error: "Not found" }, 404);

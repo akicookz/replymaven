@@ -6,13 +6,59 @@ import {
   projectSettings,
   inquiryConfig,
   inquiries,
+  greetings,
   type WidgetConfigRow,
   type QuickActionRow,
   type NewQuickActionRow,
   type InquiryConfigRow,
   type InquiryRow,
+  type GreetingRow,
+  type NewGreetingRow,
 } from "../db";
 import { users } from "../db/auth.schema";
+
+export interface GreetingPublic {
+  id: string;
+  enabled: boolean;
+  imageUrl: string | null;
+  title: string;
+  description: string | null;
+  ctaText: string | null;
+  ctaLink: string | null;
+  author: {
+    id: string;
+    name: string;
+    avatar: string | null;
+    workTitle: string | null;
+  } | null;
+  allowedPages: string[] | null;
+  delaySeconds: number;
+  durationSeconds: number;
+  sortOrder: number;
+}
+
+function parseAllowedPages(raw: string | null): string[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      const result = parsed
+        .map((v) => (typeof v === "string" ? v : null))
+        .filter((v): v is string => Boolean(v));
+      return result.length ? result : null;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function serializeAllowedPages(value: string[] | null | undefined): string | null {
+  if (!value) return null;
+  const cleaned = value.map((v) => v.trim()).filter(Boolean);
+  if (!cleaned.length) return null;
+  return JSON.stringify(cleaned);
+}
 
 export function parseInquiryData(raw: string): Record<string, string> {
   try {
@@ -337,10 +383,203 @@ export class WidgetService {
     return ids.length;
   }
 
+  // ─── Greetings ──────────────────────────────────────────────────────────────
+
+  async getGreetings(projectId: string): Promise<GreetingRow[]> {
+    return this.db
+      .select()
+      .from(greetings)
+      .where(eq(greetings.projectId, projectId))
+      .orderBy(asc(greetings.sortOrder), asc(greetings.createdAt));
+  }
+
+  async getGreetingById(
+    id: string,
+    projectId: string,
+  ): Promise<GreetingRow | null> {
+    const rows = await this.db
+      .select()
+      .from(greetings)
+      .where(eq(greetings.id, id))
+      .limit(1);
+    if (!rows[0] || rows[0].projectId !== projectId) return null;
+    return rows[0];
+  }
+
+  async createGreeting(
+    projectId: string,
+    data: {
+      enabled?: boolean;
+      imageUrl?: string | null;
+      title: string;
+      description?: string | null;
+      ctaText?: string | null;
+      ctaLink?: string | null;
+      authorId?: string | null;
+      allowedPages?: string[] | null;
+      delaySeconds?: number;
+      durationSeconds?: number;
+      sortOrder?: number;
+    },
+  ): Promise<GreetingRow> {
+    const id = crypto.randomUUID();
+
+    let sortOrder = data.sortOrder;
+    if (sortOrder == null) {
+      const existing = await this.getGreetings(projectId);
+      sortOrder = existing.length;
+    }
+
+    const insertValues: NewGreetingRow = {
+      id,
+      projectId,
+      enabled: data.enabled ?? true,
+      imageUrl: data.imageUrl ?? null,
+      title: data.title,
+      description: data.description ?? null,
+      ctaText: data.ctaText ?? null,
+      ctaLink: data.ctaLink ?? null,
+      authorId: data.authorId ?? null,
+      allowedPages: serializeAllowedPages(data.allowedPages),
+      delaySeconds: data.delaySeconds ?? 3,
+      durationSeconds: data.durationSeconds ?? 15,
+      sortOrder,
+    };
+
+    await this.db.insert(greetings).values(insertValues);
+    return (await this.getGreetingById(id, projectId))!;
+  }
+
+  async updateGreeting(
+    id: string,
+    projectId: string,
+    updates: {
+      enabled?: boolean;
+      imageUrl?: string | null;
+      title?: string;
+      description?: string | null;
+      ctaText?: string | null;
+      ctaLink?: string | null;
+      authorId?: string | null;
+      allowedPages?: string[] | null;
+      delaySeconds?: number;
+      durationSeconds?: number;
+      sortOrder?: number;
+    },
+  ): Promise<GreetingRow | null> {
+    const existing = await this.getGreetingById(id, projectId);
+    if (!existing) return null;
+
+    const setData: Record<string, unknown> = {};
+    if (updates.enabled !== undefined) setData.enabled = updates.enabled;
+    if (updates.imageUrl !== undefined) setData.imageUrl = updates.imageUrl;
+    if (updates.title !== undefined) setData.title = updates.title;
+    if (updates.description !== undefined)
+      setData.description = updates.description;
+    if (updates.ctaText !== undefined) setData.ctaText = updates.ctaText;
+    if (updates.ctaLink !== undefined) setData.ctaLink = updates.ctaLink;
+    if (updates.authorId !== undefined) setData.authorId = updates.authorId;
+    if (updates.allowedPages !== undefined)
+      setData.allowedPages = serializeAllowedPages(updates.allowedPages);
+    if (updates.delaySeconds !== undefined)
+      setData.delaySeconds = updates.delaySeconds;
+    if (updates.durationSeconds !== undefined)
+      setData.durationSeconds = updates.durationSeconds;
+    if (updates.sortOrder !== undefined) setData.sortOrder = updates.sortOrder;
+
+    await this.db.update(greetings).set(setData).where(eq(greetings.id, id));
+
+    return this.getGreetingById(id, projectId);
+  }
+
+  async deleteGreeting(id: string, projectId: string): Promise<boolean> {
+    const existing = await this.getGreetingById(id, projectId);
+    if (!existing) return false;
+    await this.db.delete(greetings).where(eq(greetings.id, id));
+    return true;
+  }
+
+  async reorderGreetings(projectId: string, ids: string[]): Promise<void> {
+    const existing = await this.getGreetings(projectId);
+    const validIds = new Set(existing.map((g) => g.id));
+    const filtered = ids.filter((id) => validIds.has(id));
+
+    for (let i = 0; i < filtered.length; i++) {
+      await this.db
+        .update(greetings)
+        .set({ sortOrder: i })
+        .where(eq(greetings.id, filtered[i]!));
+    }
+  }
+
+  async getEnabledGreetingsWithAuthors(
+    projectId: string,
+  ): Promise<GreetingPublic[]> {
+    const rows = await this.db
+      .select()
+      .from(greetings)
+      .where(
+        and(eq(greetings.projectId, projectId), eq(greetings.enabled, true)),
+      )
+      .orderBy(asc(greetings.sortOrder), asc(greetings.createdAt));
+
+    if (rows.length === 0) return [];
+
+    const authorIds = Array.from(
+      new Set(
+        rows
+          .map((r) => r.authorId)
+          .filter((v): v is string => Boolean(v)),
+      ),
+    );
+
+    const authorMap = new Map<
+      string,
+      { id: string; name: string; avatar: string | null; workTitle: string | null }
+    >();
+
+    if (authorIds.length > 0) {
+      const authorRows = await this.db
+        .select({
+          id: users.id,
+          name: users.name,
+          image: users.image,
+          profilePicture: users.profilePicture,
+          workTitle: users.workTitle,
+        })
+        .from(users)
+        .where(inArray(users.id, authorIds));
+
+      for (const a of authorRows) {
+        authorMap.set(a.id, {
+          id: a.id,
+          name: a.name,
+          avatar: a.profilePicture ?? a.image,
+          workTitle: a.workTitle,
+        });
+      }
+    }
+
+    return rows.map((row) => ({
+      id: row.id,
+      enabled: row.enabled,
+      imageUrl: row.imageUrl,
+      title: row.title,
+      description: row.description,
+      ctaText: row.ctaText,
+      ctaLink: row.ctaLink,
+      author: row.authorId ? authorMap.get(row.authorId) ?? null : null,
+      allowedPages: parseAllowedPages(row.allowedPages),
+      delaySeconds: row.delaySeconds,
+      durationSeconds: row.durationSeconds,
+      sortOrder: row.sortOrder,
+    }));
+  }
+
   // ─── Full Widget Config for Embed ───────────────────────────────────────────
 
   async getFullWidgetConfig(projectId: string) {
-    const [config, actions, settings, formConfig] =
+    const [config, actions, settings, formConfig, greetingList] =
       await Promise.all([
         this.getWidgetConfig(projectId),
         this.getQuickActions(projectId),
@@ -350,46 +589,36 @@ export class WidgetService {
           .where(eq(projectSettings.projectId, projectId))
           .limit(1),
         this.getInquiryConfig(projectId),
+        this.getEnabledGreetingsWithAuthors(projectId),
       ]);
 
-    // Resolve intro message author
-    let introMessageAuthor: {
-      name: string;
-      avatar: string | null;
-      workTitle: string | null;
-    } | null = null;
-
-    const authorId = settings[0]?.introMessageAuthorId;
-    if (authorId) {
-      const authorRows = await this.db
-        .select({
-          name: users.name,
-          image: users.image,
-          profilePicture: users.profilePicture,
-          workTitle: users.workTitle,
-        })
-        .from(users)
-        .where(eq(users.id, authorId))
-        .limit(1);
-
-      if (authorRows[0]) {
-        const a = authorRows[0];
-        introMessageAuthor = {
-          name: a.name,
-          avatar: a.profilePicture ?? a.image,
-          workTitle: a.workTitle,
-        };
-      }
-    }
+    // Back-compat shim: keep legacy intro fields populated for cached widget
+    // bundles that still read them. New widget reads `greetings` instead.
+    const firstGreeting = greetingList[0] ?? null;
+    const legacyAuthor = firstGreeting?.author ?? null;
 
     return {
       widget: config,
       quickActions: actions,
+      greetings: greetingList,
+      // Legacy intro fields — derived from first greeting if present, else project_settings
       introMessage:
-        settings[0]?.introMessage ?? "Hi there! How can I help you today?",
-      introMessageAuthor,
-      introMessageDelay: settings[0]?.introMessageDelay ?? 1,
-      introMessageDuration: settings[0]?.introMessageDuration ?? 15,
+        firstGreeting?.title ??
+        settings[0]?.introMessage ??
+        "Hi there! How can I help you today?",
+      introMessageAuthor: legacyAuthor
+        ? {
+            name: legacyAuthor.name,
+            avatar: legacyAuthor.avatar,
+            workTitle: legacyAuthor.workTitle,
+          }
+        : null,
+      introMessageDelay:
+        firstGreeting?.delaySeconds ?? settings[0]?.introMessageDelay ?? 1,
+      introMessageDuration:
+        firstGreeting?.durationSeconds ??
+        settings[0]?.introMessageDuration ??
+        15,
       botName: settings[0]?.botName ?? null,
       agentName: settings[0]?.agentName ?? null,
       companyName: settings[0]?.companyName ?? null,

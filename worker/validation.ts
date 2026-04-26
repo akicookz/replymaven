@@ -397,6 +397,51 @@ export const banVisitorSchema = z.object({
   expiresAt: z.string().datetime().nullable().optional(),
 });
 
+// ─── Greetings ────────────────────────────────────────────────────────────────
+
+const allowedPagesArraySchema = z
+  .array(z.string().min(1).max(500))
+  .max(50)
+  .nullable()
+  .optional();
+
+export const createGreetingSchema = z.object({
+  enabled: z.boolean().optional(),
+  imageUrl: z.string().max(500).nullable().optional(),
+  title: z.string().min(1, "Title is required").max(120),
+  description: z.string().max(500).nullable().optional(),
+  ctaText: z.string().max(40).nullable().optional(),
+  ctaLink: z
+    .string()
+    .url("CTA link must be a valid URL")
+    .max(2048)
+    .nullable()
+    .optional(),
+  authorId: z.string().max(100).nullable().optional(),
+  allowedPages: allowedPagesArraySchema,
+  delaySeconds: z.number().int().min(0).max(60).optional(),
+  durationSeconds: z.number().int().min(0).max(120).optional(),
+  sortOrder: z.number().int().min(0).optional(),
+});
+
+export const updateGreetingSchema = z.object({
+  enabled: z.boolean().optional(),
+  imageUrl: z.string().max(500).nullable().optional(),
+  title: z.string().min(1).max(120).optional(),
+  description: z.string().max(500).nullable().optional(),
+  ctaText: z.string().max(40).nullable().optional(),
+  ctaLink: z.string().url().max(2048).nullable().optional(),
+  authorId: z.string().max(100).nullable().optional(),
+  allowedPages: allowedPagesArraySchema,
+  delaySeconds: z.number().int().min(0).max(60).optional(),
+  durationSeconds: z.number().int().min(0).max(120).optional(),
+  sortOrder: z.number().int().min(0).optional(),
+});
+
+export const reorderGreetingsSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(50),
+});
+
 // ─── Guidelines (SOPs) ───────────────────────────────────────────────────────
 
 export const createGuidelineSchema = z.object({

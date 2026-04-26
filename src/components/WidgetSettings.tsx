@@ -165,31 +165,6 @@ export function WidgetPreviewPanel({
 }: WidgetPreviewPanelProps) {
   return (
     <>
-      {showEmbedSnippet && embedSnippet ? (
-        <Card className={WIDGET_CARD_CLASS_NAME}>
-          <CardHeader>
-            <CardTitle className="text-sm">Embed</CardTitle>
-            <CardDescription>
-              Add this script tag to your website.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="relative">
-              <pre className="bg-muted/50 rounded-xl p-3 text-xs font-mono overflow-x-auto">
-                {embedSnippet}
-              </pre>
-              <button
-                onClick={() => navigator.clipboard.writeText(embedSnippet)}
-                className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-background hover:bg-muted"
-                title="Copy"
-              >
-                <Copy className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       <Card className={WIDGET_CARD_CLASS_NAME}>
         <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
           <div>
@@ -240,6 +215,31 @@ export function WidgetPreviewPanel({
           </div>
         </CardContent>
       </Card>
+
+      {showEmbedSnippet && embedSnippet ? (
+        <Card className={WIDGET_CARD_CLASS_NAME}>
+          <CardHeader>
+            <CardTitle className="text-sm">Embed</CardTitle>
+            <CardDescription>
+              Add this script tag to your website.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="relative">
+              <pre className="bg-muted/50 rounded-xl p-3 text-xs font-mono overflow-x-auto">
+                {embedSnippet}
+              </pre>
+              <button
+                onClick={() => navigator.clipboard.writeText(embedSnippet)}
+                className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-background hover:bg-muted"
+                title="Copy"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
     </>
   );
 }
