@@ -7,6 +7,7 @@ import { TelegramService } from "../../services/telegram-service";
 import { type ToolService } from "../../services/tool-service";
 import { WidgetService } from "../../services/widget-service";
 import { type AppEnv } from "../../types";
+import { broadcastStatusChange } from "../../realtime/broadcast";
 import { buildSupportSystemPrompt } from "../prompt/build-support-system-prompt";
 import {
   createLanguageModel,
@@ -1131,6 +1132,12 @@ export async function runPlannerLoop(
         await options.chatService.updateConversationStatus(
           options.conversation.id,
           options.project.id,
+          "waiting_agent",
+        );
+        broadcastStatusChange(
+          options.env,
+          options.executionCtx,
+          options.conversation.id,
           "waiting_agent",
         );
       } catch (error) {

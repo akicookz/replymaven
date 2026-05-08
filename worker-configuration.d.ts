@@ -17,6 +17,8 @@ interface Env {
   AI: Ai;
   ASSETS: Fetcher;
   CRAWL_QUEUE: Queue<CrawlMessage>;
+  CONVERSATION_DO: DurableObjectNamespace;
+  INTERNAL_BROADCAST_SECRET: string;
   BETTER_AUTH_URL: string;
   BETTER_AUTH_SECRET: string;
   GOOGLE_CLIENT_ID: string;

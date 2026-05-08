@@ -300,6 +300,14 @@ export const conversations = sqliteTable(
     index("idx_conversations_project").on(table.projectId),
     index("idx_conversations_visitor").on(table.visitorId),
     index("idx_conversations_status").on(table.status),
+    index("idx_conversations_visitor_name_lower").on(
+      table.projectId,
+      sql`LOWER(${table.visitorName})`,
+    ),
+    index("idx_conversations_visitor_email_lower").on(
+      table.projectId,
+      sql`LOWER(${table.visitorEmail})`,
+    ),
   ],
 );
 

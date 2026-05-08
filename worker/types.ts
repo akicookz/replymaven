@@ -56,6 +56,8 @@ export interface AppEnv extends Env {
   CONVERSATIONS_CACHE: KVNamespace;
   AI: Ai;
   CRAWL_QUEUE: Queue<CrawlMessage>;
+  CONVERSATION_DO: DurableObjectNamespace;
+  INTERNAL_BROADCAST_SECRET: string;
 }
 
 export interface HonoAppContext {

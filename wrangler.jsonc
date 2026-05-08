@@ -53,6 +53,20 @@
     "binding": "AI",
     "remote": true,
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CONVERSATION_DO",
+        "class_name": "ConversationDO",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1-conversation-do",
+      "new_sqlite_classes": ["ConversationDO"],
+    },
+  ],
   "queues": {
     "consumers": [
       {

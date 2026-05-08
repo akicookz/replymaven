@@ -33,6 +33,16 @@ import { buildToolRegistry } from "./chat-runtime/tools/build-tool-registry";
 import { toToolDefinition } from "./chat-runtime/types";
 import { logError, logInfo } from "./observability";
 import {
+  broadcastClosed,
+  broadcastMessageNew,
+  broadcastStatusChange,
+} from "./realtime/broadcast";
+import {
+  handleDashboardWsUpgrade,
+  handleWidgetWsUpgrade,
+} from "./realtime/upgrade";
+export { ConversationDO } from "./durable-objects/conversation-do";
+import {
   createProjectSchema,
   updateProjectSchema,
   updateProjectSettingsSchema,
@@ -130,6 +140,16 @@ function validate<T>(
   if (result.success) return { success: true, data: result.data as T };
   const message = result.error?.issues?.[0]?.message ?? "Validation failed";
   return { success: false, error: message };
+}
+
+function isConversationStale(
+  conv: { status: string; lastActivityAt: Date | null; createdAt: Date },
+  autoCloseMinutes: number,
+): boolean {
+  if (conv.status === "closed") return false;
+  const last =
+    conv.lastActivityAt?.getTime() ?? conv.createdAt.getTime();
+  return last < Date.now() - autoCloseMinutes * 60_000;
 }
 
 function buildInquiryConversationMessage(
@@ -530,6 +550,11 @@ const app = new Hono<HonoAppContext>()
     });
   })
 
+  // ─── Widget WebSocket Upgrade ──────────────────────────────────────────────
+  .get("/api/widget/:projectSlug/conversations/:id/ws", (c) =>
+    handleWidgetWsUpgrade(c),
+  )
+
   // ─── Visitor Heartbeat ───────────────────────────────────────────────────────
   .post("/api/widget/:projectSlug/conversations/:id/heartbeat", async (c) => {
     const ip = getClientIp(c);
@@ -837,13 +862,19 @@ const app = new Hono<HonoAppContext>()
 
     const inquiryMessage = buildInquiryConversationMessage(inquiryData);
 
-    await chatService.addMessage({
+    const inquiryVisitorMessage = await chatService.addMessage({
       conversationId: conversation.id,
       role: "visitor",
       content: inquiryMessage,
       imageUrl: null,
       sources: null,
     });
+    broadcastMessageNew(
+      c.env,
+      c.executionCtx,
+      conversation.id,
+      inquiryVisitorMessage,
+    );
 
     // Notify via Telegram if configured
     const settings = await projectService.getSettings(project.id);
@@ -1063,6 +1094,7 @@ const app = new Hono<HonoAppContext>()
           await chatService.updateConversation(conversationId, projectId, {
             metadata: JSON.stringify({ agentHandbackInstructions: null }),
           });
+          broadcastStatusChange(c.env, c.executionCtx, conversationId, "active");
           await telegramService.sendMessage(
             tgSettings.telegramBotToken,
             tgSettings.telegramChatId,
@@ -1088,6 +1120,8 @@ const app = new Hono<HonoAppContext>()
             "closed",
             "resolved",
           );
+          broadcastStatusChange(c.env, c.executionCtx, conversationId, "closed");
+          broadcastClosed(c.env, c.executionCtx, conversationId, "resolved");
 
           // Auto-draft canned response in background
           c.executionCtx.waitUntil(
@@ -1125,6 +1159,8 @@ const app = new Hono<HonoAppContext>()
             "closed",
             "spam",
           );
+          broadcastStatusChange(c.env, c.executionCtx, conversationId, "closed");
+          broadcastClosed(c.env, c.executionCtx, conversationId, "spam");
 
           await telegramService.sendMessage(
             tgSettings.telegramBotToken,
@@ -1170,12 +1206,14 @@ const app = new Hono<HonoAppContext>()
           );
 
           // Store the bot response as a message
-          await chatService.addMessage({
+          const botMessage = await chatService.addMessage({
             conversationId,
             role: "bot",
             content: responseText,
             senderName: projectSettings?.botName ?? null,
           });
+          broadcastStatusChange(c.env, c.executionCtx, conversationId, "active");
+          broadcastMessageNew(c.env, c.executionCtx, conversationId, botMessage);
 
           await telegramService.sendMessage(
             tgSettings.telegramBotToken,
@@ -1190,6 +1228,7 @@ const app = new Hono<HonoAppContext>()
             projectId,
             "active",
           );
+          broadcastStatusChange(c.env, c.executionCtx, conversationId, "active");
 
           if (result.instructions) {
             await chatService.updateConversation(conversationId, projectId, {
@@ -1219,7 +1258,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Normal agent reply — store and forward to visitor
-    await chatService.addMessage({
+    const agentMessage = await chatService.addMessage({
       conversationId,
       role: "agent",
       content: message.text,
@@ -1229,6 +1268,14 @@ const app = new Hono<HonoAppContext>()
     await chatService.updateConversationStatus(
       conversationId,
       projectId,
+      "agent_replied",
+    );
+
+    broadcastMessageNew(c.env, c.executionCtx, conversationId, agentMessage);
+    broadcastStatusChange(
+      c.env,
+      c.executionCtx,
+      conversationId,
       "agent_replied",
     );
 
@@ -1436,14 +1483,21 @@ const app = new Hono<HonoAppContext>()
 
     if (conversation.status === "closed") {
       await chatService.reopenConversation(conversation.id, project.id);
+      broadcastStatusChange(c.env, c.executionCtx, conversation.id, "active");
     }
 
-    await chatService.addMessage({
+    const inboundEmailMessage = await chatService.addMessage({
       conversationId: conversation.id,
       role: "visitor",
       content: cleanedText,
       sources: null,
     });
+    broadcastMessageNew(
+      c.env,
+      c.executionCtx,
+      conversation.id,
+      inboundEmailMessage,
+    );
 
     // If in agent mode, forward to Telegram
     if (
@@ -4002,6 +4056,7 @@ const app = new Hono<HonoAppContext>()
       100,
     );
     const offset = parseInt(c.req.query("offset") ?? "0", 10) || 0;
+    const searchQuery = c.req.query("q")?.trim() || undefined;
     const chatService = new ChatService(db);
 
     // Lazy auto-close stale conversations (single query, no double fetch)
@@ -4011,6 +4066,7 @@ const app = new Hono<HonoAppContext>()
       limit,
       offset,
       statusFilter,
+      searchQuery,
     );
     if (settings?.autoCloseMinutes && statusFilter !== "closed") {
       const closedIds = await chatService.checkAndCloseStaleForProject(
@@ -4026,9 +4082,16 @@ const app = new Hono<HonoAppContext>()
         }
       }
     }
-    const counts = await chatService.getConversationCounts(project.id);
+    const [counts, lastMsgMap] = await Promise.all([
+      chatService.getConversationCounts(project.id),
+      chatService.getLastMessagesByConversationIds(convos.map((c) => c.id)),
+    ]);
+    const conversationsWithPreview = convos.map((c) => ({
+      ...c,
+      lastMessage: lastMsgMap.get(c.id) ?? null,
+    }));
     return c.json({
-      conversations: convos,
+      conversations: conversationsWithPreview,
       counts,
       hasMore: convos.length === limit,
       serverTime: Date.now(),
@@ -4065,9 +4128,19 @@ const app = new Hono<HonoAppContext>()
       chatService.getConversationUpdatesSince(project.id, new Date(since)),
       chatService.getConversationCounts(project.id),
     ]);
+    const lastMsgMap = await chatService.getLastMessagesByConversationIds(
+      updates.map((u) => u.id),
+    );
+    const updatesWithPreview = updates.map((u) => ({
+      ...u,
+      lastMessage: lastMsgMap.get(u.id) ?? null,
+    }));
 
-    return c.json({ updates, counts, serverTime });
+    return c.json({ updates: updatesWithPreview, counts, serverTime });
   })
+  .get("/api/projects/:id/conversations/:convId/ws", (c) =>
+    handleDashboardWsUpgrade(c),
+  )
   .get("/api/projects/:id/conversations/:convId", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -4079,47 +4152,87 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
+    // Wave 1: conversation row + settings in parallel.
     const chatService = new ChatService(db);
-    let conversation = await chatService.getConversationById(
-      c.req.param("convId"),
-      project.id,
-    );
+    const [conversation, settings] = await Promise.all([
+      chatService.getConversationById(c.req.param("convId"), project.id),
+      projectService.getSettings(project.id),
+    ]);
     if (!conversation) {
       return c.json({ error: "Not found" }, 404);
     }
 
-    // Fetch settings once (used for auto-close check + botName/agentName)
-    const settings = await projectService.getSettings(project.id);
-
-    // Lazy auto-close check
-    if (conversation.status !== "closed") {
-      if (settings?.autoCloseMinutes) {
-        const result = await chatService.checkAndCloseStale(
-          conversation.id,
-          project.id,
-          settings.autoCloseMinutes,
-        );
-        if (result.closed && result.conversation) {
-          conversation = result.conversation;
-          c.executionCtx.waitUntil(
-            triggerAutoRefinementIfEnabled({
+    // Defer the stale-close check off the hot path. The user reads the live
+    // conversation immediately; the WS broadcast pushes the closed status
+    // moments later if it flips.
+    if (
+      conversation.status !== "closed" &&
+      settings?.autoCloseMinutes &&
+      isConversationStale(conversation, settings.autoCloseMinutes)
+    ) {
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            await chatService.updateConversationStatus(
+              conversation.id,
+              project.id,
+              "closed",
+              "ended",
+            );
+            broadcastStatusChange(
+              c.env,
+              c.executionCtx,
+              conversation.id,
+              "closed",
+            );
+            broadcastClosed(
+              c.env,
+              c.executionCtx,
+              conversation.id,
+              "ended",
+            );
+            await triggerAutoRefinementIfEnabled({
               projectId: project.id,
               conversationId: conversation.id,
               db,
               env: c.env,
               kv: c.env.CONVERSATIONS_CACHE,
               source: "stale_auto_close",
-            }),
-          );
-        }
-      }
+            });
+          } catch {
+            // best-effort
+          }
+        })(),
+      );
     }
 
+    // Parse metadata once for the inquiry lookup decision.
+    let inquiryId: string | null = null;
+    try {
+      const metadata = conversation.metadata
+        ? (JSON.parse(conversation.metadata as string) as Record<string, unknown>)
+        : {};
+      if (typeof metadata.teamRequestSubmissionId === "string") {
+        inquiryId = metadata.teamRequestSubmissionId;
+      }
+    } catch {
+      // ignore
+    }
+
+    // Wave 2: paginated messages + (optional) inquiry, in parallel.
     const toolService = new ToolService(db);
-    const [msgs, toolExecs] = await Promise.all([
-      chatService.getMessages(conversation.id),
-      toolService.getExecutionsByConversation(conversation.id),
+    const widgetService = new WidgetService(db);
+    const [{ messages: msgs, hasMore }, inquiryRow] = await Promise.all([
+      chatService.getRecentMessages(conversation.id, 30),
+      inquiryId
+        ? widgetService.getInquiryById(inquiryId, project.id)
+        : Promise.resolve(null),
     ]);
+
+    // Wave 3: tool executions only for messages we're returning.
+    const toolExecs = await toolService.getExecutionsByMessageIds(
+      msgs.map((m) => m.id),
+    );
 
     // Group tool executions by messageId and attach to corresponding messages
     const execsByMessageId = new Map<string, typeof toolExecs>();
@@ -4148,43 +4261,97 @@ const app = new Hono<HonoAppContext>()
         })) ?? [],
     }));
 
-    // Fetch associated inquiry if one was created from this conversation
     let inquiry: {
       id: string;
       data: Record<string, string>;
       status: string;
       createdAt: number | Date;
     } | null = null;
-    try {
-      const metadata = conversation.metadata
-        ? JSON.parse(conversation.metadata as string)
-        : {};
-      if (metadata.teamRequestSubmissionId) {
-        const widgetService = new WidgetService(db);
-        const inq = await widgetService.getInquiryById(
-          metadata.teamRequestSubmissionId,
-          project.id,
-        );
-        if (inq) {
-          inquiry = {
-            id: inq.id,
-            data: inq.data ? JSON.parse(inq.data as string) : {},
-            status: inq.status,
-            createdAt: inq.createdAt,
-          };
-        }
-      }
-    } catch {
-      // Ignore metadata parsing errors
+    if (inquiryRow) {
+      inquiry = {
+        id: inquiryRow.id,
+        data: inquiryRow.data
+          ? (JSON.parse(inquiryRow.data as string) as Record<string, string>)
+          : {},
+        status: inquiryRow.status,
+        createdAt: inquiryRow.createdAt,
+      };
     }
 
     return c.json({
       conversation,
       messages: messagesWithTools,
+      hasMore,
       botName: settings?.botName ?? null,
       agentName: settings?.agentName ?? null,
       inquiry,
     });
+  })
+  .get("/api/projects/:id/conversations/:convId/messages", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const beforeParam = c.req.query("before");
+    const limit = Math.min(
+      parseInt(c.req.query("limit") ?? "30", 10) || 30,
+      100,
+    );
+    const before = beforeParam ? new Date(beforeParam) : null;
+    if (!before || isNaN(before.getTime())) {
+      return c.json({ error: "before query param is required (ISO date)" }, 400);
+    }
+
+    const chatService = new ChatService(db);
+    const conversation = await chatService.getConversationById(
+      c.req.param("convId"),
+      project.id,
+    );
+    if (!conversation) return c.json({ error: "Not found" }, 404);
+
+    const { messages: msgs, hasMore } = await chatService.getMessagesBefore(
+      conversation.id,
+      before,
+      limit,
+    );
+
+    const toolService = new ToolService(db);
+    const toolExecs = await toolService.getExecutionsByMessageIds(
+      msgs.map((m) => m.id),
+    );
+    const execsByMessageId = new Map<string, typeof toolExecs>();
+    for (const exec of toolExecs) {
+      const key = exec.messageId ?? "__unlinked__";
+      const arr = execsByMessageId.get(key) ?? [];
+      arr.push(exec);
+      execsByMessageId.set(key, arr);
+    }
+
+    const messagesWithTools = msgs.map((msg) => ({
+      ...msg,
+      toolExecutions:
+        execsByMessageId.get(msg.id)?.map((ex) => ({
+          id: ex.id,
+          toolName: ex.toolName,
+          displayName: ex.displayName,
+          method: ex.method,
+          input: ex.input ? JSON.parse(ex.input) : null,
+          output: ex.output ? JSON.parse(ex.output) : null,
+          status: ex.status,
+          httpStatus: ex.httpStatus,
+          duration: ex.duration,
+          errorMessage: ex.errorMessage,
+          createdAt: ex.createdAt,
+        })) ?? [],
+    }));
+
+    return c.json({ messages: messagesWithTools, hasMore });
   })
   .post("/api/projects/:id/conversations/:convId/reply", async (c) => {
     const user = c.get("user");
@@ -4239,6 +4406,16 @@ const app = new Hono<HonoAppContext>()
     await chatService.updateConversationStatus(
       conversation.id,
       project.id,
+      "agent_replied",
+    );
+
+    broadcastMessageNew(c.env, c.executionCtx, conversation.id, message, {
+      excludeSubjectId: user.id,
+    });
+    broadcastStatusChange(
+      c.env,
+      c.executionCtx,
+      conversation.id,
       "agent_replied",
     );
 
@@ -4347,6 +4524,8 @@ const app = new Hono<HonoAppContext>()
       "closed",
       closeReason,
     );
+    broadcastStatusChange(c.env, c.executionCtx, conversation.id, "closed");
+    broadcastClosed(c.env, c.executionCtx, conversation.id, closeReason ?? null);
 
     // Auto-draft canned response in background
     c.executionCtx.waitUntil(
@@ -4395,6 +4574,18 @@ const app = new Hono<HonoAppContext>()
         parsed.data.conversationId,
         project.id,
         "closed",
+        "spam",
+      );
+      broadcastStatusChange(
+        c.env,
+        c.executionCtx,
+        parsed.data.conversationId,
+        "closed",
+      );
+      broadcastClosed(
+        c.env,
+        c.executionCtx,
+        parsed.data.conversationId,
         "spam",
       );
     }

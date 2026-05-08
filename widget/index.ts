@@ -12,6 +12,8 @@
  * window.ReplyMaven.identify({ name: "John", email: "john@example.com" })
  */
 
+import { WebSocket as ReconnectingWebSocket } from "partysocket";
+
 (function () {
   // Find the script tag to get config
   const script = document.currentScript as HTMLScriptElement;
@@ -56,6 +58,18 @@
   let lastNewMessageAt: number = Date.now();
   const renderedMessageIds = new Set<string>();
   let unreadCount = 0;
+
+  // WebSocket state — primary transport when available; polling is fallback.
+  let wsSocket: ReconnectingWebSocket | null = null;
+  let wsHealthy = false;
+  let lastSeenMessageId: string | null = null;
+
+  // Detect touch-primary devices once at init. Used to disable Enter-to-send so
+  // mobile users can insert newlines (the on-screen keyboard has no Shift+Enter).
+  const isTouchDevice =
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(pointer: coarse)").matches;
 
   // In-memory conversation history buffer (last N {role, content} pairs).
   // Sent to the backend on each new message so the server can skip the
@@ -580,7 +594,7 @@
       flex-direction: row;
       align-items: flex-start;
       gap: 12px;
-      padding: 10px 36px 10px 10px;
+      padding: 10px 14px 10px 10px;
     }
     .rm-greeting-card.compact {
       cursor: pointer;
@@ -655,30 +669,6 @@
     }
     .rm-greeting-cta:hover {
       opacity: 0.9;
-    }
-    .rm-greeting-close {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      border: 0;
-      background: rgba(0,0,0,0.5);
-      color: #ffffff;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-      z-index: 1;
-    }
-    .rm-greeting-card[data-bg-style="blurred"] .rm-greeting-close {
-      background: rgba(255,255,255,0.18);
-    }
-    .rm-greeting-close svg {
-      width: 12px;
-      height: 12px;
     }
     .rm-trigger.active ~ .rm-greeting-stack {
       opacity: 0;
@@ -3040,7 +3030,17 @@
       document.title = originalDocTitle;
       titleOverridden = false;
     }
+    sendPresenceOverWs(document.hidden ? "background" : "active");
   });
+
+  function sendPresenceOverWs(state: "active" | "background"): void {
+    if (!wsHealthy || !wsSocket) return;
+    try {
+      wsSocket.send(JSON.stringify({ type: "presence", state }));
+    } catch {
+      // ignore
+    }
+  }
 
   // ─── Event Handlers ─────────────────────────────────────────────────────────
 
@@ -3063,6 +3063,10 @@
   });
 
   input.addEventListener("keydown", (e) => {
+    // On touch devices, Enter inserts a newline — the on-screen keyboard has no
+    // Shift, so Enter-to-send strands users with no way to multi-line. Send
+    // button is the only submit path on mobile.
+    if (isTouchDevice) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (!isSending && (input.value.trim() || pendingImageFile)) {
@@ -4425,6 +4429,7 @@
                   // Track the bot message ID if provided, and update timestamp
                   if (data.messageId) {
                     renderedMessageIds.add(data.messageId);
+                    lastSeenMessageId = data.messageId;
                   }
                   lastMessageTimestamp = Date.now();
                   scrollToBottom();
@@ -4446,6 +4451,7 @@
                     scrollToBottom();
                     stopPolling();
                     stopHeartbeat();
+                    disconnectWebSocket();
                   }
                 }
 
@@ -5059,6 +5065,10 @@
     if (!conversationId) return;
     if (hiddenByPageTargeting) return;
 
+    // Connect WebSocket in parallel. When healthy, polling becomes a no-op
+    // (see pollMessages early-return). On WS failure, polling carries on.
+    connectWebSocket();
+
     // Determine poll interval based on conversation status and idle time
     const getInterval = () => {
       const idleMin = (Date.now() - lastNewMessageAt) / 60000;
@@ -5094,17 +5104,242 @@
     }
   }
 
+  // ─── WebSocket Realtime ────────────────────────────────────────────────────
+
+  function buildWsUrl(): string {
+    if (!conversationId) return "";
+    const url = new URL(baseUrl);
+    const proto = url.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${url.host}/api/widget/${encodeURIComponent(projectSlug)}/conversations/${encodeURIComponent(conversationId)}/ws?visitorId=${encodeURIComponent(visitorId)}`;
+  }
+
+  function renderIncomingMessage(msg: {
+    id: string;
+    role: "visitor" | "bot" | "agent";
+    content: string;
+    sources: string | null;
+    senderName: string | null;
+    senderAvatar: string | null;
+    createdAt: number;
+  }): boolean {
+    if (renderedMessageIds.has(msg.id)) return false;
+
+    if (msg.role === "bot" || msg.role === "agent") {
+      hideTyping();
+      const el = addMessageToUI(
+        msg.role,
+        msg.content,
+        msg.id,
+        undefined,
+        msg.senderName ?? undefined,
+        msg.senderAvatar ?? undefined,
+      );
+      if (el.parentElement) {
+        el.innerHTML = renderMarkdown(msg.content);
+        if (msg.sources) {
+          try {
+            const sources =
+              typeof msg.sources === "string"
+                ? JSON.parse(msg.sources)
+                : msg.sources;
+            if (Array.isArray(sources) && sources.length > 0) {
+              addSourcesToMessage(el, sources);
+            }
+          } catch {
+            // Ignore malformed sources
+          }
+        }
+      }
+      lastSeenMessageId = msg.id;
+      lastMessageTimestamp = Math.max(
+        lastMessageTimestamp ?? 0,
+        msg.createdAt,
+      );
+      return true;
+    }
+
+    if (msg.role === "visitor") {
+      renderedMessageIds.add(msg.id);
+      lastSeenMessageId = msg.id;
+      lastMessageTimestamp = Math.max(
+        lastMessageTimestamp ?? 0,
+        msg.createdAt,
+      );
+    }
+    return false;
+  }
+
+  function connectWebSocket() {
+    if (!conversationId) return;
+    if (wsSocket) return;
+
+    try {
+      wsSocket = new ReconnectingWebSocket(() => buildWsUrl(), undefined, {
+        maxRetries: Number.POSITIVE_INFINITY,
+        minReconnectionDelay: 1000,
+        maxReconnectionDelay: 30000,
+        reconnectionDelayGrowFactor: 1.6,
+      });
+    } catch {
+      wsSocket = null;
+      return;
+    }
+
+    wsSocket.addEventListener("open", () => {
+      wsHealthy = true;
+      try {
+        wsSocket?.send(
+          JSON.stringify({ type: "resume", lastMessageId: lastSeenMessageId }),
+        );
+        // Sync presence on (re)connect — covers the case where the user
+        // backgrounded/foregrounded the tab while the WS was down.
+        wsSocket?.send(
+          JSON.stringify({
+            type: "presence",
+            state: document.hidden ? "background" : "active",
+          }),
+        );
+      } catch {
+        // ignore
+      }
+    });
+
+    wsSocket.addEventListener("close", () => {
+      wsHealthy = false;
+    });
+
+    wsSocket.addEventListener("error", () => {
+      wsHealthy = false;
+    });
+
+    wsSocket.addEventListener("message", (ev: MessageEvent<string>) => {
+      let parsed: {
+        type?: string;
+        message?: {
+          id: string;
+          role: "visitor" | "bot" | "agent";
+          content: string;
+          sources: string | null;
+          senderName: string | null;
+          senderAvatar: string | null;
+          createdAt: number;
+        };
+        status?: string;
+        reason?: string | null;
+      } | null = null;
+      try {
+        parsed = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      if (!parsed) return;
+
+      if (parsed.type === "message:new" && parsed.message) {
+        const rendered = renderIncomingMessage(parsed.message);
+        if (rendered) {
+          lastNewMessageAt = Date.now();
+          if (isOpen) scrollToBottom();
+          if (!isOpen) {
+            incrementUnreadBadge();
+            showBrowserNotification(parsed.message.content ?? "New message");
+            popIntroPillForIncomingMessage(parsed.message);
+          } else if (!isTabActive) {
+            incrementUnreadBadge();
+            showBrowserNotification(parsed.message.content ?? "New message");
+            if (!titleOverridden) {
+              originalDocTitle = document.title;
+            }
+            document.title = "New Message | " + originalDocTitle;
+            titleOverridden = true;
+          }
+        }
+      } else if (parsed.type === "status:change" && parsed.status) {
+        if (parsed.status !== conversationStatus) {
+          conversationStatus = parsed.status;
+          syncConversationModeUi();
+          if (parsed.status === "closed") {
+            stopPolling();
+            stopHeartbeat();
+          }
+        }
+      } else if (parsed.type === "conversation:closed") {
+        if (conversationStatus !== "closed") {
+          conversationStatus = "closed";
+          syncConversationModeUi();
+          stopPolling();
+          stopHeartbeat();
+        }
+      }
+    });
+  }
+
+  function disconnectWebSocket() {
+    if (wsSocket) {
+      try {
+        wsSocket.close();
+      } catch {
+        // ignore
+      }
+      wsSocket = null;
+      wsHealthy = false;
+    }
+  }
+
+  // Pop the intro pill with a preview of the latest bot/agent message when the
+  // widget is closed. Shared by polling and WS paths so behavior stays consistent.
+  function popIntroPillForIncomingMessage(msg: {
+    role: string;
+    content: string;
+    senderName?: string | null;
+    senderAvatar?: string | null;
+  }) {
+    if (msg.role === "visitor") return;
+
+    const senderName =
+      msg.senderName ||
+      (msg.role === "agent"
+        ? "Agent"
+        : config?.botName ||
+          config?.widget?.headerText ||
+          "New message");
+    introPillTitle.textContent = senderName;
+    const text = msg.content ?? "";
+    introPillDesc.textContent =
+      text.length > 120 ? text.substring(0, 120) + "..." : text;
+
+    const msgAvatarUrl = msg.senderAvatar
+      ? resolveUrl(msg.senderAvatar)
+      : config?.widget?.avatarUrl
+        ? resolveUrl(config.widget.avatarUrl)
+        : null;
+    updatePillAvatar(msgAvatarUrl);
+
+    introPill.classList.remove("rm-intro-hidden");
+    introPill.classList.add("visible");
+    if (introPillTimer) clearTimeout(introPillTimer);
+    introPillTimer = setTimeout(() => {
+      introPill.classList.add("rm-intro-hidden");
+      introPillTimer = null;
+    }, 8000);
+  }
+
   // ─── Heartbeat ──────────────────────────────────────────────────────────────
 
   function startHeartbeat() {
     stopHeartbeat();
     if (!conversationId) return;
 
+    // When WS is healthy, presence is delivered via WS frames on
+    // visibilitychange + on (re)connect, and status changes are pushed via
+    // status:change events. The HTTP heartbeat is the fallback path —
+    // run it on a slower cadence and skip individual ticks when WS is up.
     heartbeatTimer = setInterval(async () => {
       if (!conversationId) {
         stopHeartbeat();
         return;
       }
+      // Skip when WS is doing the job
+      if (wsHealthy) return;
       try {
         const presence = document.hidden ? "background" : "active";
         const res = await fetch(
@@ -5126,7 +5361,7 @@
       } catch {
         // Silently ignore heartbeat failures
       }
-    }, 60_000);
+    }, 5 * 60_000);
   }
 
   function stopHeartbeat() {
@@ -5139,6 +5374,7 @@
   async function pollMessages() {
     if (!conversationId) return;
     if (isStreaming) return; // Don't poll during active SSE stream
+    if (wsHealthy) return; // WS is delivering messages — polling is fallback only
 
     try {
       let url = `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`;
@@ -5168,6 +5404,8 @@
       let hasNewMessages = false;
       for (const msg of msgs) {
         if (renderedMessageIds.has(msg.id)) continue;
+        // Track latest seen id so a subsequent WS reconnect can resume cleanly.
+        lastSeenMessageId = msg.id;
 
         // Only render bot/agent messages (visitor messages are already rendered locally)
         if (msg.role === "bot" || msg.role === "agent") {
@@ -5230,33 +5468,7 @@
             .reverse()
             .find((m: { role: string }) => m.role !== "visitor");
           if (latestMsg) {
-            const senderName =
-              latestMsg.senderName ||
-              (latestMsg.role === "agent"
-                ? "Agent"
-                : config?.botName ||
-                  config?.widget?.headerText ||
-                  "New message");
-            introPillTitle.textContent = senderName;
-            const text = latestMsg.content ?? "";
-            introPillDesc.textContent =
-              text.length > 120 ? text.substring(0, 120) + "..." : text;
-
-            // Update avatar to match message author
-            const msgAvatarUrl = latestMsg.senderAvatar
-              ? resolveUrl(latestMsg.senderAvatar)
-              : config?.widget?.avatarUrl
-                ? resolveUrl(config.widget.avatarUrl)
-                : null;
-            updatePillAvatar(msgAvatarUrl);
-
-            introPill.classList.remove("rm-intro-hidden");
-            introPill.classList.add("visible");
-            if (introPillTimer) clearTimeout(introPillTimer);
-            introPillTimer = setTimeout(() => {
-              introPill.classList.add("rm-intro-hidden");
-              introPillTimer = null;
-            }, 8000);
+            popIntroPillForIncomingMessage(latestMsg);
           }
         } else if (!isTabActive) {
           // Widget is open but tab is inactive -- flash document title
@@ -5425,10 +5637,11 @@
 
       // Don't start polling for closed conversations
       if (conversationStatus === "closed") {
+        disconnectWebSocket();
         return;
       }
 
-      // Start polling for new messages
+      // Start polling for new messages (also opens WS in parallel)
       startPolling();
       startHeartbeat();
     } catch (err) {
@@ -5527,10 +5740,7 @@
     greetingDurationTimers.clear();
   }
 
-  function buildGreetingCard(
-    greeting: GreetingPublic,
-    options: { force: boolean },
-  ): HTMLElement {
+  function buildGreetingCard(greeting: GreetingPublic): HTMLElement {
     const card = document.createElement("div");
     card.className = "rm-greeting-card";
     card.setAttribute("data-greeting-id", greeting.id);
@@ -5540,18 +5750,6 @@
 
     const isRich = Boolean(greeting.imageUrl) || Boolean(greeting.ctaText);
     if (!isRich) card.classList.add("compact");
-
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "rm-greeting-close";
-    close.setAttribute("aria-label", "Dismiss");
-    close.innerHTML =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-    close.onclick = (e) => {
-      e.stopPropagation();
-      dismissGreetingCard(card, greeting.id, !options.force);
-    };
-    card.appendChild(close);
 
     if (greeting.imageUrl) {
       const img = document.createElement("img");
@@ -5671,7 +5869,7 @@
     });
 
     for (const greeting of visible) {
-      const card = buildGreetingCard(greeting, { force });
+      const card = buildGreetingCard(greeting);
       greetingStack.appendChild(card);
 
       const delayMs = Math.max(0, greeting.delaySeconds) * 1000;

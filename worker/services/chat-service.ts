@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, desc, and, gt, ne, inArray, sql } from "drizzle-orm";
+import { eq, desc, and, gt, lt, ne, inArray, or, like, sql } from "drizzle-orm";
 import {
   conversations,
   messages,
@@ -38,12 +38,25 @@ export class ChatService {
     limit = 50,
     offset = 0,
     statusFilter: "open" | "closed" | "all" = "all",
+    searchQuery?: string,
   ): Promise<ConversationRow[]> {
     const conditions = [eq(conversations.projectId, projectId)];
     if (statusFilter === "open") {
       conditions.push(ne(conversations.status, "closed"));
     } else if (statusFilter === "closed") {
       conditions.push(eq(conversations.status, "closed"));
+    }
+    const trimmedQuery = searchQuery?.trim();
+    if (trimmedQuery) {
+      const pattern = `%${trimmedQuery.toLowerCase()}%`;
+      // SQLite LIKE is case-insensitive only for ASCII; use LOWER() to handle
+      // mixed-case visitor names/emails uniformly. Indexes on
+      // LOWER(visitor_name) / LOWER(visitor_email) (migration 0039) keep this
+      // fast even with prefix wildcard.
+      const nameMatch = like(sql`LOWER(${conversations.visitorName})`, pattern);
+      const emailMatch = like(sql`LOWER(${conversations.visitorEmail})`, pattern);
+      const matcher = or(nameMatch, emailMatch);
+      if (matcher) conditions.push(matcher);
     }
     return this.db
       .select()
@@ -83,23 +96,32 @@ export class ChatService {
     since: Date,
     limit = 100,
   ): Promise<
-    Array<{
-      id: string;
-      status: ConversationRow["status"];
-      lastActivityAt: Date;
-      updatedAt: Date;
-      visitorName: string | null;
-      visitorEmail: string | null;
-    }>
+    Array<
+      Omit<ConversationRow, "chatState" | "telegramThreadId">
+    >
   > {
+    // Return the full sidebar-renderable shape (everything except the heavy
+    // chatState JSON and the telegram thread id, neither of which the
+    // dashboard sidebar consumes). The since filter still bounds the count;
+    // payload per poll is typically small. Letting the client see the full
+    // row means brand-new conversations or off-page conversations can be
+    // prepended into the loaded list, instead of being silently dropped.
     const rows = await this.db
       .select({
         id: conversations.id,
-        status: conversations.status,
-        lastActivityAt: conversations.lastActivityAt,
-        updatedAt: conversations.updatedAt,
+        projectId: conversations.projectId,
+        visitorId: conversations.visitorId,
         visitorName: conversations.visitorName,
         visitorEmail: conversations.visitorEmail,
+        status: conversations.status,
+        closeReason: conversations.closeReason,
+        metadata: conversations.metadata,
+        lastActivityAt: conversations.lastActivityAt,
+        visitorLastSeenAt: conversations.visitorLastSeenAt,
+        visitorPresence: conversations.visitorPresence,
+        visitorLastOnlineAt: conversations.visitorLastOnlineAt,
+        createdAt: conversations.createdAt,
+        updatedAt: conversations.updatedAt,
       })
       .from(conversations)
       .where(
@@ -403,12 +425,118 @@ export class ChatService {
 
   // ─── Messages ───────────────────────────────────────────────────────────────
 
+  // Fetch the latest message for each given conversation. Returns a map keyed
+  // by conversationId. Used by the dashboard sidebar to render a 1-line preview
+  // under each visitor name.
+  async getLastMessagesByConversationIds(
+    conversationIds: string[],
+  ): Promise<
+    Map<
+      string,
+      {
+        id: string;
+        role: "visitor" | "bot" | "agent";
+        content: string;
+        senderName: string | null;
+        emailedAt: Date | null;
+        createdAt: Date;
+      }
+    >
+  > {
+    if (conversationIds.length === 0) return new Map();
+
+    // Correlated subquery picks the row whose createdAt matches MAX for that
+    // conversation. Truncate content server-side to ~140 chars so a busy
+    // sidebar doesn't ship hundreds of KB of bot-response bodies.
+    const PREVIEW_CHARS = 140;
+    const rows = await this.db
+      .select({
+        id: messages.id,
+        conversationId: messages.conversationId,
+        role: messages.role,
+        content: sql<string>`SUBSTR(${messages.content}, 1, ${PREVIEW_CHARS})`,
+        senderName: messages.senderName,
+        emailedAt: messages.emailedAt,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .where(
+        and(
+          inArray(messages.conversationId, conversationIds),
+          sql`${messages.createdAt} = (
+            SELECT MAX(m2.created_at) FROM messages m2
+            WHERE m2.conversation_id = ${messages.conversationId}
+          )`,
+        ),
+      );
+
+    const map = new Map<
+      string,
+      {
+        id: string;
+        role: "visitor" | "bot" | "agent";
+        content: string;
+        senderName: string | null;
+        emailedAt: Date | null;
+        createdAt: Date;
+      }
+    >();
+    for (const row of rows) {
+      // First write wins on the rare case of ties on createdAt.
+      if (!map.has(row.conversationId)) {
+        const { conversationId: _omit, ...rest } = row;
+        void _omit;
+        map.set(row.conversationId, rest);
+      }
+    }
+    return map;
+  }
+
   async getMessages(conversationId: string): Promise<MessageRow[]> {
     return this.db
       .select()
       .from(messages)
       .where(eq(messages.conversationId, conversationId))
       .orderBy(messages.createdAt);
+  }
+
+  // Paginated reads — used by the dashboard detail endpoint to avoid
+  // shipping unbounded message history on every conversation click.
+  async getRecentMessages(
+    conversationId: string,
+    limit = 30,
+  ): Promise<{ messages: MessageRow[]; hasMore: boolean }> {
+    const rows = await this.db
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .orderBy(desc(messages.createdAt))
+      .limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const sliced = hasMore ? rows.slice(0, limit) : rows;
+    // Selected newest-first to use the index; reverse for chronological display.
+    return { messages: sliced.reverse(), hasMore };
+  }
+
+  async getMessagesBefore(
+    conversationId: string,
+    beforeCreatedAt: Date,
+    limit = 30,
+  ): Promise<{ messages: MessageRow[]; hasMore: boolean }> {
+    const rows = await this.db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          lt(messages.createdAt, beforeCreatedAt),
+        ),
+      )
+      .orderBy(desc(messages.createdAt))
+      .limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const sliced = hasMore ? rows.slice(0, limit) : rows;
+    return { messages: sliced.reverse(), hasMore };
   }
 
   async getMessagesSince(

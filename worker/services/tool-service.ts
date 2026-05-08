@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, and, desc, isNull, asc } from "drizzle-orm";
+import { eq, and, desc, isNull, asc, inArray } from "drizzle-orm";
 import {
   tools,
   toolExecutions,
@@ -213,6 +213,43 @@ export class ToolService {
       .from(toolExecutions)
       .innerJoin(tools, eq(toolExecutions.toolId, tools.id))
       .where(eq(toolExecutions.conversationId, conversationId))
+      .orderBy(asc(toolExecutions.createdAt));
+
+    return rows;
+  }
+
+  /**
+   * Get tool executions scoped to a specific list of message IDs. Used by the
+   * dashboard detail endpoint so we don't pull executions for messages we
+   * aren't displaying (the conversation may have hundreds of historic
+   * tool calls; we only want the ones attached to the current page).
+   */
+  async getExecutionsByMessageIds(
+    messageIds: string[],
+  ): Promise<
+    (ToolExecutionRow & { toolName: string; displayName: string; method: string })[]
+  > {
+    if (messageIds.length === 0) return [];
+    const rows = await this.db
+      .select({
+        id: toolExecutions.id,
+        toolId: toolExecutions.toolId,
+        conversationId: toolExecutions.conversationId,
+        messageId: toolExecutions.messageId,
+        input: toolExecutions.input,
+        output: toolExecutions.output,
+        status: toolExecutions.status,
+        httpStatus: toolExecutions.httpStatus,
+        duration: toolExecutions.duration,
+        errorMessage: toolExecutions.errorMessage,
+        createdAt: toolExecutions.createdAt,
+        toolName: tools.name,
+        displayName: tools.displayName,
+        method: tools.method,
+      })
+      .from(toolExecutions)
+      .innerJoin(tools, eq(toolExecutions.toolId, tools.id))
+      .where(inArray(toolExecutions.messageId, messageIds))
       .orderBy(asc(toolExecutions.createdAt));
 
     return rows;

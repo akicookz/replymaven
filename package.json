@@ -44,6 +44,7 @@
 		"drizzle-orm": "^0.45.1",
 		"hono": "^4.11.7",
 		"lucide-react": "^0.563.0",
+		"partysocket": "^1.1.18",
 		"radix-ui": "^1.4.3",
 		"react": "^19.1.0",
 		"react-dom": "^19.1.0",

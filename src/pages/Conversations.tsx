@@ -25,6 +25,7 @@ import {
   Tag,
   FileText,
   Mail,
+  MailCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,6 +48,7 @@ import {
   type VisitorPresenceState,
 } from "@/lib/conversation-presence";
 import { cn, renderMarkdown } from "@/lib/utils";
+import { useConversationWs } from "@/lib/use-conversation-ws";
 
 interface ConversationMeta {
   url?: string;
@@ -68,6 +70,15 @@ interface ConversationMeta {
   [key: string]: unknown;
 }
 
+interface LastMessagePreview {
+  id: string;
+  role: "visitor" | "bot" | "agent";
+  content: string;
+  senderName: string | null;
+  emailedAt: string | null;
+  createdAt: string;
+}
+
 interface Conversation {
   id: string;
   visitorId: string;
@@ -82,6 +93,7 @@ interface Conversation {
   createdAt: string;
   updatedAt: string;
   lastActivityAt?: string | null;
+  lastMessage?: LastMessagePreview | null;
 }
 
 interface ConversationsPage {
@@ -93,11 +105,20 @@ interface ConversationsPage {
 
 interface ConversationUpdate {
   id: string;
-  status: string;
-  lastActivityAt: string;
-  updatedAt: string;
+  projectId: string;
+  visitorId: string;
   visitorName: string | null;
   visitorEmail: string | null;
+  status: string;
+  closeReason: string | null;
+  metadata: string | null;
+  lastActivityAt: string;
+  visitorLastSeenAt: string | null;
+  visitorPresence: string | null;
+  visitorLastOnlineAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastMessage?: LastMessagePreview | null;
 }
 
 interface ConversationUpdatesResponse {
@@ -288,11 +309,6 @@ function getVisitorDisplayName(convo: Conversation): string {
   return convo.visitorId;
 }
 
-function getInitial(convo: Conversation): string {
-  const name = getVisitorDisplayName(convo);
-  return name.charAt(0).toUpperCase();
-}
-
 function getPresenceDotClass(state: VisitorPresenceState): string {
   switch (state) {
     case "online":
@@ -422,6 +438,7 @@ function Conversations() {
   const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "all">("all");
   const [expandedToolCards, setExpandedToolCards] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Sync selectedConvo <-> ?id= URL param so deep links work and shares are stable
@@ -442,6 +459,20 @@ function Conversations() {
   const [loadedConversations, setLoadedConversations] = useState<Conversation[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [serverTimeBaseline, setServerTimeBaseline] = useState<number | null>(null);
+
+  // Debounce search input so we don't fire a request per keystroke. The
+  // backend endpoint searches across ALL conversations (not just the 25
+  // already loaded), so server-side search is required for correctness.
+  const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Open a WebSocket for the selected conversation. The hook patches the
+  // ["conversation-detail", id] cache on incoming events so messages and
+  // status changes appear in real time without polling.
+  useConversationWs(projectId, selectedConvo);
 
   // Per-project client-side last-read tracking for unread badges
   const lastReadStorageKey = `replymaven:lastRead:${projectId ?? "unknown"}`;
@@ -486,9 +517,17 @@ function Conversations() {
   }
 
   const { data: convosPage, isLoading } = useQuery<ConversationsPage>({
-    queryKey: ["conversations", projectId, statusFilter],
+    queryKey: ["conversations", projectId, statusFilter, debouncedSearch],
     queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/conversations?status=${statusFilter}&limit=25&offset=0`);
+      const params = new URLSearchParams({
+        status: statusFilter,
+        limit: "25",
+        offset: "0",
+      });
+      if (debouncedSearch) params.set("q", debouncedSearch);
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations?${params.toString()}`,
+      );
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
@@ -523,7 +562,10 @@ function Conversations() {
     refetchIntervalInBackground: false,
   });
 
-  // Merge incoming updates into the local list without any opacity/fetch jank
+  // Merge incoming updates into the local list without any opacity/fetch jank.
+  // The delta endpoint now returns full sidebar-renderable rows, so we can
+  // prepend conversations that aren't in the loaded list — closing the
+  // "off-page conversation drops" hole.
   useEffect(() => {
     if (!updatesData) return;
 
@@ -534,27 +576,37 @@ function Conversations() {
 
     if (updatesData.updates.length === 0) return;
 
+    const passesFilter = (status: string): boolean => {
+      if (statusFilter === "all") return true;
+      if (statusFilter === "closed") return status === "closed";
+      // "open" filter excludes closed
+      return status !== "closed";
+    };
+
     const updateMap = new Map(updatesData.updates.map((u) => [u.id, u]));
 
     setLoadedConversations((prev) => {
+      const seen = new Set(prev.map((c) => c.id));
       let changed = false;
-      const next = prev.map((c) => {
+
+      // 1. Patch existing rows in place
+      const next: Conversation[] = prev.map((c) => {
         const u = updateMap.get(c.id);
         if (!u) return c;
         changed = true;
         updateMap.delete(c.id);
-        return {
-          ...c,
-          status: u.status,
-          lastActivityAt: u.lastActivityAt,
-          updatedAt: u.updatedAt,
-          visitorName: u.visitorName ?? c.visitorName,
-          visitorEmail: u.visitorEmail ?? c.visitorEmail,
-        };
+        return { ...c, ...u };
       });
-      // Any updates left in the map are for conversations not yet loaded.
-      // We don't have full records for them, so we skip; the next refresh
-      // or load-more will bring them in. Counts already reflect them.
+
+      // 2. Prepend brand-new conversations that match the active filter.
+      //    (Was previously dropped — the bug.)
+      for (const u of updateMap.values()) {
+        if (seen.has(u.id)) continue;
+        if (!passesFilter(u.status)) continue;
+        changed = true;
+        next.push(u as Conversation);
+      }
+
       if (!changed) return prev;
       // Re-sort by activity desc so freshly active convos float to the top
       next.sort((a, b) => getActivityMs(b) - getActivityMs(a));
@@ -563,21 +615,21 @@ function Conversations() {
 
     // Also patch the cached query data so status-filter switches stay consistent
     queryClient.setQueryData<ConversationsPage | undefined>(
-      ["conversations", projectId, statusFilter],
+      ["conversations", projectId, statusFilter, debouncedSearch],
       (old) => {
         if (!old) return old;
+        const seen = new Set(old.conversations.map((c) => c.id));
         const patched = old.conversations.map((c) => {
-          const u = updateMap.get(c.id) ?? updatesData.updates.find((x) => x.id === c.id);
-          if (!u) return c;
-          return {
-            ...c,
-            status: u.status,
-            lastActivityAt: u.lastActivityAt,
-            updatedAt: u.updatedAt,
-            visitorName: u.visitorName ?? c.visitorName,
-            visitorEmail: u.visitorEmail ?? c.visitorEmail,
-          };
+          const u = updatesData.updates.find((x) => x.id === c.id);
+          return u ? { ...c, ...u } : c;
         });
+        // Prepend new conversations into the cached page too
+        for (const u of updatesData.updates) {
+          if (seen.has(u.id)) continue;
+          if (!passesFilter(u.status)) continue;
+          patched.push(u as Conversation);
+        }
+        patched.sort((a, b) => getActivityMs(b) - getActivityMs(a));
         return { ...old, counts: updatesData.counts, conversations: patched };
       },
     );
@@ -586,8 +638,14 @@ function Conversations() {
 
   const loadMoreConversations = useMutation({
     mutationFn: async () => {
+      const params = new URLSearchParams({
+        status: statusFilter,
+        limit: "25",
+        offset: String(loadedConversations.length),
+      });
+      if (debouncedSearch) params.set("q", debouncedSearch);
       const res = await fetch(
-        `/api/projects/${projectId}/conversations?status=${statusFilter}&limit=25&offset=${loadedConversations.length}`,
+        `/api/projects/${projectId}/conversations?${params.toString()}`,
       );
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json() as Promise<{ conversations: Conversation[]; counts: { all: number; open: number; closed: number }; hasMore: boolean }>;
@@ -607,6 +665,7 @@ function Conversations() {
   } = useQuery<{
     conversation: Conversation;
     messages: Message[];
+    hasMore: boolean;
     botName: string | null;
     agentName: string | null;
     inquiry: ConversationInquiry | null;
@@ -625,14 +684,13 @@ function Conversations() {
       return res.json();
     },
     enabled: !!selectedConvo,
-    placeholderData: keepPreviousData,
     retry: 1,
-    refetchInterval: (query) => {
-      if (!selectedConvo) return false;
-      const status = query.state.data?.conversation?.status;
-      if (status === "closed") return false;
-      return 5_000;
-    },
+    // Conversation detail is kept fresh in real time by useConversationWs.
+    // Cache for 60s so revisiting a conversation is instant; the WS push
+    // keeps the cache current within that window. Dropping keepPreviousData
+    // means switching to a never-loaded conversation shows the skeleton
+    // instead of flashing the previous conversation's messages.
+    staleTime: 1000 * 60,
   });
 
   // Mark the open conversation as read whenever its latest activity advances
@@ -648,6 +706,71 @@ function Conversations() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConvo, convoDetail?.conversation?.lastActivityAt, convoDetail?.conversation?.updatedAt]);
+
+  const loadEarlier = useMutation({
+    mutationFn: async () => {
+      if (!selectedConvo || !convoDetail?.messages?.length) {
+        return { messages: [] as Message[], hasMore: false };
+      }
+      const oldest = convoDetail.messages[0];
+      // Capture scroll position before fetching so we can restore after
+      // prepending. Stored on the mutation context via a ref-like trick
+      // (we use the container's scrollHeight before prepend in onSuccess).
+      const params = new URLSearchParams({
+        before: oldest.createdAt,
+        limit: "30",
+      });
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${selectedConvo}/messages?${params.toString()}`,
+      );
+      if (!res.ok) throw new Error("Failed to load earlier messages");
+      return res.json() as Promise<{ messages: Message[]; hasMore: boolean }>;
+    },
+    onMutate: () => {
+      // Snapshot scroll metrics before the new render
+      const el = messagesContainerRef.current;
+      return el
+        ? { prevScrollHeight: el.scrollHeight, prevScrollTop: el.scrollTop }
+        : null;
+    },
+    onSuccess: (data, _vars, ctx) => {
+      if (data.messages.length === 0) {
+        queryClient.setQueryData(
+          ["conversation-detail", selectedConvo],
+          (old: typeof convoDetail | undefined) => {
+            if (!old) return old;
+            return { ...old, hasMore: data.hasMore };
+          },
+        );
+        return;
+      }
+      queryClient.setQueryData(
+        ["conversation-detail", selectedConvo],
+        (old: typeof convoDetail | undefined) => {
+          if (!old) return old;
+          // Dedupe just in case (shouldn't happen but cheap insurance)
+          const existingIds = new Set(old.messages.map((m) => m.id));
+          const fresh = data.messages.filter((m) => !existingIds.has(m.id));
+          return {
+            ...old,
+            messages: [...fresh, ...old.messages],
+            hasMore: data.hasMore,
+          };
+        },
+      );
+      // Restore scroll position so the user stays anchored to the same
+      // message they were looking at before we prepended.
+      requestAnimationFrame(() => {
+        const el = messagesContainerRef.current;
+        if (!el || !ctx) return;
+        const heightDelta = el.scrollHeight - ctx.prevScrollHeight;
+        el.scrollTop = ctx.prevScrollTop + heightDelta;
+      });
+    },
+    onError: () => {
+      toast.error("Couldn't load earlier messages");
+    },
+  });
 
   const sendReply = useMutation({
     mutationFn: async (content: string) => {
@@ -883,35 +1006,85 @@ function Conversations() {
     [threadItems],
   );
 
-  // Auto-scroll to bottom when the thread actually changes
+  // Auto-scroll to bottom when the thread actually changes.
+  // - On a conversation switch: jump instantly (no animation) — smooth-scroll
+  //   on switch feels like a stall.
+  // - On a new message in the same conversation: smooth-scroll for nice live UX.
+  const lastScrollConvoRef = useRef<string | null>(null);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [threadSignature]);
+    const switched = lastScrollConvoRef.current !== selectedConvo;
+    lastScrollConvoRef.current = selectedConvo;
+    messagesEndRef.current?.scrollIntoView({
+      behavior: switched ? "auto" : "smooth",
+    });
+  }, [threadSignature, selectedConvo]);
 
-  // Filter conversations by search
-  const filteredConversations = loadedConversations.filter((c) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    const name = getVisitorDisplayName(c).toLowerCase();
-    const email = (c.visitorEmail ?? "").toLowerCase();
-    return name.includes(q) || email.includes(q) || c.visitorId.includes(q);
-  });
+  // Server-side search via the conversations list query (?q=). The local
+  // result is just whatever has been loaded — no extra client-side filter.
+  const filteredConversations = loadedConversations;
 
-  // Get last message for sidebar preview
-  function getLastMessagePreview(convo: Conversation): { text: string; emailed: boolean } | null {
+  // Get last message for sidebar preview. Reads from the lastMessage attached
+  // to every conversation row (fetched server-side by the list/updates
+  // endpoints). Falls back to the live thread for the open conversation so
+  // optimistic agent replies show up immediately, before the next poll.
+  function getLastMessagePreview(
+    convo: Conversation,
+  ): { text: string; emailed: boolean; role: "visitor" | "bot" | "agent" } | null {
     if (selectedConvo === convo.id && threadItems.length > 0) {
       const last = threadItems[threadItems.length - 1];
       if (last.kind === "inquiry") {
-        return { text: "Inquiry submitted", emailed: false };
+        return { text: "Submitted an inquiry", emailed: false, role: "visitor" };
       }
-
       const isOutbound = last.message.role === "agent" || last.message.role === "bot";
+      const isInquiryMessage =
+        last.message.role === "visitor" &&
+        last.message.content.startsWith("Inquiry submission");
       return {
-        text: last.message.content,
+        text: isInquiryMessage ? "Submitted an inquiry" : last.message.content,
         emailed: isOutbound && !!last.message.emailedAt,
+        role: last.message.role,
+      };
+    }
+    if (convo.lastMessage) {
+      const isOutbound =
+        convo.lastMessage.role === "agent" || convo.lastMessage.role === "bot";
+      // Inquiry-form submissions are stored as visitor messages whose content
+      // begins with "Inquiry submission" (built by buildInquiryConversationMessage
+      // in worker/index.ts). Surface a friendlier label instead of dumping form data.
+      const isInquiry =
+        convo.lastMessage.role === "visitor" &&
+        convo.lastMessage.content.startsWith("Inquiry submission");
+      return {
+        text: isInquiry ? "Submitted an inquiry" : convo.lastMessage.content,
+        emailed: isOutbound && !!convo.lastMessage.emailedAt,
+        role: convo.lastMessage.role,
       };
     }
     return null;
+  }
+
+  function previewPrefix(role: "visitor" | "bot" | "agent"): string {
+    if (role === "agent") return "You: ";
+    if (role === "bot") return "Bot: ";
+    return "";
+  }
+
+  // Strip markdown so the sidebar preview doesn't show raw asterisks /
+  // backticks / link syntax. Lossy by design — full markdown still renders
+  // in the detail view.
+  function stripMarkdownForPreview(text: string): string {
+    return text
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/__([^_]+)__/g, "$1")
+      .replace(/(?<!\w)\*([^*]+)\*(?!\w)/g, "$1")
+      .replace(/(?<!\w)_([^_]+)_(?!\w)/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/^>\s+/gm, "")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   if (isLoading) {
@@ -1023,42 +1196,54 @@ function Conversations() {
                   setSelectedConvo(convo.id);
                   markConversationRead(convo.id);
                 }}
+                onMouseEnter={() => {
+                  // Warm the cache before the user clicks. TanStack dedupes
+                  // in-flight requests by key + the 60s staleTime makes
+                  // repeat hovers free, so no debounce needed.
+                  queryClient.prefetchQuery({
+                    queryKey: ["conversation-detail", convo.id],
+                    queryFn: async () => {
+                      const res = await fetch(
+                        `/api/projects/${projectId}/conversations/${convo.id}`,
+                      );
+                      if (!res.ok) throw new Error("Failed to load");
+                      return res.json();
+                    },
+                    staleTime: 1000 * 60,
+                  });
+                }}
                 className={cn(
-                  "w-full flex items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
+                  "w-full flex items-center gap-3 px-3 py-3.5 text-left transition-colors hover:bg-muted/50",
                   isSelected && "bg-primary/10",
                 )}
               >
-                {/* Avatar */}
-                <div className="relative">
-                  <div className="w-12 h-12 rounded-full flex items-center justify-center bg-primary text-primary-foreground font-semibold text-base">
-                    {getInitial(convo)}
-                  </div>
-                  {/* Online dot */}
-                  {convo.status !== "closed" && (
-                    <div
-                      className={cn(
-                        "absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-card",
-                        getPresenceDotClass(presenceState),
-                      )}
-                    />
-                  )}
-                </div>
-
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <span
                       className={cn(
-                        "text-sm truncate flex items-center gap-1.5 text-foreground",
+                        "text-sm truncate flex items-center gap-1.5 text-foreground min-w-0",
                         unread ? "font-bold" : "font-semibold",
                       )}
                     >
+                      {convo.status !== "closed" && (
+                        <span
+                          aria-label={`Visitor is ${getPresenceBadge(presenceState).label.toLowerCase()}`}
+                          title={`Visitor is ${getPresenceBadge(presenceState).label.toLowerCase()}`}
+                          className={cn(
+                            "w-2 h-2 rounded-full shrink-0",
+                            getPresenceDotClass(presenceState),
+                          )}
+                        />
+                      )}
                       {meta.country && (
-                        <span className="text-base leading-none">
+                        <span className="text-base leading-none shrink-0">
                           {countryToFlag(meta.country)}
                         </span>
                       )}
-                      {getVisitorDisplayName(convo)}
+                      <span className="truncate">
+                        {getVisitorDisplayName(convo)}
+                      </span>
                     </span>
                     <span
                       className={cn(
@@ -1071,7 +1256,7 @@ function Conversations() {
                       {getConversationActivityLabel(convo)}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-2 mt-0.5">
+                  <div className="flex items-center justify-between gap-2 mt-1">
                     <p
                       className={cn(
                         "text-xs truncate flex items-center gap-1",
@@ -1081,14 +1266,36 @@ function Conversations() {
                       )}
                     >
                       {preview?.emailed && (
-                        <Mail className="w-3 h-3 shrink-0 text-status-replied/70" />
+                        <MailCheck className="w-3 h-3 shrink-0 text-status-replied/70" />
                       )}
                       <span className="truncate">
-                        {preview
-                          ? preview.text.slice(0, 50) + (preview.text.length > 50 ? "..." : "")
-                          : convo.visitorEmail ?? meta.city
+                        {preview ? (() => {
+                          // "Submitted an inquiry" is already pre-formatted —
+                          // skip the markdown stripper and the role prefix.
+                          const isInquirySummary =
+                            preview.text === "Submitted an inquiry";
+                          const cleaned = isInquirySummary
+                            ? preview.text
+                            : stripMarkdownForPreview(preview.text);
+                          const truncated =
+                            cleaned.length > 60
+                              ? cleaned.slice(0, 60) + "…"
+                              : cleaned;
+                          return (
+                            <>
+                              {!isInquirySummary && previewPrefix(preview.role) && (
+                                <span className="font-medium">
+                                  {previewPrefix(preview.role)}
+                                </span>
+                              )}
+                              {truncated}
+                            </>
+                          );
+                        })() : (
+                          (convo.visitorEmail ?? (meta.city
                             ? [meta.city, meta.country].filter(Boolean).join(", ")
-                            : convo.visitorId}
+                            : convo.visitorId))
+                        )}
                       </span>
                     </p>
                     <div className="flex items-center gap-1.5 shrink-0">
@@ -1125,7 +1332,7 @@ function Conversations() {
               </p>
             </div>
           )}
-          {hasMore && !searchQuery && filteredConversations.length > 0 && (
+          {hasMore && filteredConversations.length > 0 && (
             <button
               onClick={() => loadMoreConversations.mutate()}
               disabled={loadMoreConversations.isPending}
@@ -1233,14 +1440,29 @@ function Conversations() {
               >
                 <ArrowLeft className="w-4 h-4" />
               </button>
-              {/* Avatar */}
-              <div className="w-10 h-10 rounded-full flex items-center justify-center bg-primary text-primary-foreground font-semibold text-sm">
-                {getInitial(convoDetail.conversation)}
-              </div>
-
               {/* Info */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {(() => {
+                    const presenceState = getVisitorPresenceState({
+                      visitorLastSeenAt:
+                        convoDetail.conversation.visitorLastSeenAt,
+                      visitorPresence:
+                        convoDetail.conversation.visitorPresence,
+                    });
+                    const presenceLabel = getPresenceBadge(presenceState).label;
+                    if (convoDetail.conversation.status === "closed") return null;
+                    return (
+                      <span
+                        title={`Visitor is ${presenceLabel.toLowerCase()}`}
+                        aria-label={`Visitor is ${presenceLabel.toLowerCase()}`}
+                        className={cn(
+                          "w-2 h-2 rounded-full shrink-0",
+                          getPresenceDotClass(presenceState),
+                        )}
+                      />
+                    );
+                  })()}
                   <h2 className="text-sm font-semibold text-foreground truncate">
                     {selectedMeta?.country && (
                       <span className="mr-1.5">
@@ -1249,44 +1471,21 @@ function Conversations() {
                     )}
                     {getVisitorDisplayName(convoDetail.conversation)}
                   </h2>
-                  {(() => {
-                    const presence = getPresenceBadge(
-                      getVisitorPresenceState({
-                        visitorLastSeenAt:
-                          convoDetail.conversation.visitorLastSeenAt,
-                        visitorPresence:
-                          convoDetail.conversation.visitorPresence,
-                      }),
-                    );
-
-                    return (
-                      <span className={cn(
-                        "inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full",
-                        presence.badgeClass,
-                      )}>
-                        <span
-                          className={cn(
-                            "w-1.5 h-1.5 rounded-full",
-                            presence.dotClass,
-                          )}
-                        />
-                        {presence.label}
-                      </span>
-                    );
-                  })()}
                 </div>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <div className="flex items-center gap-3 text-xs text-muted-foreground min-w-0">
                   {convoDetail.conversation.visitorEmail && (
-                    <span>{convoDetail.conversation.visitorEmail}</span>
+                    <span className="truncate min-w-0">
+                      {convoDetail.conversation.visitorEmail}
+                    </span>
                   )}
                   {selectedMeta?.city && selectedMeta?.country && (
-                    <span className="hidden md:inline-flex items-center gap-1">
+                    <span className="hidden md:inline-flex items-center gap-1 shrink-0">
                       <Globe className="w-3 h-3" />
                       {selectedMeta.city}
                       {selectedMeta.region ? `, ${selectedMeta.region}` : ""}
                     </span>
                   )}
-                  <span className="flex items-center gap-1">
+                  <span className="hidden md:flex items-center gap-1 shrink-0">
                     <Clock className="w-3 h-3" />
                     In chat {formatDuration(convoDetail.conversation.createdAt)}
                   </span>
@@ -1294,10 +1493,10 @@ function Conversations() {
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <span
                   className={cn(
-                    "text-xs px-2.5 py-1 rounded-full font-medium",
+                    "text-xs px-2.5 py-1 rounded-full font-medium whitespace-nowrap",
                     convoDetail.conversation.status === "active" &&
                     "bg-status-active/10 text-status-active",
                     convoDetail.conversation.status === "waiting_agent" &&
@@ -1409,51 +1608,64 @@ function Conversations() {
               return (
                 <Sheet>
                   <SheetTrigger asChild>
-                    <div className="px-4 py-1.5 bg-card/80 flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground w-full overflow-hidden cursor-pointer hover:bg-accent/50 transition-colors">
+                    <div className="px-4 py-1.5 bg-card/80 flex items-center gap-x-3 text-[11px] text-muted-foreground w-full overflow-hidden cursor-pointer hover:bg-accent/50 transition-colors min-w-0">
                       {isIdentified ? (
                         <>
                           {customEntries.slice(0, 3).map(([key, value]) => (
                             <span
                               key={key}
-                              className="flex items-center gap-1 whitespace-nowrap bg-primary/10 text-primary px-1.5 py-0.5 rounded-md"
+                              title={`${key}: ${value}`}
+                              className="flex items-center gap-1 whitespace-nowrap shrink-0 bg-primary/10 text-primary px-1.5 py-0.5 rounded-md"
                             >
                               <Tag className="w-2.5 h-2.5 shrink-0" />
                               <span className="font-medium">{key}:</span> {value}
                             </span>
                           ))}
                           {currentPage && (
-                            <span className="flex items-center gap-1 truncate" title={currentPage}>
+                            <span
+                              className="flex items-center gap-1 whitespace-nowrap shrink-0"
+                              title={currentPage}
+                            >
                               <Globe className="w-3 h-3 shrink-0" />
                               <span className="font-medium">Page:</span>
-                              <span className="truncate">{currentPage.replace(/^https?:\/\//, "")}</span>
+                              <span>{currentPage.replace(/^https?:\/\//, "")}</span>
                             </span>
                           )}
                         </>
                       ) : (
                         <>
                           {referrer && (
-                            <span className="flex items-center gap-1 truncate" title={referrer}>
+                            <span
+                              className="flex items-center gap-1 whitespace-nowrap shrink-0"
+                              title={referrer}
+                            >
                               <Globe className="w-3 h-3 shrink-0" />
-                              <span className="font-medium shrink-0">Referrer:</span>
-                              <span className="truncate">{referrer.replace(/^https?:\/\//, "")}</span>
+                              <span className="font-medium">Referrer:</span>
+                              <span>{referrer.replace(/^https?:\/\//, "")}</span>
                             </span>
                           )}
                           {currentPage && (
-                            <span className="flex items-center gap-1 truncate" title={currentPage}>
+                            <span
+                              className="flex items-center gap-1 whitespace-nowrap shrink-0"
+                              title={currentPage}
+                            >
                               <Globe className="w-3 h-3 shrink-0" />
-                              <span className="font-medium shrink-0">Page:</span>
-                              <span className="truncate">{currentPage.replace(/^https?:\/\//, "")}</span>
+                              <span className="font-medium">Page:</span>
+                              <span>{currentPage.replace(/^https?:\/\//, "")}</span>
                             </span>
                           )}
                           {timezone && (
-                            <span className="flex items-center gap-1 whitespace-nowrap" title={timezone}>
+                            <span
+                              className="flex items-center gap-1 whitespace-nowrap shrink-0"
+                              title={timezone}
+                            >
                               <Clock className="w-3 h-3 shrink-0" />
                               <span className="font-medium">Timezone:</span>
                               {timezone}
                             </span>
                           )}
                           {browserName !== "Unknown" && (
-                            <span className="flex items-center gap-1 whitespace-nowrap">
+                            <span className="flex items-center gap-1 whitespace-nowrap shrink-0">
                               <Monitor className="w-3 h-3 shrink-0" />
                               <span className="font-medium">Browser:</span>
                               {browserName}
@@ -1487,12 +1699,27 @@ function Conversations() {
 
             {/* Messages */}
             <div
+              ref={messagesContainerRef}
               className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-1 min-w-0"
               style={{
                 backgroundImage:
                   'url("data:image/svg+xml,%3Csvg width=\'200\' height=\'200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cdefs%3E%3Cpattern id=\'a\' patternUnits=\'userSpaceOnUse\' width=\'40\' height=\'40\'%3E%3Cpath d=\'M0 20h40M20 0v40\' fill=\'none\' stroke=\'%23000\' stroke-opacity=\'.02\' stroke-width=\'.5\'/%3E%3C/pattern%3E%3C/defs%3E%3Crect width=\'200\' height=\'200\' fill=\'url(%23a)\'/%3E%3C/svg%3E")',
               }}
             >
+              {/* Load earlier messages */}
+              {convoDetail.hasMore && (
+                <div className="flex justify-center pb-3">
+                  <button
+                    type="button"
+                    onClick={() => loadEarlier.mutate()}
+                    disabled={loadEarlier.isPending}
+                    className="px-3 py-1 rounded-lg bg-card/80 text-[11px] text-muted-foreground hover:text-foreground hover:bg-card transition-colors shadow-sm disabled:opacity-60"
+                  >
+                    {loadEarlier.isPending ? "Loading..." : "Load earlier messages"}
+                  </button>
+                </div>
+              )}
+
               {/* Date separator for first message */}
               {threadItems.length > 0 && (
                 <div className="flex justify-center mb-3">
@@ -1730,13 +1957,19 @@ function Conversations() {
 
                     <div
                       className={cn(
-                        "flex mb-0.5 min-w-0",
+                        "flex mb-3 min-w-0",
                         isVisitor ? "justify-start" : "justify-end",
                       )}
                     >
                       <div
                         className={cn(
-                          "relative max-w-[85%] sm:max-w-[65%] rounded-lg px-3 py-2 shadow-sm overflow-hidden",
+                          "flex flex-col max-w-[85%] sm:max-w-[65%] min-w-0 gap-1.5",
+                          isVisitor ? "items-start" : "items-end",
+                        )}
+                      >
+                      <div
+                        className={cn(
+                          "relative rounded-lg px-3 py-2 shadow-sm overflow-hidden max-w-full",
                           isVisitor &&
                           "bg-muted/50 text-foreground rounded-tl-none",
                           isBot &&
@@ -1819,62 +2052,61 @@ function Conversations() {
                           }
                         })()}
 
-                        {/* Timestamp + checkmarks */}
-                        <div
-                          className={cn(
-                            "flex items-center gap-1 justify-end mt-0.5",
-                          )}
-                        >
-                          {(msg as Message & { _optimistic?: boolean }).
-                            _optimistic ? (
-                            <span className="text-[10px] text-muted-foreground/70 italic">
-                              {sendReply.isPending
-                                ? "Sending..."
-                                : sendReply.isError
-                                  ? "Failed to send"
-                                  : "Sent"}
-                            </span>
-                          ) : (
-                            <>
-                              <span className="text-[10px] text-muted-foreground/70">
-                                {formatTime(msg.createdAt)}
-                              </span>
-                              {!isVisitor && (
-                                <CheckCheck className="w-3.5 h-3.5 text-status-replied/70" />
-                              )}
-                              {isVisitor && (
-                                <Check className="w-3 h-3 text-muted-foreground/40" />
-                              )}
-                              {msg.emailedAt && (
-                                <Mail className="w-3 h-3 text-status-replied/70" />
-                              )}
-                            </>
-                          )}
-                        </div>
+                      </div>
 
-                        {/* Send as Email button for agent/bot messages */}
-                        {(isAgent || isBot) && !(msg as Message & { _optimistic?: boolean })._optimistic && (
-                          <div className="flex justify-end mt-1">
-                            {msg.emailedAt ? (
-                              <span className="text-[10px] text-muted-foreground/60 flex items-center gap-1">
-                                <Mail className="w-3 h-3" />
-                                Emailed {timeAgo(msg.emailedAt)}
-                              </span>
-                            ) : convoDetail?.conversation?.visitorEmail ? (
-                              <button
-                                type="button"
-                                onClick={() => sendEmail.mutate(msg.id)}
-                                disabled={sendEmail.isPending}
-                                className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-                              >
-                                <Mail className="w-3 h-3" />
-                                {sendEmail.isPending && sendEmail.variables === msg.id
-                                  ? "Sending..."
-                                  : "Send as Email"}
-                              </button>
-                            ) : null}
-                          </div>
+                      {/* Timestamp + checkmarks + email status — sits BELOW the bubble */}
+                      <div
+                        className={cn(
+                          "flex items-center gap-1 px-1 flex-wrap",
+                          isVisitor ? "justify-start" : "justify-end",
                         )}
+                      >
+                        {(msg as Message & { _optimistic?: boolean })
+                          ._optimistic ? (
+                          <span className="text-[10px] text-muted-foreground/70 italic">
+                            {sendReply.isPending
+                              ? "Sending..."
+                              : sendReply.isError
+                                ? "Failed to send"
+                                : "Sent"}
+                          </span>
+                        ) : (
+                          <>
+                            <span className="text-[10px] text-muted-foreground/70">
+                              {formatTime(msg.createdAt)}
+                            </span>
+                            {!isVisitor && (
+                              <CheckCheck className="w-3.5 h-3.5 text-status-replied/70" />
+                            )}
+                            {isVisitor && (
+                              <Check className="w-3 h-3 text-muted-foreground/40" />
+                            )}
+                            {(isAgent || isBot) &&
+                              (msg.emailedAt ? (
+                                <span
+                                  title={`Emailed ${timeAgo(msg.emailedAt)}`}
+                                  aria-label={`Emailed ${timeAgo(msg.emailedAt)}`}
+                                  className="inline-flex"
+                                >
+                                  <MailCheck className="w-3.5 h-3.5 text-status-replied/70" />
+                                </span>
+                              ) : convoDetail?.conversation?.visitorEmail ? (
+                                <button
+                                  type="button"
+                                  onClick={() => sendEmail.mutate(msg.id)}
+                                  disabled={sendEmail.isPending}
+                                  className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 ml-1 transition-colors"
+                                >
+                                  <Mail className="w-3 h-3" />
+                                  {sendEmail.isPending &&
+                                  sendEmail.variables === msg.id
+                                    ? "Sending..."
+                                    : "Send as Email"}
+                                </button>
+                              ) : null)}
+                          </>
+                        )}
+                      </div>
                       </div>
                     </div>
                   </div>
@@ -1915,6 +2147,12 @@ function Conversations() {
                     e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
                   }}
                   onKeyDown={(e) => {
+                    // On touch-primary devices the on-screen keyboard has no
+                    // Shift, so Enter must insert a newline. Send button only.
+                    const isTouch =
+                      typeof window !== "undefined" &&
+                      window.matchMedia("(pointer: coarse)").matches;
+                    if (isTouch) return;
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       if (replyText.trim()) {

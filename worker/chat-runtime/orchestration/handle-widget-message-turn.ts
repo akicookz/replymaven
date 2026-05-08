@@ -31,6 +31,11 @@ import {
 } from "../streaming/map-agent-events-to-sse";
 import { stripInternalTokens } from "../streaming/internal-tokens";
 import {
+  broadcastClosed,
+  broadcastMessageNew,
+  broadcastStatusChange,
+} from "../../realtime/broadcast";
+import {
   type ConversationChatState,
   type TurnTelemetry,
   type WidgetMessageTurnContext,
@@ -290,6 +295,10 @@ export async function handleWidgetMessageTurn(
     return Response.json({ error: "Conversation not found" }, { status: 404 });
   }
 
+  // Capture for use inside SSE closures where TS loses narrowing on the
+  // mutable `conversation` reassignments.
+  const visitorIdForBroadcast = conversation.visitorId;
+
   let chatState: ConversationChatState = parseChatState(
     conversation.chatState,
   );
@@ -387,13 +396,23 @@ export async function handleWidgetMessageTurn(
   }
 
   const imageUrl = context.payload.imageUrl ?? null;
-  await chatService.addMessage({
+  const visitorMessage = await chatService.addMessage({
     conversationId: context.conversationId,
     role: "visitor",
     content: context.payload.content,
     imageUrl,
   });
   markStage("visitor_message_saved");
+
+  // Broadcast visitor message to dashboard agents watching this conversation.
+  // Exclude the originating visitor (they already see it locally).
+  broadcastMessageNew(
+    context.env,
+    context.executionCtx,
+    context.conversationId,
+    visitorMessage,
+    { excludeSubjectId: conversation.visitorId },
+  );
 
   const requestedAgent = isAgentRequestedStatus(conversation.status);
   // This is a pre-visitor-insert snapshot of the conversation — sufficient
@@ -500,6 +519,15 @@ export async function handleWidgetMessageTurn(
         sources: null,
         senderName: settings?.botName ?? null,
       });
+
+      // Broadcast to dashboard subscribers; exclude originator (gets it via SSE).
+      broadcastMessageNew(
+        context.env,
+        context.executionCtx,
+        context.conversationId,
+        botMessage,
+        { excludeSubjectId: visitorIdForBroadcast },
+      );
 
       emitSseEvent(controller, encoder, {
         done: true,
@@ -977,6 +1005,18 @@ export async function handleWidgetMessageTurn(
           "closed",
           "bot_resolved",
         );
+        broadcastStatusChange(
+          context.env,
+          context.executionCtx,
+          context.conversationId,
+          "closed",
+        );
+        broadcastClosed(
+          context.env,
+          context.executionCtx,
+          context.conversationId,
+          "bot_resolved",
+        );
         const resolvedMessage =
           "Glad I could help! Feel free to reach out anytime if you have more questions.";
         fullResponse = fullResponse.trim()
@@ -1011,6 +1051,15 @@ export async function handleWidgetMessageTurn(
             : null,
         senderName: settings?.botName ?? null,
       });
+
+      // Broadcast to dashboard subscribers; exclude originator (gets it via SSE).
+      broadcastMessageNew(
+        context.env,
+        context.executionCtx,
+        context.conversationId,
+        botMessage,
+        { excludeSubjectId: visitorIdForBroadcast },
+      );
 
       const MAX_SOURCES = 3;
       const cappedSources = retrieval.sourceReferences.slice(0, MAX_SOURCES);

@@ -1,0 +1,2 @@
+CREATE INDEX `idx_conversations_visitor_name_lower` ON `conversations` (`project_id`,LOWER("visitor_name"));--> statement-breakpoint
+CREATE INDEX `idx_conversations_visitor_email_lower` ON `conversations` (`project_id`,LOWER("visitor_email"));
