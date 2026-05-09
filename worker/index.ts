@@ -10,6 +10,7 @@ import { ProjectService } from "./services/project-service";
 import { buildInquiryTitle, WidgetService } from "./services/widget-service";
 import { ChatService } from "./services/chat-service";
 import { ResourceService, type FaqPair } from "./services/resource-service";
+import { triggerAutoRagSync } from "./services/autorag-sync";
 import { FAQ_SET_MAX_CHARS } from "../shared/faq-limits";
 import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
@@ -3625,12 +3626,15 @@ const app = new Hono<HonoAppContext>()
 
       const buffer = await fileObj.arrayBuffer();
       c.executionCtx.waitUntil(
-        resourceService.ingestPdf(
-          project.id,
-          resource.id,
-          buffer,
-          title.trim(),
-        ),
+        (async () => {
+          await resourceService.ingestPdf(
+            project.id,
+            resource.id,
+            buffer,
+            title.trim(),
+          );
+          await triggerAutoRagSync(c.env, "resource.create.pdf");
+        })(),
       );
 
       return c.json(resource, 201);
@@ -3653,12 +3657,15 @@ const app = new Hono<HonoAppContext>()
       });
 
       c.executionCtx.waitUntil(
-        resourceService.ingestFaqFromPairs(
-          project.id,
-          resource.id,
-          parsed.data.title,
-          parsed.data.pairs,
-        ),
+        (async () => {
+          await resourceService.ingestFaqFromPairs(
+            project.id,
+            resource.id,
+            parsed.data.title,
+            parsed.data.pairs,
+          );
+          await triggerAutoRagSync(c.env, "resource.create.faq");
+        })(),
       );
 
       return c.json(resource, 201);
@@ -3679,24 +3686,30 @@ const app = new Hono<HonoAppContext>()
     // Trigger ingestion based on type (use waitUntil to keep isolate alive)
     if (parsed.data.type === "webpage" && parsed.data.url) {
       c.executionCtx.waitUntil(
-        resourceService.ingestWebpage(
-          project.id,
-          resource.id,
-          parsed.data.url,
-          parsed.data.title,
-          c.env.CRAWL_QUEUE,
-          c.env.CF_ACCOUNT_ID,
-          c.env.BROWSER_RENDERING_API_TOKEN,
-        ),
+        (async () => {
+          await resourceService.ingestWebpage(
+            project.id,
+            resource.id,
+            parsed.data.url ?? "",
+            parsed.data.title,
+            c.env.CRAWL_QUEUE,
+            c.env.CF_ACCOUNT_ID,
+            c.env.BROWSER_RENDERING_API_TOKEN,
+          );
+          await triggerAutoRagSync(c.env, "resource.create.webpage");
+        })(),
       );
     } else if (parsed.data.type === "faq" && parsed.data.content) {
       c.executionCtx.waitUntil(
-        resourceService.ingestFaq(
-          project.id,
-          resource.id,
-          parsed.data.title,
-          parsed.data.content,
-        ),
+        (async () => {
+          await resourceService.ingestFaq(
+            project.id,
+            resource.id,
+            parsed.data.title,
+            parsed.data.content ?? "",
+          );
+          await triggerAutoRagSync(c.env, "resource.create.faq.legacy");
+        })(),
       );
     }
 
@@ -3919,25 +3932,30 @@ const app = new Hono<HonoAppContext>()
         return c.json({ error: "Source FAQ not found" }, 404);
       }
 
-      // Re-ingest each new resource to R2 / AI Search asynchronously.
-      for (const created of result.created) {
-        let bucketPairs: FaqPair[] = [];
-        try {
-          const parsedPairs = JSON.parse(created.content ?? "[]");
-          if (Array.isArray(parsedPairs)) bucketPairs = parsedPairs;
-        } catch {
-          // Skip ingestion for malformed; user can re-trigger.
-        }
-        if (bucketPairs.length === 0) continue;
-        c.executionCtx.waitUntil(
-          resourceService.ingestFaqFromPairs(
-            project.id,
-            created.id,
-            created.title,
-            bucketPairs,
-          ),
-        );
-      }
+      // Re-ingest each new resource to R2 / AI Search asynchronously, then sync.
+      c.executionCtx.waitUntil(
+        (async () => {
+          await Promise.all(
+            result.created.map(async (created) => {
+              let bucketPairs: FaqPair[] = [];
+              try {
+                const parsedPairs = JSON.parse(created.content ?? "[]");
+                if (Array.isArray(parsedPairs)) bucketPairs = parsedPairs;
+              } catch {
+                return;
+              }
+              if (bucketPairs.length === 0) return;
+              await resourceService.ingestFaqFromPairs(
+                project.id,
+                created.id,
+                created.title,
+                bucketPairs,
+              );
+            }),
+          );
+          await triggerAutoRagSync(c.env, "faq.apply_split");
+        })(),
+      );
 
       return c.json({
         created: result.created,
@@ -3992,22 +4010,25 @@ const app = new Hono<HonoAppContext>()
         return c.json({ error: message }, status);
       }
 
-      // Re-ingest both sets to R2 / AI Search.
+      // Re-ingest both sets to R2, then trigger AutoRAG sync.
       c.executionCtx.waitUntil(
-        resourceService.ingestFaqFromPairs(
-          project.id,
-          c.req.param("resourceId"),
-          result.sourceTitle,
-          result.sourcePairs,
-        ),
-      );
-      c.executionCtx.waitUntil(
-        resourceService.ingestFaqFromPairs(
-          project.id,
-          parsed.data.destResourceId,
-          result.destTitle,
-          result.destPairs,
-        ),
+        (async () => {
+          await Promise.all([
+            resourceService.ingestFaqFromPairs(
+              project.id,
+              c.req.param("resourceId"),
+              result.sourceTitle,
+              result.sourcePairs,
+            ),
+            resourceService.ingestFaqFromPairs(
+              project.id,
+              parsed.data.destResourceId,
+              result.destTitle,
+              result.destPairs,
+            ),
+          ]);
+          await triggerAutoRagSync(c.env, "faq.move_pair");
+        })(),
       );
 
       return c.json({ ok: true });
@@ -4077,6 +4098,7 @@ const app = new Hono<HonoAppContext>()
       project.id,
     );
     if (!deleted) return c.json({ error: "Not found" }, 404);
+    c.executionCtx.waitUntil(triggerAutoRagSync(c.env, "resource.delete"));
     return c.json({ ok: true });
   })
   .post("/api/projects/:id/resources/:resourceId/reindex", async (c) => {
@@ -4106,27 +4128,34 @@ const app = new Hono<HonoAppContext>()
       "pending",
     );
 
-    // Re-trigger ingestion (use waitUntil to keep isolate alive)
+    // Re-trigger ingestion (use waitUntil to keep isolate alive). After the
+    // R2 write completes, fire AutoRAG sync so AI Search picks up the change.
     if (resource.type === "webpage" && resource.url) {
       c.executionCtx.waitUntil(
-        resourceService.ingestWebpage(
-          project.id,
-          resource.id,
-          resource.url,
-          resource.title,
-          c.env.CRAWL_QUEUE,
-          c.env.CF_ACCOUNT_ID,
-          c.env.BROWSER_RENDERING_API_TOKEN,
-        ),
+        (async () => {
+          await resourceService.ingestWebpage(
+            project.id,
+            resource.id,
+            resource.url ?? "",
+            resource.title,
+            c.env.CRAWL_QUEUE,
+            c.env.CF_ACCOUNT_ID,
+            c.env.BROWSER_RENDERING_API_TOKEN,
+          );
+          await triggerAutoRagSync(c.env, "resource.reindex.webpage");
+        })(),
       );
     } else if (resource.type === "faq" && resource.content) {
       c.executionCtx.waitUntil(
-        resourceService.ingestFaq(
-          project.id,
-          resource.id,
-          resource.title,
-          resource.content,
-        ),
+        (async () => {
+          await resourceService.ingestFaq(
+            project.id,
+            resource.id,
+            resource.title,
+            resource.content ?? "",
+          );
+          await triggerAutoRagSync(c.env, "resource.reindex.faq");
+        })(),
       );
     } else if (resource.type === "pdf") {
       // Keep PDF text companion in sync when editable text exists.
@@ -4191,6 +4220,7 @@ const app = new Hono<HonoAppContext>()
               project.id,
               "indexed",
             );
+            await triggerAutoRagSync(c.env, "resource.reindex.pdf");
           } catch (err) {
             console.error(
               `PDF reindex failed for resource ${resource.id}:`,
@@ -4262,6 +4292,9 @@ const app = new Hono<HonoAppContext>()
         parsed.data.description ?? null,
       );
       if (!updated) return c.json({ error: "Update failed" }, 500);
+      c.executionCtx.waitUntil(
+        triggerAutoRagSync(c.env, "resource.update.faq"),
+      );
       return c.json(updated);
     }
 
@@ -4276,6 +4309,9 @@ const app = new Hono<HonoAppContext>()
       parsed.data.content,
     );
     if (!updated) return c.json({ error: "Update failed" }, 500);
+    c.executionCtx.waitUntil(
+      triggerAutoRagSync(c.env, "resource.update.content"),
+    );
     return c.json(updated);
   })
 
@@ -4352,6 +4388,9 @@ const app = new Hono<HonoAppContext>()
       parsed.data.content,
     );
     if (!updated) return c.json({ error: "Not found" }, 404);
+    c.executionCtx.waitUntil(
+      triggerAutoRagSync(c.env, "crawled_page.update"),
+    );
     return c.json({ ok: true });
   })
   .delete(
@@ -4374,6 +4413,9 @@ const app = new Hono<HonoAppContext>()
         project.id,
       );
       if (!deleted) return c.json({ error: "Not found" }, 404);
+      c.executionCtx.waitUntil(
+        triggerAutoRagSync(c.env, "crawled_page.delete"),
+      );
       return c.json({ ok: true });
     },
   )
@@ -4392,13 +4434,16 @@ const app = new Hono<HonoAppContext>()
 
       const resourceService = new ResourceService(db, c.env.UPLOADS);
       c.executionCtx.waitUntil(
-        resourceService.refreshCrawledPage(
-          c.req.param("pageId"),
-          c.req.param("resourceId"),
-          project.id,
-          c.env.CF_ACCOUNT_ID,
-          c.env.BROWSER_RENDERING_API_TOKEN,
-        ),
+        (async () => {
+          await resourceService.refreshCrawledPage(
+            c.req.param("pageId"),
+            c.req.param("resourceId"),
+            project.id,
+            c.env.CF_ACCOUNT_ID,
+            c.env.BROWSER_RENDERING_API_TOKEN,
+          );
+          await triggerAutoRagSync(c.env, "crawled_page.refresh");
+        })(),
       );
 
       return c.json({ ok: true, message: "Refresh started" });

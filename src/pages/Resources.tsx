@@ -321,18 +321,26 @@ function Resources() {
   });
 
   const reindex = useMutation({
-    mutationFn: async (resourceId: string) => {
+    mutationFn: async (vars: {
+      id: string;
+      type: "webpage" | "pdf" | "faq";
+    }) => {
       const res = await fetch(
-        `/api/projects/${projectId}/resources/${resourceId}/reindex`,
+        `/api/projects/${projectId}/resources/${vars.id}/reindex`,
         { method: "POST" },
       );
-      if (!res.ok) throw new Error("Failed to reindex");
+      if (!res.ok) throw new Error("Failed to index");
+      return vars;
     },
-    onSuccess: () => {
+    onSuccess: (vars) => {
       queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
-      toast.success("Reindexing started");
+      toast.success(
+        vars.type === "webpage"
+          ? "Re-crawling and indexing"
+          : "Indexing started",
+      );
     },
-    onError: () => toast.error("Failed to reindex"),
+    onError: () => toast.error("Failed to index"),
   });
 
   const typeIcons = {
@@ -1029,11 +1037,18 @@ function Resources() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          reindex.mutate(resource.id);
+                          reindex.mutate({
+                            id: resource.id,
+                            type: resource.type,
+                          });
                         }}
                         disabled={reindex.isPending}
                         className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-50"
-                        title="Reindex"
+                        title={
+                          resource.type === "webpage"
+                            ? "Re-crawl & Index"
+                            : "Index"
+                        }
                       >
                         <RefreshCw
                           className={cn(
@@ -1073,7 +1088,12 @@ function Resources() {
                           projectId={projectId!}
                           resourceId={resource.id}
                           resourceUrl={resource.url ?? ""}
-                          onRefreshAll={() => reindex.mutate(resource.id)}
+                          onRefreshAll={() =>
+                            reindex.mutate({
+                              id: resource.id,
+                              type: "webpage",
+                            })
+                          }
                         />
                       )}
                       {resource.type === "pdf" && (
@@ -1081,7 +1101,12 @@ function Resources() {
                           projectId={projectId!}
                           resourceId={resource.id}
                           resourceTitle={resource.title}
-                          onReindex={() => reindex.mutate(resource.id)}
+                          onReindex={() =>
+                            reindex.mutate({
+                              id: resource.id,
+                              type: "pdf",
+                            })
+                          }
                         />
                       )}
                     </div>

@@ -42,6 +42,7 @@ export interface AppEnv extends Env {
   OPENAI_API_KEY: string;
   AI_MODEL: string;
   BROWSER_RENDERING_API_TOKEN: string;
+  AUTORAG_API_TOKEN: string;
   CF_ACCOUNT_ID: string;
   STRIPE_SECRET_KEY: string;
   STRIPE_WEBHOOK_SECRET: string;
