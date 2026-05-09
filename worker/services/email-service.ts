@@ -118,6 +118,33 @@ ${body}
 </body></html>`;
 }
 
+// ─── Message-ID helpers ───────────────────────────────────────────────────────
+
+const MESSAGE_ID_DOMAIN = "updates.replymaven.com";
+const MESSAGE_ID_PATTERN = new RegExp(
+  `<msg-([0-9a-f-]{36})@${MESSAGE_ID_DOMAIN.replace(/\./g, "\\.")}>`,
+  "gi",
+);
+
+export function buildEmailMessageId(messageId: string): string {
+  return `<msg-${messageId}@${MESSAGE_ID_DOMAIN}>`;
+}
+
+// Extract a ReplyMaven message id from an `In-Reply-To` or `References` header.
+// `In-Reply-To` carries a single id (we take the first match). `References` is
+// space-separated and ordered oldest-to-newest, so when reading from References
+// we want the *last* match — i.e. the most recent ancestor.
+export function parseEmailMessageId(
+  header: string | null | undefined,
+  options: { source?: "in-reply-to" | "references" } = {},
+): string | null {
+  if (!header) return null;
+  const matches = [...header.matchAll(MESSAGE_ID_PATTERN)];
+  if (matches.length === 0) return null;
+  const pick = options.source === "references" ? matches.at(-1) : matches[0];
+  return pick?.[1] ?? null;
+}
+
 function buildVisitorSubjectIdentifier(opts: {
   name?: string | null;
   email?: string | null;
@@ -366,8 +393,78 @@ ${msg.body}
     projectSlug: string;
     projectName: string;
     conversationId: string;
+    messageId: string;
     agentName: string;
     agentAvatar: string | null;
+    messageContent: string;
+    dashboardUrl: string;
+    accentColor?: string | null;
+    inReplyToMessageId?: string | null;
+    autoSubmitted?: boolean;
+  }): Promise<void> {
+    const {
+      to,
+      projectSlug,
+      projectName,
+      conversationId,
+      messageId,
+      agentName,
+      messageContent,
+      dashboardUrl,
+      accentColor,
+      inReplyToMessageId,
+      autoSubmitted,
+    } = details;
+
+    const lines = escapeHtml(messageContent)
+      .split("\n")
+      .map((line) => (line.trim() === "" ? "<br/>" : `<p style="margin: 0 0 4px;">${line}</p>`))
+      .join("");
+
+    const styles = buildAccentStyles(accentColor);
+    const headers: Record<string, string> = {
+      "X-Conversation-Id": conversationId,
+      "X-Project-Slug": projectSlug,
+      "Message-ID": buildEmailMessageId(messageId),
+    };
+    if (inReplyToMessageId) {
+      const ref = buildEmailMessageId(inReplyToMessageId);
+      headers["In-Reply-To"] = ref;
+      headers["References"] = ref;
+    }
+    if (autoSubmitted) {
+      headers["Auto-Submitted"] = "auto-generated";
+      headers["Precedence"] = "bulk";
+    }
+
+    await this.resend.emails.send({
+      from: `${projectName} <${projectSlug}@updates.replymaven.com>`,
+      replyTo: `${projectSlug}@updates.replymaven.com`,
+      to,
+      subject: `New reply from ${agentName} - ${projectName}`,
+      headers,
+      html: wrapEmail(
+        `
+<p class="email-heading" style="${styles.heading} margin: 0 0 20px;">${escapeHtml(agentName)} replied</p>
+<div class="email-card" style="${CARD_STYLE} margin: 0 0 24px;">
+  <div style="font-size: 15px; ${BODY_TEXT} line-height: 1.6;">${lines}</div>
+</div>
+<a href="${dashboardUrl}" class="email-button" style="${styles.button}">View Conversation</a>
+<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">You can reply to this email to continue the conversation.</p>
+      `,
+        accentColor,
+      ),
+    });
+  }
+
+  async sendVisitorReplyToAgentEmail(details: {
+    to: string;
+    projectSlug: string;
+    projectName: string;
+    conversationId: string;
+    messageId: string;
+    inReplyToMessageId: string;
+    visitorDisplayName: string;
     messageContent: string;
     dashboardUrl: string;
     accentColor?: string | null;
@@ -377,7 +474,9 @@ ${msg.body}
       projectSlug,
       projectName,
       conversationId,
-      agentName,
+      messageId,
+      inReplyToMessageId,
+      visitorDisplayName,
       messageContent,
       dashboardUrl,
       accentColor,
@@ -389,24 +488,30 @@ ${msg.body}
       .join("");
 
     const styles = buildAccentStyles(accentColor);
+    const ref = buildEmailMessageId(inReplyToMessageId);
 
     await this.resend.emails.send({
       from: `${projectName} <${projectSlug}@updates.replymaven.com>`,
       replyTo: `${projectSlug}@updates.replymaven.com`,
       to,
-      subject: `New reply from ${agentName} - ${projectName}`,
+      subject: `Re: ${visitorDisplayName} replied - ${projectName}`,
       headers: {
         "X-Conversation-Id": conversationId,
         "X-Project-Slug": projectSlug,
+        "Message-ID": buildEmailMessageId(messageId),
+        "In-Reply-To": ref,
+        "References": ref,
+        "Auto-Submitted": "auto-generated",
+        "Precedence": "bulk",
       },
       html: wrapEmail(
         `
-<p class="email-heading" style="${styles.heading} margin: 0 0 20px;">${escapeHtml(agentName)} replied</p>
+<p class="email-heading" style="${styles.heading} margin: 0 0 20px;">${escapeHtml(visitorDisplayName)} replied</p>
 <div class="email-card" style="${CARD_STYLE} margin: 0 0 24px;">
   <div style="font-size: 15px; ${BODY_TEXT} line-height: 1.6;">${lines}</div>
 </div>
 <a href="${dashboardUrl}" class="email-button" style="${styles.button}">View Conversation</a>
-<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">You can reply to this email to continue the conversation.</p>
+<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">Reply to this email to respond &mdash; your reply will be sent to ${escapeHtml(visitorDisplayName)} and added to the conversation.</p>
       `,
         accentColor,
       ),

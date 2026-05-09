@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, desc, and, gt, lt, ne, inArray, or, like, sql } from "drizzle-orm";
+import { eq, desc, and, gt, lt, ne, inArray, isNotNull, or, like, sql } from "drizzle-orm";
 import {
   conversations,
   messages,
@@ -589,6 +589,25 @@ export class ChatService {
       .select()
       .from(messages)
       .where(eq(messages.id, messageId))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async getLatestEmailedAgentMessage(
+    conversationId: string,
+  ): Promise<MessageRow | null> {
+    const rows = await this.db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.role, "agent"),
+          isNotNull(messages.emailedAt),
+          isNotNull(messages.userId),
+        ),
+      )
+      .orderBy(desc(messages.emailedAt))
       .limit(1);
     return rows[0] ?? null;
   }

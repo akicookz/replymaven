@@ -17,7 +17,7 @@ import { TelegramService } from "./services/telegram-service";
 import { KnowledgeSuggestionService } from "./services/knowledge-suggestion-service";
 import { DashboardService } from "./services/dashboard-service";
 import { CrawlService, type CrawlMessage } from "./services/crawl-service";
-import { EmailService } from "./services/email-service";
+import { EmailService, parseEmailMessageId } from "./services/email-service";
 import { ToolService } from "./services/tool-service";
 import { GuidelineService } from "./services/guideline-service";
 import {
@@ -1386,6 +1386,15 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
+    // KV idempotency: skip duplicate webhook deliveries we've already finished
+    // processing. Set AFTER the work completes (see end of handler) so that
+    // failed runs are still retried by Resend rather than silently dropped.
+    const idempotencyKey = `inbound-email:${emailId}`;
+    const seen = await c.env.CONVERSATIONS_CACHE.get(idempotencyKey);
+    if (seen) {
+      return c.json({ ok: true });
+    }
+
     // Extract project slug from to address ({slug}@updates.replymaven.com)
     let projectSlug: string | null = null;
     for (const addr of toAddresses) {
@@ -1408,13 +1417,19 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    // Fetch full email content from Resend API
+    // Fetch full email content + headers from Resend API
     let emailText = "";
+    let inReplyToHeader: string | null = null;
+    let referencesHeader: string | null = null;
+    let autoSubmittedHeader: string | null = null;
+    let precedenceHeader: string | null = null;
+    let returnPathHeader: string | null = null;
     try {
       const emailRes = await fetch(
-        `https://api.resend.com/emails/received/${emailId}`,
+        `https://api.resend.com/emails/receiving/${emailId}`,
         {
           headers: { Authorization: `Bearer ${c.env.RESEND_API_KEY}` },
+          signal: AbortSignal.timeout(5_000),
         },
       );
       if (emailRes.ok) {
@@ -1431,6 +1446,36 @@ const app = new Hono<HonoAppContext>()
             .replace(/&quot;/g, '"')
             .trim();
         }
+
+        // Defensively normalize the headers payload — Resend may surface it
+        // as a top-level field, an object map, or an array of {name, value}.
+        const headerLookup: Record<string, string> = {};
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const headersField = emailData.headers as any;
+        if (
+          headersField &&
+          typeof headersField === "object" &&
+          !Array.isArray(headersField)
+        ) {
+          for (const [k, v] of Object.entries(headersField)) {
+            headerLookup[k.toLowerCase()] = String(v ?? "");
+          }
+        } else if (Array.isArray(headersField)) {
+          for (const h of headersField) {
+            const name = String(h?.name ?? "").toLowerCase();
+            if (name) headerLookup[name] = String(h?.value ?? "");
+          }
+        }
+        const readHeader = (name: string): string | null =>
+          headerLookup[name.toLowerCase()] ?? null;
+
+        // `in_reply_to` and `references` are not surfaced as top-level fields
+        // by Resend — they live in the `headers` object only.
+        inReplyToHeader = readHeader("in-reply-to");
+        referencesHeader = readHeader("references");
+        autoSubmittedHeader = readHeader("auto-submitted");
+        precedenceHeader = readHeader("precedence");
+        returnPathHeader = readHeader("return-path");
       } else {
         console.error(
           `[InboundEmail] Failed to fetch email content: ${emailRes.status}`,
@@ -1439,6 +1484,28 @@ const app = new Hono<HonoAppContext>()
       }
     } catch (err) {
       console.error("[InboundEmail] Error fetching email content:", err);
+      return c.json({ ok: true });
+    }
+
+    // Drop auto-responders to prevent feedback loops between the two sides.
+    // Conformant senders set `Auto-Submitted: auto-replied|auto-generated`,
+    // `Precedence: bulk|list|junk`, or use an empty `Return-Path: <>` (DSN).
+    const isAutoSubmitted = (() => {
+      const auto = autoSubmittedHeader?.trim().toLowerCase();
+      if (auto && auto !== "no") return true;
+      const prec = precedenceHeader?.trim().toLowerCase();
+      if (prec === "bulk" || prec === "list" || prec === "junk") return true;
+      const rp = returnPathHeader?.trim();
+      if (rp === "<>") return true;
+      return false;
+    })();
+    if (isAutoSubmitted) {
+      console.log(
+        `[InboundEmail] Dropping auto-submitted email ${emailId} (auto=${autoSubmittedHeader}, prec=${precedenceHeader}, rp=${returnPathHeader})`,
+      );
+      await c.env.CONVERSATIONS_CACHE.put(idempotencyKey, "1", {
+        expirationTtl: 60 * 60 * 24,
+      });
       return c.json({ ok: true });
     }
 
@@ -1461,22 +1528,56 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    // Find the conversation by sender email
-    const chatService = new ChatService(db);
-    let senderEmail: string;
+    // Resend formats `from` as a string. Per their docs it is typically
+    // `"Display Name <user@example.com>"`, but bare `"user@example.com"` also
+    // appears in the wild. Extract the angle-bracketed address when present.
+    let rawFrom: string;
     if (typeof fromAddress === "string") {
-      senderEmail = fromAddress;
+      rawFrom = fromAddress;
     } else if (typeof fromAddress === "object" && fromAddress?.address) {
-      senderEmail = fromAddress.address;
+      rawFrom = fromAddress.address;
     } else {
       console.error("[InboundEmail] Unexpected from address format:", fromAddress);
       return c.json({ ok: true });
     }
+    const angleMatch = rawFrom.match(/<([^>]+)>/);
+    const senderEmail = (angleMatch ? angleMatch[1] : rawFrom).trim().toLowerCase();
+    if (!senderEmail) {
+      console.error("[InboundEmail] Could not extract email from from-field:", rawFrom);
+      return c.json({ ok: true });
+    }
 
-    const conversation = await chatService.getRecentConversationByVisitorEmail(
-      project.id,
-      senderEmail,
-    );
+    // ─── Locate the conversation ─────────────────────────────────────────
+    // Prefer In-Reply-To (single id), fall back to References (last id is the
+    // most recent ancestor). If neither matches, fall back to a sender-email
+    // lookup so visitor-initiated email replies still work without our headers.
+    const chatService = new ChatService(db);
+    const referencedMessageId =
+      parseEmailMessageId(inReplyToHeader) ??
+      parseEmailMessageId(referencesHeader, { source: "references" });
+    let conversation = null as Awaited<
+      ReturnType<typeof chatService.getRecentConversationByVisitorEmail>
+    > | null;
+    let referencedAgentUserId: string | null = null;
+    if (referencedMessageId) {
+      const sourceMessage = await chatService.getMessageById(referencedMessageId);
+      if (sourceMessage) {
+        const conv = await chatService.getConversationById(
+          sourceMessage.conversationId,
+          project.id,
+        );
+        if (conv) {
+          conversation = conv;
+          referencedAgentUserId = sourceMessage.userId ?? null;
+        }
+      }
+    }
+    if (!conversation) {
+      conversation = await chatService.getRecentConversationByVisitorEmail(
+        project.id,
+        senderEmail,
+      );
+    }
     if (!conversation) {
       console.error(
         `[InboundEmail] No conversation found for email: ${senderEmail} in project: ${project.id}`,
@@ -1484,15 +1585,70 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    // Idempotency: check if this email was already processed
+    // Per-conversation duplicate-content guard (defends against retries that
+    // bypass the KV check, e.g. a different email_id with identical content).
     const existingMessages = await chatService.getMessagesSince(
       conversation.id,
       Date.now() - 5 * 60 * 1000,
     );
     const alreadyProcessed = existingMessages.some(
-      (m) => m.role === "visitor" && m.content === cleanedText,
+      (m) => m.content === cleanedText,
     );
     if (alreadyProcessed) {
+      return c.json({ ok: true });
+    }
+
+    // ─── Determine inbound role: visitor vs. agent ───────────────────────
+    const visitorEmail = conversation.visitorEmail?.toLowerCase() ?? null;
+    const isVisitor = visitorEmail !== null && visitorEmail === senderEmail;
+
+    let agentUser: {
+      id: string;
+      name: string;
+      email: string;
+      avatar: string | null;
+    } | null = null;
+    if (!isVisitor) {
+      // Trust Resend's MX-level filtering for SPF/DKIM/DMARC enforcement —
+      // their API doesn't surface auth verdicts to webhook consumers, so we
+      // rely on them to reject hard-fail mail before forwarding. We still
+      // require the sender's email to match a stored user account that has
+      // explicit access to this project (owner or accepted team member).
+      const userRows = await db
+        .select({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+          profilePicture: users.profilePicture,
+          image: users.image,
+        })
+        .from(users)
+        .where(eq(users.email, senderEmail))
+        .limit(1);
+      const candidate = userRows[0];
+      if (candidate) {
+        const isOwner = candidate.id === project.userId;
+        let hasAccess = isOwner;
+        if (!isOwner) {
+          const teamService = new TeamService(db);
+          const membership = await teamService.getTeamMembership(candidate.id);
+          hasAccess = membership?.ownerId === project.userId;
+        }
+        if (hasAccess) {
+          agentUser = {
+            id: candidate.id,
+            name: candidate.name,
+            email: candidate.email,
+            avatar: candidate.profilePicture ?? candidate.image ?? null,
+          };
+        }
+      }
+    }
+
+    if (!isVisitor && !agentUser) {
+      console.error(
+        `[InboundEmail] Sender ${senderEmail} is neither the visitor nor a project member`,
+      );
       return c.json({ ok: true });
     }
 
@@ -1501,46 +1657,163 @@ const app = new Hono<HonoAppContext>()
       broadcastStatusChange(c.env, c.executionCtx, conversation.id, "active");
     }
 
-    const inboundEmailMessage = await chatService.addMessage({
-      conversationId: conversation.id,
-      role: "visitor",
-      content: cleanedText,
-      sources: null,
-    });
-    broadcastMessageNew(
-      c.env,
-      c.executionCtx,
-      conversation.id,
-      inboundEmailMessage,
-    );
+    const widgetService = new WidgetService(db);
+    const widgetCfgForReply = await widgetService.getWidgetConfig(project.id);
 
-    // If in agent mode, forward to Telegram
-    if (
-      conversation.status === "waiting_agent" ||
-      conversation.status === "agent_replied"
-    ) {
-      try {
-        const telegramService = new TelegramService(db);
-        const tgSettings = await telegramService.getTelegramSettings(
-          project.id,
-        );
-        if (tgSettings?.telegramBotToken && tgSettings?.telegramChatId) {
-          const replyTo = conversation.telegramThreadId
-            ? parseInt(conversation.telegramThreadId, 10)
-            : undefined;
-          await telegramService.forwardVisitorMessage(
-            tgSettings.telegramBotToken,
-            tgSettings.telegramChatId,
-            conversation.visitorName ?? senderEmail,
-            `[via email] ${cleanedText}`,
-            conversation.id,
-            replyTo,
+    if (isVisitor) {
+      // ─── Visitor reply branch ─────────────────────────────────────────
+      const inboundEmailMessage = await chatService.addMessage({
+        conversationId: conversation.id,
+        role: "visitor",
+        content: cleanedText,
+        sources: null,
+      });
+      broadcastMessageNew(
+        c.env,
+        c.executionCtx,
+        conversation.id,
+        inboundEmailMessage,
+      );
+
+      // Forward to Telegram if conversation is in agent mode
+      if (
+        conversation.status === "waiting_agent" ||
+        conversation.status === "agent_replied"
+      ) {
+        try {
+          const telegramService = new TelegramService(db);
+          const tgSettings = await telegramService.getTelegramSettings(
+            project.id,
+          );
+          if (tgSettings?.telegramBotToken && tgSettings?.telegramChatId) {
+            const replyTo = conversation.telegramThreadId
+              ? parseInt(conversation.telegramThreadId, 10)
+              : undefined;
+            await telegramService.forwardVisitorMessage(
+              tgSettings.telegramBotToken,
+              tgSettings.telegramChatId,
+              conversation.visitorName ?? senderEmail,
+              `[via email] ${cleanedText}`,
+              conversation.id,
+              replyTo,
+            );
+          }
+        } catch (err) {
+          console.error("[InboundEmail] Telegram forward failed:", err);
+        }
+      }
+
+      // Notify the agent who originated the email thread, if any.
+      let recipientUserId = referencedAgentUserId;
+      if (!recipientUserId) {
+        const fallback =
+          await chatService.getLatestEmailedAgentMessage(conversation.id);
+        recipientUserId = fallback?.userId ?? null;
+      }
+      if (recipientUserId && c.env.RESEND_API_KEY) {
+        const agentRows = await db
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.id, recipientUserId))
+          .limit(1);
+        const agentEmail = agentRows[0]?.email;
+        if (agentEmail) {
+          const emailService = new EmailService(c.env.RESEND_API_KEY);
+          const visitorDisplayName =
+            conversation.visitorName?.trim() ||
+            conversation.visitorEmail?.trim() ||
+            "Visitor";
+          const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`;
+          c.executionCtx.waitUntil(
+            emailService
+              .sendVisitorReplyToAgentEmail({
+                to: agentEmail,
+                projectSlug: project.slug,
+                projectName: project.name,
+                conversationId: conversation.id,
+                messageId: inboundEmailMessage.id,
+                inReplyToMessageId:
+                  referencedMessageId ?? inboundEmailMessage.id,
+                visitorDisplayName,
+                messageContent: cleanedText,
+                dashboardUrl,
+                accentColor: widgetCfgForReply?.primaryColor ?? null,
+              })
+              .catch((err) => {
+                console.error(
+                  "[InboundEmail] Visitor-reply notification failed:",
+                  err,
+                );
+              }),
           );
         }
-      } catch (err) {
-        console.error("[InboundEmail] Telegram forward failed:", err);
+      }
+    } else if (agentUser) {
+      // ─── Agent reply branch (round-trip from agent's inbox) ───────────
+      const agentMessage = await chatService.addMessage({
+        conversationId: conversation.id,
+        role: "agent",
+        content: cleanedText,
+        userId: agentUser.id,
+        senderName: agentUser.name,
+        senderAvatar: agentUser.avatar,
+        sources: null,
+      });
+      await chatService.markMessageAsEmailed(agentMessage.id);
+      await chatService.updateConversationStatus(
+        conversation.id,
+        project.id,
+        "agent_replied",
+      );
+      broadcastMessageNew(c.env, c.executionCtx, conversation.id, agentMessage);
+      broadcastStatusChange(
+        c.env,
+        c.executionCtx,
+        conversation.id,
+        "agent_replied",
+      );
+
+      // Send the visitor an email with the agent's reply so the round-trip
+      // continues over email. Skip if the conversation has no visitorEmail —
+      // the message still lands in the dashboard.
+      if (conversation.visitorEmail && c.env.RESEND_API_KEY) {
+        const emailService = new EmailService(c.env.RESEND_API_KEY);
+        const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`;
+        c.executionCtx.waitUntil(
+          emailService
+            .sendAgentMessageEmail({
+              to: conversation.visitorEmail,
+              projectSlug: project.slug,
+              projectName: project.name,
+              conversationId: conversation.id,
+              messageId: agentMessage.id,
+              agentName: agentUser.name,
+              agentAvatar: agentUser.avatar,
+              messageContent: cleanedText,
+              dashboardUrl,
+              accentColor: widgetCfgForReply?.primaryColor ?? null,
+              inReplyToMessageId: referencedMessageId ?? null,
+              autoSubmitted: true,
+            })
+            .catch((err) => {
+              console.error(
+                "[InboundEmail] Agent-reply outbound to visitor failed:",
+                err,
+              );
+            }),
+        );
       }
     }
+
+    // Mark this email_id as fully processed (24h TTL). Done last so synchronous
+    // failures (DB write, fetch, etc.) leave the marker absent and Resend's
+    // retry will re-process. Note: queued outbound sends in `waitUntil` can
+    // still fail *after* this point — the message is in the DB but the
+    // recipient never gets the email. The dashboard "Send as email" button can
+    // be used to re-send manually; failures are logged with `[InboundEmail]`.
+    await c.env.CONVERSATIONS_CACHE.put(idempotencyKey, "1", {
+      expirationTtl: 60 * 60 * 24,
+    });
 
     return c.json({ ok: true });
   })
@@ -4899,6 +5172,7 @@ const app = new Hono<HonoAppContext>()
       projectSlug: project.slug,
       projectName: project.name,
       conversationId: conversation.id,
+      messageId: message.id,
       agentName: message.senderName ?? user.name ?? "Support",
       agentAvatar: message.senderAvatar ?? null,
       messageContent: message.content,
