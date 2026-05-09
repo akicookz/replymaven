@@ -173,6 +173,30 @@ export const updateResourceContentSchema = z.object({
   content: z.string().min(1, "Content is required").max(100000),
 });
 
+export const generateFaqRequestSchema = z.object({
+  topic: z.string().min(3, "Topic must be at least 3 characters").max(500),
+  sourceResourceIds: z.array(z.string().min(1)).max(50).optional(),
+  targetPairCount: z.number().int().min(3).max(15).optional(),
+});
+
+export const movePairSchema = z.object({
+  destResourceId: z.string().min(1, "Destination required"),
+  pairIndex: z.number().int().min(0),
+});
+
+export const applyFaqSplitSchema = z.object({
+  buckets: z
+    .array(
+      z.object({
+        title: z.string().min(1, "Title is required").max(200),
+        description: faqDescriptionSchema,
+        pairs: faqPairsArraySchema,
+      }),
+    )
+    .min(2, "At least 2 buckets are required")
+    .max(5, "Maximum 5 buckets allowed"),
+});
+
 export const updateCrawledPageContentSchema = z.object({
   content: z.string().min(1, "Content is required").max(100000),
 });

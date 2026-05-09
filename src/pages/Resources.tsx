@@ -18,6 +18,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -26,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import FaqEditor from "@/components/faq-editor";
+import FaqGenerateModal, { type FaqDraft } from "@/components/faq-generate-modal";
 import PdfResourceDetail from "@/components/pdf-detail";
 import WebpageResourceDetail from "@/components/webpage-detail";
 import { MobileMenuButton } from "@/components/PageHeader";
@@ -233,6 +235,8 @@ function Resources() {
   const [formType, setFormType] = useState<"webpage" | "pdf" | "faq">(
     "webpage",
   );
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [generatedDraft, setGeneratedDraft] = useState<FaqDraft | null>(null);
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [pdfFile, setPdfFile] = useState<File | null>(null);
@@ -372,7 +376,14 @@ function Resources() {
     setTitle("");
     setUrl("");
     setPdfFile(null);
+    setGeneratedDraft(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function handleGenerated(draft: FaqDraft) {
+    setGeneratedDraft(draft);
+    setFormType("faq");
+    setShowForm(true);
   }
 
   function toggleExpanded(resourceId: string) {
@@ -797,11 +808,27 @@ function Resources() {
               </span>
             )}
           </div>
-          <Button onClick={() => setShowForm(!showForm)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Resource
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowGenerateModal(true)}
+            >
+              <Sparkles className="w-4 h-4 mr-2" />
+              Generate FAQ
+            </Button>
+            <Button onClick={() => setShowForm(!showForm)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add Resource
+            </Button>
+          </div>
         </div>
+
+        <FaqGenerateModal
+          open={showGenerateModal}
+          onOpenChange={setShowGenerateModal}
+          projectId={projectId!}
+          onGenerated={handleGenerated}
+        />
 
         {showForm && (
           <div className="bg-card rounded-2xl p-6 space-y-4">
@@ -847,6 +874,7 @@ function Resources() {
                 mode="create"
                 onSave={resetForm}
                 onCancel={resetForm}
+                initialDraft={generatedDraft}
               />
             ) : (
               <>

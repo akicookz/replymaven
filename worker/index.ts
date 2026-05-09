@@ -9,7 +9,8 @@ import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
 import { buildInquiryTitle, WidgetService } from "./services/widget-service";
 import { ChatService } from "./services/chat-service";
-import { ResourceService } from "./services/resource-service";
+import { ResourceService, type FaqPair } from "./services/resource-service";
+import { FAQ_SET_MAX_CHARS } from "../shared/faq-limits";
 import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
 import { KnowledgeSuggestionService } from "./services/knowledge-suggestion-service";
@@ -53,6 +54,9 @@ import {
   createFaqResourceSchema,
   updateFaqResourceSchema,
   updateResourceContentSchema,
+  generateFaqRequestSchema,
+  applyFaqSplitSchema,
+  movePairSchema,
   updateCrawledPageContentSchema,
   createConversationSchema,
   sendMessageSchema,
@@ -3553,8 +3557,14 @@ const app = new Hono<HonoAppContext>()
     }
 
     const resourceService = new ResourceService(db, c.env.UPLOADS);
-    const resources = await resourceService.getResourcesByProject(project.id);
-    return c.json(resources);
+    const [resources, counts] = await Promise.all([
+      resourceService.getResourcesByProject(project.id),
+      resourceService.getCrawledPageCountsByResource(project.id),
+    ]);
+    const enriched = resources.map((r) =>
+      r.type === "webpage" ? { ...r, pageCount: counts.get(r.id) ?? 0 } : r,
+    );
+    return c.json(enriched);
   })
   .post("/api/projects/:id/resources", async (c) => {
     const user = c.get("user");
@@ -3691,6 +3701,364 @@ const app = new Hono<HonoAppContext>()
     }
 
     return c.json(resource, 201);
+  })
+  .post("/api/projects/:id/resources/generate-faq", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    if (!checkRateLimit(`gen-faq:${project.id}`, 5, 60 * 60 * 1000)) {
+      return c.json(
+        { error: "Rate limit exceeded. Try again later." },
+        429,
+      );
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(generateFaqRequestSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const resourceService = new ResourceService(db, c.env.UPLOADS);
+    const allResources = await resourceService.getResourcesByProject(
+      project.id,
+    );
+
+    // Source pool: webpages, PDFs, and (if user explicitly listed them) FAQs
+    // are honored. By default we exclude FAQs from sources — they are the
+    // dedupe target, not the input.
+    const requestedIds = parsed.data.sourceResourceIds;
+    const eligibleResources = allResources.filter((r) => {
+      if (requestedIds && requestedIds.length > 0) {
+        return requestedIds.includes(r.id);
+      }
+      return r.type === "webpage" || r.type === "pdf";
+    });
+
+    const sourceText = await buildContextSourceFromResources(
+      project.id,
+      resourceService,
+      eligibleResources,
+    );
+
+    // Always include company context as background.
+    const settings = await projectService.getSettings(project.id);
+    const companyContext = settings?.companyContext?.trim() ?? "";
+    const combinedSource = companyContext
+      ? `## Company Context\n${companyContext}\n\n---\n\n${sourceText}`.slice(
+          0,
+          CONTEXT_SOURCE_MAX_CHARS,
+        )
+      : sourceText;
+
+    if (!combinedSource.trim()) {
+      return c.json(
+        {
+          error:
+            "No source material available. Add at least one webpage, PDF, or company context first.",
+        },
+        400,
+      );
+    }
+
+    const [existingQuestions, existingDescriptions] = await Promise.all([
+      resourceService.getAllFaqQuestions(project.id),
+      resourceService.getAllFaqDescriptions(project.id),
+    ]);
+
+    const aiService = new AiService({
+      model: c.env.AI_MODEL,
+      geminiApiKey: c.env.GEMINI_API_KEY,
+      openaiApiKey: c.env.OPENAI_API_KEY,
+    });
+
+    const draft = await aiService.generateFaqFromSources({
+      topic: parsed.data.topic,
+      sourceText: combinedSource,
+      existingQuestions,
+      existingDescriptions,
+      targetPairCount: parsed.data.targetPairCount ?? 7,
+      maxSetChars: 8_000,
+      maxPairChars: 2_000,
+      maxDescriptionChars: 500,
+    });
+
+    if (!draft) {
+      return c.json(
+        {
+          error:
+            "Failed to generate FAQ. Try a more specific topic or add more source material.",
+        },
+        422,
+      );
+    }
+
+    return c.json(draft);
+  })
+  .post(
+    "/api/projects/:id/resources/:resourceId/split-with-ai",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      const db = c.get("db");
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectById(c.req.param("id"));
+      if (
+        !project ||
+        project.userId !== (c.get("effectiveUserId") ?? user.id)
+      ) {
+        return c.json({ error: "Not found" }, 404);
+      }
+
+      if (!checkRateLimit(`split-faq:${project.id}`, 10, 60 * 60 * 1000)) {
+        return c.json(
+          { error: "Rate limit exceeded. Try again later." },
+          429,
+        );
+      }
+
+      const resourceService = new ResourceService(db, c.env.UPLOADS);
+      const resource = await resourceService.getResourceById(
+        c.req.param("resourceId"),
+        project.id,
+      );
+      if (!resource || resource.type !== "faq") {
+        return c.json({ error: "Not found" }, 404);
+      }
+
+      let pairs: Array<{ question: string; answer: string }> = [];
+      try {
+        const parsed = JSON.parse(resource.content ?? "[]");
+        if (Array.isArray(parsed)) {
+          pairs = parsed.filter(
+            (p): p is { question: string; answer: string } =>
+              !!p &&
+              typeof p === "object" &&
+              typeof p.question === "string" &&
+              typeof p.answer === "string",
+          );
+        }
+      } catch {
+        return c.json({ error: "FAQ content is malformed" }, 400);
+      }
+
+      if (pairs.length < 2) {
+        return c.json(
+          { error: "FAQ must have at least 2 pairs to split" },
+          400,
+        );
+      }
+
+      const aiService = new AiService({
+        model: c.env.AI_MODEL,
+        geminiApiKey: c.env.GEMINI_API_KEY,
+        openaiApiKey: c.env.OPENAI_API_KEY,
+      });
+
+      const buckets = await aiService.splitFaqIntoBuckets({
+        originalTitle: resource.title,
+        originalDescription: resource.description ?? null,
+        pairs,
+        maxBucketChars: 7_000,
+      });
+
+      if (!buckets) {
+        return c.json(
+          {
+            error:
+              "Failed to produce a valid split. Try again, or shorten pairs manually.",
+          },
+          422,
+        );
+      }
+
+      // Resolve indices back to full pair text for the client preview.
+      const resolved = buckets.map((bucket) => ({
+        title: bucket.title,
+        description: bucket.description,
+        pairs: bucket.pairIndices.map((i) => pairs[i]),
+      }));
+
+      return c.json({ buckets: resolved });
+    },
+  )
+  .post(
+    "/api/projects/:id/resources/:resourceId/apply-split",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      const db = c.get("db");
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectById(c.req.param("id"));
+      if (
+        !project ||
+        project.userId !== (c.get("effectiveUserId") ?? user.id)
+      ) {
+        return c.json({ error: "Not found" }, 404);
+      }
+
+      const body = await c.req.json();
+      const parsed = validate(applyFaqSplitSchema, body);
+      if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+      const resourceService = new ResourceService(db, c.env.UPLOADS);
+      const result = await resourceService.applyFaqSplit(
+        project.id,
+        c.req.param("resourceId"),
+        parsed.data.buckets,
+      );
+
+      if (!result) {
+        return c.json({ error: "Source FAQ not found" }, 404);
+      }
+
+      // Re-ingest each new resource to R2 / AI Search asynchronously.
+      for (const created of result.created) {
+        let bucketPairs: FaqPair[] = [];
+        try {
+          const parsedPairs = JSON.parse(created.content ?? "[]");
+          if (Array.isArray(parsedPairs)) bucketPairs = parsedPairs;
+        } catch {
+          // Skip ingestion for malformed; user can re-trigger.
+        }
+        if (bucketPairs.length === 0) continue;
+        c.executionCtx.waitUntil(
+          resourceService.ingestFaqFromPairs(
+            project.id,
+            created.id,
+            created.title,
+            bucketPairs,
+          ),
+        );
+      }
+
+      return c.json({
+        created: result.created,
+        deletedSourceId: result.deletedSourceId,
+      });
+    },
+  )
+  .post(
+    "/api/projects/:id/resources/:resourceId/move-pair",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      const db = c.get("db");
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectById(c.req.param("id"));
+      if (
+        !project ||
+        project.userId !== (c.get("effectiveUserId") ?? user.id)
+      ) {
+        return c.json({ error: "Not found" }, 404);
+      }
+
+      const body = await c.req.json();
+      const parsed = validate(movePairSchema, body);
+      if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+      const resourceService = new ResourceService(db, c.env.UPLOADS);
+      const result = await resourceService.moveFaqPair(
+        project.id,
+        c.req.param("resourceId"),
+        parsed.data.destResourceId,
+        parsed.data.pairIndex,
+        FAQ_SET_MAX_CHARS,
+      );
+
+      if (!result.ok) {
+        const status =
+          result.reason === "destination_overflow"
+            ? 422
+            : result.reason === "out_of_range"
+              ? 400
+              : 404;
+        const message =
+          result.reason === "destination_overflow"
+            ? "Destination FAQ would exceed the character limit."
+            : result.reason === "same_resource"
+              ? "Source and destination cannot be the same."
+              : result.reason === "out_of_range"
+                ? "Pair index out of range."
+                : "FAQ resource not found.";
+        return c.json({ error: message }, status);
+      }
+
+      // Re-ingest both sets to R2 / AI Search.
+      c.executionCtx.waitUntil(
+        resourceService.ingestFaqFromPairs(
+          project.id,
+          c.req.param("resourceId"),
+          result.sourceTitle,
+          result.sourcePairs,
+        ),
+      );
+      c.executionCtx.waitUntil(
+        resourceService.ingestFaqFromPairs(
+          project.id,
+          parsed.data.destResourceId,
+          result.destTitle,
+          result.destPairs,
+        ),
+      );
+
+      return c.json({ ok: true });
+    },
+  )
+  .post("/api/projects/:id/faq-description-suggestion", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    if (!checkRateLimit(`faq-desc:${project.id}`, 20, 60 * 60 * 1000)) {
+      return c.json({ error: "Rate limit exceeded. Try again later." }, 429);
+    }
+
+    const body = (await c.req.json()) as {
+      pairs?: Array<{ question?: unknown; answer?: unknown }>;
+    };
+    const pairs: FaqPair[] = [];
+    for (const entry of body.pairs ?? []) {
+      if (
+        entry &&
+        typeof entry.question === "string" &&
+        typeof entry.answer === "string" &&
+        entry.question.trim() &&
+        entry.answer.trim()
+      ) {
+        pairs.push({ question: entry.question, answer: entry.answer });
+      }
+    }
+    if (pairs.length < 1) {
+      return c.json({ error: "At least one Q&A pair is required" }, 400);
+    }
+
+    const aiService = new AiService({
+      model: c.env.AI_MODEL,
+      geminiApiKey: c.env.GEMINI_API_KEY,
+      openaiApiKey: c.env.OPENAI_API_KEY,
+    });
+
+    const suggestion = await aiService.suggestFaqDescription({ pairs });
+    if (!suggestion) {
+      return c.json({ error: "Failed to generate suggestion" }, 422);
+    }
+
+    return c.json({ suggestion });
   })
   .delete("/api/projects/:id/resources/:resourceId", async (c) => {
     const user = c.get("user");

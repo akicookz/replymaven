@@ -928,6 +928,258 @@ Return this exact shape:
     }
   }
 
+  // ─── Suggest FAQ Description ───────────────────────────────────────────────
+
+  async suggestFaqDescription(options: {
+    pairs: Array<{ question: string; answer: string }>;
+  }): Promise<string> {
+    if (options.pairs.length === 0) return "";
+
+    const pairListing = options.pairs
+      .slice(0, 20)
+      .map((pair) => `- Q: ${pair.question}`)
+      .join("\n");
+
+    try {
+      const { text } = await generateText({
+        model: this.model,
+        prompt: `Given these FAQ questions, write ONE sentence (≤200 chars) that tells an AI agent when to consult this FAQ. Reply with the sentence only — no quotes, no preamble.
+
+QUESTIONS:
+${pairListing}
+
+Sentence:`,
+        temperature: 0.3,
+        maxOutputTokens: 128,
+      });
+
+      return text
+        .trim()
+        .replace(/^["']|["']$/g, "")
+        .slice(0, 500);
+    } catch {
+      return "";
+    }
+  }
+
+  // ─── Split FAQ into Buckets ────────────────────────────────────────────────
+
+  async splitFaqIntoBuckets(options: {
+    originalTitle: string;
+    originalDescription: string | null;
+    pairs: Array<{ question: string; answer: string }>;
+    maxBucketChars: number;
+  }): Promise<Array<{
+    title: string;
+    description: string;
+    pairIndices: number[];
+  }> | null> {
+    const indexedPairs = options.pairs.map((pair, index) => ({
+      index,
+      ...pair,
+    }));
+
+    const pairListing = indexedPairs
+      .map(
+        (pair) =>
+          `[${pair.index}] Q: ${pair.question}\n    A: ${pair.answer}`,
+      )
+      .join("\n\n");
+
+    const totalCount = options.pairs.length;
+    const descriptionLine = options.originalDescription
+      ? `Original "when to refer" description: ${options.originalDescription}`
+      : "Original FAQ has no routing description.";
+
+    const prompt = `You are splitting an oversized FAQ into 2 or 3 topically coherent smaller FAQ sets.
+
+Original FAQ title: ${options.originalTitle}
+${descriptionLine}
+
+PAIRS (each line shows the original index):
+${pairListing}
+
+Rules:
+- Group the ${totalCount} pairs into 2 OR 3 buckets by topic.
+- EVERY index from 0 to ${totalCount - 1} must appear in exactly ONE bucket. Do NOT omit any index. Do NOT duplicate any index.
+- Each bucket's combined Q+A character total should be ≤ ${options.maxBucketChars} (give yourself headroom).
+- Each bucket needs a 1-4 word title that describes its topic.
+- Each bucket needs a one-sentence "when to refer" description (≤200 chars) so an AI agent can route to the right set. The description must clearly distinguish this bucket from the others.
+- Do NOT modify pair contents. Only group by index.
+- Return ONLY valid JSON (no markdown, no commentary).
+
+Return this exact shape:
+{"buckets":[{"title":"...","description":"...","pairIndices":[0,2,5]},{"title":"...","description":"...","pairIndices":[1,3,4]}]}`;
+
+    const tryGenerate = async (): Promise<Record<string, unknown> | null> => {
+      try {
+        const { text } = await generateText({
+          model: this.model,
+          prompt,
+          temperature: 0.2,
+          maxOutputTokens: 2048,
+        });
+        return parseJsonObject(text);
+      } catch {
+        return null;
+      }
+    };
+
+    let parsed = await tryGenerate();
+    if (!parsed) {
+      parsed = await tryGenerate();
+    }
+    if (!parsed) return null;
+
+    const rawBuckets = Array.isArray(parsed.buckets) ? parsed.buckets : [];
+    if (rawBuckets.length < 2 || rawBuckets.length > 5) return null;
+
+    const buckets: Array<{
+      title: string;
+      description: string;
+      pairIndices: number[];
+    }> = [];
+
+    for (const entry of rawBuckets) {
+      if (!entry || typeof entry !== "object") continue;
+      const record = entry as Record<string, unknown>;
+      const title = typeof record.title === "string" ? record.title.trim() : "";
+      const description =
+        typeof record.description === "string" ? record.description.trim() : "";
+      const indicesRaw = Array.isArray(record.pairIndices)
+        ? record.pairIndices
+        : [];
+      const indices: number[] = [];
+      for (const value of indicesRaw) {
+        if (typeof value !== "number" || !Number.isInteger(value)) continue;
+        if (value < 0 || value >= totalCount) continue;
+        indices.push(value);
+      }
+      if (!title || indices.length === 0) continue;
+      buckets.push({ title, description, pairIndices: indices });
+    }
+
+    if (buckets.length < 2) return null;
+
+    // Reconcile partition: every index must appear exactly once across all buckets.
+    const seen = new Set<number>();
+    let duplicate = false;
+    for (const bucket of buckets) {
+      for (const idx of bucket.pairIndices) {
+        if (seen.has(idx)) {
+          duplicate = true;
+          break;
+        }
+        seen.add(idx);
+      }
+      if (duplicate) break;
+    }
+    if (duplicate || seen.size !== totalCount) return null;
+
+    return buckets;
+  }
+
+  // ─── Generate FAQ from Sources ──────────────────────────────────────────────
+
+  async generateFaqFromSources(options: {
+    topic: string;
+    sourceText: string;
+    existingQuestions: string[];
+    existingDescriptions: Array<{ title: string; description: string }>;
+    targetPairCount: number;
+    maxSetChars: number;
+    maxPairChars: number;
+    maxDescriptionChars: number;
+  }): Promise<{
+    title: string;
+    description: string;
+    pairs: Array<{ question: string; answer: string }>;
+  } | null> {
+    const existingQuestionsBlock =
+      options.existingQuestions.length > 0
+        ? options.existingQuestions
+            .slice(0, 200)
+            .map((q) => `- ${q}`)
+            .join("\n")
+        : "(none)";
+
+    const existingDescriptionsBlock =
+      options.existingDescriptions.length > 0
+        ? options.existingDescriptions
+            .map((d) => `- ${d.title}: ${d.description}`)
+            .join("\n")
+        : "(none)";
+
+    const prompt = `You are generating ONE new FAQ resource for a customer support knowledge base.
+
+TOPIC:
+${options.topic}
+
+SOURCE MATERIAL (use ONLY these facts):
+${options.sourceText || "(no source material provided — generate based on topic alone)"}
+
+EXISTING FAQ QUESTIONS ACROSS ALL FAQ SETS (do NOT generate any question semantically equivalent to these):
+${existingQuestionsBlock}
+
+EXISTING FAQ ROUTING DESCRIPTIONS (do NOT generate a description that overlaps with these — yours must distinctly cover the topic above):
+${existingDescriptionsBlock}
+
+Rules:
+- Generate ${options.targetPairCount} concise, distinct Q&A pairs about the topic.
+- Each Q&A pair (question + answer combined) must be ≤ ${options.maxPairChars} characters.
+- The total of all questions + answers combined must be ≤ ${options.maxSetChars} characters.
+- Use ONLY facts present in the source material. If the source does not support an answer, omit that pair entirely (do not fabricate).
+- Skip any question that is semantically equivalent to one in the existing-questions list above. It is better to return fewer pairs than to duplicate.
+- Title must be 1-4 words summarizing the topic.
+- Description must be ONE sentence (≤ ${options.maxDescriptionChars} chars) telling an AI agent when to consult this FAQ. It must clearly distinguish this FAQ from the existing routing descriptions.
+- Return ONLY valid JSON (no markdown, no code fences, no commentary).
+
+Return this exact shape:
+{"title":"...","description":"...","pairs":[{"question":"...","answer":"..."}]}`;
+
+    const tryGenerate = async (): Promise<Record<string, unknown> | null> => {
+      try {
+        const { text } = await generateText({
+          model: this.model,
+          prompt,
+          temperature: 0.3,
+          maxOutputTokens: 4096,
+        });
+        return parseJsonObject(text);
+      } catch {
+        return null;
+      }
+    };
+
+    let parsed = await tryGenerate();
+    if (!parsed) {
+      parsed = await tryGenerate();
+    }
+    if (!parsed) return null;
+
+    const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
+    const description =
+      typeof parsed.description === "string" ? parsed.description.trim() : "";
+    const rawPairs = Array.isArray(parsed.pairs) ? parsed.pairs : [];
+    const pairs: Array<{ question: string; answer: string }> = [];
+
+    for (const entry of rawPairs) {
+      if (!entry || typeof entry !== "object") continue;
+      const record = entry as Record<string, unknown>;
+      const question =
+        typeof record.question === "string" ? record.question.trim() : "";
+      const answer =
+        typeof record.answer === "string" ? record.answer.trim() : "";
+      if (!question || !answer) continue;
+      if (question.length + answer.length > options.maxPairChars) continue;
+      pairs.push({ question, answer });
+    }
+
+    if (!title || pairs.length === 0) return null;
+
+    return { title, description, pairs };
+  }
+
   // ─── Compose Inquiry Reply ──────────────────────────────────────────────────
 
   async composeInquiryReply(

@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { extractText } from "unpdf";
 import {
   resources,
@@ -158,6 +158,25 @@ export class ResourceService {
   }
 
   // ─── Crawled Pages ──────────────────────────────────────────────────────────
+
+  async getCrawledPageCountsByResource(
+    projectId: string,
+  ): Promise<Map<string, number>> {
+    const rows = await this.db
+      .select({
+        resourceId: crawledPages.resourceId,
+        count: sql<number>`count(*)`,
+      })
+      .from(crawledPages)
+      .where(
+        and(
+          eq(crawledPages.projectId, projectId),
+          eq(crawledPages.status, "crawled"),
+        ),
+      )
+      .groupBy(crawledPages.resourceId);
+    return new Map(rows.map((r) => [r.resourceId, Number(r.count)]));
+  }
 
   async getCrawledPages(
     resourceId: string,
@@ -727,6 +746,183 @@ export class ResourceService {
     }
 
     return sources;
+  }
+
+  // ─── FAQ Atomic Split ──────────────────────────────────────────────────────
+
+  async applyFaqSplit(
+    projectId: string,
+    sourceId: string,
+    buckets: Array<{
+      title: string;
+      description?: string | null;
+      pairs: FaqPair[];
+    }>,
+  ): Promise<{
+    created: ResourceRow[];
+    deletedSourceId: string;
+  } | null> {
+    const source = await this.getResourceById(sourceId, projectId);
+    if (!source || source.type !== "faq") return null;
+
+    const newRows = buckets.map((bucket) => ({
+      id: crypto.randomUUID(),
+      projectId,
+      type: "faq" as const,
+      title: bucket.title,
+      description: bucket.description ?? null,
+      content: JSON.stringify(bucket.pairs),
+    }));
+
+    // Atomic D1 commit: all inserts + source delete in one batch.
+    // batch() requires at least one statement and runs them transactionally.
+    const statements = [
+      ...newRows.map((row) => this.db.insert(resources).values(row)),
+      this.db.delete(resources).where(eq(resources.id, sourceId)),
+    ];
+
+    // Drizzle batch types require a non-empty tuple
+    if (statements.length === 0) return null;
+    await this.db.batch(
+      statements as unknown as Parameters<typeof this.db.batch>[0],
+    );
+
+    // Re-read the inserted rows to return canonical timestamps
+    const created: ResourceRow[] = [];
+    for (const row of newRows) {
+      const reloaded = await this.getResourceById(row.id, projectId);
+      if (reloaded) created.push(reloaded);
+    }
+
+    // R2 cleanup of the original FAQ markdown is fire-and-forget; orphan-tolerant.
+    if (source.r2Key) {
+      this.r2.delete(source.r2Key).catch(() => {
+        // Non-fatal: orphan markdown will be ignored by AI Search after re-index.
+      });
+    }
+
+    return { created, deletedSourceId: sourceId };
+  }
+
+  // ─── FAQ Move Pair Between Sets ────────────────────────────────────────────
+
+  async moveFaqPair(
+    projectId: string,
+    sourceId: string,
+    destId: string,
+    pairIndex: number,
+    maxSetChars: number,
+  ): Promise<
+    | { ok: true; sourcePairs: FaqPair[]; destPairs: FaqPair[]; sourceTitle: string; destTitle: string }
+    | { ok: false; reason: "not_found" | "same_resource" | "out_of_range" | "destination_overflow" }
+  > {
+    if (sourceId === destId) return { ok: false, reason: "same_resource" };
+
+    const [source, dest] = await Promise.all([
+      this.getResourceById(sourceId, projectId),
+      this.getResourceById(destId, projectId),
+    ]);
+    if (!source || source.type !== "faq" || !dest || dest.type !== "faq") {
+      return { ok: false, reason: "not_found" };
+    }
+
+    let sourcePairs: FaqPair[] = [];
+    let destPairs: FaqPair[] = [];
+    try {
+      const parsedSource = JSON.parse(source.content ?? "[]");
+      const parsedDest = JSON.parse(dest.content ?? "[]");
+      if (Array.isArray(parsedSource)) sourcePairs = parsedSource as FaqPair[];
+      if (Array.isArray(parsedDest)) destPairs = parsedDest as FaqPair[];
+    } catch {
+      return { ok: false, reason: "not_found" };
+    }
+
+    if (pairIndex < 0 || pairIndex >= sourcePairs.length) {
+      return { ok: false, reason: "out_of_range" };
+    }
+
+    const moving = sourcePairs[pairIndex];
+    const newDestPairs = [...destPairs, moving];
+    const newDestTotal = newDestPairs.reduce(
+      (sum, p) => sum + p.question.length + p.answer.length,
+      0,
+    );
+    if (newDestTotal > maxSetChars) {
+      return { ok: false, reason: "destination_overflow" };
+    }
+
+    const newSourcePairs = sourcePairs.filter((_, i) => i !== pairIndex);
+
+    const statements = [
+      this.db
+        .update(resources)
+        .set({ content: JSON.stringify(newSourcePairs) })
+        .where(eq(resources.id, sourceId)),
+      this.db
+        .update(resources)
+        .set({ content: JSON.stringify(newDestPairs) })
+        .where(eq(resources.id, destId)),
+    ];
+    await this.db.batch(
+      statements as unknown as Parameters<typeof this.db.batch>[0],
+    );
+
+    return {
+      ok: true,
+      sourcePairs: newSourcePairs,
+      destPairs: newDestPairs,
+      sourceTitle: source.title,
+      destTitle: dest.title,
+    };
+  }
+
+  // ─── FAQ Aggregation (for generation/dedup) ────────────────────────────────
+
+  async getAllFaqQuestions(projectId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ content: resources.content })
+      .from(resources)
+      .where(
+        and(eq(resources.projectId, projectId), eq(resources.type, "faq")),
+      );
+
+    const questions: string[] = [];
+    for (const row of rows) {
+      if (!row.content) continue;
+      try {
+        const pairs = JSON.parse(row.content) as FaqPair[];
+        if (!Array.isArray(pairs)) continue;
+        for (const pair of pairs) {
+          if (typeof pair?.question === "string" && pair.question.trim()) {
+            questions.push(pair.question.trim());
+          }
+        }
+      } catch {
+        // Legacy non-JSON content; skip.
+      }
+    }
+    return questions;
+  }
+
+  async getAllFaqDescriptions(
+    projectId: string,
+  ): Promise<Array<{ title: string; description: string }>> {
+    const rows = await this.db
+      .select({
+        title: resources.title,
+        description: resources.description,
+      })
+      .from(resources)
+      .where(
+        and(eq(resources.projectId, projectId), eq(resources.type, "faq")),
+      );
+
+    return rows
+      .filter((row) => row.description && row.description.trim())
+      .map((row) => ({
+        title: row.title,
+        description: (row.description ?? "").trim(),
+      }));
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
