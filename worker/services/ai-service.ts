@@ -229,7 +229,7 @@ export class AiService {
     // First message or very short conversations don't need reformulation
     if (conversationHistory.length <= 1) return currentMessage;
 
-    const recentHistory = conversationHistory.slice(-6);
+    const recentHistory = conversationHistory.slice(-12);
     const transcript = recentHistory
       .map((m) => `${m.role}: ${m.content}`)
       .join("\n");

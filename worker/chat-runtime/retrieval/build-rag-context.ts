@@ -5,12 +5,33 @@ import {
   type RetrievedSearchChunk,
 } from "../types";
 
-const RAG_MAX_CONTEXT_CHARS = 16_000;
-const RAG_MAX_CHUNKS = 10;
+const RAG_MAX_CONTEXT_CHARS = 30_000;
+const RAG_MAX_CHUNKS = 5;
 const RAG_MAX_CHUNKS_PER_SOURCE = 3;
-const RAG_MAX_CHUNK_CHARS = 1_800;
+const RAG_MAX_CHUNK_CHARS = 8_000;
+const RAG_MIN_KEEP_RATIO = 0.6;
 const RAG_HARD_MIN_SCORE = 0.2;
 const RAG_PREFERRED_MIN_SCORE = 0.25;
+
+function clipAtSentenceBoundary(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const slice = text.slice(0, max);
+  const minKeep = Math.floor(max * RAG_MIN_KEEP_RATIO);
+  for (let i = slice.length - 1; i >= minKeep; i--) {
+    const ch = slice[i];
+    if (ch === "." || ch === "!" || ch === "?") {
+      const next = slice[i + 1];
+      if (next === undefined || /\s/.test(next)) {
+        return slice.slice(0, i + 1) + " […]";
+      }
+    }
+  }
+  const lastSpace = slice.lastIndexOf(" ");
+  if (lastSpace >= minKeep) {
+    return slice.slice(0, lastSpace) + " […]";
+  }
+  return slice + "…";
+}
 
 export function prepareRagChunks(
   chunks: RetrievedSearchChunk[],
@@ -93,17 +114,14 @@ export function buildRagContext(
       const dedupeKey = `${chunk.key}:${normalizedPrefix}`;
       if (seenText.has(dedupeKey)) continue;
 
-      const clippedText =
-        chunk.text.length > RAG_MAX_CHUNK_CHARS
-          ? `${chunk.text.slice(0, RAG_MAX_CHUNK_CHARS)}...`
-          : chunk.text;
+      const clippedText = clipAtSentenceBoundary(chunk.text, RAG_MAX_CHUNK_CHARS);
 
       if (contextChars >= RAG_MAX_CONTEXT_CHARS) break;
       let finalText = clippedText;
       if (contextChars + finalText.length > RAG_MAX_CONTEXT_CHARS) {
         const remaining = RAG_MAX_CONTEXT_CHARS - contextChars;
         if (remaining < 250) break;
-        finalText = `${finalText.slice(0, remaining)}...`;
+        finalText = clipAtSentenceBoundary(finalText, remaining);
       }
 
       target.push({

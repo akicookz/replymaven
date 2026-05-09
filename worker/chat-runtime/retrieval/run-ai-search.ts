@@ -395,13 +395,21 @@ export async function runAiSearch(options: {
   );
   let ragSelection = buildRagContext(prepared.chunks, sourceReferenceMap);
 
-  if (!ragSelection.context && options.allowBroaderRetry !== false) {
+  const shouldBroaden =
+    options.allowBroaderRetry !== false &&
+    (!ragSelection.context || ragSelection.topScore < 0.35);
+
+  if (shouldBroaden) {
     const broaderQueries =
       options.broaderQueries && options.broaderQueries.length > 0
         ? options.broaderQueries
         : options.queries;
 
     broaderSearchAttempted = true;
+    const originalSelection = ragSelection;
+    const originalPrepared = prepared;
+    const originalSourceReferenceMap = sourceReferenceMap;
+
     searchPass = await executeSearchPass({
       env: options.env,
       projectId: options.projectId,
@@ -415,12 +423,30 @@ export async function runAiSearch(options: {
     activeRetrievalType = searchPass.retrievalType;
 
     const broaderMergedChunks = mergeRetrievedSearchChunks(searchResults);
-    prepared = prepareRagChunks(broaderMergedChunks, options.projectId);
-    sourceReferenceMap = await resourceService.resolveSourceReferenceMap(
+    const broaderPrepared = prepareRagChunks(broaderMergedChunks, options.projectId);
+    const broaderSourceReferenceMap = await resourceService.resolveSourceReferenceMap(
       options.projectId,
-      prepared.chunks.map((chunk) => chunk.key),
+      broaderPrepared.chunks.map((chunk) => chunk.key),
     );
-    ragSelection = buildRagContext(prepared.chunks, sourceReferenceMap);
+    const broaderSelection = buildRagContext(
+      broaderPrepared.chunks,
+      broaderSourceReferenceMap,
+    );
+
+    const useBroader =
+      !originalSelection.context ||
+      (broaderSelection.context &&
+        broaderSelection.topScore >= originalSelection.topScore);
+
+    if (useBroader) {
+      prepared = broaderPrepared;
+      sourceReferenceMap = broaderSourceReferenceMap;
+      ragSelection = broaderSelection;
+    } else {
+      prepared = originalPrepared;
+      sourceReferenceMap = originalSourceReferenceMap;
+      ragSelection = originalSelection;
+    }
   }
 
   if (!ragSelection.context) {
@@ -439,7 +465,8 @@ export async function runAiSearch(options: {
   }
 
   const ragConfident =
-    ragSelection.topScore >= 0.6 && ragSelection.selectedChunkCount >= 2;
+    ragSelection.topScore >= 0.45 ||
+    (ragSelection.topScore >= 0.35 && ragSelection.selectedChunkCount >= 4);
 
   const ragContext = ragConfident
     ? ragSelection.context

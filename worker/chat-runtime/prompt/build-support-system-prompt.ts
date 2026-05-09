@@ -1,6 +1,6 @@
 import { type SupportPromptOptions, type SupportPromptSettings } from "../types";
 
-const MAX_RAG_CONTEXT_CHARS = 12_000;
+const MAX_RAG_CONTEXT_CHARS = 30_000;
 const MAX_COMPANY_CONTEXT_CHARS = 4_000;
 const MAX_FAQ_CONTEXT_CHARS = 22_000;
 const MAX_TOOL_EVIDENCE_CHARS = 4_000;
