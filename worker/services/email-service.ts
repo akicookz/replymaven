@@ -2,10 +2,10 @@ import { Resend } from "resend";
 
 // ─── Email Design Tokens ──────────────────────────────────────────────────────
 
-const BODY_TEXT = "color: #5c4a28;";
-const MUTED_TEXT = "color: #8b744b;";
+const BODY_TEXT = "color: #374151;";
+const MUTED_TEXT = "color: #6b7280;";
 const CARD_STYLE =
-  "background: #fff2c7; border-radius: 18px; padding: 20px 24px;";
+  "background: #f3f4f6; border-radius: 18px; padding: 20px 24px;";
 
 const DEFAULT_ACCENT = "rgb(42, 17, 0)";
 const DEFAULT_ACCENT_DARK = "#6b3710";
@@ -74,8 +74,8 @@ function wrapEmail(body: string, accentColor?: string | null): string {
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><style>
 :root { color-scheme: light dark; supported-color-schemes: light dark; }
 @media (prefers-color-scheme: dark) {
-  body, .email-body { background: #050200 !important; }
-  .email-shell { background: #0b0600 !important; color: #f0f0f5 !important; }
+  body, .email-body { background: #0a0a0c !important; }
+  .email-shell { background: #16181d !important; color: #f0f0f5 !important; }
   .email-heading, .email-strong, .email-value { color: #f0f0f5 !important; }
   .email-body-text { color: #c8c8d2 !important; }
   .email-muted { color: #8a8a96 !important; }
@@ -84,11 +84,11 @@ function wrapEmail(body: string, accentColor?: string | null): string {
   .email-button { background: ${theme.dark} !important; border-color: ${theme.darkBorder} !important; color: ${theme.lightForeground} !important; }
 }
 body[data-ogsc],
-body[data-ogsb] { background: #050200 !important; }
+body[data-ogsb] { background: #0a0a0c !important; }
 [data-ogsc] .email-body,
-[data-ogsb] .email-body { background: #050200 !important; }
+[data-ogsb] .email-body { background: #0a0a0c !important; }
 [data-ogsc] .email-shell,
-[data-ogsb] .email-shell { background: #0b0600 !important; color: #f0f0f5 !important; }
+[data-ogsb] .email-shell { background: #16181d !important; color: #f0f0f5 !important; }
 [data-ogsc] .email-heading,
 [data-ogsb] .email-heading,
 [data-ogsc] .email-strong,
@@ -108,9 +108,9 @@ body[data-ogsb] { background: #050200 !important; }
 [data-ogsc] .email-button,
 [data-ogsb] .email-button { background: ${theme.dark} !important; border-color: ${theme.darkBorder} !important; color: ${theme.lightForeground} !important; }
 </style></head>
-<body class="email-body" style="margin: 0; padding: 24px 16px; background:rgb(232, 230, 219);">
-<div class="email-shell" style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 48px 24px; background: #fff9e8; color: #2a1100; font-size: 15px; line-height: 1.6; border-radius: 24px;">
-<!--[if mso]><table role="presentation" width="480" align="center" cellpadding="0" cellspacing="0"><tr><td style="padding: 48px 24px; background: #fff9e8; border-radius: 24px;"><![endif]-->
+<body class="email-body" style="margin: 0; padding: 24px 16px; background: #e5e7eb;">
+<div class="email-shell" style="font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 48px 24px; background: #ffffff; color: #1f2937; font-size: 15px; line-height: 1.6; border-radius: 24px;">
+<!--[if mso]><table role="presentation" width="480" align="center" cellpadding="0" cellspacing="0"><tr><td style="padding: 48px 24px; background: #ffffff; border-radius: 24px;"><![endif]-->
 ${body}
 <p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 40px 0 0;">&mdash; ReplyMaven Team</p>
 <!--[if mso]></td></tr></table><![endif]-->
@@ -165,7 +165,7 @@ export function buildOtpEmailHtml(otp: string): string {
 <p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Your verification code</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Enter this code to verify your email address. It expires in 10 minutes.</p>
 <div class="email-card" style="${CARD_STYLE} text-align: center; margin: 0 0 24px;">
-  <p class="email-otp" style="font-size: 32px; font-weight: 700; letter-spacing: 8px; margin: 0; color: rgb(42, 17, 0); font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;">${escapeHtml(otp)}</p>
+  <p class="email-otp" style="font-size: 32px; font-weight: 700; letter-spacing: 8px; margin: 0; color: #1f2937; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;">${escapeHtml(otp)}</p>
 </div>
 <p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 0;">If you didn't request this code, you can safely ignore this email.</p>
   `);
@@ -250,7 +250,7 @@ export class EmailService {
         .map(
           ([key, value], i) =>
             `<p class="email-muted" style="font-size: 13px; ${MUTED_TEXT} margin: 0 0 2px;">${escapeHtml(key)}</p>
-<p class="email-value" style="font-size: 15px; color: #2a1100; margin: 0 0 ${i < entries.length - 1 ? "12px" : "0"};">${escapeHtml(String(value))}</p>`,
+<p class="email-value" style="font-size: 15px; color: #1f2937; margin: 0 0 ${i < entries.length - 1 ? "12px" : "0"};">${escapeHtml(String(value))}</p>`,
         )
         .join("");
 
@@ -305,7 +305,7 @@ ${fieldsHtml}
         subject: "You've used 80% of your monthly messages",
         html: wrapEmail(`
 <p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used <strong class="email-strong" style="color: #2a1100;">${used}</strong> of <strong class="email-strong" style="color: #2a1100;">${max}</strong> messages on your <strong class="email-strong" style="color: #2a1100;">${escapeHtml(plan)}</strong> plan this billing period.</p>
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used <strong class="email-strong" style="color: #1f2937;">${used}</strong> of <strong class="email-strong" style="color: #1f2937;">${max}</strong> messages on your <strong class="email-strong" style="color: #1f2937;">${escapeHtml(plan)}</strong> plan this billing period.</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Once you reach your limit, your chatbot will stop responding to visitors until the next period. Consider upgrading if you expect to exceed your quota.</p>
 <a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">View Usage</a>
         `),
@@ -329,7 +329,7 @@ ${fieldsHtml}
         subject: "You've reached your message limit",
         html: wrapEmail(`
 <p class="email-heading" style="${styles.heading} margin: 0 0 16px;">Hi ${escapeHtml(name)},</p>
-<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used all <strong class="email-strong" style="color: #2a1100;">${max}</strong> messages on your <strong class="email-strong" style="color: #2a1100;">${escapeHtml(plan)}</strong> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
+<p class="email-body-text" style="${BODY_TEXT} margin: 0 0 16px;">You've used all <strong class="email-strong" style="color: #1f2937;">${max}</strong> messages on your <strong class="email-strong" style="color: #1f2937;">${escapeHtml(plan)}</strong> plan. Your chatbot will not respond to new visitor messages until your next billing period.</p>
 <p class="email-body-text" style="${BODY_TEXT} margin: 0 0 24px;">Upgrade your plan to get more messages and keep your chatbot online.</p>
 <a href="https://replymaven.com/app/account/billing" class="email-button" style="${styles.button}">Upgrade Plan</a>
         `),
