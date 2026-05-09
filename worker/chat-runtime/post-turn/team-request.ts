@@ -251,6 +251,11 @@ export async function createTeamRequestSubmission(params: {
     if (ownerEmail) {
       const projectName = params.settings?.companyName ?? params.project.name;
       const dashboardUrl = `${params.env.BETTER_AUTH_URL}/app/projects/${params.project.id}/inquiries`;
+      const [inquiryActions, widgetCfg] = await Promise.all([
+        params.widgetService.getQuickActionsByType(params.project.id, "inquiry"),
+        params.widgetService.getWidgetConfig(params.project.id),
+      ]);
+      const actionLabel = inquiryActions[0]?.label ?? null;
       logInfo("team_request.email_queued", {
         projectId: params.project.id,
         conversationId: params.conversation.id,
@@ -265,6 +270,11 @@ export async function createTeamRequestSubmission(params: {
             formData,
             dashboardUrl,
             isUpdate,
+            actionLabel,
+            visitorName: params.conversation.visitorName,
+            visitorEmail: params.conversation.visitorEmail,
+            visitorId: params.conversation.visitorId,
+            accentColor: widgetCfg?.primaryColor ?? null,
           })
           .catch((err) => {
             logError("team_request.email_failed", err, {

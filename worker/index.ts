@@ -922,6 +922,11 @@ const app = new Hono<HonoAppContext>()
       if (ownerEmail) {
         const projectName = settings?.companyName ?? project.name;
         const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/inquiries`;
+        const [inquiryActions, widgetCfg] = await Promise.all([
+          widgetService.getQuickActionsByType(project.id, "inquiry"),
+          widgetService.getWidgetConfig(project.id),
+        ]);
+        const actionLabel = inquiryActions[0]?.label ?? null;
         c.executionCtx.waitUntil(
           emailService
             .sendInquiryNotification({
@@ -929,6 +934,11 @@ const app = new Hono<HonoAppContext>()
               projectName,
               formData: inquiryData,
               dashboardUrl,
+              actionLabel,
+              visitorName,
+              visitorEmail,
+              visitorId,
+              accentColor: widgetCfg?.primaryColor ?? null,
             })
             .catch((err) => {
               console.error("Contact form email failed:", err);
@@ -4880,6 +4890,9 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Rate limit exceeded" }, 429);
     }
 
+    const widgetService = new WidgetService(db);
+    const widgetCfg = await widgetService.getWidgetConfig(project.id);
+
     const emailService = new EmailService(c.env.RESEND_API_KEY);
     await emailService.sendAgentMessageEmail({
       to: conversation.visitorEmail,
@@ -4890,6 +4903,7 @@ const app = new Hono<HonoAppContext>()
       agentAvatar: message.senderAvatar ?? null,
       messageContent: message.content,
       dashboardUrl: `https://replymaven.com/app/projects/${project.id}/conversations/${conversation.id}`,
+      accentColor: widgetCfg?.primaryColor ?? null,
     });
 
     await chatService.markMessageAsEmailed(message.id);
