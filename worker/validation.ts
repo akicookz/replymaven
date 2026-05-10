@@ -235,9 +235,14 @@ export const updateConversationPublicSchema = z.object({
 });
 
 // ─── Agent Reply ──────────────────────────────────────────────────────────────
-export const agentReplySchema = z.object({
-  content: z.string().min(1, "Reply cannot be empty").max(5000),
-});
+export const agentReplySchema = z
+  .object({
+    content: z.string().max(5000).optional().default(""),
+    imageUrl: z.string().max(500).optional(),
+  })
+  .refine((data) => data.content.trim().length > 0 || !!data.imageUrl, {
+    message: "Reply must include text or an image",
+  });
 
 // ─── Send Message as Email ────────────────────────────────────────────────────
 export const sendMessageAsEmailSchema = z.object({

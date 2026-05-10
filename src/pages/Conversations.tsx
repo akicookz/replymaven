@@ -26,6 +26,8 @@ import {
   FileText,
   Mail,
   MailCheck,
+  Paperclip,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -145,6 +147,7 @@ interface Message {
   id: string;
   role: "visitor" | "bot" | "agent";
   content: string;
+  imageUrl?: string | null;
   sources?: string | null;
   senderName?: string | null;
   senderAvatar?: string | null;
@@ -434,12 +437,16 @@ function Conversations() {
     searchParams.get("id"),
   );
   const [replyText, setReplyText] = useState("");
+  const [replyImageFile, setReplyImageFile] = useState<File | null>(null);
+  const [replyImagePreview, setReplyImagePreview] = useState<string | null>(null);
+  const [isUploadingReplyImage, setIsUploadingReplyImage] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "all">("all");
   const [expandedToolCards, setExpandedToolCards] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const replyImageInputRef = useRef<HTMLInputElement>(null);
 
   // Sync selectedConvo <-> ?id= URL param so deep links work and shares are stable
   useEffect(() => {
@@ -773,19 +780,48 @@ function Conversations() {
   });
 
   const sendReply = useMutation({
-    mutationFn: async (content: string) => {
+    mutationFn: async ({
+      content,
+      imageFile,
+    }: {
+      content: string;
+      imageFile: File | null;
+    }) => {
+      let imageUrl: string | null = null;
+      if (imageFile) {
+        setIsUploadingReplyImage(true);
+        try {
+          const formData = new FormData();
+          formData.append("file", imageFile);
+          const uploadRes = await fetch("/api/upload", {
+            method: "POST",
+            body: formData,
+          });
+          if (!uploadRes.ok) {
+            const err = await uploadRes
+              .json()
+              .catch(() => ({ error: "Upload failed" }));
+            throw new Error(err.error ?? "Failed to upload image");
+          }
+          const uploadData = (await uploadRes.json()) as { url: string };
+          imageUrl = uploadData.url;
+        } finally {
+          setIsUploadingReplyImage(false);
+        }
+      }
+
       const res = await fetch(
         `/api/projects/${projectId}/conversations/${selectedConvo}/reply`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content }),
+          body: JSON.stringify({ content, imageUrl: imageUrl ?? undefined }),
         },
       );
       if (!res.ok) throw new Error("Failed to send reply");
       return res.json();
     },
-    onMutate: async (content: string) => {
+    onMutate: async ({ content, imageFile }) => {
       await queryClient.cancelQueries({
         queryKey: ["conversation-detail", selectedConvo],
       });
@@ -796,6 +832,10 @@ function Conversations() {
         agentName: string | null;
         inquiry: ConversationInquiry | null;
       }>(["conversation-detail", selectedConvo]);
+
+      const optimisticImageUrl = imageFile
+        ? replyImagePreview ?? null
+        : null;
 
       queryClient.setQueryData(
         ["conversation-detail", selectedConvo],
@@ -810,7 +850,8 @@ function Conversations() {
                 id: `optimistic-${Date.now()}`,
                 conversationId: selectedConvo,
                 role: "agent",
-                content,
+                content: content || (imageFile ? "Sent an image" : ""),
+                imageUrl: optimisticImageUrl,
                 createdAt: new Date().toISOString(),
                 sources: null,
                 senderName: null,
@@ -825,16 +866,19 @@ function Conversations() {
       );
 
       setReplyText("");
+      setReplyImageFile(null);
+      setReplyImagePreview(null);
+      if (replyImageInputRef.current) replyImageInputRef.current.value = "";
       return { previous };
     },
-    onError: (_err, _content, context) => {
+    onError: (err: Error, _vars, context) => {
       if (context?.previous) {
         queryClient.setQueryData(
           ["conversation-detail", selectedConvo],
           context.previous,
         );
       }
-      toast.error("Failed to send reply");
+      toast.error(err.message || "Failed to send reply");
     },
     onSettled: () => {
       queryClient.invalidateQueries({
@@ -2003,17 +2047,39 @@ function Conversations() {
                           </div>
                         )}
 
-                        {/* Message content */}
-                        {msg.role === "visitor" ? (
-                          <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                            {msg.content}
-                          </p>
-                        ) : (
-                          <div
-                            className="text-[13.5px] leading-relaxed break-words [overflow-wrap:anywhere] prose-chat"
-                            dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-                          />
+                        {/* Attached image */}
+                        {msg.imageUrl && (
+                          <a
+                            href={msg.imageUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block mb-1.5"
+                          >
+                            <img
+                              src={msg.imageUrl}
+                              alt="Attached"
+                              className="max-w-full max-h-72 rounded-lg object-cover"
+                            />
+                          </a>
                         )}
+
+                        {/* Message content */}
+                        {(() => {
+                          const hideText =
+                            !!msg.imageUrl &&
+                            (!msg.content || msg.content.trim() === "Sent an image");
+                          if (hideText) return null;
+                          return msg.role === "visitor" ? (
+                            <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                              {msg.content}
+                            </p>
+                          ) : (
+                            <div
+                              className="text-[13.5px] leading-relaxed break-words [overflow-wrap:anywhere] prose-chat"
+                              dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                            />
+                          );
+                        })()}
 
                         {/* Source links */}
                         {isBot && msg.sources && (() => {
@@ -2125,11 +2191,39 @@ function Conversations() {
                   <span className="text-muted-foreground/60">· Replying will reopen</span>
                 </div>
               )}
+              {replyImagePreview && (
+                <div className="mb-2 inline-flex items-center gap-2 p-1.5 pr-2 rounded-xl bg-muted/60 border border-border max-w-xs">
+                  <img
+                    src={replyImagePreview}
+                    alt="Attachment preview"
+                    className="w-12 h-12 rounded-lg object-cover"
+                  />
+                  <span className="text-[12px] text-muted-foreground truncate flex-1">
+                    {replyImageFile?.name ?? "Image"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReplyImageFile(null);
+                      setReplyImagePreview(null);
+                      if (replyImageInputRef.current)
+                        replyImageInputRef.current.value = "";
+                    }}
+                    className="text-muted-foreground hover:text-foreground p-0.5"
+                    aria-label="Remove image"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (replyText.trim()) {
-                    sendReply.mutate(replyText.trim());
+                  if (replyText.trim() || replyImageFile) {
+                    sendReply.mutate({
+                      content: replyText.trim(),
+                      imageFile: replyImageFile,
+                    });
                     if (replyTextareaRef.current) {
                       replyTextareaRef.current.style.height = "auto";
                     }
@@ -2137,6 +2231,39 @@ function Conversations() {
                 }}
                 className="flex items-end gap-2"
               >
+                <input
+                  ref={replyImageInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (file.size > 10 * 1024 * 1024) {
+                      toast.error("Image too large (max 10MB)");
+                      e.target.value = "";
+                      return;
+                    }
+                    setReplyImageFile(file);
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      setReplyImagePreview(reader.result as string);
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => replyImageInputRef.current?.click()}
+                  disabled={sendReply.isPending}
+                  className="h-10 w-10 rounded-full mb-0.5 shrink-0"
+                  aria-label="Attach image"
+                  title="Attach image"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </Button>
                 <textarea
                   ref={replyTextareaRef}
                   value={replyText}
@@ -2145,6 +2272,25 @@ function Conversations() {
                     // Auto-resize
                     e.target.style.height = "auto";
                     e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+                  }}
+                  onPaste={(e) => {
+                    const item = Array.from(e.clipboardData.items).find((i) =>
+                      i.type.startsWith("image/"),
+                    );
+                    if (!item) return;
+                    const file = item.getAsFile();
+                    if (!file) return;
+                    if (file.size > 10 * 1024 * 1024) {
+                      toast.error("Image too large (max 10MB)");
+                      return;
+                    }
+                    e.preventDefault();
+                    setReplyImageFile(file);
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      setReplyImagePreview(reader.result as string);
+                    };
+                    reader.readAsDataURL(file);
                   }}
                   onKeyDown={(e) => {
                     // On touch-primary devices the on-screen keyboard has no
@@ -2155,8 +2301,11 @@ function Conversations() {
                     if (isTouch) return;
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
-                      if (replyText.trim()) {
-                        sendReply.mutate(replyText.trim());
+                      if (replyText.trim() || replyImageFile) {
+                        sendReply.mutate({
+                          content: replyText.trim(),
+                          imageFile: replyImageFile,
+                        });
                         if (replyTextareaRef.current) {
                           replyTextareaRef.current.style.height = "auto";
                         }
@@ -2171,7 +2320,11 @@ function Conversations() {
                 <Button
                   type="submit"
                   size="icon"
-                  disabled={!replyText.trim() || sendReply.isPending}
+                  disabled={
+                    (!replyText.trim() && !replyImageFile) ||
+                    sendReply.isPending ||
+                    isUploadingReplyImage
+                  }
                   className="h-10 w-10 rounded-full mb-0.5"
                 >
                   <Send className="w-4 h-4" />

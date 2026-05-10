@@ -81,7 +81,8 @@ export function useConversationWs(
                 (m as ConversationDetailMessage & { _optimistic?: boolean })
                   ._optimistic &&
                 m.role === incoming.role &&
-                m.content === incoming.content,
+                m.content === incoming.content &&
+                Boolean(m.imageUrl) === Boolean(incoming.imageUrl),
             );
             const dedupeIdx = old.messages.findIndex(
               (m) => m.id === incoming.id,

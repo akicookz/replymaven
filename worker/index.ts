@@ -5093,7 +5093,8 @@ const app = new Hono<HonoAppContext>()
     const message = await chatService.addMessage({
       conversationId: conversation.id,
       role: "agent",
-      content: parsed.data.content,
+      content: parsed.data.content?.trim() || (parsed.data.imageUrl ? "Sent an image" : ""),
+      imageUrl: parsed.data.imageUrl ?? null,
       userId: user.id,
       senderName: user.name,
       senderAvatar: avatar,
@@ -5801,6 +5802,8 @@ const app = new Hono<HonoAppContext>()
       obj.httpMetadata?.contentType ?? "application/octet-stream",
     );
     headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    headers.set("X-Content-Type-Options", "nosniff");
+    headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
     return new Response(obj.body, { headers });
   });
 
