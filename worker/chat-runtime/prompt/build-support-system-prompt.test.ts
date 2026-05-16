@@ -46,34 +46,34 @@ describe("buildSupportSystemPrompt", () => {
     expect(prompt).toContain("compiled FAQ entries");
     expect(prompt).toContain("Treat <guidelines> and <priority-faqs> as tier-1 sources.");
     expect(prompt).toContain(
-      "Human follow-up, contact collection, and inquiry submission are controlled by the runtime",
+      "Human follow-up, contact collection, and ticket submission are controlled by the runtime",
     );
     expect(prompt).toContain(
       'Do not end with optional offers like "Would you like an example?"',
     );
   });
 
-  test("renders existing-inquiry block when inquiry data is provided", () => {
+  test("renders existing-ticket block when ticket data is provided", () => {
     const prompt = buildSupportSystemPrompt(
       BASE_SETTINGS,
       "ReplyMaven",
       "",
       "",
       {
-        inquiryFields: [
+        ticketFields: [
           { label: "Name", type: "text", required: true },
           { label: "Email", type: "email", required: true },
           { label: "Phone", type: "tel", required: false },
         ],
-        existingInquiry: {
+        existingTicket: {
           Name: "Alice",
           Email: "alice@example.com",
         },
       },
     );
 
-    expect(prompt).toContain("<existing-inquiry>");
-    expect(prompt).toContain("</existing-inquiry>");
+    expect(prompt).toContain("<existing-ticket>");
+    expect(prompt).toContain("</existing-ticket>");
     expect(prompt).toContain("Name (required): Alice");
     expect(prompt).toContain("Email (required): alice@example.com");
     expect(prompt).toContain("Phone: <not provided>");
@@ -90,23 +90,23 @@ describe("buildSupportSystemPrompt", () => {
       "",
       "",
       {
-        inquiryFields: [
+        ticketFields: [
           { label: "Name", type: "text", required: true },
           { label: "Email", type: "email", required: true },
         ],
-        existingInquiry: {
+        existingTicket: {
           Name: "Bob",
         },
       },
     );
 
-    expect(prompt).toContain("<existing-inquiry>");
+    expect(prompt).toContain("<existing-ticket>");
     expect(prompt).toContain("Name (required): Bob");
     expect(prompt).toContain("Email (required): <not provided>");
     expect(prompt).toContain("Missing required fields: Email");
   });
 
-  test("omits existing-inquiry block when inquiry data is not provided", () => {
+  test("omits existing-ticket block when ticket data is not provided", () => {
     const prompt = buildSupportSystemPrompt(
       BASE_SETTINGS,
       "ReplyMaven",
@@ -117,45 +117,45 @@ describe("buildSupportSystemPrompt", () => {
       },
     );
 
-    expect(prompt).not.toContain("</existing-inquiry>");
+    expect(prompt).not.toContain("</existing-ticket>");
     expect(prompt).not.toContain(
-      "The visitor already has an inquiry submission on file for this conversation.",
+      "The visitor already has a ticket submission on file for this conversation.",
     );
   });
 
-  test("omits existing-inquiry block when inquiryFields is empty", () => {
+  test("omits existing-ticket block when ticketFields is empty", () => {
     const prompt = buildSupportSystemPrompt(
       BASE_SETTINGS,
       "ReplyMaven",
       "",
       "",
       {
-        inquiryFields: [],
-        existingInquiry: { Name: "Dave" },
+        ticketFields: [],
+        existingTicket: { Name: "Dave" },
       },
     );
 
-    expect(prompt).not.toContain("</existing-inquiry>");
+    expect(prompt).not.toContain("</existing-ticket>");
     expect(prompt).not.toContain(
-      "The visitor already has an inquiry submission on file for this conversation.",
+      "The visitor already has a ticket submission on file for this conversation.",
     );
   });
 
-  test("omits existing-inquiry block when existingInquiry is null", () => {
+  test("omits existing-ticket block when existingTicket is null", () => {
     const prompt = buildSupportSystemPrompt(
       BASE_SETTINGS,
       "ReplyMaven",
       "",
       "",
       {
-        inquiryFields: [{ label: "Name", type: "text", required: true }],
-        existingInquiry: null,
+        ticketFields: [{ label: "Name", type: "text", required: true }],
+        existingTicket: null,
       },
     );
 
-    expect(prompt).not.toContain("</existing-inquiry>");
+    expect(prompt).not.toContain("</existing-ticket>");
     expect(prompt).not.toContain(
-      "The visitor already has an inquiry submission on file for this conversation.",
+      "The visitor already has a ticket submission on file for this conversation.",
     );
   });
 
@@ -166,11 +166,11 @@ describe("buildSupportSystemPrompt", () => {
       "",
       "",
       {
-        inquiryFields: [
+        ticketFields: [
           { label: "Name", type: "text", required: true },
           { label: "Email", type: "email", required: true },
         ],
-        existingInquiry: {
+        existingTicket: {
           Name: "Eve",
           Email: "   ",
         },

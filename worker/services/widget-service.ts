@@ -4,18 +4,15 @@ import {
   widgetConfig,
   quickActions,
   projectSettings,
-  inquiryConfig,
-  inquiries,
   greetings,
   type WidgetConfigRow,
   type QuickActionRow,
   type NewQuickActionRow,
-  type InquiryConfigRow,
-  type InquiryRow,
   type GreetingRow,
   type NewGreetingRow,
 } from "../db";
 import { users } from "../db/auth.schema";
+import { TicketService } from "./ticket-service";
 
 export interface GreetingPublic {
   id: string;
@@ -58,28 +55,6 @@ function serializeAllowedPages(value: string[] | null | undefined): string | nul
   const cleaned = value.map((v) => v.trim()).filter(Boolean);
   if (!cleaned.length) return null;
   return JSON.stringify(cleaned);
-}
-
-export function parseInquiryData(raw: string): Record<string, string> {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return {};
-    }
-    const result: Record<string, string> = {};
-    for (const [key, value] of Object.entries(
-      parsed as Record<string, unknown>,
-    )) {
-      if (typeof value === "string") {
-        result[key] = value;
-      } else if (value != null) {
-        result[key] = String(value);
-      }
-    }
-    return result;
-  } catch {
-    return {};
-  }
 }
 
 export class WidgetService {
@@ -194,6 +169,8 @@ export class WidgetService {
     return true;
   }
 
+  // Note: `type` enum stored value `"inquiry"` is kept for back-compat with
+  // installed widget bundles that read this string. The UI label is "Ticket form".
   async getQuickActionsByType(
     projectId: string,
     type: "prompt" | "link" | "inquiry",
@@ -207,180 +184,6 @@ export class WidgetService {
           eq(quickActions.type, type),
         ),
       );
-  }
-
-  // ─── Inquiry Config ──────────────────────────────────────────────────────
-
-  async getInquiryConfig(
-    projectId: string,
-  ): Promise<InquiryConfigRow | null> {
-    const rows = await this.db
-      .select()
-      .from(inquiryConfig)
-      .where(eq(inquiryConfig.projectId, projectId))
-      .limit(1);
-    return rows[0] ?? null;
-  }
-
-  async upsertInquiryConfig(
-    projectId: string,
-    updates: {
-      enabled?: boolean;
-      description?: string | null;
-      fields?: Array<{ label: string; type: string; required: boolean }>;
-    },
-  ): Promise<InquiryConfigRow> {
-    const existing = await this.getInquiryConfig(projectId);
-
-    if (existing) {
-      const setData: Record<string, unknown> = {};
-      if (updates.enabled !== undefined) setData.enabled = updates.enabled;
-      if (updates.description !== undefined)
-        setData.description = updates.description;
-      if (updates.fields !== undefined)
-        setData.fields = JSON.stringify(updates.fields);
-
-      await this.db
-        .update(inquiryConfig)
-        .set(setData)
-        .where(eq(inquiryConfig.projectId, projectId));
-
-      return (await this.getInquiryConfig(projectId))!;
-    }
-
-    const id = crypto.randomUUID();
-    await this.db.insert(inquiryConfig).values({
-      id,
-      projectId,
-      enabled: updates.enabled ?? false,
-      description:
-        updates.description ?? "We'll get back to you within 1-2 hours.",
-      fields: updates.fields ? JSON.stringify(updates.fields) : "[]",
-    });
-    return (await this.getInquiryConfig(projectId))!;
-  }
-
-  // ─── Inquiries ──────────────────────────────────────────────────────────
-
-  async createInquiry(options: {
-    projectId: string;
-    conversationId?: string | null;
-    visitorId?: string;
-    title: string;
-    data: Record<string, string>;
-    appendMode?: boolean;
-  }): Promise<{ inquiry: InquiryRow; created: boolean; appended: boolean }> {
-    if (options.conversationId) {
-      const existing = await this.getInquiryByConversationId(
-        options.projectId,
-        options.conversationId,
-      );
-      if (existing) {
-        const mergedData = options.appendMode
-          ? { ...parseInquiryData(existing.data), ...options.data }
-          : options.data;
-
-        await this.db
-          .update(inquiries)
-          .set({
-            visitorId: options.visitorId ?? existing.visitorId,
-            title: options.title,
-            data: JSON.stringify(mergedData),
-          })
-          .where(eq(inquiries.id, existing.id));
-
-        return {
-          inquiry: (await this.getInquiryById(existing.id, options.projectId))!,
-          created: false,
-          appended: Boolean(options.appendMode),
-        };
-      }
-    }
-
-    const id = crypto.randomUUID();
-    await this.db.insert(inquiries).values({
-      id,
-      projectId: options.projectId,
-      conversationId: options.conversationId ?? null,
-      visitorId: options.visitorId ?? null,
-      title: options.title,
-      data: JSON.stringify(options.data),
-    });
-
-    return {
-      inquiry: (await this.getInquiryById(id, options.projectId))!,
-      created: true,
-      appended: false,
-    };
-  }
-
-  async getInquiries(
-    projectId: string,
-  ): Promise<InquiryRow[]> {
-    return this.db
-      .select()
-      .from(inquiries)
-      .where(eq(inquiries.projectId, projectId))
-      .orderBy(asc(inquiries.createdAt));
-  }
-
-  async getInquiryById(
-    id: string,
-    projectId: string,
-  ): Promise<InquiryRow | null> {
-    const rows = await this.db
-      .select()
-      .from(inquiries)
-      .where(eq(inquiries.id, id))
-      .limit(1);
-    if (!rows[0] || rows[0].projectId !== projectId) return null;
-    return rows[0];
-  }
-
-  async getInquiryByConversationId(
-    projectId: string,
-    conversationId: string,
-  ): Promise<InquiryRow | null> {
-    const rows = await this.db
-      .select()
-      .from(inquiries)
-      .where(
-        and(
-          eq(inquiries.projectId, projectId),
-          eq(inquiries.conversationId, conversationId),
-        ),
-      )
-      .limit(1);
-
-    return rows[0] ?? null;
-  }
-
-  async updateInquiryStatus(
-    id: string,
-    projectId: string,
-    status: "new" | "replied" | "closed",
-  ): Promise<InquiryRow | null> {
-    const existing = await this.getInquiryById(id, projectId);
-    if (!existing) return null;
-    await this.db
-      .update(inquiries)
-      .set({ status })
-      .where(eq(inquiries.id, id));
-    return (await this.getInquiryById(id, projectId))!;
-  }
-
-  async bulkUpdateInquiryStatus(
-    ids: string[],
-    projectId: string,
-    status: "new" | "replied" | "closed",
-  ): Promise<number> {
-    await this.db
-      .update(inquiries)
-      .set({ status })
-      .where(
-        and(inArray(inquiries.id, ids), eq(inquiries.projectId, projectId)),
-      );
-    return ids.length;
   }
 
   // ─── Greetings ──────────────────────────────────────────────────────────────
@@ -579,6 +382,7 @@ export class WidgetService {
   // ─── Full Widget Config for Embed ───────────────────────────────────────────
 
   async getFullWidgetConfig(projectId: string) {
+    const ticketService = new TicketService(this.db);
     const [config, actions, settings, formConfig, greetingList] =
       await Promise.all([
         this.getWidgetConfig(projectId),
@@ -588,7 +392,7 @@ export class WidgetService {
           .from(projectSettings)
           .where(eq(projectSettings.projectId, projectId))
           .limit(1),
-        this.getInquiryConfig(projectId),
+        ticketService.getConfig(projectId),
         this.getEnabledGreetingsWithAuthors(projectId),
       ]);
 
@@ -596,6 +400,13 @@ export class WidgetService {
     // bundles that still read them. New widget reads `greetings` instead.
     const firstGreeting = greetingList[0] ?? null;
     const legacyAuthor = firstGreeting?.author ?? null;
+
+    const formPayload = formConfig?.enabled
+      ? {
+          description: formConfig.description,
+          fields: JSON.parse(formConfig.fields || "[]"),
+        }
+      : null;
 
     return {
       widget: config,
@@ -622,41 +433,10 @@ export class WidgetService {
       botName: settings[0]?.botName ?? null,
       agentName: settings[0]?.agentName ?? null,
       companyName: settings[0]?.companyName ?? null,
-      inquiryForm:
-        formConfig?.enabled
-          ? {
-              description: formConfig.description,
-              fields: JSON.parse(formConfig.fields || "[]"),
-            }
-          : null,
+      // Legacy key kept so installed widget bundles still find the form config.
+      inquiryForm: formPayload,
+      // Canonical key for new widget bundles.
+      ticketForm: formPayload,
     };
   }
-}
-
-export function buildInquiryTitle(options: {
-  visitorName?: string | null;
-  visitorEmail?: string | null;
-  visitorId?: string | null;
-}): string {
-  const visitorName = options.visitorName?.trim() ?? "";
-  const visitorEmail = options.visitorEmail?.trim() ?? "";
-  const visitorId = options.visitorId?.trim() ?? "";
-
-  if (visitorName && visitorEmail) {
-    return `${visitorName} <${visitorEmail}>`;
-  }
-
-  if (visitorName) {
-    return visitorName;
-  }
-
-  if (visitorEmail) {
-    return visitorEmail;
-  }
-
-  if (visitorId) {
-    return `Visitor ${visitorId}`;
-  }
-
-  return "Inquiry";
 }

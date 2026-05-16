@@ -2,9 +2,13 @@ import { EmailService } from "../../services/email-service";
 import { type ChatService } from "../../services/chat-service";
 import { type ProjectService } from "../../services/project-service";
 import { type TelegramService } from "../../services/telegram-service";
-import { buildInquiryTitle, type WidgetService } from "../../services/widget-service";
+import { type WidgetService } from "../../services/widget-service";
+import {
+  TicketService,
+  buildTicketTitle,
+} from "../../services/ticket-service";
 import { logError, logInfo } from "../../observability";
-import { type InquiryFieldSpec } from "../types";
+import { type TicketFieldSpec } from "../types";
 
 function formatSubmissionValue(value: string | null | undefined): string {
   return value?.trim() || "Not provided";
@@ -22,15 +26,15 @@ export function parseTelegramThreadId(
 }
 
 export function buildDynamicFormData(params: {
-  inquiryFields: InquiryFieldSpec[] | null | undefined;
-  existingInquiry: Record<string, string> | null | undefined;
+  ticketFields: TicketFieldSpec[] | null | undefined;
+  existingTicket: Record<string, string> | null | undefined;
   extractedRefinementData: Record<string, string> | null | undefined;
   visitorName: string | null;
   email: string;
   summary: string;
 }): Record<string, string> {
-  const fields = params.inquiryFields ?? [];
-  const existing = params.existingInquiry ?? {};
+  const fields = params.ticketFields ?? [];
+  const existing = params.existingTicket ?? {};
   const extracted = params.extractedRefinementData ?? {};
 
   if (fields.length === 0) {
@@ -88,6 +92,7 @@ export function buildDynamicFormData(params: {
 export async function createTeamRequestSubmission(params: {
   chatService: ChatService;
   widgetService: WidgetService;
+  ticketService: TicketService;
   projectService: ProjectService;
   telegramService?: TelegramService;
   project: { id: string; name: string };
@@ -101,8 +106,8 @@ export async function createTeamRequestSubmission(params: {
   conversationHistory: Array<{ role: string; content: string }>;
   summary: string;
   email: string;
-  inquiryFields?: InquiryFieldSpec[] | null;
-  existingInquiry?: Record<string, string> | null;
+  ticketFields?: TicketFieldSpec[] | null;
+  existingTicket?: Record<string, string> | null;
   extractedRefinementData?: Record<string, string> | null;
   appendMode?: boolean;
   settings: {
@@ -137,31 +142,31 @@ export async function createTeamRequestSubmission(params: {
   });
 
   const formData = buildDynamicFormData({
-    inquiryFields: params.inquiryFields,
-    existingInquiry: params.existingInquiry,
+    ticketFields: params.ticketFields,
+    existingTicket: params.existingTicket,
     extractedRefinementData: params.extractedRefinementData,
     visitorName: params.conversation.visitorName,
     email: params.email,
     summary,
   });
-  const inquiryTitle = buildInquiryTitle({
+  const ticketTitle = buildTicketTitle({
     visitorName: params.conversation.visitorName,
     visitorEmail: params.conversation.visitorEmail,
     visitorId: params.conversation.visitorId,
   });
 
-  const submission = await params.widgetService.createInquiry({
+  const submission = await params.ticketService.createTicket({
     projectId: params.project.id,
     conversationId: params.conversation.id,
     visitorId: params.conversation.visitorId ?? undefined,
-    title: inquiryTitle,
+    title: ticketTitle,
     data: formData,
     appendMode: params.appendMode ?? false,
   });
   logInfo("team_request.submission_created", {
     projectId: params.project.id,
     conversationId: params.conversation.id,
-    submissionId: submission.inquiry.id,
+    submissionId: submission.ticket.id,
     created: submission.created,
     appended: submission.appended,
   });
@@ -170,7 +175,7 @@ export async function createTeamRequestSubmission(params: {
     logInfo("team_request.reused_existing_submission", {
       projectId: params.project.id,
       conversationId: params.conversation.id,
-      submissionId: submission.inquiry.id,
+      submissionId: submission.ticket.id,
     });
   }
 
@@ -178,7 +183,7 @@ export async function createTeamRequestSubmission(params: {
     logInfo("team_request.appended_existing_submission", {
       projectId: params.project.id,
       conversationId: params.conversation.id,
-      submissionId: submission.inquiry.id,
+      submissionId: submission.ticket.id,
     });
   }
 
@@ -189,7 +194,7 @@ export async function createTeamRequestSubmission(params: {
       metadata: JSON.stringify({
         teamRequestPending: false,
         teamRequestSubmittedAt: new Date().toISOString(),
-        teamRequestSubmissionId: submission.inquiry.id,
+        teamRequestSubmissionId: submission.ticket.id,
         teamRequestSummary: summary,
       }),
     },
@@ -197,7 +202,7 @@ export async function createTeamRequestSubmission(params: {
   logInfo("team_request.conversation_updated", {
     projectId: params.project.id,
     conversationId: params.conversation.id,
-    submissionId: submission.inquiry.id,
+    submissionId: submission.ticket.id,
   });
 
   let telegramThreadId: string | undefined;
@@ -214,7 +219,7 @@ export async function createTeamRequestSubmission(params: {
       const replyToMessageId = isUpdate
         ? parseTelegramThreadId(params.conversation.telegramThreadId)
         : undefined;
-      const messageId = await params.telegramService.notifyInquiry(
+      const messageId = await params.telegramService.notifyNewTicket(
         params.settings.telegramBotToken,
         params.settings.telegramChatId,
         formData,
@@ -231,7 +236,7 @@ export async function createTeamRequestSubmission(params: {
       logInfo("team_request.telegram_notified", {
         projectId: params.project.id,
         conversationId: params.conversation.id,
-        submissionId: submission.inquiry.id,
+        submissionId: submission.ticket.id,
         telegramThreadId: telegramThreadId ?? null,
         isUpdate,
         repliedToMessageId: replyToMessageId ?? null,
@@ -240,7 +245,7 @@ export async function createTeamRequestSubmission(params: {
       logError("team_request.telegram_failed", error, {
         projectId: params.project.id,
         conversationId: params.conversation.id,
-        submissionId: submission.inquiry.id,
+        submissionId: submission.ticket.id,
       });
     }
   }
@@ -250,21 +255,21 @@ export async function createTeamRequestSubmission(params: {
     const ownerEmail = await params.projectService.getOwnerEmail(params.project.id);
     if (ownerEmail) {
       const projectName = params.settings?.companyName ?? params.project.name;
-      const dashboardUrl = `${params.env.BETTER_AUTH_URL}/app/projects/${params.project.id}/inquiries`;
-      const [inquiryActions, widgetCfg] = await Promise.all([
+      const dashboardUrl = `${params.env.BETTER_AUTH_URL}/app/projects/${params.project.id}/tickets`;
+      const [ticketActions, widgetCfg] = await Promise.all([
         params.widgetService.getQuickActionsByType(params.project.id, "inquiry"),
         params.widgetService.getWidgetConfig(params.project.id),
       ]);
-      const actionLabel = inquiryActions[0]?.label ?? null;
+      const actionLabel = ticketActions[0]?.label ?? null;
       logInfo("team_request.email_queued", {
         projectId: params.project.id,
         conversationId: params.conversation.id,
-        submissionId: submission.inquiry.id,
+        submissionId: submission.ticket.id,
         isUpdate,
       });
       params.executionCtx.waitUntil(
         emailService
-          .sendInquiryNotification({
+          .sendTicketNotification({
             ownerEmail,
             projectName,
             formData,
@@ -280,7 +285,7 @@ export async function createTeamRequestSubmission(params: {
             logError("team_request.email_failed", err, {
               projectId: params.project.id,
               conversationId: params.conversation.id,
-              submissionId: submission.inquiry.id,
+              submissionId: submission.ticket.id,
             });
           }),
       );
@@ -290,13 +295,13 @@ export async function createTeamRequestSubmission(params: {
   logInfo("team_request.completed", {
     projectId: params.project.id,
     conversationId: params.conversation.id,
-    submissionId: submission.inquiry.id,
+    submissionId: submission.ticket.id,
     created: submission.created,
     telegramThreadId: telegramThreadId ?? null,
   });
 
   return {
-    submissionId: submission.inquiry.id,
+    submissionId: submission.ticket.id,
     summary,
     telegramThreadId,
     created: submission.created,

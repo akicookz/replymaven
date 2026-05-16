@@ -500,7 +500,7 @@ function Landing() {
                   </div>
                   <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg">
                     <Inbox className="w-3.5 h-3.5 text-white/30" />
-                    <span className="text-[11px] text-white/40">Inquiries</span>
+                    <span className="text-[11px] text-white/40">Tickets</span>
                   </div>
                 </div>
                 <div className="mt-3">
@@ -545,7 +545,7 @@ function Landing() {
                   ))}
                 </div>
 
-                {/* Chart + Inquiries row */}
+                {/* Chart + Tickets row */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div className="rounded-xl p-4 border border-white/[0.06]" style={{ background: "#0c0c10" }}>
                     <div className="flex items-center justify-between mb-3">
@@ -567,7 +567,7 @@ function Landing() {
                   </div>
 
                   <div className="rounded-xl p-4 border border-white/[0.06]" style={{ background: "#0c0c10" }}>
-                    <span className="text-[11px] font-semibold text-white/70">Recent Inquiries</span>
+                    <span className="text-[11px] font-semibold text-white/70">Recent Tickets</span>
                     <div className="mt-3 space-y-2">
                       {[
                         { name: "Sarah Chen", email: "sarah@brightpath.io", time: "33m ago" },
@@ -1093,7 +1093,7 @@ function Landing() {
         </div>
       </section>
 
-      {/* ── Feature 5: Inquiry Forms (Pink) ───────────────────────────── */}
+      {/* ── Feature 5: Ticket Forms (Pink) ───────────────────────────── */}
       <section className="py-24 md:py-36 px-6">
         <div className="max-w-6xl mx-auto">
           <NoiseCard className="rounded-[2rem] p-14 lg:p-20 min-h-[70vh] flex items-center" style={{ background: "#f4e0e8" }}>
@@ -1139,7 +1139,7 @@ function Landing() {
                       </div>
                     </div>
                     <div className="glow-surface rounded-xl py-2.5 text-center text-[13px] font-medium">
-                      Submit Inquiry
+                      Submit Ticket
                     </div>
                   </div>
                   <div className="px-4 py-2.5 bg-muted/30 flex items-center gap-2">
@@ -1151,7 +1151,7 @@ function Landing() {
 
               <div className="order-1 lg:order-2 space-y-5">
                 <p className="text-sm font-medium text-foreground/60 uppercase tracking-wider">
-                  Inquiry Forms
+                  Ticket Forms
                 </p>
                 <h2 className="font-heading text-3xl sm:text-4xl lg:text-[2.75rem] font-normal text-foreground tracking-tight leading-[1.15]">
                   Capture leads

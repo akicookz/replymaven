@@ -18,7 +18,7 @@ import Conversations from "./pages/Conversations";
 import Resources from "./pages/Resources";
 import QuickActions from "./pages/QuickActions";
 import WidgetConfig from "./pages/WidgetConfig";
-import Inquiries from "./pages/Inquiries";
+import Tickets from "./pages/Tickets";
 import CompanyInfo from "./pages/CompanyInfo";
 import Sops from "./pages/Sops";
 import Profile from "./pages/Profile";
@@ -246,8 +246,12 @@ function App() {
           element={<ProjectPageRedirect target="widget" />}
         />
         <Route
+          path="projects/:projectId/tickets"
+          element={<Tickets />}
+        />
+        <Route
           path="projects/:projectId/inquiries"
-          element={<Inquiries />}
+          element={<Navigate to="../tickets" replace />}
         />
         <Route
           path="projects/:projectId/quick-actions"

@@ -7,7 +7,12 @@ import { users } from "./db/auth.schema";
 import { createAuth } from "./auth";
 import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
-import { buildInquiryTitle, WidgetService } from "./services/widget-service";
+import { WidgetService } from "./services/widget-service";
+import {
+  TicketService,
+  buildTicketTitle,
+  parseTicketData,
+} from "./services/ticket-service";
 import { ChatService } from "./services/chat-service";
 import { ResourceService, type FaqPair } from "./services/resource-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
@@ -36,6 +41,7 @@ import { toToolDefinition } from "./chat-runtime/types";
 import { logError, logInfo } from "./observability";
 import {
   broadcastClosed,
+  broadcastMessageDeleted,
   broadcastMessageNew,
   broadcastStatusChange,
 } from "./realtime/broadcast";
@@ -68,10 +74,11 @@ import {
   onboardingWidgetSchema,
   updateVisitorEmailSchema,
   updateConversationPublicSchema,
-  updateInquiryConfigSchema,
-  submitInquirySchema,
-  updateInquiryStatusSchema,
-  bulkUpdateInquiryStatusSchema,
+  updateTicketConfigSchema,
+  submitTicketSchema,
+  updateTicketSchema,
+  bulkUpdateTicketStatusSchema,
+  ticketListQuerySchema,
   createToolSchema,
   updateToolSchema,
   testToolSchema,
@@ -157,10 +164,10 @@ function isConversationStale(
   return last < Date.now() - autoCloseMinutes * 60_000;
 }
 
-function buildInquiryConversationMessage(
+function buildTicketConversationMessage(
   formData: Record<string, string>,
 ): string {
-  const lines = ["Inquiry submission"];
+  const lines = ["Ticket submission"];
 
   for (const [key, value] of Object.entries(formData)) {
     const trimmedValue = value.trim();
@@ -175,7 +182,7 @@ function isLikelyEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-function extractInquiryEmail(formData: Record<string, string>): string | null {
+function extractTicketEmail(formData: Record<string, string>): string | null {
   for (const [key, value] of Object.entries(formData)) {
     if (!/email/i.test(key)) continue;
     if (isLikelyEmail(value)) return value.trim();
@@ -184,7 +191,7 @@ function extractInquiryEmail(formData: Record<string, string>): string | null {
   return null;
 }
 
-function extractInquiryName(formData: Record<string, string>): string | null {
+function extractTicketName(formData: Record<string, string>): string | null {
   for (const [key, value] of Object.entries(formData)) {
     const normalizedKey = key.trim().toLowerCase();
     if (normalizedKey.includes("company")) continue;
@@ -198,18 +205,18 @@ function extractInquiryName(formData: Record<string, string>): string | null {
   return null;
 }
 
-function buildInquiryRecord(
+function buildTicketRecord(
   formData: Record<string, string>,
   visitorName: string | null,
   visitorEmail: string | null,
 ): Record<string, string> {
   const enrichedData = { ...formData };
 
-  if (visitorName && !extractInquiryName(enrichedData)) {
+  if (visitorName && !extractTicketName(enrichedData)) {
     enrichedData["Visitor name"] = visitorName;
   }
 
-  if (visitorEmail && !extractInquiryEmail(enrichedData)) {
+  if (visitorEmail && !extractTicketEmail(enrichedData)) {
     enrichedData["Visitor email"] = visitorEmail;
   }
 
@@ -777,8 +784,16 @@ const app = new Hono<HonoAppContext>()
     return c.json(updated);
   })
 
-  // ─── Inquiry Submit (public) ──────────────────────────────────────────────
-  .post("/api/widget/:projectSlug/inquiries", async (c) => {
+  // ─── Ticket Submit (public) ───────────────────────────────────────────────
+  // Mounted on both /inquiries (legacy back-compat for installed widgets) and
+  // /tickets (new canonical path). Same handler.
+  .on(
+    "POST",
+    [
+      "/api/widget/:projectSlug/inquiries",
+      "/api/widget/:projectSlug/tickets",
+    ],
+    async (c) => {
     const ip = getClientIp(c);
     if (!checkRateLimit(`cform:${ip}`, 5, 60_000)) {
       return c.json({ error: "Rate limit exceeded" }, 429);
@@ -792,29 +807,30 @@ const app = new Hono<HonoAppContext>()
     if (!project) return c.json({ error: "Project not found" }, 404);
 
     const body = await c.req.json();
-    const parsed = validate(submitInquirySchema, body);
+    const parsed = validate(submitTicketSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const widgetService = new WidgetService(db);
+    const ticketService = new TicketService(db);
     const chatService = new ChatService(db);
 
-    // Verify inquiry form is enabled
-    const formConfig = await widgetService.getInquiryConfig(project.id);
+    // Verify ticket form is enabled
+    const formConfig = await ticketService.getConfig(project.id);
     if (!formConfig?.enabled) {
-      return c.json({ error: "Inquiry form is not enabled" }, 400);
+      return c.json({ error: "Ticket form is not enabled" }, 400);
     }
 
     const visitorId = parsed.data.visitorId ?? crypto.randomUUID();
     const visitorEmail =
-      parsed.data.visitorEmail ?? extractInquiryEmail(parsed.data.data);
+      parsed.data.visitorEmail ?? extractTicketEmail(parsed.data.data);
     const visitorName =
-      parsed.data.visitorName ?? extractInquiryName(parsed.data.data);
-    const inquiryData = buildInquiryRecord(
+      parsed.data.visitorName ?? extractTicketName(parsed.data.data);
+    const ticketData = buildTicketRecord(
       parsed.data.data,
       visitorName,
       visitorEmail,
     );
-    const inquiryTitle = buildInquiryTitle({
+    const ticketTitle = buildTicketTitle({
       visitorName,
       visitorEmail,
       visitorId,
@@ -837,6 +853,8 @@ const app = new Hono<HonoAppContext>()
       conversation = updatedConversation ?? conversation;
     } else {
       const cf = c.req.raw.cf as CfProperties | undefined;
+      // Stored metadata.source value kept as historical "inquiry" string —
+      // existing rows already have this value and there's no value-add in migrating.
       const metadata: Record<string, string> = {
         source: "inquiry",
       };
@@ -857,20 +875,20 @@ const app = new Hono<HonoAppContext>()
       });
     }
 
-    const submission = await widgetService.createInquiry({
+    const submission = await ticketService.createTicket({
       projectId: project.id,
       conversationId: conversation.id,
       visitorId,
-      title: inquiryTitle,
-      data: inquiryData,
+      title: ticketTitle,
+      data: ticketData,
     });
 
-    const inquiryMessage = buildInquiryConversationMessage(inquiryData);
+    const ticketMessage = buildTicketConversationMessage(ticketData);
 
-    const inquiryVisitorMessage = await chatService.addMessage({
+    const ticketVisitorMessage = await chatService.addMessage({
       conversationId: conversation.id,
       role: "visitor",
-      content: inquiryMessage,
+      content: ticketMessage,
       imageUrl: null,
       sources: null,
     });
@@ -878,7 +896,7 @@ const app = new Hono<HonoAppContext>()
       c.env,
       c.executionCtx,
       conversation.id,
-      inquiryVisitorMessage,
+      ticketVisitorMessage,
     );
 
     // Notify via Telegram if configured
@@ -896,16 +914,16 @@ const app = new Hono<HonoAppContext>()
               settings.telegramBotToken,
               settings.telegramChatId,
               conversation.visitorName,
-              inquiryMessage,
+              ticketMessage,
               conversation.id,
               conversation.telegramThreadId
                 ? parseInt(conversation.telegramThreadId, 10)
                 : undefined,
             )
-          : telegramService.notifyInquiry(
+          : telegramService.notifyNewTicket(
               settings.telegramBotToken,
               settings.telegramChatId,
-              inquiryData,
+              ticketData,
               c.env.BETTER_AUTH_URL,
               project.id,
             )
@@ -921,18 +939,19 @@ const app = new Hono<HonoAppContext>()
       const ownerEmail = await projectService.getOwnerEmail(project.id);
       if (ownerEmail) {
         const projectName = settings?.companyName ?? project.name;
-        const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/inquiries`;
-        const [inquiryActions, widgetCfg] = await Promise.all([
+        const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/tickets`;
+        // Quick-action stored enum value "inquiry" kept for back-compat with widgets.
+        const [ticketActions, widgetCfg] = await Promise.all([
           widgetService.getQuickActionsByType(project.id, "inquiry"),
           widgetService.getWidgetConfig(project.id),
         ]);
-        const actionLabel = inquiryActions[0]?.label ?? null;
+        const actionLabel = ticketActions[0]?.label ?? null;
         c.executionCtx.waitUntil(
           emailService
-            .sendInquiryNotification({
+            .sendTicketNotification({
               ownerEmail,
               projectName,
-              formData: inquiryData,
+              formData: ticketData,
               dashboardUrl,
               actionLabel,
               visitorName,
@@ -941,7 +960,7 @@ const app = new Hono<HonoAppContext>()
               accentColor: widgetCfg?.primaryColor ?? null,
             })
             .catch((err) => {
-              console.error("Contact form email failed:", err);
+              console.error("Ticket notification email failed:", err);
             }),
         );
       }
@@ -949,7 +968,7 @@ const app = new Hono<HonoAppContext>()
 
     return c.json(
       {
-        ...submission.inquiry,
+        ...submission.ticket,
         created: submission.created,
         conversationId: conversation.id,
         conversationStatus: conversation.status,
@@ -3115,7 +3134,8 @@ const app = new Hono<HonoAppContext>()
 
     const widgetService = new WidgetService(db);
 
-    // Enforce max 1 inquiry action per project
+    // Enforce max 1 ticket-form action per project.
+    // (Stored enum value is "inquiry" — kept for back-compat with widget bundles.)
     if (parsed.data.type === "inquiry") {
       const existing = await widgetService.getQuickActionsByType(
         project.id,
@@ -3651,8 +3671,8 @@ const app = new Hono<HonoAppContext>()
     return c.json(executions);
   })
 
-  // ─── Inquiry Config (Dashboard) ───────────────────────────────────────────
-  .get("/api/projects/:id/inquiries", async (c) => {
+  // ─── Ticket Config (Dashboard) ────────────────────────────────────────────
+  .get("/api/projects/:id/ticket-config", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
@@ -3663,8 +3683,8 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const widgetService = new WidgetService(db);
-    const config = await widgetService.getInquiryConfig(project.id);
+    const ticketService = new TicketService(db);
+    const config = await ticketService.getConfig(project.id);
     if (!config) {
       return c.json({
         enabled: false,
@@ -3678,12 +3698,12 @@ const app = new Hono<HonoAppContext>()
       fields: JSON.parse(config.fields || "[]"),
     });
   })
-  .put("/api/projects/:id/inquiries", async (c) => {
+  .put("/api/projects/:id/ticket-config", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     const body = await c.req.json();
-    const parsed = validate(updateInquiryConfigSchema, body);
+    const parsed = validate(updateTicketConfigSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const db = c.get("db");
@@ -3693,18 +3713,17 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const widgetService = new WidgetService(db);
-    const config = await widgetService.upsertInquiryConfig(
-      project.id,
-      parsed.data,
-    );
+    const ticketService = new TicketService(db);
+    const config = await ticketService.upsertConfig(project.id, parsed.data);
     return c.json({
       enabled: config.enabled,
       description: config.description,
       fields: JSON.parse(config.fields || "[]"),
     });
   })
-  .get("/api/projects/:id/inquiries/submissions", async (c) => {
+
+  // ─── Assignable Users (project owner + accepted team members) ─────────────
+  .get("/api/projects/:id/assignable-users", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
@@ -3715,24 +3734,61 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const widgetService = new WidgetService(db);
-    const submissions = await widgetService.getInquiries(project.id);
+    const ticketService = new TicketService(db);
+    const assignable = await ticketService.getAssignableUsers(project.id);
+    return c.json(assignable);
+  })
+
+  // ─── Tickets List ─────────────────────────────────────────────────────────
+  .get("/api/projects/:id/tickets", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const rawQuery = {
+      status: c.req.queries("status"),
+      priority: c.req.queries("priority"),
+      assigneeId: c.req.query("assigneeId"),
+      unassigned: c.req.query("unassigned") === "true" ? true : undefined,
+      q: c.req.query("q"),
+      sortBy: c.req.query("sortBy"),
+      sortDir: c.req.query("sortDir"),
+      limit: c.req.query("limit")
+        ? parseInt(c.req.query("limit")!, 10)
+        : undefined,
+      offset: c.req.query("offset")
+        ? parseInt(c.req.query("offset")!, 10)
+        : undefined,
+    };
+    const parsed = validate(ticketListQuerySchema, rawQuery);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const ticketService = new TicketService(db);
+    const enriched = await ticketService.getTicketsWithAssignees(
+      project.id,
+      parsed.data,
+    );
     return c.json(
-      submissions.map((s) => ({
-        ...s,
-        data: JSON.parse(s.data || "{}"),
+      enriched.map((t) => ({
+        ...t,
+        data: JSON.parse(t.data || "{}"),
       })),
     );
   })
 
-  // ─── Update Inquiry Status ──────────────────────────────────────────────────
-  // ─── Bulk Update Inquiry Status ───────────────────────────────────────────
-  .patch("/api/projects/:id/inquiries/bulk-status", async (c) => {
+  // ─── Bulk Update Ticket Status ────────────────────────────────────────────
+  .patch("/api/projects/:id/tickets/bulk-status", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     const body = await c.req.json();
-    const parsed = validate(bulkUpdateInquiryStatusSchema, body);
+    const parsed = validate(bulkUpdateTicketStatusSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const db = c.get("db");
@@ -3742,8 +3798,8 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const widgetService = new WidgetService(db);
-    const updated = await widgetService.bulkUpdateInquiryStatus(
+    const ticketService = new TicketService(db);
+    const updated = await ticketService.bulkUpdateTicketStatus(
       parsed.data.ids,
       project.id,
       parsed.data.status,
@@ -3751,12 +3807,13 @@ const app = new Hono<HonoAppContext>()
     return c.json({ updated });
   })
 
-  .patch("/api/projects/:id/inquiries/:inquiryId", async (c) => {
+  // ─── Update Ticket (status / priority / assignee / dueDate) ───────────────
+  .patch("/api/projects/:id/tickets/:ticketId", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
     const body = await c.req.json();
-    const parsed = validate(updateInquiryStatusSchema, body);
+    const parsed = validate(updateTicketSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const db = c.get("db");
@@ -3766,18 +3823,45 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const widgetService = new WidgetService(db);
-    const inquiry = await widgetService.updateInquiryStatus(
-      c.req.param("inquiryId"),
-      project.id,
-      parsed.data.status,
-    );
-    if (!inquiry) return c.json({ error: "Not found" }, 404);
-    return c.json({ ...inquiry, data: JSON.parse(inquiry.data || "{}") });
+    const ticketService = new TicketService(db);
+    try {
+      const ticket = await ticketService.updateTicket(
+        c.req.param("ticketId"),
+        project.id,
+        {
+          status: parsed.data.status,
+          priority: parsed.data.priority,
+          assigneeId: parsed.data.assigneeId,
+          dueDate:
+            parsed.data.dueDate === undefined
+              ? undefined
+              : parsed.data.dueDate === null
+                ? null
+                : new Date(parsed.data.dueDate),
+        },
+      );
+      if (!ticket) return c.json({ error: "Not found" }, 404);
+      const withAssignee = await ticketService.getTicketByIdWithAssignee(
+        ticket.id,
+        project.id,
+      );
+      return c.json({
+        ...(withAssignee ?? ticket),
+        data: JSON.parse((withAssignee ?? ticket).data || "{}"),
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message === "ASSIGNEE_NOT_ALLOWED") {
+        return c.json(
+          { error: "Assignee is not a member of this project's team" },
+          400,
+        );
+      }
+      throw err;
+    }
   })
 
-  // ─── Compose Inquiry Reply ─────────────────────────────────────────────────
-  .post("/api/projects/:id/inquiries/:inquiryId/compose", async (c) => {
+  // ─── Compose Ticket Reply ─────────────────────────────────────────────────
+  .post("/api/projects/:id/tickets/:ticketId/compose", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
@@ -3788,12 +3872,12 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const widgetService = new WidgetService(db);
-    const inquiry = await widgetService.getInquiryById(
-      c.req.param("inquiryId"),
+    const ticketService = new TicketService(db);
+    const ticket = await ticketService.getTicketById(
+      c.req.param("ticketId"),
       project.id,
     );
-    if (!inquiry) return c.json({ error: "Not found" }, 404);
+    if (!ticket) return c.json({ error: "Not found" }, 404);
 
     const settings = await projectService.getSettings(project.id);
     const aiService = new AiService({
@@ -3801,10 +3885,7 @@ const app = new Hono<HonoAppContext>()
       geminiApiKey: c.env.GEMINI_API_KEY,
       openaiApiKey: c.env.OPENAI_API_KEY,
     });
-    const inquiryData = JSON.parse(inquiry.data || "{}") as Record<
-      string,
-      string
-    >;
+    const ticketData = parseTicketData(ticket.data);
 
     // Fetch user's work title for email signature
     const [userProfile] = await db
@@ -3813,7 +3894,7 @@ const app = new Hono<HonoAppContext>()
       .where(eq(users.id, user.id))
       .limit(1);
 
-    const reply = await aiService.composeInquiryReply(
+    const reply = await aiService.composeTicketReply(
       {
         toneOfVoice: settings?.toneOfVoice,
         customTonePrompt: settings?.customTonePrompt,
@@ -3821,7 +3902,7 @@ const app = new Hono<HonoAppContext>()
         companyName: settings?.companyName,
       },
       settings?.companyName ?? project.name,
-      inquiryData,
+      ticketData,
       { name: user.name, email: user.email, workTitle: userProfile?.workTitle },
     );
 
@@ -4902,26 +4983,28 @@ const app = new Hono<HonoAppContext>()
       );
     }
 
-    // Parse metadata once for the inquiry lookup decision.
-    let inquiryId: string | null = null;
+    // Parse metadata once for the ticket lookup decision.
+    // The metadata key `teamRequestSubmissionId` is historical (predates the
+    // inquiry → ticket rename); kept as-is to avoid migrating JSON columns.
+    let ticketId: string | null = null;
     try {
       const metadata = conversation.metadata
         ? (JSON.parse(conversation.metadata as string) as Record<string, unknown>)
         : {};
       if (typeof metadata.teamRequestSubmissionId === "string") {
-        inquiryId = metadata.teamRequestSubmissionId;
+        ticketId = metadata.teamRequestSubmissionId;
       }
     } catch {
       // ignore
     }
 
-    // Wave 2: paginated messages + (optional) inquiry, in parallel.
+    // Wave 2: paginated messages + (optional) ticket, in parallel.
     const toolService = new ToolService(db);
-    const widgetService = new WidgetService(db);
-    const [{ messages: msgs, hasMore }, inquiryRow] = await Promise.all([
+    const ticketService = new TicketService(db);
+    const [{ messages: msgs, hasMore }, ticketRow] = await Promise.all([
       chatService.getRecentMessages(conversation.id, 30),
-      inquiryId
-        ? widgetService.getInquiryById(inquiryId, project.id)
+      ticketId
+        ? ticketService.getTicketByIdWithAssignee(ticketId, project.id)
         : Promise.resolve(null),
     ]);
 
@@ -4957,22 +5040,19 @@ const app = new Hono<HonoAppContext>()
         })) ?? [],
     }));
 
-    let inquiry: {
-      id: string;
-      data: Record<string, string>;
-      status: string;
-      createdAt: number | Date;
-    } | null = null;
-    if (inquiryRow) {
-      inquiry = {
-        id: inquiryRow.id,
-        data: inquiryRow.data
-          ? (JSON.parse(inquiryRow.data as string) as Record<string, string>)
-          : {},
-        status: inquiryRow.status,
-        createdAt: inquiryRow.createdAt,
-      };
-    }
+    const ticket = ticketRow
+      ? {
+          id: ticketRow.id,
+          data: parseTicketData(ticketRow.data),
+          status: ticketRow.status,
+          priority: ticketRow.priority,
+          assigneeId: ticketRow.assigneeId,
+          assignee: ticketRow.assignee,
+          dueDate: ticketRow.dueDate,
+          createdAt: ticketRow.createdAt,
+          updatedAt: ticketRow.updatedAt,
+        }
+      : null;
 
     return c.json({
       conversation,
@@ -4980,7 +5060,7 @@ const app = new Hono<HonoAppContext>()
       hasMore,
       botName: settings?.botName ?? null,
       agentName: settings?.agentName ?? null,
-      inquiry,
+      ticket,
     });
   })
   .get("/api/projects/:id/conversations/:convId/messages", async (c) => {
@@ -5185,6 +5265,53 @@ const app = new Hono<HonoAppContext>()
 
     return c.json({ ok: true, emailedAt: new Date().toISOString() });
   })
+  // ─── Delete an agent message ──────────────────────────────────────────────
+  .delete(
+    "/api/projects/:id/conversations/:convId/messages/:messageId",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      const db = c.get("db");
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectById(c.req.param("id"));
+      if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+        return c.json({ error: "Not found" }, 404);
+      }
+
+      const convId = c.req.param("convId");
+      const messageId = c.req.param("messageId");
+
+      const chatService = new ChatService(db);
+      const conversation = await chatService.getConversationById(
+        convId,
+        project.id,
+      );
+      if (!conversation) return c.json({ error: "Not found" }, 404);
+
+      const result = await chatService.deleteAgentMessage(convId, messageId);
+      if (!result.deleted) {
+        if (result.reason === "not_agent") {
+          return c.json(
+            { error: "Only agent messages can be deleted" },
+            400,
+          );
+        }
+        if (result.reason === "not_found") {
+          // Idempotent: already deleted (likely by a teammate). Don't flip
+          // the optimistic UI back, and don't re-broadcast.
+          return c.json({ ok: true, alreadyDeleted: true });
+        }
+        return c.json({ error: "Not found" }, 404);
+      }
+
+      broadcastMessageDeleted(c.env, c.executionCtx, convId, messageId, {
+        excludeSubjectId: user.id,
+      });
+
+      return c.json({ ok: true });
+    },
+  )
   .post("/api/projects/:id/conversations/:convId/close", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);

@@ -406,10 +406,10 @@ export type KnowledgeSuggestionRow = typeof knowledgeSuggestions.$inferSelect;
 export type NewKnowledgeSuggestionRow =
   typeof knowledgeSuggestions.$inferInsert;
 
-// ─── Inquiry Config ───────────────────────────────────────────────────────
+// ─── Ticket Config ────────────────────────────────────────────────────────
 
-export const inquiryConfig = sqliteTable(
-  "inquiry_config",
+export const ticketConfig = sqliteTable(
+  "ticket_config",
   {
     id: text("id").primaryKey(),
     projectId: text("project_id")
@@ -429,17 +429,17 @@ export const inquiryConfig = sqliteTable(
       .notNull(),
   },
   (table) => [
-    uniqueIndex("idx_inquiry_config_project").on(table.projectId),
+    uniqueIndex("idx_ticket_config_project").on(table.projectId),
   ],
 );
 
-export type InquiryConfigRow = typeof inquiryConfig.$inferSelect;
-export type NewInquiryConfigRow = typeof inquiryConfig.$inferInsert;
+export type TicketConfigRow = typeof ticketConfig.$inferSelect;
+export type NewTicketConfigRow = typeof ticketConfig.$inferInsert;
 
-// ─── Inquiries ────────────────────────────────────────────────────────────
+// ─── Tickets ──────────────────────────────────────────────────────────────
 
-export const inquiries = sqliteTable(
-  "inquiries",
+export const tickets = sqliteTable(
+  "tickets",
   {
     id: text("id").primaryKey(),
     projectId: text("project_id")
@@ -449,25 +449,43 @@ export const inquiries = sqliteTable(
       onDelete: "set null",
     }),
     visitorId: text("visitor_id"),
-    title: text("title").notNull().default("Inquiry"),
+    title: text("title").notNull().default("Ticket"),
     data: text("data").notNull(), // JSON object of { fieldLabel: value }
-    status: text("status", { enum: ["new", "replied", "closed"] })
+    status: text("status", {
+      enum: ["open", "in_progress", "resolved", "closed"],
+    })
       .notNull()
-      .default("new"),
+      .default("open"),
+    priority: text("priority", {
+      enum: ["low", "medium", "high", "urgent"],
+    })
+      .notNull()
+      .default("medium"),
+    // Nullable FK to users.id. No team-membership enforcement at the DB layer —
+    // validation lives in TicketService.updateTicket against the owner's team.
+    assigneeId: text("assignee_id").references(() => authSchema.users.id, {
+      onDelete: "set null",
+    }),
+    dueDate: integer("due_date", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (table) => [
-    index("idx_inquiries_project").on(table.projectId),
-    uniqueIndex("idx_inquiries_conversation").on(table.conversationId),
+    index("idx_tickets_project").on(table.projectId),
+    uniqueIndex("idx_tickets_conversation").on(table.conversationId),
+    index("idx_tickets_status").on(table.status),
+    index("idx_tickets_assignee").on(table.assigneeId),
+    index("idx_tickets_priority").on(table.priority),
   ],
 );
 
-export type InquiryRow =
-  typeof inquiries.$inferSelect;
-export type NewInquiryRow =
-  typeof inquiries.$inferInsert;
+export type TicketRow = typeof tickets.$inferSelect;
+export type NewTicketRow = typeof tickets.$inferInsert;
 
 // ─── Tools ────────────────────────────────────────────────────────────────────
 
@@ -788,8 +806,8 @@ export const schema = {
   conversations,
   messages,
   knowledgeSuggestions,
-  inquiryConfig,
-  inquiries,
+  ticketConfig,
+  tickets,
   subscriptions,
   teamMembers,
   usage,

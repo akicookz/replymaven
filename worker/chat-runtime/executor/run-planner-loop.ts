@@ -6,6 +6,7 @@ import { type ProjectService } from "../../services/project-service";
 import { TelegramService } from "../../services/telegram-service";
 import { type ToolService } from "../../services/tool-service";
 import { WidgetService } from "../../services/widget-service";
+import { TicketService } from "../../services/ticket-service";
 import { type AppEnv } from "../../types";
 import { broadcastStatusChange } from "../../realtime/broadcast";
 import { buildSupportSystemPrompt } from "../prompt/build-support-system-prompt";
@@ -45,9 +46,9 @@ import {
 import { streamSupportAgent } from "../agents/support-agent";
 import { stripTrailingSolicitedFollowUp } from "./strip-trailing-solicited-follow-up";
 import { executeHttpTool } from "../tools/http-tool-executor";
-import { type InquiryRefinementDecision } from "../workflows/classify-inquiry-refinement";
+import { type TicketRefinementDecision } from "../workflows/classify-ticket-refinement";
 import {
-  type InquiryFieldSpec,
+  type TicketFieldSpec,
   type PlannerActionHistoryEntry,
   type PlannerDocsEvidence,
   type PlannerLoopResult,
@@ -102,9 +103,9 @@ interface RunPlannerLoopOptions {
   compiledFaqContext: string;
   hasIndexedResources: boolean;
   visitorInfo: { name: string | null; email: string | null };
-  existingInquiry?: Record<string, string> | null;
-  inquiryFields?: InquiryFieldSpec[] | null;
-  inquiryRefinementDecision?: InquiryRefinementDecision | null;
+  existingTicket?: Record<string, string> | null;
+  ticketFields?: TicketFieldSpec[] | null;
+  ticketRefinementDecision?: TicketRefinementDecision | null;
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
   faqMatchHint?: { question: string; answer: string; score: number } | null;
@@ -421,8 +422,8 @@ async function executeCompose(options: {
   faqMatchHint?: { question: string; answer: string; score: number } | null;
   pageContext?: Record<string, string>;
   visitorInfo: { name: string | null; email: string | null };
-  existingInquiry?: Record<string, string> | null;
-  inquiryFields?: InquiryFieldSpec[] | null;
+  existingTicket?: Record<string, string> | null;
+  ticketFields?: TicketFieldSpec[] | null;
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
   emitStatus: (
@@ -461,8 +462,8 @@ async function executeCompose(options: {
       toolEvidenceSummary: summarizeToolEvidence(options.state.toolEvidence),
       retrievalAttempted: options.state.docsEvidence.retrievalAttempted,
       broaderSearchAttempted: options.state.docsEvidence.broaderSearchAttempted,
-      existingInquiry: options.existingInquiry,
-      inquiryFields: options.inquiryFields,
+      existingTicket: options.existingTicket,
+      ticketFields: options.ticketFields,
     },
     // options.currentMessage,
   );
@@ -1026,12 +1027,12 @@ export async function runPlannerLoop(
       };
     }
 
-    if (nextAction.type === "create_inquiry") {
+    if (nextAction.type === "create_ticket") {
       const teamRequestDecision = options.shouldAllowTeamRequest();
 
       if (!teamRequestDecision.allowed) {
         pushActionHistory(loopState, {
-          type: "create_inquiry",
+          type: "create_ticket",
           reason: `${nextAction.reason} Blocked: ${teamRequestDecision.reason}.`,
           outcome: "rejected",
           note: teamRequestDecision.reason,
@@ -1060,6 +1061,7 @@ export async function runPlannerLoop(
         submission = await createTeamRequestSubmission({
           chatService: options.chatService,
           widgetService: new WidgetService(options.db),
+          ticketService: new TicketService(options.db),
           projectService: options.projectService,
           telegramService,
           project: options.project,
@@ -1073,11 +1075,11 @@ export async function runPlannerLoop(
           conversationHistory: options.conversationHistory,
           summary,
           email: loopState.knownVisitorEmail ?? "not provided",
-          inquiryFields: options.inquiryFields,
-          existingInquiry: options.existingInquiry,
+          ticketFields: options.ticketFields,
+          existingTicket: options.existingTicket,
           extractedRefinementData:
-            options.inquiryRefinementDecision?.extracted ?? null,
-          appendMode: Boolean(options.existingInquiry),
+            options.ticketRefinementDecision?.extracted ?? null,
+          appendMode: Boolean(options.existingTicket),
           settings: options.settings,
           env: {
             BETTER_AUTH_URL: options.env.BETTER_AUTH_URL,
@@ -1094,7 +1096,7 @@ export async function runPlannerLoop(
         const fullResponse =
           "I couldn't forward that to the team just now. I can keep helping here, or you can try again in a moment.";
         pushActionHistory(loopState, {
-          type: "create_inquiry",
+          type: "create_ticket",
           reason: `${nextAction.reason} Submission failed.`,
           outcome: "rejected",
           note: fullResponse,
@@ -1111,7 +1113,7 @@ export async function runPlannerLoop(
           lastToolOutput,
           lastToolError,
           stepCount: loopState.stepCount,
-          terminationAction: "create_inquiry",
+          terminationAction: "create_ticket",
           loopState,
           detectedInternalTokens: [],
         };
@@ -1166,7 +1168,7 @@ export async function runPlannerLoop(
         fullResponse = `I've already forwarded this conversation to the team. ${agentLabel} will continue the follow-up there.`;
       }
       pushActionHistory(loopState, {
-        type: "create_inquiry",
+        type: "create_ticket",
         reason: nextAction.reason,
         outcome: "completed",
         note: summary,
@@ -1184,7 +1186,7 @@ export async function runPlannerLoop(
         lastToolOutput,
         lastToolError,
         stepCount: loopState.stepCount,
-        terminationAction: "create_inquiry",
+        terminationAction: "create_ticket",
         loopState,
         detectedInternalTokens: [],
       };
@@ -1241,8 +1243,8 @@ export async function runPlannerLoop(
         faqMatchHint: options.faqMatchHint ?? null,
         pageContext: options.pageContext,
         visitorInfo: options.visitorInfo,
-        existingInquiry: options.existingInquiry,
-        inquiryFields: options.inquiryFields,
+        existingTicket: options.existingTicket,
+        ticketFields: options.ticketFields,
         agentHandbackInstructions: options.agentHandbackInstructions,
         image: options.image,
         emitStatus: options.emitStatus,
@@ -1290,8 +1292,8 @@ export async function runPlannerLoop(
         faqMatchHint: options.faqMatchHint ?? null,
         pageContext: options.pageContext,
         visitorInfo: options.visitorInfo,
-        existingInquiry: options.existingInquiry,
-        inquiryFields: options.inquiryFields,
+        existingTicket: options.existingTicket,
+        ticketFields: options.ticketFields,
         agentHandbackInstructions: options.agentHandbackInstructions,
         image: options.image,
         emitStatus: options.emitStatus,
@@ -1360,8 +1362,8 @@ export async function runPlannerLoop(
       faqMatchHint: options.faqMatchHint ?? null,
       pageContext: options.pageContext,
       visitorInfo: options.visitorInfo,
-      existingInquiry: options.existingInquiry,
-      inquiryFields: options.inquiryFields,
+      existingTicket: options.existingTicket,
+      ticketFields: options.ticketFields,
       agentHandbackInstructions: options.agentHandbackInstructions,
       image: options.image,
       emitStatus: options.emitStatus,

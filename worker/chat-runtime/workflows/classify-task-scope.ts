@@ -14,7 +14,7 @@ const SUPPORT_SIGNAL_PATTERNS = [
   /\b(api|sdk|token|integration|webhook|embed|widget|dashboard|project|settings)\b/i,
   /\b(setup|set up|configure|configuration|install|connect|connected|enable|enabled)\b/i,
   /\b(error|issue|problem|bug|broken|failing|failed|not working|working)\b/i,
-  /\b(feature|documentation|docs|policy|compliance|security|team|agent|inquiry)\b/i,
+  /\b(feature|documentation|docs|policy|compliance|security|team|agent|ticket)\b/i,
 ];
 
 const UNSAFE_REQUEST_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [

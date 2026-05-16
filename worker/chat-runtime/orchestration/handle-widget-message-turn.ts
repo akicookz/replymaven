@@ -20,9 +20,9 @@ import {
 } from "../retrieval/run-ai-search";
 import { classifyTaskScope } from "../workflows/classify-task-scope";
 import {
-  classifyInquiryRefinement,
-  type InquiryRefinementDecision,
-} from "../workflows/classify-inquiry-refinement";
+  classifyTicketRefinement,
+  type TicketRefinementDecision,
+} from "../workflows/classify-ticket-refinement";
 import { createWidgetSseResponse } from "../streaming/create-widget-sse-response";
 import {
   createInitialAgentEventState,
@@ -51,10 +51,10 @@ import { ResourceService } from "../../services/resource-service";
 import { TelegramService } from "../../services/telegram-service";
 import { ToolService } from "../../services/tool-service";
 import {
-  WidgetService,
-  parseInquiryData,
-} from "../../services/widget-service";
-import { type InquiryFieldSpec } from "../types";
+  TicketService,
+  parseTicketData,
+} from "../../services/ticket-service";
+import { type TicketFieldSpec } from "../types";
 import { type MessageRow } from "../../db";
 import { isEncrypted, decryptHeaders } from "../../services/encryption-service";
 
@@ -190,7 +190,7 @@ export async function handleWidgetMessageTurn(
   const toolService = new ToolService(context.db);
   const guidelineService = new GuidelineService(context.db);
   const resourceService = new ResourceService(context.db, context.env.UPLOADS);
-  const widgetService = new WidgetService(context.db);
+  const ticketService = new TicketService(context.db);
 
   const startedAt = Date.now();
   const stageTimings: Record<string, number> = {};
@@ -222,8 +222,8 @@ export async function handleWidgetMessageTurn(
     enabledTools,
     enabledGuidelines,
     allResources,
-    existingInquiryRow,
-    inquiryConfigRow,
+    existingTicketRow,
+    ticketConfigRow,
     parallelPrefetchedHistory,
   ] = await Promise.all([
     billingService.getSubscriptionByUserId(context.project.userId),
@@ -235,11 +235,11 @@ export async function handleWidgetMessageTurn(
     toolService.getEnabledTools(context.project.id),
     guidelineService.getEnabledByProject(context.project.id),
     resourceService.getResourcesByProject(context.project.id),
-    widgetService.getInquiryByConversationId(
+    ticketService.getTicketByConversationId(
       context.project.id,
       context.conversationId,
     ),
-    widgetService.getInquiryConfig(context.project.id),
+    ticketService.getConfig(context.project.id),
     clientSuppliedHistory
       ? Promise.resolve<MessageRow[] | null>(null)
       : chatService.getMessages(context.conversationId),
@@ -319,17 +319,17 @@ export async function handleWidgetMessageTurn(
   );
   markStage("faq_match_checked");
 
-  const existingInquiry: Record<string, string> | null = existingInquiryRow
-    ? parseInquiryData(existingInquiryRow.data)
+  const existingTicket: Record<string, string> | null = existingTicketRow
+    ? parseTicketData(existingTicketRow.data)
     : null;
-  let inquiryFields: InquiryFieldSpec[] | null = null;
-  if (inquiryConfigRow?.fields) {
+  let ticketFields: TicketFieldSpec[] | null = null;
+  if (ticketConfigRow?.fields) {
     try {
-      const parsed = JSON.parse(inquiryConfigRow.fields) as unknown;
+      const parsed = JSON.parse(ticketConfigRow.fields) as unknown;
       if (Array.isArray(parsed)) {
-        inquiryFields = parsed
+        ticketFields = parsed
           .filter(
-            (entry): entry is InquiryFieldSpec =>
+            (entry): entry is TicketFieldSpec =>
               typeof entry === "object" &&
               entry !== null &&
               typeof (entry as { label?: unknown }).label === "string" &&
@@ -338,7 +338,7 @@ export async function handleWidgetMessageTurn(
           );
       }
     } catch {
-      inquiryFields = null;
+      ticketFields = null;
     }
   }
 
@@ -687,22 +687,22 @@ export async function handleWidgetMessageTurn(
         return;
       }
 
-      const inquiryRefinementDecision: InquiryRefinementDecision | null =
-        existingInquiry && inquiryFields && inquiryFields.length > 0
-          ? classifyInquiryRefinement({
+      const ticketRefinementDecision: TicketRefinementDecision | null =
+        existingTicket && ticketFields && ticketFields.length > 0
+          ? classifyTicketRefinement({
               message: context.payload.content,
-              inquiryFields,
-              existingData: existingInquiry,
-              hasExistingInquiry: true,
+              ticketFields,
+              existingData: existingTicket,
+              hasExistingTicket: true,
             })
           : null;
-      if (inquiryRefinementDecision?.isRefinement) {
+      if (ticketRefinementDecision?.isRefinement) {
         logInfo(
-          "widget_turn.inquiry_refinement_detected",
+          "widget_turn.ticket_refinement_detected",
           buildWidgetTurnLogContext(context, turnId, {
-            signals: inquiryRefinementDecision.signals,
-            extractedKeys: Object.keys(inquiryRefinementDecision.extracted),
-            reason: inquiryRefinementDecision.reason,
+            signals: ticketRefinementDecision.signals,
+            extractedKeys: Object.keys(ticketRefinementDecision.extracted),
+            reason: ticketRefinementDecision.reason,
           }),
         );
       }
@@ -878,7 +878,7 @@ export async function handleWidgetMessageTurn(
         conversationHistory,
         conversationSummary,
         turnPlan,
-        inquiryRefinementDecision,
+        ticketRefinementDecision,
         availableTools,
         enabledToolRows: enabledTools,
         toolService,
@@ -914,8 +914,8 @@ export async function handleWidgetMessageTurn(
           name: conversation.visitorName,
           email: conversation.visitorEmail,
         },
-        existingInquiry,
-        inquiryFields,
+        existingTicket,
+        ticketFields,
         agentHandbackInstructions,
         image,
         faqMatchHint,

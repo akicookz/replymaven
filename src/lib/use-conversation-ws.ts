@@ -99,6 +99,21 @@ export function useConversationWs(
             return { ...old, messages: next };
           },
         );
+      } else if (parsed.type === "message:deleted") {
+        const deletedId = parsed.messageId;
+        queryClient.setQueryData<ConversationDetailData | undefined>(
+          ["conversation-detail", conversationId],
+          (old) => {
+            if (!old) return old;
+            return {
+              ...old,
+              messages: old.messages.filter((m) => m.id !== deletedId),
+            };
+          },
+        );
+        queryClient.invalidateQueries({
+          queryKey: ["conversations", projectId],
+        });
       } else if (parsed.type === "status:change") {
         queryClient.setQueryData<ConversationDetailData | undefined>(
           ["conversation-detail", conversationId],

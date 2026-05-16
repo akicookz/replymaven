@@ -280,36 +280,65 @@ export const onboardingWidgetSchema = z.object({
   fontFamily: z.string().max(100),
 });
 
-// ─── Inquiries ────────────────────────────────────────────────────────────
-export const inquiryFieldSchema = z.object({
+// ─── Tickets ──────────────────────────────────────────────────────────────
+export const ticketStatusEnum = z.enum([
+  "open",
+  "in_progress",
+  "resolved",
+  "closed",
+]);
+export const ticketPriorityEnum = z.enum(["low", "medium", "high", "urgent"]);
+
+export const ticketFieldSchema = z.object({
   label: z.string().min(1, "Label is required").max(100),
   type: z.enum(["text", "textarea"]),
   required: z.boolean().default(false),
 });
 
-export const updateInquiryConfigSchema = z.object({
+export const updateTicketConfigSchema = z.object({
   enabled: z.boolean().optional(),
   description: z.string().max(500).nullable().optional(),
   fields: z
-    .array(inquiryFieldSchema)
+    .array(ticketFieldSchema)
     .max(10, "Maximum 10 fields allowed")
     .optional(),
 });
 
-export const submitInquirySchema = z.object({
+export const submitTicketSchema = z.object({
   visitorId: z.string().min(1).max(100).optional(),
   visitorName: z.string().max(100).optional(),
   visitorEmail: z.string().email().optional(),
   data: z.record(z.string(), z.string().max(5000)),
 });
 
-export const updateInquiryStatusSchema = z.object({
-  status: z.enum(["new", "replied", "closed"]),
+export const updateTicketSchema = z.object({
+  status: ticketStatusEnum.optional(),
+  priority: ticketPriorityEnum.optional(),
+  assigneeId: z.string().min(1).nullable().optional(),
+  dueDate: z
+    .string()
+    .datetime({ offset: true })
+    .nullable()
+    .optional(),
 });
 
-export const bulkUpdateInquiryStatusSchema = z.object({
+export const bulkUpdateTicketStatusSchema = z.object({
   ids: z.array(z.string().min(1)).min(1).max(100),
-  status: z.enum(["new", "replied", "closed"]),
+  status: ticketStatusEnum,
+});
+
+export const ticketListQuerySchema = z.object({
+  status: z.array(ticketStatusEnum).optional(),
+  priority: z.array(ticketPriorityEnum).optional(),
+  assigneeId: z.string().min(1).optional(),
+  unassigned: z.boolean().optional(),
+  q: z.string().max(200).optional(),
+  sortBy: z
+    .enum(["createdAt", "updatedAt", "dueDate", "priority", "status"])
+    .optional(),
+  sortDir: z.enum(["asc", "desc"]).optional(),
+  limit: z.number().int().positive().max(200).optional(),
+  offset: z.number().int().min(0).optional(),
 });
 
 // ─── Tools ────────────────────────────────────────────────────────────────────

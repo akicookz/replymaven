@@ -55,7 +55,7 @@ const navItems: NavItem[] = [
       { id: "set-metadata", label: "Set Custom Metadata" },
       { id: "page-context", label: "Page Context" },
       { id: "notifications", label: "Request Notifications" },
-      { id: "open-inquiry-form", label: "Open Inquiry Form" },
+      { id: "open-ticket-form", label: "Open Ticket Form" },
     ],
   },
   {
@@ -121,7 +121,7 @@ const navItems: NavItem[] = [
     icon: <Settings className="w-4 h-4" />,
     children: [
       { id: "telegram", label: "Telegram" },
-      { id: "inquiries", label: "Inquiries" },
+      { id: "tickets", label: "Tickets" },
       { id: "tone-of-voice", label: "Tone of Voice" },
       { id: "knowledge-refinement", label: "Knowledge Refinement" },
     ],
@@ -622,22 +622,25 @@ window.ReplyMaven.toggle();`}
               code={`window.ReplyMaven.requestNotifications();`}
             />
 
-            <SectionHeading id="open-inquiry-form" level={3}>
-              Open Inquiry Form
+            <SectionHeading id="open-ticket-form" level={3}>
+              Open Ticket Form
             </SectionHeading>
             <p className="text-muted-foreground leading-relaxed mb-4">
-              Open the inquiry form programmatically. If the widget is
-              closed, it will be opened first. The inquiry form must be
+              Open the ticket form programmatically. If the widget is
+              closed, it will be opened first. The ticket form must be
               enabled in your project settings under{" "}
-              <strong>Inquiries</strong>.
+              <strong>Tickets</strong>.
             </p>
             <CodeBlock
-              title="Open the inquiry form"
+              title="Open the ticket form"
               language="javascript"
               code={`window.ReplyMaven.openInquiryForm();`}
             />
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              <IC>openTicketForm()</IC> is also exposed as an alias.
+            </p>
             <Callout type="tip">
-              Use this to trigger the inquiry form from custom buttons or
+              Use this to trigger the ticket form from custom buttons or
               links on your page -- for example, a "Contact Us" button in
               your navigation.
             </Callout>
@@ -1409,18 +1412,19 @@ window.ReplyMaven.setMetadata({
               </li>
             </ul>
 
-            <SectionHeading id="inquiries" level={3}>
-              Inquiries
+            <SectionHeading id="tickets" level={3}>
+              Tickets
             </SectionHeading>
             <p className="text-muted-foreground leading-relaxed mb-4">
-              Enable a "Leave a message" inquiry form on the widget's home
+              Enable a "Leave a message" ticket form on the widget's home
               screen. Visitors can submit structured information when they
               prefer not to chat. Configure fields in{" "}
-              <strong>Inquiries</strong> in the dashboard.
+              <strong>Tickets</strong> in the dashboard.
             </p>
             <p className="text-muted-foreground leading-relaxed mb-4">
-              You can also open the inquiry form programmatically using{" "}
-              <IC>window.ReplyMaven.openInquiryForm()</IC>.
+              You can also open the ticket form programmatically using{" "}
+              <IC>window.ReplyMaven.openInquiryForm()</IC>.{" "}
+              <IC>openTicketForm()</IC> is also exposed as an alias.
             </p>
 
             <SectionHeading id="tone-of-voice" level={3}>

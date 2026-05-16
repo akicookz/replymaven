@@ -217,9 +217,9 @@ export class EmailService {
     console.log("Team invite email sent:", result);
   }
 
-  // ─── Inquiry Notification (to project owner) ────────────────────────────────
+  // ─── Ticket Notification (to project owner) ────────────────────────────────
 
-  async sendInquiryNotification(details: {
+  async sendTicketNotification(details: {
     ownerEmail: string;
     projectName: string;
     formData: Record<string, string>;
@@ -254,7 +254,7 @@ export class EmailService {
         )
         .join("");
 
-      const rawLabel = actionLabel?.trim() || "New inquiry";
+      const rawLabel = actionLabel?.trim() || "New ticket";
       const labelText =
         rawLabel.length > 40 ? `${rawLabel.slice(0, 37)}...` : rawLabel;
       const visitor = buildVisitorSubjectIdentifier({
@@ -265,7 +265,7 @@ export class EmailService {
       const subject = isUpdate
         ? `Re: ${labelText} - ${visitor}`
         : `${labelText} - ${visitor}`;
-      const heading = isUpdate ? "Inquiry Updated" : labelText;
+      const heading = isUpdate ? "Ticket Updated" : labelText;
       const styles = buildAccentStyles(accentColor);
 
       await this.resend.emails.send({
@@ -284,7 +284,7 @@ ${fieldsHtml}
         ),
       });
     } catch (error) {
-      console.error("[EmailService] Inquiry notification email failed:", error);
+      console.error("[EmailService] Ticket notification email failed:", error);
     }
   }
 

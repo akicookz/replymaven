@@ -1,34 +1,34 @@
 import { describe, expect, test } from "bun:test";
-import { parseInquiryData } from "./widget-service";
+import { parseTicketData, buildTicketTitle } from "./ticket-service";
 
-describe("parseInquiryData", () => {
+describe("parseTicketData", () => {
   test("parses a valid JSON object with string values", () => {
     const raw = JSON.stringify({ name: "Alice", email: "alice@example.com" });
-    expect(parseInquiryData(raw)).toEqual({
+    expect(parseTicketData(raw)).toEqual({
       name: "Alice",
       email: "alice@example.com",
     });
   });
 
   test("returns empty object for malformed JSON", () => {
-    expect(parseInquiryData("{not valid json")).toEqual({});
+    expect(parseTicketData("{not valid json")).toEqual({});
   });
 
   test("returns empty object for empty string", () => {
-    expect(parseInquiryData("")).toEqual({});
+    expect(parseTicketData("")).toEqual({});
   });
 
   test("returns empty object when JSON is an array", () => {
-    expect(parseInquiryData(JSON.stringify(["a", "b"]))).toEqual({});
+    expect(parseTicketData(JSON.stringify(["a", "b"]))).toEqual({});
   });
 
   test("returns empty object when JSON is null", () => {
-    expect(parseInquiryData("null")).toEqual({});
+    expect(parseTicketData("null")).toEqual({});
   });
 
   test("returns empty object when JSON is a primitive", () => {
-    expect(parseInquiryData('"just a string"')).toEqual({});
-    expect(parseInquiryData("42")).toEqual({});
+    expect(parseTicketData('"just a string"')).toEqual({});
+    expect(parseTicketData("42")).toEqual({});
   });
 
   test("coerces non-string values to strings", () => {
@@ -37,7 +37,7 @@ describe("parseInquiryData", () => {
       age: 30,
       active: true,
     });
-    expect(parseInquiryData(raw)).toEqual({
+    expect(parseTicketData(raw)).toEqual({
       name: "Bob",
       age: "30",
       active: "true",
@@ -49,13 +49,13 @@ describe("parseInquiryData", () => {
       name: "Carol",
       email: null,
     });
-    expect(parseInquiryData(raw)).toEqual({
+    expect(parseTicketData(raw)).toEqual({
       name: "Carol",
     });
   });
 
   test("handles empty object", () => {
-    expect(parseInquiryData("{}")).toEqual({});
+    expect(parseTicketData("{}")).toEqual({});
   });
 
   test("coerces nested objects via String() conversion", () => {
@@ -63,13 +63,13 @@ describe("parseInquiryData", () => {
       name: "Dave",
       meta: { nested: "value" },
     });
-    const result = parseInquiryData(raw);
+    const result = parseTicketData(raw);
     expect(result.name).toBe("Dave");
     expect(typeof result.meta).toBe("string");
   });
 });
 
-describe("createInquiry append-mode merge semantics", () => {
+describe("createTicket append-mode merge semantics", () => {
   test("append mode merges existing data with new values overriding", () => {
     const existingRaw = JSON.stringify({
       name: "Eve",
@@ -81,7 +81,7 @@ describe("createInquiry append-mode merge semantics", () => {
       company: "Acme Corp",
     };
 
-    const merged = { ...parseInquiryData(existingRaw), ...newData };
+    const merged = { ...parseTicketData(existingRaw), ...newData };
 
     expect(merged).toEqual({
       name: "Eve",
@@ -110,7 +110,7 @@ describe("createInquiry append-mode merge semantics", () => {
     });
     const newData = {};
 
-    const merged = { ...parseInquiryData(existingRaw), ...newData };
+    const merged = { ...parseTicketData(existingRaw), ...newData };
 
     expect(merged).toEqual({
       name: "Grace",
@@ -124,10 +124,34 @@ describe("createInquiry append-mode merge semantics", () => {
       name: "Heidi",
     };
 
-    const merged = { ...parseInquiryData(existingRaw), ...newData };
+    const merged = { ...parseTicketData(existingRaw), ...newData };
 
     expect(merged).toEqual({
       name: "Heidi",
     });
+  });
+});
+
+describe("buildTicketTitle", () => {
+  test("name + email returns 'name <email>'", () => {
+    expect(
+      buildTicketTitle({ visitorName: "Ivy", visitorEmail: "ivy@x.com" }),
+    ).toBe("Ivy <ivy@x.com>");
+  });
+
+  test("name only", () => {
+    expect(buildTicketTitle({ visitorName: "Jack" })).toBe("Jack");
+  });
+
+  test("email only", () => {
+    expect(buildTicketTitle({ visitorEmail: "kim@x.com" })).toBe("kim@x.com");
+  });
+
+  test("visitorId fallback", () => {
+    expect(buildTicketTitle({ visitorId: "abc123" })).toBe("Visitor abc123");
+  });
+
+  test("no info → default 'Ticket'", () => {
+    expect(buildTicketTitle({})).toBe("Ticket");
   });
 });

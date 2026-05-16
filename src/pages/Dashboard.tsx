@@ -74,7 +74,7 @@ function countryToFlag(countryCode: string): string {
   return String.fromCodePoint(first) + String.fromCodePoint(second);
 }
 
-interface RecentInquiry {
+interface RecentTicket {
   id: string;
   visitorId: string | null;
   data: string;
@@ -90,7 +90,7 @@ interface DashboardData {
   pendingCannedDrafts: number;
   conversationsByDay: ConversationsByDay[];
   recentConversations: RecentConversation[];
-  recentInquiries: RecentInquiry[];
+  recentTickets: RecentTicket[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -304,7 +304,7 @@ function Dashboard() {
     // ─── Build Activity Timeline ────────────────────────────────────────────
     type TimelineItem = {
       id: string;
-      type: "inquiry";
+      type: "ticket";
       name: string;
       email: string | null;
       firstLine: string | null;
@@ -313,7 +313,7 @@ function Dashboard() {
 
     const timelineItems: TimelineItem[] = [];
 
-    for (const s of data.recentInquiries) {
+    for (const s of data.recentTickets) {
       let parsedData: Record<string, string> = {};
       try {
         parsedData = JSON.parse(s.data);
@@ -338,7 +338,7 @@ function Dashboard() {
 
       timelineItems.push({
         id: s.id,
-        type: "inquiry",
+        type: "ticket",
         name: name ?? email ?? "Unknown",
         email: name ? email : null,
         firstLine,
@@ -451,7 +451,7 @@ function Dashboard() {
         <div className="bg-card rounded-xl p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-sm font-semibold text-foreground">
-              Recent Inquiries
+              Recent Tickets
             </h2>
           </div>
           {timelineItems.length > 0 ? (
@@ -459,7 +459,7 @@ function Dashboard() {
               {timelineItems.slice(0, 8).map((item) => (
                 <Link
                   key={item.id}
-                  to={`/app/projects/${projectId}/inquiries`}
+                  to={`/app/projects/${projectId}/tickets`}
                   className="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-accent/50 transition-colors group"
                 >
                   <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 bg-orange-500/10">
@@ -489,7 +489,7 @@ function Dashboard() {
           ) : (
             <div className="flex flex-col items-center justify-center h-[200px] text-sm text-muted-foreground gap-1">
               <Clock className="w-5 h-5 mb-1 text-muted-foreground/50" />
-              No inquiries yet
+              No tickets yet
             </div>
           )}
         </div>

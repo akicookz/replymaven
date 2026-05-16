@@ -9,7 +9,7 @@ interface DetailsPanelProps {
   stats?: { label: string; value: string | number }[];
   /** Top-level identity fields (name, email, phone) shown first */
   identity?: { label: string; value: string }[];
-  /** Key-value fields (inquiry form data or custom metadata) */
+  /** Key-value fields (ticket form data or custom metadata) */
   fields?: Record<string, string>;
   /** Optional section header for fields, e.g. "Custom Metadata" */
   fieldsLabel?: string;

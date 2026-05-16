@@ -281,6 +281,13 @@
       "when": 1778238839696,
       "tag": "0039_overconfident_gauntlet",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1779325200000,
+      "tag": "0040_rename_inquiries_to_tickets",
+      "breakpoints": true
     }
   ]
 }

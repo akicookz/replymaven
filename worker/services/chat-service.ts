@@ -619,4 +619,45 @@ export class ChatService {
       .where(eq(messages.id, messageId));
   }
 
+  // Hard-delete a message. Caller must verify project ownership via the
+  // conversation first. Only agent-role messages are deletable. Idempotent:
+  // returns { deleted: false, reason: "not_found" } if the row is already gone,
+  // letting the caller treat racing deletes as success.
+  async deleteAgentMessage(
+    conversationId: string,
+    messageId: string,
+  ): Promise<{
+    deleted: boolean;
+    reason?: "not_found" | "wrong_conversation" | "not_agent";
+    row?: MessageRow;
+  }> {
+    const rows = await this.db
+      .select()
+      .from(messages)
+      .where(eq(messages.id, messageId))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return { deleted: false, reason: "not_found" };
+    if (row.conversationId !== conversationId) {
+      return { deleted: false, reason: "wrong_conversation" };
+    }
+    if (row.role !== "agent") return { deleted: false, reason: "not_agent" };
+
+    await this.db.delete(messages).where(eq(messages.id, messageId));
+
+    // Recompute lastActivityAt so the conversation list re-orders correctly.
+    // Falls back to the conversation's createdAt when no messages remain.
+    await this.db
+      .update(conversations)
+      .set({
+        lastActivityAt: sql`COALESCE(
+          (SELECT MAX(${messages.createdAt}) FROM ${messages}
+           WHERE ${messages.conversationId} = ${conversationId}),
+          ${conversations.createdAt}
+        )`,
+      })
+      .where(eq(conversations.id, conversationId));
+
+    return { deleted: true, row };
+  }
 }

@@ -71,6 +71,26 @@ export function broadcastMessageNew(
   );
 }
 
+export function broadcastMessageDeleted(
+  env: AppEnv,
+  ctx: ExecutionContext,
+  conversationId: string,
+  messageId: string,
+  options: BroadcastOptions = {},
+): void {
+  dispatch(
+    env,
+    ctx,
+    conversationId,
+    {
+      type: "message:deleted",
+      conversationId,
+      messageId,
+    },
+    options,
+  );
+}
+
 export function broadcastStatusChange(
   env: AppEnv,
   ctx: ExecutionContext,

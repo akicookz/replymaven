@@ -74,7 +74,7 @@ export interface SupportAgentStreamOptions {
   onToolCallFinish?: (info: ToolCallFinishInfo) => void;
 }
 
-export interface InquiryFieldSpec {
+export interface TicketFieldSpec {
   label: string;
   type: string;
   required: boolean;
@@ -99,8 +99,8 @@ export interface SupportPromptOptions {
   toolEvidenceSummary?: string | null;
   retrievalAttempted?: boolean;
   broaderSearchAttempted?: boolean;
-  existingInquiry?: Record<string, string> | null;
-  inquiryFields?: InquiryFieldSpec[] | null;
+  existingTicket?: Record<string, string> | null;
+  ticketFields?: TicketFieldSpec[] | null;
 }
 
 export type SupportPromptSettings = Pick<
@@ -244,7 +244,7 @@ export type PlannerActionType =
   | "ask_user"
   | "offer_handoff"
   | "collect_contact"
-  | "create_inquiry"
+  | "create_ticket"
   | "compose"
   | "stop";
 
@@ -279,8 +279,8 @@ export interface PlannerCollectContactAction {
   missingFields: Array<"name" | "email">;
 }
 
-export interface PlannerCreateInquiryAction {
-  type: "create_inquiry";
+export interface PlannerCreateTicketAction {
+  type: "create_ticket";
   reason: string;
 }
 
@@ -301,7 +301,7 @@ export type PlannerNextAction =
   | PlannerAskUserAction
   | PlannerOfferHandoffAction
   | PlannerCollectContactAction
-  | PlannerCreateInquiryAction
+  | PlannerCreateTicketAction
   | PlannerComposeAction
   | PlannerStopAction;
 

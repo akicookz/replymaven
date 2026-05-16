@@ -1,28 +1,28 @@
-export type InquiryRefinementSignal =
+export type TicketRefinementSignal =
   | "email"
   | "phone"
   | "name"
   | "freeform"
   | "none";
 
-export interface InquiryFieldSpec {
+export interface TicketFieldSpec {
   label: string;
   type: string;
   required: boolean;
 }
 
-export interface InquiryRefinementDecision {
+export interface TicketRefinementDecision {
   isRefinement: boolean;
-  signals: InquiryRefinementSignal[];
+  signals: TicketRefinementSignal[];
   extracted: Record<string, string>;
   reason: string;
 }
 
-export interface ClassifyInquiryRefinementInput {
+export interface ClassifyTicketRefinementInput {
   message: string;
-  inquiryFields: InquiryFieldSpec[];
+  ticketFields: TicketFieldSpec[];
   existingData: Record<string, string>;
-  hasExistingInquiry: boolean;
+  hasExistingTicket: boolean;
 }
 
 const EMAIL_PATTERN =
@@ -76,7 +76,7 @@ function normalizeLabel(label: string): string {
 }
 
 function findFieldKey(
-  fields: InquiryFieldSpec[],
+  fields: TicketFieldSpec[],
   candidates: string[],
 ): string | null {
   for (const field of fields) {
@@ -88,15 +88,15 @@ function findFieldKey(
   return null;
 }
 
-export function classifyInquiryRefinement(
-  input: ClassifyInquiryRefinementInput,
-): InquiryRefinementDecision {
-  if (!input.hasExistingInquiry) {
+export function classifyTicketRefinement(
+  input: ClassifyTicketRefinementInput,
+): TicketRefinementDecision {
+  if (!input.hasExistingTicket) {
     return {
       isRefinement: false,
       signals: [],
       extracted: {},
-      reason: "no_existing_inquiry",
+      reason: "no_existing_ticket",
     };
   }
 
@@ -110,7 +110,7 @@ export function classifyInquiryRefinement(
     };
   }
 
-  const signals: InquiryRefinementSignal[] = [];
+  const signals: TicketRefinementSignal[] = [];
   const extracted: Record<string, string> = {};
   let structuredSignalSeen = false;
 
@@ -118,7 +118,7 @@ export function classifyInquiryRefinement(
   if (email) {
     structuredSignalSeen = true;
     const fieldKey =
-      findFieldKey(input.inquiryFields, ["email", "mail"]) ?? "email";
+      findFieldKey(input.ticketFields, ["email", "mail"]) ?? "email";
     if (input.existingData[fieldKey] !== email) {
       extracted[fieldKey] = email;
       signals.push("email");
@@ -127,7 +127,7 @@ export function classifyInquiryRefinement(
 
   const phone = extractPhone(trimmed);
   if (phone) {
-    const fieldKey = findFieldKey(input.inquiryFields, [
+    const fieldKey = findFieldKey(input.ticketFields, [
       "phone",
       "mobile",
       "tel",
@@ -146,7 +146,7 @@ export function classifyInquiryRefinement(
   const name = extractName(trimmed);
   if (name) {
     const fieldKey =
-      findFieldKey(input.inquiryFields, ["name", "fullname", "firstname"]) ??
+      findFieldKey(input.ticketFields, ["name", "fullname", "firstname"]) ??
       null;
     if (fieldKey) {
       structuredSignalSeen = true;
@@ -160,7 +160,7 @@ export function classifyInquiryRefinement(
   if (signals.length === 0 && !structuredSignalSeen) {
     const wordCount = trimmed.split(/\s+/).length;
     if (wordCount >= 3) {
-      const topicField = findFieldKey(input.inquiryFields, [
+      const topicField = findFieldKey(input.ticketFields, [
         "topic",
         "subject",
         "question",

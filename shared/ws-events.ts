@@ -20,6 +20,11 @@ export interface MessagePayload {
 export type ServerEvent =
   | { type: "message:new"; conversationId: string; message: MessagePayload }
   | {
+      type: "message:deleted";
+      conversationId: string;
+      messageId: string;
+    }
+  | {
       type: "status:change";
       conversationId: string;
       status: ConversationStatus;

@@ -1180,9 +1180,9 @@ Return this exact shape:
     return { title, description, pairs };
   }
 
-  // ─── Compose Inquiry Reply ──────────────────────────────────────────────────
+  // ─── Compose Ticket Reply ──────────────────────────────────────────────────
 
-  async composeInquiryReply(
+  async composeTicketReply(
     settings: {
       toneOfVoice?: string | null;
       customTonePrompt?: string | null;
@@ -1190,7 +1190,7 @@ Return this exact shape:
       companyName?: string | null;
     },
     projectName: string,
-    inquiryData: Record<string, string>,
+    ticketData: Record<string, string>,
     senderInfo?: {
       name: string;
       email: string;
@@ -1212,7 +1212,7 @@ Return this exact shape:
       ? `\nCompany context:\n${settings.companyContext}`
       : "";
 
-    const fieldLines = Object.entries(inquiryData)
+    const fieldLines = Object.entries(ticketData)
       .map(([key, val]) => `${key}: ${val}`)
       .join("\n");
 
@@ -1227,7 +1227,7 @@ Return this exact shape:
       system: `You are a helpful assistant composing email replies on behalf of "${projectName}".
 ${toneInstruction}${companyCtx}${cannedHint}
 
-Compose a professional reply email to an inquiry form submission. The reply should:
+Compose a professional reply email to a ticket submission. The reply should:
 - Address the person by name if available
 - Acknowledge what they wrote
 - Provide a helpful, relevant response based on the company context
@@ -1238,7 +1238,7 @@ Return ONLY valid JSON in this exact format:
 {"subject":"<email subject line>","body":"<email body text>"}
 
 Do not wrap in markdown code blocks. Do not include any text outside the JSON.`,
-      prompt: `Inquiry submission:\n${fieldLines}`,
+      prompt: `Ticket submission:\n${fieldLines}`,
       temperature: 0.5,
       maxOutputTokens: 1024,
     });
@@ -1247,12 +1247,12 @@ Do not wrap in markdown code blocks. Do not include any text outside the JSON.`,
       const cleaned = text.replace(/```json?\s*/g, "").replace(/```\s*/g, "").trim();
       const parsed = JSON.parse(cleaned);
       return {
-        subject: parsed.subject || "Re: Your inquiry",
+        subject: parsed.subject || "Re: Your ticket",
         body: parsed.body || "",
       };
     } catch {
       return {
-        subject: "Re: Your inquiry",
+        subject: "Re: Your ticket",
         body: text.trim(),
       };
     }

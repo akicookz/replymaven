@@ -5,7 +5,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   FolderOpen,
-  Inbox,
+  Ticket,
   Palette,
   LogOut,
   ChevronDown,
@@ -135,15 +135,15 @@ function Layout() {
           icon: MessageSquare,
         },
         {
+          label: "Tickets",
+          href: `/app/projects/${currentProject.id}/tickets`,
+          icon: Ticket,
+        },
+        {
           label: "Knowledgebase",
           href: `/app/projects/${currentProject.id}/knowledgebase`,
           icon: FolderOpen,
           badge: suggestionCountsData?.total ?? 0,
-        },
-        {
-          label: "Inquiries",
-          href: `/app/projects/${currentProject.id}/inquiries`,
-          icon: Inbox,
         },
       ]
     : [];

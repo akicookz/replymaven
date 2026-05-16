@@ -6,7 +6,7 @@ import {
   messages,
   resources,
   knowledgeSuggestions,
-  inquiries,
+  tickets,
 } from "../db";
 
 export class DashboardService {
@@ -35,7 +35,7 @@ export class DashboardService {
         conversationsByDay: [],
         conversationsByStatus: [],
         recentConversations: [],
-        recentInquiries: [],
+        recentTickets: [],
       };
     }
 
@@ -154,17 +154,17 @@ export class DashboardService {
       )
       .limit(5);
 
-    // ─── Recent inquiries (last 5) ──────────────────────────────────────────
-    const recentInquiries = await this.db
+    // ─── Recent tickets (last 5) ────────────────────────────────────────────
+    const recentTickets = await this.db
       .select()
-      .from(inquiries)
+      .from(tickets)
       .where(
-        sql`${inquiries.projectId} IN (${sql.join(
+        sql`${tickets.projectId} IN (${sql.join(
           projectIds.map((id) => sql`${id}`),
           sql`, `,
         )})`,
       )
-      .orderBy(desc(inquiries.createdAt))
+      .orderBy(desc(tickets.createdAt))
       .limit(5);
 
     return {
@@ -177,7 +177,7 @@ export class DashboardService {
       conversationsByDay,
       conversationsByStatus,
       recentConversations,
-      recentInquiries,
+      recentTickets,
     };
   }
 }

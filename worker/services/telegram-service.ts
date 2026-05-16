@@ -46,9 +46,9 @@ export class TelegramService {
     };
   }
 
-  // ─── Notify Inquiry Submission with Dashboard Link ──────────────────────────
+  // ─── Notify New Ticket with Dashboard Link ──────────────────────────────────
 
-  async notifyInquiry(
+  async notifyNewTicket(
     botToken: string,
     chatId: string,
     fields: Record<string, string>,
@@ -63,10 +63,10 @@ export class TelegramService {
       .map(([key, val]) => `<b>${escapeHtml(key)}:</b> ${escapeHtml(val)}`)
       .join("\n");
 
-    const projectLink = `${dashboardBaseUrl}/app/projects/${projectId}/inquiries`;
+    const projectLink = `${dashboardBaseUrl}/app/projects/${projectId}/tickets`;
     const headline = options?.isUpdate
-      ? `<b>Inquiry updated</b>`
-      : `<b>New inquiry submitted</b>`;
+      ? `<b>Ticket updated</b>`
+      : `<b>New ticket submitted</b>`;
 
     const text = [
       headline,

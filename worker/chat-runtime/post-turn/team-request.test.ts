@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { buildDynamicFormData, parseTelegramThreadId } from "./team-request";
-import { type InquiryFieldSpec } from "../types";
+import { type TicketFieldSpec } from "../types";
 
 describe("buildDynamicFormData", () => {
-  test("backwards-compat: no inquiryFields falls back to Name/Email/Message shape", () => {
+  test("backwards-compat: no ticketFields falls back to Name/Email/Message shape", () => {
     const result = buildDynamicFormData({
-      inquiryFields: null,
-      existingInquiry: null,
+      ticketFields: null,
+      existingTicket: null,
       extractedRefinementData: null,
       visitorName: "Alice",
       email: "alice@example.com",
@@ -20,10 +20,10 @@ describe("buildDynamicFormData", () => {
     });
   });
 
-  test("backwards-compat: merges existingInquiry and extractedRefinementData on top of fallback shape", () => {
+  test("backwards-compat: merges existingTicket and extractedRefinementData on top of fallback shape", () => {
     const result = buildDynamicFormData({
-      inquiryFields: [],
-      existingInquiry: { Company: "Acme" },
+      ticketFields: [],
+      existingTicket: { Company: "Acme" },
       extractedRefinementData: { Phone: "555-1234" },
       visitorName: "Alice",
       email: "alice@example.com",
@@ -41,8 +41,8 @@ describe("buildDynamicFormData", () => {
 
   test("backwards-compat: formats missing visitor name as 'Not provided'", () => {
     const result = buildDynamicFormData({
-      inquiryFields: null,
-      existingInquiry: null,
+      ticketFields: null,
+      existingTicket: null,
       extractedRefinementData: null,
       visitorName: null,
       email: "alice@example.com",
@@ -54,8 +54,8 @@ describe("buildDynamicFormData", () => {
 
   test("backwards-compat: trims whitespace-only visitor name to 'Not provided'", () => {
     const result = buildDynamicFormData({
-      inquiryFields: null,
-      existingInquiry: null,
+      ticketFields: null,
+      existingTicket: null,
       extractedRefinementData: null,
       visitorName: "   ",
       email: "alice@example.com",
@@ -66,15 +66,15 @@ describe("buildDynamicFormData", () => {
   });
 
   test("dynamic fields: uses label verbatim and heuristic-maps Name/Email/Message", () => {
-    const fields: InquiryFieldSpec[] = [
+    const fields: TicketFieldSpec[] = [
       { label: "Name", type: "text", required: true },
       { label: "Email", type: "email", required: true },
       { label: "Message", type: "textarea", required: false },
     ];
 
     const result = buildDynamicFormData({
-      inquiryFields: fields,
-      existingInquiry: null,
+      ticketFields: fields,
+      existingTicket: null,
       extractedRefinementData: null,
       visitorName: "Bob",
       email: "bob@example.com",
@@ -89,13 +89,13 @@ describe("buildDynamicFormData", () => {
   });
 
   test("dynamic fields: extracted refinement value wins over existing value", () => {
-    const fields: InquiryFieldSpec[] = [
+    const fields: TicketFieldSpec[] = [
       { label: "Phone", type: "tel", required: true },
     ];
 
     const result = buildDynamicFormData({
-      inquiryFields: fields,
-      existingInquiry: { Phone: "555-OLD" },
+      ticketFields: fields,
+      existingTicket: { Phone: "555-OLD" },
       extractedRefinementData: { Phone: "555-NEW" },
       visitorName: "Bob",
       email: "bob@example.com",
@@ -106,13 +106,13 @@ describe("buildDynamicFormData", () => {
   });
 
   test("dynamic fields: existing value wins when no extracted value present", () => {
-    const fields: InquiryFieldSpec[] = [
+    const fields: TicketFieldSpec[] = [
       { label: "Company", type: "text", required: false },
     ];
 
     const result = buildDynamicFormData({
-      inquiryFields: fields,
-      existingInquiry: { Company: "Acme Corp" },
+      ticketFields: fields,
+      existingTicket: { Company: "Acme Corp" },
       extractedRefinementData: {},
       visitorName: "Bob",
       email: "bob@example.com",
@@ -123,13 +123,13 @@ describe("buildDynamicFormData", () => {
   });
 
   test("dynamic fields: falls back to 'Not provided' when no data matches", () => {
-    const fields: InquiryFieldSpec[] = [
+    const fields: TicketFieldSpec[] = [
       { label: "Project Budget", type: "text", required: false },
     ];
 
     const result = buildDynamicFormData({
-      inquiryFields: fields,
-      existingInquiry: null,
+      ticketFields: fields,
+      existingTicket: null,
       extractedRefinementData: null,
       visitorName: "Bob",
       email: "bob@example.com",
@@ -140,13 +140,13 @@ describe("buildDynamicFormData", () => {
   });
 
   test("dynamic fields: heuristic matches 'Full Name' to visitor name", () => {
-    const fields: InquiryFieldSpec[] = [
+    const fields: TicketFieldSpec[] = [
       { label: "Full Name", type: "text", required: true },
     ];
 
     const result = buildDynamicFormData({
-      inquiryFields: fields,
-      existingInquiry: null,
+      ticketFields: fields,
+      existingTicket: null,
       extractedRefinementData: null,
       visitorName: "Charlie",
       email: "c@example.com",
@@ -157,13 +157,13 @@ describe("buildDynamicFormData", () => {
   });
 
   test("dynamic fields: heuristic matches 'Work Email' to email", () => {
-    const fields: InquiryFieldSpec[] = [
+    const fields: TicketFieldSpec[] = [
       { label: "Work Email", type: "email", required: true },
     ];
 
     const result = buildDynamicFormData({
-      inquiryFields: fields,
-      existingInquiry: null,
+      ticketFields: fields,
+      existingTicket: null,
       extractedRefinementData: null,
       visitorName: "Charlie",
       email: "work@example.com",
@@ -174,13 +174,13 @@ describe("buildDynamicFormData", () => {
   });
 
   test("dynamic fields: heuristic matches 'Details' to summary", () => {
-    const fields: InquiryFieldSpec[] = [
+    const fields: TicketFieldSpec[] = [
       { label: "Details", type: "textarea", required: true },
     ];
 
     const result = buildDynamicFormData({
-      inquiryFields: fields,
-      existingInquiry: null,
+      ticketFields: fields,
+      existingTicket: null,
       extractedRefinementData: null,
       visitorName: "Charlie",
       email: "c@example.com",
@@ -191,13 +191,13 @@ describe("buildDynamicFormData", () => {
   });
 
   test("dynamic fields: heuristic matches 'Description' to summary", () => {
-    const fields: InquiryFieldSpec[] = [
+    const fields: TicketFieldSpec[] = [
       { label: "Description", type: "textarea", required: false },
     ];
 
     const result = buildDynamicFormData({
-      inquiryFields: fields,
-      existingInquiry: null,
+      ticketFields: fields,
+      existingTicket: null,
       extractedRefinementData: null,
       visitorName: "Charlie",
       email: "c@example.com",
@@ -208,13 +208,13 @@ describe("buildDynamicFormData", () => {
   });
 
   test("dynamic fields: heuristic matches 'Summary' to summary", () => {
-    const fields: InquiryFieldSpec[] = [
+    const fields: TicketFieldSpec[] = [
       { label: "Summary", type: "textarea", required: false },
     ];
 
     const result = buildDynamicFormData({
-      inquiryFields: fields,
-      existingInquiry: null,
+      ticketFields: fields,
+      existingTicket: null,
       extractedRefinementData: null,
       visitorName: "Charlie",
       email: "c@example.com",
@@ -225,13 +225,13 @@ describe("buildDynamicFormData", () => {
   });
 
   test("dynamic fields: whitespace-only extracted value is ignored and falls through to existing", () => {
-    const fields: InquiryFieldSpec[] = [
+    const fields: TicketFieldSpec[] = [
       { label: "Company", type: "text", required: false },
     ];
 
     const result = buildDynamicFormData({
-      inquiryFields: fields,
-      existingInquiry: { Company: "Acme" },
+      ticketFields: fields,
+      existingTicket: { Company: "Acme" },
       extractedRefinementData: { Company: "   " },
       visitorName: "Bob",
       email: "bob@example.com",
@@ -242,7 +242,7 @@ describe("buildDynamicFormData", () => {
   });
 
   test("dynamic fields: mixed scenario with some matched and some unmatched labels", () => {
-    const fields: InquiryFieldSpec[] = [
+    const fields: TicketFieldSpec[] = [
       { label: "Name", type: "text", required: true },
       { label: "Email", type: "email", required: true },
       { label: "Company", type: "text", required: false },
@@ -250,8 +250,8 @@ describe("buildDynamicFormData", () => {
     ];
 
     const result = buildDynamicFormData({
-      inquiryFields: fields,
-      existingInquiry: { Company: "Acme" },
+      ticketFields: fields,
+      existingTicket: { Company: "Acme" },
       extractedRefinementData: { Budget: "$10k" },
       visitorName: "Dave",
       email: "dave@acme.com",

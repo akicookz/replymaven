@@ -221,12 +221,12 @@ describe("sanitizePlannerDecision", () => {
     expect(sanitized.nextAction.type).toBe("compose");
   });
 
-  test("asks for contact once before creating inquiry when contact info is missing", () => {
+  test("asks for contact once before creating ticket when contact info is missing", () => {
     const sanitized = sanitize({
       decision: {
         goal: "Forward this to the team",
         nextAction: {
-          type: "create_inquiry",
+          type: "create_ticket",
           reason: "Human follow-up requested.",
         },
       },
@@ -245,7 +245,7 @@ describe("sanitizePlannerDecision", () => {
     expect(sanitized.nextAction.type).toBe("collect_contact");
   });
 
-  test("allows create_inquiry after contact details were declined", () => {
+  test("allows create_ticket after contact details were declined", () => {
     const state = createState();
     state.awaitingContactFields = ["email"];
     state.contactDeclined = true;
@@ -255,7 +255,7 @@ describe("sanitizePlannerDecision", () => {
       decision: {
         goal: "Forward this to the team",
         nextAction: {
-          type: "create_inquiry",
+          type: "create_ticket",
           reason: "The visitor still wants human follow-up.",
         },
       },
@@ -272,7 +272,7 @@ describe("sanitizePlannerDecision", () => {
       ],
     });
 
-    expect(sanitized.nextAction.type).toBe("create_inquiry");
+    expect(sanitized.nextAction.type).toBe("create_ticket");
   });
 });
 
@@ -305,7 +305,7 @@ describe("fallbackPlanNextAction", () => {
     expect(decision.nextAction.type).toBe("collect_contact");
   });
 
-  test("proceeds to inquiry when visitor declines contact after a contact request", () => {
+  test("proceeds to ticket when visitor declines contact after a contact request", () => {
     const state = createState();
     state.awaitingContactFields = ["email"];
     state.contactDeclined = true;
@@ -337,7 +337,7 @@ describe("fallbackPlanNextAction", () => {
       maxSteps: 5,
     });
 
-    expect(decision.nextAction.type).toBe("create_inquiry");
+    expect(decision.nextAction.type).toBe("create_ticket");
   });
 
   test("does not mistake generic contact wording for contact collection flow", () => {
@@ -362,7 +362,7 @@ describe("fallbackPlanNextAction", () => {
       maxSteps: 5,
     });
 
-    expect(decision.nextAction.type).not.toBe("create_inquiry");
+    expect(decision.nextAction.type).not.toBe("create_ticket");
     expect(decision.nextAction.type).not.toBe("collect_contact");
   });
 });
@@ -471,7 +471,7 @@ llmDescribe("planNextAction (LLM integration)", () => {
       state,
     });
 
-    expect(["offer_handoff", "collect_contact", "create_inquiry"]).toContain(
+    expect(["offer_handoff", "collect_contact", "create_ticket"]).toContain(
       decision.nextAction.type,
     );
   }, 15_000);

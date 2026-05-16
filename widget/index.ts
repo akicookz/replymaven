@@ -78,21 +78,36 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
   const conversationHistoryBuffer: Array<{
     role: "visitor" | "bot" | "agent";
     content: string;
+    id?: string;
   }> = [];
 
-  function pushHistoryEntry(role: string, content: string): void {
+  function pushHistoryEntry(
+    role: string,
+    content: string,
+    id?: string,
+  ): void {
     if (role !== "visitor" && role !== "bot" && role !== "agent") return;
     const trimmed = (content ?? "").toString();
     if (!trimmed) return;
     conversationHistoryBuffer.push({
       role: role as "visitor" | "bot" | "agent",
       content: trimmed,
+      id,
     });
     if (conversationHistoryBuffer.length > HISTORY_BUFFER_LIMIT * 2) {
       conversationHistoryBuffer.splice(
         0,
         conversationHistoryBuffer.length - HISTORY_BUFFER_LIMIT,
       );
+    }
+  }
+
+  function removeHistoryEntryById(id: string): void {
+    for (let i = conversationHistoryBuffer.length - 1; i >= 0; i--) {
+      if (conversationHistoryBuffer[i].id === id) {
+        conversationHistoryBuffer.splice(i, 1);
+        return;
+      }
     }
   }
 
@@ -4544,7 +4559,8 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
 
     // Record in the in-memory history buffer so we can ship the last N turns
     // with subsequent POSTs and skip the server-side D1/KV history fetch.
-    pushHistoryEntry(role, content);
+    // The id (when present) lets us prune the buffer on message:deleted.
+    pushHistoryEntry(role, content, messageId);
 
     const primaryColor = getPrimaryColor();
     const isRoleChange = lastMessageRole !== null && lastMessageRole !== role;
@@ -5252,6 +5268,28 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
             document.title = "New Message | " + originalDocTitle;
             titleOverridden = true;
           }
+        }
+      } else if (parsed.type === "message:deleted" && parsed.messageId) {
+        const deletedId = parsed.messageId as string;
+        const row = messagesContainer.querySelector(
+          `[data-message-id="${CSS.escape(deletedId)}"]`,
+        );
+        if (row?.parentElement) row.parentElement.removeChild(row);
+        renderedMessageIds.delete(deletedId);
+        // Prune from the buffer so the deleted content isn't replayed to the
+        // AI as conversation context on the next visitor message.
+        removeHistoryEntryById(deletedId);
+        // If we just deleted the message used as the WS resume cursor, point
+        // the cursor at the now-newest still-rendered message so a reconnect
+        // doesn't replay the entire conversation from scratch.
+        if (lastSeenMessageId === deletedId) {
+          const remaining = messagesContainer.querySelectorAll(
+            "[data-message-id]",
+          );
+          const last = remaining[remaining.length - 1] as
+            | HTMLElement
+            | undefined;
+          lastSeenMessageId = last?.dataset.messageId ?? null;
         }
       } else if (parsed.type === "status:change" && parsed.status) {
         if (parsed.status !== conversationStatus) {
@@ -6073,6 +6111,11 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
       requestNotificationPermission();
     },
     openInquiryForm: () => {
+      // Legacy public API name — kept for embedded widgets already in the wild.
+      if (!isOpen) openChatWidget();
+      showFormScreen();
+    },
+    openTicketForm: () => {
       if (!isOpen) openChatWidget();
       showFormScreen();
     },

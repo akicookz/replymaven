@@ -53,16 +53,16 @@ interface QuickAction {
   sortOrder: number;
 }
 
-interface InquiryField {
+interface TicketField {
   label: string;
   type: "text" | "textarea";
   required: boolean;
 }
 
-interface InquiryConfig {
+interface TicketConfig {
   enabled: boolean;
   description: string | null;
-  fields: InquiryField[];
+  fields: TicketField[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -97,8 +97,8 @@ const TYPE_CONFIG: Record<
     iconColor: "text-status-replied",
   },
   inquiry: {
-    label: "Inquiry",
-    description: "Opens the inquiry form",
+    label: "Ticket form",
+    description: "Opens the ticket form",
     RightIcon: ChevronRight,
     iconColor: "text-status-active",
   },
@@ -145,7 +145,7 @@ function QuickActions() {
             Quick Actions and Tools
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Manage widget shortcuts, inquiry behavior, and bot tools from one
+            Manage widget shortcuts, ticket form, and bot tools from one
             place.
           </p>
         </div>
@@ -204,17 +204,17 @@ function ActionsTab({
     action: string;
     icon: string;
     showOnHome: boolean;
-    inquiryEnabled: boolean;
-    inquiryDescription: string;
-    inquiryFields: InquiryField[];
+    ticketEnabled: boolean;
+    ticketDescription: string;
+    ticketFields: TicketField[];
   }>({
     label: "",
     action: "",
     icon: "link",
     showOnHome: false,
-    inquiryEnabled: false,
-    inquiryDescription: "We'll get back to you within 1-2 hours.",
-    inquiryFields: [],
+    ticketEnabled: false,
+    ticketDescription: "We'll get back to you within 1-2 hours.",
+    ticketFields: [],
   });
   const [newFieldLabel, setNewFieldLabel] = useState("");
   const [newFieldType, setNewFieldType] = useState<"text" | "textarea">("text");
@@ -234,10 +234,10 @@ function ActionsTab({
     },
   });
 
-  const { data: inquiryConfig } = useQuery<InquiryConfig>({
-    queryKey: ["inquiry-config", projectId],
+  const { data: ticketConfig } = useQuery<TicketConfig>({
+    queryKey: ["ticket-config", projectId],
     queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/inquiries`);
+      const res = await fetch(`/api/projects/${projectId}/ticket-config`);
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
@@ -311,7 +311,7 @@ function ActionsTab({
     setNewIcon(defaults[newType]);
   }, [newType]);
 
-  const hasInquiry = actions?.some((a) => a.type === "inquiry");
+  const hasTicketAction = actions?.some((a) => a.type === "inquiry");
 
   function expandAction(action: QuickAction) {
     if (expandedId === action.id) {
@@ -324,9 +324,9 @@ function ActionsTab({
       action: action.action,
       icon: action.icon,
       showOnHome: action.showOnHome,
-      inquiryEnabled: inquiryConfig?.enabled ?? false,
-      inquiryDescription: inquiryConfig?.description ?? "We'll get back to you within 1-2 hours.",
-      inquiryFields: inquiryConfig?.fields ?? [],
+      ticketEnabled: ticketConfig?.enabled ?? false,
+      ticketDescription: ticketConfig?.description ?? "We'll get back to you within 1-2 hours.",
+      ticketFields: ticketConfig?.fields ?? [],
     });
     setNewFieldLabel("");
     setNewFieldType("text");
@@ -350,13 +350,13 @@ function ActionsTab({
       ];
       if (action.type === "inquiry") {
         promises.push(
-          fetch(`/api/projects/${projectId}/inquiries`, {
+          fetch(`/api/projects/${projectId}/ticket-config`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              enabled: editForm.inquiryEnabled,
-              description: editForm.inquiryDescription,
-              fields: editForm.inquiryFields,
+              enabled: editForm.ticketEnabled,
+              description: editForm.ticketDescription,
+              fields: editForm.ticketFields,
             }),
           }),
         );
@@ -364,7 +364,7 @@ function ActionsTab({
       const results = await Promise.all(promises);
       if (results.some((r) => !r.ok)) throw new Error("Failed to save");
       queryClient.invalidateQueries({ queryKey: ["quick-actions", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["inquiry-config", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["ticket-config", projectId] });
       setExpandedId(null);
     } catch {
       // Keep panel open on error
@@ -375,11 +375,11 @@ function ActionsTab({
 
   function addEditField() {
     if (!newFieldLabel.trim()) return;
-    if (editForm.inquiryFields.length >= 10) return;
+    if (editForm.ticketFields.length >= 10) return;
     setEditForm((prev) => ({
       ...prev,
-      inquiryFields: [
-        ...prev.inquiryFields,
+      ticketFields: [
+        ...prev.ticketFields,
         { label: newFieldLabel.trim(), type: newFieldType, required: newFieldRequired },
       ],
     }));
@@ -391,17 +391,17 @@ function ActionsTab({
   function removeEditField(index: number) {
     setEditForm((prev) => ({
       ...prev,
-      inquiryFields: prev.inquiryFields.filter((_, i) => i !== index),
+      ticketFields: prev.ticketFields.filter((_, i) => i !== index),
     }));
   }
 
   function moveEditField(index: number, direction: "up" | "down") {
     const targetIndex = direction === "up" ? index - 1 : index + 1;
     setEditForm((prev) => {
-      const newFields = [...prev.inquiryFields];
+      const newFields = [...prev.ticketFields];
       if (targetIndex < 0 || targetIndex >= newFields.length) return prev;
       [newFields[index], newFields[targetIndex]] = [newFields[targetIndex], newFields[index]];
-      return { ...prev, inquiryFields: newFields };
+      return { ...prev, ticketFields: newFields };
     });
   }
 
@@ -442,12 +442,12 @@ function ActionsTab({
                 </SelectItem>
                 <SelectItem
                   value="inquiry"
-                  disabled={!!hasInquiry}
+                  disabled={!!hasTicketAction}
                 >
                   <span className="flex items-center gap-1.5">
                     <MessageSquareText className="w-3.5 h-3.5" />
-                    Inquiry
-                    {hasInquiry && (
+                    Ticket form
+                    {hasTicketAction && (
                       <span className="text-[10px] text-muted-foreground ml-1">(exists)</span>
                     )}
                   </span>
@@ -624,7 +624,7 @@ function ActionsTab({
                       />
                     </div>
 
-                    {/* Action/URL/Prompt (hidden for inquiry) */}
+                    {/* Action/URL/Prompt (hidden for ticket-form) */}
                     {action.type !== "inquiry" && (
                       <div className="space-y-2">
                         <Label className="text-xs text-muted-foreground">
@@ -682,38 +682,38 @@ function ActionsTab({
                       </Label>
                     </div>
 
-                    {/* ─── Inquiry Form Config (only for inquiry type) ─── */}
+                    {/* ─── Ticket Form Config (only for ticket-form type) ─── */}
                     {action.type === "inquiry" && (
                       <>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-2">
                           <div>
-                            <p className="text-sm font-semibold text-foreground">Inquiry form</p>
+                            <p className="text-sm font-semibold text-foreground">Ticket form</p>
                             <p className="text-xs text-muted-foreground mt-0.5">
                               Configure the form visitors see when they tap this action.
                             </p>
                           </div>
                           <div className="flex items-center gap-3">
-                            <Badge variant={editForm.inquiryEnabled ? "secondary" : "outline"}>
-                              {editForm.inquiryEnabled ? "Enabled" : "Disabled"}
+                            <Badge variant={editForm.ticketEnabled ? "secondary" : "outline"}>
+                              {editForm.ticketEnabled ? "Enabled" : "Disabled"}
                             </Badge>
                             <Switch
-                              checked={editForm.inquiryEnabled}
+                              checked={editForm.ticketEnabled}
                               onCheckedChange={(checked) =>
-                                setEditForm((prev) => ({ ...prev, inquiryEnabled: checked }))
+                                setEditForm((prev) => ({ ...prev, ticketEnabled: checked }))
                               }
                             />
                           </div>
                         </div>
 
-                        {editForm.inquiryEnabled && (
+                        {editForm.ticketEnabled && (
                           <>
                             {/* Form description */}
                             <div className="space-y-2">
                               <Label className="text-xs text-muted-foreground">Form description</Label>
                               <textarea
-                                value={editForm.inquiryDescription}
+                                value={editForm.ticketDescription}
                                 onChange={(e) =>
-                                  setEditForm((prev) => ({ ...prev, inquiryDescription: e.target.value }))
+                                  setEditForm((prev) => ({ ...prev, ticketDescription: e.target.value }))
                                 }
                                 placeholder="We'll get back to you within 1-2 hours."
                                 rows={2}
@@ -726,13 +726,13 @@ function ActionsTab({
                               <div className="flex items-center justify-between">
                                 <Label className="text-xs text-muted-foreground">Form fields</Label>
                                 <span className="text-xs text-muted-foreground">
-                                  {editForm.inquiryFields.length}/10
+                                  {editForm.ticketFields.length}/10
                                 </span>
                               </div>
 
-                              {editForm.inquiryFields.length > 0 && (
+                              {editForm.ticketFields.length > 0 && (
                                 <div className="space-y-1.5">
-                                  {editForm.inquiryFields.map((field, index) => (
+                                  {editForm.ticketFields.map((field, index) => (
                                     <div
                                       key={index}
                                       className="flex items-center gap-2 px-3 py-2 bg-background rounded-lg group/field"
@@ -749,7 +749,7 @@ function ActionsTab({
                                         <button
                                           type="button"
                                           onClick={() => moveEditField(index, "down")}
-                                          disabled={index === editForm.inquiryFields.length - 1}
+                                          disabled={index === editForm.ticketFields.length - 1}
                                           className="text-muted-foreground hover:text-foreground disabled:opacity-20 p-0.5"
                                         >
                                           <ChevronDown className="w-3.5 h-3.5" />
@@ -783,7 +783,7 @@ function ActionsTab({
                                 </div>
                               )}
 
-                              {editForm.inquiryFields.length === 0 && (
+                              {editForm.ticketFields.length === 0 && (
                                 <div className="py-6 text-center border-2 border-dashed border-muted rounded-xl">
                                   <Type className="w-6 h-6 mx-auto text-muted-foreground/40 mb-2" />
                                   <p className="text-xs text-muted-foreground">
@@ -792,7 +792,7 @@ function ActionsTab({
                                 </div>
                               )}
 
-                              {editForm.inquiryFields.length < 10 && (
+                              {editForm.ticketFields.length < 10 && (
                                 <div className="space-y-3 p-3 bg-background rounded-xl border-2 border-dashed border-muted">
                                   <div className="flex flex-col sm:flex-row gap-2">
                                     <Input
@@ -885,7 +885,7 @@ function ActionsTab({
             No quick actions yet
           </h2>
           <p className="text-sm text-muted-foreground max-w-md leading-relaxed">
-            Add actions like AI prompts, external links, and inquiry form
+            Add actions like AI prompts, external links, and ticket form
             buttons. They appear on the widget home screen and chat view.
           </p>
         </div>

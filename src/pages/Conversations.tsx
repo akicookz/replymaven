@@ -28,6 +28,7 @@ import {
   MailCheck,
   Paperclip,
   X,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +43,14 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { DetailsPanel } from "@/components/DetailsPanel";
 import {
@@ -164,11 +173,21 @@ interface SourceReference {
 }
 
 
-interface ConversationInquiry {
+interface ConversationTicket {
   id: string;
   data: Record<string, string>;
-  status: string;
+  status: "open" | "in_progress" | "resolved" | "closed";
+  priority: "low" | "medium" | "high" | "urgent";
+  assigneeId: string | null;
+  assignee: {
+    id: string;
+    name: string;
+    email: string;
+    image: string | null;
+  } | null;
+  dueDate: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 type ThreadItem =
@@ -179,10 +198,10 @@ type ThreadItem =
     message: Message;
   }
   | {
-    kind: "inquiry";
+    kind: "ticket";
     id: string;
     createdAt: string;
-    inquiry: ConversationInquiry;
+    ticket: ConversationTicket;
     fields: Array<[string, string]>;
   };
 
@@ -365,7 +384,7 @@ function getConversationActivityLabel(convo: Pick<
 
 function buildConversationThread(
   messages: Message[],
-  inquiry: ConversationInquiry | null,
+  ticket: ConversationTicket | null,
 ): ThreadItem[] {
   const threadItems: ThreadItem[] = messages.map((message) => ({
     kind: "message",
@@ -374,17 +393,17 @@ function buildConversationThread(
     message,
   }));
 
-  if (inquiry) {
+  if (ticket) {
     const hiddenKeys = new Set(["Conversation ID", "Recent chat", "Type"]);
-    const fields = Object.entries(inquiry.data).filter(
+    const fields = Object.entries(ticket.data).filter(
       ([key]) => !hiddenKeys.has(key),
     );
 
     threadItems.push({
-      kind: "inquiry",
-      id: `inquiry:${inquiry.id}`,
-      createdAt: inquiry.createdAt,
-      inquiry,
+      kind: "ticket",
+      id: `ticket:${ticket.id}`,
+      createdAt: ticket.createdAt,
+      ticket,
       fields,
     });
   }
@@ -443,6 +462,11 @@ function Conversations() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "all">("all");
   const [expandedToolCards, setExpandedToolCards] = useState<Set<string>>(new Set());
+  const [messageToDelete, setMessageToDelete] = useState<{
+    id: string;
+    preview: string;
+    emailedAt: string | null;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -675,7 +699,7 @@ function Conversations() {
     hasMore: boolean;
     botName: string | null;
     agentName: string | null;
-    inquiry: ConversationInquiry | null;
+    ticket: ConversationTicket | null;
   }>({
     queryKey: ["conversation-detail", selectedConvo],
     queryFn: async () => {
@@ -830,7 +854,7 @@ function Conversations() {
         messages: Message[];
         botName: string | null;
         agentName: string | null;
-        inquiry: ConversationInquiry | null;
+        ticket: ConversationTicket | null;
       }>(["conversation-detail", selectedConvo]);
 
       const optimisticImageUrl = imageFile
@@ -909,7 +933,7 @@ function Conversations() {
     onSuccess: (data, messageId) => {
       queryClient.setQueryData(
         ["conversation-detail", selectedConvo],
-        (old: { conversation: Conversation; messages: Message[]; botName: string | null; agentName: string | null; inquiry: ConversationInquiry | null } | undefined) => {
+        (old: { conversation: Conversation; messages: Message[]; botName: string | null; agentName: string | null; ticket: ConversationTicket | null } | undefined) => {
           if (!old) return old;
           return {
             ...old,
@@ -922,6 +946,49 @@ function Conversations() {
       toast.success("Email sent");
     },
     onError: (err: Error) => toast.error(err.message),
+  });
+
+  const deleteMessage = useMutation({
+    mutationFn: async (messageId: string) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${selectedConvo}/messages/${messageId}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed" }));
+        throw new Error(err.error ?? "Failed to delete message");
+      }
+      return messageId;
+    },
+    onMutate: async (messageId) => {
+      await queryClient.cancelQueries({
+        queryKey: ["conversation-detail", selectedConvo],
+      });
+      const previous = queryClient.getQueryData(["conversation-detail", selectedConvo]);
+      queryClient.setQueryData(
+        ["conversation-detail", selectedConvo],
+        (old: typeof previous) => {
+          if (!old || typeof old !== "object" || !("messages" in old)) return old;
+          const o = old as { conversation: Conversation; messages: Message[]; botName: string | null; agentName: string | null; ticket: ConversationTicket | null };
+          return { ...o, messages: o.messages.filter((m) => m.id !== messageId) };
+        },
+      );
+      return { previous };
+    },
+    onError: (err: Error, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(
+          ["conversation-detail", selectedConvo],
+          context.previous,
+        );
+      }
+      toast.error(err.message || "Failed to delete message");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["conversations", projectId],
+      });
+    },
   });
 
   const banVisitor = useMutation({
@@ -992,7 +1059,7 @@ function Conversations() {
         ["conversation-detail", convId],
         (old: typeof previousDetail & { conversation?: Conversation }) => {
           if (!old || !("conversation" in (old as Record<string, unknown>))) return old;
-          const o = old as { conversation: Conversation; messages: Message[]; botName: string | null; agentName: string | null; inquiry: ConversationInquiry | null };
+          const o = old as { conversation: Conversation; messages: Message[]; botName: string | null; agentName: string | null; ticket: ConversationTicket | null };
           return { ...o, conversation: { ...o.conversation, status: "closed", closeReason } };
         },
       );
@@ -1038,10 +1105,10 @@ function Conversations() {
 
   const threadItems = useMemo(
     () => convoDetail
-      ? buildConversationThread(convoDetail.messages, convoDetail.inquiry)
+      ? buildConversationThread(convoDetail.messages, convoDetail.ticket)
       : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [convoDetail?.messages, convoDetail?.inquiry],
+    [convoDetail?.messages, convoDetail?.ticket],
   );
   const threadSignature = useMemo(
     () => threadItems
@@ -1076,15 +1143,18 @@ function Conversations() {
   ): { text: string; emailed: boolean; role: "visitor" | "bot" | "agent" } | null {
     if (selectedConvo === convo.id && threadItems.length > 0) {
       const last = threadItems[threadItems.length - 1];
-      if (last.kind === "inquiry") {
-        return { text: "Submitted an inquiry", emailed: false, role: "visitor" };
+      if (last.kind === "ticket") {
+        return { text: "Submitted a ticket", emailed: false, role: "visitor" };
       }
       const isOutbound = last.message.role === "agent" || last.message.role === "bot";
-      const isInquiryMessage =
+      // Detect both new-style "Ticket submission" and legacy "Inquiry submission"
+      // prefixes — historical rows pre-date the rename.
+      const isTicketMessage =
         last.message.role === "visitor" &&
-        last.message.content.startsWith("Inquiry submission");
+        (last.message.content.startsWith("Ticket submission") ||
+          last.message.content.startsWith("Inquiry submission"));
       return {
-        text: isInquiryMessage ? "Submitted an inquiry" : last.message.content,
+        text: isTicketMessage ? "Submitted a ticket" : last.message.content,
         emailed: isOutbound && !!last.message.emailedAt,
         role: last.message.role,
       };
@@ -1092,14 +1162,16 @@ function Conversations() {
     if (convo.lastMessage) {
       const isOutbound =
         convo.lastMessage.role === "agent" || convo.lastMessage.role === "bot";
-      // Inquiry-form submissions are stored as visitor messages whose content
-      // begins with "Inquiry submission" (built by buildInquiryConversationMessage
-      // in worker/index.ts). Surface a friendlier label instead of dumping form data.
-      const isInquiry =
+      // Ticket-form submissions are stored as visitor messages whose content
+      // begins with "Ticket submission" (built by buildTicketConversationMessage
+      // in worker/index.ts). Detect legacy "Inquiry submission" prefix too for
+      // back-compat with rows written before the rename.
+      const isTicket =
         convo.lastMessage.role === "visitor" &&
-        convo.lastMessage.content.startsWith("Inquiry submission");
+        (convo.lastMessage.content.startsWith("Ticket submission") ||
+          convo.lastMessage.content.startsWith("Inquiry submission"));
       return {
-        text: isInquiry ? "Submitted an inquiry" : convo.lastMessage.content,
+        text: isTicket ? "Submitted a ticket" : convo.lastMessage.content,
         emailed: isOutbound && !!convo.lastMessage.emailedAt,
         role: convo.lastMessage.role,
       };
@@ -1314,11 +1386,11 @@ function Conversations() {
                       )}
                       <span className="truncate">
                         {preview ? (() => {
-                          // "Submitted an inquiry" is already pre-formatted —
+                          // "Submitted a ticket" is already pre-formatted —
                           // skip the markdown stripper and the role prefix.
-                          const isInquirySummary =
-                            preview.text === "Submitted an inquiry";
-                          const cleaned = isInquirySummary
+                          const isTicketSummary =
+                            preview.text === "Submitted a ticket";
+                          const cleaned = isTicketSummary
                             ? preview.text
                             : stripMarkdownForPreview(preview.text);
                           const truncated =
@@ -1327,7 +1399,7 @@ function Conversations() {
                               : cleaned;
                           return (
                             <>
-                              {!isInquirySummary && previewPrefix(preview.role) && (
+                              {!isTicketSummary && previewPrefix(preview.role) && (
                                 <span className="font-medium">
                                   {previewPrefix(preview.role)}
                                 </span>
@@ -1786,8 +1858,24 @@ function Conversations() {
                   new Date(item.createdAt).toDateString() !==
                   new Date(prevItem.createdAt).toDateString();
 
-                if (item.kind === "inquiry") {
-                  const inq = item.inquiry;
+                if (item.kind === "ticket") {
+                  const t = item.ticket;
+                  const statusLabel =
+                    t.status === "open"
+                      ? "Open"
+                      : t.status === "in_progress"
+                        ? "In progress"
+                        : t.status === "resolved"
+                          ? "Resolved"
+                          : "Closed";
+                  const priorityLabel =
+                    t.priority.charAt(0).toUpperCase() + t.priority.slice(1);
+                  const dueDateObj = t.dueDate ? new Date(t.dueDate) : null;
+                  const isPastDue =
+                    dueDateObj !== null &&
+                    dueDateObj.getTime() < Date.now() &&
+                    t.status !== "resolved" &&
+                    t.status !== "closed";
 
                   return (
                     <div key={item.id}>
@@ -1805,27 +1893,40 @@ function Conversations() {
 
                       <div className="flex justify-start mb-0.5">
                         <div className="relative max-w-[85%] sm:max-w-[65%] rounded-lg rounded-tl-none px-3 py-2 shadow-sm bg-muted/50 text-foreground overflow-hidden">
-                          <div className="flex items-center gap-1 mb-1.5">
+                          <div className="flex items-center gap-1 mb-1.5 flex-wrap">
                             <FileText className="w-3 h-3 text-muted-foreground" />
                             <span className="text-[11px] font-semibold text-muted-foreground">
-                              Inquiry
+                              Ticket
                             </span>
                             <span
                               className={cn(
                                 "text-[10px] px-1.5 py-0.5 rounded-full ml-1",
-                                inq.status === "new" &&
+                                t.status === "open" &&
                                 "bg-blue-500/10 text-blue-400",
-                                inq.status === "replied" &&
+                                t.status === "in_progress" &&
+                                "bg-amber-500/10 text-amber-400",
+                                t.status === "resolved" &&
                                 "bg-emerald-500/10 text-emerald-400",
-                                inq.status === "closed" &&
+                                t.status === "closed" &&
                                 "bg-muted text-muted-foreground",
                               )}
                             >
-                              {inq.status === "new"
-                                ? "New"
-                                : inq.status === "replied"
-                                  ? "Replied"
-                                  : "Closed"}
+                              {statusLabel}
+                            </span>
+                            <span
+                              className={cn(
+                                "text-[10px] px-1.5 py-0.5 rounded-full",
+                                t.priority === "urgent" &&
+                                "bg-red-500/10 text-red-400",
+                                t.priority === "high" &&
+                                "bg-amber-500/10 text-amber-400",
+                                t.priority === "medium" &&
+                                "bg-blue-500/10 text-blue-400",
+                                t.priority === "low" &&
+                                "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              {priorityLabel}
                             </span>
                           </div>
                           {item.fields.length > 0 && (
@@ -1842,9 +1943,39 @@ function Conversations() {
                               ))}
                             </div>
                           )}
+                          {(t.assignee || dueDateObj) && (
+                            <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
+                              {t.assignee && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-medium text-foreground/70">
+                                    Assignee:
+                                  </span>
+                                  <span>{t.assignee.name}</span>
+                                </div>
+                              )}
+                              {dueDateObj && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-medium text-foreground/70">
+                                    Due:
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      isPastDue && "text-red-400 font-medium",
+                                    )}
+                                  >
+                                    {dueDateObj.toLocaleDateString([], {
+                                      month: "short",
+                                      day: "numeric",
+                                      year: "numeric",
+                                    })}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )}
                           <div className="flex items-center justify-end mt-1">
                             <span className="text-[10px] text-muted-foreground/70">
-                              {formatTime(String(inq.createdAt))}
+                              {formatTime(String(t.createdAt))}
                             </span>
                           </div>
                         </div>
@@ -2001,10 +2132,27 @@ function Conversations() {
 
                     <div
                       className={cn(
-                        "flex mb-3 min-w-0",
+                        "group flex mb-3 min-w-0 items-center gap-2",
                         isVisitor ? "justify-start" : "justify-end",
                       )}
                     >
+                      {isAgent && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMessageToDelete({
+                              id: msg.id,
+                              preview: msg.content.slice(0, 80),
+                              emailedAt: msg.emailedAt ?? null,
+                            })
+                          }
+                          aria-label="Delete message"
+                          title="Delete message"
+                          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <div
                         className={cn(
                           "flex flex-col max-w-[85%] sm:max-w-[65%] min-w-0 gap-1.5",
@@ -2343,6 +2491,61 @@ function Conversations() {
           </div>
         )}
       </div>
+
+      <Dialog
+        open={!!messageToDelete}
+        onOpenChange={(open) => {
+          if (!open) setMessageToDelete(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete message?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes the message from this conversation. The
+              visitor's widget will update in real time.
+            </DialogDescription>
+          </DialogHeader>
+          {messageToDelete && (
+            <div className="space-y-2">
+              <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground/80 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                {messageToDelete.preview}
+                {messageToDelete.preview.length >= 80 && "…"}
+              </div>
+              {messageToDelete.emailedAt && (
+                <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>
+                    This reply was already emailed to the visitor. Deletion only
+                    removes it from the widget — the email cannot be recalled.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setMessageToDelete(null)}
+              disabled={deleteMessage.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!messageToDelete) return;
+                deleteMessage.mutate(messageToDelete.id, {
+                  onSuccess: () => setMessageToDelete(null),
+                });
+              }}
+              disabled={deleteMessage.isPending}
+            >
+              {deleteMessage.isPending ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
