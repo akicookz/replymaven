@@ -3,7 +3,8 @@ ALTER TABLE `inquiries` RENAME TO `tickets`;--> statement-breakpoint
 ALTER TABLE `tickets` ADD COLUMN `priority` text DEFAULT 'medium' NOT NULL;--> statement-breakpoint
 ALTER TABLE `tickets` ADD COLUMN `assignee_id` text REFERENCES `users`(`id`) ON DELETE set null;--> statement-breakpoint
 ALTER TABLE `tickets` ADD COLUMN `due_date` integer;--> statement-breakpoint
-ALTER TABLE `tickets` ADD COLUMN `updated_at` integer DEFAULT (unixepoch()) NOT NULL;--> statement-breakpoint
+ALTER TABLE `tickets` ADD COLUMN `updated_at` integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+UPDATE `tickets` SET `updated_at` = unixepoch() WHERE `updated_at` = 0;--> statement-breakpoint
 UPDATE `tickets` SET `status` = 'open' WHERE `status` = 'new';--> statement-breakpoint
 UPDATE `tickets` SET `status` = 'in_progress' WHERE `status` = 'replied';--> statement-breakpoint
 DROP INDEX IF EXISTS `idx_inquiry_config_project`;--> statement-breakpoint
