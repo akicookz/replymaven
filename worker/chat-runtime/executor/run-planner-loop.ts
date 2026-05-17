@@ -63,6 +63,27 @@ import {
 
 const MAX_PLANNER_STEPS = 8; // Increased to allow more search attempts for thorough documentation checking
 
+// Callback signature for the system prompt builder. Visitor flow leaves this
+// undefined and falls back to `buildSupportSystemPrompt`; Copilot flow passes
+// a `buildCopilotSystemPrompt` adapter so we don't fork the planner loop.
+export interface ComposeSystemPromptContext {
+  state: PlannerLoopState;
+  settings: SupportPromptSettings;
+  projectName: string;
+  guidelines: Array<{ condition: string; instruction: string }>;
+  compiledFaqContext: string;
+  faqMatchHint?: { question: string; answer: string; score: number } | null;
+  pageContext?: Record<string, string>;
+  visitorInfo: { name: string | null; email: string | null };
+  existingTicket?: Record<string, string> | null;
+  ticketFields?: TicketFieldSpec[] | null;
+  agentHandbackInstructions?: string | null;
+}
+
+export type BuildSystemPromptFn = (
+  context: ComposeSystemPromptContext,
+) => string;
+
 interface RunPlannerLoopOptions {
   controller: ReadableStreamDefaultController;
   encoder: TextEncoder;
@@ -116,6 +137,9 @@ interface RunPlannerLoopOptions {
   shouldAllowTeamRequest: () => { allowed: boolean; reason: string };
   closeSafeAiReplayWindow: (reason: string) => void;
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
+  // Optional override for the compose-stage system prompt. When omitted the
+  // visitor-facing prompt is used. Copilot turns inject a Copilot-facing prompt.
+  buildSystemPrompt?: BuildSystemPromptFn;
 }
 
 function createEmptyPlannerDocsEvidence(): PlannerDocsEvidence {
@@ -432,41 +456,56 @@ async function executeCompose(options: {
   ) => void;
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
   closeSafeAiReplayWindow: (reason: string) => void;
+  buildSystemPrompt?: BuildSystemPromptFn;
 }): Promise<{
   fullResponse: string;
   lastToolOutput: unknown;
   lastToolError: string | null;
   detectedInternalTokens: InternalToken[];
 }> {
-  const systemPrompt = buildSupportSystemPrompt(
-    options.settings,
-    options.projectName,
-    options.state.docsEvidence.knowledgeBaseContext,
-    options.state.conversationSummary,
-    {
-      guidelines: options.guidelines,
-      agentHandbackInstructions: options.agentHandbackInstructions,
-      pageContext: options.pageContext,
-      visitorInfo: options.visitorInfo,
-      faqContext: options.compiledFaqContext,
-      faqMatchHint: options.faqMatchHint ?? null,
-      groundingConfidence: options.state.docsEvidence.groundingConfidence,
-      topScore: options.state.docsEvidence.topScore,
-      turnPlan: {
-        intent: options.state.initialTurnPlan.intent,
-        summary: options.state.initialTurnPlan.summary,
-        followUpQuestion: options.state.initialTurnPlan.followUpQuestion,
-      },
-      plannerGoal: options.state.goal,
-      plannerActionHistory: options.state.actionHistory,
-      toolEvidenceSummary: summarizeToolEvidence(options.state.toolEvidence),
-      retrievalAttempted: options.state.docsEvidence.retrievalAttempted,
-      broaderSearchAttempted: options.state.docsEvidence.broaderSearchAttempted,
-      existingTicket: options.existingTicket,
-      ticketFields: options.ticketFields,
-    },
-    // options.currentMessage,
-  );
+  const promptContext: ComposeSystemPromptContext = {
+    state: options.state,
+    settings: options.settings,
+    projectName: options.projectName,
+    guidelines: options.guidelines,
+    compiledFaqContext: options.compiledFaqContext,
+    faqMatchHint: options.faqMatchHint,
+    pageContext: options.pageContext,
+    visitorInfo: options.visitorInfo,
+    existingTicket: options.existingTicket,
+    ticketFields: options.ticketFields,
+    agentHandbackInstructions: options.agentHandbackInstructions,
+  };
+  const systemPrompt = options.buildSystemPrompt
+    ? options.buildSystemPrompt(promptContext)
+    : buildSupportSystemPrompt(
+        options.settings,
+        options.projectName,
+        options.state.docsEvidence.knowledgeBaseContext,
+        options.state.conversationSummary,
+        {
+          guidelines: options.guidelines,
+          agentHandbackInstructions: options.agentHandbackInstructions,
+          pageContext: options.pageContext,
+          visitorInfo: options.visitorInfo,
+          faqContext: options.compiledFaqContext,
+          faqMatchHint: options.faqMatchHint ?? null,
+          groundingConfidence: options.state.docsEvidence.groundingConfidence,
+          topScore: options.state.docsEvidence.topScore,
+          turnPlan: {
+            intent: options.state.initialTurnPlan.intent,
+            summary: options.state.initialTurnPlan.summary,
+            followUpQuestion: options.state.initialTurnPlan.followUpQuestion,
+          },
+          plannerGoal: options.state.goal,
+          plannerActionHistory: options.state.actionHistory,
+          toolEvidenceSummary: summarizeToolEvidence(options.state.toolEvidence),
+          retrievalAttempted: options.state.docsEvidence.retrievalAttempted,
+          broaderSearchAttempted: options.state.docsEvidence.broaderSearchAttempted,
+          existingTicket: options.existingTicket,
+          ticketFields: options.ticketFields,
+        },
+      );
 
   options.emitStatus("Writing the reply...", "compose");
   let streamTextStarted = false;
@@ -1250,6 +1289,7 @@ export async function runPlannerLoop(
         emitStatus: options.emitStatus,
         buildLogContext: options.buildLogContext,
         closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
+        buildSystemPrompt: options.buildSystemPrompt,
       });
       options.telemetry.composeMs = Date.now() - composeStart;
 
@@ -1299,6 +1339,7 @@ export async function runPlannerLoop(
         emitStatus: options.emitStatus,
         buildLogContext: options.buildLogContext,
         closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
+        buildSystemPrompt: options.buildSystemPrompt,
       });
 
       loopState.finalDraft = stopComposeResult.fullResponse;
@@ -1369,6 +1410,7 @@ export async function runPlannerLoop(
       emitStatus: options.emitStatus,
       buildLogContext: options.buildLogContext,
       closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
+      buildSystemPrompt: options.buildSystemPrompt,
     });
 
     loopState.finalDraft = limitComposeResult.fullResponse;

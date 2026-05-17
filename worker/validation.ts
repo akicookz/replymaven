@@ -514,3 +514,8 @@ export const updateGuidelineSchema = z.object({
   enabled: z.boolean().optional(),
   sortOrder: z.number().int().min(0).optional(),
 });
+
+// ─── Copilot ──────────────────────────────────────────────────────────────────
+export const copilotSendMessageSchema = z.object({
+  content: z.string().min(1, "Message cannot be empty").max(5000),
+});

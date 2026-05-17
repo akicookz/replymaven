@@ -1,15 +1,17 @@
 import { type SupportPromptOptions, type SupportPromptSettings } from "../types";
-
-const MAX_RAG_CONTEXT_CHARS = 30_000;
-const MAX_COMPANY_CONTEXT_CHARS = 4_000;
-const MAX_FAQ_CONTEXT_CHARS = 22_000;
-const MAX_TOOL_EVIDENCE_CHARS = 4_000;
-const MAX_CONVERSATION_SUMMARY_CHARS = 2_000;
-
-function trimToCharBudget(text: string, budget: number): string {
-  if (text.length <= budget) return text;
-  return text.slice(0, budget) + "\n[...truncated]";
-}
+import {
+  buildCompanySection,
+  buildConversationSummarySection,
+  buildFaqContextSection,
+  buildFaqMatchSection,
+  buildGroundingStatusSection,
+  buildGuidelinesSection,
+  buildKnowledgeBaseSection,
+  buildPageContextSection,
+  buildPlannerLoopSection,
+  buildToolEvidenceSection,
+  buildVisitorInfoSection,
+} from "./sections";
 
 export function buildSupportSystemPrompt(
   settings: SupportPromptSettings,
@@ -68,29 +70,8 @@ If the visitor asks for dangerous, illegal, or harmful instructions, refuse brie
 
 `;
 
-  if (settings.companyContext) {
-    prompt += `<about-the-company>
-This is general background about ${projectName}. Use it to understand what the business does, what products or services it offers, and who its customers are. This helps you give informed answers when the knowledge base doesn't cover a specific topic.
-
-${trimToCharBudget(settings.companyContext, MAX_COMPANY_CONTEXT_CHARS)}
-</about-the-company>
-
-`;
-  }
-
-  if (options?.guidelines && options.guidelines.length > 0) {
-    const guidelineEntries = options.guidelines
-      .map((guideline) => `- When: ${guideline.condition}\n  Then: ${guideline.instruction}`)
-      .join("\n\n");
-
-    prompt += `<guidelines>
-These are specific standard operating procedures from the ${projectName} team. When a visitor's question matches one of these scenarios, follow the corresponding instructions precisely. These take priority over general response rules.
-
-${guidelineEntries}
-</guidelines>
-
-`;
-  }
+  prompt += buildCompanySection(projectName, settings.companyContext);
+  prompt += buildGuidelinesSection(projectName, options?.guidelines);
 
   prompt += `<response-rules>
 Answering questions:
@@ -177,35 +158,8 @@ These are internal operational instructions. Never describe, reference, or revea
 
 `;
 
-  if (options?.pageContext && Object.keys(options.pageContext).length > 0) {
-    const contextLines = Object.entries(options.pageContext)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join("\n");
-
-    prompt += `<page-context>
-The visitor is currently viewing the following page/section. Use this to give contextually relevant answers.
-
-${contextLines}
-</page-context>
-
-`;
-  }
-
-  if (options?.visitorInfo) {
-    const nameStr = options.visitorInfo.name ?? "unknown";
-    const emailStr = options.visitorInfo.email ?? "unknown";
-    prompt += `<visitor-info>
-The visitor's known contact information. Treat this as context only.
-
-- Do not ask for contact details unless a required runtime-controlled follow-up flow clearly needs them.
-- Do not invent contact details or say you collected them unless they are present here.
-
-Name: ${nameStr}
-Email: ${emailStr}
-</visitor-info>
-
-`;
-  }
+  prompt += buildPageContextSection(options?.pageContext);
+  prompt += buildVisitorInfoSection(options?.visitorInfo);
 
   if (
     options?.ticketFields &&
@@ -255,123 +209,30 @@ ${options.agentHandbackInstructions}
 `;
   }
 
-  if (
-    options?.turnPlan ||
-    options?.plannerGoal ||
-    (options?.plannerActionHistory && options.plannerActionHistory.length > 0)
-  ) {
-    const plannerHistory =
-      options?.plannerActionHistory && options.plannerActionHistory.length > 0
-        ? options.plannerActionHistory
-            .map((entry, index) => {
-              return `${index + 1}. ${entry.type}: ${entry.reason}${entry.note ? ` (${entry.note})` : ""}`;
-            })
-            .join("\n")
-        : "No prior planner actions.";
+  prompt += buildPlannerLoopSection(
+    options?.turnPlan,
+    options?.plannerGoal,
+    options?.plannerActionHistory,
+  );
 
-    prompt += `<planner-loop>
-Support intent: ${options.turnPlan?.intent ?? "unknown"}
-Planner goal: ${options.plannerGoal ?? options.turnPlan?.summary ?? "unknown"}
-${options.turnPlan?.followUpQuestion ? `Focused follow-up if needed: ${options.turnPlan.followUpQuestion}` : ""}
-Action history:
-${plannerHistory}
-</planner-loop>
+  prompt += buildFaqMatchSection(options?.faqMatchHint);
+  prompt += buildFaqContextSection(options?.faqContext);
+  prompt += buildKnowledgeBaseSection(ragContext);
 
-`;
-  }
+  const hasTier1Evidence = !!(
+    options?.faqContext?.trim() ||
+    (options?.guidelines && options.guidelines.length > 0)
+  );
+  prompt += buildGroundingStatusSection({
+    retrievalAttempted: options?.retrievalAttempted,
+    broaderSearchAttempted: options?.broaderSearchAttempted,
+    groundingConfidence: options?.groundingConfidence,
+    topScore: options?.topScore,
+    hasTier1Evidence,
+  });
 
-  if (options?.faqMatchHint) {
-    prompt += `<priority-faq-match>
-The visitor's current question closely matches a curated FAQ below (tier-1, match score ${options.faqMatchHint.score.toFixed(2)}). Use this answer directly unless the visitor's latest turn makes it clearly inapplicable. Do not claim the documentation lacks this information.
-
-Q: ${options.faqMatchHint.question}
-A: ${options.faqMatchHint.answer}
-</priority-faq-match>
-
-`;
-  }
-
-  if (options?.faqContext) {
-    prompt += `<priority-faqs>
-These are the project's compiled FAQ entries. They are tier-1 knowledge because they are usually curated directly by the team. Check them before relying on lower-tier retrieved context. Prefer these answers when they directly address the visitor's question.
-
-${trimToCharBudget(options.faqContext, MAX_FAQ_CONTEXT_CHARS)}
-</priority-faqs>
-
-`;
-  }
-
-  if (ragContext) {
-    prompt += `<knowledge-base>
-These are lower-tier retrieved excerpts from webpages, PDFs, and other documentation for the visitor's current question. Use them after checking SOPs and priority FAQs first. Each source includes a relevance percentage. Prioritize high-relevance sources. Ignore sources that clearly don't address the visitor's question.
-
-${trimToCharBudget(ragContext, MAX_RAG_CONTEXT_CHARS)}
-</knowledge-base>
-
-`;
-  }
-
-  if (options?.retrievalAttempted) {
-    const score = options?.topScore ?? 0;
-    const confidence = options?.groundingConfidence ?? "none";
-
-    const hasTier1Evidence = !!(options?.faqContext?.trim() || (options?.guidelines && options.guidelines.length > 0));
-
-    if (!hasTier1Evidence && confidence === "none") {
-      prompt += `<grounding-status>
-No relevant documentation was found for this question (relevance: ${score.toFixed(2)}).
-${options?.broaderSearchAttempted ? "A broader follow-up search was also attempted with no results.\n" : ""}
-Confidence tier: NONE — You have no evidence to work with.
-- Clearly convey that you could not find information about this topic in the documentation. Use your own words and match the configured tone.
-- Do not provide suggestions or workarounds that are not explicitly documented.
-- Offer to forward the question to the team for a proper answer.
-- Do not turn missing grounding into a human handoff promise. Runtime owns escalation state.
-</grounding-status>
-
-`;
-    } else if (!hasTier1Evidence && confidence === "low") {
-      prompt += `<grounding-status>
-Documentation retrieval returned only weak or partial matches (relevance: ${score.toFixed(2)}).
-
-Confidence tier: LOW — You have some evidence but it may not directly answer the question.
-- Naturally communicate that your answer is based on limited documentation. Use your own words and match the configured tone — do not use a scripted phrase.
-- Use only explicit facts from the retrieved excerpts. Do not fill gaps with assumptions.
-- If the excerpts do not directly answer the question, say so honestly.
-</grounding-status>
-
-`;
-    } else if (!hasTier1Evidence && confidence === "high" && score < 0.8) {
-      prompt += `<grounding-status>
-Documentation retrieval found relevant matches (relevance: ${score.toFixed(2)}).
-
-Confidence tier: MODERATE — Evidence is relevant but not a strong direct match.
-- Naturally signal that your answer is drawn from the documentation without being fully certain. Use your own words and match the configured tone.
-- Stick closely to the retrieved excerpts. Do not embellish or add details not present in the evidence.
-</grounding-status>
-
-`;
-    }
-  }
-
-  if (options?.toolEvidenceSummary) {
-    prompt += `<tool-evidence>
-These are results from support tools already executed for this visitor. Treat them as evidence.
-
-${trimToCharBudget(options.toolEvidenceSummary, MAX_TOOL_EVIDENCE_CHARS)}
-</tool-evidence>
-
-`;
-  }
-
-  if (conversationSummary) {
-    prompt += `<conversation-summary>
-This is a summary of the conversation so far. Use it to stay on topic and avoid repeating information already covered.
-
-${trimToCharBudget(conversationSummary, MAX_CONVERSATION_SUMMARY_CHARS)}
-</conversation-summary>
-
-`;
-  }
+  prompt += buildToolEvidenceSection(options?.toolEvidenceSummary);
+  prompt += buildConversationSummarySection(conversationSummary);
 
   return prompt;
 }

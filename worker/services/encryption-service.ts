@@ -100,6 +100,29 @@ export async function decryptHeaders(
  * Check if a string looks like it's encrypted (base64 with minimum length for IV + data).
  * Used to handle migration from plaintext to encrypted storage gracefully.
  */
+/**
+ * In-place decrypt of `headers` on each tool row whose value looks encrypted.
+ * Both visitor and Copilot agentic flows must call this before passing tool
+ * rows to `executeHttpTool` — otherwise outbound HTTP requests would send the
+ * encrypted blob as the Authorization/custom header values.
+ */
+export async function decryptEnabledToolHeaders(
+  tools: Array<{ id: string; name: string; headers: string | null }>,
+  encryptionKey: string,
+  onFailure?: (row: { id: string; name: string }) => void,
+): Promise<void> {
+  for (const tool of tools) {
+    if (!tool.headers || !isEncrypted(tool.headers)) continue;
+    try {
+      const decrypted = await decryptHeaders(tool.headers, encryptionKey);
+      tool.headers = JSON.stringify(decrypted);
+    } catch {
+      onFailure?.({ id: tool.id, name: tool.name });
+      tool.headers = null;
+    }
+  }
+}
+
 export function isEncrypted(value: string): boolean {
   // Encrypted values are base64-encoded and at least IV_LENGTH bytes long
   // A base64 string of 12+ bytes is at least 16 chars

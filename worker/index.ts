@@ -35,6 +35,8 @@ import { BillingService } from "./services/billing-service";
 import { TeamService } from "./services/team-service";
 import { VisitorBanService } from "./services/visitor-ban-service";
 import { handleWidgetMessageTurn } from "./chat-runtime/orchestration/handle-widget-message-turn";
+import { handleCopilotTurn } from "./chat-runtime/orchestration/handle-copilot-turn";
+import { CopilotService } from "./services/copilot-service";
 import { triggerAutoRefinementIfEnabled } from "./chat-runtime/post-turn/auto-refine";
 import { buildToolRegistry } from "./chat-runtime/tools/build-tool-registry";
 import { toToolDefinition } from "./chat-runtime/types";
@@ -90,6 +92,7 @@ import {
   verifyEmailChangeSchema,
   createGuidelineSchema,
   updateGuidelineSchema,
+  copilotSendMessageSchema,
   usageLogQuerySchema,
   sendMessageAsEmailSchema,
   banVisitorSchema,
@@ -3770,16 +3773,26 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const ticketService = new TicketService(db);
+    // Fetch one extra row to detect whether another page exists, then trim.
+    const requestedLimit = parsed.data.limit;
+    const optsWithPeek = {
+      ...parsed.data,
+      limit: requestedLimit != null ? requestedLimit + 1 : undefined,
+    };
     const enriched = await ticketService.getTicketsWithAssignees(
       project.id,
-      parsed.data,
+      optsWithPeek,
     );
-    return c.json(
-      enriched.map((t) => ({
+    const hasMore =
+      requestedLimit != null && enriched.length > requestedLimit;
+    const trimmed = hasMore ? enriched.slice(0, requestedLimit!) : enriched;
+    return c.json({
+      rows: trimmed.map((t) => ({
         ...t,
         data: JSON.parse(t.data || "{}"),
       })),
-    );
+      hasMore,
+    });
   })
 
   // ─── Bulk Update Ticket Status ────────────────────────────────────────────
@@ -5310,6 +5323,106 @@ const app = new Hono<HonoAppContext>()
       });
 
       return c.json({ ok: true });
+    },
+  )
+  // ─── Copilot (agent-facing assistant per visitor conversation) ────────────
+  .get(
+    "/api/projects/:id/conversations/:convId/copilot/messages",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      const db = c.get("db");
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectById(c.req.param("id"));
+      if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+        return c.json({ error: "Not found" }, 404);
+      }
+
+      const chatService = new ChatService(db);
+      const conversation = await chatService.getConversationById(
+        c.req.param("convId"),
+        project.id,
+      );
+      if (!conversation) return c.json({ error: "Not found" }, 404);
+
+      const copilotService = new CopilotService(db);
+      const rows = await copilotService.getThread(c.req.param("convId"));
+      return c.json(rows);
+    },
+  )
+  .post(
+    "/api/projects/:id/conversations/:convId/copilot/messages",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      const ip = getClientIp(c);
+      if (!checkRateLimit(`copilot:${c.req.param("id")}:${user.id}:${ip}`, 30, 60_000)) {
+        return c.json({ error: "Rate limit exceeded" }, 429);
+      }
+
+      const body = await c.req.json();
+      const parsed = validate(copilotSendMessageSchema, body);
+      if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+      const db = c.get("db");
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectById(c.req.param("id"));
+      if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+        return c.json({ error: "Not found" }, 404);
+      }
+
+      return handleCopilotTurn({
+        db,
+        env: c.env,
+        executionCtx: c.executionCtx,
+        project: { id: project.id, userId: project.userId, name: project.name },
+        conversationId: c.req.param("convId"),
+        agentUserId: user.id,
+        payload: { content: parsed.data.content },
+      });
+    },
+  )
+  .post(
+    "/api/projects/:id/conversations/:convId/copilot/auto-suggest",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+      const ip = getClientIp(c);
+      if (!checkRateLimit(`copilot:${c.req.param("id")}:${user.id}:${ip}`, 30, 60_000)) {
+        return c.json({ error: "Rate limit exceeded" }, 429);
+      }
+
+      const db = c.get("db");
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectById(c.req.param("id"));
+      if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+        return c.json({ error: "Not found" }, 404);
+      }
+
+      const copilotService = new CopilotService(db);
+      if (await copilotService.hasMessages(c.req.param("convId"))) {
+        return c.json(
+          { error: "Copilot thread already exists", code: "thread_exists" },
+          409,
+        );
+      }
+
+      return handleCopilotTurn({
+        db,
+        env: c.env,
+        executionCtx: c.executionCtx,
+        project: { id: project.id, userId: project.userId, name: project.name },
+        conversationId: c.req.param("convId"),
+        agentUserId: user.id,
+        payload: {
+          content:
+            "Draft a reply to the visitor's most recent message. If there's no visitor message yet, draft a friendly opening based on what's known.",
+        },
+        isAutoSuggest: true,
+      });
     },
   )
   .post("/api/projects/:id/conversations/:convId/close", async (c) => {

@@ -10,20 +10,15 @@ import { toast } from "sonner";
 import {
   Ticket as TicketIcon,
   AlertCircle,
-  Copy,
   Check,
-  Sparkles,
-  ChevronDown,
-  ArrowLeft,
-  Loader2,
-  Mail,
-  Send,
   X,
   Search,
   Filter,
   ArrowUpDown,
   Users,
   ExternalLink,
+  Calendar as CalendarIcon,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -98,20 +93,6 @@ interface AssignableUser {
   role: "owner" | "admin" | "member";
 }
 
-interface ComposeReply {
-  subject: string;
-  body: string;
-}
-
-type MailClient = "default" | "gmail" | "outlook" | "proton";
-
-const MAIL_CLIENTS: { key: MailClient; label: string }[] = [
-  { key: "default", label: "Default" },
-  { key: "gmail", label: "Gmail" },
-  { key: "outlook", label: "Outlook" },
-  { key: "proton", label: "Proton Mail" },
-];
-
 type StatusTab = "all" | TicketStatus;
 
 type SortOption =
@@ -162,6 +143,8 @@ const STATUS_OPTIONS: TicketStatus[] = [
   "resolved",
   "closed",
 ];
+
+const PAGE_SIZE = 25;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -232,26 +215,6 @@ function getVisitorName(data: Record<string, string>): string | null {
   return null;
 }
 
-function buildMailUrl(
-  client: MailClient,
-  to: string,
-  subject: string,
-  body: string,
-): string {
-  const encodedSubject = encodeURIComponent(subject);
-  const encodedBody = encodeURIComponent(body);
-  switch (client) {
-    case "gmail":
-      return `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(to)}&su=${encodedSubject}&body=${encodedBody}`;
-    case "outlook":
-      return `https://outlook.live.com/mail/0/deeplink/compose?to=${encodeURIComponent(to)}&subject=${encodedSubject}&body=${encodedBody}`;
-    case "proton":
-      return `https://mail.proton.me/u/0/compose?to=${encodeURIComponent(to)}&Subject=${encodedSubject}&Body=${encodedBody}`;
-    default:
-      return `mailto:${to}?subject=${encodedSubject}&body=${encodedBody}`;
-  }
-}
-
 function getInitials(name: string): string {
   return name
     .split(/\s+/)
@@ -296,6 +259,7 @@ interface TicketFilters {
 function buildQueryString(
   filters: TicketFilters,
   sessionUserId: string | null,
+  page: number,
 ): string {
   const params = new URLSearchParams();
   if (filters.status !== "all") params.append("status", filters.status);
@@ -314,8 +278,8 @@ function buildQueryString(
   const [sortBy, sortDir] = filters.sort.split(":");
   params.set("sortBy", sortBy);
   params.set("sortDir", sortDir);
-  params.set("limit", "100");
-  params.set("offset", "0");
+  params.set("limit", String(PAGE_SIZE));
+  params.set("offset", String(page * PAGE_SIZE));
   return params.toString();
 }
 
@@ -363,20 +327,6 @@ function Tickets() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [view, setView] = useState<"details" | "compose">("details");
-  const [composeData, setComposeData] = useState<ComposeReply | null>(null);
-  const [editSubject, setEditSubject] = useState("");
-  const [editBody, setEditBody] = useState("");
-
-  useEffect(() => {
-    if (!sheetOpen) {
-      const timer = setTimeout(() => {
-        setView("details");
-        setComposeData(null);
-      }, 200);
-      return () => clearTimeout(timer);
-    }
-  }, [sheetOpen]);
 
   const filterKey = useMemo(
     () => ({
@@ -389,17 +339,27 @@ function Tickets() {
     [filters],
   );
 
+  // Page is reset to 0 whenever the filter set changes — staying on page 5
+  // after switching to a smaller filtered result would render empty.
+  const [page, setPage] = useState(0);
+  // Serializing filterKey gives a stable dependency value for useEffect.
+  const filterKeySerialized = JSON.stringify(filterKey);
+  useEffect(() => {
+    setPage(0);
+    setSelectedIds(new Set());
+  }, [filterKeySerialized]);
+
   // ─── Queries ────────────────────────────────────────────────────────────────
 
   const {
-    data: tickets,
+    data: ticketsPage,
     isLoading,
     isError,
     refetch,
-  } = useQuery<Ticket[]>({
-    queryKey: ["tickets", projectId, filterKey],
+  } = useQuery<{ rows: Ticket[]; hasMore: boolean }>({
+    queryKey: ["tickets", projectId, filterKey, page],
     queryFn: async () => {
-      const qs = buildQueryString(filters, sessionUserId);
+      const qs = buildQueryString(filters, sessionUserId, page);
       const res = await fetch(`/api/projects/${projectId}/tickets?${qs}`);
       if (!res.ok) throw new Error("Failed to fetch tickets");
       return res.json();
@@ -407,6 +367,8 @@ function Tickets() {
     placeholderData: keepPreviousData,
     enabled: !!projectId,
   });
+  const tickets = ticketsPage?.rows;
+  const hasMore = ticketsPage?.hasMore ?? false;
 
   const { data: assignableUsers } = useQuery<AssignableUser[]>({
     queryKey: ["assignable-users", projectId],
@@ -447,7 +409,10 @@ function Tickets() {
     },
     onMutate: async ({ ticketId, patch }) => {
       await queryClient.cancelQueries({ queryKey: ["tickets", projectId] });
-      const previous = queryClient.getQueriesData<Ticket[]>({
+      const previous = queryClient.getQueriesData<{
+        rows: Ticket[];
+        hasMore: boolean;
+      }>({
         queryKey: ["tickets", projectId],
       });
       // Resolve the assignee object alongside assigneeId so the UI doesn't
@@ -472,13 +437,16 @@ function Tickets() {
         ...patch,
         ...(resolvedAssignee !== undefined ? { assignee: resolvedAssignee } : {}),
       };
-      queryClient.setQueriesData<Ticket[]>(
+      queryClient.setQueriesData<{ rows: Ticket[]; hasMore: boolean }>(
         { queryKey: ["tickets", projectId] },
         (old) =>
           old
-            ? old.map((t) =>
-                t.id === ticketId ? { ...t, ...optimistic } : t,
-              )
+            ? {
+                ...old,
+                rows: old.rows.map((t) =>
+                  t.id === ticketId ? { ...t, ...optimistic } : t,
+                ),
+              }
             : old,
       );
       if (selectedTicket?.id === ticketId) {
@@ -495,9 +463,17 @@ function Tickets() {
       toast.error("Failed to update ticket");
     },
     onSuccess: (updated) => {
-      queryClient.setQueriesData<Ticket[]>(
+      queryClient.setQueriesData<{ rows: Ticket[]; hasMore: boolean }>(
         { queryKey: ["tickets", projectId] },
-        (old) => (old ? old.map((t) => (t.id === updated.id ? updated : t)) : old),
+        (old) =>
+          old
+            ? {
+                ...old,
+                rows: old.rows.map((t) =>
+                  t.id === updated.id ? updated : t,
+                ),
+              }
+            : old,
       );
       if (selectedTicket?.id === updated.id) {
         setSelectedTicket(updated);
@@ -525,13 +501,16 @@ function Tickets() {
       return { ids, status };
     },
     onSuccess: ({ ids, status }) => {
-      queryClient.setQueriesData<Ticket[]>(
+      queryClient.setQueriesData<{ rows: Ticket[]; hasMore: boolean }>(
         { queryKey: ["tickets", projectId] },
         (old) =>
           old
-            ? old.map((t) =>
-                ids.includes(t.id) ? { ...t, status } : t,
-              )
+            ? {
+                ...old,
+                rows: old.rows.map((t) =>
+                  ids.includes(t.id) ? { ...t, status } : t,
+                ),
+              }
             : old,
       );
       setSelectedIds(new Set());
@@ -540,24 +519,6 @@ function Tickets() {
       );
     },
     onError: () => toast.error("Failed to update tickets"),
-  });
-
-  const composeMutation = useMutation({
-    mutationFn: async (ticketId: string) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/tickets/${ticketId}/compose`,
-        { method: "POST" },
-      );
-      if (!res.ok) throw new Error("Failed to compose");
-      return res.json() as Promise<ComposeReply>;
-    },
-    onSuccess: (data) => {
-      setComposeData(data);
-      setEditSubject(data.subject);
-      setEditBody(data.body);
-      setView("compose");
-    },
-    onError: () => toast.error("Failed to compose reply"),
   });
 
   // ─── Handlers ───────────────────────────────────────────────────────────────
@@ -588,33 +549,7 @@ function Tickets() {
 
   function handleOpenTicket(ticket: Ticket) {
     setSelectedTicket(ticket);
-    setView("details");
-    setComposeData(null);
     setSheetOpen(true);
-  }
-
-  function handleCompose() {
-    if (!selectedTicket) return;
-    composeMutation.mutate(selectedTicket.id);
-  }
-
-  function handleOpenInMail(client: MailClient) {
-    if (!selectedTicket) return;
-    const email = getVisitorEmail(selectedTicket.data);
-    if (!email) return;
-    const url = buildMailUrl(client, email, editSubject, editBody);
-    window.open(url, "_blank");
-    localStorage.setItem("replymaven:mailClient", client);
-    if (selectedTicket.status !== "resolved") {
-      propertyMutation.mutate({
-        ticketId: selectedTicket.id,
-        patch: { status: "resolved" },
-      });
-    }
-  }
-
-  function handleCopyBody() {
-    navigator.clipboard.writeText(editBody);
   }
 
   function clearFilters() {
@@ -641,9 +576,6 @@ function Tickets() {
   }
 
   // ─── Render ─────────────────────────────────────────────────────────────────
-
-  const savedClient = (localStorage.getItem("replymaven:mailClient") ||
-    "default") as MailClient;
 
   const statusCounts = useMemo(() => {
     const counts = { all: 0, open: 0, in_progress: 0, resolved: 0, closed: 0 };
@@ -996,6 +928,34 @@ function Tickets() {
               </tbody>
             </table>
           </div>
+          {(page > 0 || hasMore) && (
+            <div className="flex items-center justify-between px-4 py-3 text-xs text-muted-foreground">
+              <span>
+                {`Showing ${page * PAGE_SIZE + 1}–${page * PAGE_SIZE + list.length}${hasMore ? "" : ` of ${page * PAGE_SIZE + list.length}`}`}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={page === 0}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                >
+                  Previous
+                </Button>
+                <span className="px-2">Page {page + 1}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!hasMore}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1005,13 +965,11 @@ function Tickets() {
           side="right"
           className="sm:max-w-lg w-full flex flex-col gap-0"
         >
-          {selectedTicket && view === "details" && (
+          {selectedTicket && (
             <DetailView
               ticket={selectedTicket}
               projectId={projectId!}
               assignableUsers={assignableUsers ?? []}
-              onCompose={handleCompose}
-              isComposing={composeMutation.isPending}
               onChange={(patch) =>
                 propertyMutation.mutate({
                   ticketId: selectedTicket.id,
@@ -1019,22 +977,6 @@ function Tickets() {
                 })
               }
               isMutating={propertyMutation.isPending}
-            />
-          )}
-
-          {selectedTicket && view === "compose" && (
-            <ComposeView
-              ticket={selectedTicket}
-              composeData={composeData}
-              isLoading={composeMutation.isPending}
-              editSubject={editSubject}
-              editBody={editBody}
-              onSubjectChange={setEditSubject}
-              onBodyChange={setEditBody}
-              onBack={() => setView("details")}
-              onCopyBody={handleCopyBody}
-              onOpenInMail={handleOpenInMail}
-              savedClient={savedClient}
             />
           )}
         </SheetContent>
@@ -1197,16 +1139,12 @@ function DetailView({
   ticket,
   projectId,
   assignableUsers,
-  onCompose,
-  isComposing,
   onChange,
   isMutating,
 }: {
   ticket: Ticket;
   projectId: string;
   assignableUsers: AssignableUser[];
-  onCompose: () => void;
-  isComposing: boolean;
   onChange: (patch: {
     status?: TicketStatus;
     priority?: TicketPriority;
@@ -1216,55 +1154,42 @@ function DetailView({
   isMutating: boolean;
 }) {
   const overdue = isPastDue(ticket);
+  const dueValue = toDueDateInputValue(ticket.dueDate);
+  const dueDisplay = ticket.dueDate
+    ? new Date(ticket.dueDate).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : null;
 
   return (
     <>
-      <SheetHeader>
-        <div className="flex items-center gap-2 flex-wrap">
-          <SheetTitle className="truncate">
-            {ticket.title || "Ticket details"}
-          </SheetTitle>
-          <Badge
-            variant="outline"
-            className={cn(
-              "text-[10px]",
-              STATUS_CONFIG[ticket.status].className,
-            )}
-          >
-            {STATUS_CONFIG[ticket.status].label}
-          </Badge>
-          <Badge
-            variant="outline"
-            className={cn(
-              "text-[10px]",
-              PRIORITY_CONFIG[ticket.priority].className,
-            )}
-          >
-            {PRIORITY_CONFIG[ticket.priority].label}
-          </Badge>
-        </div>
-        <SheetDescription>
+      {/* ─── Header: title + submitted-time ────────────────────────────────── */}
+      <SheetHeader className="pb-3">
+        <SheetTitle className="text-base font-semibold truncate">
+          {ticket.title || "Ticket"}
+        </SheetTitle>
+        <SheetDescription className="text-xs">
           Submitted {formatTimeAgo(ticket.createdAt)}
+          {overdue && (
+            <span className="ml-2 text-destructive font-medium">· Overdue</span>
+          )}
         </SheetDescription>
       </SheetHeader>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-5">
-        {/* Properties */}
-        <div className="space-y-2.5">
-          <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1">
-            Properties
-          </h4>
-          <div className="bg-muted/50 rounded-xl p-3 space-y-2.5">
-            {/* Status */}
+      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-6">
+        {/* ─── Properties (label / control rows) ─────────────────────────── */}
+        <section>
+          <SectionLabel>Properties</SectionLabel>
+          <div className="rounded-xl bg-muted/40 divide-y divide-transparent">
             <PropertyRow label="Status">
               <Select
                 value={ticket.status}
-                onValueChange={(v) =>
-                  onChange({ status: v as TicketStatus })
-                }
+                onValueChange={(v) => onChange({ status: v as TicketStatus })}
                 disabled={isMutating}
               >
-                <SelectTrigger className="h-8 text-xs" size="sm">
+                <SelectTrigger className="h-8 text-xs w-[160px]" size="sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
@@ -1277,7 +1202,6 @@ function DetailView({
               </Select>
             </PropertyRow>
 
-            {/* Priority */}
             <PropertyRow label="Priority">
               <Select
                 value={ticket.priority}
@@ -1286,7 +1210,7 @@ function DetailView({
                 }
                 disabled={isMutating}
               >
-                <SelectTrigger className="h-8 text-xs" size="sm">
+                <SelectTrigger className="h-8 text-xs w-[160px]" size="sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
@@ -1299,7 +1223,6 @@ function DetailView({
               </Select>
             </PropertyRow>
 
-            {/* Assignee */}
             <PropertyRow label="Assignee">
               <Select
                 value={ticket.assigneeId ?? "__unassigned__"}
@@ -1310,7 +1233,7 @@ function DetailView({
                 }
                 disabled={isMutating}
               >
-                <SelectTrigger className="h-8 text-xs" size="sm">
+                <SelectTrigger className="h-8 text-xs w-[160px]" size="sm">
                   <SelectValue placeholder="Unassigned" />
                 </SelectTrigger>
                 <SelectContent align="end">
@@ -1324,94 +1247,104 @@ function DetailView({
               </Select>
             </PropertyRow>
 
-            {/* Due date */}
             <PropertyRow label="Due date">
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="date"
-                  value={toDueDateInputValue(ticket.dueDate)}
-                  onChange={(e) =>
-                    onChange({ dueDate: fromDueDateInputValue(e.target.value) })
-                  }
-                  disabled={isMutating}
+              <div
+                className={cn(
+                  "relative inline-flex items-center w-[160px] h-8 rounded-lg bg-background border border-input focus-within:ring-1 focus-within:ring-ring",
+                  overdue && "border-destructive/40",
+                )}
+              >
+                <CalendarIcon
                   className={cn(
-                    "h-8 px-2 text-xs rounded-lg bg-background border border-input outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                    overdue && "text-red-400",
+                    "absolute left-2 w-3.5 h-3.5 pointer-events-none",
+                    overdue ? "text-destructive" : "text-muted-foreground",
                   )}
                 />
+                {/* Native input is the picker. Text rendered transparent so
+                    we can overlay a formatted, theme-consistent date label. */}
+                <input
+                  type="date"
+                  value={dueValue}
+                  onChange={(e) =>
+                    onChange({
+                      dueDate: fromDueDateInputValue(e.target.value),
+                    })
+                  }
+                  disabled={isMutating}
+                  aria-label="Due date"
+                  className={cn(
+                    "absolute inset-0 w-full h-full opacity-0 cursor-pointer rounded-lg",
+                    "[color-scheme:dark]",
+                  )}
+                />
+                <span
+                  className={cn(
+                    "pl-7 pr-7 text-xs pointer-events-none truncate",
+                    overdue
+                      ? "text-destructive"
+                      : dueDisplay
+                        ? "text-foreground"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {dueDisplay ?? "Set date"}
+                </span>
                 {ticket.dueDate && (
                   <button
-                    onClick={() => onChange({ dueDate: null })}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onChange({ dueDate: null });
+                    }}
                     disabled={isMutating}
-                    className="p-1 rounded hover:bg-muted text-muted-foreground"
+                    className="absolute right-1 z-10 p-1 rounded hover:bg-muted text-muted-foreground"
                     aria-label="Clear due date"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-3 h-3" />
                   </button>
                 )}
               </div>
             </PropertyRow>
           </div>
-        </div>
+        </section>
 
-        {/* Form data */}
+        {/* ─── Submitted form data ───────────────────────────────────────── */}
         {Object.keys(ticket.data).length > 0 && (
-          <DetailsPanel
-            fields={ticket.data}
-            fieldsLabel="Submitted fields"
-          />
+          <section>
+            <SectionLabel>Submitted fields</SectionLabel>
+            <div className="rounded-xl bg-muted/40 p-3">
+              <DetailsPanel fields={ticket.data} />
+            </div>
+          </section>
         )}
       </div>
 
-      {/* Footer */}
-      <SheetFooter className="flex-col gap-2 pt-3">
-        <div className="flex items-center gap-2 w-full">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onCompose}
-            disabled={isComposing}
-            className="gap-1.5"
-          >
-            {isComposing ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Sparkles className="w-3.5 h-3.5" />
-            )}
-            {isComposing ? "Composing…" : "Compose Reply"}
+      {/* ─── Footer: single primary action ─────────────────────────────────── */}
+      <SheetFooter className="px-4 py-3 bg-card/50">
+        {ticket.conversationId ? (
+          <Button asChild className="w-full gap-1.5">
+            <Link
+              to={`/app/projects/${projectId}/conversations?id=${ticket.conversationId}`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              Reply in conversation
+            </Link>
           </Button>
-          {ticket.conversationId && (
-            <Button
-              variant="ghost"
-              size="sm"
-              asChild
-              className="gap-1.5 text-muted-foreground"
-            >
-              <Link
-                to={`/app/projects/${projectId}/conversations?id=${ticket.conversationId}`}
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                Open conversation
-              </Link>
-            </Button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5 w-full">
-          {STATUS_OPTIONS.map((s) => (
-            <Button
-              key={s}
-              variant={ticket.status === s ? "default" : "outline"}
-              size="sm"
-              disabled={isMutating || ticket.status === s}
-              onClick={() => onChange({ status: s })}
-              className="h-7 text-xs"
-            >
-              {STATUS_CONFIG[s].label}
-            </Button>
-          ))}
-        </div>
+        ) : (
+          <p className="text-xs text-muted-foreground text-center w-full">
+            No linked conversation. Reach the visitor at their submitted email.
+          </p>
+        )}
       </SheetFooter>
     </>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h4 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-2">
+      {children}
+    </h4>
   );
 }
 
@@ -1423,164 +1356,12 @@ function PropertyRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+    <div className="flex items-center justify-between gap-3 px-3 py-2 first:pt-3 last:pb-3">
+      <span className="text-xs text-muted-foreground font-medium">
         {label}
       </span>
-      <div className="min-w-[160px]">{children}</div>
+      <div>{children}</div>
     </div>
-  );
-}
-
-// ─── Compose View ─────────────────────────────────────────────────────────────
-
-function ComposeView({
-  ticket,
-  composeData,
-  isLoading,
-  editSubject,
-  editBody,
-  onSubjectChange,
-  onBodyChange,
-  onBack,
-  onCopyBody,
-  onOpenInMail,
-  savedClient,
-}: {
-  ticket: Ticket;
-  composeData: ComposeReply | null;
-  isLoading: boolean;
-  editSubject: string;
-  editBody: string;
-  onSubjectChange: (v: string) => void;
-  onBodyChange: (v: string) => void;
-  onBack: () => void;
-  onCopyBody: () => void;
-  onOpenInMail: (client: MailClient) => void;
-  savedClient: MailClient;
-}) {
-  const [bodyCopied, setBodyCopied] = useState(false);
-  const email = getVisitorEmail(ticket.data);
-
-  function handleCopy() {
-    onCopyBody();
-    setBodyCopied(true);
-    setTimeout(() => setBodyCopied(false), 1500);
-  }
-
-  function handleOpenInMail(client: MailClient) {
-    onOpenInMail(client);
-  }
-
-  return (
-    <>
-      <SheetHeader>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onBack}
-            className="p-1 rounded-md hover:bg-muted transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4 text-muted-foreground" />
-          </button>
-          <SheetTitle>Compose Reply</SheetTitle>
-        </div>
-        {email && <SheetDescription>To: {email}</SheetDescription>}
-      </SheetHeader>
-
-      <div className="flex-1 overflow-y-auto space-y-4 px-4 py-3">
-        {isLoading && !composeData && (
-          <div className="space-y-3">
-            <div className="h-10 rounded-lg bg-muted/50 animate-pulse" />
-            <div className="h-48 rounded-xl bg-muted/50 animate-pulse" />
-            <p className="text-xs text-muted-foreground text-center">
-              Composing reply…
-            </p>
-          </div>
-        )}
-
-        {composeData && (
-          <>
-            <div>
-              <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
-                Subject
-              </label>
-              <Input
-                value={editSubject}
-                onChange={(e) => onSubjectChange(e.target.value)}
-                className="text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5 block">
-                Body
-              </label>
-              <textarea
-                value={editBody}
-                onChange={(e) => onBodyChange(e.target.value)}
-                className="w-full min-h-[240px] bg-muted/30 rounded-xl p-4 text-sm text-foreground resize-y focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
-          </>
-        )}
-      </div>
-
-      {composeData && (
-        <SheetFooter className="flex-row gap-2 pt-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleCopy}
-            className="gap-1.5"
-          >
-            {bodyCopied ? (
-              <Check className="w-3.5 h-3.5 text-emerald-400" />
-            ) : (
-              <Copy className="w-3.5 h-3.5" />
-            )}
-            {bodyCopied ? "Copied" : "Copy"}
-          </Button>
-
-          <div className="flex items-center ml-auto">
-            <Button
-              size="sm"
-              onClick={() => handleOpenInMail(savedClient)}
-              className="gap-1.5 rounded-r-none"
-              disabled={!email}
-            >
-              <Send className="w-3.5 h-3.5" />
-              Open in{" "}
-              {MAIL_CLIENTS.find((c) => c.key === savedClient)?.label ?? "Mail"}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  className="rounded-l-none border-l border-primary-foreground/20 px-2"
-                  disabled={!email}
-                >
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {MAIL_CLIENTS.map((client) => (
-                  <DropdownMenuItem
-                    key={client.key}
-                    onSelect={() => handleOpenInMail(client.key)}
-                  >
-                    <Mail className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-                    {client.label}
-                    {client.key === savedClient && (
-                      <Check className="w-3 h-3 ml-auto text-emerald-400" />
-                    )}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </SheetFooter>
-      )}
-    </>
   );
 }
 

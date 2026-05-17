@@ -2,9 +2,20 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { WebSocket as ReconnectingWebSocket } from "partysocket";
 import {
+  type CopilotMessagePayload,
   type MessagePayload,
   type ServerEvent,
 } from "../../shared/ws-events";
+
+interface CopilotCacheRow {
+  id: string;
+  role: "agent" | "copilot";
+  content: string;
+  sources: string | null;
+  agentUserId: string | null;
+  autoSuggest: boolean;
+  createdAt: string;
+}
 
 interface ConversationDetailMessage extends MessagePayload {
   toolExecutions?: unknown[];
@@ -114,6 +125,27 @@ export function useConversationWs(
         queryClient.invalidateQueries({
           queryKey: ["conversations", projectId],
         });
+      } else if (parsed.type === "copilot:message:new") {
+        const incoming: CopilotMessagePayload = parsed.message;
+        queryClient.setQueryData<CopilotCacheRow[] | undefined>(
+          ["copilot-thread", conversationId],
+          (old) => {
+            if (!old) return old;
+            if (old.some((m) => m.id === incoming.id)) return old;
+            return [
+              ...old,
+              {
+                id: incoming.id,
+                role: incoming.role,
+                content: incoming.content,
+                sources: incoming.sources,
+                agentUserId: incoming.agentUserId,
+                autoSuggest: incoming.autoSuggest,
+                createdAt: new Date(incoming.createdAt).toISOString(),
+              },
+            ];
+          },
+        );
       } else if (parsed.type === "status:change") {
         queryClient.setQueryData<ConversationDetailData | undefined>(
           ["conversation-detail", conversationId],

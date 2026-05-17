@@ -29,6 +29,7 @@ import {
   Paperclip,
   X,
   Trash2,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,6 +61,7 @@ import {
 } from "@/lib/conversation-presence";
 import { cn, renderMarkdown } from "@/lib/utils";
 import { useConversationWs } from "@/lib/use-conversation-ws";
+import { CopilotDrawer } from "@/components/CopilotDrawer";
 
 interface ConversationMeta {
   url?: string;
@@ -467,6 +469,27 @@ function Conversations() {
     preview: string;
     emailedAt: string | null;
   } | null>(null);
+  const copilotStorageKey = `replymaven:copilotOpen:${projectId ?? "unknown"}`;
+  const [copilotOpen, setCopilotOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(copilotStorageKey) === "true";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(copilotStorageKey, String(copilotOpen));
+  }, [copilotOpen, copilotStorageKey]);
+
+  function appendToComposer(text: string) {
+    setReplyText((prev) => (prev ? `${prev}\n\n${text}` : text));
+    setTimeout(() => {
+      const el = replyTextareaRef.current;
+      if (el) {
+        el.focus();
+        el.style.height = "auto";
+        el.style.height = `${el.scrollHeight}px`;
+      }
+    }, 0);
+  }
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1460,14 +1483,14 @@ function Conversations() {
         </div>
       </div>
 
-      {/* ─── Right Panel: Chat Thread ──────────────────────────────────── */}
+      {/* ─── Right Panel: Chat Thread + Copilot ───────────────────────── */}
       <div
         className={cn(
-          "flex-1 flex flex-col min-w-0 bg-white/[0.02]",
-          // On mobile: hide when no convo selected
+          "flex-1 flex min-w-0 bg-white/[0.02]",
           !selectedConvo && "hidden md:flex",
         )}
       >
+      <div className="flex-1 flex flex-col min-w-0">
         {selectedConvo && isDetailLoading ? (
           <div className="flex-1 flex flex-col">
             {/* Skeleton header */}
@@ -1627,6 +1650,22 @@ function Conversations() {
                     ? getCloseReasonLabel(convoDetail.conversation.closeReason)
                     : getStatusLabel(convoDetail.conversation.status)}
                 </span>
+                <Button
+                  variant={copilotOpen ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => setCopilotOpen((v) => !v)}
+                  className={cn(
+                    "h-8 px-2 gap-1.5",
+                    copilotOpen
+                      ? "text-primary"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  aria-pressed={copilotOpen}
+                  title={copilotOpen ? "Hide Copilot" : "Open Copilot"}
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span className="hidden md:inline text-xs">Copilot</span>
+                </Button>
                 {convoDetail.conversation.status !== "closed" && (
                   <Popover>
                     <PopoverTrigger asChild>
@@ -2490,6 +2529,15 @@ function Conversations() {
             </div>
           </div>
         )}
+      </div>
+      {copilotOpen && selectedConvo && projectId && (
+        <CopilotDrawer
+          projectId={projectId}
+          conversationId={selectedConvo}
+          onClose={() => setCopilotOpen(false)}
+          onAddToComposer={appendToComposer}
+        />
+      )}
       </div>
 
       <Dialog

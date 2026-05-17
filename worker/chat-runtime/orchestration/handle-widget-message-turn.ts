@@ -1,19 +1,6 @@
-import {
-  createLanguageModel,
-  createModelRuntimeState,
-  runWithModelFallback,
-} from "../llm/create-language-model";
-import {
-  classifySupportTurn,
-  fallbackClassifySupportTurn,
-  selectFaqSets,
-  summarizeConversation,
-} from "../llm/auxiliary-calls";
-import { runPlannerLoop } from "../executor/run-planner-loop";
-import {
-  findBestFaqMatch,
-  getOrBuildCompiledFaqContext,
-} from "../prompt/build-compiled-faq-context";
+import { createModelRuntimeState } from "../llm/create-language-model";
+import { runAgenticTurn } from "./run-agentic-pipeline";
+import { prepareTurnRouting } from "./prepare-turn-routing";
 import { triggerAutoRefinementIfEnabled } from "../post-turn/auto-refine";
 import {
   type RetrievalResult,
@@ -56,7 +43,7 @@ import {
 } from "../../services/ticket-service";
 import { type TicketFieldSpec } from "../types";
 import { type MessageRow } from "../../db";
-import { isEncrypted, decryptHeaders } from "../../services/encryption-service";
+import { decryptEnabledToolHeaders } from "../../services/encryption-service";
 
 function parseConversationMetadata(
   rawMetadata: string | null | undefined,
@@ -146,21 +133,6 @@ function shouldAllowTeamRequest(options: {
   }
 
   return { allowed: true, reason: "planner_decided" };
-}
-
-function claimsUnavailableCapabilities(response: string): boolean {
-  if (!response.trim()) {
-    return false;
-  }
-
-  return (
-    /\b(i|i've|i have|i was able to)\b[^.!?\n]{0,100}\b(search(?:ed)?|browse(?:d)?|looked up|found|checked)\b[^.!?\n]{0,100}\b(web|internet|online|google|browser)\b/i.test(
-      response,
-    ) ||
-    /\baccording to google\b/i.test(response) ||
-    /\bi found (this|that|it) online\b/i.test(response) ||
-    /\bi checked the internet\b/i.test(response)
-  );
 }
 
 function buildWidgetTurnLogContext(
@@ -303,22 +275,6 @@ export async function handleWidgetMessageTurn(
     conversation.chatState,
   );
 
-  const sortedFaqResources = allResources
-    .filter((resource) => resource.type === "faq")
-    .sort((left, right) => left.title.localeCompare(right.title));
-  const hasIndexedResources = allResources.some(
-    (resource) => resource.status === "indexed",
-  );
-
-  const faqMatchHint = findBestFaqMatch(
-    sortedFaqResources.map((resource) => ({
-      title: resource.title,
-      content: resource.content,
-    })),
-    context.payload.content,
-  );
-  markStage("faq_match_checked");
-
   const existingTicket: Record<string, string> | null = existingTicketRow
     ? parseTicketData(existingTicketRow.data)
     : null;
@@ -358,26 +314,19 @@ export async function handleWidgetMessageTurn(
       );
     }
 
-    for (const tool of enabledTools) {
-      if (tool.headers && isEncrypted(tool.headers)) {
-        try {
-          const decrypted = await decryptHeaders(
-            tool.headers,
-            context.env.ENCRYPTION_KEY,
-          );
-          tool.headers = JSON.stringify(decrypted);
-        } catch {
-          logWarn(
-            "widget_turn.tool_headers_decrypt_failed",
-            buildWidgetTurnLogContext(context, turnId, {
-              toolId: tool.id,
-              toolName: tool.name,
-            }),
-          );
-          tool.headers = null;
-        }
-      }
-    }
+    await decryptEnabledToolHeaders(
+      enabledTools,
+      context.env.ENCRYPTION_KEY,
+      (row) => {
+        logWarn(
+          "widget_turn.tool_headers_decrypt_failed",
+          buildWidgetTurnLogContext(context, turnId, {
+            toolId: row.id,
+            toolName: row.name,
+          }),
+        );
+      },
+    );
   }
   const availableTools = enabledTools.map(toToolDefinition);
 
@@ -709,116 +658,41 @@ export async function handleWidgetMessageTurn(
 
       currentStage = "classify_turn";
       emitStatus("Understanding your message...", "thinking");
-      const classifyStartedAt = Date.now();
-      const buildRouterLogContext = (extra: Record<string, unknown> = {}) =>
-        buildWidgetTurnLogContext(context, turnId, extra);
-      type FaqSelection =
-        | { outcome: "none_available" }
-        | { outcome: "single"; ids: string[] }
-        | { outcome: "selected"; ids: string[] }
-        | { outcome: "failed" };
-      const [turnPlan, conversationSummary, faqSelection] =
-        await Promise.all([
-          runWithModelFallback({
-            runtime: modelRuntime,
-            stage: "classify_support_turn",
-            logContext: buildRouterLogContext(),
-            operation: async (activeConfig) =>
-              classifySupportTurn(
-                createLanguageModel(activeConfig),
-                conversationHistory,
-                context.payload.content,
-                context.payload.pageContext,
-                { throwOnModelError: true },
-              ),
-          }).catch(() =>
-            fallbackClassifySupportTurn(context.payload.content),
-          ),
-          runWithModelFallback({
-            runtime: modelRuntime,
-            stage: "summarize_conversation",
-            logContext: buildRouterLogContext(),
-            operation: async (activeConfig) =>
-              summarizeConversation(
-                createLanguageModel(activeConfig),
-                conversationHistory,
-                { throwOnModelError: true },
-              ),
-          }).catch(() => null),
-          (async (): Promise<FaqSelection> => {
-            if (sortedFaqResources.length === 0) {
-              return { outcome: "none_available" };
-            }
-            if (sortedFaqResources.length === 1) {
-              return { outcome: "single", ids: [sortedFaqResources[0].id] };
-            }
-            try {
-              const ids = await runWithModelFallback({
-                runtime: modelRuntime,
-                stage: "select_faq_sets",
-                logContext: buildRouterLogContext(),
-                operation: async (activeConfig) =>
-                  selectFaqSets(
-                    createLanguageModel(activeConfig),
-                    {
-                      conversationHistory,
-                      currentMessage: context.payload.content,
-                      pageContext: context.payload.pageContext,
-                      faqSets: sortedFaqResources.map((resource) => ({
-                        id: resource.id,
-                        title: resource.title,
-                        description: resource.description,
-                      })),
-                    },
-                    { throwOnModelError: true },
-                  ),
-              });
-              return { outcome: "selected", ids };
-            } catch {
-              return { outcome: "failed" };
-            }
-          })(),
-        ]);
-      telemetry.routerMs = Date.now() - classifyStartedAt;
-
-      // Fail-open: when the selector failed (not "returned empty"), include
-      // all FAQ sets so the model still has tier-1 context. The
-      // MAX_COMPILED_FAQ_CHARS budget keeps prompt size bounded.
-      const selectedFaqResources =
-        faqSelection.outcome === "failed"
-          ? sortedFaqResources
-          : faqSelection.outcome === "none_available"
-            ? []
-            : sortedFaqResources.filter((resource) =>
-                faqSelection.ids.includes(resource.id),
-              );
-      const selectedFaqSetIds =
-        faqSelection.outcome === "failed"
-          ? sortedFaqResources.map((r) => r.id)
-          : faqSelection.outcome === "none_available"
-            ? []
-            : faqSelection.ids;
-      const compiledFaqContext = await getOrBuildCompiledFaqContext({
+      const routing = await prepareTurnRouting({
+        modelRuntime,
+        conversationHistory,
+        currentMessage: context.payload.content,
+        pageContext: context.payload.pageContext,
+        resources: allResources,
         kv: context.env.CONVERSATIONS_CACHE,
         projectId: context.project.id,
-        fingerprintResources: selectedFaqResources.map((resource) => ({
-          id: resource.id,
-          updatedAt: resource.updatedAt,
-          content: resource.content,
-        })),
-        faqResources: selectedFaqResources.map((resource) => ({
-          title: resource.title,
-          content: resource.content,
-        })),
         executionCtx: context.executionCtx,
+        onRouterFinished: (ms) => {
+          telemetry.routerMs = ms;
+        },
+        buildLogContext: (extra = {}) =>
+          buildWidgetTurnLogContext(context, turnId, extra),
       });
+      const {
+        turnPlan,
+        conversationSummary,
+        compiledFaqContext,
+        faqMatchHint,
+        selectedFaqSetIds,
+        selectorOutcome,
+        sortedFaqResources,
+        hasIndexedResources,
+      } = routing;
+      const selectedTitles = sortedFaqResources
+        .filter((r) => selectedFaqSetIds.includes(r.id))
+        .map((r) => r.title);
       logInfo(
         "widget_turn.faq_sets_selected",
         buildWidgetTurnLogContext(context, turnId, {
           totalFaqSets: sortedFaqResources.length,
-          selectorOutcome: faqSelection.outcome,
+          selectorOutcome,
           selectedIds: selectedFaqSetIds,
-          selectedTitles: selectedFaqResources.map((r) => r.title),
+          selectedTitles,
           compiledFaqChars: compiledFaqContext.length,
           faqHintFired: Boolean(faqMatchHint),
           faqHintQuestion: faqMatchHint?.question ?? null,
@@ -867,8 +741,7 @@ export async function handleWidgetMessageTurn(
         }),
       );
 
-      const loopStartedAt = Date.now();
-      const loopResult = await runPlannerLoop({
+      const loopResult = await runAgenticTurn({
         controller,
         encoder,
         modelRuntime,
@@ -920,15 +793,13 @@ export async function handleWidgetMessageTurn(
         image,
         faqMatchHint,
         emitStatus,
-        shouldAllowTeamRequest: () =>
-          shouldAllowTeamRequest({
-            conversation,
-          }),
+        shouldAllowTeamRequest: () => shouldAllowTeamRequest({ conversation }),
         closeSafeAiReplayWindow,
         buildLogContext: (extra = {}) =>
           buildWidgetTurnLogContext(context, turnId, extra),
+        // buildSystemPrompt omitted → planner falls back to the visitor-facing
+        // `buildSupportSystemPrompt` (byte-identical to pre-refactor behavior).
       });
-      telemetry.loopMs = Date.now() - loopStartedAt;
       retrieval = loopResult.retrieval;
       eventState = {
         ...createInitialAgentEventState(),
@@ -979,22 +850,14 @@ export async function handleWidgetMessageTurn(
       );
 
       let fullResponse = eventState.fullResponse;
-
-      if (claimsUnavailableCapabilities(fullResponse)) {
-        const capabilityFallback =
-          "I can't browse the web or use unassigned tools here. I can only help with this product or website using the provided documentation and any assigned support tools.";
-
-        if (capabilityFallback !== fullResponse.trim()) {
-          fullResponse = capabilityFallback;
-          logWarn(
-            "widget_turn.unavailable_capability_claim_blocked",
-            buildWidgetTurnLogContext(context, turnId, {
-              executionPath,
-              turnIntent,
-            }),
-          );
-          emitSseEvent(controller, encoder, { finalText: fullResponse });
-        }
+      if (loopResult.capabilityFallbackApplied) {
+        logWarn(
+          "widget_turn.unavailable_capability_claim_blocked",
+          buildWidgetTurnLogContext(context, turnId, {
+            executionPath,
+            turnIntent,
+          }),
+        );
       }
 
       if (loopResult.detectedInternalTokens.includes("[RESOLVED]")) {

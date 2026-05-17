@@ -346,6 +346,42 @@ export const messages = sqliteTable(
 export type MessageRow = typeof messages.$inferSelect;
 export type NewMessageRow = typeof messages.$inferInsert;
 
+// ─── Copilot Messages ─────────────────────────────────────────────────────────
+// Agent-facing Copilot thread, scoped per visitor conversation. Visitors never
+// see these. Distinct from `messages` so visitor-flow queries stay clean.
+
+export const copilotMessages = sqliteTable(
+  "copilot_messages",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["agent", "copilot"] }).notNull(),
+    content: text("content").notNull(),
+    sources: text("sources"), // JSON string of RAG source references (same shape as messages.sources)
+    agentUserId: text("agent_user_id").references(() => authSchema.users.id, {
+      onDelete: "set null",
+    }), // who asked; null for copilot rows and auto-suggest triggers
+    autoSuggest: integer("auto_suggest", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    index("idx_copilot_messages_conversation").on(table.conversationId),
+    index("idx_copilot_messages_conversation_created").on(
+      table.conversationId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export type CopilotMessageRow = typeof copilotMessages.$inferSelect;
+export type NewCopilotMessageRow = typeof copilotMessages.$inferInsert;
+
 // ─── Knowledge Suggestions ────────────────────────────────────────────────────
 
 export const knowledgeSuggestions = sqliteTable(
@@ -805,6 +841,7 @@ export const schema = {
   crawledPages,
   conversations,
   messages,
+  copilotMessages,
   knowledgeSuggestions,
   ticketConfig,
   tickets,
