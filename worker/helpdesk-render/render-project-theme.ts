@@ -7,8 +7,8 @@ const LENGTH_RE = /^\d+(\.\d+)?(px|rem|em|%)$/;
 
 export function renderProjectTheme(widgetConfig: WidgetConfigRow | null): string {
   const primary = sanitizeColor(widgetConfig?.primaryColor) ?? "#2563eb";
-  const bg = sanitizeColor(widgetConfig?.backgroundColor) ?? "#ffffff";
-  const fg = sanitizeColor(widgetConfig?.textColor) ?? "#0a0a0a";
+  const bg = "#ffffff";
+  const fg = "#0a0a0a";
   const radius = normalizeRadius(widgetConfig?.borderRadius);
   const fontSans = sanitizeFontName(widgetConfig?.fontFamily) ?? "Inter";
 
