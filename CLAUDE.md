@@ -722,6 +722,48 @@ After a conversation closes:
 5. Stores draft in `canned_responses` with status `draft`
 6. User sees drafts in dashboard and can approve/edit/reject
 
+### Helpdesk / Knowledge Base
+
+A multi-tenant CMS where the project owner writes markdown help articles (via a Tiptap WYSIWYG editor) organized into categories. Articles are served as SEO-friendly public HTML pages AND indexed by Cloudflare AI Search so the chatbot can cite them.
+
+**Schema**
+- `help_categories` -- id, projectId (FK projects), name, slug, description, icon, sortOrder, timestamps. Slug unique per project.
+- `help_articles` -- id, projectId, categoryId (FK help_categories), title, slug, excerpt, content (markdown), status (draft|published), sortOrder, publishedAt, timestamps. Slug unique per category.
+- `resources.sourceArticleId` -- nullable FK to help_articles. Bridge row: when an article is published, an existing-style `resources` row is upserted with `type="webpage"`, `r2Key={projectId}/articles/{articleId}.md`, `url=<canonical replymaven URL>`. Cascade deletes when the article is deleted.
+- `projectSettings.helpCustomUrl` -- nullable. Owner's custom domain + subpath, e.g. `https://acme.com/docs`. Null = canonical replymaven URLs.
+
+**Public URL scheme**
+- Canonical: `https://replymaven.com/help/{projectSlug}/{categorySlug}/{articleSlug}`
+- Custom: `{helpCustomUrl}/{categorySlug}/{articleSlug}` when `helpCustomUrl` is set
+- All URL construction goes through `worker/helpdesk-render/build-help-url.ts` -- no inline string concat anywhere
+- Custom-domain hosting requires the customer to run a reverse proxy (Cloudflare / Vercel / Netlify / Nginx) that forwards `/docs/*` to `replymaven.com/help/{slug}/*`. The dashboard ships a setup guide and a `/api/projects/:id/help/test-proxy` endpoint that verifies the proxy by fetching the URL and looking for `<meta name="replymaven:help" content="{slug}">`.
+
+**Lazy URL rewrite at citation-resolution time**
+- The bridge `resources.url` is ALWAYS stored as the canonical `https://replymaven.com/help/...` URL so it remains stable when `helpCustomUrl` changes.
+- `resolveSourceReferenceMap` in `worker/services/resource-service.ts` fetches `projectSettings.helpCustomUrl` once and passes every webpage URL through `rewriteHelpUrlIfNeeded` before adding to the source map. Non-help URLs pass through unchanged.
+- This means flipping `helpCustomUrl` propagates instantly to citation links with no bulk DB migration.
+
+**Rendering pipeline** (`worker/helpdesk-render/`)
+- `marked` parses markdown. Sanitization happens at the token/regex level (NOT DOMPurify -- isomorphic-dompurify depends on JSDOM which is unavailable in the Workers runtime).
+- Allowlist excludes `<script>`, `<iframe>`, `<form>`, `<input>`, `<style>`, event handlers (`on*`), `javascript:` URLs, non-image `data:` URLs.
+- Hono's built-in JSX runtime is used (`tsconfig.worker.json` has `"jsx": "react-jsx"`, `"jsxImportSource": "hono/jsx"`). All JSX uses `class=` (not `className=`).
+- Per-tenant theming: `render-project-theme.ts` reads `widgetConfig` and emits a `:root { --brand: ...; --background: ...; ... }` CSS string that is inlined as a `<style>` block. Defaults are light-mode (white bg, dark text, blue brand, Inter font).
+- Static CSS: `worker/helpdesk-render/help.css` is a Tailwind v4 entry that imports `src/theme.css` (the shared design tokens, extracted from `src/index.css` so dashboard + help center stay in lockstep) and is bundled via `?inline` import in `layout.tsx`. The `@tailwindcss/vite` plugin processes it during the worker build.
+- Font allowlist (`build-font-link.ts`) -- only ~14 named Google Fonts are allowed via `widgetConfig.fontFamily`. Arbitrary URL injection is blocked.
+- `customCss` from widget_config is NOT injected on help pages (deferred).
+
+**Public routes** (in `worker/index.ts`, registered before the SPA fallback by excluding `/help/*` from the `except` list)
+- `GET /help/:projectSlug` -- HTML index (categories grid)
+- `GET /help/:projectSlug/:categorySlug` -- HTML category (articles list)
+- `GET /help/:projectSlug/:categorySlug/:articleSlug` -- HTML article (404 if status=draft)
+- `GET /help/:projectSlug/sitemap.xml` -- XML sitemap (all categories + published articles)
+- `GET /help/:projectSlug/robots.txt` -- robots with sitemap link
+- All: `Cache-Control: public, max-age=120`, rate-limited 200 req/min per IP
+
+**Markdown is source of truth.** The Tiptap-markdown round-trip was verified lossless across 8 test cases.
+
+**Deferred to v2**: viewCount, slug history / 301 redirects on rename, `customCss` injection on help pages, iframe/embed allowlist (YouTube/Loom/Vimeo), article revisions, per-category visibility, dark mode toggle, sitemap auto-submission, search box, "Was this helpful?" widget.
+
 ---
 
 ## Cloudflare Bindings

@@ -4,6 +4,7 @@ import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { users } from "./db/auth.schema";
+import { helpArticles, helpCategories } from "./db/schema";
 import { createAuth } from "./auth";
 import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
@@ -25,6 +26,14 @@ import { CrawlService, type CrawlMessage } from "./services/crawl-service";
 import { EmailService, parseEmailMessageId } from "./services/email-service";
 import { ToolService } from "./services/tool-service";
 import { GuidelineService } from "./services/guideline-service";
+import { HelpdeskService } from "./services/helpdesk-service";
+import { renderHelpIndex } from "./helpdesk-render/render-help-index";
+import { renderHelpCategory } from "./helpdesk-render/render-help-category";
+import { renderHelpArticle } from "./helpdesk-render/render-help-article";
+import { renderSitemap } from "./helpdesk-render/render-sitemap";
+import { renderRobots } from "./helpdesk-render/render-robots";
+import { renderMarkdown } from "./helpdesk-render/render-markdown";
+import { normalizeHelpCustomUrl } from "./helpdesk-render/build-help-url";
 import {
   encryptHeaders,
   decryptHeaders,
@@ -41,6 +50,7 @@ import { triggerAutoRefinementIfEnabled } from "./chat-runtime/post-turn/auto-re
 import { buildToolRegistry } from "./chat-runtime/tools/build-tool-registry";
 import { toToolDefinition } from "./chat-runtime/types";
 import { logError, logInfo } from "./observability";
+import { slugify } from "./lib/slugify";
 import {
   broadcastClosed,
   broadcastMessageDeleted,
@@ -99,6 +109,12 @@ import {
   createGreetingSchema,
   updateGreetingSchema,
   reorderGreetingsSchema,
+  createHelpCategorySchema,
+  updateHelpCategorySchema,
+  createHelpArticleSchema,
+  updateHelpArticleSchema,
+  reorderHelpItemsSchema,
+  helpTestProxySchema,
 } from "./validation";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
@@ -138,6 +154,42 @@ function getClientIp(c: {
     c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
     "unknown"
   );
+}
+
+// ─── Streaming body reader with a hard byte cap ───────────────────────────────
+async function readBodyCapped(
+  response: Response,
+  maxBytes: number,
+): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  const buf = new Uint8Array(Math.min(total, maxBytes));
+  let offset = 0;
+  for (const chunk of chunks) {
+    const remaining = buf.length - offset;
+    if (remaining <= 0) break;
+    if (chunk.byteLength <= remaining) {
+      buf.set(chunk, offset);
+      offset += chunk.byteLength;
+    } else {
+      buf.set(chunk.subarray(0, remaining), offset);
+      offset += remaining;
+      break;
+    }
+  }
+  return new TextDecoder("utf-8", { fatal: false, ignoreBOM: false }).decode(buf);
 }
 
 // ─── Zod validation helper ────────────────────────────────────────────────────
@@ -226,14 +278,6 @@ function buildTicketRecord(
   return enrichedData;
 }
 
-// ─── Slug generator ──────────────────────────────────────────────────────────
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 50);
-}
 
 interface BrowserRenderingMarkdownResponse {
   success: boolean;
@@ -387,9 +431,12 @@ const app = new Hono<HonoAppContext>()
     return auth.handler(c.req.raw);
   })
   // ─── Static SPA fallback ───────────────────────────────────────────────────
+  // /help/* is reserved for the helpdesk feature (see helpdesk-render/).
+  // Excluding it here lets the public help routes registered below intercept
+  // those paths before the SPA fallback fires.
   .use(
     "*",
-    except(["/api/*"], async (c) => {
+    except(["/api/*", "/help/*"], async (c) => {
       return c.env.ASSETS.fetch(c.req.raw);
     }),
   )
@@ -1322,6 +1369,199 @@ const app = new Hono<HonoAppContext>()
   // ─── Widget Embed JS (redirect to R2 custom domain) ────────────────────────
   .get("/api/widget-embed.js", (c) => {
     return c.redirect("https://widget.replymaven.com/widget-embed.js", 301);
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PUBLIC HELP CENTER (HTML, no auth)
+  // ═══════════════════════════════════════════════════════════════════════════
+  .get("/help/:projectSlug/sitemap.xml", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
+      return c.text("Rate limit exceeded", 429);
+    }
+    const slug = c.req.param("projectSlug");
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.text("Not found", 404);
+
+    const helpService = new HelpdeskService(db, c.env.UPLOADS);
+    const settings = await projectService.getSettings(project.id);
+    const categories = await helpService.listCategories(project.id);
+    const articles = await helpService.listArticles(project.id, {
+      status: "published",
+    });
+
+    const xml = renderSitemap({
+      project,
+      categories,
+      articles,
+      helpCustomUrl: settings?.helpCustomUrl ?? null,
+    });
+    return new Response(xml, {
+      headers: {
+        "Content-Type": "application/xml; charset=utf-8",
+        "Cache-Control": "public, max-age=300, s-maxage=300",
+      },
+    });
+  })
+  .get("/help/:projectSlug/robots.txt", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
+      return c.text("Rate limit exceeded", 429);
+    }
+    const slug = c.req.param("projectSlug");
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(slug);
+    if (!project) return c.text("Not found", 404);
+
+    const settings = await projectService.getSettings(project.id);
+    const body = renderRobots({
+      projectSlug: project.slug,
+      helpCustomUrl: settings?.helpCustomUrl ?? null,
+    });
+    return new Response(body, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "public, max-age=300, s-maxage=300",
+      },
+    });
+  })
+  .get("/help/:projectSlug/:categorySlug/:articleSlug", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
+      return c.text("Rate limit exceeded", 429);
+    }
+    const projectSlug = c.req.param("projectSlug");
+    const categorySlug = c.req.param("categorySlug");
+    const articleSlug = c.req.param("articleSlug");
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(projectSlug);
+    if (!project) return c.text("Not found", 404);
+
+    const helpService = new HelpdeskService(db, c.env.UPLOADS);
+    const match = await helpService.getArticleBySlug(
+      project.id,
+      categorySlug,
+      articleSlug,
+    );
+    if (!match || match.article.status !== "published") {
+      return c.text("Not found", 404);
+    }
+
+    const widgetService = new WidgetService(db);
+    const [widgetConfigRow, settings, siblings] = await Promise.all([
+      widgetService.getWidgetConfig(project.id),
+      projectService.getSettings(project.id),
+      helpService.listArticles(project.id, {
+        categoryId: match.category.id,
+        status: "published",
+      }),
+    ]);
+
+    const orderedIds = siblings.map((a) => a.id);
+    const currentIndex = orderedIds.indexOf(match.article.id);
+    const prevArticle = currentIndex > 0 ? siblings[currentIndex - 1] : null;
+    const nextArticle =
+      currentIndex >= 0 && currentIndex < siblings.length - 1
+        ? siblings[currentIndex + 1]
+        : null;
+
+    const bodyHtml = await renderMarkdown(match.article.content ?? "", {
+      projectSlug: project.slug,
+      customUrl: settings?.helpCustomUrl ?? null,
+    });
+
+    const html = renderHelpArticle({
+      project,
+      category: match.category,
+      article: match.article,
+      bodyHtml,
+      prevArticle,
+      nextArticle,
+      widgetConfig: widgetConfigRow,
+      helpCustomUrl: settings?.helpCustomUrl ?? null,
+    });
+    return c.html(`<!doctype html>${html.toString()}`, 200, {
+      "Cache-Control": "public, max-age=120, s-maxage=120",
+    });
+  })
+  .get("/help/:projectSlug/:categorySlug", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
+      return c.text("Rate limit exceeded", 429);
+    }
+    const projectSlug = c.req.param("projectSlug");
+    const categorySlug = c.req.param("categorySlug");
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(projectSlug);
+    if (!project) return c.text("Not found", 404);
+
+    const helpService = new HelpdeskService(db, c.env.UPLOADS);
+    const category = await helpService.getCategoryBySlug(
+      project.id,
+      categorySlug,
+    );
+    if (!category) return c.text("Not found", 404);
+
+    const widgetService = new WidgetService(db);
+    const [widgetConfigRow, settings, articles] = await Promise.all([
+      widgetService.getWidgetConfig(project.id),
+      projectService.getSettings(project.id),
+      helpService.listArticles(project.id, {
+        categoryId: category.id,
+        status: "published",
+      }),
+    ]);
+
+    const html = renderHelpCategory({
+      project,
+      category,
+      articles,
+      widgetConfig: widgetConfigRow,
+      helpCustomUrl: settings?.helpCustomUrl ?? null,
+    });
+    return c.html(`<!doctype html>${html.toString()}`, 200, {
+      "Cache-Control": "public, max-age=120, s-maxage=120",
+    });
+  })
+  .get("/help/:projectSlug", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
+      return c.text("Rate limit exceeded", 429);
+    }
+    const projectSlug = c.req.param("projectSlug");
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(projectSlug);
+    if (!project) return c.text("Not found", 404);
+
+    const helpService = new HelpdeskService(db, c.env.UPLOADS);
+    const widgetService = new WidgetService(db);
+    const [widgetConfigRow, settings, categories, counts] = await Promise.all([
+      widgetService.getWidgetConfig(project.id),
+      projectService.getSettings(project.id),
+      helpService.listCategories(project.id),
+      helpService.getArticleCountsByCategory(project.id),
+    ]);
+
+    const enriched = categories.map((cat) => ({
+      ...cat,
+      articleCount: counts.get(cat.id) ?? 0,
+    }));
+
+    const html = renderHelpIndex({
+      project,
+      categories: enriched,
+      widgetConfig: widgetConfigRow,
+      helpCustomUrl: settings?.helpCustomUrl ?? null,
+    });
+    return c.html(`<!doctype html>${html.toString()}`, 200, {
+      "Cache-Control": "public, max-age=120, s-maxage=120",
+    });
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -3935,13 +4175,49 @@ const app = new Hono<HonoAppContext>()
     }
 
     const resourceService = new ResourceService(db, c.env.UPLOADS);
-    const [resources, counts] = await Promise.all([
+    const [resources, counts, articleBridge] = await Promise.all([
       resourceService.getResourcesByProject(project.id),
       resourceService.getCrawledPageCountsByResource(project.id),
+      db
+        .select({
+          articleId: helpArticles.id,
+          title: helpArticles.title,
+          articleSlug: helpArticles.slug,
+          categorySlug: helpCategories.slug,
+        })
+        .from(helpArticles)
+        .innerJoin(
+          helpCategories,
+          eq(helpArticles.categoryId, helpCategories.id),
+        )
+        .where(eq(helpArticles.projectId, project.id)),
     ]);
-    const enriched = resources.map((r) =>
-      r.type === "webpage" ? { ...r, pageCount: counts.get(r.id) ?? 0 } : r,
+
+    const articleById = new Map(
+      articleBridge.map((a) => [a.articleId, a]),
     );
+
+    const enriched = resources.map((r) => {
+      const base =
+        r.type === "webpage"
+          ? { ...r, pageCount: counts.get(r.id) ?? 0 }
+          : r;
+      if (r.sourceArticleId) {
+        const article = articleById.get(r.sourceArticleId);
+        if (article) {
+          return {
+            ...base,
+            sourceArticle: {
+              id: article.articleId,
+              title: article.title,
+              categorySlug: article.categorySlug,
+              articleSlug: article.articleSlug,
+            },
+          };
+        }
+      }
+      return base;
+    });
     return c.json(enriched);
   })
   .post("/api/projects/:id/resources", async (c) => {
@@ -4826,6 +5102,399 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true, message: "Refresh started" });
     },
   )
+
+  // ─── Help Center (Dashboard) ────────────────────────────────────────────────
+  .get("/api/projects/:id/help/categories", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    const [categories, counts] = await Promise.all([
+      service.listCategories(project.id),
+      service.getArticleCountsByCategory(project.id),
+    ]);
+    const enriched = categories.map((cat) => ({
+      ...cat,
+      articleCount: counts.get(cat.id) ?? 0,
+    }));
+    return c.json(enriched);
+  })
+  .post("/api/projects/:id/help/categories", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(createHelpCategorySchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    try {
+      const created = await service.createCategory(parsed.data, project.id);
+      return c.json(created, 201);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to create category";
+      return c.json({ error: message }, 400);
+    }
+  })
+  .post("/api/projects/:id/help/categories/reorder", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(reorderHelpItemsSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    await service.reorderCategories(project.id, parsed.data.items);
+    return c.json({ ok: true });
+  })
+  .patch("/api/projects/:id/help/categories/:catId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateHelpCategorySchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    try {
+      const updated = await service.updateCategory(
+        c.req.param("catId"),
+        project.id,
+        parsed.data,
+      );
+      if (!updated) return c.json({ error: "Not found" }, 404);
+      return c.json(updated);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update category";
+      return c.json({ error: message }, 400);
+    }
+  })
+  .delete("/api/projects/:id/help/categories/:catId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    const deleted = await service.deleteCategory(
+      c.req.param("catId"),
+      project.id,
+    );
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+    c.executionCtx.waitUntil(
+      triggerAutoRagSync(c.env, "helpdesk.category.delete"),
+    );
+    return c.json({ ok: true });
+  })
+  .get("/api/projects/:id/help/articles", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const categoryId = c.req.query("categoryId") ?? undefined;
+    const statusParam = c.req.query("status");
+    const status =
+      statusParam === "draft" || statusParam === "published"
+        ? statusParam
+        : undefined;
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    const articles = await service.listArticles(project.id, {
+      categoryId,
+      status,
+    });
+    return c.json(articles);
+  })
+  .post("/api/projects/:id/help/articles/reorder", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const reorderSchema = reorderHelpItemsSchema.extend({
+      categoryId: createHelpArticleSchema.shape.categoryId,
+    });
+    const parsed = validate(reorderSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    await service.reorderArticles(
+      project.id,
+      parsed.data.categoryId,
+      parsed.data.items,
+    );
+    return c.json({ ok: true });
+  })
+  .post("/api/projects/:id/help/articles", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(createHelpArticleSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    try {
+      const created = await service.createArticle(
+        parsed.data,
+        project.id,
+        project.slug,
+      );
+      if (created.status === "published") {
+        c.executionCtx.waitUntil(
+          triggerAutoRagSync(c.env, "helpdesk.article.create"),
+        );
+      }
+      return c.json(created, 201);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to create article";
+      return c.json({ error: message }, 400);
+    }
+  })
+  .get("/api/projects/:id/help/articles/:artId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    const article = await service.getArticleById(
+      c.req.param("artId"),
+      project.id,
+    );
+    if (!article) return c.json({ error: "Not found" }, 404);
+    return c.json(article);
+  })
+  .patch("/api/projects/:id/help/articles/:artId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(updateHelpArticleSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    try {
+      const updated = await service.updateArticle(
+        c.req.param("artId"),
+        project.id,
+        parsed.data,
+        project.slug,
+      );
+      if (!updated) return c.json({ error: "Not found" }, 404);
+      c.executionCtx.waitUntil(
+        triggerAutoRagSync(c.env, "helpdesk.article.update"),
+      );
+      return c.json(updated);
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      const message =
+        err instanceof Error ? err.message : "Failed to update article";
+      if (code === "slug_conflict") {
+        return c.json({ error: message, code }, 409);
+      }
+      return c.json({ error: message }, 400);
+    }
+  })
+  .delete("/api/projects/:id/help/articles/:artId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    const deleted = await service.deleteArticle(
+      c.req.param("artId"),
+      project.id,
+    );
+    if (!deleted) return c.json({ error: "Not found" }, 404);
+    c.executionCtx.waitUntil(
+      triggerAutoRagSync(c.env, "helpdesk.article.delete"),
+    );
+    return c.json({ ok: true });
+  })
+  .post("/api/projects/:id/help/articles/:artId/publish", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    const updated = await service.updateArticle(
+      c.req.param("artId"),
+      project.id,
+      { status: "published" },
+      project.slug,
+    );
+    if (!updated) return c.json({ error: "Not found" }, 404);
+    c.executionCtx.waitUntil(
+      triggerAutoRagSync(c.env, "helpdesk.article.publish"),
+    );
+    return c.json(updated);
+  })
+  .post("/api/projects/:id/help/articles/:artId/unpublish", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    const updated = await service.updateArticle(
+      c.req.param("artId"),
+      project.id,
+      { status: "draft" },
+      project.slug,
+    );
+    if (!updated) return c.json({ error: "Not found" }, 404);
+    c.executionCtx.waitUntil(
+      triggerAutoRagSync(c.env, "helpdesk.article.unpublish"),
+    );
+    return c.json(updated);
+  })
+  .post("/api/projects/:id/help/test-proxy", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    if (!checkRateLimit(`help-proxy:${user.id}`, 10, 60_000)) {
+      return c.json({ error: "Too many requests" }, 429);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(helpTestProxySchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const candidateUrl = normalizeHelpCustomUrl(parsed.data.customUrl);
+    try {
+      const response = await fetch(candidateUrl, {
+        method: "GET",
+        redirect: "follow",
+        headers: { "User-Agent": "ReplyMaven-HelpProxyTest/1.0" },
+        signal: AbortSignal.timeout(5_000),
+      });
+      const text = await readBodyCapped(response, 16_384);
+      const expectedMarker = `<meta name="replymaven:help" content="${project.slug}">`;
+      const altMarker = `<meta content="${project.slug}" name="replymaven:help">`;
+      if (text.includes(expectedMarker) || text.includes(altMarker)) {
+        return c.json({ ok: true, status: response.status });
+      }
+      const snippet = text
+        .slice(0, 300)
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\x00-\x1F\x7F-\xFF]/g, "");
+      return c.json({
+        ok: false,
+        status: response.status,
+        snippet,
+        error:
+          "Marker not found. Make sure your reverse proxy forwards the request to https://replymaven.com/help/" +
+          project.slug +
+          " and returns the response body unchanged.",
+      });
+    } catch (err) {
+      const isAbort =
+        err instanceof Error &&
+        (err.name === "TimeoutError" || err.name === "AbortError");
+      return c.json({
+        ok: false,
+        status: 0,
+        error: isAbort
+          ? "Timed out"
+          : err instanceof Error
+            ? err.message
+            : "Failed to reach the proxied URL",
+      });
+    }
+  })
 
   // ─── Conversations (Dashboard) ──────────────────────────────────────────────
   .get("/api/projects/:id/conversations", async (c) => {

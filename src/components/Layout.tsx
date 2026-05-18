@@ -17,6 +17,7 @@ import {
   CreditCard,
   X,
   Zap,
+  BookOpen,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -144,6 +145,11 @@ function Layout() {
           href: `/app/projects/${currentProject.id}/knowledgebase`,
           icon: FolderOpen,
           badge: suggestionCountsData?.total ?? 0,
+        },
+        {
+          label: "Help Center",
+          href: `/app/projects/${currentProject.id}/help`,
+          icon: BookOpen,
         },
       ]
     : [];

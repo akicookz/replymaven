@@ -4,11 +4,14 @@ import { extractText } from "unpdf";
 import {
   resources,
   crawledPages,
+  projects,
+  projectSettings,
   type ResourceRow,
   type NewResourceRow,
   type CrawledPageRow,
 } from "../db";
 import { CrawlService, type CrawlMessage } from "./crawl-service";
+import { rewriteHelpUrlIfNeeded } from "../helpdesk-render/build-help-url";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -562,6 +565,26 @@ export class ResourceService {
       return sourceMap;
     }
 
+    const projectMeta = await this.db
+      .select({
+        slug: projects.slug,
+        helpCustomUrl: projectSettings.helpCustomUrl,
+      })
+      .from(projects)
+      .leftJoin(
+        projectSettings,
+        eq(projectSettings.projectId, projects.id),
+      )
+      .where(eq(projects.id, projectId))
+      .limit(1);
+    const projectSlug = projectMeta[0]?.slug ?? null;
+    const helpCustomUrl = projectMeta[0]?.helpCustomUrl ?? null;
+    const rewriteUrl = (url: string | null): string | null => {
+      if (!url) return url;
+      if (!projectSlug) return url;
+      return rewriteHelpUrlIfNeeded(url, projectSlug, helpCustomUrl);
+    };
+
     const projectPrefix = `${projectId}/`;
 
     // Filenames that follow the `{projectId}/{resourceId}-text.md` or
@@ -676,7 +699,7 @@ export class ResourceService {
         if (parent && parent.type === "webpage" && crawled.url) {
           sourceMap.set(filename, {
             title: crawled.pageTitle || parent.title,
-            url: crawled.url,
+            url: rewriteUrl(crawled.url),
             type: "webpage",
           });
           continue;
@@ -701,7 +724,7 @@ export class ResourceService {
       if (byKey.type === "webpage" && byKey.url) {
         sourceMap.set(filename, {
           title: byKey.title,
-          url: byKey.url,
+          url: rewriteUrl(byKey.url),
           type: "webpage",
         });
       } else if (byKey.type === "pdf") {

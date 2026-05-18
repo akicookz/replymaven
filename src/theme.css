@@ -1,0 +1,197 @@
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-status-active: var(--status-active);
+  --color-status-waiting: var(--status-waiting);
+  --color-status-replied: var(--status-replied);
+  --color-status-closed: var(--status-closed);
+
+  /* ─── Brand Accent Scale ─────────────────────────────────────────── */
+  --color-brand: var(--brand);
+  --color-brand-dark: var(--brand-dark);
+  --color-brand-soft: var(--brand-soft);
+
+  /* ─── Extended Text Scale ────────────────────────────────────────── */
+  --color-quaternary: var(--quaternary);
+  --color-disabled: var(--disabled);
+
+  /* ─── Specialty Surfaces ─────────────────────────────────────────── */
+  --color-code: var(--code);
+  --color-code-foreground: var(--code-foreground);
+
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-heading: "Playfair", Georgia, serif;
+}
+
+/* ─── Dark-First Design Language ───────────────────────────────────────────── */
+
+:root {
+  --radius: 0.75rem;
+
+  /* Orange accent scale */
+  --brand: #f97316;
+  --brand-dark: #ea580c;
+  --brand-soft: #fb923c;
+
+  /* Surface scale (dark) */
+  --background: #0b0600;
+  --foreground: #f0f0f5;
+
+  --card: #0c0c10;
+  --card-foreground: #e8e8ee;
+
+  --popover: #0c0c10;
+  --popover-foreground: #e8e8ee;
+
+  /* Brand orange primary */
+  --primary: var(--brand);
+  --primary-foreground: #ffffff;
+
+  --secondary: #18181e;
+  --secondary-foreground: #c8c8d2;
+
+  --muted: #1c1c22;
+  --muted-foreground: #8a8a96;
+
+  --accent: #18181e;
+  --accent-foreground: #e8e8ee;
+
+  --destructive: oklch(60% 0.2 25);
+
+  --success: oklch(60% 0.15 152);
+  --warning: oklch(72% 0.15 75);
+  --status-active: var(--success);
+  --status-waiting: var(--warning);
+  --status-replied: var(--primary);
+  --status-closed: var(--muted-foreground);
+
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: var(--brand);
+
+  /* Sidebar */
+  --sidebar: #0c0c10;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+
+  /* Extended text scale */
+  --quaternary: #6b6b78;
+  --disabled: #4a4a55;
+
+  /* Specialty surfaces */
+  --code: #04040a;
+  --code-foreground: #e2e8f0;
+}
+
+/* ─── Light Mode (for future toggle) ──────────────────────────────────────── */
+
+.light {
+  --background: oklch(98.5% 0.002 80);
+  --foreground: oklch(15% 0.005 60);
+
+  --card: oklch(100% 0 0);
+  --card-foreground: oklch(15% 0.005 60);
+
+  --popover: oklch(100% 0 0);
+  --popover-foreground: oklch(15% 0.005 60);
+
+  --primary: var(--brand);
+  --primary-foreground: oklch(100% 0 0);
+
+  --secondary: oklch(96% 0.003 80);
+  --secondary-foreground: oklch(25% 0.005 60);
+
+  --muted: oklch(95.5% 0.003 80);
+  --muted-foreground: oklch(55% 0.01 60);
+
+  --accent: oklch(96% 0.003 80);
+  --accent-foreground: oklch(25% 0.005 60);
+
+  --destructive: oklch(55% 0.2 25);
+
+  --success: oklch(55% 0.15 152);
+  --warning: oklch(70% 0.15 75);
+
+  --border: oklch(92% 0.003 80);
+  --input: oklch(92% 0.003 80);
+  --ring: var(--brand-soft);
+
+  --sidebar: oklch(100% 0 0);
+  --sidebar-border: oklch(93% 0.003 80);
+
+  --quaternary: oklch(45% 0.01 60);
+  --disabled: oklch(65% 0.01 60);
+
+  --code: oklch(97% 0.002 80);
+  --code-foreground: oklch(25% 0.005 60);
+}
+
+/* ─── Dark Mode (same as :root, for .dark class toggle) ───────────────────── */
+
+.dark {
+  --background: #08080a;
+  --foreground: #f0f0f5;
+
+  --card: #0c0c10;
+  --card-foreground: #e8e8ee;
+
+  --popover: #0c0c10;
+  --popover-foreground: #e8e8ee;
+
+  --primary: var(--brand);
+  --primary-foreground: #ffffff;
+
+  --secondary: #18181e;
+  --secondary-foreground: #c8c8d2;
+
+  --muted: #1c1c22;
+  --muted-foreground: #8a8a96;
+
+  --accent: #18181e;
+  --accent-foreground: #e8e8ee;
+
+  --destructive: oklch(60% 0.2 25);
+
+  --success: oklch(60% 0.15 152);
+  --warning: oklch(72% 0.15 75);
+  --status-active: var(--success);
+  --status-waiting: var(--warning);
+  --status-replied: var(--primary);
+  --status-closed: var(--muted-foreground);
+
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: var(--brand);
+
+  --sidebar: #0c0c10;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+
+  --quaternary: #6b6b78;
+  --disabled: #4a4a55;
+
+  --code: #04040a;
+  --code-foreground: #e2e8f0;
+}

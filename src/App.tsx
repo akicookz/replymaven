@@ -27,6 +27,9 @@ import Billing from "./pages/Billing";
 import AuthCallback from "./pages/AuthCallback";
 import Docs from "./pages/Docs";
 import TeamAccept from "./pages/TeamAccept";
+import HelpCenter from "./pages/HelpCenter";
+import HelpCenterSettings from "./pages/HelpCenterSettings";
+import HelpArticleEditor from "./pages/HelpArticleEditor";
 
 // ─── Redirect /app to first project's dashboard ──────────────────────────────
 function DashboardRedirect() {
@@ -260,6 +263,22 @@ function App() {
         <Route
           path="projects/:projectId/tools"
           element={<ProjectPageRedirect target="tools" />}
+        />
+        <Route
+          path="projects/:projectId/help"
+          element={<HelpCenter />}
+        />
+        <Route
+          path="projects/:projectId/help/settings"
+          element={<HelpCenterSettings />}
+        />
+        <Route
+          path="projects/:projectId/help/articles/new"
+          element={<HelpArticleEditor />}
+        />
+        <Route
+          path="projects/:projectId/help/articles/:articleId"
+          element={<HelpArticleEditor />}
         />
       </Route>
     </Routes>

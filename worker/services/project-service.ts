@@ -141,6 +141,7 @@ export class ProjectService {
         | "introMessageAuthorId"
         | "introMessageDelay"
         | "introMessageDuration"
+        | "helpCustomUrl"
       >
     >,
   ): Promise<ProjectSettingsRow | null> {

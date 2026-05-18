@@ -6,6 +6,49 @@ import {
   getFaqSetTotalLength,
 } from "../shared/faq-limits";
 
+// ─── Host Allow/Deny Helpers (shared by helpCustomUrl + helpTestProxy) ───────
+function isLikelyIp(host: string): boolean {
+  const h = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return true;
+  if (/^\d+$/.test(h)) return true;
+  if (/^0x[0-9a-f]+(\.|$)/i.test(h)) return true;
+  if (/^[0-9a-f:]+(\.\d+){0,3}$/i.test(h) && h.includes(":")) return true;
+  return false;
+}
+
+function isAllowedHelpHost(host: string): boolean {
+  if (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    host === "[::1]" ||
+    host === "workers.dev" ||
+    host === "pages.dev" ||
+    host === "r2.cloudflarestorage.com"
+  ) {
+    return false;
+  }
+  if (
+    host.endsWith(".workers.dev") ||
+    host.endsWith(".r2.cloudflarestorage.com") ||
+    host.endsWith(".pages.dev")
+  ) {
+    return false;
+  }
+  if (isLikelyIp(host)) return false;
+  return true;
+}
+
+function isPermittedHelpUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return isAllowedHelpHost(host);
+  } catch {
+    return false;
+  }
+}
+
 // ─── Projects ─────────────────────────────────────────────────────────────────
 export const createProjectSchema = z.object({
   name: z.string().min(1, "Project name is required").max(100),
@@ -52,6 +95,26 @@ export const updateProjectSettingsSchema = z.object({
     .optional(),
   introMessageAuthorId: z.string().max(100).nullable().optional(),
   autoCloseMinutes: z.number().int().min(5).max(1440).nullable().optional(),
+  helpCustomUrl: z
+    .string()
+    .url("Must be a valid URL")
+    .max(2048)
+    .refine((u) => u.startsWith("https://"), "Must use HTTPS")
+    .refine((u) => !u.endsWith("/"), "Must not end with a trailing slash")
+    .refine(
+      (u) => {
+        try {
+          const host = new URL(u).hostname.toLowerCase();
+          return host !== "replymaven.com" && !host.endsWith(".replymaven.com");
+        } catch {
+          return false;
+        }
+      },
+      "Cannot point at replymaven.com",
+    )
+    .refine(isPermittedHelpUrl, "Host is not allowed")
+    .nullable()
+    .optional(),
 });
 
 // ─── Widget Config ────────────────────────────────────────────────────────────
@@ -518,4 +581,75 @@ export const updateGuidelineSchema = z.object({
 // ─── Copilot ──────────────────────────────────────────────────────────────────
 export const copilotSendMessageSchema = z.object({
   content: z.string().min(1, "Message cannot be empty").max(5000),
+});
+
+// ─── Help Categories ──────────────────────────────────────────────────────────
+export const createHelpCategorySchema = z.object({
+  name: z.string().min(1, "Name is required").max(100),
+  slug: z
+    .string()
+    .min(1)
+    .max(60)
+    .regex(/^[a-z0-9-]+$/, "Slug may only contain lowercase letters, numbers, and hyphens")
+    .optional(),
+  description: z.string().max(500).nullable().optional(),
+  icon: z.string().max(50).nullable().optional(),
+  sortOrder: z.number().int().min(0).optional(),
+});
+
+export const updateHelpCategorySchema = createHelpCategorySchema.partial();
+
+// ─── Help Articles ────────────────────────────────────────────────────────────
+export const createHelpArticleSchema = z.object({
+  categoryId: z.string().min(1, "Category is required"),
+  title: z.string().min(1, "Title is required").max(200),
+  slug: z
+    .string()
+    .min(1)
+    .max(80)
+    .regex(/^[a-z0-9-]+$/, "Slug may only contain lowercase letters, numbers, and hyphens")
+    .optional(),
+  excerpt: z.string().max(280).nullable().optional(),
+  content: z.string().max(100_000).optional().default(""),
+  status: z.enum(["draft", "published"]).optional().default("draft"),
+  sortOrder: z.number().int().min(0).optional(),
+});
+
+export const updateHelpArticleSchema = createHelpArticleSchema
+  .partial()
+  .extend({
+    categoryId: z.string().min(1).optional(),
+  });
+
+export const reorderHelpItemsSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        sortOrder: z.number().int().min(0),
+      }),
+    )
+    .min(1)
+    .max(200),
+});
+
+export const helpTestProxySchema = z.object({
+  customUrl: z
+    .string()
+    .url("Must be a valid URL")
+    .max(2048)
+    .refine((u) => u.startsWith("https://"), "Must use HTTPS")
+    .refine((u) => !u.endsWith("/"), "Must not end with a trailing slash")
+    .refine(
+      (u) => {
+        try {
+          const host = new URL(u).hostname.toLowerCase();
+          return host !== "replymaven.com" && !host.endsWith(".replymaven.com");
+        } catch {
+          return false;
+        }
+      },
+      "Cannot point at replymaven.com",
+    )
+    .refine(isPermittedHelpUrl, "Host is not allowed"),
 });

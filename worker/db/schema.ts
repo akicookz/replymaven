@@ -84,6 +84,7 @@ export const projectSettings = sqliteTable(
       .notNull()
       .default(true),
     autoCloseMinutes: integer("auto_close_minutes").default(30), // null = disabled
+    helpCustomUrl: text("help_custom_url"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -183,6 +184,92 @@ export const quickActions = sqliteTable(
 export type QuickActionRow = typeof quickActions.$inferSelect;
 export type NewQuickActionRow = typeof quickActions.$inferInsert;
 
+// ─── Help Categories ──────────────────────────────────────────────────────────
+
+export const helpCategories = sqliteTable(
+  "help_categories",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    description: text("description"),
+    icon: text("icon"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_help_categories_project_slug").on(
+      table.projectId,
+      table.slug,
+    ),
+    index("idx_help_categories_project_sort").on(
+      table.projectId,
+      table.sortOrder,
+    ),
+  ],
+);
+
+export type HelpCategoryRow = typeof helpCategories.$inferSelect;
+export type NewHelpCategoryRow = typeof helpCategories.$inferInsert;
+
+// ─── Help Articles ────────────────────────────────────────────────────────────
+
+export const helpArticles = sqliteTable(
+  "help_articles",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => helpCategories.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    slug: text("slug").notNull(),
+    excerpt: text("excerpt"),
+    content: text("content").notNull().default(""),
+    status: text("status", { enum: ["draft", "published"] })
+      .notNull()
+      .default("draft"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    publishedAt: integer("published_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_help_articles_category_slug").on(
+      table.categoryId,
+      table.slug,
+    ),
+    index("idx_help_articles_project").on(table.projectId),
+    index("idx_help_articles_project_status").on(
+      table.projectId,
+      table.status,
+    ),
+    index("idx_help_articles_category_sort").on(
+      table.categoryId,
+      table.sortOrder,
+    ),
+  ],
+);
+
+export type HelpArticleRow = typeof helpArticles.$inferSelect;
+export type NewHelpArticleRow = typeof helpArticles.$inferInsert;
+
 // ─── Resources ────────────────────────────────────────────────────────────────
 
 export const resources = sqliteTable(
@@ -204,6 +291,10 @@ export const resources = sqliteTable(
       .notNull()
       .default("pending"),
     lastIndexedAt: integer("last_indexed_at", { mode: "timestamp" }),
+    sourceArticleId: text("source_article_id").references(
+      () => helpArticles.id,
+      { onDelete: "cascade" },
+    ),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -215,6 +306,9 @@ export const resources = sqliteTable(
   (table) => [
     index("idx_resources_project").on(table.projectId),
     index("idx_resources_status").on(table.status),
+    uniqueIndex("idx_resources_source_article_id_unique")
+      .on(table.sourceArticleId)
+      .where(sql`${table.sourceArticleId} IS NOT NULL`),
   ],
 );
 
@@ -854,4 +948,6 @@ export const schema = {
   guidelines,
   visitorBans,
   greetings,
+  helpCategories,
+  helpArticles,
 } as const;
