@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
@@ -75,6 +75,7 @@ function HelpArticleEditor({
   placeholder,
 }: HelpArticleEditorProps) {
   const [uploading, setUploading] = useState(false);
+  const lastSyncedRef = useRef<string>(value);
 
   const editor = useEditor({
     extensions: [
@@ -107,16 +108,17 @@ function HelpArticleEditor({
       },
     },
     onUpdate: ({ editor }) => {
-      onChange(getMarkdown(editor));
+      const md = getMarkdown(editor);
+      lastSyncedRef.current = md;
+      onChange(md);
     },
   });
 
   useEffect(() => {
     if (!editor) return;
-    const current = getMarkdown(editor);
-    if (value !== current) {
-      editor.commands.setContent(value, { emitUpdate: false });
-    }
+    if (value === lastSyncedRef.current) return;
+    lastSyncedRef.current = value;
+    editor.commands.setContent(value, { emitUpdate: false });
   }, [value, editor]);
 
   if (!editor) {
