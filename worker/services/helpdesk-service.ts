@@ -559,6 +559,7 @@ export class HelpdeskService {
       .values(row)
       .onConflictDoUpdate({
         target: resources.sourceArticleId,
+        targetWhere: sql`${resources.sourceArticleId} IS NOT NULL`,
         set: {
           type: "webpage",
           title: article.title,
