@@ -1,3 +1,4 @@
+/** @jsxImportSource hono/jsx */
 import { raw } from "hono/html";
 import type { WidgetConfigRow } from "../db/schema";
 import helpCss from "./help.css?inline";

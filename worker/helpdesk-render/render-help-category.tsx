@@ -1,3 +1,4 @@
+/** @jsxImportSource hono/jsx */
 import type {
   HelpArticleRow,
   HelpCategoryRow,
