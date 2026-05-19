@@ -7,10 +7,13 @@ import type {
 } from "../db/schema";
 import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
+import { HelpSidebar } from "./sidebar";
+import { MobileCategoryNav } from "./mobile-category-nav";
 
 interface RenderHelpCategoryProps {
   project: ProjectRow;
   category: HelpCategoryRow;
+  categories: HelpCategoryRow[];
   articles: HelpArticleRow[];
   widgetConfig: WidgetConfigRow | null;
   helpCustomUrl: string | null;
@@ -34,57 +37,61 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
       canonicalUrl={canonical}
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
+      sidebar={
+        <HelpSidebar
+          project={props.project}
+          categories={props.categories}
+          activeCategorySlug={props.category.slug}
+          helpCustomUrl={props.helpCustomUrl}
+        />
+      }
     >
-      <div class="mx-auto max-w-3xl px-6 pt-16 pb-24">
-        <nav class="mb-6 text-sm text-muted-foreground">
+      <MobileCategoryNav
+        project={props.project}
+        categories={props.categories}
+        activeCategorySlug={props.category.slug}
+        helpCustomUrl={props.helpCustomUrl}
+      />
+
+      <div class="help-page">
+        <nav class="help-breadcrumb" aria-label="Breadcrumb">
           <a
             href={buildHelpUrl({
               projectSlug: props.project.slug,
               customUrl: props.helpCustomUrl,
             })}
-            class="hover:text-foreground"
           >
-            {props.project.name} Help
+            {props.project.name}
           </a>
-          <span class="mx-2">/</span>
-          <span class="text-foreground">{props.category.name}</span>
+          <span class="help-breadcrumb-sep">/</span>
+          <span class="help-breadcrumb-current">{props.category.name}</span>
         </nav>
 
-        <header class="mb-10">
-          <h1 class="text-4xl font-semibold tracking-tight">
-            {props.category.name}
-          </h1>
+        <header>
+          <h1 class="help-page-title">{props.category.name}</h1>
           {props.category.description && (
-            <p class="mt-3 text-base text-muted-foreground">
-              {props.category.description}
-            </p>
+            <p class="help-page-subtitle">{props.category.description}</p>
           )}
         </header>
 
         {props.articles.length === 0 ? (
-          <div class="rounded-2xl bg-card p-10 text-center text-muted-foreground">
-            No articles yet in this category.
-          </div>
+          <div class="help-empty">No articles yet in this category.</div>
         ) : (
-          <ul class="space-y-3">
+          <ul class="help-article-list">
             {props.articles.map((article) => (
               <li>
                 <a
+                  class="help-article-row"
                   href={buildHelpUrl({
                     projectSlug: props.project.slug,
                     customUrl: props.helpCustomUrl,
                     category: props.category.slug,
                     article: article.slug,
                   })}
-                  class="group block rounded-2xl bg-card p-5 transition-colors hover:bg-accent"
                 >
-                  <h2 class="text-lg font-medium tracking-tight group-hover:text-brand">
-                    {article.title}
-                  </h2>
+                  <p class="help-article-row-title">{article.title}</p>
                   {article.excerpt && (
-                    <p class="mt-1.5 text-sm text-muted-foreground line-clamp-2">
-                      {article.excerpt}
-                    </p>
+                    <p class="help-article-row-excerpt">{article.excerpt}</p>
                   )}
                 </a>
               </li>
@@ -95,3 +102,4 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
     </Layout>
   );
 }
+

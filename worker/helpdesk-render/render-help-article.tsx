@@ -7,10 +7,13 @@ import type {
 } from "../db/schema";
 import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
+import { HelpSidebar } from "./sidebar";
+import { MobileCategoryNav } from "./mobile-category-nav";
 
 interface RenderHelpArticleProps {
   project: ProjectRow;
   category: HelpCategoryRow;
+  categories: HelpCategoryRow[];
   article: HelpArticleRow;
   bodyHtml: string;
   prevArticle: HelpArticleRow | null;
@@ -27,7 +30,9 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
     article: props.article.slug,
   });
   const title = `${props.article.title} — ${props.project.name} Help`;
-  const description = props.article.excerpt ?? `${props.article.title} — help article from ${props.project.name}.`;
+  const description =
+    props.article.excerpt ??
+    `${props.article.title} — help article from ${props.project.name}.`;
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -56,49 +61,61 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
       jsonLd={jsonLd}
+      sidebar={
+        <HelpSidebar
+          project={props.project}
+          categories={props.categories}
+          activeCategorySlug={props.category.slug}
+          helpCustomUrl={props.helpCustomUrl}
+        />
+      }
     >
-      <article class="mx-auto max-w-3xl px-6 pt-16 pb-24">
-        <nav class="mb-6 text-sm text-muted-foreground">
+      <MobileCategoryNav
+        project={props.project}
+        categories={props.categories}
+        activeCategorySlug={props.category.slug}
+        helpCustomUrl={props.helpCustomUrl}
+      />
+
+      <article class="help-page">
+        <nav class="help-breadcrumb" aria-label="Breadcrumb">
           <a
             href={buildHelpUrl({
               projectSlug: props.project.slug,
               customUrl: props.helpCustomUrl,
             })}
-            class="hover:text-foreground"
           >
-            {props.project.name} Help
+            {props.project.name}
           </a>
-          <span class="mx-2">/</span>
+          <span class="help-breadcrumb-sep">/</span>
           <a
             href={buildHelpUrl({
               projectSlug: props.project.slug,
               customUrl: props.helpCustomUrl,
               category: props.category.slug,
             })}
-            class="hover:text-foreground"
           >
             {props.category.name}
           </a>
+          <span class="help-breadcrumb-sep">/</span>
+          <span class="help-breadcrumb-current">{props.article.title}</span>
         </nav>
 
-        <header class="mb-10">
-          <h1 class="text-4xl font-semibold tracking-tight sm:text-5xl">
-            {props.article.title}
-          </h1>
+        <header>
+          <h1 class="help-page-title">{props.article.title}</h1>
           {props.article.excerpt && (
-            <p class="mt-4 text-lg text-muted-foreground">
-              {props.article.excerpt}
-            </p>
+            <p class="help-page-subtitle">{props.article.excerpt}</p>
           )}
         </header>
 
         <div
           class="help-prose"
+          style="margin-top: 2.5rem"
           dangerouslySetInnerHTML={{ __html: props.bodyHtml }}
         />
 
         {(props.prevArticle || props.nextArticle) && (
-          <nav class="mt-16 grid gap-4 sm:grid-cols-2">
+          <nav class="help-article-nav" aria-label="Article pagination">
             {props.prevArticle ? (
               <a
                 href={buildHelpUrl({
@@ -107,34 +124,25 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
                   category: props.category.slug,
                   article: props.prevArticle.slug,
                 })}
-                class="rounded-2xl bg-card p-5 transition-colors hover:bg-accent"
               >
-                <p class="text-xs uppercase tracking-wide text-muted-foreground">
-                  Previous
-                </p>
-                <p class="mt-1 text-base font-medium">
-                  {props.prevArticle.title}
-                </p>
+                <p class="help-article-nav-direction">Previous</p>
+                <p class="help-article-nav-title">{props.prevArticle.title}</p>
               </a>
             ) : (
               <div />
             )}
             {props.nextArticle ? (
               <a
+                class="help-article-nav-next"
                 href={buildHelpUrl({
                   projectSlug: props.project.slug,
                   customUrl: props.helpCustomUrl,
                   category: props.category.slug,
                   article: props.nextArticle.slug,
                 })}
-                class="rounded-2xl bg-card p-5 text-right transition-colors hover:bg-accent"
               >
-                <p class="text-xs uppercase tracking-wide text-muted-foreground">
-                  Next
-                </p>
-                <p class="mt-1 text-base font-medium">
-                  {props.nextArticle.title}
-                </p>
+                <p class="help-article-nav-direction">Next</p>
+                <p class="help-article-nav-title">{props.nextArticle.title}</p>
               </a>
             ) : (
               <div />

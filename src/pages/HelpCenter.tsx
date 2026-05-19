@@ -21,6 +21,7 @@ import HelpCategoryList, {
 import HelpArticleList, {
   type HelpArticleItem,
 } from "@/components/help-article-list";
+import IconPicker from "@/components/icon-picker";
 
 interface CategoryResponse {
   id: string;
@@ -54,12 +55,14 @@ interface CategoryFormState {
   name: string;
   slug: string;
   description: string;
+  icon: string | null;
 }
 
 const emptyCategoryForm: CategoryFormState = {
   name: "",
   slug: "",
   description: "",
+  icon: null,
 };
 
 function HelpCenter() {
@@ -123,6 +126,7 @@ function HelpCenter() {
       const body: Record<string, unknown> = { name: input.name };
       if (input.slug.trim()) body.slug = input.slug.trim();
       if (input.description.trim()) body.description = input.description.trim();
+      if (input.icon !== null) body.icon = input.icon;
       const res = await fetch(`/api/projects/${projectId}/help/categories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -161,6 +165,9 @@ function HelpCenter() {
       if (input.patch.slug !== undefined) body.slug = input.patch.slug.trim();
       if (input.patch.description !== undefined) {
         body.description = input.patch.description.trim() || null;
+      }
+      if (input.patch.icon !== undefined) {
+        body.icon = input.patch.icon;
       }
       const res = await fetch(
         `/api/projects/${projectId}/help/categories/${input.id}`,
@@ -343,6 +350,7 @@ function HelpCenter() {
       name: full.name,
       slug: full.slug,
       description: full.description ?? "",
+      icon: full.icon,
     });
     setCategoryError(null);
     setCategoryDialogOpen(true);
@@ -592,6 +600,24 @@ function HelpCenter() {
                 placeholder="Refunds, plans, and invoices"
                 maxLength={500}
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label>
+                Icon{" "}
+                <span className="text-muted-foreground font-normal">
+                  (optional)
+                </span>
+              </Label>
+              <IconPicker
+                value={categoryForm.icon}
+                onChange={(v) =>
+                  setCategoryForm((f) => ({ ...f, icon: v }))
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Pick a Lucide icon or upload an image. Images are shown
+                full-bleed with a gradient overlay on the public help center.
+              </p>
             </div>
             {categoryError && (
               <p className="text-sm text-destructive">{categoryError}</p>

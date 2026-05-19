@@ -1,5 +1,4 @@
 /** @jsxImportSource hono/jsx */
-import { raw } from "hono/html";
 import type { WidgetConfigRow } from "../db/schema";
 import helpCss from "./help.css?inline";
 import { renderProjectTheme } from "./render-project-theme";
@@ -18,6 +17,7 @@ export interface LayoutProps {
   widgetConfig: WidgetConfigRow | null;
   jsonLd?: object | null;
   ogImage?: OgImage | null;
+  sidebar?: unknown;
   children?: unknown;
 }
 
@@ -65,20 +65,22 @@ export function Layout(props: LayoutProps) {
         <style dangerouslySetInnerHTML={{ __html: themeOverrides }} />
       </head>
       <body class="min-h-screen bg-background text-foreground antialiased">
-        {props.children}
-        {raw(
-          `<script src="https://widget.replymaven.com/widget-embed.js" data-project="${escapeAttr(props.projectSlug)}" async></script>`,
+        {props.sidebar ? (
+          <div class="help-shell">
+            {props.sidebar}
+            <main class="help-main">{props.children}</main>
+          </div>
+        ) : (
+          props.children
         )}
+        <script
+          src="https://widget.replymaven.com/widget-embed.js"
+          data-project={props.projectSlug}
+          async
+        />
       </body>
     </html>
   );
-}
-
-function escapeAttr(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;");
 }
 
 function safeJsonLd(value: unknown): string {

@@ -1452,13 +1452,14 @@ const app = new Hono<HonoAppContext>()
     }
 
     const widgetService = new WidgetService(db);
-    const [widgetConfigRow, settings, siblings] = await Promise.all([
+    const [widgetConfigRow, settings, siblings, categories] = await Promise.all([
       widgetService.getWidgetConfig(project.id),
       projectService.getSettings(project.id),
       helpService.listArticles(project.id, {
         categoryId: match.category.id,
         status: "published",
       }),
+      helpService.listCategories(project.id),
     ]);
 
     const orderedIds = siblings.map((a) => a.id);
@@ -1477,6 +1478,7 @@ const app = new Hono<HonoAppContext>()
     const html = renderHelpArticle({
       project,
       category: match.category,
+      categories,
       article: match.article,
       bodyHtml,
       prevArticle,
@@ -1508,18 +1510,20 @@ const app = new Hono<HonoAppContext>()
     if (!category) return c.text("Not found", 404);
 
     const widgetService = new WidgetService(db);
-    const [widgetConfigRow, settings, articles] = await Promise.all([
+    const [widgetConfigRow, settings, articles, categories] = await Promise.all([
       widgetService.getWidgetConfig(project.id),
       projectService.getSettings(project.id),
       helpService.listArticles(project.id, {
         categoryId: category.id,
         status: "published",
       }),
+      helpService.listCategories(project.id),
     ]);
 
     const html = renderHelpCategory({
       project,
       category,
+      categories,
       articles,
       widgetConfig: widgetConfigRow,
       helpCustomUrl: settings?.helpCustomUrl ?? null,

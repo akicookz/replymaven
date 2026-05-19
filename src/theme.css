@@ -104,6 +104,12 @@
   /* Specialty surfaces */
   --code: #04040a;
   --code-foreground: #e2e8f0;
+
+  /* Overlay scrim tokens (image cards, hero overlays) */
+  --overlay-strong: oklch(0% 0 0 / 0.85);
+  --overlay-mid: oklch(0% 0 0 / 0.45);
+  --on-overlay: oklch(100% 0 0);
+  --on-overlay-muted: oklch(100% 0 0 / 0.85);
 }
 
 /* ─── Light Mode (for future toggle) ──────────────────────────────────────── */

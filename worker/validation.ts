@@ -593,7 +593,18 @@ export const createHelpCategorySchema = z.object({
     .regex(/^[a-z0-9-]+$/, "Slug may only contain lowercase letters, numbers, and hyphens")
     .optional(),
   description: z.string().max(500).nullable().optional(),
-  icon: z.string().max(50).nullable().optional(),
+  icon: z
+    .union([
+      z.string().regex(/^[A-Z][A-Za-z]{1,49}$/, "Invalid icon name"),
+      z
+        .string()
+        .regex(
+          /^\/api\/uploads\/[A-Za-z0-9._/-]+\.(jpe?g|png|webp)$/i,
+          "Invalid icon image path",
+        ),
+    ])
+    .nullable()
+    .optional(),
   sortOrder: z.number().int().min(0).optional(),
 });
 
