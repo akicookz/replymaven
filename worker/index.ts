@@ -1740,18 +1740,32 @@ const app = new Hono<HonoAppContext>()
       categories,
       counts,
       allPublished,
+      recentlyPublished,
     ] = await Promise.all([
       widgetService.getWidgetConfig(project.id),
       projectService.getSettings(project.id),
       helpService.listCategories(project.id),
       helpService.getArticleCountsByCategory(project.id),
       helpService.listAllPublishedArticles(project.id),
+      helpService.listRecentlyPublishedArticles(project.id),
     ]);
 
     const enriched = categories.map((cat) => ({
       ...cat,
       articleCount: counts.get(cat.id) ?? 0,
     }));
+
+    const categoryById = new Map(categories.map((cat) => [cat.id, cat]));
+    const popularArticles = recentlyPublished
+      .map((article) => {
+        const category = categoryById.get(article.categoryId);
+        if (!category) return null;
+        return { article, category };
+      })
+      .filter(
+        (entry): entry is { article: HelpArticleRow; category: HelpCategoryRow } =>
+          entry !== null,
+      );
 
     const articlesByCategory = groupArticlesByCategory(allPublished);
     const topNav = parseHelpTopNav(settings?.helpTopNav);
@@ -1760,6 +1774,7 @@ const app = new Hono<HonoAppContext>()
       project,
       categories: enriched,
       articlesByCategory,
+      popularArticles,
       widgetConfig: widgetConfigRow,
       helpCustomUrl: settings?.helpCustomUrl ?? null,
       topNav,

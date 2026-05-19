@@ -11,15 +11,22 @@ import { buildHelpUrl } from "./build-help-url";
 import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
 import { CategoryCard } from "./category-card";
+import { HelpIcon } from "./icons";
 
 interface CategoryWithCount extends HelpCategoryRow {
   articleCount: number;
+}
+
+interface PopularArticleEntry {
+  article: HelpArticleRow;
+  category: HelpCategoryRow;
 }
 
 interface RenderHelpIndexProps {
   project: ProjectRow;
   categories: CategoryWithCount[];
   articlesByCategory: Map<string, HelpArticleRow[]>;
+  popularArticles: PopularArticleEntry[];
   widgetConfig: WidgetConfigRow | null;
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
@@ -113,23 +120,63 @@ export function renderHelpIndex(props: RenderHelpIndexProps) {
         </header>
 
         <section class="help-index-body">
-          {props.categories.length === 0 ? (
-            <div class="help-empty">No help articles yet.</div>
-          ) : (
-            <div class="help-index-grid">
-              {props.categories.map((category) => (
-                <CategoryCard
-                  category={category}
-                  articleCount={category.articleCount}
-                  href={buildHelpUrl({
-                    projectSlug: props.project.slug,
-                    customUrl: props.helpCustomUrl,
-                    category: category.slug,
-                  })}
-                />
-              ))}
+          <div
+            class={
+              props.popularArticles.length > 0
+                ? "grid gap-8 lg:grid-cols-[1fr_320px]"
+                : ""
+            }
+          >
+            <div>
+              {props.categories.length === 0 ? (
+                <div class="help-empty">No help articles yet.</div>
+              ) : (
+                <div class="help-index-grid">
+                  {props.categories.map((category) => (
+                    <CategoryCard
+                      category={category}
+                      articleCount={category.articleCount}
+                      href={buildHelpUrl({
+                        projectSlug: props.project.slug,
+                        customUrl: props.helpCustomUrl,
+                        category: category.slug,
+                      })}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+            {props.popularArticles.length > 0 && (
+              <aside class="hidden lg:block">
+                <div class="rounded-xl border border-border bg-card p-4">
+                  <h2 class="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <HelpIcon name="Sparkles" class="h-4 w-4 text-primary" />
+                    Popular Articles
+                  </h2>
+                  <ul class="space-y-1">
+                    {props.popularArticles.map(({ article, category }) => (
+                      <li>
+                        <a
+                          class="group flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                          href={buildHelpUrl({
+                            projectSlug: props.project.slug,
+                            customUrl: props.helpCustomUrl,
+                            category: category.slug,
+                            article: article.slug,
+                          })}
+                        >
+                          <span class="truncate">{article.title}</span>
+                          <span class="text-xs opacity-50 transition-opacity group-hover:opacity-100">
+                            →
+                          </span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </aside>
+            )}
+          </div>
         </section>
       </div>
     </Layout>

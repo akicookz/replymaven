@@ -105,89 +105,6 @@
 .help-prose strong { font-weight: 600; }
 .help-prose em { font-style: italic; }
 
-/* ─── Top bar ────────────────────────────────────────────────────────────── */
-/* Single section divider (border-bottom) here is acceptable: this is a page-
-   chrome boundary, not a row separator inside a list. Aligns with Linear /
-   Ferndesk conventions. */
-
-.help-topbar {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.875rem 1.5rem;
-  background: var(--background);
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  border-bottom: 1px solid var(--border);
-}
-.help-topbar-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.625rem;
-  color: var(--foreground);
-  text-decoration: none;
-  font-weight: 600;
-  transition: opacity 120ms ease;
-}
-.help-topbar-brand:hover {
-  opacity: 0.85;
-}
-.help-topbar-avatar {
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: 999px;
-  object-fit: cover;
-  background: var(--muted);
-}
-.help-topbar-name {
-  font-family: var(--font-heading);
-  font-size: 0.95rem;
-  letter-spacing: -0.01em;
-  color: var(--foreground);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 18rem;
-}
-.help-topbar-nav {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.help-topbar-link {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.625rem;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--muted-foreground);
-  text-decoration: none;
-  transition: color 120ms ease, background-color 120ms ease;
-}
-.help-topbar-link:hover {
-  color: var(--foreground);
-  background: var(--muted);
-}
-.help-topbar-cta {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.5rem 0.95rem;
-  border-radius: 0.625rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  background: var(--brand);
-  color: color-mix(in oklch, var(--brand), white 90%);
-  text-decoration: none;
-  transition: background-color 120ms ease, transform 120ms ease;
-}
-.help-topbar-cta:hover {
-  background: var(--brand-dark);
-}
-
 /* ─── Shell + sidebar layout ─────────────────────────────────────────────── */
 
 .help-shell {
@@ -411,7 +328,7 @@
 
 .help-index-body {
   padding: 0 1.5rem 5rem;
-  max-width: 64rem;
+  max-width: 80rem;
   width: 100%;
 }
 .help-index-grid {
