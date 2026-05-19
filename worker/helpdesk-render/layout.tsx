@@ -17,6 +17,7 @@ export interface LayoutProps {
   widgetConfig: WidgetConfigRow | null;
   jsonLd?: object | null;
   ogImage?: OgImage | null;
+  topBar?: unknown;
   sidebar?: unknown;
   children?: unknown;
 }
@@ -65,6 +66,7 @@ export function Layout(props: LayoutProps) {
         <style dangerouslySetInnerHTML={{ __html: themeOverrides }} />
       </head>
       <body class="min-h-screen bg-background text-foreground antialiased">
+        {props.topBar}
         {props.sidebar ? (
           <div class="help-shell">
             {props.sidebar}

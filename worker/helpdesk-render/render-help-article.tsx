@@ -5,21 +5,25 @@ import type {
   ProjectRow,
   WidgetConfigRow,
 } from "../db/schema";
+import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
 import { HelpSidebar } from "./sidebar";
+import { HelpTopBar } from "./top-bar";
 import { MobileCategoryNav } from "./mobile-category-nav";
 
 interface RenderHelpArticleProps {
   project: ProjectRow;
   category: HelpCategoryRow;
   categories: HelpCategoryRow[];
+  articlesByCategory: Map<string, HelpArticleRow[]>;
   article: HelpArticleRow;
   bodyHtml: string;
   prevArticle: HelpArticleRow | null;
   nextArticle: HelpArticleRow | null;
   widgetConfig: WidgetConfigRow | null;
   helpCustomUrl: string | null;
+  topNav: HelpTopNavItem[];
 }
 
 export function renderHelpArticle(props: RenderHelpArticleProps) {
@@ -61,13 +65,23 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
       jsonLd={jsonLd}
+      topBar={
+        <HelpTopBar
+          project={props.project}
+          widgetConfig={props.widgetConfig}
+          helpCustomUrl={props.helpCustomUrl}
+          topNav={props.topNav}
+        />
+      }
       sidebar={
         <HelpSidebar
           project={props.project}
           categories={props.categories}
-          widgetConfig={props.widgetConfig}
+          articlesByCategory={props.articlesByCategory}
           activeCategorySlug={props.category.slug}
+          activeArticleSlug={props.article.slug}
           helpCustomUrl={props.helpCustomUrl}
+          widgetConfig={props.widgetConfig}
         />
       }
     >

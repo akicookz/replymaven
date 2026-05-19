@@ -4,7 +4,12 @@ import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { users } from "./db/auth.schema";
-import { helpArticles, helpCategories } from "./db/schema";
+import {
+  helpArticles,
+  helpCategories,
+  type HelpArticleRow,
+  type HelpCategoryRow,
+} from "./db/schema";
 import { createAuth } from "./auth";
 import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
@@ -30,10 +35,15 @@ import { HelpdeskService } from "./services/helpdesk-service";
 import { renderHelpIndex } from "./helpdesk-render/render-help-index";
 import { renderHelpCategory } from "./helpdesk-render/render-help-category";
 import { renderHelpArticle } from "./helpdesk-render/render-help-article";
+import {
+  renderHelpSearch,
+  type HelpSearchResult,
+} from "./helpdesk-render/render-help-search";
 import { renderSitemap } from "./helpdesk-render/render-sitemap";
 import { renderRobots } from "./helpdesk-render/render-robots";
 import { renderMarkdown } from "./helpdesk-render/render-markdown";
 import { normalizeHelpCustomUrl } from "./helpdesk-render/build-help-url";
+import { groupArticlesByCategory } from "./helpdesk-render/group-articles";
 import {
   encryptHeaders,
   decryptHeaders,
@@ -49,8 +59,9 @@ import { CopilotService } from "./services/copilot-service";
 import { triggerAutoRefinementIfEnabled } from "./chat-runtime/post-turn/auto-refine";
 import { buildToolRegistry } from "./chat-runtime/tools/build-tool-registry";
 import { toToolDefinition } from "./chat-runtime/types";
-import { logError, logInfo } from "./observability";
+import { logError, logInfo, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
+import { parseHelpTopNav } from "./lib/help-top-nav";
 import {
   broadcastClosed,
   broadcastMessageDeleted,
@@ -190,6 +201,84 @@ async function readBodyCapped(
     }
   }
   return new TextDecoder("utf-8", { fatal: false, ignoreBOM: false }).decode(buf);
+}
+
+// ─── Help search result resolver ──────────────────────────────────────────────
+function resolveHelpSearchResults(
+  response: unknown,
+  articles: HelpArticleRow[],
+  categories: HelpCategoryRow[],
+  projectId: string,
+): HelpSearchResult[] {
+  if (typeof response !== "object" || response === null) return [];
+  const articlesById = new Map(articles.map((a) => [a.id, a]));
+  const categoriesById = new Map(categories.map((c) => [c.id, c]));
+  const filenames: Array<{ filename: string; score: number | null }> = [];
+
+  const record = response as Record<string, unknown>;
+  const result =
+    typeof record.result === "object" && record.result !== null
+      ? (record.result as Record<string, unknown>)
+      : null;
+
+  const collectFromArray = (arr: unknown[]): void => {
+    for (const entry of arr) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const r = entry as Record<string, unknown>;
+      const item =
+        typeof r.item === "object" && r.item !== null
+          ? (r.item as Record<string, unknown>)
+          : null;
+      const filename =
+        typeof r.filename === "string"
+          ? r.filename
+          : typeof item?.key === "string"
+            ? (item.key as string)
+            : null;
+      if (!filename) continue;
+      const score = typeof r.score === "number" ? r.score : null;
+      filenames.push({ filename, score });
+    }
+  };
+
+  if (result && Array.isArray(result.chunks)) {
+    collectFromArray(result.chunks);
+  } else if (Array.isArray(record.chunks)) {
+    collectFromArray(record.chunks);
+  } else if (Array.isArray(record.data)) {
+    collectFromArray(record.data);
+  }
+
+  const prefix = `${projectId}/articles/`;
+  const bestByArticleId = new Map<
+    string,
+    { article: HelpArticleRow; score: number | null }
+  >();
+  for (const { filename, score } of filenames) {
+    if (!filename.startsWith(prefix)) continue;
+    const tail = filename.slice(prefix.length);
+    const articleId = tail.endsWith(".md") ? tail.slice(0, -3) : tail;
+    const article = articlesById.get(articleId);
+    if (!article) continue;
+    const existing = bestByArticleId.get(articleId);
+    if (!existing) {
+      bestByArticleId.set(articleId, { article, score });
+    } else if (
+      score !== null &&
+      (existing.score === null || score > existing.score)
+    ) {
+      bestByArticleId.set(articleId, { article, score });
+    }
+  }
+
+  const results: HelpSearchResult[] = [];
+  for (const { article, score } of bestByArticleId.values()) {
+    const category = categoriesById.get(article.categoryId);
+    if (!category) continue;
+    results.push({ article, category, score });
+  }
+  results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return results;
 }
 
 // ─── Zod validation helper ────────────────────────────────────────────────────
@@ -1452,7 +1541,13 @@ const app = new Hono<HonoAppContext>()
     }
 
     const widgetService = new WidgetService(db);
-    const [widgetConfigRow, settings, siblings, categories] = await Promise.all([
+    const [
+      widgetConfigRow,
+      settings,
+      siblings,
+      categories,
+      allPublished,
+    ] = await Promise.all([
       widgetService.getWidgetConfig(project.id),
       projectService.getSettings(project.id),
       helpService.listArticles(project.id, {
@@ -1460,6 +1555,7 @@ const app = new Hono<HonoAppContext>()
         status: "published",
       }),
       helpService.listCategories(project.id),
+      helpService.listAllPublishedArticles(project.id),
     ]);
 
     const orderedIds = siblings.map((a) => a.id);
@@ -1475,19 +1571,100 @@ const app = new Hono<HonoAppContext>()
       customUrl: settings?.helpCustomUrl ?? null,
     });
 
+    const articlesByCategory = groupArticlesByCategory(allPublished);
+    const topNav = parseHelpTopNav(settings?.helpTopNav);
+
     const html = renderHelpArticle({
       project,
       category: match.category,
       categories,
+      articlesByCategory,
       article: match.article,
       bodyHtml,
       prevArticle,
       nextArticle,
       widgetConfig: widgetConfigRow,
       helpCustomUrl: settings?.helpCustomUrl ?? null,
+      topNav,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
       "Cache-Control": "public, max-age=120, s-maxage=120",
+    });
+  })
+  .get("/help/:projectSlug/search", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
+      return c.text("Rate limit exceeded", 429);
+    }
+    const projectSlug = c.req.param("projectSlug");
+    const query = (c.req.query("q") ?? "").trim().slice(0, 200);
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(projectSlug);
+    if (!project) return c.text("Not found", 404);
+
+    const helpService = new HelpdeskService(db, c.env.UPLOADS);
+    const widgetService = new WidgetService(db);
+    const [widgetConfigRow, settings, categories, allPublished] =
+      await Promise.all([
+        widgetService.getWidgetConfig(project.id),
+        projectService.getSettings(project.id),
+        helpService.listCategories(project.id),
+        helpService.listAllPublishedArticles(project.id),
+      ]);
+
+    let results: HelpSearchResult[] = [];
+    if (query.length > 0) {
+      try {
+        const response = await c.env.AI.aiSearch()
+          .get("supportbot")
+          .search({
+            messages: [{ role: "user", content: query }],
+            ai_search_options: {
+              retrieval: {
+                retrieval_type: "vector",
+                filters: {
+                  folder: { $eq: `${project.id}/` },
+                } as never,
+                max_num_results: 12,
+                match_threshold: 0.2,
+              },
+              query_rewrite: { enabled: false },
+              reranking: {
+                enabled: true,
+                model: "@cf/baai/bge-reranker-base",
+              },
+            },
+          });
+        results = resolveHelpSearchResults(
+          response,
+          allPublished,
+          categories,
+          project.id,
+        );
+      } catch (err) {
+        logWarn("help_search.failed", {
+          projectId: project.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    const articlesByCategory = groupArticlesByCategory(allPublished);
+    const topNav = parseHelpTopNav(settings?.helpTopNav);
+
+    const html = renderHelpSearch({
+      project,
+      query,
+      results,
+      categories,
+      articlesByCategory,
+      widgetConfig: widgetConfigRow,
+      helpCustomUrl: settings?.helpCustomUrl ?? null,
+      topNav,
+    });
+    return c.html(`<!doctype html>${html.toString()}`, 200, {
+      "Cache-Control": "no-store",
     });
   })
   .get("/help/:projectSlug/:categorySlug", async (c) => {
@@ -1510,7 +1687,13 @@ const app = new Hono<HonoAppContext>()
     if (!category) return c.text("Not found", 404);
 
     const widgetService = new WidgetService(db);
-    const [widgetConfigRow, settings, articles, categories] = await Promise.all([
+    const [
+      widgetConfigRow,
+      settings,
+      articles,
+      categories,
+      allPublished,
+    ] = await Promise.all([
       widgetService.getWidgetConfig(project.id),
       projectService.getSettings(project.id),
       helpService.listArticles(project.id, {
@@ -1518,15 +1701,21 @@ const app = new Hono<HonoAppContext>()
         status: "published",
       }),
       helpService.listCategories(project.id),
+      helpService.listAllPublishedArticles(project.id),
     ]);
+
+    const articlesByCategory = groupArticlesByCategory(allPublished);
+    const topNav = parseHelpTopNav(settings?.helpTopNav);
 
     const html = renderHelpCategory({
       project,
       category,
       categories,
       articles,
+      articlesByCategory,
       widgetConfig: widgetConfigRow,
       helpCustomUrl: settings?.helpCustomUrl ?? null,
+      topNav,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
       "Cache-Control": "public, max-age=120, s-maxage=120",
@@ -1545,11 +1734,18 @@ const app = new Hono<HonoAppContext>()
 
     const helpService = new HelpdeskService(db, c.env.UPLOADS);
     const widgetService = new WidgetService(db);
-    const [widgetConfigRow, settings, categories, counts] = await Promise.all([
+    const [
+      widgetConfigRow,
+      settings,
+      categories,
+      counts,
+      allPublished,
+    ] = await Promise.all([
       widgetService.getWidgetConfig(project.id),
       projectService.getSettings(project.id),
       helpService.listCategories(project.id),
       helpService.getArticleCountsByCategory(project.id),
+      helpService.listAllPublishedArticles(project.id),
     ]);
 
     const enriched = categories.map((cat) => ({
@@ -1557,11 +1753,16 @@ const app = new Hono<HonoAppContext>()
       articleCount: counts.get(cat.id) ?? 0,
     }));
 
+    const articlesByCategory = groupArticlesByCategory(allPublished);
+    const topNav = parseHelpTopNav(settings?.helpTopNav);
+
     const html = renderHelpIndex({
       project,
       categories: enriched,
+      articlesByCategory,
       widgetConfig: widgetConfigRow,
       helpCustomUrl: settings?.helpCustomUrl ?? null,
+      topNav,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
       "Cache-Control": "public, max-age=120, s-maxage=120",
@@ -3181,6 +3382,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({
         ...settings,
         telegramBotToken: settings.telegramBotToken ? "••••••••" : null,
+        helpTopNav: parseHelpTopNav(settings.helpTopNav),
       });
     }
     return c.json(null);
@@ -3216,9 +3418,18 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
+    const { helpTopNav, ...rest } = parsed.data;
+    const updatePayload: Parameters<typeof projectService.updateSettings>[1] = {
+      ...rest,
+    };
+    if (helpTopNav !== undefined) {
+      updatePayload.helpTopNav =
+        helpTopNav === null ? null : JSON.stringify(helpTopNav);
+    }
+
     const settings = await projectService.updateSettings(
       project.id,
-      parsed.data,
+      updatePayload,
     );
     return c.json(settings);
   })

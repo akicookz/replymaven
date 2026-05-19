@@ -85,6 +85,7 @@ export const projectSettings = sqliteTable(
       .default(true),
     autoCloseMinutes: integer("auto_close_minutes").default(30), // null = disabled
     helpCustomUrl: text("help_custom_url"),
+    helpTopNav: text("help_top_nav"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),

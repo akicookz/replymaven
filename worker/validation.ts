@@ -49,6 +49,32 @@ function isPermittedHelpUrl(url: string): boolean {
   }
 }
 
+// ─── Help Top Nav (shared by project settings) ───────────────────────────────
+export const helpTopNavItemSchema = z.object({
+  label: z.string().min(1).max(40),
+  href: z
+    .string()
+    .url()
+    .max(2048)
+    .refine((u) => u.startsWith("https://"), "Must be HTTPS")
+    .refine((u) => {
+      try {
+        const host = new URL(u).hostname.toLowerCase();
+        return host !== "replymaven.com" && !host.endsWith(".replymaven.com");
+      } catch {
+        return false;
+      }
+    }, "Cannot point at replymaven.com"),
+  style: z.enum(["link", "button"]),
+});
+
+export const helpTopNavSchema = z
+  .array(helpTopNavItemSchema)
+  .max(3)
+  .nullable();
+
+export type HelpTopNavItem = z.infer<typeof helpTopNavItemSchema>;
+
 // ─── Projects ─────────────────────────────────────────────────────────────────
 export const createProjectSchema = z.object({
   name: z.string().min(1, "Project name is required").max(100),
@@ -115,6 +141,7 @@ export const updateProjectSettingsSchema = z.object({
     .refine(isPermittedHelpUrl, "Host is not allowed")
     .nullable()
     .optional(),
+  helpTopNav: helpTopNavSchema.optional(),
 });
 
 // ─── Widget Config ────────────────────────────────────────────────────────────

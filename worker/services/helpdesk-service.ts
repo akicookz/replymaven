@@ -265,6 +265,25 @@ export class HelpdeskService {
       .orderBy(asc(helpArticles.sortOrder), asc(helpArticles.createdAt));
   }
 
+  async listAllPublishedArticles(
+    projectId: string,
+  ): Promise<HelpArticleRow[]> {
+    return this.db
+      .select()
+      .from(helpArticles)
+      .where(
+        and(
+          eq(helpArticles.projectId, projectId),
+          eq(helpArticles.status, "published"),
+        ),
+      )
+      .orderBy(
+        asc(helpArticles.categoryId),
+        asc(helpArticles.sortOrder),
+        asc(helpArticles.createdAt),
+      );
+  }
+
   async getArticleById(
     id: string,
     projectId: string,

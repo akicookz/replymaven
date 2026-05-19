@@ -14,9 +14,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MobileMenuButton } from "@/components/PageHeader";
 import ProxySetupGuide from "@/components/ProxySetupGuide";
+import HelpTopNavEditor, {
+  type HelpTopNavItem,
+} from "@/components/help-top-nav-editor";
 
 interface ProjectSettingsData {
   helpCustomUrl: string | null;
+  helpTopNav: HelpTopNavItem[] | null;
 }
 
 interface ProjectData {
@@ -38,6 +42,8 @@ function HelpCenterSettings() {
   const [customUrl, setCustomUrl] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TestProxyResponse | null>(null);
+  const [topNav, setTopNav] = useState<HelpTopNavItem[]>([]);
+  const [topNavError, setTopNavError] = useState<string | null>(null);
 
   const { data: project } = useQuery<ProjectData>({
     queryKey: ["project", projectId],
@@ -60,8 +66,39 @@ function HelpCenterSettings() {
   useEffect(() => {
     if (settings) {
       setCustomUrl(settings.helpCustomUrl ?? "");
+      setTopNav(Array.isArray(settings.helpTopNav) ? settings.helpTopNav : []);
     }
   }, [settings]);
+
+  function validateTopNav(items: HelpTopNavItem[]): string | null {
+    if (items.length > 3) return "Maximum 3 top-nav links";
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const label = item.label.trim();
+      const href = item.href.trim();
+      if (!label) return `Link ${i + 1}: label is required`;
+      if (label.length > 40) return `Link ${i + 1}: label too long (max 40)`;
+      if (!href) return `Link ${i + 1}: URL is required`;
+      if (href.length > 2048) return `Link ${i + 1}: URL too long`;
+      let parsed: URL;
+      try {
+        parsed = new URL(href);
+      } catch {
+        return `Link ${i + 1}: URL is not valid`;
+      }
+      if (parsed.protocol !== "https:") {
+        return `Link ${i + 1}: must use HTTPS`;
+      }
+      const host = parsed.hostname.toLowerCase();
+      if (host === "replymaven.com" || host.endsWith(".replymaven.com")) {
+        return `Link ${i + 1}: cannot point at replymaven.com`;
+      }
+      if (item.style !== "link" && item.style !== "button") {
+        return `Link ${i + 1}: invalid style`;
+      }
+    }
+    return null;
+  }
 
   function validateCustomUrl(value: string): string | null {
     if (!value) return null;
@@ -90,10 +127,26 @@ function HelpCenterSettings() {
       }
       setValidationError(null);
 
+      const normalizedTopNav = topNav.map((item) => ({
+        label: item.label.trim(),
+        href: item.href.trim(),
+        style: item.style,
+      }));
+      const topNavMsg = validateTopNav(normalizedTopNav);
+      if (topNavMsg) {
+        setTopNavError(topNavMsg);
+        throw new Error(topNavMsg);
+      }
+      setTopNavError(null);
+
       const res = await fetch(`/api/projects/${projectId}/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ helpCustomUrl: trimmed || null }),
+        body: JSON.stringify({
+          helpCustomUrl: trimmed || null,
+          helpTopNav:
+            normalizedTopNav.length === 0 ? null : normalizedTopNav,
+        }),
       });
       if (!res.ok) {
         const err = await res
@@ -142,7 +195,10 @@ function HelpCenterSettings() {
     },
   });
 
-  const dirty = (settings?.helpCustomUrl ?? "") !== customUrl;
+  const savedTopNav = settings?.helpTopNav ?? [];
+  const dirty =
+    (settings?.helpCustomUrl ?? "") !== customUrl ||
+    JSON.stringify(savedTopNav) !== JSON.stringify(topNav);
 
   return (
     <div className="space-y-6">
@@ -261,6 +317,31 @@ function HelpCenterSettings() {
               </div>
             </div>
           </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl bg-card/50 backdrop-blur-xl border border-border p-6 space-y-5">
+        <div>
+          <h2 className="text-base font-semibold tracking-tight">
+            Top navigation
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Add up to 3 links or buttons that appear in the top-right of your
+            help center.
+          </p>
+        </div>
+
+        <HelpTopNavEditor
+          value={topNav}
+          onChange={(next) => {
+            setTopNav(next);
+            setTopNavError(null);
+          }}
+          disabled={isLoading || saveSettings.isPending}
+        />
+
+        {topNavError && (
+          <p className="text-xs text-destructive">{topNavError}</p>
         )}
       </div>
 
