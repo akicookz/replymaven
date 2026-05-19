@@ -131,8 +131,8 @@
 }
 .help-sidebar-home {
   display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
+  align-items: center;
+  gap: 0.625rem;
   padding: 0.5rem 0.625rem;
   border-radius: 0.625rem;
   text-decoration: none;
@@ -141,6 +141,20 @@
 }
 .help-sidebar-home:hover {
   background: color-mix(in oklch, var(--background), var(--foreground) 6%);
+}
+.help-sidebar-avatar {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.5rem;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: color-mix(in oklch, var(--background), var(--foreground) 6%);
+}
+.help-sidebar-home-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
 }
 .help-sidebar-home-label {
   font-size: 0.7rem;
@@ -155,6 +169,9 @@
   font-weight: 600;
   color: var(--foreground);
   letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .help-sidebar-nav {
   flex: 1;
@@ -197,9 +214,13 @@
   background: color-mix(in oklch, var(--background), var(--foreground) 4%);
 }
 .help-sidebar-item-active {
-  color: var(--foreground);
-  background: color-mix(in oklch, var(--background), var(--foreground) 6%);
+  color: var(--brand);
+  background: color-mix(in oklch, var(--brand), transparent 90%);
   font-weight: 500;
+}
+.help-sidebar-item-active:hover {
+  color: var(--brand);
+  background: color-mix(in oklch, var(--brand), transparent 85%);
 }
 .help-sidebar-item-icon {
   display: inline-flex;
@@ -264,42 +285,106 @@
   .help-mobile-cats { display: none; }
 }
 
-/* ─── Category cards (index grid) ─────────────────────────────────────────── */
+/* ─── Index page: hero banner + body ─────────────────────────────────────── */
 
+.help-index {
+  display: flex;
+  flex-direction: column;
+}
 .help-index-hero {
-  padding: 4.5rem 1.5rem 2.5rem;
+  position: relative;
+  min-height: 180px;
+  padding: 2.5rem 1.5rem;
+  background:
+    radial-gradient(
+      120% 140% at 0% 0%,
+      color-mix(in oklch, var(--brand), var(--background) 75%) 0%,
+      var(--background) 70%
+    ),
+    color-mix(in oklch, var(--brand), var(--background) 88%);
+  display: flex;
+  align-items: center;
+}
+.help-index-hero-inner {
+  width: 100%;
   max-width: 64rem;
-  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 .help-index-eyebrow {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.18em;
-  color: var(--muted-foreground);
+  color: var(--brand);
+  font-weight: 600;
   margin: 0;
 }
 .help-index-title {
   margin: 0.75rem 0 0;
   font-family: var(--font-heading);
-  font-size: clamp(2.25rem, 4vw, 3.25rem);
+  font-size: clamp(1.9rem, 3.5vw, 3rem);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.05;
   color: var(--foreground);
+  text-align: left;
 }
 .help-index-subtitle {
-  margin: 1rem 0 0;
-  font-size: 1.05rem;
+  margin: 0.75rem 0 0;
+  font-size: 1rem;
   color: var(--muted-foreground);
   max-width: 40rem;
+  text-align: left;
+}
+.help-index-search {
+  margin-top: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  max-width: 28rem;
+  padding: 0.75rem 1rem;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--background), var(--foreground) 2%);
+  border: 1px solid color-mix(in oklch, var(--brand), transparent 80%);
+  border-radius: 999px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+.help-index-search:hover {
+  background: var(--background);
+  border-color: color-mix(in oklch, var(--brand), transparent 60%);
+  transform: translateY(-1px);
+}
+.help-index-search-icon {
+  width: 1.05rem;
+  height: 1.05rem;
+  color: var(--brand);
+  flex-shrink: 0;
+}
+.help-index-search-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.help-index-body {
+  padding: 2.5rem 1.5rem 5rem;
+  max-width: 64rem;
+  width: 100%;
 }
 .help-index-grid {
   display: grid;
   grid-template-columns: 1fr;
   gap: 1rem;
-  padding: 0 1.5rem 5rem;
-  max-width: 80rem;
-  margin: 0 auto;
+  align-items: start;
+  justify-content: start;
 }
 @media (min-width: 640px) {
   .help-index-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -309,6 +394,8 @@
 }
 @media (min-width: 1024px) {
   .help-index-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .help-index-hero { min-height: 260px; padding: 3.5rem 3rem; }
+  .help-index-body { padding: 3rem 3rem 5rem; }
 }
 
 .help-category-card {
@@ -318,6 +405,7 @@
   color: var(--foreground);
   border-radius: 1.25rem;
   overflow: hidden;
+  align-self: start;
   transition: transform 200ms ease, box-shadow 200ms ease, background-color 200ms ease;
   isolation: isolate;
 }
@@ -326,10 +414,11 @@
   padding: 1.5rem;
   background: var(--card);
   border: 1px solid var(--border);
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 1 / 1;
 }
 .help-category-card-icon:hover {
-  background: color-mix(in oklch, var(--card), var(--brand) 5%);
+  background: color-mix(in oklch, var(--card), var(--brand) 4%);
+  border-color: color-mix(in oklch, var(--brand), transparent 70%);
   transform: translateY(-2px);
 }
 .help-category-card-icon:hover .help-category-card-icon-wrap {
@@ -343,8 +432,8 @@
   align-items: center;
   justify-content: center;
   border-radius: 0.75rem;
-  background: color-mix(in oklch, var(--background), var(--foreground) 5%);
-  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--brand), var(--background) 92%);
+  color: var(--brand);
   transition: background-color 200ms ease, color 200ms ease;
 }
 .help-category-card-icon-svg {
@@ -386,7 +475,7 @@
 }
 
 .help-category-card-image {
-  aspect-ratio: 4 / 5;
+  aspect-ratio: 1 / 1;
   color: var(--on-overlay);
   flex-direction: column;
 }

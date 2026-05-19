@@ -41,6 +41,7 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
         <HelpSidebar
           project={props.project}
           categories={props.categories}
+          widgetConfig={props.widgetConfig}
           activeCategorySlug={props.category.slug}
           helpCustomUrl={props.helpCustomUrl}
         />

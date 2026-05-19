@@ -1,5 +1,5 @@
 /** @jsxImportSource hono/jsx */
-import type { HelpCategoryRow, ProjectRow } from "../db/schema";
+import type { HelpCategoryRow, ProjectRow, WidgetConfigRow } from "../db/schema";
 import { buildHelpUrl } from "./build-help-url";
 import { HelpIcon } from "./icons";
 import { isImageIcon } from "../../shared/help-icons";
@@ -7,6 +7,7 @@ import { isImageIcon } from "../../shared/help-icons";
 export interface HelpSidebarProps {
   project: ProjectRow;
   categories: HelpCategoryRow[];
+  widgetConfig?: WidgetConfigRow | null;
   activeCategorySlug?: string | null;
   helpCustomUrl: string | null;
 }
@@ -16,13 +17,26 @@ export function HelpSidebar(props: HelpSidebarProps) {
     projectSlug: props.project.slug,
     customUrl: props.helpCustomUrl,
   });
+  const avatarUrl = props.widgetConfig?.avatarUrl ?? null;
 
   return (
     <aside class="help-sidebar">
       <div class="help-sidebar-inner">
         <a class="help-sidebar-home" href={homeHref}>
-          <span class="help-sidebar-home-label">Help Center</span>
-          <span class="help-sidebar-home-project">{props.project.name}</span>
+          {avatarUrl && (
+            <img
+              class="help-sidebar-avatar"
+              src={avatarUrl}
+              alt=""
+              role="presentation"
+              loading="lazy"
+              decoding="async"
+            />
+          )}
+          <span class="help-sidebar-home-text">
+            <span class="help-sidebar-home-label">Help Center</span>
+            <span class="help-sidebar-home-project">{props.project.name}</span>
+          </span>
         </a>
 
         {props.categories.length > 0 && (
