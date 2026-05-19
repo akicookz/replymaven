@@ -22,26 +22,43 @@ export function HelpSidebar(props: HelpSidebarProps) {
   return (
     <aside class="help-sidebar">
       <div class="help-sidebar-inner">
-        <a class="help-sidebar-home" href={homeHref}>
-          {avatarUrl && (
-            <img
-              class="help-sidebar-avatar"
-              src={avatarUrl}
-              alt=""
-              role="presentation"
-              loading="lazy"
-              decoding="async"
-            />
-          )}
-          <span class="help-sidebar-home-text">
-            <span class="help-sidebar-home-label">Help Center</span>
+        <div class="help-sidebar-header">
+          <a class="help-sidebar-home" href={homeHref}>
+            {avatarUrl && (
+              <img
+                class="help-sidebar-avatar"
+                src={avatarUrl}
+                alt=""
+                role="presentation"
+                loading="lazy"
+                decoding="async"
+              />
+            )}
             <span class="help-sidebar-home-project">{props.project.name}</span>
-          </span>
-        </a>
+          </a>
+          <button
+            type="button"
+            class="help-sidebar-search"
+            onclick="if(window.ReplyMaven)window.ReplyMaven.open()"
+            aria-label="Search"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
+        </div>
 
         {props.categories.length > 0 && (
           <nav class="help-sidebar-nav" aria-label="Help categories">
-            <p class="help-sidebar-heading">Categories</p>
             <ul class="help-sidebar-list">
               {props.categories.map((category) => {
                 const isActive = category.slug === props.activeCategorySlug;

@@ -10,7 +10,6 @@ export interface CategoryCardProps {
 }
 
 export function CategoryCard(props: CategoryCardProps) {
-  const countLabel = `${props.articleCount} ${props.articleCount === 1 ? "article" : "articles"}`;
   const iconValue = props.category.icon;
 
   if (isImageIcon(iconValue)) {
@@ -27,7 +26,6 @@ export function CategoryCard(props: CategoryCardProps) {
         <div class="help-category-card-image-overlay" />
         <div class="help-category-card-image-content">
           <h2 class="help-category-card-title">{props.category.name}</h2>
-          <p class="help-category-card-count">{countLabel}</p>
         </div>
       </a>
     );
@@ -35,17 +33,18 @@ export function CategoryCard(props: CategoryCardProps) {
 
   return (
     <a class="help-category-card help-category-card-icon" href={props.href}>
-      <span class="help-category-card-icon-wrap">
+      <div class="help-category-card-icon-mark">
         <HelpIcon
           name={iconValue ?? "BookOpen"}
           class="help-category-card-icon-svg"
         />
-      </span>
-      <h2 class="help-category-card-title">{props.category.name}</h2>
-      {props.category.description && (
-        <p class="help-category-card-description">{props.category.description}</p>
-      )}
-      <p class="help-category-card-count">{countLabel}</p>
+      </div>
+      <div class="help-category-card-content">
+        <h2 class="help-category-card-title">{props.category.name}</h2>
+        {props.category.description && (
+          <p class="help-category-card-description">{props.category.description}</p>
+        )}
+      </div>
     </a>
   );
 }
