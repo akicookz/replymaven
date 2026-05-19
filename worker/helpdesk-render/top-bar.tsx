@@ -41,7 +41,7 @@ export function HelpTopBar(props: HelpTopBarProps) {
               return (
                 <a
                   href={item.href}
-                  class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  class="inline-flex h-9 items-center justify-center rounded-[var(--radius)] bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                   target={isExternal ? "_blank" : undefined}
                   rel={isExternal ? "noopener noreferrer" : undefined}
                 >
@@ -52,7 +52,7 @@ export function HelpTopBar(props: HelpTopBarProps) {
             return (
               <a
                 href={item.href}
-                class="inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                class="inline-flex h-9 items-center justify-center rounded-[var(--radius)] px-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
                 target={isExternal ? "_blank" : undefined}
                 rel={isExternal ? "noopener noreferrer" : undefined}
               >
