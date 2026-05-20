@@ -1,8 +1,9 @@
+import type { ChangeEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 export interface HelpTopNavItem {
   label: string;
@@ -123,19 +124,21 @@ function HelpTopNavEditor(props: HelpTopNavEditorProps) {
                     Use button preset
                   </button>
                 </div>
-                <Textarea
+                <textarea
                   id={`help-topnav-classes-${index}`}
                   value={item.classes ?? ""}
                   maxLength={300}
                   rows={2}
                   placeholder="Leave empty for a plain text link. Example: inline-flex h-9 items-center px-4 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90"
                   disabled={props.disabled}
-                  onChange={(e) =>
+                  onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
                     updateItem(index, {
                       classes: e.target.value.length > 0 ? e.target.value : null,
                     })
                   }
-                  className="font-mono text-xs"
+                  className={cn(
+                    "flex min-h-[60px] w-full rounded-md border border-input bg-card px-3 py-2 text-xs font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+                  )}
                 />
               </div>
             </li>
