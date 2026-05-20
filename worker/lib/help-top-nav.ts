@@ -1,8 +1,10 @@
 export interface HelpTopNavItem {
   label: string;
   href: string;
-  style: "link" | "button";
+  classes?: string | null;
 }
+
+const TAILWIND_CLASS_RE = /^[a-zA-Z0-9:/_\-[\]().,%! ]*$/;
 
 export function parseHelpTopNav(
   raw: string | null | undefined,
@@ -21,11 +23,16 @@ export function parseHelpTopNav(
     const record = candidate as Record<string, unknown>;
     const label = record.label;
     const href = record.href;
-    const style = record.style;
     if (typeof label !== "string" || label.length === 0) continue;
     if (typeof href !== "string" || href.length === 0) continue;
-    if (style !== "link" && style !== "button") continue;
-    items.push({ label, href, style });
+    let classes: string | null = null;
+    if (typeof record.classes === "string") {
+      const trimmed = record.classes.trim();
+      if (trimmed.length > 0 && trimmed.length <= 300 && TAILWIND_CLASS_RE.test(trimmed)) {
+        classes = trimmed;
+      }
+    }
+    items.push({ label, href, classes });
     if (items.length === 3) break;
   }
   return items;

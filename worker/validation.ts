@@ -50,6 +50,8 @@ function isPermittedHelpUrl(url: string): boolean {
 }
 
 // ─── Help Top Nav (shared by project settings) ───────────────────────────────
+const tailwindClassesRe = /^[a-zA-Z0-9:/_\-[\]().,%! ]*$/;
+
 export const helpTopNavItemSchema = z.object({
   label: z.string().min(1).max(40),
   href: z
@@ -65,7 +67,12 @@ export const helpTopNavItemSchema = z.object({
         return false;
       }
     }, "Cannot point at replymaven.com"),
-  style: z.enum(["link", "button"]),
+  classes: z
+    .string()
+    .max(300)
+    .regex(tailwindClassesRe, "Only Tailwind utility characters allowed")
+    .nullable()
+    .optional(),
 });
 
 export const helpTopNavSchema = z

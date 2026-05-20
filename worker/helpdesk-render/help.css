@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "../../src/theme.css";
 @source "./*.tsx";
+@source "./tailwind-safelist.ts";
 
 /* ─── Prose styles for marked output ─────────────────────────────────────── */
 

@@ -34,25 +34,16 @@ export function HelpTopBar(props: HelpTopBarProps) {
         <span class="max-w-72 truncate text-sm">{props.project.name}</span>
       </a>
       {props.topNav.length > 0 && (
-        <nav class="ml-auto flex items-center gap-1" aria-label="Top navigation">
+        <nav class="ml-auto flex items-center gap-2" aria-label="Top navigation">
           {props.topNav.map((item) => {
             const isExternal = item.href.startsWith("https://");
-            if (item.style === "button") {
-              return (
-                <a
-                  href={item.href}
-                  class="inline-flex h-9 items-center justify-center rounded-[var(--radius)] bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                  target={isExternal ? "_blank" : undefined}
-                  rel={isExternal ? "noopener noreferrer" : undefined}
-                >
-                  {item.label}
-                </a>
-              );
-            }
+            const classes =
+              item.classes?.trim() ||
+              "inline-flex h-9 items-center justify-center px-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground";
             return (
               <a
                 href={item.href}
-                class="inline-flex h-9 items-center justify-center rounded-[var(--radius)] px-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                class={classes}
                 target={isExternal ? "_blank" : undefined}
                 rel={isExternal ? "noopener noreferrer" : undefined}
               >

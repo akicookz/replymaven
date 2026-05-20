@@ -2,18 +2,12 @@ import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 export interface HelpTopNavItem {
   label: string;
   href: string;
-  style: "link" | "button";
+  classes?: string | null;
 }
 
 interface HelpTopNavEditorProps {
@@ -23,6 +17,8 @@ interface HelpTopNavEditorProps {
 }
 
 const MAX_ITEMS = 3;
+const DEFAULT_BUTTON_CLASSES =
+  "inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors";
 
 function HelpTopNavEditor(props: HelpTopNavEditorProps) {
   function updateItem(index: number, patch: Partial<HelpTopNavItem>) {
@@ -41,7 +37,7 @@ function HelpTopNavEditor(props: HelpTopNavEditorProps) {
     if (props.value.length >= MAX_ITEMS) return;
     props.onChange([
       ...props.value,
-      { label: "", href: "", style: "link" },
+      { label: "", href: "", classes: null },
     ]);
   }
 
@@ -49,8 +45,8 @@ function HelpTopNavEditor(props: HelpTopNavEditorProps) {
     <div className="space-y-4">
       {props.value.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No top-nav links yet. Add up to {MAX_ITEMS} links or buttons that
-          appear in the top-right of your help center.
+          No top-nav items yet. Add up to {MAX_ITEMS} links that appear in the
+          top-right of your help center.
         </p>
       ) : (
         <ul className="space-y-3">
@@ -59,7 +55,7 @@ function HelpTopNavEditor(props: HelpTopNavEditorProps) {
               key={index}
               className="rounded-xl bg-muted/40 p-4 space-y-3"
             >
-              <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr_auto_auto] sm:items-end">
+              <div className="grid gap-3 sm:grid-cols-[1fr_1.5fr_auto] sm:items-end">
                 <div className="space-y-1.5">
                   <Label
                     htmlFor={`help-topnav-label-${index}`}
@@ -97,34 +93,6 @@ function HelpTopNavEditor(props: HelpTopNavEditorProps) {
                     }
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label
-                    htmlFor={`help-topnav-style-${index}`}
-                    className="text-xs"
-                  >
-                    Style
-                  </Label>
-                  <Select
-                    value={item.style}
-                    onValueChange={(value) =>
-                      updateItem(index, {
-                        style: value === "button" ? "button" : "link",
-                      })
-                    }
-                    disabled={props.disabled}
-                  >
-                    <SelectTrigger
-                      id={`help-topnav-style-${index}`}
-                      className="w-full sm:w-32"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="link">Link</SelectItem>
-                      <SelectItem value="button">Button</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
                 <Button
                   type="button"
                   variant="ghost"
@@ -135,6 +103,40 @@ function HelpTopNavEditor(props: HelpTopNavEditorProps) {
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label
+                    htmlFor={`help-topnav-classes-${index}`}
+                    className="text-xs"
+                  >
+                    Tailwind classes (optional)
+                  </Label>
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() =>
+                      updateItem(index, { classes: DEFAULT_BUTTON_CLASSES })
+                    }
+                    disabled={props.disabled}
+                  >
+                    Use button preset
+                  </button>
+                </div>
+                <Textarea
+                  id={`help-topnav-classes-${index}`}
+                  value={item.classes ?? ""}
+                  maxLength={300}
+                  rows={2}
+                  placeholder="Leave empty for a plain text link. Example: inline-flex h-9 items-center px-4 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90"
+                  disabled={props.disabled}
+                  onChange={(e) =>
+                    updateItem(index, {
+                      classes: e.target.value.length > 0 ? e.target.value : null,
+                    })
+                  }
+                  className="font-mono text-xs"
+                />
               </div>
             </li>
           ))}

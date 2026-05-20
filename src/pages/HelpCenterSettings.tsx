@@ -93,8 +93,13 @@ function HelpCenterSettings() {
       if (host === "replymaven.com" || host.endsWith(".replymaven.com")) {
         return `Link ${i + 1}: cannot point at replymaven.com`;
       }
-      if (item.style !== "link" && item.style !== "button") {
-        return `Link ${i + 1}: invalid style`;
+      if (item.classes !== null && item.classes !== undefined) {
+        if (typeof item.classes !== "string" || item.classes.length > 300) {
+          return `Link ${i + 1}: classes too long`;
+        }
+        if (!/^[a-zA-Z0-9:/_\-[\]().,%! ]*$/.test(item.classes)) {
+          return `Link ${i + 1}: classes contain invalid characters`;
+        }
       }
     }
     return null;
@@ -130,7 +135,7 @@ function HelpCenterSettings() {
       const normalizedTopNav = topNav.map((item) => ({
         label: item.label.trim(),
         href: item.href.trim(),
-        style: item.style,
+        classes: item.classes ? item.classes.trim() || null : null,
       }));
       const topNavMsg = validateTopNav(normalizedTopNav);
       if (topNavMsg) {
