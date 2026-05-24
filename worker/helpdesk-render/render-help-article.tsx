@@ -8,6 +8,8 @@ import type {
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
+import { extractFirstImage } from "./extract-first-image";
+import { extractToc } from "./render-markdown";
 import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
 import { MobileCategoryNav } from "./mobile-category-nav";
@@ -47,6 +49,15 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
       ? props.article.updatedAt.toISOString()
       : new Date().toISOString();
 
+  const toc = extractToc(props.article.content ?? "");
+  const firstImage = extractFirstImage(props.article.content ?? "");
+  const ogImage = firstImage
+    ? {
+        url: resolveAbsolute(firstImage.url, canonical),
+        alt: firstImage.alt || props.article.title,
+      }
+    : null;
+
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Article",
@@ -56,6 +67,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
     datePublished,
     dateModified,
     articleSection: props.category.name,
+    ...(ogImage ? { image: ogImage.url } : {}),
     author: { "@type": "Organization", name: props.project.name },
     publisher: { "@type": "Organization", name: props.project.name },
     mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
@@ -69,6 +81,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
       jsonLd={jsonLd}
+      ogImage={ogImage}
       articleMeta={{
         publishedAt: datePublished,
         modifiedAt: dateModified,
@@ -101,6 +114,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
         helpCustomUrl={props.helpCustomUrl}
       />
 
+      <div class="help-article-layout">
       <article class="help-page">
         <nav class="help-breadcrumb" aria-label="Breadcrumb">
           <a
@@ -174,6 +188,66 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
           </nav>
         )}
       </article>
+      {toc.length > 0 && (
+        <aside class="help-toc" aria-label="On this page">
+          <h2 class="help-toc-heading">On this page</h2>
+          <ol class="help-toc-list">
+            {toc.map((entry) => (
+              <li class={`help-toc-item is-h${entry.level}`}>
+                <a class="help-toc-link" href={`#${entry.id}`} data-toc-id={entry.id}>
+                  {entry.text}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </aside>
+      )}
+      </div>
+      <script
+        dangerouslySetInnerHTML={{
+          __html: TOC_SCROLLSPY_SCRIPT,
+        }}
+      />
     </Layout>
   );
+}
+
+const TOC_SCROLLSPY_SCRIPT = `
+(function(){
+  var links = document.querySelectorAll('.help-toc-link');
+  if (!links.length) return;
+  var byId = {};
+  links.forEach(function(a){ byId[a.getAttribute('data-toc-id')] = a; });
+  var headings = Object.keys(byId)
+    .map(function(id){ return document.getElementById(id); })
+    .filter(Boolean);
+  if (!headings.length) return;
+  var current = null;
+  function setActive(id){
+    if (current === id) return;
+    links.forEach(function(a){ a.classList.remove('is-active'); });
+    var a = byId[id];
+    if (a) a.classList.add('is-active');
+    current = id;
+  }
+  var io = new IntersectionObserver(function(entries){
+    var visible = entries
+      .filter(function(e){ return e.isIntersecting; })
+      .sort(function(a,b){ return a.boundingClientRect.top - b.boundingClientRect.top; });
+    if (visible[0]) {
+      setActive(visible[0].target.id);
+    }
+  }, { rootMargin: '-80px 0px -65% 0px', threshold: 0 });
+  headings.forEach(function(h){ io.observe(h); });
+})();
+`;
+
+function resolveAbsolute(url: string, base: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (/^data:/i.test(url)) return url;
+  try {
+    return new URL(url, base).toString();
+  } catch {
+    return url;
+  }
 }

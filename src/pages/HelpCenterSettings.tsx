@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  BookOpen,
   CheckCircle2,
   ExternalLink,
   Loader2,
@@ -11,9 +12,17 @@ import {
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { MobileMenuButton } from "@/components/PageHeader";
-import ProxySetupGuide from "@/components/ProxySetupGuide";
+import { ProxySetupBody } from "@/components/ProxySetupGuide";
 import HelpTopNavEditor, {
   type HelpTopNavItem,
 } from "@/components/help-top-nav-editor";
@@ -287,6 +296,26 @@ function HelpCenterSettings() {
             )}
             Test connection
           </Button>
+          {project?.slug && (
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="sm" className="ml-auto">
+                  <BookOpen className="h-4 w-4" />
+                  Reverse proxy setup
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>How to set up a reverse proxy</DialogTitle>
+                  <DialogDescription>
+                    Forward <code>/docs/*</code> from your domain to ReplyMaven.
+                    Pick a snippet for your host below.
+                  </DialogDescription>
+                </DialogHeader>
+                <ProxySetupBody projectSlug={project.slug} />
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
 
         {testResult && (
@@ -350,7 +379,6 @@ function HelpCenterSettings() {
         )}
       </div>
 
-      {project?.slug && <ProxySetupGuide projectSlug={project.slug} />}
     </div>
   );
 }

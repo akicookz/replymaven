@@ -39,6 +39,58 @@ const HLJS_REGISTERED = (() => {
 
 type CalloutVariant = "info" | "warning" | "tip" | "danger";
 
+export function slugifyHeading(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 80);
+}
+
+export interface TocEntry {
+  level: number;
+  id: string;
+  text: string;
+}
+
+/**
+ * Walk the markdown to produce a flat list of h2/h3 headings with slugified
+ * IDs that match what the renderer injects. Skips headings inside fenced
+ * code blocks.
+ */
+export function extractToc(markdown: string): TocEntry[] {
+  if (!markdown) return [];
+  const entries: TocEntry[] = [];
+  const seen = new Map<string, number>();
+  const lines = markdown.split(/\r?\n/);
+  let inFence = false;
+  for (const line of lines) {
+    const fence = /^\s*```/.test(line) || /^\s*~~~/.test(line);
+    if (fence) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (!match) continue;
+    const level = match[1].length;
+    if (level < 2 || level > 3) continue;
+    const text = match[2].replace(/[*_`]/g, "").trim();
+    if (!text) continue;
+    const base = slugifyHeading(text);
+    if (!base) continue;
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    const id = n === 0 ? base : `${base}-${n}`;
+    entries.push({ level, id, text });
+  }
+  return entries;
+}
+
 function calloutExtension(): MarkedExtension {
   return {
     walkTokens(token) {
@@ -80,6 +132,28 @@ function calloutExtension(): MarkedExtension {
   };
 }
 
+function headingIdExtension(): MarkedExtension {
+  return {
+    renderer: {
+      heading(this: unknown, token: Tokens.Heading) {
+        const self = this as {
+          parser: { parseInline: (tokens: Tokens.Generic[]) => string };
+          headingSeen?: Map<string, number>;
+        };
+        const inner = self.parser.parseInline(token.tokens ?? []);
+        const plain = token.text ?? "";
+        const base = slugifyHeading(plain);
+        if (!base) return `<h${token.depth}>${inner}</h${token.depth}>`;
+        if (!self.headingSeen) self.headingSeen = new Map();
+        const n = self.headingSeen.get(base) ?? 0;
+        self.headingSeen.set(base, n + 1);
+        const id = n === 0 ? base : `${base}-${n}`;
+        return `<h${token.depth} id="${id}">${inner}</h${token.depth}>`;
+      },
+    },
+  };
+}
+
 function createMarked(): Marked {
   return new Marked(
     markedHighlight({
@@ -98,6 +172,7 @@ function createMarked(): Marked {
       },
     }),
     calloutExtension(),
+    headingIdExtension(),
     { gfm: true, breaks: false },
   );
 }
