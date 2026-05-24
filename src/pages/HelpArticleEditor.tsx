@@ -1,11 +1,16 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -15,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { cn } from "@/lib/utils";
+import type { DerivedMeta } from "@/components/help-article-editor";
 
 const HelpArticleEditor = lazy(
   () => import("@/components/help-article-editor"),
@@ -52,6 +58,14 @@ interface ArticleFormState {
 
 const EXCERPT_MAX = 280;
 
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+}
+
 function HelpArticleEditorPage() {
   const { projectId, articleId } = useParams<{
     projectId: string;
@@ -73,6 +87,7 @@ function HelpArticleEditorPage() {
     status: "draft",
   });
   const [slugTouched, setSlugTouched] = useState(false);
+  const [excerptTouched, setExcerptTouched] = useState(false);
   const [savedSnapshot, setSavedSnapshot] = useState<ArticleFormState | null>(
     null,
   );
@@ -113,14 +128,17 @@ function HelpArticleEditorPage() {
       setForm(next);
       setSavedSnapshot(next);
       setSlugTouched(true);
+      setExcerptTouched(true);
     }
   }, [articleQuery.data]);
 
+  // Auto-select first category for new articles when none picked.
   useEffect(() => {
-    if (isNew && initialCategoryId && !form.categoryId) {
-      setForm((f) => ({ ...f, categoryId: initialCategoryId }));
-    }
-  }, [isNew, initialCategoryId, form.categoryId]);
+    if (!isNew) return;
+    if (form.categoryId) return;
+    const first = categoriesQuery.data?.[0]?.id;
+    if (first) setForm((f) => ({ ...f, categoryId: first }));
+  }, [isNew, form.categoryId, categoriesQuery.data]);
 
   const createArticle = useMutation({
     mutationFn: async (input: ArticleFormState) => {
@@ -214,19 +232,30 @@ function HelpArticleEditorPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  function handleTitleChange(value: string) {
-    setForm((f) => {
-      const next = { ...f, title: value };
-      if (!slugTouched && isNew) {
-        next.slug = value
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-|-$/g, "")
-          .slice(0, 80);
-      }
-      return next;
-    });
-  }
+  const handleMetaChange = useCallback(
+    (meta: DerivedMeta) => {
+      setForm((f) => {
+        const next = { ...f };
+        if (meta.title !== f.title) next.title = meta.title;
+        if (!slugTouched && meta.title) {
+          const s = slugify(meta.title);
+          if (s !== f.slug) next.slug = s;
+        }
+        if (!excerptTouched && meta.excerpt !== f.excerpt) {
+          next.excerpt = meta.excerpt;
+        }
+        if (
+          next.title === f.title &&
+          next.slug === f.slug &&
+          next.excerpt === f.excerpt
+        ) {
+          return f;
+        }
+        return next;
+      });
+    },
+    [slugTouched, excerptTouched],
+  );
 
   function handleSlugChange(value: string) {
     setSlugTouched(true);
@@ -236,13 +265,18 @@ function HelpArticleEditorPage() {
     }));
   }
 
+  function handleExcerptChange(value: string) {
+    setExcerptTouched(true);
+    setForm((f) => ({ ...f, excerpt: value.slice(0, EXCERPT_MAX) }));
+  }
+
   function handleSave() {
     if (!form.title.trim()) {
-      toast.error("Title is required");
+      toast.error("Article needs a title (type one in the H1 line)");
       return;
     }
     if (!form.categoryId) {
-      toast.error("Pick a category");
+      toast.error("Pick a category in Publish settings");
       return;
     }
     if (isNew) {
@@ -269,14 +303,17 @@ function HelpArticleEditorPage() {
   const isLoading =
     (!isNew && articleQuery.isLoading) || categoriesQuery.isLoading;
   const saving = createArticle.isPending || updateArticle.isPending;
-  const dirty =
-    !savedSnapshot ||
-    savedSnapshot.title !== form.title ||
-    savedSnapshot.slug !== form.slug ||
-    savedSnapshot.excerpt !== form.excerpt ||
-    savedSnapshot.content !== form.content ||
-    savedSnapshot.categoryId !== form.categoryId ||
-    savedSnapshot.status !== form.status;
+  const dirty = useMemo(
+    () =>
+      !savedSnapshot ||
+      savedSnapshot.title !== form.title ||
+      savedSnapshot.slug !== form.slug ||
+      savedSnapshot.excerpt !== form.excerpt ||
+      savedSnapshot.content !== form.content ||
+      savedSnapshot.categoryId !== form.categoryId ||
+      savedSnapshot.status !== form.status,
+    [savedSnapshot, form],
+  );
 
   if (isLoading) {
     return (
@@ -289,22 +326,22 @@ function HelpArticleEditorPage() {
   const categories = categoriesQuery.data ?? [];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-2 min-w-0">
+    <div className="help-editor-page-shell">
+      <header className="help-editor-page-bar">
+        <div className="flex items-center gap-2 min-w-0">
           <MobileMenuButton />
-          <div className="min-w-0">
-            <Button asChild variant="ghost" size="sm" className="-ml-2 mb-2">
-              <Link to={`/app/projects/${projectId}/help`}>
-                <ArrowLeft className="w-4 h-4" />
-                Back to Help Center
-              </Link>
-            </Button>
-            <h1 className="font-heading text-3xl tracking-tight truncate">
-              {isNew ? "New article" : form.title || "Untitled article"}
-            </h1>
-          </div>
+          <Button asChild variant="ghost" size="sm" className="-ml-1">
+            <Link to={`/app/projects/${projectId}/help`}>
+              <ArrowLeft className="w-4 h-4" />
+              <span className="hidden sm:inline">Help Center</span>
+            </Link>
+          </Button>
+          <span className="text-muted-foreground hidden md:inline">/</span>
+          <span className="text-sm text-muted-foreground truncate hidden md:inline">
+            {form.title || (isNew ? "New article" : "Untitled article")}
+          </span>
         </div>
+
         <div className="flex items-center gap-2 shrink-0">
           <span
             className={cn(
@@ -316,6 +353,70 @@ function HelpArticleEditorPage() {
           >
             {form.status === "published" ? "Published" : "Draft"}
           </span>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button type="button" variant="outline" size="sm">
+                <Settings2 className="w-4 h-4" />
+                <span className="hidden sm:inline">Publish settings</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80">
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="article-category">Category</Label>
+                  <Select
+                    value={form.categoryId}
+                    onValueChange={(v) =>
+                      setForm((f) => ({ ...f, categoryId: v }))
+                    }
+                  >
+                    <SelectTrigger id="article-category">
+                      <SelectValue placeholder="Pick a category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map((cat) => (
+                        <SelectItem key={cat.id} value={cat.id}>
+                          {cat.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="article-slug">URL slug</Label>
+                  <Input
+                    id="article-slug"
+                    value={form.slug}
+                    onChange={(e) => handleSlugChange(e.target.value)}
+                    placeholder="getting-started"
+                    maxLength={80}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Auto-generated from the title — edit to override.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="article-excerpt">Excerpt</Label>
+                  <textarea
+                    id="article-excerpt"
+                    value={form.excerpt}
+                    onChange={(e) => handleExcerptChange(e.target.value)}
+                    maxLength={EXCERPT_MAX}
+                    rows={4}
+                    placeholder="One-line summary shown in listings and search."
+                    className="w-full rounded-lg bg-card border border-border px-3 py-2 text-sm placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
+                  />
+                  <p className="text-xs text-muted-foreground text-right">
+                    {form.excerpt.length} / {EXCERPT_MAX}
+                  </p>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
           <Button
             type="button"
             variant="outline"
@@ -332,97 +433,28 @@ function HelpArticleEditorPage() {
             onClick={handleSave}
             disabled={saving || (!dirty && !isNew)}
           >
-            {saving ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : null}
-            {isNew ? "Create article" : "Save"}
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            {isNew ? "Create" : "Save"}
           </Button>
         </div>
-      </div>
+      </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr,320px] gap-6">
-        <div className="space-y-4">
-          <Input
-            type="text"
-            placeholder="Article title"
-            value={form.title}
-            onChange={(e) => handleTitleChange(e.target.value)}
-            maxLength={200}
-            className="text-xl h-12"
+      <main className="help-editor-page-main">
+        <Suspense
+          fallback={
+            <div className="min-h-[60vh] flex items-center justify-center">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+          }
+        >
+          <HelpArticleEditor
+            value={form.content}
+            onChange={(md) => setForm((f) => ({ ...f, content: md }))}
+            onMetaChange={handleMetaChange}
+            variant="page"
           />
-
-          <Suspense
-            fallback={
-              <div className="rounded-xl bg-card border border-border min-h-[480px] flex items-center justify-center">
-                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-              </div>
-            }
-          >
-            <HelpArticleEditor
-              value={form.content}
-              onChange={(md) => setForm((f) => ({ ...f, content: md }))}
-            />
-          </Suspense>
-        </div>
-
-        <aside className="space-y-5">
-          <div className="space-y-1.5">
-            <Label htmlFor="article-category">Category</Label>
-            <Select
-              value={form.categoryId}
-              onValueChange={(v) =>
-                setForm((f) => ({ ...f, categoryId: v }))
-              }
-            >
-              <SelectTrigger id="article-category">
-                <SelectValue placeholder="Pick a category" />
-              </SelectTrigger>
-              <SelectContent>
-                {categories.map((cat) => (
-                  <SelectItem key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="article-slug">URL slug</Label>
-            <Input
-              id="article-slug"
-              value={form.slug}
-              onChange={(e) => handleSlugChange(e.target.value)}
-              placeholder="getting-started"
-              maxLength={80}
-            />
-            <p className="text-xs text-muted-foreground">
-              Lowercase letters, numbers, and hyphens.
-            </p>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="article-excerpt">Excerpt</Label>
-            <textarea
-              id="article-excerpt"
-              value={form.excerpt}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  excerpt: e.target.value.slice(0, EXCERPT_MAX),
-                }))
-              }
-              maxLength={EXCERPT_MAX}
-              rows={4}
-              placeholder="One-line summary shown on category pages and in search results."
-              className="w-full rounded-lg bg-card border border-border px-3 py-2 text-sm placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
-            />
-            <p className="text-xs text-muted-foreground text-right">
-              {form.excerpt.length} / {EXCERPT_MAX}
-            </p>
-          </div>
-        </aside>
-      </div>
+        </Suspense>
+      </main>
     </div>
   );
 }

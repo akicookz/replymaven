@@ -708,3 +708,44 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ─── Callouts (GFM alerts) ──────────────────────────────────────────────── */
+
+.help-prose .callout {
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  border-left: 3px solid;
+  background: var(--muted);
+  color: var(--foreground);
+  font-style: normal;
+  display: block;
+}
+.help-prose .callout > p { margin: 0; }
+.help-prose .callout > * + * { margin-top: 0.5em; }
+.help-prose .callout-info { border-color: #3b82f6; background: color-mix(in srgb, #3b82f6 8%, var(--background)); }
+.help-prose .callout-warning { border-color: #f59e0b; background: color-mix(in srgb, #f59e0b 10%, var(--background)); }
+.help-prose .callout-tip { border-color: #10b981; background: color-mix(in srgb, #10b981 8%, var(--background)); }
+.help-prose .callout-danger { border-color: #ef4444; background: color-mix(in srgb, #ef4444 10%, var(--background)); }
+
+/* ─── Task lists ─────────────────────────────────────────────────────────── */
+
+.help-prose ul:has(> li > input[type="checkbox"]),
+.help-prose ul.contains-task-list {
+  list-style: none;
+  padding-left: 0.25rem;
+}
+.help-prose li > input[type="checkbox"] {
+  margin-right: 0.5rem;
+  vertical-align: middle;
+  accent-color: var(--brand);
+}
+
+/* ─── Syntax highlighting (highlight.js token classes) ───────────────────── */
+
+.help-prose pre code.hljs { display: block; }
+.hljs-comment, .hljs-quote { color: #6a737d; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-name, .hljs-tag { color: #d73a49; }
+.hljs-string, .hljs-title, .hljs-section, .hljs-attribute, .hljs-literal, .hljs-template-tag, .hljs-template-variable, .hljs-type, .hljs-addition { color: #032f62; }
+.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-link, .hljs-meta, .hljs-selector-attr, .hljs-selector-pseudo { color: #005cc5; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }

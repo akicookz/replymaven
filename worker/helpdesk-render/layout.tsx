@@ -9,6 +9,12 @@ interface OgImage {
   alt?: string;
 }
 
+export interface ArticleMeta {
+  publishedAt?: string | null;
+  modifiedAt?: string | null;
+  section?: string | null;
+}
+
 export interface LayoutProps {
   title: string;
   description: string;
@@ -17,6 +23,7 @@ export interface LayoutProps {
   widgetConfig: WidgetConfigRow | null;
   jsonLd?: object | null;
   ogImage?: OgImage | null;
+  articleMeta?: ArticleMeta | null;
   topBar?: unknown;
   sidebar?: unknown;
   children?: unknown;
@@ -48,6 +55,21 @@ export function Layout(props: LayoutProps) {
         <meta name="twitter:description" content={props.description} />
         {props.ogImage && (
           <meta name="twitter:image" content={props.ogImage.url} />
+        )}
+        {props.articleMeta?.publishedAt && (
+          <meta
+            property="article:published_time"
+            content={props.articleMeta.publishedAt}
+          />
+        )}
+        {props.articleMeta?.modifiedAt && (
+          <meta
+            property="article:modified_time"
+            content={props.articleMeta.modifiedAt}
+          />
+        )}
+        {props.articleMeta?.section && (
+          <meta property="article:section" content={props.articleMeta.section} />
         )}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link

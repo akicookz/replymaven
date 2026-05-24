@@ -13,6 +13,7 @@ import {
 } from "../db";
 import { slugify } from "../lib/slugify";
 import { buildHelpUrl } from "../helpdesk-render/build-help-url";
+import { buildFrontmatterMarkdown } from "../helpdesk-render/build-frontmatter-md";
 
 interface CreateCategoryInput {
   name: string;
@@ -563,7 +564,7 @@ export class HelpdeskService {
     projectSlug: string,
   ): Promise<void> {
     const r2Key = `${projectId}/articles/${article.id}.md`;
-    const markdown = buildArticleMarkdown(article);
+    const markdown = buildFrontmatterMarkdown(article, category);
     await this.r2.put(r2Key, markdown, {
       customMetadata: {
         context: `Help article: ${article.title}`,
@@ -661,13 +662,3 @@ export class HelpdeskService {
   }
 }
 
-function buildArticleMarkdown(article: HelpArticleRow): string {
-  const parts = [`# ${article.title}`];
-  if (article.excerpt && article.excerpt.trim()) {
-    parts.push(article.excerpt.trim());
-  }
-  if (article.content && article.content.trim()) {
-    parts.push(article.content);
-  }
-  return parts.join("\n\n");
-}

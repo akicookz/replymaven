@@ -38,20 +38,24 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
     props.article.excerpt ??
     `${props.article.title} — help article from ${props.project.name}.`;
 
+  const datePublished =
+    props.article.publishedAt instanceof Date
+      ? props.article.publishedAt.toISOString()
+      : new Date().toISOString();
+  const dateModified =
+    props.article.updatedAt instanceof Date
+      ? props.article.updatedAt.toISOString()
+      : new Date().toISOString();
+
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Article",
     headline: props.article.title,
     description: props.article.excerpt ?? "",
     url: canonical,
-    datePublished:
-      props.article.publishedAt instanceof Date
-        ? props.article.publishedAt.toISOString()
-        : new Date().toISOString(),
-    dateModified:
-      props.article.updatedAt instanceof Date
-        ? props.article.updatedAt.toISOString()
-        : new Date().toISOString(),
+    datePublished,
+    dateModified,
+    articleSection: props.category.name,
     author: { "@type": "Organization", name: props.project.name },
     publisher: { "@type": "Organization", name: props.project.name },
     mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
@@ -65,6 +69,11 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
       jsonLd={jsonLd}
+      articleMeta={{
+        publishedAt: datePublished,
+        modifiedAt: dateModified,
+        section: props.category.slug,
+      }}
       topBar={
         <HelpTopBar
           project={props.project}
