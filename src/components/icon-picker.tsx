@@ -43,6 +43,7 @@ import {
   Star,
   Tag,
   Terminal,
+  TrendingUp,
   Upload,
   User,
   Users,
@@ -118,12 +119,40 @@ const ICON_MAP: Record<HelpIconName, LucideIcon> = {
   Activity,
   Layers,
   Workflow,
+  TrendingUp,
 };
 
 function getLucideIcon(name: HelpIconName): LucideIcon | null {
   return Object.prototype.hasOwnProperty.call(ICON_MAP, name)
     ? ICON_MAP[name]
     : null;
+}
+
+/**
+ * Render a category icon — either an uploaded image (fills its parent) or a
+ * Lucide glyph. Falls back to BookOpen when unset/unknown.
+ */
+export function CategoryIcon({
+  icon,
+  className,
+}: {
+  icon: string | null | undefined;
+  className?: string;
+}) {
+  if (isImageIcon(icon)) {
+    return (
+      <img
+        src={icon as string}
+        alt=""
+        className="h-full w-full object-cover"
+        loading="lazy"
+      />
+    );
+  }
+  const name: HelpIconName =
+    icon && isHelpIconName(icon) ? icon : "BookOpen";
+  const Icon = getLucideIcon(name) ?? BookOpen;
+  return <Icon className={className} />;
 }
 
 function IconPicker({ value, onChange }: IconPickerProps) {
@@ -146,10 +175,6 @@ function IconPicker({ value, onChange }: IconPickerProps) {
 
   function handlePickIcon(name: HelpIconName) {
     onChange(name);
-  }
-
-  function handleClearIcon() {
-    onChange(null);
   }
 
   async function handleFileSelected(file: File) {
@@ -207,7 +232,7 @@ function IconPicker({ value, onChange }: IconPickerProps) {
             className="pl-9"
           />
         </div>
-        <div className="grid grid-cols-6 sm:grid-cols-8 gap-2 max-h-64 overflow-y-auto pr-1">
+        <div className="grid grid-cols-7 sm:grid-cols-9 gap-1.5 max-h-56 overflow-y-auto pr-1">
           {filtered.map((name) => {
             const Icon = getLucideIcon(name);
             if (!Icon) return null;
@@ -221,11 +246,10 @@ function IconPicker({ value, onChange }: IconPickerProps) {
                 aria-label={name}
                 aria-pressed={isSelected}
                 className={cn(
-                  "aspect-square flex items-center justify-center rounded-lg bg-muted/50 transition-colors",
-                  "hover:bg-muted",
+                  "aspect-square flex items-center justify-center rounded-lg transition-colors",
                   isSelected
                     ? "ring-2 ring-brand text-brand bg-brand/10"
-                    : "text-muted-foreground",
+                    : "text-muted-foreground bg-muted/50 hover:bg-muted",
                 )}
               >
                 <Icon className="w-5 h-5" />
@@ -238,22 +262,6 @@ function IconPicker({ value, onChange }: IconPickerProps) {
             </p>
           )}
         </div>
-        {selectedIcon && (
-          <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2">
-            <span className="text-sm">
-              Selected:{" "}
-              <span className="font-medium text-foreground">{selectedIcon}</span>
-            </span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleClearIcon}
-            >
-              Clear
-            </Button>
-          </div>
-        )}
       </TabsContent>
 
       <TabsContent value="image" className="space-y-3">

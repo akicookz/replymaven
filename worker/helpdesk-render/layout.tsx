@@ -38,6 +38,9 @@ export function Layout(props: LayoutProps) {
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {props.widgetConfig?.avatarUrl && (
+          <link rel="icon" href={props.widgetConfig.avatarUrl} />
+        )}
         <title>{props.title}</title>
         <meta name="description" content={props.description} />
         <link rel="canonical" href={props.canonicalUrl} />

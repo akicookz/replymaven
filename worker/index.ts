@@ -41,7 +41,10 @@ import {
 } from "./helpdesk-render/render-help-search";
 import { renderSitemap } from "./helpdesk-render/render-sitemap";
 import { renderRobots } from "./helpdesk-render/render-robots";
-import { renderMarkdown } from "./helpdesk-render/render-markdown";
+import {
+  renderMarkdown,
+  ensureArticleTitle,
+} from "./helpdesk-render/render-markdown";
 import { normalizeHelpCustomUrl } from "./helpdesk-render/build-help-url";
 import { groupArticlesByCategory } from "./helpdesk-render/group-articles";
 import {
@@ -1566,10 +1569,13 @@ const app = new Hono<HonoAppContext>()
         ? siblings[currentIndex + 1]
         : null;
 
-    const bodyHtml = await renderMarkdown(match.article.content ?? "", {
-      projectSlug: project.slug,
-      customUrl: settings?.helpCustomUrl ?? null,
-    });
+    const bodyHtml = await renderMarkdown(
+      ensureArticleTitle(match.article.content ?? "", match.article.title),
+      {
+        projectSlug: project.slug,
+        customUrl: settings?.helpCustomUrl ?? null,
+      },
+    );
 
     const articlesByCategory = groupArticlesByCategory(allPublished);
     const topNav = parseHelpTopNav(settings?.helpTopNav);
@@ -1624,7 +1630,10 @@ const app = new Hono<HonoAppContext>()
               retrieval: {
                 retrieval_type: "vector",
                 filters: {
-                  folder: { $eq: `${project.id}/` },
+                  // Help articles live in the `articles/` subfolder. AutoRAG's
+                  // folder $eq matches a folder exactly (not recursively), so
+                  // filtering on `${project.id}/` misses every article.
+                  folder: { $eq: `${project.id}/articles/` },
                 } as never,
                 max_num_results: 12,
                 match_threshold: 0.2,
@@ -5442,13 +5451,14 @@ const app = new Hono<HonoAppContext>()
     }
 
     const service = new HelpdeskService(db, c.env.UPLOADS);
-    const deleted = await service.deleteCategory(
+    // Content groups are archived (soft), never hard-deleted.
+    const archived = await service.archiveCategory(
       c.req.param("catId"),
       project.id,
     );
-    if (!deleted) return c.json({ error: "Not found" }, 404);
+    if (!archived) return c.json({ error: "Not found" }, 404);
     c.executionCtx.waitUntil(
-      triggerAutoRagSync(c.env, "helpdesk.category.delete"),
+      triggerAutoRagSync(c.env, "helpdesk.category.archive"),
     );
     return c.json({ ok: true });
   })

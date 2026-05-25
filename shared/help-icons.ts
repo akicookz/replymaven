@@ -46,6 +46,7 @@ export const HELP_ICON_NAMES = [
   "Activity",
   "Layers",
   "Workflow",
+  "TrendingUp",
 ] as const;
 
 export type HelpIconName = (typeof HELP_ICON_NAMES)[number];

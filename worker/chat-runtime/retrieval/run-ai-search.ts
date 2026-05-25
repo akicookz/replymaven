@@ -234,8 +234,15 @@ async function searchWithRetrievalType(options: {
             retrieval: {
               retrieval_type: options.retrievalType,
               filters: {
+                // Recursive folder match: AutoRAG's folder $eq is exact (it
+                // ignores subfolders), so a plain `${projectId}/` filter would
+                // miss help articles stored under `${projectId}/articles/`.
+                // The $gte/$lt range matches everything under the project
+                // prefix (ASCII: '/' 0x2F < '0' 0x30) while staying scoped to
+                // this tenant — no other UUID can fall in this range.
                 folder: {
-                  $eq: `${options.projectId}/`,
+                  $gte: `${options.projectId}/`,
+                  $lt: `${options.projectId}0`,
                 },
               } as never,
               max_num_results: options.maxResults,
@@ -259,7 +266,7 @@ async function searchWithRetrievalType(options: {
         retrievalType: options.retrievalType,
         matchThreshold: options.matchThreshold,
         maxResults: options.maxResults,
-        filterFolder: `${options.projectId}/`,
+        filterFolder: `${options.projectId}/ <= folder < ${options.projectId}0`,
         responseKind: normalized.responseKind,
         success: normalized.success,
         topLevelKeys: normalized.topLevelKeys,
@@ -284,7 +291,7 @@ async function searchWithRetrievalType(options: {
           retrievalType: options.retrievalType,
           responseKind: normalized.responseKind,
           success: normalized.success,
-          filterFolder: `${options.projectId}/`,
+          filterFolder: `${options.projectId}/ <= folder < ${options.projectId}0`,
         });
       }
 

@@ -58,6 +58,19 @@ export interface TocEntry {
 }
 
 /**
+ * Articles authored in the new editor carry their title as the first H1 in the
+ * body. Legacy articles stored the title separately with no H1 in the body.
+ * Guarantee a leading H1 so the published page always shows the title once.
+ */
+export function ensureArticleTitle(markdown: string, title: string): string {
+  const trimmed = (markdown ?? "").trimStart();
+  if (/^#[ \t]/.test(trimmed)) return markdown;
+  const safeTitle = title.trim();
+  if (!safeTitle) return markdown;
+  return `# ${safeTitle}\n\n${markdown ?? ""}`;
+}
+
+/**
  * Walk the markdown to produce a flat list of h2/h3 headings with slugified
  * IDs that match what the renderer injects. Skips headings inside fenced
  * code blocks.

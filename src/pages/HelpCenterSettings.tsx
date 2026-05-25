@@ -225,7 +225,7 @@ function HelpCenterSettings() {
               Back to Help Center
             </Link>
           </Button>
-          <h1 className="font-heading text-3xl tracking-tight">
+          <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
             Help Center Settings
           </h1>
           <p className="text-sm text-muted-foreground mt-1">

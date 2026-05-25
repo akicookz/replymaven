@@ -1,0 +1,1 @@
+ALTER TABLE `help_categories` ADD `archived_at` integer;

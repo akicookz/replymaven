@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { type SQLiteColumn } from "drizzle-orm/sqlite-core";
 import {
   helpArticles,
@@ -73,7 +73,12 @@ export class HelpdeskService {
     return this.db
       .select()
       .from(helpCategories)
-      .where(eq(helpCategories.projectId, projectId))
+      .where(
+        and(
+          eq(helpCategories.projectId, projectId),
+          isNull(helpCategories.archivedAt),
+        ),
+      )
       .orderBy(asc(helpCategories.sortOrder), asc(helpCategories.createdAt));
   }
 
@@ -105,6 +110,7 @@ export class HelpdeskService {
         and(
           eq(helpCategories.projectId, projectId),
           eq(helpCategories.slug, slug),
+          isNull(helpCategories.archivedAt),
         ),
       )
       .limit(1);
@@ -194,9 +200,16 @@ export class HelpdeskService {
     return this.getCategoryById(id, projectId);
   }
 
-  async deleteCategory(id: string, projectId: string): Promise<boolean> {
+  /**
+   * Soft-archive a category. The row and its articles are retained in the DB,
+   * but the category disappears from every listing (`listCategories` /
+   * `getCategoryBySlug` filter out archived rows) and its published articles
+   * are pulled from R2 so they no longer surface in the public help center,
+   * search, or RAG. There is intentionally no hard delete for content groups.
+   */
+  async archiveCategory(id: string, projectId: string): Promise<boolean> {
     const existing = await this.getCategoryById(id, projectId);
-    if (!existing) return false;
+    if (!existing || existing.archivedAt) return false;
 
     const articles = await this.db
       .select()
@@ -210,12 +223,13 @@ export class HelpdeskService {
 
     for (const article of articles) {
       if (article.status === "published") {
-        await this.r2.delete(`${projectId}/articles/${article.id}.md`);
+        await this.unpublishArticleFromR2(article, projectId);
       }
     }
 
     await this.db
-      .delete(helpCategories)
+      .update(helpCategories)
+      .set({ archivedAt: new Date() })
       .where(
         and(
           eq(helpCategories.id, id),

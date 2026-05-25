@@ -28,6 +28,15 @@
 .help-prose h2 { font-size: 1.5rem; }
 .help-prose h3 { font-size: 1.25rem; }
 .help-prose h4 { font-size: 1.125rem; }
+/* First H1 in the body is the page title — render it large with no top gap. */
+.help-prose > h1:first-child {
+  font-size: clamp(2rem, 3.5vw, 2.75rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-top: 0;
+  margin-bottom: 0.75em;
+}
 .help-prose p { margin: 0; }
 .help-prose a {
   color: var(--brand);
@@ -132,7 +141,7 @@
     align-self: flex-start;
     height: calc(100vh - 3.5rem);
     overflow-y: auto;
-    padding: 2rem 0.75rem 1.25rem;
+    padding: 2.5rem 0.75rem 1.25rem;
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
@@ -314,7 +323,7 @@
   flex-direction: column;
 }
 .help-index-hero {
-  padding: 6rem 1.5rem 3rem;
+  padding: 4rem 1.5rem 2.5rem;
   background: var(--background);
   display: flex;
   align-items: flex-start;
@@ -329,10 +338,10 @@
 .help-index-title {
   margin: 0;
   font-family: var(--font-heading);
-  font-size: clamp(1.9rem, 3.5vw, 3rem);
+  font-size: clamp(1.6rem, 2.6vw, 2.25rem);
   font-weight: 600;
   letter-spacing: -0.02em;
-  line-height: 1.05;
+  line-height: 1.1;
   color: var(--foreground);
   text-align: left;
 }
@@ -360,8 +369,7 @@
   .help-index-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (min-width: 1024px) {
-  .help-index-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .help-index-hero { padding: 6rem 3rem 3rem; }
+  .help-index-hero { padding: 4.5rem 3rem 2.5rem; }
   .help-index-body { padding: 0 3rem 5rem; }
 }
 
@@ -370,20 +378,18 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-height: 200px;
+  min-height: 150px;
   padding: 1.5rem;
   border-radius: 1rem;
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: var(--muted);
   text-decoration: none;
   color: inherit;
   overflow: hidden;
   isolation: isolate;
-  transition: background-color 150ms ease, border-color 150ms ease;
+  transition: background-color 150ms ease;
 }
 .help-category-card:hover {
-  background: var(--muted);
-  border-color: color-mix(in oklch, var(--foreground), transparent 80%);
+  background: color-mix(in oklch, var(--muted), var(--foreground) 6%);
 }
 
 .help-category-card-icon-mark {
@@ -498,8 +504,7 @@
 .help-article-layout > .help-page {
   flex: 1;
   min-width: 0;
-  padding-left: 0;
-  padding-right: 0;
+  padding: 2.5rem 0 5rem;
   max-width: 52rem;
 }
 .help-toc {
@@ -511,11 +516,11 @@
     flex-shrink: 0;
     width: 14rem;
     position: sticky;
-    top: 5rem;
+    top: 3.5rem;
     align-self: flex-start;
-    max-height: calc(100vh - 6rem);
+    max-height: calc(100vh - 3.5rem);
     overflow-y: auto;
-    padding: 3.5rem 0 5rem;
+    padding: 2.5rem 0 5rem;
   }
 }
 .help-toc-heading {
@@ -686,16 +691,14 @@
 /* ─── Hero search (index + search page) ──────────────────────────────────── */
 
 .help-hero-search {
-  margin-top: 1.5rem;
+  margin: 0 0 1.5rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
   width: 100%;
-  max-width: 44rem;
   padding: 0.5rem 0.5rem 0.5rem 1rem;
-  background: var(--card);
+  background: var(--muted);
   border-radius: 999px;
-  box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground), transparent 92%);
   transition: box-shadow 150ms ease;
 }
 .help-hero-search:focus-within {

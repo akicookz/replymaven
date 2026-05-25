@@ -139,16 +139,8 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
           <span class="help-breadcrumb-current">{props.article.title}</span>
         </nav>
 
-        <header>
-          <h1 class="help-page-title">{props.article.title}</h1>
-          {props.article.excerpt && (
-            <p class="help-page-subtitle">{props.article.excerpt}</p>
-          )}
-        </header>
-
         <div
           class="help-prose"
-          style="margin-top: 2.5rem"
           dangerouslySetInnerHTML={{ __html: props.bodyHtml }}
         />
 
@@ -214,12 +206,12 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
 
 const TOC_SCROLLSPY_SCRIPT = `
 (function(){
-  var links = document.querySelectorAll('.help-toc-link');
+  var links = Array.prototype.slice.call(document.querySelectorAll('.help-toc-link'));
   if (!links.length) return;
   var byId = {};
   links.forEach(function(a){ byId[a.getAttribute('data-toc-id')] = a; });
-  var headings = Object.keys(byId)
-    .map(function(id){ return document.getElementById(id); })
+  var headings = links
+    .map(function(a){ return document.getElementById(a.getAttribute('data-toc-id')); })
     .filter(Boolean);
   if (!headings.length) return;
   var current = null;
@@ -227,18 +219,43 @@ const TOC_SCROLLSPY_SCRIPT = `
     if (current === id) return;
     links.forEach(function(a){ a.classList.remove('is-active'); });
     var a = byId[id];
-    if (a) a.classList.add('is-active');
+    if (a) {
+      a.classList.add('is-active');
+      // keep the active item visible within a scrollable TOC
+      a.scrollIntoView({ block: 'nearest' });
+    }
     current = id;
   }
-  var io = new IntersectionObserver(function(entries){
-    var visible = entries
-      .filter(function(e){ return e.isIntersecting; })
-      .sort(function(a,b){ return a.boundingClientRect.top - b.boundingClientRect.top; });
-    if (visible[0]) {
-      setActive(visible[0].target.id);
+  var ticking = false;
+  function update(){
+    ticking = false;
+    var offset = 100; // account for sticky top bar
+    var activeId = headings[0].id;
+    for (var i = 0; i < headings.length; i++){
+      if (headings[i].getBoundingClientRect().top - offset <= 1){
+        activeId = headings[i].id;
+      } else {
+        break;
+      }
     }
-  }, { rootMargin: '-80px 0px -65% 0px', threshold: 0 });
-  headings.forEach(function(h){ io.observe(h); });
+    // At (or near) the bottom of the page, force the last section active so
+    // short trailing sections still light up.
+    var scrolledToBottom =
+      window.innerHeight + window.scrollY >=
+      document.documentElement.scrollHeight - 2;
+    if (scrolledToBottom){
+      activeId = headings[headings.length - 1].id;
+    }
+    setActive(activeId);
+  }
+  function onScroll(){
+    if (ticking) return;
+    ticking = true;
+    window.requestAnimationFrame(update);
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll, { passive: true });
+  update();
 })();
 `;
 

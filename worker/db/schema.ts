@@ -199,6 +199,7 @@ export const helpCategories = sqliteTable(
     description: text("description"),
     icon: text("icon"),
     sortOrder: integer("sort_order").notNull().default(0),
+    archivedAt: integer("archived_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),

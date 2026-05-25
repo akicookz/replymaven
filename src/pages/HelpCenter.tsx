@@ -17,6 +17,7 @@ import {
 import { MobileMenuButton } from "@/components/PageHeader";
 import HelpCategoryList, {
   type HelpCategoryItem,
+  type SidebarArticle,
 } from "@/components/help-category-list";
 import HelpArticleList, {
   type HelpArticleItem,
@@ -65,6 +66,28 @@ const emptyCategoryForm: CategoryFormState = {
   icon: null,
 };
 
+function firstImageFromMarkdown(markdown: string): string | null {
+  if (!markdown) return null;
+  const candidates: Array<{ idx: number; url: string }> = [];
+  const mdRe = /!\[[^\]]*\]\((\S+?)(?:\s+"[^"]*")?\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = mdRe.exec(markdown)) !== null) {
+    candidates.push({ idx: m.index, url: m[1] });
+  }
+  const htmlRe = /<img\b[^>]*?\bsrc\s*=\s*"([^"]*)"/gi;
+  while ((m = htmlRe.exec(markdown)) !== null) {
+    candidates.push({ idx: m.index, url: m[1] });
+  }
+  candidates.sort((a, b) => a.idx - b.idx);
+  for (const c of candidates) {
+    const u = c.url.trim();
+    if (/^https?:\/\//i.test(u) || u.startsWith("/") || /^data:image\//i.test(u)) {
+      return u;
+    }
+  }
+  return null;
+}
+
 function HelpCenter() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -108,18 +131,34 @@ function HelpCenter() {
   }, [categories, selectedCategoryId]);
 
   const articlesQuery = useQuery<ArticleResponse[]>({
-    queryKey: ["help-articles", projectId, selectedCategoryId],
+    queryKey: ["help-articles", projectId],
     queryFn: async () => {
-      const res = await fetch(
-        `/api/projects/${projectId}/help/articles?categoryId=${selectedCategoryId}`,
-      );
+      const res = await fetch(`/api/projects/${projectId}/help/articles`);
       if (!res.ok) throw new Error("Failed to load articles");
       return res.json();
     },
-    enabled: !!projectId && !!selectedCategoryId,
+    enabled: !!projectId,
   });
 
-  const articles = articlesQuery.data ?? [];
+  const allArticles = useMemo(
+    () => articlesQuery.data ?? [],
+    [articlesQuery.data],
+  );
+
+  const articlesByCategory = useMemo(() => {
+    const map = new Map<string, SidebarArticle[]>();
+    for (const a of allArticles) {
+      const list = map.get(a.categoryId) ?? [];
+      list.push({ id: a.id, title: a.title, status: a.status });
+      map.set(a.categoryId, list);
+    }
+    return map;
+  }, [allArticles]);
+
+  const articles = useMemo(
+    () => allArticles.filter((a) => a.categoryId === selectedCategoryId),
+    [allArticles, selectedCategoryId],
+  );
 
   const createCategory = useMutation({
     mutationFn: async (input: CategoryFormState) => {
@@ -200,13 +239,13 @@ function HelpCenter() {
     onError: (err: Error) => setCategoryError(err.message),
   });
 
-  const deleteCategory = useMutation({
+  const archiveCategory = useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(
         `/api/projects/${projectId}/help/categories/${id}`,
         { method: "DELETE" },
       );
-      if (!res.ok) throw new Error("Failed to delete category");
+      if (!res.ok) throw new Error("Failed to archive category");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -215,7 +254,7 @@ function HelpCenter() {
       queryClient.invalidateQueries({
         queryKey: ["help-articles", projectId],
       });
-      toast.success("Category deleted");
+      toast.success("Category archived");
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -300,29 +339,27 @@ function HelpCenter() {
     },
     onMutate: async (items) => {
       await queryClient.cancelQueries({
-        queryKey: ["help-articles", projectId, selectedCategoryId],
+        queryKey: ["help-articles", projectId],
       });
       const prev = queryClient.getQueryData<ArticleResponse[]>([
         "help-articles",
         projectId,
-        selectedCategoryId,
       ]);
       if (prev) {
         const map = new Map(items.map((i) => [i.id, i.sortOrder]));
         const next = [...prev]
-          .map((a) => ({ ...a, sortOrder: map.get(a.id) ?? a.sortOrder }))
+          .map((a) =>
+            map.has(a.id) ? { ...a, sortOrder: map.get(a.id)! } : a,
+          )
           .sort((a, b) => a.sortOrder - b.sortOrder);
-        queryClient.setQueryData(
-          ["help-articles", projectId, selectedCategoryId],
-          next,
-        );
+        queryClient.setQueryData(["help-articles", projectId], next);
       }
       return { prev };
     },
     onError: (_err, _items, context) => {
       if (context?.prev) {
         queryClient.setQueryData(
-          ["help-articles", projectId, selectedCategoryId],
+          ["help-articles", projectId],
           context.prev,
         );
       }
@@ -330,7 +367,7 @@ function HelpCenter() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({
-        queryKey: ["help-articles", projectId, selectedCategoryId],
+        queryKey: ["help-articles", projectId],
       });
     },
   });
@@ -372,15 +409,21 @@ function HelpCenter() {
     }
   }
 
-  function handleDeleteCategory(cat: HelpCategoryItem) {
+  function handleArchiveCategory(cat: HelpCategoryItem) {
     if (
       !confirm(
-        `Delete "${cat.name}" and all ${cat.articleCount} article(s) inside it?`,
+        `Archive "${cat.name}"? Its ${cat.articleCount} article(s) will be hidden from your help center. Nothing is permanently deleted.`,
       )
     ) {
       return;
     }
-    deleteCategory.mutate(cat.id);
+    archiveCategory.mutate(cat.id);
+  }
+
+  function handleNewArticleInCategory(categoryId: string) {
+    navigate(
+      `/app/projects/${projectId}/help/articles/new?categoryId=${categoryId}`,
+    );
   }
 
   function handleDeleteArticle(article: HelpArticleItem) {
@@ -403,6 +446,7 @@ function HelpCenter() {
     name: c.name,
     slug: c.slug,
     description: c.description,
+    icon: c.icon,
     articleCount: c.articleCount,
     sortOrder: c.sortOrder,
   }));
@@ -414,6 +458,7 @@ function HelpCenter() {
     excerpt: a.excerpt,
     status: a.status,
     sortOrder: a.sortOrder,
+    thumbnail: firstImageFromMarkdown(a.content),
   }));
 
   const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
@@ -424,7 +469,7 @@ function HelpCenter() {
         <div className="flex items-start gap-2">
           <MobileMenuButton />
           <div>
-            <h1 className="font-heading text-3xl tracking-tight">
+            <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
               Help Center
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
@@ -471,7 +516,7 @@ function HelpCenter() {
             <BookOpen className="w-6 h-6 text-muted-foreground" />
           </div>
           <div>
-            <h2 className="font-heading text-xl">No categories yet</h2>
+            <h2 className="text-lg font-bold text-foreground">No categories yet</h2>
             <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
               Categories group related articles. Create your first one to start
               writing.
@@ -483,36 +528,39 @@ function HelpCenter() {
           </Button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-[320px,1fr] gap-6">
-          <aside className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 items-start">
+          <aside className="space-y-3 md:sticky md:top-6">
             <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1">
               Categories
             </h2>
             <HelpCategoryList
+              projectId={projectId ?? ""}
               categories={categoryItems}
+              articlesByCategory={articlesByCategory}
               selectedId={selectedCategoryId}
               onSelect={setSelectedCategoryId}
-              onEdit={openEditCategory}
-              onDelete={handleDeleteCategory}
+              onNewArticle={handleNewArticleInCategory}
+              onEditCategory={openEditCategory}
+              onArchiveCategory={handleArchiveCategory}
               onReorder={(items) => reorderCategories.mutate(items)}
             />
           </aside>
 
-          <section className="space-y-3">
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 className="font-heading text-xl tracking-tight">
+          <section className="space-y-4 min-w-0">
+            <div className="space-y-1">
+              <h2 className="text-lg font-bold text-foreground tracking-tight">
                 {selectedCategory?.name ?? "Articles"}
               </h2>
               {selectedCategory?.description && (
-                <p className="text-sm text-muted-foreground truncate">
+                <p className="text-sm text-muted-foreground">
                   {selectedCategory.description}
                 </p>
               )}
             </div>
             {articlesQuery.isLoading ? (
-              <div className="space-y-2">
-                <div className="h-16 rounded-xl bg-muted/40 animate-pulse" />
-                <div className="h-16 rounded-xl bg-muted/40 animate-pulse" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                <div className="h-48 rounded-xl bg-muted/40 animate-pulse" />
+                <div className="h-48 rounded-xl bg-muted/40 animate-pulse" />
               </div>
             ) : (
               <HelpArticleList
@@ -614,10 +662,6 @@ function HelpCenter() {
                   setCategoryForm((f) => ({ ...f, icon: v }))
                 }
               />
-              <p className="text-xs text-muted-foreground">
-                Pick a Lucide icon or upload an image. Images are shown
-                full-bleed with a gradient overlay on the public help center.
-              </p>
             </div>
             {categoryError && (
               <p className="text-sm text-destructive">{categoryError}</p>

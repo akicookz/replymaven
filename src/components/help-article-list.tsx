@@ -11,12 +11,12 @@ import {
 import {
   SortableContext,
   arrayMove,
+  rectSortingStrategy,
   sortableKeyboardCoordinates,
   useSortable,
-  verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Pencil, Trash2 } from "lucide-react";
+import { GripVertical, ImageIcon, Pencil, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,7 @@ export interface HelpArticleItem {
   excerpt: string | null;
   status: "draft" | "published";
   sortOrder: number;
+  thumbnail: string | null;
 }
 
 interface HelpArticleListProps {
@@ -37,17 +38,17 @@ interface HelpArticleListProps {
   onReorder: (items: { id: string; sortOrder: number }[]) => void;
 }
 
-interface SortableArticleRowProps {
+interface SortableArticleCardProps {
   projectId: string;
   article: HelpArticleItem;
   onDelete: () => void;
 }
 
-function SortableArticleRow({
+function SortableArticleCard({
   projectId,
   article,
   onDelete,
-}: SortableArticleRowProps) {
+}: SortableArticleCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: article.id });
 
@@ -63,53 +64,80 @@ function SortableArticleRow({
     <li
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-1.5 rounded-xl px-2 py-2.5 bg-muted/40 hover:bg-muted/60 transition-colors"
+      className="group relative flex flex-col overflow-hidden rounded-xl bg-muted/40 hover:bg-muted/60 transition-colors"
     >
+      <Link to={editHref} className="flex flex-col">
+        <div className="aspect-[16/9] w-full bg-muted/60 overflow-hidden">
+          {article.thumbnail ? (
+            <img
+              src={article.thumbnail}
+              alt=""
+              className="h-full w-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-muted-foreground/50">
+              <ImageIcon className="h-8 w-8" />
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col gap-1.5 p-3">
+          <div className="flex items-start justify-between gap-2">
+            <span className="text-sm font-medium line-clamp-1">
+              {article.title || "(untitled)"}
+            </span>
+            <span
+              className={cn(
+                "shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full",
+                article.status === "published"
+                  ? "bg-green-500/15 text-green-700 dark:text-green-300"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              {article.status === "published" ? "Published" : "Draft"}
+            </span>
+          </div>
+          {article.excerpt && (
+            <p className="text-xs text-muted-foreground line-clamp-2">
+              {article.excerpt}
+            </p>
+          )}
+        </div>
+      </Link>
+
       <button
         type="button"
         aria-label="Drag to reorder"
-        className="h-8 w-6 inline-flex items-center justify-center text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing"
+        className="absolute top-2 left-2 h-7 w-7 inline-flex items-center justify-center rounded-md bg-background/80 backdrop-blur text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
         {...attributes}
         {...listeners}
       >
         <GripVertical className="w-4 h-4" />
       </button>
-      <Link to={editHref} className="flex-1 min-w-0 group">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium truncate group-hover:underline">
-            {article.title || "(untitled)"}
-          </span>
-          <span
-            className={cn(
-              "text-[10px] font-medium px-1.5 py-0.5 rounded-full",
-              article.status === "published"
-                ? "bg-green-500/15 text-green-700 dark:text-green-300"
-                : "bg-muted text-muted-foreground",
-            )}
-          >
-            {article.status === "published" ? "Published" : "Draft"}
-          </span>
-        </div>
-        {article.excerpt && (
-          <div className="text-xs text-muted-foreground truncate mt-0.5">
-            {article.excerpt}
-          </div>
-        )}
-      </Link>
-      <Button type="button" variant="ghost" size="icon" asChild aria-label={`Edit ${article.title}`}>
-        <Link to={editHref}>
-          <Pencil className="w-4 h-4" />
-        </Link>
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        onClick={onDelete}
-        aria-label={`Delete ${article.title}`}
-      >
-        <Trash2 className="w-4 h-4" />
-      </Button>
+      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          className="h-7 w-7 bg-background/80 backdrop-blur"
+          asChild
+          aria-label={`Edit ${article.title}`}
+        >
+          <Link to={editHref}>
+            <Pencil className="w-3.5 h-3.5" />
+          </Link>
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          className="h-7 w-7 bg-background/80 backdrop-blur"
+          onClick={onDelete}
+          aria-label={`Delete ${article.title}`}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </Button>
+      </div>
     </li>
   );
 }
@@ -153,10 +181,10 @@ function HelpArticleList({
       collisionDetection={closestCenter}
       onDragEnd={handleDragEnd}
     >
-      <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-        <ul className="space-y-2">
+      <SortableContext items={ids} strategy={rectSortingStrategy}>
+        <ul className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {articles.map((article) => (
-            <SortableArticleRow
+            <SortableArticleCard
               key={article.id}
               projectId={projectId}
               article={article}
