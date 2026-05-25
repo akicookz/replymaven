@@ -666,6 +666,18 @@ export const updateHelpArticleSchema = createHelpArticleSchema
     categoryId: z.string().min(1).optional(),
   });
 
+export const previewHelpArticleSchema = z.object({
+  categoryId: z.string().min(1).nullable().optional(),
+  title: z.string().max(200).optional().default(""),
+  slug: z
+    .string()
+    .max(80)
+    .regex(/^[a-z0-9-]*$/, "Slug may only contain lowercase letters, numbers, and hyphens")
+    .optional(),
+  excerpt: z.string().max(280).nullable().optional(),
+  content: z.string().max(100_000).optional().default(""),
+});
+
 export const reorderHelpItemsSchema = z.object({
   items: z
     .array(

@@ -127,6 +127,7 @@ import {
   updateHelpCategorySchema,
   createHelpArticleSchema,
   updateHelpArticleSchema,
+  previewHelpArticleSchema,
   reorderHelpItemsSchema,
   helpTestProxySchema,
 } from "./validation";
@@ -5512,6 +5513,113 @@ const app = new Hono<HonoAppContext>()
       parsed.data.items,
     );
     return c.json({ ok: true });
+  })
+  .post("/api/projects/:id/help/articles/preview", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(previewHelpArticleSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const service = new HelpdeskService(db, c.env.UPLOADS);
+    const widgetService = new WidgetService(db);
+    const [widgetConfigRow, settings, categories, allPublished] =
+      await Promise.all([
+        widgetService.getWidgetConfig(project.id),
+        projectService.getSettings(project.id),
+        service.listCategories(project.id),
+        service.listAllPublishedArticles(project.id),
+      ]);
+
+    const now = new Date();
+    let category = parsed.data.categoryId
+      ? await service.getCategoryById(parsed.data.categoryId, project.id)
+      : null;
+    if (!category) category = categories[0] ?? null;
+    if (!category) {
+      category = {
+        id: "preview-category",
+        projectId: project.id,
+        name: "Uncategorized",
+        slug: "preview",
+        description: null,
+        icon: null,
+        sortOrder: 0,
+        archivedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    }
+    // Ensure the active category is present in the sidebar even when it has no
+    // published articles yet (e.g. previewing the first draft in a category).
+    const categoriesForRender = categories.some((c) => c.id === category!.id)
+      ? categories
+      : [...categories, category];
+
+    const title = parsed.data.title.trim() || "Untitled article";
+    const article: HelpArticleRow = {
+      id: "preview",
+      projectId: project.id,
+      categoryId: category.id,
+      title,
+      slug: parsed.data.slug?.trim() || "preview",
+      excerpt: parsed.data.excerpt ?? null,
+      content: parsed.data.content,
+      status: "draft",
+      sortOrder: 0,
+      publishedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Prev/next mirror the live page: derived from published siblings. When the
+    // draft shares a slug with an existing published article, surround it.
+    const siblings = await service.listArticles(project.id, {
+      categoryId: category.id,
+      status: "published",
+    });
+    const currentIndex = siblings.findIndex((a) => a.slug === article.slug);
+    const prevArticle = currentIndex > 0 ? siblings[currentIndex - 1] : null;
+    const nextArticle =
+      currentIndex >= 0 && currentIndex < siblings.length - 1
+        ? siblings[currentIndex + 1]
+        : null;
+
+    const bodyHtml = await renderMarkdown(
+      ensureArticleTitle(article.content ?? "", article.title),
+      {
+        projectSlug: project.slug,
+        customUrl: settings?.helpCustomUrl ?? null,
+      },
+    );
+
+    const articlesByCategory = groupArticlesByCategory(allPublished);
+    const topNav = parseHelpTopNav(settings?.helpTopNav);
+
+    const html = renderHelpArticle({
+      project,
+      category,
+      categories: categoriesForRender,
+      articlesByCategory,
+      article,
+      bodyHtml,
+      prevArticle,
+      nextArticle,
+      widgetConfig: widgetConfigRow,
+      helpCustomUrl: settings?.helpCustomUrl ?? null,
+      topNav,
+    });
+    return c.html(`<!doctype html>${html.toString()}`, 200, {
+      "Cache-Control": "no-store",
+    });
   })
   .post("/api/projects/:id/help/articles", async (c) => {
     const user = c.get("user");

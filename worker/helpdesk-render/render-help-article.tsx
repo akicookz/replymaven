@@ -208,46 +208,62 @@ const TOC_SCROLLSPY_SCRIPT = `
 (function(){
   var links = Array.prototype.slice.call(document.querySelectorAll('.help-toc-link'));
   if (!links.length) return;
+  var container = document.querySelector('.help-toc');
   var byId = {};
   links.forEach(function(a){ byId[a.getAttribute('data-toc-id')] = a; });
   var headings = links
     .map(function(a){ return document.getElementById(a.getAttribute('data-toc-id')); })
     .filter(Boolean);
   if (!headings.length) return;
+
+  // Scroll the active link into view WITHIN the TOC's own scroll box only —
+  // never call element.scrollIntoView, which would scroll the whole page.
+  function revealInToc(a){
+    if (!container) return;
+    var top = a.offsetTop;
+    var bottom = top + a.offsetHeight;
+    var viewTop = container.scrollTop;
+    var viewBottom = viewTop + container.clientHeight;
+    if (top < viewTop) container.scrollTop = top - 8;
+    else if (bottom > viewBottom) container.scrollTop = bottom - container.clientHeight + 8;
+  }
+
   var current = null;
   function setActive(id){
     if (current === id) return;
-    links.forEach(function(a){ a.classList.remove('is-active'); });
-    var a = byId[id];
-    if (a) {
-      a.classList.add('is-active');
-      // keep the active item visible within a scrollable TOC
-      a.scrollIntoView({ block: 'nearest' });
-    }
     current = id;
+    links.forEach(function(a){
+      a.classList.toggle('is-active', a.getAttribute('data-toc-id') === id);
+    });
+    var a = byId[id];
+    if (a) revealInToc(a);
   }
-  var ticking = false;
+
+  var TOP = 100; // reading line just below the sticky top bar
   function update(){
     ticking = false;
-    var offset = 100; // account for sticky top bar
-    var activeId = headings[0].id;
+    var maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    var remaining = maxScroll - window.scrollY;
+
+    // Normally the active section is the last heading at/above the reading
+    // line. In the final screenful the trailing headings can never reach that
+    // line, so sweep the line downward toward the viewport bottom as we
+    // approach the end — each trailing heading crosses it in order, so the
+    // highlight advances smoothly instead of snapping to the last one.
+    var line = TOP;
+    if (maxScroll > 0 && remaining < window.innerHeight){
+      var p = 1 - Math.max(remaining, 0) / window.innerHeight; // 0 → 1
+      line = TOP + (window.innerHeight - TOP) * p;
+    }
+
+    var idx = 0;
     for (var i = 0; i < headings.length; i++){
-      if (headings[i].getBoundingClientRect().top - offset <= 1){
-        activeId = headings[i].id;
-      } else {
-        break;
-      }
+      if (headings[i].getBoundingClientRect().top <= line) idx = i;
+      else if (line === TOP) break;
     }
-    // At (or near) the bottom of the page, force the last section active so
-    // short trailing sections still light up.
-    var scrolledToBottom =
-      window.innerHeight + window.scrollY >=
-      document.documentElement.scrollHeight - 2;
-    if (scrolledToBottom){
-      activeId = headings[headings.length - 1].id;
-    }
-    setActive(activeId);
+    setActive(headings[idx].id);
   }
+  var ticking = false;
   function onScroll(){
     if (ticking) return;
     ticking = true;

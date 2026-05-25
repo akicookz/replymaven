@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Settings2 } from "lucide-react";
+import { ArrowLeft, Eye, Loader2, RefreshCw, Settings2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -91,6 +99,10 @@ function HelpArticleEditorPage() {
   const [savedSnapshot, setSavedSnapshot] = useState<ArticleFormState | null>(
     null,
   );
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const categoriesQuery = useQuery<CategoryResponse[]>({
     queryKey: ["help-categories", projectId],
@@ -286,6 +298,47 @@ function HelpArticleEditorPage() {
     }
   }
 
+  const loadPreview = useCallback(async () => {
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/help/articles/preview`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            categoryId: form.categoryId || null,
+            title: form.title,
+            slug: form.slug || undefined,
+            excerpt: form.excerpt || null,
+            content: form.content,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const err = await res
+          .json()
+          .catch(() => ({ error: "Failed to render preview" }));
+        throw new Error(
+          (err as { error?: string }).error ?? "Failed to render preview",
+        );
+      }
+      setPreviewHtml(await res.text());
+    } catch (err) {
+      setPreviewError(
+        err instanceof Error ? err.message : "Failed to render preview",
+      );
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [projectId, form]);
+
+  function handleOpenPreview() {
+    setPreviewOpen(true);
+    void loadPreview();
+  }
+
   function handleTogglePublish() {
     if (isNew || !articleId) {
       toast.error("Save the article before publishing");
@@ -353,6 +406,16 @@ function HelpArticleEditorPage() {
           >
             {form.status === "published" ? "Published" : "Draft"}
           </span>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleOpenPreview}
+          >
+            <Eye className="w-4 h-4" />
+            <span className="hidden sm:inline">Preview</span>
+          </Button>
 
           <Popover>
             <PopoverTrigger asChild>
@@ -455,6 +518,65 @@ function HelpArticleEditorPage() {
           />
         </Suspense>
       </main>
+
+      <Sheet open={previewOpen} onOpenChange={setPreviewOpen}>
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className="w-full sm:max-w-3xl lg:max-w-5xl p-0 gap-0"
+        >
+          <SheetHeader className="flex-row items-center justify-between gap-3 px-4 py-2.5">
+            <SheetTitle className="text-sm">Preview</SheetTitle>
+            <SheetDescription className="sr-only">
+              Live preview of how this article looks to your readers.
+            </SheetDescription>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void loadPreview()}
+                disabled={previewLoading}
+              >
+                {previewLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4" />
+                )}
+                Refresh
+              </Button>
+              <SheetClose asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Close preview"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </SheetClose>
+            </div>
+          </SheetHeader>
+          <div className="relative flex-1 min-h-0 bg-muted/30">
+            {previewError ? (
+              <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
+                <p className="text-sm text-destructive">{previewError}</p>
+              </div>
+            ) : previewHtml ? (
+              <iframe
+                title="Article preview"
+                srcDoc={previewHtml}
+                className="w-full h-full border-0 bg-white"
+                sandbox="allow-scripts allow-same-origin allow-popups"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
