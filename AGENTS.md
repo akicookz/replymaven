@@ -70,6 +70,8 @@ bun run db:generate
 bun run widget:build
 ```
 
+To preview/verify changes visually, run `bun run dev` (serves the SPA + worker API and the embeddable widget at `/test-widget.html`) alongside `bun run widget:watch` (rebuilds `public/widget-embed.js` on change), then drive the headless browser via `bun ~/.preview-tools/shot.mjs <url> <out.png> [selector] [width] [height]` to screenshot a route. For widget states that depend on server config (e.g. greetings, page targeting), intercept `**/api/widget/<slug>/config` with a Playwright route and patch the JSON.
+
 ## Deployment
 
 **Always ask the user before deploying anything.**

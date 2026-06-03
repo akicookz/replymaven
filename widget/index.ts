@@ -685,15 +685,63 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
     .rm-greeting-cta:hover {
       opacity: 0.9;
     }
+    .rm-greeting-close {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--rm-bg, #ffffff);
+      color: var(--rm-text-secondary, #52525b);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.18);
+      cursor: pointer;
+      opacity: 0;
+      transform: scale(0.85);
+      transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+      z-index: 3;
+    }
+    .rm-greeting-card:hover .rm-greeting-close,
+    .rm-greeting-card:focus-within .rm-greeting-close {
+      opacity: 1;
+      transform: scale(1);
+    }
+    .rm-greeting-close:hover {
+      background: var(--rm-bg-secondary, #f4f4f5);
+      color: var(--rm-text, #18181b);
+    }
+    .rm-greeting-close svg {
+      width: 12px;
+      height: 12px;
+    }
+    @media (hover: none) {
+      .rm-greeting-close {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
     .rm-trigger.active ~ .rm-greeting-stack {
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.2s ease;
     }
     @media (max-width: 480px) {
-      .rm-greeting-stack {
-        width: calc(100vw - 24px);
-        max-width: calc(100vw - 24px);
+      /* Anchor to the viewport (not the offset launcher container) so the card
+         sits 12px from both screen edges instead of overflowing to the left. */
+      .rm-greeting-stack,
+      .rm-widget-container.bottom-right .rm-greeting-stack,
+      .rm-widget-container.bottom-left .rm-greeting-stack {
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        bottom: 84px;
+        width: auto;
+        max-width: none;
       }
       .rm-greeting-image {
         height: 120px;
@@ -1439,6 +1487,34 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
       width: 22px;
       height: 22px;
     }
+    .rm-home-close {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 32px;
+      height: 32px;
+      border: none;
+      border-radius: 50%;
+      /* Desktop closes via the floating launcher; only needed on mobile where
+         the launcher is hidden behind the fullscreen panel. */
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      background: rgba(0,0,0,0.35);
+      color: #ffffff;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      transition: background 0.2s;
+      z-index: 2;
+    }
+    .rm-home-close:hover {
+      background: rgba(0,0,0,0.5);
+    }
+    .rm-home-close svg {
+      width: 16px;
+      height: 16px;
+    }
     .rm-home-body {
       padding: 32px 20px 16px;
       flex: 1;
@@ -1960,6 +2036,11 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
       .rm-chat-window.open ~ .rm-trigger {
         display: none;
       }
+      /* The launcher (the usual close affordance) is hidden above, so the home
+         view needs its own close button on mobile. */
+      .rm-home-close {
+        display: flex;
+      }
     }
 
     /* ─── Center Inline Bar ──────────────────────────────────────────────── */
@@ -2409,6 +2490,16 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
   homeAvatar.className = "rm-home-avatar rm-icon-avatar";
   homeAvatar.innerHTML = ICONS.aiSparkle;
   homeBanner.appendChild(homeAvatar);
+
+  // Close button — only visible on mobile, where the launcher button (the usual
+  // close affordance) is hidden behind the fullscreen panel.
+  const homeCloseBtn = document.createElement("button");
+  homeCloseBtn.className = "rm-home-close";
+  homeCloseBtn.type = "button";
+  homeCloseBtn.setAttribute("aria-label", "Close");
+  homeCloseBtn.innerHTML = ICONS.close;
+  homeCloseBtn.onclick = () => closeChatWidget();
+  homeBanner.appendChild(homeCloseBtn);
 
   // Home body
   const homeBody = document.createElement("div");
@@ -5858,6 +5949,17 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
     }
 
     card.appendChild(body);
+
+    const close = document.createElement("button");
+    close.className = "rm-greeting-close";
+    close.type = "button";
+    close.setAttribute("aria-label", "Dismiss");
+    close.innerHTML = ICONS.x;
+    close.onclick = (e) => {
+      e.stopPropagation();
+      dismissGreetingCard(card, greeting.id, true);
+    };
+    card.appendChild(close);
 
     if (!isRich) {
       card.onclick = () => toggleChatWidget();
