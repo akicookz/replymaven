@@ -64,6 +64,12 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
   let wsHealthy = false;
   let lastSeenMessageId: string | null = null;
 
+  // Id of the newest bot/agent (non-visitor) message currently known. Tracked so
+  // we can surface an unseen response on page load and persist a per-device
+  // "seen up to here" marker. Tracking the newest *response* (not any message)
+  // avoids re-flagging when the visitor's own later message is newest.
+  let newestResponseId: string | null = null;
+
   // Detect touch-primary devices once at init. Used to disable Enter-to-send so
   // mobile users can insert newlines (the on-screen keyboard has no Shift+Enter).
   const isTouchDevice =
@@ -230,6 +236,24 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
 
   function clearPersistedConversation(): void {
     localStorage.removeItem(getStorageKey("conversation_id"));
+  }
+
+  // Per-device "seen up to here" marker — the newest response id the visitor has
+  // viewed. Used to surface an unseen response on load. Per-device by nature
+  // since visitorId is per-device localStorage.
+  function getStoredSeenResponseId(): string | null {
+    return localStorage.getItem(getStorageKey("last_seen_response_id"));
+  }
+  function setStoredSeenResponseId(id: string): void {
+    localStorage.setItem(getStorageKey("last_seen_response_id"), id);
+  }
+  // The newest response id we've already popped the intro card for, so a waiting
+  // response pops the card once but keeps badging the launcher until opened.
+  function getStoredPoppedIntroId(): string | null {
+    return localStorage.getItem(getStorageKey("last_popped_intro_id"));
+  }
+  function setStoredPoppedIntroId(id: string): void {
+    localStorage.setItem(getStorageKey("last_popped_intro_id"), id);
   }
 
   // ─── SVG Icons ──────────────────────────────────────────────────────────────
@@ -5258,6 +5282,7 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
         }
       }
       lastSeenMessageId = msg.id;
+      newestResponseId = msg.id;
       lastMessageTimestamp = Math.max(
         lastMessageTimestamp ?? 0,
         msg.createdAt,
@@ -5345,7 +5370,10 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
         const rendered = renderIncomingMessage(parsed.message);
         if (rendered) {
           lastNewMessageAt = Date.now();
-          if (isOpen) scrollToBottom();
+          if (isOpen) {
+            scrollToBottom();
+            markConversationSeen();
+          }
           if (!isOpen) {
             incrementUnreadBadge();
             showBrowserNotification(parsed.message.content ?? "New message");
@@ -5564,6 +5592,7 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
               }
             }
           }
+          newestResponseId = msg.id;
           hasNewMessages = true;
         } else if (msg.role === "visitor") {
           // Mark visitor messages as rendered so we don't duplicate them
@@ -5584,7 +5613,10 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
 
       if (hasNewMessages) {
         lastNewMessageAt = Date.now();
-        if (isOpen) scrollToBottom();
+        if (isOpen) {
+          scrollToBottom();
+          markConversationSeen();
+        }
 
         if (!isOpen) {
           // Widget is closed -- show red dot + pop out intro pill with latest message
@@ -5681,6 +5713,13 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
     triggerBadge.classList.remove("visible");
   }
 
+  // Persist that the visitor has seen the newest response and clear the badge.
+  // Called when the widget opens or a response is viewed while open.
+  function markConversationSeen() {
+    if (newestResponseId) setStoredSeenResponseId(newestResponseId);
+    clearUnreadBadge();
+  }
+
   // ─── Conversation History Loading ────────────────────────────────────────────
 
   async function loadConversationHistory(openChat = true) {
@@ -5762,6 +5801,25 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
         }
 
         ensureLatestMessageVisible();
+
+        // Surface an unseen response on load. Find the newest bot/agent message;
+        // if it hasn't been seen on this device, badge the launcher and pop the
+        // intro card once. Runs for active and recently-closed threads alike.
+        const latestResponse = [...msgs]
+          .reverse()
+          .find((m: { role: string }) => m.role !== "visitor");
+        if (latestResponse) {
+          newestResponseId = latestResponse.id;
+          if (isOpen) {
+            markConversationSeen();
+          } else if (latestResponse.id !== getStoredSeenResponseId()) {
+            incrementUnreadBadge();
+            if (latestResponse.id !== getStoredPoppedIntroId()) {
+              popIntroPillForIncomingMessage(latestResponse);
+              setStoredPoppedIntroId(latestResponse.id);
+            }
+          }
+        }
       }
 
       // Don't start polling for closed conversations
@@ -6092,7 +6150,7 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
     isOpen = true;
     chatWindow.classList.add("open");
     trigger.classList.add("active");
-    clearUnreadBadge();
+    markConversationSeen();
     // Hide intro pill permanently
     if (introPillDelayTimer) {
       clearTimeout(introPillDelayTimer);
