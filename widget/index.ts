@@ -5450,7 +5450,9 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
     senderName?: string | null;
     senderAvatar?: string | null;
   }) {
-    if (msg.role === "visitor") return;
+    // Only human agent replies pop the card. AI/bot answers still badge the
+    // launcher (handled by the callers) but don't interrupt with the pill.
+    if (msg.role !== "agent") return;
 
     const senderName =
       msg.senderName ||
