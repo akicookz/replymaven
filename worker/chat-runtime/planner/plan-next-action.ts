@@ -32,6 +32,7 @@ interface PlanNextActionOptions {
   state: PlannerLoopState;
   faqContext?: string | null;
   guidelines?: Array<{ condition: string; instruction: string }>;
+  image?: { base64: string; mimeType: string } | null;
 }
 
 const PLANNER_FAQ_CHAR_BUDGET = 3500;
@@ -441,12 +442,7 @@ export async function planNextAction(
     ? trimToBudget(options.faqContext.trim(), PLANNER_FAQ_CHAR_BUDGET)
     : "None.";
 
-  const result = await generateText({
-    model: options.model,
-    output: Output.object({ schema: plannerDecisionSchema }),
-    temperature: 0,
-    maxOutputTokens: 1200,
-    prompt: `Return ONLY a single valid JSON object matching the schema — no prose, no markdown fences.
+  const promptText = `Return ONLY a single valid JSON object matching the schema — no prose, no markdown fences.
 
 Choose the next bounded action for a support-chat planner.
 
@@ -454,7 +450,7 @@ Conversation:
 ${transcript || "No prior conversation"}
 
 Latest visitor message:
-${options.currentMessage}
+${options.currentMessage}${options.image ? "\n(The visitor attached an image to this message — it is shown to you below.)" : ""}
 
 Page context:
 ${pageContextBlock}
@@ -548,7 +544,29 @@ Anti-loop rules (CRITICAL):
 - If the visitor shows frustration signals ("useless", "not helping", "stop asking", "I already said"), immediately prefer offer_handoff over any further ask_user.
 - If the visitor says the issue is resolved or thanks you, choose compose — do NOT search docs or ask further questions.
 
-- If no safe action remains, choose stop. The runtime will still compose a reply using available evidence or a candid acknowledgment that no concrete answer was found.`,
+- If no safe action remains, choose stop. The runtime will still compose a reply using available evidence or a candid acknowledgment that no concrete answer was found.`;
+
+  // Default to text-only; when the visitor attached an image, pass it as a
+  // normal multimodal content part so the planner can read it alongside the
+  // text instead of asking for a screenshot that was already provided.
+  const userContent: Array<
+    | { type: "text"; text: string }
+    | { type: "image"; image: string; mediaType?: string }
+  > = [{ type: "text", text: promptText }];
+  if (options.image) {
+    userContent.push({
+      type: "image",
+      image: options.image.base64,
+      mediaType: options.image.mimeType,
+    });
+  }
+
+  const result = await generateText({
+    model: options.model,
+    output: Output.object({ schema: plannerDecisionSchema }),
+    temperature: 0,
+    maxOutputTokens: 1200,
+    messages: [{ role: "user", content: userContent }],
   });
 
   const object =

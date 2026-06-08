@@ -709,6 +709,7 @@ export async function runPlannerLoop(
               state: loopState,
               faqContext: options.compiledFaqContext,
               guidelines: options.guidelines,
+              image: options.image,
             });
           },
         });

@@ -32,14 +32,15 @@ export async function streamSupportAgent(
   const messages = toSdkConversationMessages(options.conversationHistory);
   const userContent: Array<
     | { type: "text"; text: string }
-    | { type: "image"; image: string; mimeType?: string }
+    | { type: "image"; image: string; mediaType?: string }
   > = [{ type: "text", text: options.userMessage }];
 
   if (options.image) {
     userContent.push({
       type: "image",
       image: options.image.base64,
-      mimeType: options.image.mimeType,
+      // AI SDK v6 ImagePart uses `mediaType` (v4's `mimeType` is ignored).
+      mediaType: options.image.mimeType,
     });
   }
 

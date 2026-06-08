@@ -5251,22 +5251,25 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
     sources: string | null;
     senderName: string | null;
     senderAvatar: string | null;
+    imageUrl: string | null;
     createdAt: number;
   }): boolean {
     if (renderedMessageIds.has(msg.id)) return false;
 
     if (msg.role === "bot" || msg.role === "agent") {
       hideTyping();
+      // addMessageToUI already renders the markdown body (and the image, when
+      // present) into msgEl. Re-setting el.innerHTML here would wipe the image,
+      // so we only layer sources on top of what it built.
       const el = addMessageToUI(
         msg.role,
         msg.content,
         msg.id,
-        undefined,
+        msg.imageUrl ?? undefined,
         msg.senderName ?? undefined,
         msg.senderAvatar ?? undefined,
       );
       if (el.parentElement) {
-        el.innerHTML = renderMarkdown(msg.content);
         if (msg.sources) {
           try {
             const sources =
@@ -5354,6 +5357,7 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
           sources: string | null;
           senderName: string | null;
           senderAvatar: string | null;
+          imageUrl: string | null;
           createdAt: number;
         };
         status?: string;
@@ -5573,13 +5577,13 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
             msg.role,
             msg.content,
             msg.id,
-            undefined,
+            msg.imageUrl ?? undefined,
             msg.senderName ?? undefined,
             msg.senderAvatar ?? undefined,
           );
-          // Render markdown for bot/agent messages
+          // addMessageToUI already rendered the markdown body and image; only
+          // layer sources on top (re-setting innerHTML would wipe the image).
           if (el.parentElement) {
-            el.innerHTML = renderMarkdown(msg.content);
             if (msg.sources) {
               try {
                 const sources =
@@ -5769,12 +5773,12 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
             msg.senderName ?? undefined,
             msg.senderAvatar ?? undefined,
           );
-          // Render markdown for bot/agent messages
+          // addMessageToUI already rendered the markdown body and image; only
+          // layer sources on top (re-setting innerHTML would wipe the image).
           if (
             (msg.role === "bot" || msg.role === "agent") &&
             el.parentElement
           ) {
-            el.innerHTML = renderMarkdown(msg.content);
             if (msg.sources) {
               try {
                 const sources =
