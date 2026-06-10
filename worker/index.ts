@@ -3708,6 +3708,7 @@ const app = new Hono<HonoAppContext>()
       id: row.id,
       enabled: row.enabled,
       imageUrl: row.imageUrl,
+      imagePosition: row.imagePosition,
       title: row.title,
       description: row.description,
       ctaText: row.ctaText,

@@ -21,6 +21,7 @@ export interface WidgetConfigData {
   fontFamily: string;
   customCss: string | null;
   bannerUrl: string | null;
+  bannerPosition: string | null;
   homeTitle: string;
   homeSubtitle: string | null;
   allowedPages: string | null;
@@ -84,6 +85,7 @@ interface PreviewGreetingPayload {
   id: string;
   enabled: boolean;
   imageUrl: string | null;
+  imagePosition: string | null;
   title: string;
   description: string | null;
   ctaText: string | null;
@@ -122,6 +124,7 @@ function buildPreviewHtml(options: {
       fontFamily: options.form.fontFamily ?? "",
       customCss: options.form.customCss ?? null,
       bannerUrl: options.form.bannerUrl ?? null,
+      bannerPosition: options.form.bannerPosition ?? null,
       homeTitle: options.form.homeTitle ?? "How can we help?",
       homeSubtitle: options.form.homeSubtitle ?? null,
       backgroundStyle: options.form.backgroundStyle ?? "solid",
@@ -282,6 +285,7 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
         id: g.id,
         enabled: g.enabled,
         imageUrl: g.imageUrl,
+        imagePosition: g.imagePosition,
         title: g.title,
         description: g.description,
         ctaText: g.ctaText,
@@ -338,7 +342,10 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
 
       if (!res.ok) throw new Error("Upload failed");
       const { url } = (await res.json()) as { url: string };
-      updateForm({ [field]: url } as Partial<WidgetConfigData>);
+      const updates: Partial<WidgetConfigData> = { [field]: url };
+      // A new banner starts centered — the old focal point is meaningless.
+      if (field === "bannerUrl") updates.bannerPosition = null;
+      updateForm(updates);
     } catch (err) {
       console.error("Upload failed:", err);
     } finally {

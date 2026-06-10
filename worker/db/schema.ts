@@ -124,6 +124,8 @@ export const widgetConfig = sqliteTable(
     fontFamily: text("font_family").notNull().default("system-ui"),
     customCss: text("custom_css"),
     bannerUrl: text("banner_url"),
+    // Focal point for the banner image as "X% Y%"; null = centered.
+    bannerPosition: text("banner_position"),
     homeTitle: text("home_title").notNull().default("How can we help?"),
     homeSubtitle: text("home_subtitle"),
     allowedPages: text("allowed_pages"),
@@ -859,6 +861,8 @@ export const greetings = sqliteTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
     imageUrl: text("image_url"),
+    // Focal point for the image as "X% Y%"; null = centered.
+    imagePosition: text("image_position"),
     title: text("title").notNull(),
     description: text("description"),
     ctaText: text("cta_text"),

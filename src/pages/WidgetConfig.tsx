@@ -24,6 +24,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import GreetingsList from "@/components/GreetingsList";
+import { ImagePositioner } from "@/components/ImagePositioner";
 import PageVisibilityInput from "@/components/PageVisibilityInput";
 import {
   WidgetPageShell,
@@ -36,6 +37,7 @@ import {
   useWidgetSettings,
 } from "@/hooks/use-widget-settings";
 import { cn } from "@/lib/utils";
+import { WIDGET_FONTS } from "../../shared/widget-fonts";
 
 const VALID_TABS = ["appearance", "greetings"] as const;
 type TabValue = (typeof VALID_TABS)[number];
@@ -240,23 +242,11 @@ function WidgetConfig() {
                   <SelectValue placeholder="Select font" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="system-ui">System Default</SelectItem>
-                  <SelectItem value="Inter">Inter</SelectItem>
-                  <SelectItem value="Satoshi">Satoshi</SelectItem>
-                  <SelectItem value="DM Sans">DM Sans</SelectItem>
-                  <SelectItem value="Nunito">Nunito</SelectItem>
-                  <SelectItem value="Raleway">Raleway</SelectItem>
-                  <SelectItem value="Plus Jakarta Sans">
-                    Plus Jakarta Sans
-                  </SelectItem>
-                  <SelectItem value="IBM Plex Sans">IBM Plex Sans</SelectItem>
-                  <SelectItem value="Lato">Lato</SelectItem>
-                  <SelectItem value="Space Grotesk">Space Grotesk</SelectItem>
-                  <SelectItem value="Outfit">Outfit</SelectItem>
-                  <SelectItem value="Merriweather Sans">
-                    Merriweather Sans
-                  </SelectItem>
-                  <SelectItem value="JetBrains Mono">JetBrains Mono</SelectItem>
+                  {WIDGET_FONTS.map((font) => (
+                    <SelectItem key={font.value} value={font.value}>
+                      {font.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -383,28 +373,46 @@ function WidgetConfig() {
                     Banner Image
                   </label>
                   <div
-                    className="relative w-full h-28 rounded-xl border-2 border-dashed border-border flex items-center justify-center overflow-hidden bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors"
-                    style={
+                    className={cn(
+                      "relative w-full h-28 rounded-xl border-2 border-border flex items-center justify-center overflow-hidden bg-muted/30",
+                      !state.form.bannerUrl &&
+                        "border-dashed cursor-pointer hover:bg-muted/50 transition-colors",
+                    )}
+                    onClick={
                       state.form.bannerUrl
-                        ? { borderStyle: "solid" }
-                        : undefined
+                        ? undefined
+                        : () => state.bannerInputRef.current?.click()
                     }
-                    onClick={() => state.bannerInputRef.current?.click()}
                   >
                     {state.form.bannerUrl ? (
                       <>
-                        <img
+                        <ImagePositioner
                           src={state.form.bannerUrl}
                           alt="Banner"
-                          className="w-full h-full object-cover"
+                          position={state.form.bannerPosition ?? null}
+                          onChange={(value) =>
+                            state.updateForm({ bannerPosition: value })
+                          }
                         />
                         <button
                           type="button"
+                          title="Replace image"
+                          disabled={state.bannerUploading}
+                          className="absolute top-2 right-9 w-6 h-6 bg-black/50 rounded-full flex items-center justify-center text-white hover:bg-black/70 disabled:opacity-50"
+                          onClick={() => state.bannerInputRef.current?.click()}
+                        >
+                          <Upload className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Remove image"
                           className="absolute top-2 right-2 w-6 h-6 bg-black/50 rounded-full flex items-center justify-center text-white hover:bg-black/70"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            state.updateForm({ bannerUrl: null });
-                          }}
+                          onClick={() =>
+                            state.updateForm({
+                              bannerUrl: null,
+                              bannerPosition: null,
+                            })
+                          }
                         >
                           <X className="w-3 h-3" />
                         </button>

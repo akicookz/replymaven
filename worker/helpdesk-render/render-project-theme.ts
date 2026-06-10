@@ -1,5 +1,5 @@
 import type { WidgetConfigRow } from "../db/schema";
-import { FONT_ALLOWLIST } from "./build-font-link";
+import { isAllowedFont } from "./build-font-link";
 
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
 const COLOR_FN_RE = /^(oklch|rgb|rgba|hsl|hsla)\(\s*[0-9a-zA-Z%.,\-\s/+*]+\s*\)$/i;
@@ -59,7 +59,7 @@ export function sanitizeRadius(input: string | null | undefined): string | null 
 
 export function sanitizeFontName(input: string | null | undefined): string | null {
   if (!input) return null;
-  return Object.hasOwn(FONT_ALLOWLIST, input) ? input : null;
+  return isAllowedFont(input) ? input : null;
 }
 
 function normalizeRadius(value: number | string | null | undefined): string {

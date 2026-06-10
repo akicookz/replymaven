@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Image, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ImagePositioner } from "@/components/ImagePositioner";
+import { cn } from "@/lib/utils";
 import {
   Sheet,
   SheetContent,
@@ -24,6 +26,7 @@ import type { GreetingData } from "@/hooks/use-greetings";
 export interface GreetingFormState {
   enabled: boolean;
   imageUrl: string | null;
+  imagePosition: string | null;
   title: string;
   description: string;
   ctaText: string;
@@ -38,6 +41,7 @@ function emptyForm(): GreetingFormState {
   return {
     enabled: true,
     imageUrl: null,
+    imagePosition: null,
     title: "",
     description: "",
     ctaText: "",
@@ -53,6 +57,7 @@ function fromGreeting(g: GreetingData): GreetingFormState {
   return {
     enabled: g.enabled,
     imageUrl: g.imageUrl,
+    imagePosition: g.imagePosition,
     title: g.title,
     description: g.description ?? "",
     ctaText: g.ctaText ?? "",
@@ -109,7 +114,8 @@ function GreetingEditor({
     setUploadError(null);
     try {
       const url = await uploadImage(file);
-      update("imageUrl", url);
+      // A new image starts centered — the old focal point is meaningless.
+      setForm((prev) => ({ ...prev, imageUrl: url, imagePosition: null }));
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -178,23 +184,44 @@ function GreetingEditor({
               </span>
             </label>
             <div
-              className="relative w-full h-36 rounded-xl border-2 border-dashed border-border flex items-center justify-center overflow-hidden bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors"
-              style={form.imageUrl ? { borderStyle: "solid" } : undefined}
-              onClick={() => fileInputRef.current?.click()}
+              className={cn(
+                "relative w-full h-36 rounded-xl border-2 border-border flex items-center justify-center overflow-hidden bg-muted/30",
+                !form.imageUrl &&
+                  "border-dashed cursor-pointer hover:bg-muted/50 transition-colors",
+              )}
+              onClick={
+                form.imageUrl
+                  ? undefined
+                  : () => fileInputRef.current?.click()
+              }
             >
               {form.imageUrl ? (
                 <>
-                  <img
+                  <ImagePositioner
                     src={form.imageUrl}
                     alt="Greeting"
-                    className="w-full h-full object-cover"
+                    position={form.imagePosition}
+                    onChange={(value) => update("imagePosition", value)}
                   />
                   <button
                     type="button"
+                    title="Replace image"
+                    disabled={uploading}
+                    className="absolute top-2 right-9 w-6 h-6 bg-black/50 rounded-full flex items-center justify-center text-white hover:bg-black/70 disabled:opacity-50"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    title="Remove image"
                     className="absolute top-2 right-2 w-6 h-6 bg-black/50 rounded-full flex items-center justify-center text-white hover:bg-black/70"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      update("imageUrl", null);
+                    onClick={() => {
+                      setForm((prev) => ({
+                        ...prev,
+                        imageUrl: null,
+                        imagePosition: null,
+                      }));
                     }}
                   >
                     <X className="w-3 h-3" />

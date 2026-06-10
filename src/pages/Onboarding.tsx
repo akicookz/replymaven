@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select";
 import { ColorPicker } from "@/components/ui/color-picker";
 import { Skeleton } from "@/components/ui/skeleton";
+import { WIDGET_FONTS as FONT_OPTIONS } from "../../shared/widget-fonts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -61,15 +62,6 @@ const COLOR_PRESETS = [
   "#0891b2",
   "#db2777",
   "#475569",
-] as const;
-
-const FONT_OPTIONS = [
-  { value: "system-ui", label: "System Default" },
-  { value: "Inter", label: "Inter" },
-  { value: "DM Sans", label: "DM Sans" },
-  { value: "Plus Jakarta Sans", label: "Plus Jakarta Sans" },
-  { value: "Space Grotesk", label: "Space Grotesk" },
-  { value: "JetBrains Mono", label: "JetBrains Mono" },
 ] as const;
 
 const STEPS = [

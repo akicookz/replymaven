@@ -13,6 +13,7 @@
  */
 
 import { WebSocket as ReconnectingWebSocket } from "partysocket";
+import { WIDGET_FONTS } from "../shared/widget-fonts";
 
 (function () {
   // Find the script tag to get config
@@ -313,6 +314,14 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
   // ─── Styles ─────────────────────────────────────────────────────────────────
   const styles = document.createElement("style");
   styles.textContent = `
+    /* Form controls don't inherit font-family by default — without this,
+       buttons/inputs keep the host page's system font when a custom widget
+       font is configured. */
+    .rm-widget-container button, .rm-widget-container input,
+    .rm-widget-container textarea, .rm-widget-container select,
+    .rm-inline-bar button, .rm-inline-bar input {
+      font-family: inherit;
+    }
     .rm-widget-container {
       position: fixed;
       z-index: 999999;
@@ -1545,7 +1554,7 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
     }
     .rm-home-title {
       font-size: 20px;
-      font-weight: 700;
+      font-weight: 600;
       line-height: 1.3;
       color: var(--rm-text);
     }
@@ -2878,6 +2887,7 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
     id: string;
     enabled: boolean;
     imageUrl: string | null;
+    imagePosition: string | null;
     title: string;
     description: string | null;
     ctaText: string | null;
@@ -3628,40 +3638,24 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
 
         // Font family
         if (w.fontFamily && w.fontFamily !== "system-ui") {
-          const fontUrls: Record<string, string> = {
-            Inter:
-              "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
-            Satoshi:
-              "https://api.fontshare.com/v2/css?f[]=satoshi@400;500;600;700&display=swap",
-            "DM Sans":
-              "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap",
-            Nunito:
-              "https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700&display=swap",
-            Raleway:
-              "https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600&display=swap",
-            "Plus Jakarta Sans":
-              "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap",
-            "IBM Plex Sans":
-              "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap",
-            Lato: "https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap",
-            "Space Grotesk":
-              "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap",
-            Outfit:
-              "https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap",
-            "Merriweather Sans":
-              "https://fonts.googleapis.com/css2?family=Merriweather+Sans:wght@400;500;600&display=swap",
-            "JetBrains Mono":
-              "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap",
-          };
-          const fontUrl = fontUrls[w.fontFamily];
-          if (fontUrl) {
+          const fontOption = WIDGET_FONTS.find(
+            (f) => f.value === w.fontFamily,
+          );
+          if (fontOption?.url && !document.getElementById("rm-widget-font")) {
             const link = document.createElement("link");
+            link.id = "rm-widget-font";
             link.rel = "stylesheet";
-            link.href = fontUrl;
+            link.href = fontOption.url;
             document.head.appendChild(link);
           }
-          container.style.fontFamily =
-            w.fontFamily + ", -apple-system, BlinkMacSystemFont, sans-serif";
+          const fontStack =
+            '"' +
+            w.fontFamily +
+            '", -apple-system, BlinkMacSystemFont, sans-serif';
+          container.style.fontFamily = fontStack;
+          // The inline bar is its own top-level element — it does not
+          // inherit from container, so it needs the font applied too.
+          inlineBar.style.fontFamily = fontStack;
         }
 
         // ─── Avatar (trigger, header, home screen) ────────────────────────────
@@ -3702,6 +3696,9 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
         // Banner
         if (w.bannerUrl) {
           homeBanner.style.backgroundImage = `url(${resolveUrl(w.bannerUrl)})`;
+          if (w.bannerPosition) {
+            homeBanner.style.backgroundPosition = w.bannerPosition;
+          }
         } else {
           homeBanner.style.backgroundColor = primary;
         }
@@ -5949,6 +5946,9 @@ import { WebSocket as ReconnectingWebSocket } from "partysocket";
       img.className = "rm-greeting-image";
       img.src = resolveUrl(greeting.imageUrl);
       img.alt = "";
+      if (greeting.imagePosition) {
+        img.style.objectPosition = greeting.imagePosition;
+      }
       card.appendChild(img);
     }
 

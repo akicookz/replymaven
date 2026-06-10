@@ -18,6 +18,7 @@ export interface GreetingPublic {
   id: string;
   enabled: boolean;
   imageUrl: string | null;
+  imagePosition: string | null;
   title: string;
   description: string | null;
   ctaText: string | null;
@@ -87,6 +88,7 @@ export class WidgetService {
         | "fontFamily"
         | "customCss"
         | "bannerUrl"
+        | "bannerPosition"
         | "homeTitle"
         | "homeSubtitle"
         | "allowedPages"
@@ -214,6 +216,7 @@ export class WidgetService {
     data: {
       enabled?: boolean;
       imageUrl?: string | null;
+      imagePosition?: string | null;
       title: string;
       description?: string | null;
       ctaText?: string | null;
@@ -238,6 +241,7 @@ export class WidgetService {
       projectId,
       enabled: data.enabled ?? true,
       imageUrl: data.imageUrl ?? null,
+      imagePosition: data.imagePosition ?? null,
       title: data.title,
       description: data.description ?? null,
       ctaText: data.ctaText ?? null,
@@ -259,6 +263,7 @@ export class WidgetService {
     updates: {
       enabled?: boolean;
       imageUrl?: string | null;
+      imagePosition?: string | null;
       title?: string;
       description?: string | null;
       ctaText?: string | null;
@@ -276,6 +281,8 @@ export class WidgetService {
     const setData: Record<string, unknown> = {};
     if (updates.enabled !== undefined) setData.enabled = updates.enabled;
     if (updates.imageUrl !== undefined) setData.imageUrl = updates.imageUrl;
+    if (updates.imagePosition !== undefined)
+      setData.imagePosition = updates.imagePosition;
     if (updates.title !== undefined) setData.title = updates.title;
     if (updates.description !== undefined)
       setData.description = updates.description;
@@ -367,6 +374,7 @@ export class WidgetService {
       id: row.id,
       enabled: row.enabled,
       imageUrl: row.imageUrl,
+      imagePosition: row.imagePosition,
       title: row.title,
       description: row.description,
       ctaText: row.ctaText,

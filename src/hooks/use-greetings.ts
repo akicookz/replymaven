@@ -10,6 +10,7 @@ export interface GreetingData {
   id: string;
   enabled: boolean;
   imageUrl: string | null;
+  imagePosition: string | null;
   title: string;
   description: string | null;
   ctaText: string | null;
@@ -24,6 +25,7 @@ export interface GreetingData {
 export interface CreateGreetingInput {
   enabled?: boolean;
   imageUrl?: string | null;
+  imagePosition?: string | null;
   title: string;
   description?: string | null;
   ctaText?: string | null;

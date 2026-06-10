@@ -48,6 +48,7 @@ function GreetingsList({
     const payload = {
       enabled: form.enabled,
       imageUrl: form.imageUrl,
+      imagePosition: form.imageUrl ? form.imagePosition : null,
       title: form.title.trim(),
       description: form.description.trim() || null,
       ctaText: form.ctaText.trim() || null,
@@ -111,6 +112,11 @@ function GreetingsList({
                     src={g.imageUrl}
                     alt=""
                     className="w-full h-full object-cover"
+                    style={
+                      g.imagePosition
+                        ? { objectPosition: g.imagePosition }
+                        : undefined
+                    }
                   />
                 ) : (
                   <span className="text-sm font-semibold text-muted-foreground">

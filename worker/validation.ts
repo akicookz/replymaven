@@ -152,6 +152,11 @@ export const updateProjectSettingsSchema = z.object({
 });
 
 // ─── Widget Config ────────────────────────────────────────────────────────────
+// Image focal point as "X% Y%" with integer percentages (e.g. "50% 25%").
+const imagePositionSchema = z
+  .string()
+  .regex(/^(?:100|\d{1,2})% (?:100|\d{1,2})%$/, "Must be 'X% Y%'");
+
 export const updateWidgetConfigSchema = z.object({
   primaryColor: z
     .string()
@@ -173,6 +178,7 @@ export const updateWidgetConfigSchema = z.object({
   fontFamily: z.string().max(100).optional(),
   customCss: z.string().max(5000).nullable().optional(),
   bannerUrl: z.string().max(500).nullable().optional(),
+  bannerPosition: imagePositionSchema.nullable().optional(),
   homeTitle: z.string().min(1).max(200).optional(),
   homeSubtitle: z.string().max(500).nullable().optional(),
   allowedPages: z.string().max(2000).nullable().optional(),
@@ -563,6 +569,7 @@ const allowedPagesArraySchema = z
 export const createGreetingSchema = z.object({
   enabled: z.boolean().optional(),
   imageUrl: z.string().max(500).nullable().optional(),
+  imagePosition: imagePositionSchema.nullable().optional(),
   title: z.string().min(1, "Title is required").max(120),
   description: z.string().max(500).nullable().optional(),
   ctaText: z.string().max(40).nullable().optional(),
@@ -582,6 +589,7 @@ export const createGreetingSchema = z.object({
 export const updateGreetingSchema = z.object({
   enabled: z.boolean().optional(),
   imageUrl: z.string().max(500).nullable().optional(),
+  imagePosition: imagePositionSchema.nullable().optional(),
   title: z.string().min(1).max(120).optional(),
   description: z.string().max(500).nullable().optional(),
   ctaText: z.string().max(40).nullable().optional(),
