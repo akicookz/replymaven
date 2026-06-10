@@ -18,6 +18,9 @@ import {
   X,
   Zap,
   BookOpen,
+  Home,
+  Megaphone,
+  Code,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -154,19 +157,34 @@ function Layout() {
       ]
     : [];
 
-  const toolsNav = currentProject
+  const widgetNav = currentProject
     ? [
         {
-          label: "Widget Configuration",
+          label: "Appearance",
           href: `/app/projects/${currentProject.id}/widget`,
           icon: Palette,
+          exact: true,
         },
         {
-          label: "Quick Actions and Tools",
+          label: "Home Screen",
+          href: `/app/projects/${currentProject.id}/widget/home`,
+          icon: Home,
+        },
+        {
+          label: "Greetings & News",
+          href: `/app/projects/${currentProject.id}/widget/greetings`,
+          icon: Megaphone,
+        },
+        {
+          label: "Quick Actions & Tools",
           href: `/app/projects/${currentProject.id}/quick-actions`,
           icon: Zap,
         },
-
+        {
+          label: "Installation",
+          href: `/app/projects/${currentProject.id}/widget/installation`,
+          icon: Code,
+        },
       ]
     : [];
 
@@ -188,13 +206,13 @@ function Layout() {
     navigate("/");
   }
 
-  function isActive(item: { label: string; href: string }) {
-    return item.label === "Dashboard"
+  function isActive(item: { label: string; href: string; exact?: boolean }) {
+    return item.label === "Dashboard" || item.exact
       ? location.pathname === item.href
       : location.pathname.startsWith(item.href);
   }
 
-  function NavLink({ item }: { item: { label: string; href: string; icon: React.ComponentType<{ className?: string }>; badge?: number } }) {
+  function NavLink({ item }: { item: { label: string; href: string; icon: React.ComponentType<{ className?: string }>; badge?: number; exact?: boolean } }) {
     const active = isActive(item);
     return (
       <Link
@@ -346,16 +364,16 @@ function Layout() {
             ))}
           </div>
 
-          {/* Configure */}
-          {toolsNav.length > 0 && (
+          {/* Widget */}
+          {widgetNav.length > 0 && (
             <div className="space-y-1">
               {!collapsed && (
                 <p className="px-3 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Configure
+                  Widget
                 </p>
               )}
               <div className="space-y-0.5">
-                {toolsNav.map((item) => (
+                {widgetNav.map((item) => (
                   <NavLink key={item.href} item={item} />
                 ))}
               </div>

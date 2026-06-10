@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, and, count } from "drizzle-orm";
+import { eq, and, count, sql } from "drizzle-orm";
 import robotsParser from "robots-parser";
 import {
   crawledPages,
@@ -33,6 +33,15 @@ interface BrowserRenderingMarkdownResponse {
 const MAX_PAGES_DEFAULT = 50;
 const MAX_DEPTH_DEFAULT = 1;
 const USER_AGENT = "ReplyMaven Bot/1.0 (https://replymaven.com)";
+const BROWSER_API_TIMEOUT_MS = 60_000;
+// A crawl with no page activity (status transition or new row) for this long
+// is considered dead — its queue messages are gone, so pending pages get
+// failed and the resource finalized.
+const STALE_PENDING_MS = 10 * 60_000;
+
+// Transient failure (rate limit, 5xx, network) — the queue should redeliver
+// with backoff instead of permanently failing the page.
+export class CrawlRetryableError extends Error {}
 
 // ─── Robots.txt cache (per-isolate, keyed by origin) ──────────────────────────
 
@@ -162,7 +171,7 @@ export class CrawlService {
         if (existing) {
           await this.db
             .update(crawledPages)
-            .set({ status: "skipped" })
+            .set({ status: "skipped", updatedAt: new Date() })
             .where(
               and(
                 eq(crawledPages.resourceId, resourceId),
@@ -217,6 +226,9 @@ export class CrawlService {
       markdown = mdResult.markdown;
       pageTitle = mdResult.title || url;
     } catch (err) {
+      // Transient failures bubble up so the queue redelivers with backoff;
+      // only permanent failures (4xx, missing token) fail the page now.
+      if (err instanceof CrawlRetryableError) throw err;
       console.error(`Browser Rendering /markdown failed for ${url}:`, err);
       await this.markPageStatus(resourceId, url, "failed");
       await this.checkAndFinalizeResource(resourceId, projectId);
@@ -247,7 +259,7 @@ export class CrawlService {
     if (existing) {
       await this.db
         .update(crawledPages)
-        .set({ status: "crawled", r2Key, pageTitle })
+        .set({ status: "crawled", r2Key, pageTitle, updatedAt: new Date() })
         .where(
           and(
             eq(crawledPages.resourceId, resourceId),
@@ -359,30 +371,110 @@ export class CrawlService {
     await this.checkAndFinalizeResource(resourceId, projectId);
   }
 
-  // ─── Browser Rendering API Helpers ──────────────────────────────────────
+  // ─── Failure Recovery ─────────────────────────────────────────────────────
 
-  private async fetchMarkdown(url: string): Promise<{ markdown: string; title: string }> {
-    const res = await fetch(`${this.browserApiBase}/markdown`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        url,
-        gotoOptions: {
-          waitUntil: "networkidle2",
-        },
-        rejectRequestPattern: ["/^.*\\.(jpg|jpeg|png|gif|svg|webp|ico|bmp|tiff|mp4|webm|ogg|mp3|wav|woff2?|ttf|eot|otf|css)$/i"],
-      }),
-    });
+  // Called by the queue consumer when a message exhausts its retries, so the
+  // page never lingers as "pending" and the resource can finalize. The seed
+  // message may have already enqueued children before failing — finalizing
+  // here is then transient: each child re-runs checkAndFinalizeResource and
+  // nothing ever sets the resource back to "crawling".
+  async failPage(message: CrawlMessage): Promise<void> {
+    await this.markPageStatus(message.resourceId, message.url, "failed");
+    await this.checkAndFinalizeResource(message.resourceId, message.projectId);
+  }
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Browser Rendering /markdown returned ${res.status}: ${text}`);
+  // Self-heal a crawl whose queue messages were lost (dropped after retries,
+  // consumer crash, etc.). Gated on activity, not row age: every in-flight
+  // message bumps updatedAt (or inserts rows) well within the stale window,
+  // so a healthy long-running crawl is never truncated. Only when the whole
+  // crawl has gone quiet are its pending pages dead — fail them and finalize.
+  async recoverStaleCrawl(
+    resourceId: string,
+    projectId: string,
+  ): Promise<void> {
+    const activityRows = await this.db
+      .select({
+        last: sql<
+          number | null
+        >`max(coalesce(${crawledPages.updatedAt}, ${crawledPages.createdAt}))`,
+      })
+      .from(crawledPages)
+      .where(eq(crawledPages.resourceId, resourceId));
+
+    const lastActivity = activityRows[0]?.last;
+    const cutoffSecs = Math.floor((Date.now() - STALE_PENDING_MS) / 1000);
+    if (lastActivity != null && lastActivity > cutoffSecs) {
+      return; // Crawl is still making progress
     }
 
-    const data = (await res.json()) as BrowserRenderingMarkdownResponse;
+    await this.db
+      .update(crawledPages)
+      .set({ status: "failed", updatedAt: new Date() })
+      .where(
+        and(
+          eq(crawledPages.resourceId, resourceId),
+          eq(crawledPages.status, "pending"),
+        ),
+      );
+    await this.checkAndFinalizeResource(resourceId, projectId);
+  }
+
+  // ─── Browser Rendering API Helpers ──────────────────────────────────────
+
+  private async browserRenderingRequest(
+    endpoint: "/markdown" | "/links",
+    body: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (!this.apiToken) {
+      // Permanent: without a token every call fails — surface a clear hint
+      // instead of burning retries (locally this means .dev.vars is missing
+      // BROWSER_RENDERING_API_TOKEN).
+      throw new Error(
+        "BROWSER_RENDERING_API_TOKEN is not set — crawling requires a Cloudflare Browser Rendering API token",
+      );
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(`${this.browserApiBase}${endpoint}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(BROWSER_API_TIMEOUT_MS),
+      });
+    } catch (err) {
+      // Network error or timeout — transient
+      throw new CrawlRetryableError(
+        `Browser Rendering ${endpoint} request failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    if (res.status === 429 || res.status >= 500) {
+      throw new CrawlRetryableError(
+        `Browser Rendering ${endpoint} returned ${res.status}`,
+      );
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(
+        `Browser Rendering ${endpoint} returned ${res.status}: ${text}`,
+      );
+    }
+
+    return res.json();
+  }
+
+  private async fetchMarkdown(url: string): Promise<{ markdown: string; title: string }> {
+    const data = (await this.browserRenderingRequest("/markdown", {
+      url,
+      gotoOptions: {
+        waitUntil: "networkidle2",
+      },
+      rejectRequestPattern: ["/^.*\\.(jpg|jpeg|png|gif|svg|webp|ico|bmp|tiff|mp4|webm|ogg|mp3|wav|woff2?|ttf|eot|otf|css)$/i"],
+    })) as BrowserRenderingMarkdownResponse;
     if (!data.success) {
       throw new Error("Browser Rendering /markdown returned success=false");
     }
@@ -398,28 +490,14 @@ export class CrawlService {
   }
 
   private async fetchLinks(url: string): Promise<string[]> {
-    const res = await fetch(`${this.browserApiBase}/links`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiToken}`,
-        "Content-Type": "application/json",
+    const data = (await this.browserRenderingRequest("/links", {
+      url,
+      gotoOptions: {
+        waitUntil: "networkidle2",
       },
-      body: JSON.stringify({
-        url,
-        gotoOptions: {
-          waitUntil: "networkidle2",
-        },
-        excludeExternalLinks: true,
-        rejectRequestPattern: ["/^.*\\.(jpg|jpeg|png|gif|svg|webp|ico|bmp|tiff|mp4|webm|ogg|mp3|wav|woff2?|ttf|eot|otf|css)$/i"],
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Browser Rendering /links returned ${res.status}: ${text}`);
-    }
-
-    const data = (await res.json()) as BrowserRenderingLinksResponse;
+      excludeExternalLinks: true,
+      rejectRequestPattern: ["/^.*\\.(jpg|jpeg|png|gif|svg|webp|ico|bmp|tiff|mp4|webm|ogg|mp3|wav|woff2?|ttf|eot|otf|css)$/i"],
+    })) as BrowserRenderingLinksResponse;
     if (!data.success) {
       throw new Error("Browser Rendering /links returned success=false");
     }
@@ -486,7 +564,7 @@ export class CrawlService {
   ): Promise<void> {
     await this.db
       .update(crawledPages)
-      .set({ status })
+      .set({ status, updatedAt: new Date() })
       .where(
         and(
           eq(crawledPages.resourceId, resourceId),

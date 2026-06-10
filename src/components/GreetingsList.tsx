@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { useEffect, useImperativeHandle, useMemo, useState } from "react";
+import type { Ref } from "react";
+import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import GreetingEditor, {
@@ -11,16 +12,23 @@ import {
 } from "@/hooks/use-greetings";
 import type { AuthorOption } from "@/hooks/use-widget-settings";
 
+export interface GreetingsListHandle {
+  openCreate: () => void;
+}
+
 interface GreetingsListProps {
   projectId: string;
   authors: AuthorOption[];
   onPreviewChange?: (greetings: GreetingData[]) => void;
+  /** Lets the page trigger the create editor from outside (header button). */
+  handleRef?: Ref<GreetingsListHandle>;
 }
 
 function GreetingsList({
   projectId,
   authors,
   onPreviewChange,
+  handleRef,
 }: GreetingsListProps) {
   const greetingsApi = useGreetings(projectId);
   const greetings = greetingsApi.greetings;
@@ -39,6 +47,8 @@ function GreetingsList({
     setEditorOpen(true);
   }
 
+  useImperativeHandle(handleRef, () => ({ openCreate }), []);
+
   function openEdit(g: GreetingData) {
     setEditing(g);
     setEditorOpen(true);
@@ -49,6 +59,7 @@ function GreetingsList({
       enabled: form.enabled,
       imageUrl: form.imageUrl,
       imagePosition: form.imageUrl ? form.imagePosition : null,
+      imageAspect: form.imageUrl ? form.imageAspect : null,
       title: form.title.trim(),
       description: form.description.trim() || null,
       ctaText: form.ctaText.trim() || null,
@@ -160,17 +171,6 @@ function GreetingsList({
           ))}
         </ul>
       )}
-
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={openCreate}
-        className="w-full"
-      >
-        <Plus className="w-4 h-4 mr-2" />
-        Add greeting
-      </Button>
 
       <GreetingEditor
         open={editorOpen}

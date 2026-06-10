@@ -71,8 +71,14 @@
     "consumers": [
       {
         "queue": "replymaven-crawl",
-        "max_batch_timeout": 30,
+        // Deliver promptly — a long batching window adds dead time per crawl hop
+        "max_batch_timeout": 5,
         "max_batch_size": 5,
+        // The consumer acks-and-fails pages itself at MAX_CRAWL_ATTEMPTS (3);
+        // this is a safety net so messages are never silently dropped earlier
+        "max_retries": 5,
+        // Keep Browser Rendering API pressure low to avoid 429 storms
+        "max_concurrency": 2,
       },
     ],
     "producers": [

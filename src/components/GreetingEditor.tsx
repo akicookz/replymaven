@@ -21,12 +21,16 @@ import {
 import { Switch } from "@/components/ui/switch";
 import PageVisibilityInput from "@/components/PageVisibilityInput";
 import type { AuthorOption } from "@/hooks/use-widget-settings";
-import type { GreetingData } from "@/hooks/use-greetings";
+import type {
+  GreetingData,
+  GreetingImageAspect,
+} from "@/hooks/use-greetings";
 
 export interface GreetingFormState {
   enabled: boolean;
   imageUrl: string | null;
   imagePosition: string | null;
+  imageAspect: GreetingImageAspect;
   title: string;
   description: string;
   ctaText: string;
@@ -42,6 +46,7 @@ function emptyForm(): GreetingFormState {
     enabled: true,
     imageUrl: null,
     imagePosition: null,
+    imageAspect: "landscape",
     title: "",
     description: "",
     ctaText: "",
@@ -58,6 +63,7 @@ function fromGreeting(g: GreetingData): GreetingFormState {
     enabled: g.enabled,
     imageUrl: g.imageUrl,
     imagePosition: g.imagePosition,
+    imageAspect: g.imageAspect ?? "landscape",
     title: g.title,
     description: g.description ?? "",
     ctaText: g.ctaText ?? "",
@@ -177,15 +183,39 @@ function GreetingEditor({
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Image{" "}
-              <span className="text-muted-foreground font-normal">
-                (optional)
-              </span>
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-foreground">
+                Image{" "}
+                <span className="text-muted-foreground font-normal">
+                  (optional)
+                </span>
+              </label>
+              {form.imageUrl ? (
+                <div className="flex gap-0.5 bg-muted/50 rounded-lg p-0.5">
+                  {(["landscape", "square"] as const).map((aspect) => (
+                    <button
+                      key={aspect}
+                      type="button"
+                      onClick={() => update("imageAspect", aspect)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-md text-xs font-medium capitalize transition-colors",
+                        form.imageAspect === aspect
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {aspect}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <div
               className={cn(
-                "relative w-full h-36 rounded-xl border-2 border-border flex items-center justify-center overflow-hidden bg-muted/30",
+                "relative rounded-xl border-2 border-border flex items-center justify-center overflow-hidden bg-muted/30",
+                form.imageUrl && form.imageAspect === "square"
+                  ? "w-56 h-56 mx-auto"
+                  : "w-full h-36",
                 !form.imageUrl &&
                   "border-dashed cursor-pointer hover:bg-muted/50 transition-colors",
               )}
@@ -255,7 +285,9 @@ function GreetingEditor({
               <p className="text-xs text-destructive">{uploadError}</p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Recommended: 800x420px. JPG, PNG, or WebP.
+                Recommended:{" "}
+                {form.imageAspect === "square" ? "800x800px" : "800x420px"}.
+                JPG, PNG, or WebP.
               </p>
             )}
           </div>

@@ -6,11 +6,14 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 
+export type GreetingImageAspect = "landscape" | "square";
+
 export interface GreetingData {
   id: string;
   enabled: boolean;
   imageUrl: string | null;
   imagePosition: string | null;
+  imageAspect: GreetingImageAspect | null;
   title: string;
   description: string | null;
   ctaText: string | null;
@@ -26,6 +29,7 @@ export interface CreateGreetingInput {
   enabled?: boolean;
   imageUrl?: string | null;
   imagePosition?: string | null;
+  imageAspect?: GreetingImageAspect | null;
   title: string;
   description?: string | null;
   ctaText?: string | null;

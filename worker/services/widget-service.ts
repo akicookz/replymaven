@@ -19,6 +19,7 @@ export interface GreetingPublic {
   enabled: boolean;
   imageUrl: string | null;
   imagePosition: string | null;
+  imageAspect: "landscape" | "square" | null;
   title: string;
   description: string | null;
   ctaText: string | null;
@@ -217,6 +218,7 @@ export class WidgetService {
       enabled?: boolean;
       imageUrl?: string | null;
       imagePosition?: string | null;
+      imageAspect?: "landscape" | "square" | null;
       title: string;
       description?: string | null;
       ctaText?: string | null;
@@ -242,6 +244,7 @@ export class WidgetService {
       enabled: data.enabled ?? true,
       imageUrl: data.imageUrl ?? null,
       imagePosition: data.imagePosition ?? null,
+      imageAspect: data.imageAspect ?? null,
       title: data.title,
       description: data.description ?? null,
       ctaText: data.ctaText ?? null,
@@ -264,6 +267,7 @@ export class WidgetService {
       enabled?: boolean;
       imageUrl?: string | null;
       imagePosition?: string | null;
+      imageAspect?: "landscape" | "square" | null;
       title?: string;
       description?: string | null;
       ctaText?: string | null;
@@ -283,6 +287,8 @@ export class WidgetService {
     if (updates.imageUrl !== undefined) setData.imageUrl = updates.imageUrl;
     if (updates.imagePosition !== undefined)
       setData.imagePosition = updates.imagePosition;
+    if (updates.imageAspect !== undefined)
+      setData.imageAspect = updates.imageAspect;
     if (updates.title !== undefined) setData.title = updates.title;
     if (updates.description !== undefined)
       setData.description = updates.description;
@@ -375,6 +381,7 @@ export class WidgetService {
       enabled: row.enabled,
       imageUrl: row.imageUrl,
       imagePosition: row.imagePosition,
+      imageAspect: (row.imageAspect as "landscape" | "square" | null) ?? null,
       title: row.title,
       description: row.description,
       ctaText: row.ctaText,

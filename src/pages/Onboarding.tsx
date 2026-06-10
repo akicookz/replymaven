@@ -1,26 +1,23 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import confetti from "canvas-confetti";
 import { useSubscription } from "@/hooks/use-subscription";
 import {
   Globe,
   Building2,
-  Sparkles,
   Palette,
   ArrowRight,
   ArrowLeft,
   Loader2,
   Check,
-  Copy,
   AlertCircle,
   CreditCard,
-  MessageSquare,
-  LogOut,
+  Sparkles,
+  X,
 } from "lucide-react";
-import { Logo } from "@/components/Logo";
-import { signOut } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
-import { PricingCardsSelect, BillingToggle } from "@/components/PricingCards";
+import { PricingCardsSelect, BillingToggle, getCtaLabel } from "@/components/PricingCards";
 import {
   Select,
   SelectContent,
@@ -31,27 +28,9 @@ import {
 import { ColorPicker } from "@/components/ui/color-picker";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WIDGET_FONTS as FONT_OPTIONS } from "../../shared/widget-fonts";
+import { INDUSTRIES } from "../../shared/industries";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const INDUSTRIES = [
-  "SaaS",
-  "E-commerce",
-  "Healthcare",
-  "Education",
-  "Real Estate",
-  "Finance & Banking",
-  "Agency & Consulting",
-  "Restaurant & Food",
-  "Travel & Hospitality",
-  "Fitness & Wellness",
-  "Legal",
-  "Non-profit",
-  "Media & Entertainment",
-  "Retail",
-  "Technology",
-  "Other",
-] as const;
 
 const COLOR_PRESETS = [
   "#2563eb",
@@ -64,100 +43,48 @@ const COLOR_PRESETS = [
   "#475569",
 ] as const;
 
-const STEPS = [
-  { label: "Company", icon: Building2 },
-  { label: "Context", icon: Sparkles },
-  { label: "Widget", icon: Palette },
-  { label: "Test", icon: MessageSquare },
-  { label: "Plan", icon: CreditCard },
-] as const;
+const ONBOARDING_CONTENT_CLASS = "w-full max-w-2xl mx-auto shrink-0";
 
-
-
-// ─── Step 1: Company Info ─────────────────────────────────────────────────────
-
-interface Step1Data {
-  websiteName: string;
-  websiteUrl: string;
-  companyName: string;
-  industry: string;
-}
+// ─── Step 1: Add Your Website ─────────────────────────────────────────────────
 
 function Step1({
-  data,
+  websiteUrl,
   onChange,
   onNext,
   isPending,
   error,
 }: {
-  data: Step1Data;
-  onChange: (data: Step1Data) => void;
+  websiteUrl: string;
+  onChange: (url: string) => void;
   onNext: () => void;
   isPending: boolean;
   error: string | null;
 }) {
-  const isValid =
-    data.websiteName.trim() &&
-    data.websiteUrl.trim() &&
-    data.companyName.trim() &&
-    data.industry;
-
-  const continueButton = (
-    <Button
-      onClick={onNext}
-      disabled={!isValid || isPending}
-    >
-      {isPending ? (
-        <>
-          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          Creating project...
-        </>
-      ) : (
-        <>
-          Continue
-          <ArrowRight className="w-4 h-4 ml-2" />
-        </>
-      )}
-    </Button>
-  );
+  const isValid = websiteUrl.trim().includes(".");
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
-            <Building2 className="w-6 h-6 text-brand" />
-          </div>
-          <div className="space-y-1">
-            <h2 className="text-xl font-bold text-foreground">
-              Tell us about your business
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              We'll use this to set up your AI support agent
-            </p>
-          </div>
+      <div className="flex items-start gap-4">
+        <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
+          <Globe className="w-6 h-6 text-brand" />
         </div>
-        <div className="hidden md:block shrink-0">
-          {continueButton}
+        <div className="space-y-1">
+          <h2 className="text-xl font-bold text-foreground">
+            Add your website
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            We'll analyze your site and set up your AI support agent for you
+          </p>
         </div>
       </div>
 
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">
-            Website Name
-          </label>
-          <input
-            type="text"
-            value={data.websiteName}
-            onChange={(e) =>
-              onChange({ ...data, websiteName: e.target.value })
-            }
-            placeholder="My Awesome App"
-            className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>
-
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (isValid && !isPending) onNext();
+        }}
+        className="space-y-4"
+      >
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">
             Website URL
@@ -165,87 +92,81 @@ function Step1({
           <div className="relative">
             <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
-              type="url"
-              value={data.websiteUrl}
-              onChange={(e) =>
-                onChange({ ...data, websiteUrl: e.target.value })
-              }
-              placeholder="https://example.com"
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              type="text"
+              value={websiteUrl}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder="example.com"
+              autoFocus
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
         </div>
 
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">
-            Company Name
-          </label>
-          <input
-            type="text"
-            value={data.companyName}
-            onChange={(e) =>
-              onChange({ ...data, companyName: e.target.value })
-            }
-            placeholder="Acme Inc."
-            className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>
+        {error && (
+          <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-destructive/10 text-destructive text-sm">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            {error}
+          </div>
+        )}
 
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-foreground">
-            Industry
-          </label>
-          <Select
-            value={data.industry}
-            onValueChange={(val) =>
-              onChange({ ...data, industry: val })
-            }
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select your industry" />
-            </SelectTrigger>
-            <SelectContent>
-              {INDUSTRIES.map((industry) => (
-                <SelectItem key={industry} value={industry}>
-                  {industry}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {error && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-destructive/10 text-destructive text-sm">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          {error}
-        </div>
-      )}
-
-      <div className="md:hidden">
-        {continueButton}
-      </div>
+        <Button type="submit" disabled={!isValid || isPending} className="w-full">
+          {isPending ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Creating project...
+            </>
+          ) : (
+            <>
+              Continue
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </>
+          )}
+        </Button>
+      </form>
     </div>
   );
 }
 
-// ─── Step 2: Site Context ─────────────────────────────────────────────────────
+// ─── Step 2: Review Company Profile ───────────────────────────────────────────
+
+interface CompanyProfile {
+  websiteName: string;
+  companyName: string;
+  industry: string;
+  context: string;
+}
+
+function hasSavedCompanyProfile(settings: {
+  companyName: string | null;
+  industry: string | null;
+  companyContext: string | null;
+} | undefined): boolean {
+  return Boolean(
+    settings?.companyContext?.trim() &&
+      settings?.companyName?.trim() &&
+      settings?.industry,
+  );
+}
 
 function Step2({
   projectId,
-  context,
-  setContext,
+  profile,
+  setProfile,
   onNext,
   onBack,
+  settingsReady,
+  hasExistingProfile,
 }: {
   projectId: string;
-  context: string;
-  setContext: (ctx: string) => void;
+  profile: CompanyProfile;
+  setProfile: (profile: CompanyProfile) => void;
   onNext: () => void;
   onBack: () => void;
+  settingsReady: boolean;
+  hasExistingProfile: boolean;
 }) {
+  const queryClient = useQueryClient();
   const [scraped, setScraped] = useState<boolean | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const hasFired = useRef(false);
   const skippedRef = useRef(false);
@@ -256,13 +177,29 @@ function Step2({
         method: "POST",
       });
       if (!res.ok) throw new Error("Failed to scrape");
-      return res.json() as Promise<{ context: string; scraped: boolean }>;
+      return res.json() as Promise<{
+        context: string;
+        scraped: boolean;
+        websiteName?: string;
+        companyName?: string;
+        industry?: string;
+      }>;
     },
     onSuccess: (data) => {
       if (skippedRef.current) return;
       setScraped(data.scraped);
       if (data.scraped && data.context) {
-        setContext(data.context);
+        setProfile({
+          websiteName: data.websiteName || profile.websiteName,
+          companyName: data.companyName || profile.companyName,
+          industry: data.industry || profile.industry,
+          context: data.context,
+        });
+        // The scrape persisted the profile server-side too
+        queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+        queryClient.invalidateQueries({
+          queryKey: ["project-settings", projectId],
+        });
       }
     },
     onError: () => {
@@ -276,23 +213,27 @@ function Step2({
       const res = await fetch(`/api/onboarding/${projectId}/context`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyContext: context }),
+        body: JSON.stringify({
+          websiteName: profile.websiteName,
+          companyName: profile.companyName,
+          industry: profile.industry,
+          companyContext: profile.context,
+        }),
       });
-      if (!res.ok) throw new Error("Failed to save context");
+      if (!res.ok) throw new Error("Failed to save");
     },
   });
 
-  // Fire scrape on mount — skip if context is already pre-filled
+  // Wait for saved settings before deciding whether to scrape
   useEffect(() => {
-    if (!hasFired.current) {
-      hasFired.current = true;
-      if (context.trim()) {
-        setScraped(true);
-      } else {
-        scrapeMutation.mutate();
-      }
+    if (!settingsReady || hasFired.current) return;
+    hasFired.current = true;
+    if (hasExistingProfile || profile.context.trim()) {
+      setScraped(true);
+      return;
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    scrapeMutation.mutate();
+  }, [settingsReady, hasExistingProfile, profile.context]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Show "Enter manually" after 10 seconds of crawling
   useEffect(() => {
@@ -307,12 +248,22 @@ function Step2({
     setShowManualEntry(false);
   }
 
+  const isValid =
+    profile.websiteName.trim() &&
+    profile.companyName.trim() &&
+    profile.industry &&
+    profile.context.trim();
+
   function handleContinue() {
-    if (isEditing || !scraped) {
-      saveContextMutation.mutate(undefined, { onSuccess: onNext });
-    } else {
-      onNext();
-    }
+    saveContextMutation.mutate(undefined, { onSuccess: onNext });
+  }
+
+  if (!settingsReady) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   // Loading state — skeleton UI (unless user skipped)
@@ -329,7 +280,8 @@ function Step2({
                 Analyzing your website...
               </h2>
               <p className="text-sm text-muted-foreground">
-                We're crawling your site to build your agent's knowledge base
+                We're reading your site and filling in your company details
+                for you
               </p>
               {showManualEntry && (
                 <button
@@ -387,7 +339,7 @@ function Step2({
     <div className="space-y-6">
       <div className="flex items-start gap-4">
         <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
-          <Sparkles className="w-6 h-6 text-brand" />
+          <Building2 className="w-6 h-6 text-brand" />
         </div>
         <div className="space-y-1">
           <h2 className="text-xl font-bold text-foreground">
@@ -397,34 +349,77 @@ function Step2({
           </h2>
           <p className="text-sm text-muted-foreground">
             {scraped
-              ? "Review the context we built from your site. Edit if needed."
-              : "We couldn't extract much from your site. Describe your business so your AI agent knows how to help."}
+              ? "We generated this from your website. Review and edit anything before continuing."
+              : "We couldn't extract much from your site. Fill in the details so your AI agent knows."}
           </p>
         </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">
-            Company Context
+            Website Name
           </label>
-          {scraped && !isEditing && (
-            <button
-              type="button"
-              onClick={() => setIsEditing(true)}
-              className="text-xs text-primary hover:underline"
-            >
-              Edit
-            </button>
-          )}
+          <input
+            type="text"
+            value={profile.websiteName}
+            onChange={(e) =>
+              setProfile({ ...profile, websiteName: e.target.value })
+            }
+            placeholder="My Awesome App"
+            className="w-full px-4 py-2.5 rounded-xl border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
         </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">
+            Company Name
+          </label>
+          <input
+            type="text"
+            value={profile.companyName}
+            onChange={(e) =>
+              setProfile({ ...profile, companyName: e.target.value })
+            }
+            placeholder="Acme Inc."
+            className="w-full px-4 py-2.5 rounded-xl border border-input bg-input-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-foreground">
+          Industry
+        </label>
+        <Select
+          value={profile.industry}
+          onValueChange={(val) => setProfile({ ...profile, industry: val })}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select your industry" />
+          </SelectTrigger>
+          <SelectContent>
+            {INDUSTRIES.map((industry) => (
+              <SelectItem key={industry} value={industry}>
+                {industry}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-foreground">
+          Company Context
+        </label>
         <textarea
-          value={context}
-          onChange={(e) => setContext(e.target.value)}
-          readOnly={scraped === true && !isEditing}
-          rows={10}
+          value={profile.context}
+          onChange={(e) =>
+            setProfile({ ...profile, context: e.target.value })
+          }
+          rows={8}
           placeholder="Describe what your company does, your products/services, pricing, policies, and anything your AI support agent should know..."
-          className="w-full px-4 py-3 rounded-xl border border-input bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+          className="w-full px-4 py-3 rounded-xl border border-input bg-input-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
         />
         <p className="text-xs text-muted-foreground">
           This context helps your AI agent answer questions accurately.
@@ -438,7 +433,7 @@ function Step2({
         </Button>
         <Button
           onClick={handleContinue}
-          disabled={!context.trim() || saveContextMutation.isPending}
+          disabled={!isValid || saveContextMutation.isPending}
           className="flex-1"
         >
           {saveContextMutation.isPending ? (
@@ -460,10 +455,285 @@ function Step2({
 
 // ─── Step 3: Widget Styling ───────────────────────────────────────────────────
 
+type WidgetPosition = "bottom-right" | "bottom-left" | "center-inline";
+
+const WIDGET_POSITIONS: { value: WidgetPosition; label: string }[] = [
+  { value: "bottom-right", label: "Bottom Right" },
+  { value: "bottom-left", label: "Bottom Left" },
+  { value: "center-inline", label: "Center Inline" },
+];
+
 interface WidgetStyle {
   primaryColor: string;
+  textColor: string;
   borderRadius: number;
   fontFamily: string;
+  position: WidgetPosition;
+}
+
+function hexToRgb(hex: string): string {
+  const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!match) return "37, 99, 235";
+  return `${parseInt(match[1], 16)}, ${parseInt(match[2], 16)}, ${parseInt(match[3], 16)}`;
+}
+
+function widgetPreviewFontFamily(fontFamily: string): string {
+  if (fontFamily === "system-ui") {
+    return "system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  }
+  return `"${fontFamily}", system-ui, -apple-system, sans-serif`;
+}
+
+function formatPreviewDomain(url: string): string {
+  if (!url.trim()) return "yoursite.com";
+  try {
+    const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    return new URL(normalized).hostname.replace(/^www\./, "");
+  } catch {
+    return (
+      url
+        .replace(/^https?:\/\//i, "")
+        .replace(/^www\./, "")
+        .split("/")[0] || "yoursite.com"
+    );
+  }
+}
+
+function getFaviconCandidates(domain: string, size: number): string[] {
+  if (!domain || domain === "yoursite.com") return [];
+  const encoded = encodeURIComponent(domain);
+  return [
+    `https://${domain}/favicon.ico`,
+    `https://www.google.com/s2/favicons?domain=${encoded}&sz=${size * 2}`,
+    `https://icons.duckduckgo.com/ip3/${encoded}.ico`,
+  ];
+}
+
+function PreviewFaviconAvatar({
+  domain,
+  size,
+  className,
+  primaryColor,
+  rgb,
+}: {
+  domain: string;
+  size: number;
+  className: string;
+  primaryColor: string;
+  rgb: string;
+}) {
+  const candidates = getFaviconCandidates(domain, size);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const showFallback =
+    candidates.length === 0 || candidateIndex >= candidates.length;
+
+  useEffect(() => {
+    setCandidateIndex(0);
+  }, [domain]);
+
+  if (showFallback) {
+    return (
+      <div
+        className={`flex items-center justify-center shrink-0 ${className}`}
+        style={{
+          background: `rgba(${rgb}, 0.08)`,
+          color: primaryColor,
+        }}
+      >
+        <Sparkles className={size >= 28 ? "w-4 h-4" : "w-2.5 h-2.5"} />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`overflow-hidden shrink-0 ${className}`}>
+      <img
+        src={candidates[candidateIndex]}
+        alt=""
+        className="w-full h-full object-cover"
+        onError={() => setCandidateIndex((index) => index + 1)}
+      />
+    </div>
+  );
+}
+
+function WidgetStylePreview({
+  style,
+  websiteUrl,
+}: {
+  style: WidgetStyle;
+  websiteUrl: string;
+}) {
+  const domain = formatPreviewDomain(websiteUrl);
+  const rgb = hexToRgb(style.primaryColor);
+  const inputRadius = Math.min(style.borderRadius * 0.875, 14);
+
+  useEffect(() => {
+    const font = FONT_OPTIONS.find((option) => option.value === style.fontFamily);
+    if (!font?.url) return;
+
+    const linkId = "onboarding-widget-preview-font";
+    let link = document.getElementById(linkId) as HTMLLinkElement | null;
+    if (!link) {
+      link = document.createElement("link");
+      link.id = linkId;
+      link.rel = "stylesheet";
+      document.head.appendChild(link);
+    }
+    link.href = font.url;
+  }, [style.fontFamily]);
+
+  const isInline = style.position === "center-inline";
+  const viewportAlign =
+    style.position === "bottom-left"
+      ? "items-end justify-start"
+      : style.position === "center-inline"
+        ? "items-end justify-center"
+        : "items-end justify-end";
+
+  const chatPanel = (
+    <div
+      className={`flex flex-col overflow-hidden border border-border/80 bg-white shadow-[0_12px_32px_rgba(15,15,20,0.14)] ${
+        isInline ? "w-full max-w-[280px]" : "w-full max-w-[248px]"
+      }`}
+      style={{
+        borderRadius: `${style.borderRadius}px`,
+        fontFamily: widgetPreviewFontFamily(style.fontFamily),
+      }}
+    >
+      <div className="flex items-center gap-2.5 px-4 py-3.5">
+        <PreviewFaviconAvatar
+          domain={domain}
+          size={32}
+          className="w-8 h-8 rounded-[10px]"
+          primaryColor={style.primaryColor}
+          rgb={rgb}
+        />
+        <div className="flex-1 min-w-0">
+          <p className="text-[15px] font-semibold text-[#18181b] leading-tight truncate">
+            Chat with us
+          </p>
+          <p className="text-xs text-[#71717a] leading-tight mt-0.5 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+            Online
+          </p>
+        </div>
+        <div className="w-8 h-8 rounded-full bg-[#f4f4f5] flex items-center justify-center text-[#71717a] shrink-0">
+          <X className="w-4 h-4" />
+        </div>
+      </div>
+
+      <div className="px-4 pb-2 space-y-3">
+        <div className="flex items-end gap-2 max-w-[92%]">
+          <PreviewFaviconAvatar
+            domain={domain}
+            size={18}
+            className="w-[18px] h-[18px] rounded-[5px]"
+            primaryColor={style.primaryColor}
+            rgb={rgb}
+          />
+          <div
+            className="px-3.5 py-2.5 text-sm text-[#18181b] leading-snug"
+            style={{
+              background: "#f4f4f5",
+              borderRadius: "18px 18px 18px 4px",
+            }}
+          >
+            Hi there! How can I help you today?
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <div
+            className="px-3.5 py-2.5 text-sm leading-snug max-w-[85%]"
+            style={{
+              background: style.primaryColor,
+              color: style.textColor,
+              borderRadius: "18px 18px 4px 18px",
+            }}
+          >
+            I have a question about pricing
+          </div>
+        </div>
+      </div>
+
+      {!isInline && (
+        <div className="px-4 pb-3 pt-1 flex items-center gap-2">
+          <div
+            className="flex-1 px-3 py-2 text-sm text-[#a1a1aa]"
+            style={{
+              background: "#f4f4f5",
+              borderRadius: `${inputRadius}px`,
+            }}
+          >
+            Type a message...
+          </div>
+          <div
+            className="w-9 h-9 flex items-center justify-center shrink-0"
+            style={{
+              background: style.primaryColor,
+              color: style.textColor,
+              borderRadius: `${inputRadius}px`,
+            }}
+          >
+            <ArrowRight className="w-4 h-4" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const inlineBar = (
+    <div
+      className="w-full max-w-[300px] flex items-center gap-2 px-3 py-2.5 bg-white border border-border/80 shadow-sm"
+      style={{ borderRadius: `${style.borderRadius}px` }}
+    >
+      <div
+        className="flex-1 px-3 py-2 text-sm text-[#a1a1aa]"
+        style={{
+          background: "#f4f4f5",
+          borderRadius: `${inputRadius}px`,
+        }}
+      >
+        Type a message...
+      </div>
+      <div
+        className="w-9 h-9 flex items-center justify-center shrink-0"
+        style={{
+          background: style.primaryColor,
+          color: style.textColor,
+          borderRadius: `${inputRadius}px`,
+        }}
+      >
+        <ArrowRight className="w-4 h-4" />
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="rounded-xl border border-border/70 overflow-hidden bg-input-background shadow-sm">
+      <div className="flex items-center gap-2.5 px-3 py-2.5 bg-muted/50">
+        <div className="flex items-center gap-1.5 shrink-0" aria-hidden>
+          <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]/90" />
+          <span className="w-2.5 h-2.5 rounded-full bg-[#febc2e]/90" />
+          <span className="w-2.5 h-2.5 rounded-full bg-[#28c840]/90" />
+        </div>
+        <div className="flex-1 flex items-center gap-2 min-w-0 px-3 py-1.5 rounded-lg bg-background text-xs text-muted-foreground">
+          <Globe className="w-3.5 h-3.5 shrink-0 text-muted-foreground/80" />
+          <span className="truncate">{domain}</span>
+        </div>
+      </div>
+
+      <div
+        className={`relative min-h-[320px] p-4 bg-gradient-to-b from-muted/15 to-muted/35 flex ${
+          isInline ? "flex-col items-center justify-end gap-2" : viewportAlign
+        }`}
+      >
+        {chatPanel}
+        {isInline && inlineBar}
+      </div>
+    </div>
+  );
 }
 
 function Step3({
@@ -472,21 +742,28 @@ function Step3({
   onNext,
   onBack,
   projectId,
+  websiteUrl,
 }: {
   style: WidgetStyle;
   onChange: (style: WidgetStyle) => void;
   onNext: () => void;
   onBack: () => void;
   projectId: string;
+  websiteUrl: string;
 }) {
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/onboarding/${projectId}/widget`, {
+      const widgetRes = await fetch(`/api/onboarding/${projectId}/widget`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(style),
       });
-      if (!res.ok) throw new Error("Failed to save widget config");
+      if (!widgetRes.ok) throw new Error("Failed to save widget config");
+
+      const completeRes = await fetch(`/api/onboarding/${projectId}/complete`, {
+        method: "POST",
+      });
+      if (!completeRes.ok) throw new Error("Failed to complete onboarding");
     },
     onSuccess: onNext,
   });
@@ -507,40 +784,39 @@ function Step3({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Controls */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <div className="space-y-5">
-          {/* Color Presets */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">
-              Primary Color
+              Brand Color
             </label>
-            <div className="flex items-center gap-2 flex-wrap">
-              {COLOR_PRESETS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  onClick={() =>
-                    onChange({ ...style, primaryColor: color })
-                  }
-                  className="w-8 h-8 rounded-lg border-2 transition-all"
-                  style={{
-                    backgroundColor: color,
-                    borderColor:
-                      style.primaryColor === color
-                        ? color
-                        : "transparent",
-                    transform:
-                      style.primaryColor === color
-                        ? "scale(1.15)"
-                        : "scale(1)",
-                  }}
-                >
-                  {style.primaryColor === color && (
-                    <Check className="w-4 h-4 text-white mx-auto" />
-                  )}
-                </button>
-              ))}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {COLOR_PRESETS.map((color) => {
+                const isSelected = style.primaryColor === color;
+                return (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() =>
+                      onChange({ ...style, primaryColor: color })
+                    }
+                    className={`w-6 h-6 rounded-md transition-all flex items-center justify-center ${
+                      isSelected ? "" : "hover:scale-105"
+                    }`}
+                    style={{
+                      backgroundColor: color,
+                      boxShadow: isSelected
+                        ? `0 0 0 2px var(--background), 0 0 0 4px ${color}`
+                        : undefined,
+                    }}
+                    title={color}
+                  >
+                    {isSelected && (
+                      <Check className="w-3 h-3 text-white drop-shadow-sm" />
+                    )}
+                  </button>
+                );
+              })}
               <ColorPicker
                 value={style.primaryColor}
                 onChange={(color) =>
@@ -549,9 +825,33 @@ function Step3({
                     primaryColor: color,
                   })
                 }
-                className="w-8 h-8 gap-0 px-0 border-dashed [&>span:first-child]:size-full [&>span:first-child]:rounded-lg [&>span:nth-child(2)]:hidden [&>svg]:hidden"
+                className={`h-6 w-6 min-w-6 shrink-0 gap-0 rounded-md border-2 border-dashed p-0 [&>span:first-child]:size-full [&>span:first-child]:rounded-md [&>span:nth-child(2)]:hidden [&>svg]:hidden ${
+                  !COLOR_PRESETS.includes(
+                    style.primaryColor as (typeof COLOR_PRESETS)[number],
+                  )
+                    ? "border-foreground/30"
+                    : "border-input"
+                }`}
               />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">
+              Brand Text
+            </label>
+            <ColorPicker
+              value={style.textColor}
+              onChange={(color) =>
+                onChange({
+                  ...style,
+                  textColor: color,
+                })
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              Text on buttons and visitor messages.
+            </p>
           </div>
 
           {/* Border Radius */}
@@ -601,82 +901,35 @@ function Step3({
               </SelectContent>
             </Select>
           </div>
-        </div>
 
-        {/* Mini Preview */}
-        <div className="flex items-center justify-center">
-          <div
-            className="w-72 shadow-xl overflow-hidden"
-            style={{
-              borderRadius: `${style.borderRadius}px`,
-              fontFamily: style.fontFamily,
-              background: "rgba(0,0,0,0.18)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              boxShadow: "0 8px 40px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)",
-            }}
-          >
-            <div
-              className="px-4 py-3 font-medium text-sm text-white"
-              style={{
-                background: `${style.primaryColor}4d`,
-                borderBottom: "1px solid rgba(255,255,255,0.06)",
-              }}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">
+              Placement
+            </label>
+            <Select
+              value={style.position}
+              onValueChange={(val) =>
+                onChange({
+                  ...style,
+                  position: val as WidgetPosition,
+                })
+              }
             >
-              Chat with us
-            </div>
-            <div className="p-4 space-y-3">
-              <div className="flex gap-2">
-                <div
-                  className="w-6 h-6 rounded-full flex-shrink-0"
-                  style={{
-                    backgroundColor: `${style.primaryColor}33`,
-                  }}
-                />
-                <div
-                  className="rounded-lg px-3 py-2 text-xs max-w-[80%] text-white"
-                  style={{
-                    background: "rgba(255,255,255,0.08)",
-                    border: "1px solid rgba(255,255,255,0.06)",
-                  }}
-                >
-                  Hi there! How can I help you today?
-                </div>
-              </div>
-              <div className="flex gap-2 justify-end">
-                <div
-                  className="rounded-lg px-3 py-2 text-xs max-w-[80%] text-white"
-                  style={{ backgroundColor: style.primaryColor }}
-                >
-                  I have a question about pricing
-                </div>
-              </div>
-            </div>
-            <div className="px-4 pb-3">
-              <div className="flex gap-2">
-                <div
-                  className="flex-1 px-3 py-2 text-xs"
-                  style={{
-                    borderRadius: `${Math.min(style.borderRadius, 12)}px`,
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    background: "rgba(255,255,255,0.06)",
-                    color: "rgba(255,255,255,0.35)",
-                  }}
-                >
-                  Type a message...
-                </div>
-                <div
-                  className="w-8 h-8 flex items-center justify-center text-white"
-                  style={{
-                    backgroundColor: style.primaryColor,
-                    borderRadius: `${Math.min(style.borderRadius, 12)}px`,
-                  }}
-                >
-                  <ArrowRight className="w-3 h-3" />
-                </div>
-              </div>
-            </div>
+              <SelectTrigger>
+                <SelectValue placeholder="Select placement" />
+              </SelectTrigger>
+              <SelectContent>
+                {WIDGET_POSITIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
+
+        <WidgetStylePreview style={style} websiteUrl={websiteUrl} />
       </div>
 
       <div className="flex gap-3">
@@ -706,225 +959,42 @@ function Step3({
   );
 }
 
-// ─── Step 4: Test Your Agent ──────────────────────────────────────────────────
+// ─── Step 4: Choose Plan ──────────────────────────────────────────────────────
 
-function Step4({
-  projectId,
-  slug,
-  onBack,
-  onNext,
-}: {
-  projectId: string;
-  slug: string;
-  onBack: () => void;
-  onNext: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-  const [copiedQuestion, setCopiedQuestion] = useState(false);
-  const [completed, setCompleted] = useState(false);
-  const widgetInjected = useRef(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+function celebrateCheckout() {
+  const colors = ["#f97316", "#fb923c", "#2563eb", "#ffffff"];
+  const duration = 2200;
+  const end = Date.now() + duration;
 
-  const embedCode = `<script src="https://widget.replymaven.com/widget-embed.js" data-project="${slug}"></script>`;
-
-  // Fetch sample question
-  const { data: sampleData } = useQuery<{ question: string }>({
-    queryKey: ["sample-question", projectId],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/onboarding/${projectId}/sample-question`,
-      );
-      if (!res.ok) throw new Error("Failed to fetch");
-      return res.json();
-    },
+  confetti({
+    particleCount: 80,
+    spread: 72,
+    origin: { y: 0.55 },
+    colors,
   });
 
-  const completeMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/onboarding/${projectId}/complete`, {
-        method: "POST",
-      });
-      if (!res.ok) throw new Error("Failed to complete");
-    },
-    onSuccess: () => {
-      setCompleted(true);
-    },
-  });
-
-  // Inject widget script
-  useEffect(() => {
-    if (widgetInjected.current) return;
-    widgetInjected.current = true;
-
-    const script = document.createElement("script");
-    script.src = `https://widget.replymaven.com/widget-embed.js`;
-    script.setAttribute("data-project", slug);
-    document.body.appendChild(script);
-
-    return () => {
-      // Clean up widget on unmount
-      script.remove();
-      const widgetContainer = document.getElementById("sb-widget-container");
-      if (widgetContainer) widgetContainer.remove();
-      const widgetStyles = document.getElementById("sb-widget-styles");
-      if (widgetStyles) widgetStyles.remove();
-    };
-  }, [slug]);
-
-  // Poll for conversations
-  useEffect(() => {
-    if (completed) return;
-
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(
-          `/api/projects/${projectId}/conversations`,
-        );
-        if (res.ok) {
-          const conversations = (await res.json()) as Array<{
-            id: string;
-          }>;
-          if (conversations.length > 0) {
-            if (pollRef.current) clearInterval(pollRef.current);
-            completeMutation.mutate();
-          }
-        }
-      } catch {
-        // Ignore polling errors
-      }
-    }, 3000);
-
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [completed, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function copyToClipboard(text: string, type: "embed" | "question") {
-    navigator.clipboard.writeText(text);
-    if (type === "embed") {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } else {
-      setCopiedQuestion(true);
-      setTimeout(() => setCopiedQuestion(false), 2000);
+  function burst() {
+    confetti({
+      particleCount: 4,
+      angle: 60,
+      spread: 50,
+      origin: { x: 0, y: 0.55 },
+      colors,
+    });
+    confetti({
+      particleCount: 4,
+      angle: 120,
+      spread: 50,
+      origin: { x: 1, y: 0.55 },
+      colors,
+    });
+    if (Date.now() < end) {
+      requestAnimationFrame(burst);
     }
   }
 
-  // Success state — move to plan selection
-  if (completed) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-start gap-4 py-8">
-          <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
-            <Check className="w-6 h-6 text-brand" />
-          </div>
-          <div className="space-y-1">
-            <h2 className="text-xl font-bold text-foreground">
-              Your AI customer support agent is live
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Start your free trial to go live on your website.
-            </p>
-          </div>
-        </div>
-        <Button onClick={onNext} className="w-full">
-          Start your free trial
-          <ArrowRight className="w-4 h-4 ml-2" />
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-start gap-4">
-        <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
-          <MessageSquare className="w-6 h-6 text-brand" />
-        </div>
-        <div className="space-y-1">
-          <h2 className="text-xl font-bold text-foreground">
-            Test your AI agent
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Send a test message to see your AI agent in action
-          </p>
-        </div>
-      </div>
-
-      {/* Embed Code */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-foreground">
-          Embed Code
-        </label>
-        <div className="relative">
-          <pre className="px-4 py-3 rounded-xl bg-muted/50 text-xs font-mono overflow-x-auto text-foreground">
-            {embedCode}
-          </pre>
-          <button
-            type="button"
-            onClick={() => copyToClipboard(embedCode, "embed")}
-            className="absolute top-2 right-2 p-1.5 rounded-lg bg-background/80 hover:bg-muted transition-colors"
-            title="Copy embed code"
-          >
-            {copied ? (
-              <Check className="w-3.5 h-3.5 text-green-600" />
-            ) : (
-              <Copy className="w-3.5 h-3.5 text-muted-foreground" />
-            )}
-          </button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Add this snippet to your website's HTML to embed the chat widget.
-        </p>
-      </div>
-
-      {/* Sample Question */}
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-foreground">
-          Try sending this message
-        </label>
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-primary/5">
-          <p className="flex-1 text-sm text-foreground">
-            {sampleData?.question ?? "Loading a question for you..."}
-          </p>
-          {sampleData?.question && (
-            <button
-              type="button"
-              onClick={() =>
-                copyToClipboard(sampleData.question, "question")
-              }
-              className="shrink-0 p-1.5 rounded-lg hover:bg-primary/10 transition-colors"
-              title="Copy question"
-            >
-              {copiedQuestion ? (
-                <Check className="w-4 h-4 text-green-600" />
-              ) : (
-                <Copy className="w-4 h-4 text-primary" />
-              )}
-            </button>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Copy this message and paste it into the chat widget in the bottom
-          right corner.
-        </p>
-      </div>
-
-      {/* Waiting indicator */}
-      <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-2">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        Waiting for your first message...
-      </div>
-
-      <Button variant="outline" onClick={onBack} className="w-full md:w-auto">
-        <ArrowLeft className="w-4 h-4 mr-2" />
-        Back
-      </Button>
-    </div>
-  );
+  burst();
 }
-
-// ─── Step 5: Choose Plan ──────────────────────────────────────────────────────
 
 function Step5({
   onBack,
@@ -934,47 +1004,96 @@ function Step5({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: subData } = useSubscription();
-  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<
+    "starter" | "standard" | "business"
+  >("standard");
+  const [checkoutPending, setCheckoutPending] = useState(false);
+  const [portalPending, setPortalPending] = useState(false);
   const [billingInterval, setBillingInterval] = useState<"monthly" | "annual">("annual");
 
-  // Check if returning from Stripe Checkout
-  const searchParams = new URLSearchParams(window.location.search);
-  const checkoutSuccess = searchParams.get("checkout") === "success";
+  const [searchParams] = useSearchParams();
+  const isStripeReturn = searchParams.get("checkout") === "success";
+  const isCelebratePreview = searchParams.get("celebrate") === "1";
+  const showCelebration = isStripeReturn || isCelebratePreview;
 
   const currentPlan = subData?.subscription?.plan as "starter" | "standard" | "business" | undefined;
   const currentInterval = subData?.subscription?.interval as "monthly" | "annual" | undefined;
+  const confettiFired = useRef(false);
 
   useEffect(() => {
-    if (checkoutSuccess) {
-      // Clean up URL params
-      const url = new URL(window.location.href);
-      url.searchParams.delete("checkout");
-      const nextUrl = `${url.pathname}${url.searchParams.toString() ? `?${url.searchParams.toString()}` : ""}`;
-      window.history.replaceState({}, "", nextUrl);
+    if (currentPlan) setSelectedPlan(currentPlan);
+  }, [currentPlan]);
 
-      // Invalidate subscription cache so OnboardingGuard sees the new subscription
-      queryClient.invalidateQueries({ queryKey: ["subscription"] });
+  useEffect(() => {
+    if (currentInterval) setBillingInterval(currentInterval);
+  }, [currentInterval]);
 
-      // Auto-redirect to dashboard after a brief delay
-      const timer = setTimeout(() => {
-        navigate("/app", { replace: true });
-      }, 1500);
-      return () => clearTimeout(timer);
+  useEffect(() => {
+    if (!showCelebration) return;
+
+    if (!confettiFired.current) {
+      confettiFired.current = true;
+      celebrateCheckout();
     }
-  }, [checkoutSuccess, queryClient, navigate]);
 
-  async function handleSelectPlan(plan: "starter" | "standard" | "business", interval: "monthly" | "annual") {
-    setLoadingPlan(plan);
+    if (isCelebratePreview) return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("checkout");
+    const nextUrl = `${url.pathname}${url.searchParams.toString() ? `?${url.searchParams.toString()}` : ""}`;
+    window.history.replaceState({}, "", nextUrl);
+
+    queryClient.invalidateQueries({ queryKey: ["subscription"] });
+
+    const timer = setTimeout(() => {
+      navigate("/app", { replace: true });
+    }, 2800);
+    return () => clearTimeout(timer);
+  }, [
+    showCelebration,
+    isCelebratePreview,
+    queryClient,
+    navigate,
+  ]);
+
+  async function handleManagePlan() {
+    setPortalPending(true);
     try {
+      const res = await fetch("/api/billing/portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          returnUrl: `${window.location.origin}/app/onboarding?step=3`,
+        }),
+      });
 
+      if (!res.ok) {
+        throw new Error("Failed to create portal session");
+      }
+
+      const data = (await res.json()) as { url: string };
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setPortalPending(false);
+      }
+    } catch (err) {
+      console.error("Portal error:", err);
+      setPortalPending(false);
+    }
+  }
+
+  async function handleStartTrial() {
+    setCheckoutPending(true);
+    try {
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          plan,
-          interval,
-          successUrl: `${window.location.origin}/app/onboarding?step=4&checkout=success`,
-          cancelUrl: `${window.location.origin}/app/onboarding?step=4`,
+          plan: selectedPlan,
+          interval: billingInterval,
+          successUrl: `${window.location.origin}/app/onboarding?step=3&checkout=success`,
+          cancelUrl: `${window.location.origin}/app/onboarding?step=3`,
         }),
       });
 
@@ -985,35 +1104,40 @@ function Step5({
       const data = (await res.json()) as { url: string };
       if (data.url) {
         window.location.href = data.url;
+      } else {
+        setCheckoutPending(false);
       }
     } catch (err) {
       console.error("Checkout error:", err);
-      setLoadingPlan(null);
+      setCheckoutPending(false);
     }
   }
 
-  function handleManagePlan() {
-    navigate("/app/account");
-  }
-
-  if (checkoutSuccess) {
+  if (showCelebration) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-start gap-4 py-8">
-          <div className="w-12 h-12 rounded-2xl glow-surface flex items-center justify-center shrink-0">
-            <Check className="w-6 h-6 text-brand" />
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-xl font-bold text-foreground">Welcome aboard!</h2>
-            <p className="text-sm text-muted-foreground">
-              Your trial has started. Redirecting you to the dashboard...
-            </p>
-          </div>
+      <div className="flex flex-col items-center text-center py-16 space-y-4">
+        <div className="w-16 h-16 rounded-2xl glow-surface flex items-center justify-center">
+          <Check className="w-8 h-8 text-brand" />
         </div>
-        <Button onClick={() => navigate("/app", { replace: true })} className="w-full md:w-auto">
-          Go to Dashboard
-          <ArrowRight className="w-4 h-4 ml-2" />
-        </Button>
+        <div className="space-y-2">
+          <h2 className="text-2xl font-bold text-foreground">Welcome aboard!</h2>
+          <p className="text-sm text-muted-foreground max-w-sm">
+            {isCelebratePreview
+              ? "Preview mode — confetti only, no redirect."
+              : "Your trial has started. Taking you to the dashboard..."}
+          </p>
+        </div>
+        {isCelebratePreview ? (
+          <Button
+            variant="outline"
+            onClick={() => navigate("/app/onboarding?step=3", { replace: true })}
+            className="mt-2"
+          >
+            Back to plan step
+          </Button>
+        ) : (
+          <Loader2 className="w-5 h-5 animate-spin text-muted-foreground mt-2" />
+        )}
       </div>
     );
   }
@@ -1041,65 +1165,61 @@ function Step5({
       </div>
 
       <PricingCardsSelect
-        onSelectPlan={handleSelectPlan}
-        loadingPlan={loadingPlan}
+        selectedPlan={selectedPlan}
+        onSelectedPlanChange={setSelectedPlan}
         interval={billingInterval}
         currentPlan={currentPlan}
         currentInterval={currentInterval}
-        onManagePlan={handleManagePlan}
       />
 
-      {currentPlan ? (
-        <Button onClick={() => navigate("/app", { replace: true })} className="w-full md:w-auto">
-          Go to Dashboard
-          <ArrowRight className="w-4 h-4 ml-2" />
-        </Button>
-      ) : (
-        <Button variant="outline" onClick={onBack} className="w-full md:w-auto">
+      <div className="flex gap-3">
+        <Button variant="outline" onClick={onBack} className="flex-1">
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back
         </Button>
-      )}
-    </div>
-  );
-}
-
-// ─── Progress Bar ─────────────────────────────────────────────────────────────
-
-function ProgressBar({ currentStep }: { currentStep: number }) {
-  return (
-    <div className="flex items-center justify-center gap-2">
-      {STEPS.map((step, i) => {
-        const StepIcon = step.icon;
-        const isActive = i === currentStep;
-        const isCompleted = i < currentStep;
-
-        return (
-          <div key={step.label} className="flex items-center gap-2">
-            <div
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${isActive
-                ? "bg-primary text-primary-foreground"
-                : isCompleted
-                  ? "bg-primary/10 text-primary"
-                  : "bg-muted text-muted-foreground"
-                }`}
-            >
-              {isCompleted ? (
-                <Check className="w-3 h-3" />
-              ) : (
-                <StepIcon className="w-3 h-3" />
-              )}
-              <span className="hidden sm:inline">{step.label}</span>
-            </div>
-            {i < STEPS.length - 1 && (
-              <div
-                className={`w-6 h-px transition-colors ${isCompleted ? "bg-primary" : "bg-border"
-                  }`}
-              />
+        {currentPlan ? (
+          <Button
+            onClick={handleManagePlan}
+            disabled={portalPending}
+            className="flex-1"
+          >
+            {portalPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Redirecting...
+              </>
+            ) : (
+              <>
+                {getCtaLabel(
+                  selectedPlan,
+                  billingInterval,
+                  currentPlan,
+                  currentInterval,
+                )}
+                <ArrowRight className="w-4 h-4 ml-2" />
+              </>
             )}
-          </div>
-        );
-      })}
+          </Button>
+        ) : (
+          <Button
+            onClick={handleStartTrial}
+            disabled={checkoutPending}
+            className="flex-1"
+          >
+            {checkoutPending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Redirecting...
+              </>
+            ) : (
+              <>
+                Start 7-day free trial
+                <ArrowRight className="w-4 h-4 ml-2" />
+              </>
+            )}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1109,27 +1229,9 @@ function ProgressBar({ currentStep }: { currentStep: number }) {
 function OnboardingSkeleton() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Header */}
-      <header className="px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <Logo size="md" />
-          {/* Skeleton progress bar */}
-          <div className="flex items-center gap-2">
-            {STEPS.map((s, i) => (
-              <div key={s.label} className="flex items-center gap-2">
-                <Skeleton className="h-7 w-20 rounded-full" />
-                {i < STEPS.length - 1 && (
-                  <div className="w-6 h-px bg-border" />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      </header>
-
-      {/* Content skeleton */}
-      <main className="flex-1 flex items-start justify-center px-6 py-12">
-        <div className="w-full max-w-2xl space-y-8">
+      <main className="flex-1 flex flex-col px-6">
+        <div className="flex-[2] min-h-0 shrink" aria-hidden />
+        <div className={`${ONBOARDING_CONTENT_CLASS} space-y-8`}>
           {/* Title area */}
           <div className="space-y-3">
             <Skeleton className="h-8 w-64" />
@@ -1161,6 +1263,7 @@ function OnboardingSkeleton() {
             <Skeleton className="h-10 w-32 rounded-lg" />
           </div>
         </div>
+        <div className="flex-[3] min-h-0 shrink" aria-hidden />
       </main>
     </div>
   );
@@ -1176,10 +1279,8 @@ interface ExistingProject {
 }
 
 function Onboarding() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [projectSlug, setProjectSlug] = useState<string | null>(null);
   const [step1Error, setStep1Error] = useState<string | null>(null);
   const [autoCheckoutPending, setAutoCheckoutPending] = useState(false);
 
@@ -1187,7 +1288,7 @@ function Onboarding() {
   const rawStepParam = searchParams.get("step");
   const parsedStep = rawStepParam !== null ? parseInt(rawStepParam, 10) : null;
   // step is null until we've determined the correct one from data
-  const step = parsedStep !== null && !isNaN(parsedStep) && parsedStep >= 0 && parsedStep <= 4
+  const step = parsedStep !== null && !isNaN(parsedStep) && parsedStep >= 0 && parsedStep <= 3
     ? parsedStep
     : null;
   // Track whether step has been resolved (either from URL or from data)
@@ -1269,12 +1370,10 @@ function Onboarding() {
       const incomplete = existingProjects.find((p) => !p.onboarded);
       if (incomplete && !projectId) {
         setProjectId(incomplete.id);
-        setProjectSlug(incomplete.slug);
-      } else if (existingProjects.length > 0 && !projectId && step === 4) {
+      } else if (existingProjects.length > 0 && !projectId && step === 3) {
         const latestProject = existingProjects[existingProjects.length - 1];
         if (latestProject) {
           setProjectId(latestProject.id);
-          setProjectSlug(latestProject.slug);
         }
       }
       return;
@@ -1282,39 +1381,35 @@ function Onboarding() {
 
     // Step not yet in URL — determine it from data
     const checkoutParam = searchParams.get("checkout");
-
-    // If there's an incomplete project, resume it
     const incomplete = existingProjects.find((p) => !p.onboarded);
-    if (incomplete && !projectId) {
-      setProjectId(incomplete.id);
-      setProjectSlug(incomplete.slug);
 
-      if (checkoutParam === "success") {
-        setStep(4);
-      } else {
-        setStep(1);
+    // Incomplete project: bind projectId and let the settings effect pick step 1/2
+    if (incomplete) {
+      if (!projectId) {
+        setProjectId(incomplete.id);
       }
-    } else if (existingProjects.length > 0 && checkoutParam === "success") {
+      if (checkoutParam === "success") {
+        setStep(3);
+      }
+      return;
+    }
+
+    if (existingProjects.length > 0 && checkoutParam === "success") {
       // User has onboarded projects but came back from Stripe
       const latestProject = existingProjects[existingProjects.length - 1];
       if (latestProject) {
         setProjectId(latestProject.id);
-        setProjectSlug(latestProject.slug);
-        setStep(4);
+        setStep(3);
       }
-    } else {
-      // No existing projects, fresh onboarding
-      setStep(0);
+      return;
     }
+
+    // No existing projects — fresh onboarding
+    setStep(0);
   }, [existingProjects, projectId, stepResolved, step, searchParams, setStep]);
 
   // Step 1 state
-  const [step1Data, setStep1Data] = useState<Step1Data>({
-    websiteName: "",
-    websiteUrl: "",
-    companyName: "",
-    industry: "",
-  });
+  const [websiteUrl, setWebsiteUrl] = useState("");
 
   // Pre-fill step 1 data when resuming an existing project
   const { data: projectData } = useQuery<{
@@ -1345,45 +1440,87 @@ function Onboarding() {
     enabled: !!projectId,
   });
 
+  // Infer resume step once project settings are available
+  useEffect(() => {
+    if (!projectId || !settingsData || stepResolved) return;
+
+    const incomplete = existingProjects?.find(
+      (project) => !project.onboarded && project.id === projectId,
+    );
+    if (!incomplete) return;
+
+    if (searchParams.get("checkout") === "success") {
+      setStep(3);
+      return;
+    }
+
+    setStep(hasSavedCompanyProfile(settingsData) ? 2 : 1);
+  }, [
+    projectId,
+    settingsData,
+    stepResolved,
+    existingProjects,
+    searchParams,
+    setStep,
+  ]);
+
+  // Step 2 state — AI-generated company profile, reviewed by the user
+  const [profile, setProfile] = useState<CompanyProfile>({
+    websiteName: "",
+    companyName: "",
+    industry: "",
+    context: "",
+  });
+
   useEffect(() => {
     if (!projectData || !settingsData) return;
+    if (!websiteUrl) {
+      setWebsiteUrl(
+        settingsData.companyUrl ??
+        (projectData.domain ? `https://${projectData.domain}` : ""),
+      );
+    }
+    // Pre-fill the profile if it hasn't been touched yet
     const isEmpty =
-      !step1Data.websiteName &&
-      !step1Data.websiteUrl &&
-      !step1Data.companyName &&
-      !step1Data.industry;
+      !profile.websiteName &&
+      !profile.companyName &&
+      !profile.industry &&
+      !profile.context;
     if (isEmpty) {
-      setStep1Data({
-        websiteName: projectData.name ?? "",
-        websiteUrl:
-          settingsData.companyUrl ??
-          (projectData.domain ? `https://${projectData.domain}` : ""),
+      // Project creation names the project after its hostname as a
+      // placeholder — don't surface that as the website name.
+      const placeholderName = projectData.domain?.replace(/^www\./, "");
+      setProfile({
+        websiteName:
+          projectData.name && projectData.name !== placeholderName
+            ? projectData.name
+            : "",
         companyName: settingsData.companyName ?? "",
         industry: settingsData.industry ?? "",
+        context: settingsData.companyContext ?? "",
       });
     }
-    // Also pre-fill context if available and not already set
-    if (!context && settingsData.companyContext) {
-      setContext(settingsData.companyContext);
-    }
   }, [projectData, settingsData]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Step 2 state
-  const [context, setContext] = useState("");
 
   // Step 3 state
   const [widgetStyle, setWidgetStyle] = useState<WidgetStyle>({
     primaryColor: "#2563eb",
+    textColor: "#ffffff",
     borderRadius: 16,
     fontFamily: "system-ui",
+    position: "bottom-right",
   });
 
   const createProjectMutation = useMutation({
     mutationFn: async () => {
+      const trimmed = websiteUrl.trim();
+      const normalizedUrl = /^https?:\/\//i.test(trimmed)
+        ? trimmed
+        : `https://${trimmed}`;
       const res = await fetch("/api/onboarding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(step1Data),
+        body: JSON.stringify({ websiteUrl: normalizedUrl }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -1395,7 +1532,6 @@ function Onboarding() {
     },
     onSuccess: (data) => {
       setProjectId(data.projectId);
-      setProjectSlug(data.slug);
       setStep1Error(null);
       setStep(1);
     },
@@ -1427,34 +1563,13 @@ function Onboarding() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Header */}
-      <header className="px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <Logo size="md" />
-          <div className="flex items-center gap-4">
-            <ProgressBar currentStep={step} />
-            <button
-              type="button"
-              onClick={async () => {
-                await signOut();
-                navigate("/");
-              }}
-              className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="Log out"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Content */}
-      <main className="flex-1 flex items-start justify-center px-6 py-12">
-        <div className="w-full max-w-6xl">
+      <main className="flex-1 flex flex-col px-6">
+        <div className="flex-[2] min-h-0 shrink" aria-hidden />
+        <div className={ONBOARDING_CONTENT_CLASS}>
           {step === 0 && (
             <Step1
-              data={step1Data}
-              onChange={setStep1Data}
+              websiteUrl={websiteUrl}
+              onChange={setWebsiteUrl}
               onNext={handleStep1Next}
               isPending={createProjectMutation.isPending}
               error={step1Error}
@@ -1463,10 +1578,12 @@ function Onboarding() {
           {step === 1 && projectId && (
             <Step2
               projectId={projectId}
-              context={context}
-              setContext={setContext}
+              profile={profile}
+              setProfile={setProfile}
               onNext={() => setStep(2)}
               onBack={() => setStep(0)}
+              settingsReady={!!settingsData}
+              hasExistingProfile={hasSavedCompanyProfile(settingsData)}
             />
           )}
           {step === 2 && projectId && (
@@ -1476,20 +1593,14 @@ function Onboarding() {
               onNext={() => setStep(3)}
               onBack={() => setStep(1)}
               projectId={projectId}
+              websiteUrl={websiteUrl}
             />
           )}
-          {step === 3 && projectId && projectSlug && (
-            <Step4
-              projectId={projectId}
-              slug={projectSlug}
-              onBack={() => setStep(2)}
-              onNext={() => setStep(4)}
-            />
-          )}
-          {step === 4 && (
-            <Step5 onBack={() => setStep(3)} />
+          {step === 3 && (
+            <Step5 onBack={() => setStep(2)} />
           )}
         </div>
+        <div className="flex-[3] min-h-0 shrink" aria-hidden />
       </main>
     </div>
   );

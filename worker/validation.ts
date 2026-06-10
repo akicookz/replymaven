@@ -5,6 +5,7 @@ import {
   FAQ_SET_MAX_CHARS,
   getFaqSetTotalLength,
 } from "../shared/faq-limits";
+import { INDUSTRIES } from "../shared/industries";
 
 // ─── Host Allow/Deny Helpers (shared by helpCustomUrl + helpTestProxy) ───────
 function isLikelyIp(host: string): boolean {
@@ -365,13 +366,13 @@ export const createApiKeySchema = z.object({
 
 // ─── Onboarding ───────────────────────────────────────────────────────────────
 export const onboardingStep1Schema = z.object({
-  websiteName: z.string().min(1, "Website name is required").max(100),
   websiteUrl: z.string().url("Must be a valid URL").max(2048),
-  companyName: z.string().min(1, "Company name is required").max(200),
-  industry: z.string().min(1, "Industry is required").max(100),
 });
 
 export const onboardingContextSchema = z.object({
+  websiteName: z.string().min(1, "Website name is required").max(100),
+  companyName: z.string().min(1, "Company name is required").max(200),
+  industry: z.enum(INDUSTRIES, "Industry is required"),
   companyContext: z.string().min(1, "Context is required").max(10000),
 });
 
@@ -379,8 +380,13 @@ export const onboardingWidgetSchema = z.object({
   primaryColor: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid hex color"),
+  textColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, "Must be a valid hex color")
+    .optional(),
   borderRadius: z.number().min(0).max(50),
   fontFamily: z.string().max(100),
+  position: z.enum(["bottom-right", "bottom-left", "center-inline"]).optional(),
 });
 
 // ─── Tickets ──────────────────────────────────────────────────────────────
@@ -566,10 +572,13 @@ const allowedPagesArraySchema = z
   .nullable()
   .optional();
 
+const imageAspectSchema = z.enum(["landscape", "square"]);
+
 export const createGreetingSchema = z.object({
   enabled: z.boolean().optional(),
   imageUrl: z.string().max(500).nullable().optional(),
   imagePosition: imagePositionSchema.nullable().optional(),
+  imageAspect: imageAspectSchema.nullable().optional(),
   title: z.string().min(1, "Title is required").max(120),
   description: z.string().max(500).nullable().optional(),
   ctaText: z.string().max(40).nullable().optional(),
@@ -590,6 +599,7 @@ export const updateGreetingSchema = z.object({
   enabled: z.boolean().optional(),
   imageUrl: z.string().max(500).nullable().optional(),
   imagePosition: imagePositionSchema.nullable().optional(),
+  imageAspect: imageAspectSchema.nullable().optional(),
   title: z.string().min(1).max(120).optional(),
   description: z.string().max(500).nullable().optional(),
   ctaText: z.string().max(40).nullable().optional(),

@@ -286,10 +286,10 @@ function Dashboard() {
               Add Knowledge
             </Button>
           </Link>
-          <Link to={`/app/projects/${projectId}/widget`}>
+          <Link to={`/app/projects/${projectId}/widget/installation`}>
             <Button className="gap-2">
               <Plus className="w-4 h-4" />
-              Configure Widget
+              Install Widget
             </Button>
           </Link>
         </div>

@@ -1,5 +1,10 @@
+import { useRef } from "react";
+import { Plus } from "lucide-react";
 import { useParams } from "react-router-dom";
-import GreetingsList from "@/components/GreetingsList";
+import { Button } from "@/components/ui/button";
+import GreetingsList, {
+  type GreetingsListHandle,
+} from "@/components/GreetingsList";
 import {
   WidgetPageShell,
   WidgetPreviewPanel,
@@ -15,6 +20,7 @@ const PAGE_DESCRIPTION =
 function WidgetGreetings() {
   const { projectId } = useParams<{ projectId: string }>();
   const state = useWidgetSettings(projectId ?? "");
+  const listRef = useRef<GreetingsListHandle>(null);
 
   if (state.isLoading) {
     return (
@@ -42,11 +48,26 @@ function WidgetGreetings() {
         />
       }
     >
-      <WidgetSectionCard description="Each greeting saves as you create or edit it.">
+      <WidgetSectionCard
+        title="Your greetings"
+        description="Each greeting saves as you create or edit it."
+        action={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => listRef.current?.openCreate()}
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add greeting
+          </Button>
+        }
+      >
         <GreetingsList
           projectId={projectId ?? ""}
           authors={state.authors ?? []}
           onPreviewChange={state.setPreviewGreetings}
+          handleRef={listRef}
         />
       </WidgetSectionCard>
     </WidgetPageShell>

@@ -343,6 +343,10 @@ export const crawledPages = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
+    // Last status transition — used to detect crawls that have gone quiet.
+    // Nullable (SQLite can't add a column with a non-constant default);
+    // null means "no transition yet", fall back to createdAt.
+    updatedAt: integer("updated_at", { mode: "timestamp" }),
   },
   (table) => [
     uniqueIndex("idx_crawled_pages_resource_url").on(
@@ -863,6 +867,8 @@ export const greetings = sqliteTable(
     imageUrl: text("image_url"),
     // Focal point for the image as "X% Y%"; null = centered.
     imagePosition: text("image_position"),
+    // "landscape" (wide banner crop) or "square"; null = landscape.
+    imageAspect: text("image_aspect"),
     title: text("title").notNull(),
     description: text("description"),
     ctaText: text("cta_text"),

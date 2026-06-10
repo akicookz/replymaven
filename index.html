@@ -5,6 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
     <title>ReplyMaven</title>
+    <script>
+      // Apply the stored theme before first paint so the app never flashes
+      // dark on load. Must mirror getStoredTheme() in src/lib/theme.ts
+      // (same storage key, same "dark" default).
+      (function () {
+        var theme = "dark";
+        try {
+          var stored = localStorage.getItem("rm-theme");
+          if (stored === "light" || stored === "dark") theme = stored;
+        } catch (e) {
+          /* localStorage unavailable */
+        }
+        document.documentElement.classList.add(theme);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

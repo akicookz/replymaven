@@ -71,7 +71,7 @@ function OnboardingGuard({ children }: { children: React.ReactNode }) {
 
   // Has onboarded projects but no subscription -- go to plan selection
   if (!subData?.subscription) {
-    return <Navigate to="/app/onboarding?step=4" replace />;
+    return <Navigate to="/app/onboarding?step=3" replace />;
   }
 
   return <>{children}</>;

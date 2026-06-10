@@ -577,8 +577,8 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     .rm-greeting-stack {
       position: absolute;
       bottom: 76px;
-      width: 320px;
-      max-width: 320px;
+      width: 360px;
+      max-width: 360px;
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -631,6 +631,35 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       width: 100%;
       height: 140px;
       object-fit: cover;
+      /* Fade the artwork into the card body. A mask (not a painted
+         gradient) turns the image itself transparent, so the user's
+         background color — or the blurred glass style — shows through,
+         and the card radius keeps clipping the corners as usual. */
+      -webkit-mask-image: linear-gradient(
+        to bottom,
+        #000 55%,
+        rgba(0, 0, 0, 0.45) 80%,
+        transparent 100%
+      );
+      mask-image: linear-gradient(
+        to bottom,
+        #000 55%,
+        rgba(0, 0, 0, 0.45) 80%,
+        transparent 100%
+      );
+    }
+    .rm-greeting-image.square {
+      height: auto;
+      aspect-ratio: 1 / 1;
+      /* Keep tall images from dwarfing the card body; object-fit crops
+         around the configured focal point. */
+      max-height: 260px;
+    }
+    /* Let the text rise into the faded zone so image and body melt
+       together instead of stacking as two blocks. */
+    .rm-greeting-image + .rm-greeting-body {
+      position: relative;
+      margin-top: -28px;
     }
     .rm-greeting-body {
       padding: 14px 16px 14px 16px;
@@ -646,6 +675,8 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     }
     .rm-greeting-card.compact {
       cursor: pointer;
+      /* The wider stack is for rich news cards; bubbles stay chat-sized. */
+      max-width: 320px;
     }
     .rm-greeting-avatar {
       width: 40px;
@@ -692,6 +723,25 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       color: var(--rm-text-secondary, #52525b);
       line-height: 1.45;
     }
+    /* Rich (news) cards: clearer hierarchy — bigger title, quieter
+       description, roomier body. Compact bubbles keep the base sizes since
+       the description holds the actual message there. */
+    .rm-greeting-card:not(.compact) .rm-greeting-body {
+      padding: 18px;
+    }
+    .rm-greeting-card:not(.compact) .rm-greeting-text {
+      gap: 5px;
+    }
+    .rm-greeting-card:not(.compact) .rm-greeting-title {
+      font-size: 17px;
+      letter-spacing: -0.01em;
+    }
+    .rm-greeting-card:not(.compact) .rm-greeting-desc {
+      font-size: 14px;
+      line-height: 1.55;
+      color: var(--rm-text-secondary, #71717a);
+      opacity: 0.85;
+    }
     .rm-greeting-card.compact .rm-greeting-desc {
       display: -webkit-box;
       -webkit-line-clamp: 3;
@@ -699,19 +749,21 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       overflow: hidden;
     }
     .rm-greeting-cta {
-      align-self: flex-start;
-      margin-top: 6px;
-      padding: 8px 14px;
+      align-self: stretch;
+      margin-top: 10px;
+      padding: 9px 14px;
       border-radius: 999px;
       background: var(--rm-primary, #2563eb);
       color: var(--rm-brand-text, #ffffff);
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 600;
       border: 0;
       cursor: pointer;
       text-decoration: none;
       display: inline-flex;
       align-items: center;
+      justify-content: center;
+      text-align: center;
       gap: 6px;
       transition: opacity 0.2s ease;
     }
@@ -2888,6 +2940,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     enabled: boolean;
     imageUrl: string | null;
     imagePosition: string | null;
+    imageAspect?: "landscape" | "square" | null;
     title: string;
     description: string | null;
     ctaText: string | null;
@@ -5943,7 +5996,10 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
 
     if (greeting.imageUrl) {
       const img = document.createElement("img");
-      img.className = "rm-greeting-image";
+      img.className =
+        greeting.imageAspect === "square"
+          ? "rm-greeting-image square"
+          : "rm-greeting-image";
       img.src = resolveUrl(greeting.imageUrl);
       img.alt = "";
       if (greeting.imagePosition) {

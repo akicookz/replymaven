@@ -46,7 +46,7 @@ function ColorPicker({ value, onChange, className }: ColorPickerProps) {
         <button
           type="button"
           className={cn(
-            "group flex h-10 w-full items-center gap-3 rounded-xl border border-input bg-background px-3 text-sm transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "group flex h-10 w-full items-center gap-3 rounded-xl border border-input bg-input-background px-3 text-sm transition-colors hover:bg-input-background-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             className
           )}
         >

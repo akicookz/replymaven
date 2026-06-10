@@ -17,7 +17,10 @@ import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
 import Resources from "./pages/Resources";
 import QuickActions from "./pages/QuickActions";
-import WidgetConfig from "./pages/WidgetConfig";
+import WidgetAppearance from "./pages/WidgetAppearance";
+import WidgetHome from "./pages/WidgetHome";
+import WidgetGreetings from "./pages/WidgetGreetings";
+import WidgetInstallation from "./pages/WidgetInstallation";
 import Tickets from "./pages/Tickets";
 import CompanyInfo from "./pages/CompanyInfo";
 import Sops from "./pages/Sops";
@@ -234,7 +237,19 @@ function App() {
         />
         <Route
           path="projects/:projectId/widget"
-          element={<WidgetConfig />}
+          element={<WidgetAppearance />}
+        />
+        <Route
+          path="projects/:projectId/widget/home"
+          element={<WidgetHome />}
+        />
+        <Route
+          path="projects/:projectId/widget/greetings"
+          element={<WidgetGreetings />}
+        />
+        <Route
+          path="projects/:projectId/widget/installation"
+          element={<WidgetInstallation />}
         />
         <Route
           path="projects/:projectId/widget/quick-actions"

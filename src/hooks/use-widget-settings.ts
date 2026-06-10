@@ -6,6 +6,7 @@ import {
   useQueryClient,
   type UseMutationResult,
 } from "@tanstack/react-query";
+import { useTheme } from "@/lib/theme";
 import type { GreetingData } from "./use-greetings";
 
 export interface WidgetConfigData {
@@ -53,14 +54,25 @@ export const BACKGROUND_STYLES = [
   },
 ] as const;
 
+export type WidgetPreviewMode = "launcher" | "open";
+
+export interface WidgetSettingsOptions {
+  /**
+   * Preview state the page starts on: "launcher" shows the closed trigger
+   * with greeting/intro popups, "open" shows the widget opened on its home
+   * screen. Center-inline widgets always preview as "open".
+   */
+  defaultPreviewMode?: WidgetPreviewMode;
+}
+
 export interface WidgetSettingsState {
   project?: ProjectData;
   form: Partial<WidgetConfigData>;
   authors?: AuthorOption[];
   avatarUploading: boolean;
   bannerUploading: boolean;
-  pageInput: string;
-  previewMode: "home" | "chat";
+  previewMode: WidgetPreviewMode;
+  previewPagePath: string;
   previewHtml: string;
   embedSnippet: string;
   isLoading: boolean;
@@ -68,8 +80,9 @@ export interface WidgetSettingsState {
   bannerInputRef: RefObject<HTMLInputElement | null>;
   iframeRef: RefObject<HTMLIFrameElement | null>;
   save: UseMutationResult<WidgetConfigData, Error, void>;
-  setPageInput: Dispatch<SetStateAction<string>>;
-  setPreviewMode: Dispatch<SetStateAction<"home" | "chat">>;
+  setPreviewMode: Dispatch<SetStateAction<WidgetPreviewMode>>;
+  setPreviewPagePath: Dispatch<SetStateAction<string>>;
+  replayPreview: () => void;
   setPreviewGreetings: (greetings: GreetingData[]) => void;
   updateForm: (updates: Partial<WidgetConfigData>) => void;
   handleImageUpload: (
@@ -86,6 +99,7 @@ interface PreviewGreetingPayload {
   enabled: boolean;
   imageUrl: string | null;
   imagePosition: string | null;
+  imageAspect: "landscape" | "square" | null;
   title: string;
   description: string | null;
   ctaText: string | null;
@@ -102,13 +116,64 @@ interface PreviewGreetingPayload {
   sortOrder: number;
 }
 
+// In dev the preview loads the locally built bundle (public/widget-embed.js,
+// same file test-widget.html uses — keep it fresh with `bun run widget:watch`)
+// so widget changes show up without deploying. The widget derives its API base
+// from the script origin, so API calls go to the local worker too.
+const WIDGET_SCRIPT_URL = import.meta.env.DEV
+  ? "/widget-embed.js"
+  : "https://widget.replymaven.com/widget-embed.js";
+
+// Mirrors --background in src/theme.css so the preview backdrop matches the app
+const PREVIEW_BACKDROP = {
+  light: { background: "oklch(98.5% 0.002 80)", dot: "oklch(87% 0.004 80)" },
+  dark: { background: "#08080a", dot: "#2c2c30" },
+} as const;
+
+// Mirrors matchesCurrentPage in widget/index.ts. The preview iframe runs at
+// about:srcdoc, so page-visibility rules are evaluated here against the
+// simulated path instead of letting the widget check window.location.
+function matchesPagePatterns(path: string, patterns: string[]): boolean {
+  return patterns.some((pattern) => {
+    if (pattern.endsWith("/*")) {
+      const prefix = pattern.slice(0, -2);
+      return path === prefix || path.startsWith(prefix + "/");
+    }
+    return path === pattern;
+  });
+}
+
+function normalizePagePath(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === "/") return "/";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function buildPreviewHtml(options: {
   projectSlug: string;
   form: Partial<WidgetConfigData>;
   greetings: PreviewGreetingPayload[];
-  previewMode: "home" | "chat";
+  previewMode: WidgetPreviewMode;
+  theme: "light" | "dark";
+  pagePath: string;
+  hiddenByPageRules: boolean;
+  replayNonce: number;
 }): string {
-  const firstGreeting = options.greetings[0] ?? null;
+  const backdrop = PREVIEW_BACKDROP[options.theme];
+  // The widget derives the in-thread intro from the first compact greeting
+  // (no image, no CTA) — see widget/index.ts. Mirror that so the legacy
+  // introMessage fallback fields don't diverge from real behavior.
+  const firstGreeting =
+    options.greetings.find((g) => !g.imageUrl && !g.ctaText && !g.ctaLink) ??
+    null;
 
   const configPayload = {
     widget: {
@@ -146,47 +211,90 @@ function buildPreviewHtml(options: {
     contactForm: null,
   };
 
-  return `<!DOCTYPE html>
-<html><head>
+  const head = `<head>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     width: 100%; height: 100vh;
-    background: #1a1a1a;
-    background-image: radial-gradient(circle, #333 1px, transparent 1px);
+    background: ${backdrop.background};
+    background-image: radial-gradient(circle, ${backdrop.dot} 1px, transparent 1px);
     background-size: 20px 20px;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   }
 </style>
-</head><body>
+</head>`;
+
+  if (options.hiddenByPageRules) {
+    return `<!DOCTYPE html>
+<html>${head}<body>
+<div style="height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;">
+  <div style="max-width: 280px; text-align: center; font-size: 13px; line-height: 1.5; color: ${options.theme === "dark" ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.5)"};">
+    The widget is hidden on <code>${escapeHtml(options.pagePath)}</code> by your page visibility rules.
+  </div>
+</div>
+</body></html>`;
+  }
+
+  // <-escape so greeting titles containing "</script>" can't break out
+  // of the inline script tag.
+  const cfgJson = JSON.stringify(configPayload).replace(/</g, "\\u003c");
+
+  return `<!DOCTYPE html>
+<html>${head}<body>
+<!-- replay:${options.replayNonce} -->
 <script>
-  var cfg = ${JSON.stringify(configPayload)};
+  // The iframe is same-origin with the dashboard, so the widget would read
+  // the dashboard's localStorage: dismissed greetings and conversations from
+  // earlier preview sessions would suppress greeting cards (the widget only
+  // renders them when no conversation exists). An in-memory shim gives every
+  // preview load a clean slate without touching real storage.
+  (function () {
+    var mem = {};
+    var shim = {
+      getItem: function (k) {
+        return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null;
+      },
+      setItem: function (k, v) { mem[k] = String(v); },
+      removeItem: function (k) { delete mem[k]; },
+      clear: function () { mem = {}; },
+      key: function (i) { return Object.keys(mem)[i] || null; },
+      get length() { return Object.keys(mem).length; }
+    };
+    try {
+      Object.defineProperty(window, 'localStorage', {
+        value: shim,
+        configurable: true
+      });
+    } catch (e) {}
+  })();
+
+  var cfg = ${cfgJson};
   var origFetch = window.fetch;
   window.fetch = function(url, opts) {
-    if (typeof url === 'string' && url.includes('/api/widget/') && url.includes('/config')) {
-      return Promise.resolve(new Response(JSON.stringify(cfg), {
-        headers: { 'Content-Type': 'application/json' }
-      }));
+    if (typeof url === 'string' && url.includes('/api/widget/')) {
+      if (url.includes('/config')) {
+        return Promise.resolve(new Response(JSON.stringify(cfg), {
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
+      // Never restore a previously tested conversation into the preview.
+      if (url.includes('/conversations/active')) {
+        return Promise.resolve(new Response(JSON.stringify({ conversation: null }), {
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      }
     }
     return origFetch.call(this, url, opts);
   };
-  // Reset dismissed greetings on each preview render so the popup re-shows.
-  try {
-    Object.keys(localStorage).forEach(function (k) {
-      if (k.indexOf('rm:') === 0 && k.indexOf(':greetings_dismissed') !== -1) {
-        localStorage.removeItem(k);
-      }
-    });
-  } catch (e) {}
 </script>
-<script src="https://widget.replymaven.com/widget-embed.js" data-project="${options.projectSlug}"></script>
+<script src="${WIDGET_SCRIPT_URL}" data-project="${options.projectSlug}"></script>
 <script>
   var mode = "${options.previewMode}";
   var waitForWidget = setInterval(function() {
     if (window.ReplyMaven) {
       clearInterval(waitForWidget);
-      if (mode === "chat") {
+      if (mode === "open") {
         setTimeout(function() { window.ReplyMaven.open(); }, 300);
       }
     }
@@ -195,20 +303,29 @@ function buildPreviewHtml(options: {
 </body></html>`;
 }
 
-export function useWidgetSettings(projectId: string): WidgetSettingsState {
+export function useWidgetSettings(
+  projectId: string,
+  options?: WidgetSettingsOptions,
+): WidgetSettingsState {
   const queryClient = useQueryClient();
+  const { theme } = useTheme();
+  const defaultPreviewMode = options?.defaultPreviewMode ?? "launcher";
   const [form, setForm] = useState<Partial<WidgetConfigData>>({});
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
-  const [pageInput, setPageInput] = useState("");
-  const [previewMode, setPreviewMode] = useState<"home" | "chat">("home");
+  const [previewMode, setPreviewMode] =
+    useState<WidgetPreviewMode>(defaultPreviewMode);
+  const [previewPagePath, setPreviewPagePath] = useState("/");
   const [previewGreetings, setPreviewGreetings] = useState<GreetingData[]>([]);
+  const [replayNonce, setReplayNonce] = useState(0);
   const [debouncedPreviewState, setDebouncedPreviewState] = useState<{
     form: Partial<WidgetConfigData>;
     greetings: GreetingData[];
+    pagePath: string;
   }>({
     form: {},
     greetings: [],
+    pagePath: "/",
   });
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -252,17 +369,22 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedPreviewState({ form, greetings: previewGreetings });
+      setDebouncedPreviewState({
+        form,
+        greetings: previewGreetings,
+        pagePath: previewPagePath,
+      });
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [form, previewGreetings]);
+  }, [form, previewGreetings, previewPagePath]);
 
   useEffect(() => {
+    // Center-inline has no launcher state to preview. Only force the mode on
+    // that transition so the user's manual toggle survives data loads and
+    // unrelated form edits.
     if (form.position === "center-inline") {
-      setPreviewMode("chat");
-    } else {
-      setPreviewMode("home");
+      setPreviewMode("open");
     }
   }, [form.position]);
 
@@ -279,19 +401,40 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
       ]),
     );
 
+    const pagePath = normalizePagePath(debouncedPreviewState.pagePath);
+
+    // Widget-level page visibility — the whole widget hides on non-matching
+    // pages, exactly like matchesCurrentPage in the embed script.
+    const widgetPagePatterns = (debouncedPreviewState.form.allowedPages ?? "")
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const hiddenByPageRules =
+      widgetPagePatterns.length > 0 &&
+      !matchesPagePatterns(pagePath, widgetPagePatterns);
+
+    // Per-greeting page rules are resolved here against the simulated path,
+    // then stripped so the widget doesn't re-check them against about:srcdoc.
     const previewPayload: PreviewGreetingPayload[] = debouncedPreviewState.greetings
       .filter((g) => g.enabled)
+      .filter(
+        (g) =>
+          !g.allowedPages ||
+          g.allowedPages.length === 0 ||
+          matchesPagePatterns(pagePath, g.allowedPages),
+      )
       .map((g) => ({
         id: g.id,
         enabled: g.enabled,
         imageUrl: g.imageUrl,
         imagePosition: g.imagePosition,
+        imageAspect: g.imageAspect,
         title: g.title,
         description: g.description,
         ctaText: g.ctaText,
         ctaLink: g.ctaLink,
         author: g.authorId ? authorMap.get(g.authorId) ?? null : null,
-        allowedPages: g.allowedPages,
+        allowedPages: null,
         delaySeconds: g.delaySeconds,
         durationSeconds: g.durationSeconds,
         sortOrder: g.sortOrder,
@@ -302,8 +445,19 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
       form: debouncedPreviewState.form,
       greetings: previewPayload,
       previewMode,
+      theme,
+      pagePath,
+      hiddenByPageRules,
+      replayNonce,
     });
-  }, [debouncedPreviewState, previewMode, project?.slug, authors]);
+  }, [
+    debouncedPreviewState,
+    previewMode,
+    project?.slug,
+    authors,
+    theme,
+    replayNonce,
+  ]);
 
   const save = useMutation<WidgetConfigData, Error, void>({
     mutationFn: async () => {
@@ -363,14 +517,20 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
     await handleImageUpload(file, setBannerUploading, "bannerUrl");
   }
 
+  // Bumping the nonce changes the iframe srcDoc, reloading the preview so
+  // greeting delay/duration timers run again.
+  function replayPreview(): void {
+    setReplayNonce((n) => n + 1);
+  }
+
   return {
     project,
     form,
     authors,
     avatarUploading,
     bannerUploading,
-    pageInput,
     previewMode,
+    previewPagePath,
     previewHtml,
     embedSnippet,
     isLoading,
@@ -378,8 +538,9 @@ export function useWidgetSettings(projectId: string): WidgetSettingsState {
     bannerInputRef,
     iframeRef,
     save,
-    setPageInput,
     setPreviewMode,
+    setPreviewPagePath,
+    replayPreview,
     setPreviewGreetings,
     updateForm,
     handleImageUpload,

@@ -2391,16 +2391,16 @@ const app = new Hono<HonoAppContext>()
     const db = c.get("db");
     const projectService = new ProjectService(db);
 
-    // Generate slug from website name
-    const baseSlug = slugify(parsed.data.websiteName);
-
-    // Extract domain from URL
-    let domain: string | undefined;
+    // Derive domain + placeholder name from the URL; the AI fills in the
+    // real website/company name during the scrape step.
+    let domain: string;
     try {
       domain = new URL(parsed.data.websiteUrl).hostname;
     } catch {
-      domain = undefined;
+      return c.json({ error: "Must be a valid URL" }, 400);
     }
+    const displayDomain = domain.replace(/^www\./, "");
+    const baseSlug = slugify(displayDomain);
 
     // Resolve to owner's id so team members see/create projects on the owner's
     // account, not under their own user id (which would orphan the project).
@@ -2414,9 +2414,7 @@ const app = new Hono<HonoAppContext>()
     if (existing) {
       // Reuse the existing project — update its settings and return it
       await projectService.updateSettings(existing.id, {
-        companyName: parsed.data.companyName,
         companyUrl: parsed.data.websiteUrl,
-        industry: parsed.data.industry,
       });
       return c.json({ projectId: existing.id, slug: existing.slug }, 200);
     }
@@ -2430,16 +2428,13 @@ const app = new Hono<HonoAppContext>()
     // Create the project under the owner's account
     const project = await projectService.createProject({
       userId: effectiveUserId,
-      name: parsed.data.websiteName,
+      name: displayDomain,
       slug,
       domain,
     });
 
-    // Update settings with company info
     await projectService.updateSettings(project.id, {
-      companyName: parsed.data.companyName,
       companyUrl: parsed.data.websiteUrl,
-      industry: parsed.data.industry,
     });
 
     return c.json({ projectId: project.id, slug: project.slug }, 201);
@@ -2521,30 +2516,46 @@ const app = new Hono<HonoAppContext>()
         ),
       );
 
-      // Summarize via AI
+      // Extract company profile (name, industry, context) via AI
       const aiService = new AiService({
         model: c.env.AI_MODEL,
         geminiApiKey: c.env.GEMINI_API_KEY,
         openaiApiKey: c.env.OPENAI_API_KEY,
       });
-      const context = await aiService.summarizeWebsite(rawText);
+      const profile = await aiService.extractCompanyProfile(
+        rawText,
+        settings.companyUrl,
+      );
 
-      if (!context) {
+      if (!profile) {
         return c.json({ context: "", scraped: false });
       }
 
-      // Save the summary to project settings
+      // Save the extracted profile to project settings
       await projectService.updateSettings(project.id, {
-        companyContext: context,
+        companyName: profile.companyName,
+        industry: profile.industry,
+        companyContext: profile.context,
       });
+      if (profile.websiteName) {
+        await projectService.updateProject(project.id, project.userId, {
+          name: profile.websiteName,
+        });
+      }
 
-      return c.json({ context, scraped: true });
+      return c.json({
+        scraped: true,
+        context: profile.context,
+        websiteName: profile.websiteName,
+        companyName: profile.companyName,
+        industry: profile.industry,
+      });
     } catch {
       return c.json({ context: "", scraped: false });
     }
   })
 
-  // ─── Step 2 fallback: Manually set context ────────────────────────────────
+  // ─── Step 2: Save reviewed company profile ─────────────────────────────────
   .put("/api/onboarding/:projectId/context", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -2563,7 +2574,12 @@ const app = new Hono<HonoAppContext>()
     }
 
     await projectService.updateSettings(project.id, {
+      companyName: parsed.data.companyName,
+      industry: parsed.data.industry,
       companyContext: parsed.data.companyContext,
+    });
+    await projectService.updateProject(project.id, project.userId, {
+      name: parsed.data.websiteName,
     });
 
     return c.json({ ok: true });
@@ -3709,6 +3725,7 @@ const app = new Hono<HonoAppContext>()
       enabled: row.enabled,
       imageUrl: row.imageUrl,
       imagePosition: row.imagePosition,
+      imageAspect: row.imageAspect,
       title: row.title,
       description: row.description,
       ctaText: row.ctaText,
@@ -4416,7 +4433,8 @@ const app = new Hono<HonoAppContext>()
     }
 
     const resourceService = new ResourceService(db, c.env.UPLOADS);
-    const [resources, counts, articleBridge] = await Promise.all([
+    // eslint-disable-next-line prefer-const -- resources is re-fetched after stale-crawl recovery
+    let [resources, counts, articleBridge] = await Promise.all([
       resourceService.getResourcesByProject(project.id),
       resourceService.getCrawledPageCountsByResource(project.id),
       db
@@ -4433,6 +4451,23 @@ const app = new Hono<HonoAppContext>()
         )
         .where(eq(helpArticles.projectId, project.id)),
     ]);
+
+    // Self-heal crawls stuck on abandoned pending pages (lost queue messages)
+    const stuckCrawls = resources.filter(
+      (r) => r.type === "webpage" && r.status === "crawling",
+    );
+    if (stuckCrawls.length > 0) {
+      const crawlService = new CrawlService(
+        db,
+        c.env.UPLOADS,
+        c.env.CF_ACCOUNT_ID,
+        c.env.BROWSER_RENDERING_API_TOKEN,
+      );
+      for (const r of stuckCrawls) {
+        await crawlService.recoverStaleCrawl(r.id, project.id);
+      }
+      resources = await resourceService.getResourcesByProject(project.id);
+    }
 
     const articleById = new Map(
       articleBridge.map((a) => [a.articleId, a]),
@@ -5228,6 +5263,17 @@ const app = new Hono<HonoAppContext>()
     );
     if (!resource || resource.type !== "webpage") {
       return c.json({ error: "Not found" }, 404);
+    }
+
+    // Self-heal crawls stuck on abandoned pending pages (lost queue messages)
+    if (resource.status === "crawling") {
+      const crawlService = new CrawlService(
+        db,
+        c.env.UPLOADS,
+        c.env.CF_ACCOUNT_ID,
+        c.env.BROWSER_RENDERING_API_TOKEN,
+      );
+      await crawlService.recoverStaleCrawl(resource.id, project.id);
     }
 
     const pages = await resourceService.getCrawledPages(
@@ -7067,6 +7113,10 @@ const app = new Hono<HonoAppContext>()
 
 // ─── Queue Consumer ───────────────────────────────────────────────────────────
 
+// After this many delivery attempts a page is marked failed instead of
+// retried, so a flaky page can never leave the resource stuck in "crawling".
+const MAX_CRAWL_ATTEMPTS = 3;
+
 async function handleQueue(
   batch: MessageBatch<CrawlMessage>,
   env: Env,
@@ -7074,22 +7124,38 @@ async function handleQueue(
   const db = drizzle(env.DB);
 
   for (const message of batch.messages) {
-    try {
-      const crawlService = new CrawlService(
-        db,
-        env.UPLOADS,
-        env.CF_ACCOUNT_ID,
-        env.BROWSER_RENDERING_API_TOKEN,
-      );
+    const crawlService = new CrawlService(
+      db,
+      env.UPLOADS,
+      env.CF_ACCOUNT_ID,
+      env.BROWSER_RENDERING_API_TOKEN,
+    );
 
+    try {
       await crawlService.processUrl(message.body, env.CRAWL_QUEUE);
       message.ack();
     } catch (err) {
       console.error(
-        `Queue message processing failed for ${message.body.url}:`,
+        `Queue message processing failed for ${message.body.url} (attempt ${message.attempts}):`,
         err,
       );
-      message.retry();
+
+      if (message.attempts >= MAX_CRAWL_ATTEMPTS) {
+        // Out of retries — fail the page and finalize the resource rather
+        // than dropping the message and leaving the page "pending" forever.
+        try {
+          await crawlService.failPage(message.body);
+        } catch (failErr) {
+          console.error(
+            `Failed to finalize page ${message.body.url} after retries:`,
+            failErr,
+          );
+        }
+        message.ack();
+      } else {
+        // Back off so rate-limited Browser Rendering calls aren't hammered
+        message.retry({ delaySeconds: 20 * message.attempts });
+      }
     }
   }
 }

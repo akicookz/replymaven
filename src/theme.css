@@ -20,6 +20,8 @@
   --color-destructive: var(--destructive);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-input-background-hover: var(--input-background-hover);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
   --color-sidebar-border: var(--sidebar-border);
@@ -91,6 +93,8 @@
 
   --border: rgba(255, 255, 255, 0.08);
   --input: rgba(255, 255, 255, 0.08);
+  --input-background: #12121a;
+  --input-background-hover: #18181f;
   --ring: var(--brand);
 
   /* Sidebar */
@@ -143,6 +147,8 @@
 
   --border: oklch(92% 0.003 80);
   --input: oklch(92% 0.003 80);
+  --input-background: oklch(96.5% 0.004 80);
+  --input-background-hover: oklch(95.5% 0.004 80);
   --ring: var(--brand-soft);
 
   --sidebar: oklch(100% 0 0);
@@ -190,6 +196,8 @@
 
   --border: rgba(255, 255, 255, 0.08);
   --input: rgba(255, 255, 255, 0.08);
+  --input-background: #12121a;
+  --input-background-hover: #18181f;
   --ring: var(--brand);
 
   --sidebar: #0c0c10;

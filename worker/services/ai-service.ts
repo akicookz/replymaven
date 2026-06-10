@@ -2,6 +2,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText } from "ai";
 import { type ProjectSettingsRow } from "../db";
+import { INDUSTRIES } from "../../shared/industries";
 import {
   buildExtractContactInfoPrompt,
   buildReformulateQueryPrompt,
@@ -16,6 +17,13 @@ interface AiServiceConfig {
   model: string;
   geminiApiKey: string;
   openaiApiKey: string;
+}
+
+export interface CompanyProfile {
+  websiteName: string;
+  companyName: string;
+  industry: string;
+  context: string;
 }
 
 export interface KnowledgeRefinementPlan {
@@ -1258,34 +1266,67 @@ Do not wrap in markdown code blocks. Do not include any text outside the JSON.`,
     }
   }
 
-  // ─── Summarize Website Content ────────────────────────────────────────────────
+  // ─── Extract Company Profile From Website ───────────────────────────────────
 
-  async summarizeWebsite(rawText: string): Promise<string> {
+  async extractCompanyProfile(
+    rawText: string,
+    websiteUrl: string,
+  ): Promise<CompanyProfile | null> {
     const truncated = rawText.slice(0, 15000);
 
-    try {
-      const { text } = await generateText({
-        model: this.model,
-        prompt: `You are analyzing a website's content to create a company knowledge base for an AI customer support chatbot.
+    const json = await this.generateJsonObject({
+      prompt: `You are analyzing a website's content to set up an AI customer support chatbot for it.
+
+WEBSITE URL: ${websiteUrl}
 
 WEBSITE CONTENT:
 ${truncated}
 
-Based on this content, create a concise but comprehensive company description that covers:
-- What the company does (products/services)
-- Key features or offerings
-- Target audience
-- Any important policies, pricing info, or FAQs mentioned
+Extract the following and return ONLY a JSON object with these exact keys:
+{
+  "websiteName": "The product/website name as the company brands it (e.g. \\"Notion\\", \\"My Awesome App\\"). Max 60 chars.",
+  "companyName": "The legal/company name if mentioned, otherwise the brand name (e.g. \\"Acme Inc.\\"). Max 100 chars.",
+  "industry": "Exactly one of: ${INDUSTRIES.join(", ")}",
+  "context": "A concise but comprehensive factual company description for the support agent's knowledge base: what the company does (products/services), key features or offerings, target audience, and any policies, pricing, or FAQs mentioned. Not marketing copy. Under 2000 characters."
+}
 
-Write it as a factual reference document (not marketing copy). Keep it under 2000 characters. If the content is very sparse, extract whatever useful info you can.`,
-        temperature: 0.3,
-        maxOutputTokens: 1024,
-      });
+If the content is very sparse, extract whatever useful info you can and make reasonable inferences from the URL and content. Return only valid JSON.`,
+      maxOutputTokens: 1500,
+    });
 
-      return text.trim();
-    } catch {
-      return "";
+    if (!json) return null;
+
+    let websiteName =
+      typeof json.websiteName === "string" ? json.websiteName.trim() : "";
+    const companyName =
+      typeof json.companyName === "string" ? json.companyName.trim() : "";
+    const context =
+      typeof json.context === "string" ? json.context.trim() : "";
+    const rawIndustry =
+      typeof json.industry === "string" ? json.industry.trim() : "";
+    const industry =
+      INDUSTRIES.find(
+        (i) => i.toLowerCase() === rawIndustry.toLowerCase(),
+      ) ?? "Other";
+
+    if (!context) return null;
+
+    // Guarantee a usable website name — the LLM may omit it
+    if (!websiteName) websiteName = companyName;
+    if (!websiteName) {
+      try {
+        websiteName = new URL(websiteUrl).hostname.replace(/^www\./, "");
+      } catch {
+        return null;
+      }
     }
+
+    return {
+      websiteName: websiteName.slice(0, 100),
+      companyName: (companyName || websiteName).slice(0, 200),
+      industry,
+      context: context.slice(0, 10000),
+    };
   }
 
   // ─── Generate Structured Company Context ────────────────────────────────────
