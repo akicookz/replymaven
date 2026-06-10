@@ -15,6 +15,11 @@ import {
   AlertTriangle,
   Lightbulb,
   AlertOctagon,
+  Footprints,
+  Globe,
+  Activity,
+  SlidersHorizontal,
+  FileCode,
 } from "lucide-react";
 import type { CalloutVariant } from "./callout";
 
@@ -185,6 +190,107 @@ export function buildSlashItems(ctx: SlashItemContext): SlashItem[] {
       icon: Minus,
       command: ({ editor, range }) =>
         editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
+    },
+    {
+      id: "steps",
+      title: "Steps",
+      description: "Numbered step-by-step guide",
+      keywords: ["steps", "step", "guide", "numbered", "tutorial"],
+      icon: Footprints,
+      command: ({ editor, range }) =>
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .insertContent({
+            type: "steps",
+            content: [
+              {
+                type: "step",
+                attrs: { title: "" },
+                content: [{ type: "paragraph" }],
+              },
+            ],
+          })
+          .run(),
+    },
+    {
+      id: "api-endpoint",
+      title: "API endpoint",
+      description: "Method badge + path + description",
+      keywords: ["api", "endpoint", "method", "get", "post", "route"],
+      icon: Globe,
+      command: ({ editor, range }) =>
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .insertContent({
+            type: "apiEndpoint",
+            attrs: { data: { method: "GET", path: "", description: "" } },
+          })
+          .run(),
+    },
+    {
+      id: "api-status",
+      title: "API status codes",
+      description: "Response codes with descriptions",
+      keywords: ["api", "status", "codes", "http", "response"],
+      icon: Activity,
+      command: ({ editor, range }) =>
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .insertContent({
+            type: "apiStatus",
+            attrs: { data: { rows: [{ code: "200", description: "OK" }] } },
+          })
+          .run(),
+    },
+    {
+      id: "api-params",
+      title: "API parameters",
+      description: "Parameter list with types",
+      keywords: ["api", "params", "parameters", "arguments", "fields"],
+      icon: SlidersHorizontal,
+      command: ({ editor, range }) =>
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .insertContent({
+            type: "apiParams",
+            attrs: {
+              data: {
+                rows: [
+                  { name: "", type: "string", required: false, description: "" },
+                ],
+              },
+            },
+          })
+          .run(),
+    },
+    {
+      id: "api-examples",
+      title: "API examples",
+      description: "Labeled request/response code blocks",
+      keywords: ["api", "examples", "request", "response", "curl", "payload"],
+      icon: FileCode,
+      command: ({ editor, range }) =>
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .insertContent({
+            type: "apiExamples",
+            attrs: {
+              data: {
+                examples: [{ label: "Request", language: "bash", code: "" }],
+              },
+            },
+          })
+          .run(),
     },
   ];
 }

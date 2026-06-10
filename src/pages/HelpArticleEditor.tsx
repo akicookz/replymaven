@@ -126,6 +126,18 @@ function HelpArticleEditorPage() {
     enabled: !!projectId && !!articleId,
   });
 
+  // Published help pages tint links/badges with the widget primaryColor —
+  // feed it to the editor so authoring matches the live look.
+  const widgetConfigQuery = useQuery<{ primaryColor?: string | null }>({
+    queryKey: ["widget-config", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/widget-config`);
+      if (!res.ok) throw new Error("Failed to fetch widget config");
+      return res.json();
+    },
+    enabled: !!projectId,
+  });
+
   useEffect(() => {
     if (articleQuery.data) {
       const a = articleQuery.data;
@@ -515,6 +527,7 @@ function HelpArticleEditorPage() {
             onChange={(md) => setForm((f) => ({ ...f, content: md }))}
             onMetaChange={handleMetaChange}
             variant="page"
+            accentColor={widgetConfigQuery.data?.primaryColor}
           />
         </Suspense>
       </main>

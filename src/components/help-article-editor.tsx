@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { buildExtensions } from "@/components/help-editor/extensions";
 import { EditorBubbleMenu } from "@/components/help-editor/bubble-menu";
+import { splitGluedImageBlocks } from "../../shared/markdown-repair";
 
 export interface DerivedMeta {
   title: string;
@@ -19,6 +20,9 @@ interface HelpArticleEditorProps {
   onMetaChange?: (meta: DerivedMeta) => void;
   placeholder?: string;
   variant?: "card" | "page";
+  /** Project's published accent (widget primaryColor) so links/badges in the
+   *  editor match the live help center. Defaults to the published default. */
+  accentColor?: string | null;
 }
 
 function getMarkdown(editor: TiptapEditor): string {
@@ -56,7 +60,11 @@ function HelpArticleEditor({
   onMetaChange,
   placeholder,
   variant = "card",
+  accentColor,
 }: HelpArticleEditorProps) {
+  const accentStyle = accentColor
+    ? ({ "--help-accent": accentColor } as React.CSSProperties)
+    : undefined;
   const [uploading, setUploading] = useState(false);
   const lastSyncedRef = useRef<string>(value);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -79,7 +87,9 @@ function HelpArticleEditor({
 
   const editor = useEditor({
     extensions,
-    content: value || "<h1></h1><p></p>",
+    // Repair legacy image-glued markdown on the way in so corrupted articles
+    // parse correctly — they heal permanently on the next save.
+    content: value ? splitGluedImageBlocks(value) : "<h1></h1><p></p>",
     editorProps: {
       attributes: {
         class:
@@ -105,7 +115,9 @@ function HelpArticleEditor({
     if (!editor) return;
     if (value === lastSyncedRef.current) return;
     lastSyncedRef.current = value;
-    editor.commands.setContent(value, { emitUpdate: false });
+    editor.commands.setContent(splitGluedImageBlocks(value), {
+      emitUpdate: false,
+    });
     onMetaChangeRef.current?.(deriveMeta(editor));
   }, [value, editor]);
 
@@ -177,7 +189,7 @@ function HelpArticleEditor({
 
   if (variant === "page") {
     return (
-      <div className="help-editor-page">
+      <div className="help-editor-page" style={accentStyle}>
         <EditorContent editor={editor} />
         <EditorBubbleMenu editor={editor} />
         <div className="help-editor-floating-tools" contentEditable={false}>
@@ -235,7 +247,10 @@ function HelpArticleEditor({
   }
 
   return (
-    <div className="rounded-xl bg-card border border-border overflow-hidden">
+    <div
+      className="rounded-xl bg-card border border-border overflow-hidden"
+      style={accentStyle}
+    >
       <div className="flex items-center gap-1 px-2 py-1.5 bg-muted/30 border-b border-border">
         <Button
           type="button"

@@ -20,6 +20,8 @@ import sql from "highlight.js/lib/languages/sql";
 import { Markdown } from "tiptap-markdown";
 import { ImageWithAlt } from "./image-with-alt";
 import { Callout } from "./callout";
+import { Steps, Step } from "./steps";
+import { ApiEndpoint, ApiStatus, ApiParams, ApiExamples } from "./api-blocks";
 import { createSlashCommand } from "./slash-command";
 import type { SlashItemContext } from "./slash-command-items";
 
@@ -72,6 +74,12 @@ export function buildExtensions(args: BuildExtensionsArgs) {
     TaskList,
     TaskItem.configure({ nested: true }),
     Callout,
+    Steps,
+    Step,
+    ApiEndpoint,
+    ApiStatus,
+    ApiParams,
+    ApiExamples,
     createSlashCommand({ openImagePicker: args.openImagePicker }),
     Markdown.configure({
       // `html: true` lets us roundtrip <img width="..."> (resizable images).

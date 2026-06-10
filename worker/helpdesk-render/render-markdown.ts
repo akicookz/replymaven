@@ -1,4 +1,10 @@
-import { Marked, type Tokens, type MarkedExtension } from "marked";
+import {
+  Lexer,
+  Marked,
+  type Token,
+  type Tokens,
+  type MarkedExtension,
+} from "marked";
 import { markedHighlight } from "marked-highlight";
 import hljs from "highlight.js/lib/core";
 import javascript from "highlight.js/lib/languages/javascript";
@@ -11,6 +17,7 @@ import python from "highlight.js/lib/languages/python";
 import sql from "highlight.js/lib/languages/sql";
 import sanitizeHtml from "sanitize-html";
 import { buildHelpUrl } from "./build-help-url";
+import { splitGluedImageBlocks } from "../../shared/markdown-repair";
 
 interface RenderMarkdownOptions {
   projectSlug: string;
@@ -57,6 +64,8 @@ export interface TocEntry {
   text: string;
 }
 
+export { splitGluedImageBlocks };
+
 /**
  * Articles authored in the new editor carry their title as the first H1 in the
  * body. Legacy articles stored the title separately with no H1 in the body.
@@ -79,7 +88,7 @@ export function extractToc(markdown: string): TocEntry[] {
   if (!markdown) return [];
   const entries: TocEntry[] = [];
   const seen = new Map<string, number>();
-  const lines = markdown.split(/\r?\n/);
+  const lines = splitGluedImageBlocks(markdown).split(/\r?\n/);
   let inFence = false;
   for (const line of lines) {
     const fence = /^\s*```/.test(line) || /^\s*~~~/.test(line);
@@ -167,23 +176,296 @@ function headingIdExtension(): MarkedExtension {
   };
 }
 
+interface StepToken {
+  type: "step";
+  raw: string;
+  titleTokens: Token[];
+  tokens: Token[];
+}
+
+/**
+ * `:::steps` container with `::step <title>` items, each holding arbitrary
+ * nested block markdown:
+ *
+ *   :::steps
+ *   ::step First step title
+ *   any markdown blocks...
+ *   ::step Second step title
+ *   ...
+ *   :::
+ *
+ * Each step becomes its own token (with child `tokens`) so marked's
+ * walkTokens — and therefore code highlighting and callouts — reaches the
+ * nested content.
+ */
+function stepsExtension(): MarkedExtension {
+  return {
+    extensions: [
+      {
+        name: "steps",
+        level: "block",
+        start(src: string) {
+          const i = src.indexOf(":::steps");
+          return i < 0 ? undefined : i;
+        },
+        tokenizer(src: string) {
+          const match = /^:::steps[ \t]*\n([\s\S]*?)\n:::[ \t]*(?=\n|$)/.exec(
+            src,
+          );
+          if (!match) return undefined;
+          const steps: StepToken[] = [];
+          let current: { title: string; body: string[] } | null = null;
+          const flush = () => {
+            if (!current) return;
+            const body = current.body.join("\n").trim();
+            const titleTokens: Token[] = [];
+            this.lexer.inline(current.title, titleTokens);
+            steps.push({
+              type: "step",
+              raw: "",
+              titleTokens,
+              tokens: body ? this.lexer.blockTokens(`${body}\n`, []) : [],
+            });
+            current = null;
+          };
+          for (const line of match[1].split("\n")) {
+            const sm = /^::step\b[ \t]*(.*)$/.exec(line);
+            if (sm) {
+              flush();
+              current = { title: sm[1].trim(), body: [] };
+            } else if (current) {
+              current.body.push(line);
+            }
+          }
+          flush();
+          if (steps.length === 0) return undefined;
+          return { type: "steps", raw: match[0], tokens: steps };
+        },
+        childTokens: ["tokens"],
+        renderer(token) {
+          const items = this.parser.parse(token.tokens ?? []);
+          return `<ol class="help-steps">${items}</ol>`;
+        },
+      },
+      {
+        name: "step",
+        level: "block",
+        childTokens: ["tokens"],
+        renderer(token) {
+          const step = token as unknown as StepToken;
+          const title = this.parser.parseInline(step.titleTokens ?? []);
+          const body = this.parser.parse(step.tokens ?? []);
+          return `<li class="help-step"><div class="help-step-title">${title}</div><div class="help-step-body">${body}</div></li>`;
+        },
+      },
+    ],
+  };
+}
+
+/* ─── API doc blocks: fenced code with api-* langs holding JSON ──────────── */
+
+const API_LANGS = new Set([
+  "api-endpoint",
+  "api-status",
+  "api-params",
+  "api-examples",
+]);
+
+const API_METHODS = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+]);
+
+/**
+ * Pull the body back out of `token.raw` — markedHighlight's walkTokens has
+ * already HTML-escaped `token.text` by render time, so the raw fence is the
+ * only reliable source of the original JSON.
+ */
+function extractFenceBody(raw: string): string {
+  const lines = raw.replace(/\n+$/, "").split("\n");
+  if (lines.length < 2) return "";
+  return lines.slice(1, /^(`{3,}|~{3,})\s*$/.test(lines[lines.length - 1]) ? -1 : undefined).join("\n");
+}
+
+function apiBlocksExtension(): MarkedExtension {
+  return {
+    renderer: {
+      code(token: Tokens.Code) {
+        const lang = (token.lang ?? "").trim().toLowerCase();
+        if (!API_LANGS.has(lang)) return false;
+        let data: unknown;
+        try {
+          data = JSON.parse(extractFenceBody(token.raw));
+        } catch {
+          return false; // corrupt JSON → fall back to a plain code block
+        }
+        if (typeof data !== "object" || data === null) return false;
+        const obj = data as Record<string, unknown>;
+        switch (lang) {
+          case "api-endpoint":
+            return renderApiEndpoint(obj);
+          case "api-status":
+            return renderApiStatus(obj);
+          case "api-params":
+            return renderApiParams(obj);
+          case "api-examples":
+            return renderApiExamples(obj);
+        }
+        return false;
+      },
+    },
+  };
+}
+
+/** Inline markdown (bold, `code`, links…) for short description strings. */
+function renderInlineMd(text: string): string {
+  const value = String(text ?? "");
+  if (!value) return "";
+  try {
+    const lexer = new Lexer({ gfm: true, breaks: false });
+    const tokens = lexer.inlineTokens(value);
+    let out = "";
+    for (const t of tokens) {
+      switch (t.type) {
+        case "strong":
+          out += `<strong>${renderInlineMd(t.text)}</strong>`;
+          break;
+        case "em":
+          out += `<em>${renderInlineMd(t.text)}</em>`;
+          break;
+        case "codespan":
+          out += `<code>${t.text}</code>`;
+          break;
+        case "link":
+          out += `<a href="${escapeAttr(t.href)}">${renderInlineMd(t.text)}</a>`;
+          break;
+        default:
+          out += escapeHtml("raw" in t ? t.raw : "");
+      }
+    }
+    return out;
+  } catch {
+    return escapeHtml(value);
+  }
+}
+
+function renderApiEndpoint(data: Record<string, unknown>): string {
+  const rawMethod = String(data.method ?? "GET").toUpperCase();
+  const method = API_METHODS.has(rawMethod) ? rawMethod : "GET";
+  const path = String(data.path ?? "");
+  const description = String(data.description ?? "");
+  const desc = description
+    ? `<p class="help-api-desc">${renderInlineMd(description)}</p>`
+    : "";
+  return (
+    `<div class="help-api-endpoint">` +
+    `<div class="help-api-endpoint-row">` +
+    `<span class="help-api-method is-${method.toLowerCase()}">${method}</span>` +
+    `<code class="help-api-path">${escapeHtml(path)}</code>` +
+    `</div>${desc}</div>`
+  );
+}
+
+function statusClass(code: string): string {
+  const c = code.charAt(0);
+  if (c === "2") return "is-2xx";
+  if (c === "4") return "is-4xx";
+  if (c === "5") return "is-5xx";
+  return "is-other";
+}
+
+function renderApiStatus(data: Record<string, unknown>): string {
+  if (!Array.isArray(data.rows)) return "";
+  const rows = data.rows
+    .filter((r): r is Record<string, unknown> => typeof r === "object" && r !== null)
+    .map((r) => {
+      const code = String(r.code ?? "");
+      const description = String(r.description ?? "");
+      return (
+        `<div class="help-api-status-row">` +
+        `<span class="help-api-status-badge ${statusClass(code)}">${escapeHtml(code)}</span>` +
+        `<span class="help-api-status-desc">${renderInlineMd(description)}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
+  return `<div class="help-api-status">${rows}</div>`;
+}
+
+function renderApiParams(data: Record<string, unknown>): string {
+  if (!Array.isArray(data.rows)) return "";
+  const rows = data.rows
+    .filter((r): r is Record<string, unknown> => typeof r === "object" && r !== null)
+    .map((r) => {
+      const name = String(r.name ?? "");
+      const type = String(r.type ?? "");
+      const required = r.required === true;
+      const description = String(r.description ?? "");
+      const requiredBadge = required
+        ? `<span class="help-api-param-required">required</span>`
+        : "";
+      const typeBadge = type
+        ? `<span class="help-api-param-type">${escapeHtml(type)}</span>`
+        : "";
+      const dd = description
+        ? `<dd>${renderInlineMd(description)}</dd>`
+        : "";
+      return (
+        `<div class="help-api-param">` +
+        `<dt><code>${escapeHtml(name)}</code>${typeBadge}${requiredBadge}</dt>` +
+        `${dd}</div>`
+      );
+    })
+    .join("");
+  return `<dl class="help-api-params">${rows}</dl>`;
+}
+
+function renderApiExamples(data: Record<string, unknown>): string {
+  if (!Array.isArray(data.examples)) return "";
+  const blocks = data.examples
+    .filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null)
+    .map((e) => {
+      const label = String(e.label ?? "");
+      const language = String(e.language ?? "");
+      const code = String(e.code ?? "");
+      const labelHtml = label
+        ? `<div class="help-api-example-label">${escapeHtml(label)}</div>`
+        : "";
+      return (
+        `<div class="help-api-example">${labelHtml}` +
+        `<pre><code class="hljs language-${escapeAttr(language)}">${highlightCode(code, language)}</code></pre>` +
+        `</div>`
+      );
+    })
+    .join("");
+  return `<div class="help-api-examples">${blocks}</div>`;
+}
+
+function highlightCode(code: string, lang: string): string {
+  const language = lang && hljs.getLanguage(lang) ? lang : null;
+  try {
+    if (language) {
+      return hljs.highlight(code, { language, ignoreIllegals: true }).value;
+    }
+  } catch {
+    // fall through
+  }
+  return escapeHtml(code);
+}
+
 function createMarked(): Marked {
   return new Marked(
     markedHighlight({
       langPrefix: "hljs language-",
-      highlight(code, lang) {
-        const language =
-          lang && hljs.getLanguage(lang) ? lang : null;
-        try {
-          if (language) {
-            return hljs.highlight(code, { language, ignoreIllegals: true }).value;
-          }
-        } catch {
-          // fall through
-        }
-        return escapeHtml(code);
-      },
+      highlight: highlightCode,
     }),
+    apiBlocksExtension(),
+    stepsExtension(),
     calloutExtension(),
     headingIdExtension(),
     { gfm: true, breaks: false },
@@ -205,7 +487,9 @@ export async function renderMarkdown(
 ): Promise<string> {
   void HLJS_REGISTERED;
   const marked = createMarked();
-  const rawHtml = await marked.parse(markdown ?? "", { async: true });
+  const rawHtml = await marked.parse(splitGluedImageBlocks(markdown ?? ""), {
+    async: true,
+  });
   const rewritten = postProcessLinksAndImages(rawHtml, options);
   return sanitizeRenderedHtml(rewritten, options);
 }
@@ -239,6 +523,9 @@ function sanitizeRenderedHtml(
       "ul",
       "ol",
       "li",
+      "dl",
+      "dt",
+      "dd",
       "a",
       "img",
       "table",
@@ -272,6 +559,9 @@ function sanitizeRenderedHtml(
       ul: ["class"],
       ol: ["class"],
       li: ["class"],
+      dl: ["class"],
+      dt: ["class"],
+      dd: ["class"],
       h1: ["class", "id"],
       h2: ["class", "id"],
       h3: ["class", "id"],

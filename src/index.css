@@ -180,34 +180,176 @@ input[type="color"]::-moz-color-swatch {
   max-width: 760px;
   position: relative;
 }
+/* Mirror the published .help-prose typography (help.css) so what you write
+   is what readers get — same scale, weights, and tracking. */
 .help-editor-surface-page {
-  font-size: 1.05rem;
-  line-height: 1.7;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.75;
+  /* Same body softening as the published .help-prose — headings and bold
+     stay full-strength so the weight hierarchy matches the live page. */
+  color: color-mix(in oklch, var(--foreground), transparent 22%);
+}
+/* Published .help-prose pins bold to 600; without this, preflight's
+   `strong { font-weight: bolder }` lands on 700 in body text and 900 inside
+   headings — visibly heavier than the live page. */
+.help-editor-surface strong,
+.help-editor-surface b {
+  font-weight: 600;
+  color: var(--foreground);
+}
+.help-editor-surface-page h1,
+.help-editor-surface-page h2,
+.help-editor-surface-page h3 {
+  font-family: var(--font-sans);
+  color: var(--foreground);
+  line-height: 1.3;
 }
 .help-editor-surface-page h1 {
-  font-size: 2.5rem;
+  font-size: 2.25rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  margin: 0.5rem 0 1.5rem;
+  letter-spacing: -0.025em;
+  margin: 0.5rem 0 1.25rem;
   line-height: 1.15;
 }
 .help-editor-surface-page h2 {
-  font-size: 1.625rem;
-  font-weight: 600;
-  margin: 2rem 0 0.75rem;
-  line-height: 1.25;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 2.25rem 0 0.65rem;
 }
 .help-editor-surface-page h3 {
-  font-size: 1.25rem;
+  font-size: 1.3rem;
   font-weight: 600;
-  margin: 1.5rem 0 0.5rem;
+  letter-spacing: -0.01em;
+  margin: 1.75rem 0 0.5rem;
 }
 .help-editor-surface-page p { margin: 0.75rem 0; }
 .help-editor-surface-page ul,
 .help-editor-surface-page ol { margin: 0.75rem 0; padding-left: 1.5rem; }
 .help-editor-surface-page ul { list-style: disc; }
 .help-editor-surface-page ol { list-style: decimal; }
+.help-editor-surface-page li { margin: 0.35em 0; }
 .help-editor-surface-page > *:first-child { margin-top: 0; }
+
+/* Elements the published page styles but the editor previously didn't —
+   links, quotes, rules, code, and tables. */
+/* Content accents use the project's published primary color (--help-accent,
+   set inline from widget config), not the dashboard's orange brand. */
+.help-editor-surface a {
+  color: var(--help-accent, #2563eb);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.help-editor-surface blockquote {
+  border-left: 3px solid var(--help-accent, #2563eb);
+  padding-left: 1rem;
+  color: var(--muted-foreground);
+  font-style: italic;
+  margin: 1.25rem 0;
+}
+.help-editor-surface hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 2rem 0;
+}
+.help-editor-surface :not(pre) > code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--code);
+  color: var(--code-foreground);
+  padding: 0.125em 0.375em;
+  border-radius: 0.375rem;
+  font-size: 0.9em;
+}
+.help-editor-surface pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--code);
+  color: var(--code-foreground);
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-size: 0.9em;
+  line-height: 1.6;
+  margin: 1.25rem 0;
+}
+.help-editor-surface pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 1em;
+}
+/* lowlight token colors readable on the dark --code surface */
+.help-editor-surface .hljs-comment,
+.help-editor-surface .hljs-quote { color: #8b949e; font-style: italic; }
+.help-editor-surface .hljs-keyword,
+.help-editor-surface .hljs-selector-tag,
+.help-editor-surface .hljs-built_in,
+.help-editor-surface .hljs-name,
+.help-editor-surface .hljs-tag { color: #ff7b72; }
+.help-editor-surface .hljs-string,
+.help-editor-surface .hljs-title,
+.help-editor-surface .hljs-section,
+.help-editor-surface .hljs-attribute,
+.help-editor-surface .hljs-literal,
+.help-editor-surface .hljs-type,
+.help-editor-surface .hljs-addition { color: #a5d6ff; }
+.help-editor-surface .hljs-number,
+.help-editor-surface .hljs-symbol,
+.help-editor-surface .hljs-bullet,
+.help-editor-surface .hljs-link,
+.help-editor-surface .hljs-meta,
+.help-editor-surface .hljs-selector-attr,
+.help-editor-surface .hljs-selector-pseudo { color: #79c0ff; }
+
+/* Tables (TipTap renders these inside .tableWrapper) */
+.help-editor-surface .tableWrapper {
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+.help-editor-surface table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.9em;
+}
+.help-editor-surface th,
+.help-editor-surface td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+  position: relative;
+  min-width: 3rem;
+}
+.help-editor-surface th {
+  background: var(--muted);
+  font-weight: 600;
+}
+.help-editor-surface th > p,
+.help-editor-surface td > p {
+  margin: 0;
+}
+.help-editor-surface .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  pointer-events: none;
+  z-index: 2;
+}
+.help-editor-surface .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background: var(--brand);
+  pointer-events: none;
+}
+.help-editor-surface.resize-cursor,
+.help-editor-surface .resize-cursor {
+  cursor: col-resize;
+}
 .help-editor-floating-tools {
   position: fixed;
   right: 1.5rem;
@@ -356,6 +498,251 @@ input[type="color"]::-moz-color-swatch {
 .callout-variant-select:hover { background: color-mix(in srgb, var(--foreground) 6%, transparent); }
 .callout-body > p { margin: 0; }
 .callout-body > * + * { margin-top: 0.35em; }
+
+/* Steps block (editor) */
+.help-editor-steps {
+  counter-reset: help-editor-step;
+  margin: 1rem 0;
+}
+.help-editor-step {
+  counter-increment: help-editor-step;
+  position: relative;
+  padding-left: 2.5rem;
+  margin: 0 0 1rem;
+}
+.help-editor-step:not(:last-of-type)::after {
+  content: "";
+  position: absolute;
+  left: calc(0.8125rem - 0.5px);
+  top: 2.125rem;
+  bottom: -0.75rem;
+  width: 1px;
+  background: var(--border);
+}
+.help-editor-step-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.help-editor-step-badge::before {
+  content: counter(help-editor-step);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  left: 0;
+  top: 0.125rem;
+  width: 1.625rem;
+  height: 1.625rem;
+  border-radius: 999px;
+  background: color-mix(
+    in srgb,
+    var(--help-accent, #2563eb) 12%,
+    var(--background)
+  );
+  color: var(--help-accent, #2563eb);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.help-editor-step-title {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--foreground);
+  padding: 0.25rem 0;
+}
+.help-editor-step-title:focus {
+  outline: none;
+}
+.help-editor-step-title::placeholder {
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+.help-editor-step-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.help-editor-step:hover .help-editor-step-remove {
+  opacity: 1;
+}
+.help-editor-step-remove:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.help-editor-step-body > p { margin: 0.35rem 0; }
+.help-editor-steps-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  margin-left: 2rem;
+  border-radius: 0.375rem;
+}
+.help-editor-steps-add:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+/* API doc blocks (editor) */
+.help-editor-api {
+  margin: 1rem 0;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--muted) 50%, var(--background));
+}
+.help-editor-api-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.625rem;
+}
+.help-editor-api-kind {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+}
+.help-editor-api-remove,
+.help-editor-api-row-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.help-editor-api-remove:hover,
+.help-editor-api-row-remove:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.help-editor-api-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.help-editor-api-param-row,
+.help-editor-api-example {
+  padding-bottom: 0.625rem;
+  margin-bottom: 0.625rem;
+  border-bottom: 1px dashed var(--border);
+}
+.help-editor-api-param-row:last-of-type,
+.help-editor-api-example:last-of-type {
+  border-bottom: none;
+}
+.help-editor-api-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--border);
+  background: var(--background);
+  font-size: 0.85rem;
+  color: var(--foreground);
+}
+.help-editor-api-input:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+.help-editor-api-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.help-editor-api-code {
+  flex: 0 0 5rem;
+}
+.help-editor-api-type {
+  flex: 0 0 7rem;
+}
+.help-editor-api-method,
+.help-editor-api-lang {
+  flex-shrink: 0;
+  padding: 0.35rem 0.45rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--border);
+  background: var(--background);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--foreground);
+  cursor: pointer;
+}
+.help-editor-api-method.is-get { color: #059669; }
+.help-editor-api-method.is-post { color: #2563eb; }
+.help-editor-api-method.is-put { color: #d97706; }
+.help-editor-api-method.is-patch { color: #7c3aed; }
+.help-editor-api-method.is-delete { color: #dc2626; }
+.help-editor-api-required {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  user-select: none;
+}
+.help-editor-api-required input {
+  accent-color: var(--brand);
+}
+.help-editor-api-textarea {
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--border);
+  background: var(--background);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--foreground);
+  resize: vertical;
+}
+.help-editor-api-textarea:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+.help-editor-api-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+}
+.help-editor-api-add:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
 
 .help-editor-surface ul[data-type="taskList"] {
   list-style: none;

@@ -182,7 +182,24 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
       </article>
       {toc.length > 0 && (
         <aside class="help-toc" aria-label="On this page">
-          <h2 class="help-toc-heading">On this page</h2>
+          <h2 class="help-toc-heading">
+            <svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="15" y2="12" />
+              <line x1="3" y1="18" x2="9" y2="18" />
+            </svg>
+            On this page
+          </h2>
           <ol class="help-toc-list">
             {toc.map((entry) => (
               <li class={`help-toc-item is-h${entry.level}`}>

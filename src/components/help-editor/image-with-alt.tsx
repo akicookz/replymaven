@@ -150,11 +150,15 @@ export const ImageWithAlt = Image.extend({
             ];
             if (title) attrs.push(`title="${escapeAttr(title)}"`);
             state.write(`<img ${attrs.join(" ")} />`);
+            state.closeBlock(node);
             return;
           }
           // Default markdown form.
           const titlePart = title ? ` "${title.replace(/"/g, '\\"')}"` : "";
           state.write(`![${alt.replace(/[[\]]/g, "")}](${src}${titlePart})`);
+          // The image is a block node — without closeBlock the following
+          // block gets glued onto this line (`![](url)## Heading`).
+          state.closeBlock(node);
         },
         parse: {
           // Inline <img> tags handled by markdown-it when html: true.
