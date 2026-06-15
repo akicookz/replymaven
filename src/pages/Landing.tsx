@@ -9,7 +9,6 @@ import {
   Bot,
   Code,
   FileText,
-  Palette,
   Check,
   ChevronDown,
   ArrowRight,
@@ -18,31 +17,36 @@ import {
   Zap,
   Wrench,
   Heart,
-  Shield,
   BookOpen,
-  ClipboardList,
   Users,
   FolderOpen,
   Mail,
-  LayoutDashboard,
-  Inbox,
   Search,
-  ExternalLink,
-  BarChart3,
-  Clock,
   CheckCircle2,
-  AlertCircle,
   User,
-  Phone,
-  Building2,
-  ChevronRight,
-  Play,
-  RefreshCw,
-  TrendingUp,
-  Eye,
+  Calendar,
+  Tag,
 } from "lucide-react";
 import { pricingPlans } from "@/components/PricingCards";
+import { LogoIcon } from "@/components/Logo";
 import { cn } from "@/lib/utils";
+
+// ─── Pastel illustration gradients ─────────────────────────────────────────────
+
+const GRADIENTS = {
+  sage: "linear-gradient(150deg, #e4efe1 0%, #f4f1e7 100%)",
+  cream: "linear-gradient(150deg, #f6edda 0%, #faf4ea 100%)",
+  lavender: "linear-gradient(150deg, #e8e6f6 0%, #f0eff9 100%)",
+  blue: "linear-gradient(150deg, #dcecfb 0%, #eef5fd 100%)",
+  pink: "linear-gradient(150deg, #f6e2ec 0%, #faeef3 100%)",
+  mist: "linear-gradient(150deg, #e6ecf0 0%, #f1f3f5 100%)",
+} as const;
+
+const DOTS = {
+  backgroundImage: "url(/dots.svg)",
+  backgroundRepeat: "repeat",
+  backgroundSize: "8px 8px",
+} as const;
 
 // ─── FAQ Data ─────────────────────────────────────────────────────────────────
 
@@ -81,34 +85,28 @@ const faqItems = [
 
 // ─── FAQ Accordion Item ───────────────────────────────────────────────────────
 
-function FaqItem({
-  question,
-  answer,
-}: {
-  question: string;
-  answer: string;
-}) {
+function FaqItem({ question, answer }: { question: string; answer: string }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="border-b border-border last:border-b-0">
+    <div>
       <button
         type="button"
         onClick={() => setOpen(!open)}
         className="w-full flex items-center justify-between py-5 text-left cursor-pointer group"
       >
-        <span className="font-normal text-foreground text-[15px] pr-4 group-hover:text-primary transition-colors">
+        <span className="font-medium text-foreground text-base pr-4 transition-opacity group-hover:opacity-60">
           {question}
         </span>
         <ChevronDown
-          className={`w-5 h-5 text-quaternary shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          className={`w-5 h-5 text-muted-foreground shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
         />
       </button>
       <div
         className={`grid transition-all duration-200 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
       >
         <div className="overflow-hidden">
-          <p className="pb-5 text-sm text-muted-foreground leading-relaxed">
+          <p className="pb-5 text-[15px] text-muted-foreground leading-relaxed">
             {answer}
           </p>
         </div>
@@ -117,57 +115,519 @@ function FaqItem({
   );
 }
 
-// ─── Logo (inline for landing — light mode version) ──────────────────────────
+// ─── Logo ───────────────────────────────────────────────────────────────────
 
 function LandingLogo() {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="w-8 h-8 rounded-xl glow-surface flex items-center justify-center shrink-0">
-        <svg viewBox="0 0 28 32" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-5 w-auto">
-          <path
-            d="M24 32H6C2.6875 32 0 29.3125 0 26V6C0 2.6875 2.6875 0 6 0H25C26.6562 0 28 1.34375 28 3V21C28 22.3062 27.1625 23.4187 26 23.8312V28C27.1063 28 28 28.8937 28 30C28 31.1063 27.1063 32 26 32H24ZM6 24C4.89375 24 4 24.8937 4 26C4 27.1063 4.89375 28 6 28H22V24H6Z"
-            fill="currentColor"
-          />
-        </svg>
+      <div className="w-8 h-8 rounded-xl bg-foreground flex items-center justify-center shrink-0">
+        <LogoIcon className="h-5 w-auto text-background" />
       </div>
-      <span className="font-semibold tracking-tight text-[15px] text-foreground">
+      <span className="font-medium tracking-tight text-[15px] text-foreground">
         ReplyMaven
       </span>
     </div>
   );
 }
 
-// ─── Noise Card ─────────────────────────────────────────────────────────────
+// ─── Feature Card (pastel panel + mock + heading) ─────────────────────────────
 
-function NoiseCard({
+function FeatureCard({
+  gradient,
+  title,
+  description,
   children,
-  className,
-  style,
-  as: Tag = "div",
 }: {
+  gradient: string;
+  title: string;
+  description: string;
   children: React.ReactNode;
-  className?: string;
-  style?: React.CSSProperties;
-  as?: "div" | "section";
 }) {
   return (
-    <Tag className={cn("relative overflow-hidden", className)} style={style}>
+    <div className="rounded-[1.75rem] border border-border bg-card p-3 transition-all duration-300 hover:-translate-y-1">
       <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundImage: "url(/dots.svg)",
-          backgroundRepeat: "repeat",
-          backgroundSize: "8px 8px",
-          opacity: 0.5,
-        }}
-      />
-      <div className="relative">{children}</div>
-    </Tag>
+        className="relative rounded-[1.25rem] overflow-hidden aspect-[5/4] flex items-center justify-center"
+        style={{ background: gradient }}
+      >
+        <div aria-hidden className="pointer-events-none absolute inset-0 opacity-40" style={DOTS} />
+        <div className="relative w-full px-6">{children}</div>
+      </div>
+      <div className="px-3 pt-6 pb-3">
+        <h3 className="text-xl font-medium tracking-tight text-foreground">{title}</h3>
+        <p className="mt-2 text-[14px] text-muted-foreground leading-relaxed">{description}</p>
+      </div>
+    </div>
   );
 }
 
-// ─── Light-Mode Pricing ──────────────────────────────────────────────────────
+// ─── Mini mocks (illustrations inside feature panels) ─────────────────────────
+
+function ChatMiniMock() {
+  const botAvatar = (
+    <div className="w-7 h-7 rounded-full bg-foreground flex items-center justify-center shrink-0">
+      <LogoIcon className="h-3.5 w-auto text-background" />
+    </div>
+  );
+  return (
+    <div className="w-full max-w-[280px] mx-auto space-y-2.5">
+      <div className="flex items-end gap-2">
+        {botAvatar}
+        <div className="max-w-[200px] rounded-2xl rounded-bl-sm bg-white px-3 py-2 text-[11px] text-zinc-800">
+          Hi! Ask me anything about Acme.
+        </div>
+      </div>
+      <div className="flex items-end gap-2 flex-row-reverse">
+        <img
+          src="https://randomuser.me/api/portraits/women/68.jpg"
+          alt="Visitor"
+          loading="lazy"
+          className="w-7 h-7 rounded-full object-cover shrink-0"
+        />
+        <div className="max-w-[200px] rounded-2xl rounded-br-sm bg-foreground px-3 py-2 text-[11px] text-background">
+          How do I reset my password?
+        </div>
+      </div>
+      <div className="flex items-end gap-2">
+        {botAvatar}
+        <div className="max-w-[210px] rounded-2xl rounded-bl-sm bg-white px-3 py-2 text-[11px] text-zinc-800">
+          Open Settings → Security and tap “Reset.” I can email you the link too.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KnowledgeMiniMock() {
+  const rows = [
+    { icon: Globe, label: "docs.acme.com", sub: "Web page" },
+    { icon: FileText, label: "API Reference.pdf", sub: "12 pages" },
+    { icon: BookOpen, label: "Billing FAQ", sub: "8 answers" },
+  ];
+  return (
+    <div className="w-full max-w-[240px] mx-auto rounded-2xl bg-white p-2.5 space-y-1.5">
+      {rows.map((r) => (
+        <div key={r.label} className="flex items-center gap-2 rounded-xl bg-black/[0.025] px-2 py-1.5">
+          <div className="w-6 h-6 rounded-lg bg-white flex items-center justify-center shrink-0">
+            <r.icon className="w-3 h-3 text-zinc-700" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-medium text-zinc-800 truncate">{r.label}</p>
+            <p className="text-[8px] text-zinc-400">{r.sub}</p>
+          </div>
+          <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WorkflowMiniMock() {
+  const steps = [
+    { icon: Zap, label: "Visitor asks a question", tag: "TRIGGER" },
+    { icon: Search, label: "Search knowledge base" },
+    { icon: Wrench, label: "Call lookup_order" },
+  ];
+  return (
+    <div className="w-full max-w-[250px] mx-auto relative">
+      <div className="absolute left-[1.45rem] top-7 bottom-7 w-px bg-black/10" />
+      <div className="space-y-2.5 relative">
+        {steps.map((s) => (
+          <div
+            key={s.label}
+            className="flex items-center gap-2.5 rounded-xl bg-white px-2.5 py-2"
+          >
+            <div className="w-7 h-7 rounded-lg bg-black/[0.04] flex items-center justify-center shrink-0">
+              <s.icon className="w-3.5 h-3.5 text-zinc-700" />
+            </div>
+            <div className="min-w-0">
+              {s.tag && (
+                <p className="text-[7px] font-medium tracking-[0.12em] text-zinc-400">{s.tag}</p>
+              )}
+              <p className="text-[10px] font-medium text-zinc-800 leading-tight">{s.label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AnalyticsMiniMock() {
+  const bars = [42, 56, 36, 64, 50, 72, 54];
+  return (
+    <div className="w-full max-w-[240px] mx-auto rounded-2xl bg-white p-3.5">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="text-[8px] text-zinc-400">Resolved by AI</p>
+          <p className="text-lg font-medium text-zinc-900 leading-none mt-0.5">89%</p>
+        </div>
+        <span className="text-[8px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">
+          +4%
+        </span>
+      </div>
+      <div className="flex items-end gap-1 h-12">
+        {bars.map((h, i) => (
+          <div key={i} className="flex-1 rounded-t-sm bg-zinc-900/15" style={{ height: `${h}%` }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FormMiniMock() {
+  return (
+    <div className="w-full max-w-[230px] mx-auto rounded-2xl bg-white p-3 space-y-2">
+      <p className="text-[10px] font-medium text-zinc-900">Contact us</p>
+      <div className="space-y-1.5">
+        <div className="rounded-lg bg-black/[0.03] px-2.5 py-1.5 text-[9px] text-zinc-700">Sarah Chen</div>
+        <div className="rounded-lg bg-black/[0.03] px-2.5 py-1.5 text-[9px] text-zinc-700 flex items-center gap-1.5">
+          <Mail className="w-2.5 h-2.5 text-zinc-400" />
+          sarah@acme.com
+        </div>
+        <div className="rounded-lg bg-black/[0.03] px-2.5 py-1.5 text-[9px] text-zinc-400 min-h-[30px]">
+          Enterprise pricing for 50+ seats…
+        </div>
+      </div>
+      <div className="rounded-lg bg-foreground text-background text-[9px] font-medium py-1.5 text-center">
+        Submit ticket
+      </div>
+    </div>
+  );
+}
+
+function HandoffMiniMock() {
+  return (
+    <div className="w-full max-w-[240px] mx-auto rounded-2xl bg-white p-3 space-y-2">
+      <div className="flex items-center gap-2 max-w-[88%]">
+        <div className="w-5 h-5 rounded-full bg-black/[0.05] flex items-center justify-center shrink-0">
+          <User className="w-2.5 h-2.5 text-zinc-400" />
+        </div>
+        <div className="rounded-xl rounded-bl-sm bg-black/[0.03] px-2.5 py-1.5 text-[9px] text-zinc-700">
+          I have a billing dispute on my renewal.
+        </div>
+      </div>
+      <div className="flex justify-center">
+        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[8px] font-medium text-amber-700">
+          <span className="w-1 h-1 rounded-full bg-amber-500 animate-pulse" />
+          Agent notified via Telegram
+        </span>
+      </div>
+      <div className="flex items-center gap-2 max-w-[88%] ml-auto flex-row-reverse">
+        <div className="w-5 h-5 rounded-full bg-foreground flex items-center justify-center shrink-0">
+          <Sparkles className="w-2.5 h-2.5 text-background" />
+        </div>
+        <div className="rounded-xl rounded-br-sm bg-foreground px-2.5 py-1.5 text-[9px] text-background">
+          Connecting you with Alex now.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Full chat widget (device frame) ──────────────────────────────────────────
+
+function WidgetDeviceMock() {
+  const botAvatar = (
+    <div className="w-7 h-7 rounded-full bg-foreground flex items-center justify-center shrink-0">
+      <LogoIcon className="h-3.5 w-auto text-background" />
+    </div>
+  );
+  return (
+    <div className="px-5 py-6 space-y-3.5 bg-[#f4f4f6] min-h-[300px]">
+      <div className="flex gap-2 items-end">
+        {botAvatar}
+        <div className="max-w-[78%] rounded-2xl rounded-bl-md bg-white px-3.5 py-2.5 text-[13px] text-zinc-800">
+          Hi! I'm Luna. Ask me anything about Acme.
+        </div>
+      </div>
+      <div className="flex gap-2 items-end flex-row-reverse">
+        <img
+          src="https://randomuser.me/api/portraits/women/68.jpg"
+          alt="Visitor"
+          loading="lazy"
+          className="w-7 h-7 rounded-full object-cover shrink-0"
+        />
+        <div className="max-w-[78%] rounded-2xl rounded-br-md bg-foreground px-3.5 py-2.5 text-[13px] text-background">
+          Do you integrate with Slack?
+        </div>
+      </div>
+      <div className="flex gap-2 items-end">
+        {botAvatar}
+        <div className="max-w-[78%] space-y-1.5">
+          <div className="rounded-2xl rounded-bl-md bg-white px-3.5 py-2.5 text-[13px] text-zinc-800">
+            Yes — Slack, Telegram, and webhooks are all supported. Want the setup guide?
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 px-1">
+            <BookOpen className="w-3 h-3" />
+            Slack integration guide
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Integration hub illustration ─────────────────────────────────────────────
+
+function IntegrationHub() {
+  const tiles = [
+    { icon: Calendar, bg: "#ffffff", fg: "#2563eb", ring: true },
+    { icon: Mail, bg: "#5b8def", fg: "#ffffff" },
+    { icon: Globe, bg: "#16181d", fg: "#ffffff" },
+    { icon: Zap, bg: "#e8a33d", fg: "#ffffff" },
+    { icon: Send, bg: "#5da9f0", fg: "#ffffff" },
+    { icon: Code, bg: "#2f4538", fg: "#ffffff" },
+    { icon: Sparkles, bg: "#16181d", fg: "#ffffff" },
+    { icon: FileText, bg: "#8b5cf6", fg: "#ffffff" },
+    { icon: Users, bg: "#2d6b7a", fg: "#ffffff" },
+    { icon: Tag, bg: "#e0588f", fg: "#ffffff" },
+  ];
+  return (
+    <div className="w-full max-w-md mx-auto">
+      <div className="grid grid-cols-5 gap-3 sm:gap-4">
+        {tiles.map((t, i) => (
+          <div
+            key={i}
+            className={cn(
+              "aspect-square rounded-2xl flex items-center justify-center",
+              t.ring && "ring-1 ring-black/5",
+            )}
+            style={{ background: t.bg }}
+          >
+            <t.icon className="w-5 h-5 sm:w-6 sm:h-6" style={{ color: t.fg }} strokeWidth={2} />
+          </div>
+        ))}
+      </div>
+      <svg viewBox="0 0 500 90" className="w-full h-16 mt-1" fill="none" preserveAspectRatio="none">
+        {[50, 150, 250, 350, 450].map((x, i) => (
+          <path key={i} d={`M ${x} 2 C ${x} 52, 250 38, 250 88`} stroke="rgba(0,0,0,0.13)" strokeWidth="1.2" />
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+// ─── Dashboard product mock (hero) ────────────────────────────────────────────
+
+function DashboardMock() {
+  return (
+    <div className="flex gap-4 lg:gap-5">
+      {/* Window 1 — Dashboard (2/3) */}
+      <div className="flex-1 lg:flex-[2] min-w-0 rounded-3xl overflow-hidden border border-black/[0.07]" style={{ background: "#f7f7f9" }}>
+        <div className="px-3.5 py-2.5 flex items-center gap-2">
+          <div className="flex gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
+            <div className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
+            <div className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
+          </div>
+          <div className="flex-1 text-center">
+            <span className="text-[10px] text-black/45">replymaven.com/app</span>
+          </div>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <p className="text-sm font-medium text-black/85">Hello, Maven</p>
+            <p className="text-[11px] text-black/45">What are you working on?</p>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {[
+              { icon: MessageSquare, label: "Total Conversations", value: "334" },
+              { icon: Users, label: "Active Conversations", value: "1" },
+              { icon: FolderOpen, label: "Knowledge Resources", value: "2" },
+              { icon: Bot, label: "Pending Drafts", value: "0" },
+            ].map((s) => (
+              <div key={s.label} className="rounded-xl p-3 border border-black/[0.08]" style={{ background: "#ffffff" }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: "#f0f0f2" }}>
+                    <s.icon className="w-3 h-3 text-black/45" />
+                  </div>
+                  <span className="text-[9px] text-black/55 font-medium">{s.label}</span>
+                </div>
+                <span className="text-xl font-medium text-black/85">{s.value}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="rounded-xl p-4 border border-black/[0.08]" style={{ background: "#ffffff" }}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[11px] font-medium text-black/65">Conversations over time</span>
+                <span className="flex items-center gap-1 text-[9px] text-black/45">
+                  <span className="w-1.5 h-1.5 rounded-full bg-black/30" /> Conversations
+                </span>
+              </div>
+              <div className="flex gap-[3px] items-end h-16">
+                {[18, 22, 14, 16, 12, 15, 4].map((h, i) => (
+                  <div key={i} className="flex-1 rounded-t-sm min-h-[3px]" style={{ height: `${(h / 24) * 100}%`, background: "rgba(0,0,0,0.13)" }} />
+                ))}
+              </div>
+              <div className="flex gap-[3px] mt-1.5">
+                {["Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Mon"].map((d) => (
+                  <span key={d} className="flex-1 text-center text-[7px] text-black/35">{d}</span>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl p-4 border border-black/[0.08]" style={{ background: "#ffffff" }}>
+              <span className="text-[11px] font-medium text-black/65">Recent Tickets</span>
+              <div className="mt-3 space-y-2">
+                {[
+                  { name: "Sarah Chen", email: "sarah@brightpath.io", time: "33m ago" },
+                  { name: "Marcus Rivera", email: "marcus@novastack.dev", time: "4h ago" },
+                  { name: "Emily Larsson", email: "emily@clearviewhq.com", time: "10h ago" },
+                ].map((item) => (
+                  <div key={item.name} className="flex items-center gap-2">
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(0,0,0,0.04)" }}>
+                      <Mail className="w-2.5 h-2.5 text-black/55" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-medium text-black/75 truncate">{item.name}</p>
+                      <p className="text-[8px] text-black/40 truncate">{item.email}</p>
+                    </div>
+                    <span className="text-[8px] text-black/35 shrink-0">{item.time}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-black/[0.08]" style={{ background: "#ffffff" }}>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-medium text-black/65">Recent Conversations</span>
+                <span className="text-[9px] text-black/45 bg-black/[0.06] px-1.5 py-0.5 rounded-full">5</span>
+              </div>
+              <span className="text-[9px] text-black/45">See all</span>
+            </div>
+            <div>
+              {[
+                { flag: "🇺🇸", name: "Sarah Chen", loc: "San Francisco, California", status: "Active", statusColor: "#22c55e", time: "28m ago" },
+                { flag: "🇬🇧", name: "James Abbott", loc: "London, England", status: "Closed", statusColor: "#8a8a96", time: "1h ago" },
+                { flag: "🇩🇪", name: "Lena Müller", loc: "Berlin, Germany", status: "Closed", statusColor: "#8a8a96", time: "2h ago" },
+              ].map((c) => (
+                <div key={c.name} className="flex items-center gap-3 px-4 py-2 hover:bg-black/[0.03] transition-colors">
+                  <div className="relative shrink-0">
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]" style={{ background: "#f0f0f2" }}>
+                      {c.flag}
+                    </div>
+                    {c.status === "Active" && (
+                      <span className="absolute -bottom-px -right-px w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-white" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-medium text-black/75 truncate">{c.name}</p>
+                    <p className="text-[8px] text-black/40 truncate flex items-center gap-0.5">
+                      <Globe className="w-2 h-2" /> {c.loc}
+                    </p>
+                  </div>
+                  <span
+                    className="text-[8px] font-medium px-1.5 py-0.5 rounded-full border"
+                    style={{ color: c.statusColor, backgroundColor: `${c.statusColor}15`, borderColor: `${c.statusColor}30` }}
+                  >
+                    {c.status}
+                  </span>
+                  <span className="text-[8px] text-black/35">{c.time}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Window 2 — Live conversation (1/3), staggered to read as a separate view */}
+      <div className="hidden lg:flex lg:flex-1 min-w-0 flex-col rounded-3xl overflow-hidden border border-black/[0.07]" style={{ background: "#ffffff" }}>
+        <div className="px-3.5 py-2.5 flex items-center gap-2">
+          <div className="flex gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-[#ff5f57]" />
+            <div className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
+            <div className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
+          </div>
+          <div className="flex-1 text-center">
+            <span className="text-[10px] text-black/45">replymaven.com/app/inbox</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 px-3.5 py-3">
+            <div className="relative shrink-0">
+              <img src="https://randomuser.me/api/portraits/women/68.jpg" alt="" loading="lazy" className="w-7 h-7 rounded-full object-cover" />
+              <span className="absolute -bottom-px -right-px w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-medium text-black/85 truncate">Sarah Chen</p>
+              <p className="text-[8px] text-black/45 truncate">San Francisco, California</p>
+            </div>
+            <span className="text-[8px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full">AI handling</span>
+          </div>
+
+          <div className="flex-1 p-3.5 space-y-2.5">
+            <div className="flex justify-center">
+              <span className="text-[7px] text-black/40 bg-black/[0.03] px-2 py-0.5 rounded-full">Today · 2:31 PM</span>
+            </div>
+
+            <div className="flex flex-col items-end gap-0.5">
+              <div className="max-w-[82%] rounded-xl rounded-br-sm bg-foreground px-2.5 py-1.5 text-[9px] text-background">
+                Where's my order #1042?
+              </div>
+              <span className="text-[7px] text-black/35 pr-1">2:31 PM</span>
+            </div>
+
+            <div className="flex justify-center">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-black/[0.04] px-2 py-1">
+                <Wrench className="w-2.5 h-2.5 text-black/50" />
+                <span className="text-[8px] font-mono text-black/60">lookup_order</span>
+                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+              </span>
+            </div>
+
+            <div className="flex items-end gap-1.5">
+              <div className="w-5 h-5 rounded-full bg-foreground flex items-center justify-center shrink-0">
+                <LogoIcon className="h-2.5 w-auto text-background" />
+              </div>
+              <div className="flex flex-col items-start gap-0.5 max-w-[82%]">
+                <div className="rounded-xl rounded-bl-sm bg-black/[0.04] px-2.5 py-1.5 text-[9px] text-zinc-800">
+                  It shipped this morning via UPS — tracking 1Z999AA1, arriving Thursday.
+                </div>
+                <span className="text-[7px] text-black/35 pl-1">2:31 PM</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col items-end gap-0.5">
+              <div className="max-w-[82%] rounded-xl rounded-br-sm bg-foreground px-2.5 py-1.5 text-[9px] text-background">
+                I need it before my event Wednesday. Can it be expedited?
+              </div>
+              <span className="text-[7px] text-black/35 pr-1">2:32 PM</span>
+            </div>
+
+            <div className="flex justify-center">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-1">
+                <span className="w-1 h-1 rounded-full bg-amber-500 animate-pulse" />
+                <span className="text-[8px] font-medium text-amber-700">Summoning a human agent…</span>
+              </span>
+            </div>
+
+            <div className="flex items-end gap-1.5">
+              <img src="https://randomuser.me/api/portraits/men/32.jpg" alt="" loading="lazy" className="w-5 h-5 rounded-full object-cover shrink-0" />
+              <div className="flex flex-col items-start gap-0.5">
+                <div className="max-w-[170px] rounded-xl rounded-bl-sm bg-blue-50 px-2.5 py-1.5 text-[9px] text-zinc-800">
+                  Hi, I'm Alex. Upgraded you to overnight at no charge — it'll arrive tomorrow by 10 AM.
+                </div>
+                <p className="text-[7px] text-black/40 pl-1">Alex · Support Engineer · 2:34 PM</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 px-3 py-2.5">
+            <div className="flex-1 h-6 rounded-full bg-black/[0.04]" />
+            <div className="w-6 h-6 rounded-full bg-foreground flex items-center justify-center shrink-0">
+              <Send className="w-3 h-3 text-background" />
+            </div>
+          </div>
+        </div>
+      </div>
+  );
+}
+
+// ─── Pricing ──────────────────────────────────────────────────────────────────
 
 type PlanId = "starter" | "standard" | "business";
 type Interval = "monthly" | "annual";
@@ -203,15 +663,13 @@ function LandingPricing({
 
   return (
     <div className="space-y-10">
-      <div className="flex items-center gap-1 p-1 rounded-full bg-muted w-fit">
+      <div className="flex items-center gap-1 p-1 rounded-full bg-muted w-fit mx-auto">
         <button
           type="button"
           onClick={() => setInterval("monthly")}
           className={cn(
             "px-5 py-2 rounded-full text-sm font-medium transition-all",
-            interval === "monthly"
-              ? "bg-foreground text-background shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
+            interval === "monthly" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground",
           )}
         >
           Monthly
@@ -221,15 +679,11 @@ function LandingPricing({
           onClick={() => setInterval("annual")}
           className={cn(
             "px-5 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2",
-            interval === "annual"
-              ? "bg-foreground text-background shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
+            interval === "annual" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground",
           )}
         >
           Annual
-          <span className="text-[11px] text-foreground font-semibold">
-            2 months free
-          </span>
+          <span className="text-[11px] font-medium">2 months free</span>
         </button>
       </div>
 
@@ -243,18 +697,14 @@ function LandingPricing({
             <div
               key={plan.id}
               className={cn(
-                "relative flex flex-col rounded-2xl p-7 transition-shadow",
-                plan.highlighted
-                  ? "bg-card ring-2 ring-foreground/20 shadow-lg shadow-foreground/[0.05]"
-                  : "bg-card ring-1 ring-border shadow-sm",
-                isCurrent && "ring-2 ring-foreground/30",
+                "relative flex flex-col rounded-[1.5rem] p-7 bg-card",
+                plan.highlighted ? "ring-2 ring-foreground/25" : "ring-1 ring-border",
+                isCurrent && "ring-2 ring-foreground/40",
               )}
             >
               {isCurrent && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="text-[11px] glow-surface px-3 py-1 rounded-full font-medium">
-                    Current Plan
-                  </span>
+                  <span className="text-[11px] bg-foreground text-background px-3 py-1 rounded-full font-medium">Current Plan</span>
                 </div>
               )}
 
@@ -262,22 +712,14 @@ function LandingPricing({
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm text-muted-foreground">{plan.name}</h3>
                   {plan.highlighted && plan.badge && (
-                    <span className="text-[11px] glow-surface px-2 py-0.5 rounded-full font-medium">
-                      {plan.badge}
-                    </span>
+                    <span className="text-[11px] bg-foreground text-background px-2 py-0.5 rounded-full font-medium">{plan.badge}</span>
                   )}
                 </div>
                 <div className="flex items-baseline gap-1">
-                  <span className="text-4xl font-semibold text-foreground tracking-tight">
-                    ${price}
-                  </span>
+                  <span className="text-4xl font-medium text-foreground tracking-tight">${price}</span>
                   <span className="text-quaternary text-sm">
                     /mo
-                    {interval === "annual" && (
-                      <span className="ml-1 text-xs text-quaternary">
-                        (${plan.annualPrice}/yr)
-                      </span>
-                    )}
+                    {interval === "annual" && <span className="ml-1 text-xs text-quaternary">(${plan.annualPrice}/yr)</span>}
                   </span>
                 </div>
                 <p className="text-sm text-muted-foreground">{plan.description}</p>
@@ -301,11 +743,7 @@ function LandingPricing({
                     onCtaClick(plan.id, interval);
                   }
                 }}
-                className={cn(
-                  "w-full rounded-xl h-11 text-sm font-medium transition-colors cursor-pointer text-white",
-                  plan.highlighted ? "glow-surface" : "bg-foreground hover:brightness-110",
-                )}
-                style={undefined}
+                className="w-full rounded-xl h-11 text-sm font-medium transition-opacity cursor-pointer bg-foreground text-background hover:opacity-90"
               >
                 {ctaLabel}
               </button>
@@ -317,16 +755,35 @@ function LandingPricing({
   );
 }
 
+// ─── Section heading helper ─────────────────────────────────────────────────
+
+function SectionHeading({
+  eyebrow,
+  title,
+  subtitle,
+}: {
+  eyebrow?: string;
+  title: React.ReactNode;
+  subtitle?: string;
+}) {
+  return (
+    <div className="text-center max-w-2xl mx-auto">
+      {eyebrow && (
+        <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground mb-4">{eyebrow}</p>
+      )}
+      <h2 className="text-4xl sm:text-5xl font-medium tracking-tight leading-[1.05] text-foreground">{title}</h2>
+      {subtitle && <p className="mt-5 text-lg text-muted-foreground leading-relaxed">{subtitle}</p>}
+    </div>
+  );
+}
+
 // ─── Landing Page ─────────────────────────────────────────────────────────────
 
 function Landing() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [authOpen, setAuthOpen] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState<{
-    plan: string;
-    interval: string;
-  } | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<{ plan: string; interval: string } | null>(null);
 
   const { data: session } = useSession();
   const { data: subData } = useSubscription();
@@ -367,1035 +824,243 @@ function Landing() {
       ? callbackParam
       : "/app";
 
-  return (
-    <div className="light min-h-screen bg-background text-foreground scroll-smooth overflow-x-hidden">
+  const steps = [
+    {
+      title: "Add your knowledge",
+      desc: "Upload docs, paste URLs, or write FAQs. Everything is indexed automatically — no setup, no cleanup.",
+    },
+    {
+      title: "Customize your agent",
+      desc: "Match brand colors, set the tone of voice, and configure quick actions so the widget feels native to your site.",
+    },
+    {
+      title: "Embed & go live",
+      desc: "Paste one script tag or share a hosted link. Conversations and tickets start flowing in instantly.",
+    },
+  ];
 
+  return (
+    <div className="font-heading light min-h-screen bg-background text-foreground scroll-smooth overflow-x-hidden">
       {/* ── Navigation (floating pill) ────────────────────────────────── */}
       <header className="fixed top-0 left-0 right-0 z-50 flex justify-center pt-4 px-4">
-        <nav className="bg-background/80 backdrop-blur-xl rounded-full px-2 pl-5 h-12 flex items-center gap-1 shadow-[0_2px_20px_-4px_rgba(0,0,0,0.1)] border border-border/50">
+        <nav className="bg-background/80 backdrop-blur-xl rounded-full px-2 pl-5 h-12 flex items-center gap-1 border border-border/50">
           <Link to="/" className="shrink-0 mr-3">
             <LandingLogo />
           </Link>
 
           <div className="hidden md:flex items-center gap-0.5">
-            <a href="#features" className="px-3.5 py-1.5 text-[13px] text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors">
-              Features
-            </a>
-            <a href="#pricing" className="px-3.5 py-1.5 text-[13px] text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors">
-              Pricing
-            </a>
-            <a href="#faq" className="px-3.5 py-1.5 text-[13px] text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors">
-              FAQ
-            </a>
-            <Link to="/docs" className="px-3.5 py-1.5 text-[13px] text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors">
-              Docs
-            </Link>
+            <a href="#features" className="px-3.5 py-1.5 text-[13px] text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors">Benefits</a>
+            <a href="#how" className="px-3.5 py-1.5 text-[13px] text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors">How it works</a>
+            <a href="#pricing" className="px-3.5 py-1.5 text-[13px] text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors">Pricing</a>
+            <a href="#faq" className="px-3.5 py-1.5 text-[13px] text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors">FAQ</a>
+            <Link to="/docs" className="px-3.5 py-1.5 text-[13px] text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors">Docs</Link>
           </div>
 
           <div className="flex items-center gap-2 ml-3">
             {isLoggedIn ? (
-              <button
-                type="button"
-                onClick={() => navigate("/app")}
-                className="text-[13px] text-muted-foreground hover:text-foreground transition-colors px-3"
-              >
-                Dashboard
-              </button>
+              <button type="button" onClick={() => navigate("/app")} className="text-[13px] text-muted-foreground hover:text-foreground transition-colors px-3">Dashboard</button>
             ) : (
-              <button
-                type="button"
-                onClick={handleGenericCta}
-                className="text-[13px] text-muted-foreground hover:text-foreground transition-colors px-3"
-              >
-                Log in
-              </button>
+              <button type="button" onClick={handleGenericCta} className="text-[13px] text-muted-foreground hover:text-foreground transition-colors px-3">Log in</button>
             )}
-            <button
-              type="button"
-              onClick={handleGenericCta}
-              className="glow-surface px-5 py-1.5 rounded-full text-[13px] font-medium transition-all"
-            >
+            <button type="button" onClick={handleGenericCta} className="bg-foreground text-background px-5 py-1.5 rounded-full text-[13px] font-medium hover:opacity-90 transition-opacity">
               Get Started
             </button>
           </div>
         </nav>
       </header>
 
-      {/* ── Hero Section ───────────────────────────────────────────────── */}
-      <NoiseCard as="section" className="pt-36 pb-28 rounded-b-4xl border-b border-glow-surface" style={{ background: "linear-gradient(180deg, #fdf6ee 0%, #faf3ea 30%, #f7efe4 60%, #ffffff 100%)" }}>
-        <div className="max-w-5xl mx-auto px-6 text-center">
-          <h1 className="font-heading text-5xl sm:text-6xl lg:text-[4.5rem] font-normal text-foreground tracking-tight leading-[1.1] mb-6">
-            AI customer support agent
+      {/* ── Hero ──────────────────────────────────────────────────────── */}
+      <section
+        className="relative pt-36 pb-28 rounded-b-[2.5rem] overflow-hidden"
+        style={{ background: "linear-gradient(180deg, #eef1ec 0%, #f4f2ec 32%, #faf8f3 62%, #ffffff 100%)" }}
+      >
+        <div aria-hidden className="pointer-events-none absolute inset-0 opacity-50" style={DOTS} />
+        <div className="relative max-w-5xl mx-auto px-6 text-center animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <h1 className="text-5xl sm:text-6xl lg:text-[4.75rem] font-medium text-foreground tracking-tight leading-[1.02] mb-6">
+            Your 24/7 support agent
             <br />
-            that knows your product
+            that can do{" "}
+            <span className="underline decoration-foreground/40 decoration-[3px] underline-offset-[8px]">things</span>
           </h1>
-
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed mb-10">
             Train your AI agent on your docs, FAQs, and web pages. Go live with a fully branded chat widget in minutes. Automate 90% of support queries.
           </p>
-
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
-            <button
-              type="button"
-              onClick={handleGenericCta}
-              className="glow-surface px-8 py-3.5 rounded-full text-[15px] font-medium transition-all inline-flex items-center gap-2"
-            >
+            <button type="button" onClick={handleGenericCta} className="bg-foreground text-background px-8 py-3.5 rounded-full text-[15px] font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-2">
               Try ReplyMaven Free
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
-
           <div className="flex items-center justify-center gap-6 text-sm text-quaternary">
-            <span className="flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-foreground" />
-              7-day free trial
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-foreground" />
-              5-minute setup
-            </span>
-            <span className="flex items-center gap-1.5 hidden sm:flex">
-              <Check className="w-4 h-4 text-foreground" />
-              Cancel anytime
-            </span>
+            <span className="flex items-center gap-1.5"><Check className="w-4 h-4 text-foreground" />7-day free trial</span>
+            <span className="flex items-center gap-1.5"><Check className="w-4 h-4 text-foreground" />5-minute setup</span>
+            <span className="items-center gap-1.5 hidden sm:flex"><Check className="w-4 h-4 text-foreground" />Cancel anytime</span>
           </div>
         </div>
 
-        {/* Product mock — dark dashboard matching the real app */}
-        <div className="max-w-5xl mx-auto px-6 mt-16">
-          <div className="rounded-4xl overflow-hidden shadow-[0_8px_60px_-12px_rgba(0,0,0,0.25)]" style={{ background: "#0b0600" }}>
-            <div className="px-4 py-3 flex items-center gap-2 border-b border-white/[0.06]">
-              <div className="flex gap-1.5">
-                <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
-                <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
-                <div className="w-3 h-3 rounded-full bg-[#28c840]" />
-              </div>
-              <div className="flex-1 text-center">
-                <span className="text-[11px] text-white/30">replymaven.com/app</span>
-              </div>
-            </div>
-            <div className="flex">
-              {/* Sidebar */}
-              <div className="hidden md:flex flex-col w-56 shrink-0 border-r border-white/[0.06] p-4 gap-4" style={{ background: "#0c0c10" }}>
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg glow-surface flex items-center justify-center">
-                    <svg viewBox="0 0 28 32" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-auto text-white">
-                      <path d="M24 32H6C2.6875 32 0 29.3125 0 26V6C0 2.6875 2.6875 0 6 0H25C26.6562 0 28 1.34375 28 3V21C28 22.3062 27.1625 23.4187 26 23.8312V28C27.1063 28 28 28.8937 28 30C28 31.1063 27.1063 32 26 32H24ZM6 24C4.89375 24 4 24.8937 4 26C4 27.1063 4.89375 28 6 28H22V24H6Z" fill="currentColor" />
-                    </svg>
-                  </div>
-                  <span className="text-[11px] font-semibold text-white/90">ReplyMaven</span>
-                </div>
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg" style={{ background: "rgba(249,115,22,0.12)", boxShadow: "inset 0 8px 8px -6px rgba(249,115,22,0.25)" }}>
-                    <LayoutDashboard className="w-3.5 h-3.5" />
-                    <span className="text-[11px] font-medium text-white/90">Dashboard</span>
-                  </div>
-                  <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg">
-                    <MessageSquare className="w-3.5 h-3.5 text-white/30" />
-                    <span className="text-[11px] text-white/40">Conversations</span>
-                  </div>
-                  <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg">
-                    <FolderOpen className="w-3.5 h-3.5 text-white/30" />
-                    <span className="text-[11px] text-white/40">Knowledgebase</span>
-                  </div>
-                  <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg">
-                    <Inbox className="w-3.5 h-3.5 text-white/30" />
-                    <span className="text-[11px] text-white/40">Tickets</span>
-                  </div>
-                </div>
-                <div className="mt-3">
-                  <p className="text-[8px] text-white/20 uppercase tracking-wider font-medium px-2.5 mb-1">Configure</p>
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg">
-                      <Palette className="w-3.5 h-3.5 text-white/30" />
-                      <span className="text-[11px] text-white/40">Widget Configuration</span>
-                    </div>
-                    <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg">
-                      <Zap className="w-3.5 h-3.5 text-white/30" />
-                      <span className="text-[11px] text-white/40">Quick Actions and Tools</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+        <div className="relative max-w-5xl mx-auto px-6 mt-16 animate-in fade-in slide-in-from-bottom-6 duration-1000 delay-200 fill-mode-both">
+          <DashboardMock />
+        </div>
+      </section>
 
-              {/* Main content */}
-              <div className="flex-1 p-5 space-y-4 min-w-0" style={{ background: "#0b0600" }}>
-                <div>
-                  <p className="text-sm font-bold text-white/90">Hello, Maven</p>
-                  <p className="text-[11px] text-white/30">What are you working on?</p>
-                </div>
+      {/* ── Feature cards (Ref 1) ─────────────────────────────────────── */}
+      <section id="features" className="py-24 md:py-32 px-6">
+        <div className="max-w-6xl mx-auto">
+          <SectionHeading
+            eyebrow="Benefits"
+            title={<>A true support agent,<br className="hidden sm:block" /> not a chatbot</>}
+            subtitle="Train it on your content, connect it to your tools, and let it resolve support around the clock — all from one platform."
+          />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-16">
+            <FeatureCard
+              gradient={GRADIENTS.sage}
+              title="Answers you can trust"
+              description="Retrieval-augmented generation answers from your docs, FAQs, and pages — every reply cites its source, no hallucination."
+            >
+              <ChatMiniMock />
+            </FeatureCard>
+            <FeatureCard
+              gradient={GRADIENTS.blue}
+              title="Trained on your docs"
+              description="Upload PDFs, paste URLs, write FAQs. Everything is indexed and searchable the moment you add it."
+            >
+              <KnowledgeMiniMock />
+            </FeatureCard>
+            <FeatureCard
+              gradient={GRADIENTS.lavender}
+              title="Executes actions"
+              description="Connect any REST API. The agent looks up orders, checks inventory, and triggers workflows on its own."
+            >
+              <WorkflowMiniMock />
+            </FeatureCard>
+          </div>
+        </div>
+      </section>
 
-                {/* Stat cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  {[
-                    { icon: MessageSquare, label: "Total Conversations", value: "334" },
-                    { icon: Users, label: "Active Conversations", value: "1" },
-                    { icon: FolderOpen, label: "Knowledge Resources", value: "2" },
-                    { icon: Bot, label: "Pending Drafts", value: "0" },
-                  ].map((s) => (
-                    <div key={s.label} className="rounded-xl p-3 border border-white/[0.06]" style={{ background: "#0c0c10" }}>
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: "#1c1c22" }}>
-                          <s.icon className="w-3 h-3 text-white/30" />
-                        </div>
-                        <span className="text-[9px] text-white/40 font-medium">{s.label}</span>
-                      </div>
-                      <span className="text-xl font-bold text-white/90">{s.value}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Chart + Tickets row */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div className="rounded-xl p-4 border border-white/[0.06]" style={{ background: "#0c0c10" }}>
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-[11px] font-semibold text-white/70">Conversations over time</span>
-                      <span className="flex items-center gap-1 text-[9px] text-white/30">
-                        <span className="w-1.5 h-1.5 rounded-full bg-white/40" /> Conversations
-                      </span>
-                    </div>
-                    <div className="flex gap-[3px] items-end h-16">
-                      {[18, 22, 14, 16, 12, 15, 4].map((h, i) => (
-                        <div key={i} className="flex-1 rounded-t-sm min-h-[3px]" style={{ height: `${(h / 24) * 100}%`, background: "rgba(249,115,22,0.25)", boxShadow: "inset 0 4px 4px -2px rgba(249,115,22,0.4)" }} />
-                      ))}
-                    </div>
-                    <div className="flex gap-[3px] mt-1.5">
-                      {["Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Mon"].map((d) => (
-                        <span key={d} className="flex-1 text-center text-[7px] text-white/20">{d}</span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl p-4 border border-white/[0.06]" style={{ background: "#0c0c10" }}>
-                    <span className="text-[11px] font-semibold text-white/70">Recent Tickets</span>
-                    <div className="mt-3 space-y-2">
-                      {[
-                        { name: "Sarah Chen", email: "sarah@brightpath.io", time: "33m ago" },
-                        { name: "Marcus Rivera", email: "marcus@novastack.dev", time: "4h ago" },
-                        { name: "Emily Larsson", email: "emily@clearviewhq.com", time: "10h ago" },
-                      ].map((item) => (
-                        <div key={item.name} className="flex items-center gap-2">
-                          <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ background: "rgba(249,115,22,0.08)" }}>
-                            <Mail className="w-2.5 h-2.5 text-white/40" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[10px] font-medium text-white/80 truncate">{item.name}</p>
-                            <p className="text-[8px] text-white/25 truncate">{item.email}</p>
-                          </div>
-                          <span className="text-[8px] text-white/20 shrink-0">{item.time}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Recent Conversations */}
-                <div className="rounded-xl border border-white/[0.06]" style={{ background: "#0c0c10" }}>
-                  <div className="flex items-center justify-between px-4 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-semibold text-white/70">Recent Conversations</span>
-                      <span className="text-[9px] text-white/30 bg-white/[0.06] px-1.5 py-0.5 rounded-full">5</span>
-                    </div>
-                    <span className="text-[9px] text-white/30">See all</span>
+      {/* ── Numbered steps + device frame (Ref 2) ─────────────────────── */}
+      <section id="how" className="py-20 md:py-28 px-6 bg-muted/40">
+        <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+          <div>
+            <h2 className="text-4xl sm:text-5xl font-medium tracking-tight leading-[1.05] text-foreground">
+              Simplify your<br />support workflow
+            </h2>
+            <div className="mt-10 space-y-8">
+              {steps.map((s, i) => (
+                <div key={s.title} className="flex gap-5">
+                  <div className="shrink-0 w-11 h-11 rounded-xl bg-background border border-border flex items-center justify-center text-sm font-medium text-foreground">
+                    {String(i + 1).padStart(2, "0")}
                   </div>
                   <div>
-                    {[
-                      { flag: "🇺🇸", name: "Sarah Chen", loc: "San Francisco, California", status: "Active", statusColor: "#22c55e", time: "28m ago" },
-                      { flag: "🇬🇧", name: "James Abbott", loc: "London, England", status: "Closed", statusColor: "#8a8a96", time: "1h ago" },
-                      { flag: "🇩🇪", name: "Lena Müller", loc: "Berlin, Germany", status: "Closed", statusColor: "#8a8a96", time: "2h ago" },
-                    ].map((c) => (
-                      <div key={c.name} className="flex items-center gap-3 px-4 py-2 hover:bg-white/[0.02] transition-colors">
-                        <div className="relative shrink-0">
-                          <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px]" style={{ background: "#1c1c22" }}>
-                            {c.flag}
-                          </div>
-                          {c.status === "Active" && (
-                            <span className="absolute -bottom-px -right-px w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-[#0c0c10]" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[10px] font-medium text-white/80 truncate">{c.name}</p>
-                          <p className="text-[8px] text-white/25 truncate flex items-center gap-0.5">
-                            <Globe className="w-2 h-2" /> {c.loc}
-                          </p>
-                        </div>
-                        <span
-                          className="text-[8px] font-medium px-1.5 py-0.5 rounded-full border"
-                          style={{
-                            color: c.statusColor,
-                            backgroundColor: `${c.statusColor}15`,
-                            borderColor: `${c.statusColor}30`,
-                          }}
-                        >
-                          {c.status}
-                        </span>
-                        <span className="text-[8px] text-white/20">{c.time}</span>
-                      </div>
-                    ))}
+                    <h3 className="text-lg font-medium text-foreground">{s.title}</h3>
+                    <p className="mt-1.5 text-[15px] text-muted-foreground leading-relaxed max-w-sm">{s.desc}</p>
                   </div>
                 </div>
-              </div>
+              ))}
             </div>
           </div>
-        </div>
-      </NoiseCard>
 
-      {/* ── Feature Pillars ──────────────────────────────────────────── */}
-      <section id="features" className="py-28 px-6">
-        <div className="max-w-7xl mx-auto text-center">
-          <h2 className="font-heading text-3xl sm:text-4xl lg:text-5xl font-normal text-foreground tracking-tight leading-[1.15]">
-            Not just a chatbot,
-            <br />
-            it's <span className="italic text-foreground">your</span> 10x support engineer.
-          </h2>
-
-          <div className="flex flex-wrap items-start justify-center gap-10 sm:gap-14 mt-16">
-            {[
-              { icon: BookOpen, label: "Trained on your docs" },
-              { icon: Wrench, label: "Connect your tools" },
-              { icon: Users, label: "Part of your team" },
-              { icon: BarChart3, label: "Analytics" },
-              { icon: Palette, label: "Customizable" },
-            ].map((item) => (
-              <div key={item.label} className="flex flex-col items-center gap-3 w-36">
-                <item.icon className="w-8 h-8 text-foreground" strokeWidth={1.3} />
-                <span className="text-sm text-foreground font-medium">{item.label}</span>
+          <div className="rounded-[2rem] p-5 sm:p-7" style={{ background: "#efeeea" }}>
+            <div className="rounded-[1.4rem] bg-white overflow-hidden">
+              <WidgetDeviceMock />
+            </div>
+            <div className="flex items-center justify-between mt-5 px-1">
+              <p className="text-sm font-medium text-foreground">Embed anywhere — one script tag</p>
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Code className="w-4 h-4 text-foreground" /></span>
+                <span className="w-8 h-8 rounded-full bg-white flex items-center justify-center"><Globe className="w-4 h-4 text-foreground" /></span>
               </div>
-            ))}
+            </div>
+            <div className="flex items-center gap-1.5 mt-4 px-1">
+              <span className="h-1.5 w-6 rounded-full bg-foreground" />
+              <span className="h-1.5 w-1.5 rounded-full bg-foreground/20" />
+              <span className="h-1.5 w-1.5 rounded-full bg-foreground/20" />
+              <span className="h-1.5 w-1.5 rounded-full bg-foreground/20" />
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ── Feature 1: AI Chat Widget (Lavender) ─────────────────────── */}
-      <section className="py-24 px-6">
-        <div className="max-w-6xl mx-auto">
-          <NoiseCard className="rounded-[2rem] p-14 lg:p-20 min-h-[70vh] flex items-center" style={{ background: "#e8e0f4" }}>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center w-full">
-              <div className="order-2 lg:order-1">
-                <div className="bg-card rounded-2xl shadow-lg overflow-hidden max-w-sm w-full">
-                  <div className="px-4 py-3 flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full glow-surface flex items-center justify-center">
-                      <Sparkles className="w-4 h-4" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-foreground">Acme Support</p>
-                      <p className="text-[11px] text-quaternary flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        Online
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="px-4 pt-2 pb-1 flex gap-2">
-                    {["Pricing", "How to integrate", "Refund policy"].map((topic) => (
-                      <span key={topic} className="text-[10px] px-2.5 py-1 rounded-full bg-muted text-muted-foreground">
-                        {topic}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="px-4 py-4 space-y-3 bg-muted/50">
-                    <div className="flex items-end gap-2">
-                      <div className="w-6 h-6 rounded-full glow-surface flex items-center justify-center shrink-0">
-                        <Sparkles className="w-3 h-3" />
-                      </div>
-                      <div className="bg-card rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-[13px] text-foreground shadow-sm max-w-[260px]">
-                        Hi! I'm Luna, your AI assistant. How can I help?
-                      </div>
-                    </div>
-                    <div className="flex justify-end">
-                      <div className="glow-surface rounded-2xl rounded-br-sm px-3.5 py-2.5 text-[13px] max-w-[240px]">
-                        How do I integrate the widget?
-                      </div>
-                    </div>
-                    <div className="flex items-end gap-2">
-                      <div className="w-6 h-6 rounded-full glow-surface flex items-center justify-center shrink-0">
-                        <Sparkles className="w-3 h-3" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="bg-card rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-[13px] text-foreground shadow-sm max-w-[260px]">
-                          Just add a single script tag to your HTML:
-                          <code className="block mt-1.5 text-[11px] bg-muted rounded-lg px-2.5 py-1.5 font-mono text-muted-foreground">
-                            {'<script src="widget.js" />'}
-                          </code>
-                        </div>
-                        <div className="flex items-center gap-3 px-1">
-                          <div className="flex items-center gap-1">
-                            <BookOpen className="w-3 h-3 text-quaternary" />
-                            <span className="text-[10px] text-quaternary">Getting Started Guide</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <ExternalLink className="w-2.5 h-2.5 text-quaternary" />
-                            <span className="text-[10px] text-quaternary">API Docs</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex justify-end">
-                      <div className="glow-surface rounded-2xl rounded-br-sm px-3.5 py-2.5 text-[13px] max-w-[240px]">
-                        Can I customize the colors?
-                      </div>
-                    </div>
-                    <div className="flex items-end gap-2">
-                      <div className="w-6 h-6 rounded-full glow-surface flex items-center justify-center shrink-0">
-                        <Sparkles className="w-3 h-3" />
-                      </div>
-                      <div className="bg-card rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-[13px] text-foreground shadow-sm max-w-[260px]">
-                        <span className="flex items-center gap-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          Yes! Full customization available
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="px-3 py-2.5 flex items-center gap-2 bg-card">
-                    <div className="flex-1 bg-muted rounded-full px-3.5 py-2 text-[13px] text-quaternary">
-                      Type a message...
-                    </div>
-                    <div className="w-8 h-8 rounded-full glow-surface flex items-center justify-center">
-                      <Send className="w-3.5 h-3.5" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="order-1 lg:order-2 space-y-5">
-                <p className="text-sm font-medium text-foreground/60 uppercase tracking-wider">
-                  AI Chat
-                </p>
-                <h2 className="font-heading text-3xl sm:text-4xl lg:text-[2.75rem] font-normal text-foreground tracking-tight leading-[1.15]">
-                  Smart answers,
-                  <br />
-                  grounded in your docs
-                </h2>
-                <p className="text-muted-foreground leading-relaxed max-w-md">
-                  Retrieval-augmented generation searches your docs, FAQs, and web pages. Every response cites its source -- no hallucination.
-                </p>
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  {[
-                    { icon: Globe, label: "Web resources" },
-                    { icon: FileText, label: "PDF indexing" },
-                    { icon: Bot, label: "AI responses" },
-                    { icon: Sparkles, label: "RAG search" },
-                  ].map((item) => (
-                    <div key={item.label} className="flex items-center gap-2.5 text-sm text-foreground">
-                      <item.icon className="w-4 h-4 text-muted-foreground" />
-                      {item.label}
-                    </div>
-                  ))}
-                </div>
-              </div>
+      {/* ── Integration hub (Ref 3) ───────────────────────────────────── */}
+      <section className="py-24 md:py-32 px-6">
+        <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          <div className="relative rounded-[2rem] p-10 sm:p-16 overflow-hidden" style={{ background: "#f1f1ee" }}>
+            <div aria-hidden className="pointer-events-none absolute inset-0 opacity-40" style={DOTS} />
+            <div className="relative">
+              <IntegrationHub />
             </div>
-          </NoiseCard>
-        </div>
-      </section>
-
-      {/* ── Feature 2: Knowledge Base (Blue) ──────────────────────────── */}
-      <section className="py-24 md:py-36 px-6">
-        <div className="max-w-6xl mx-auto">
-          <NoiseCard className="rounded-[2rem] p-14 lg:p-20 min-h-[70vh] flex items-center" style={{ background: "#dbeffe" }}>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center w-full">
-              <div className="space-y-5">
-                <p className="text-sm font-medium text-foreground/60 uppercase tracking-wider">
-                  Knowledge Base
-                </p>
-                <h2 className="font-heading text-3xl sm:text-4xl lg:text-[2.75rem] font-normal text-foreground tracking-tight leading-[1.15]">
-                  Train your very own
-                  <br />
-                  support agent — on your docs
-                </h2>
-                <p className="text-muted-foreground leading-relaxed max-w-md">
-                  Upload docs, paste URLs, create FAQs. Everything is automatically indexed and searchable. The AI only answers from your verified knowledge.
-                </p>
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  {[
-                    { icon: Globe, label: "Web pages" },
-                    { icon: FileText, label: "PDFs" },
-                    { icon: BookOpen, label: "FAQs" },
-                    { icon: Search, label: "Auto-indexing" },
-                  ].map((item) => (
-                    <div key={item.label} className="flex items-center gap-2.5 text-sm text-foreground">
-                      <item.icon className="w-4 h-4 text-muted-foreground" />
-                      {item.label}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-card rounded-2xl shadow-lg overflow-hidden">
-                <div className="px-4 py-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <FolderOpen className="w-4 h-4 text-foreground" />
-                    <span className="text-sm font-medium text-foreground">Knowledge Base</span>
-                    <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full">6 resources</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 bg-muted rounded-lg px-2.5 py-1.5">
-                    <Search className="w-3 h-3 text-quaternary" />
-                    <span className="text-[11px] text-quaternary">Search...</span>
-                  </div>
-                </div>
-                <div className="px-4 pb-4 space-y-2">
-                  {[
-                    { type: "webpage", icon: Globe, title: "Getting Started Guide", url: "docs.acme.com/getting-started", status: "indexed", time: "2m ago" },
-                    { type: "pdf", icon: FileText, title: "API Reference v3.2.pdf", url: "12 pages · 2.4 MB", status: "indexed", time: "1h ago" },
-                    { type: "faq", icon: BookOpen, title: "Billing & Pricing FAQ", url: "8 questions", status: "indexed", time: "3h ago" },
-                    { type: "webpage", icon: Globe, title: "Troubleshooting Guide", url: "docs.acme.com/troubleshooting", status: "indexing", time: "Just now" },
-                    { type: "pdf", icon: FileText, title: "Security Whitepaper.pdf", url: "24 pages · 5.1 MB", status: "indexed", time: "1d ago" },
-                  ].map((resource) => (
-                    <div key={resource.title} className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-muted/50 hover:bg-muted transition-colors">
-                      <div className="w-8 h-8 rounded-lg glow-surface flex items-center justify-center shrink-0">
-                        <resource.icon className="w-4 h-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-medium text-foreground truncate">{resource.title}</p>
-                        <p className="text-[11px] text-quaternary truncate">{resource.url}</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {resource.status === "indexed" ? (
-                          <span className="flex items-center gap-1 text-[10px] text-emerald-600">
-                            <CheckCircle2 className="w-3 h-3" />
-                            Indexed
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1 text-[10px] text-amber-600">
-                            <RefreshCw className="w-3 h-3 animate-spin" />
-                            Indexing
-                          </span>
-                        )}
-                        <span className="text-[10px] text-quaternary">{resource.time}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="px-4 py-3 bg-muted/30 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="flex -space-x-1">
-                      <div className="w-5 h-5 rounded-full glow-surface flex items-center justify-center text-[8px]">AI</div>
-                    </div>
-                    <span className="text-[11px] text-quaternary">RAG search active · 847 chunks indexed</span>
-                  </div>
-                  <span className="text-[11px] text-foreground font-medium flex items-center gap-1 cursor-pointer">
-                    Add resource <ChevronRight className="w-3 h-3" />
-                  </span>
-                </div>
-              </div>
-            </div>
-          </NoiseCard>
-        </div>
-      </section>
-
-      {/* ── Feature 3: Tool Calls (Green) ─────────────────────────────── */}
-      <section className="py-24 md:py-36 px-6">
-        <div className="max-w-6xl mx-auto">
-          <NoiseCard className="rounded-[2rem] p-14 lg:p-20 min-h-[70vh] flex items-center" style={{ background: "#d5edda" }}>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center w-full">
-              <div className="order-2 lg:order-1">
-                <div className="bg-card rounded-2xl shadow-lg overflow-hidden">
-                  <div className="px-4 py-3 flex items-center gap-2">
-                    <Wrench className="w-4 h-4 text-foreground" />
-                    <span className="text-sm font-medium text-foreground">Tool Configuration</span>
-                  </div>
-                  <div className="px-4 pb-4 space-y-3">
-                    <div className="rounded-xl bg-muted/50 overflow-hidden">
-                      <div className="px-3 py-2 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-md glow-surface flex items-center justify-center">
-                            <Search className="w-3 h-3" />
-                          </div>
-                          <span className="text-[12px] font-medium text-foreground">lookup_order</span>
-                        </div>
-                        <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">Active</span>
-                      </div>
-                      <div className="px-3 pb-2.5">
-                        <div className="bg-card rounded-lg p-2.5 font-mono text-[10px] text-foreground/70 space-y-1">
-                          <p className="text-quaternary">// Request</p>
-                          <p><span className="text-blue-600">GET</span> /api/orders/{'{order_id}'}</p>
-                          <p className="text-quaternary mt-2">// Response</p>
-                          <p>{'{'} <span className="text-emerald-600">"status"</span>: <span className="text-amber-600">"shipped"</span>,</p>
-                          <p>{'  '}<span className="text-emerald-600">"tracking"</span>: <span className="text-amber-600">"1Z999..."</span> {'}'}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl bg-muted/50 overflow-hidden">
-                      <div className="px-3 py-2 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-md glow-surface flex items-center justify-center">
-                            <RefreshCw className="w-3 h-3" />
-                          </div>
-                          <span className="text-[12px] font-medium text-foreground">check_inventory</span>
-                        </div>
-                        <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">Active</span>
-                      </div>
-                      <div className="px-3 pb-2.5">
-                        <div className="bg-card rounded-lg p-2.5 font-mono text-[10px] text-foreground/70 space-y-1">
-                          <p className="text-quaternary">// Request</p>
-                          <p><span className="text-blue-600">POST</span> /api/inventory/check</p>
-                          <p className="text-quaternary mt-2">// Response</p>
-                          <p>{'{'} <span className="text-emerald-600">"in_stock"</span>: <span className="text-blue-600">true</span>,</p>
-                          <p>{'  '}<span className="text-emerald-600">"quantity"</span>: <span className="text-blue-600">47</span> {'}'}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl bg-muted/50 px-3 py-2 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-md glow-surface flex items-center justify-center">
-                          <Zap className="w-3 h-3" />
-                        </div>
-                        <span className="text-[12px] font-medium text-foreground">create_ticket</span>
-                      </div>
-                      <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-medium">Draft</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="order-1 lg:order-2 space-y-5">
-                <p className="text-sm font-medium text-foreground/60 uppercase tracking-wider">
-                  Tools & Actions
-                </p>
-                <h2 className="font-heading text-3xl sm:text-4xl lg:text-[2.75rem] font-normal text-foreground tracking-tight leading-[1.15]">
-                  Go beyond
-                  <br />
-                  static answers
-                </h2>
-                <p className="text-muted-foreground leading-relaxed max-w-md">
-                  Connect your AI to any REST API. The bot autonomously looks up orders, checks inventory, or triggers workflows -- 24/7.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleGenericCta}
-                  className="inline-flex items-center gap-2 bg-foreground/[0.07] hover:bg-foreground/[0.12] text-foreground px-5 py-2.5 rounded-full text-sm font-medium transition-colors"
-                >
-                  Learn more
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          </NoiseCard>
-        </div>
-      </section>
-
-      <section className="py-24 md:py-36 px-6">
-        <div className="max-w-6xl mx-auto">
-          <NoiseCard className="rounded-[2rem] p-14 lg:p-20 min-h-[70vh] flex items-center" style={{ background: "#f5f3ee" }}>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center w-full">
-              <div className="space-y-5">
-                <p className="text-sm font-medium text-foreground/60 uppercase tracking-wider">
-                  Analytics
-                </p>
-                <h2 className="font-heading text-3xl sm:text-4xl lg:text-[2.75rem] font-normal text-foreground tracking-tight leading-[1.15]">
-                  See the full picture,
-                  <br />
-                  in real time
-                </h2>
-                <p className="text-muted-foreground leading-relaxed max-w-md">
-                  Track conversations, response quality, handoff rates, and visitor engagement. Know exactly how your AI agent is performing.
-                </p>
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  {[
-                    { icon: BarChart3, label: "Conversation trends" },
-                    { icon: Clock, label: "Response times" },
-                    { icon: TrendingUp, label: "Resolution rates" },
-                    { icon: Eye, label: "Live monitoring" },
-                  ].map((item) => (
-                    <div key={item.label} className="flex items-center gap-2.5 text-sm text-foreground">
-                      <item.icon className="w-4 h-4 text-muted-foreground" />
-                      {item.label}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-card rounded-2xl shadow-lg overflow-hidden">
-                <div className="p-4 space-y-3">
-                  <div className="grid grid-cols-3 gap-2.5">
-                    {[
-                      { label: "Total Conversations", value: "1,247", change: "+12%" },
-                      { label: "AI Resolved", value: "89%", change: "+4%" },
-                      { label: "Avg Response", value: "1.2s", change: "-0.3s" },
-                    ].map((stat) => (
-                      <div key={stat.label} className="rounded-xl bg-muted/50 p-3">
-                        <p className="text-[10px] text-quaternary">{stat.label}</p>
-                        <p className="text-lg font-semibold text-foreground mt-0.5">{stat.value}</p>
-                        <p className="text-[10px] text-emerald-600 font-medium">{stat.change}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="rounded-xl bg-muted/50 p-3">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-[11px] font-medium text-foreground">Conversations this week</span>
-                      <div className="flex items-center gap-3">
-                        <span className="flex items-center gap-1 text-[9px] text-quaternary">
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: "rgba(249,115,22,0.6)" }} /> AI
-                        </span>
-                        <span className="flex items-center gap-1 text-[9px] text-quaternary">
-                          <span className="w-1.5 h-1.5 rounded-full bg-foreground/20" /> Agent
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex gap-[3px] items-end h-20">
-                      {[
-                        { ai: 32, agent: 4 },
-                        { ai: 28, agent: 6 },
-                        { ai: 45, agent: 3 },
-                        { ai: 38, agent: 5 },
-                        { ai: 42, agent: 2 },
-                        { ai: 35, agent: 7 },
-                        { ai: 22, agent: 1 },
-                      ].map((d, i) => (
-                        <div key={i} className="flex-1 flex flex-col gap-[1px] justify-end h-full">
-                          <div className="rounded-t-sm" style={{ height: `${(d.ai / 50) * 100}%`, background: "rgba(249,115,22,0.3)", boxShadow: "inset 0 4px 4px -2px rgba(249,115,22,0.4)" }} />
-                          <div className="rounded-b-sm bg-foreground/10" style={{ height: `${(d.agent / 50) * 100}%` }} />
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex gap-[3px] mt-1.5">
-                      {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-                        <span key={d} className="flex-1 text-center text-[8px] text-quaternary">{d}</span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-muted/50 p-3">
-                    <span className="text-[11px] font-medium text-foreground">Active Conversations</span>
-                    <div className="mt-2 space-y-1.5">
-                      {[
-                        { name: "Sarah Chen", msg: "How do I upgrade my plan?", time: "2m", status: "ai" },
-                        { name: "James Abbott", msg: "I need help with the API", time: "5m", status: "agent" },
-                        { name: "Lena Müller", msg: "Can I get a refund?", time: "8m", status: "ai" },
-                      ].map((conv) => (
-                        <div key={conv.name} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors">
-                          <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center shrink-0">
-                            <User className="w-3 h-3 text-quaternary" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[11px] font-medium text-foreground truncate">{conv.name}</p>
-                            <p className="text-[10px] text-quaternary truncate">{conv.msg}</p>
-                          </div>
-                          <span className="text-[9px] text-quaternary shrink-0">{conv.time}</span>
-                          <span className={cn(
-                            "text-[9px] font-medium px-1.5 py-0.5 rounded-full shrink-0",
-                            conv.status === "ai" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700",
-                          )}>
-                            {conv.status === "ai" ? "AI" : "Agent"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </NoiseCard>
-        </div>
-      </section>
-
-      {/* ── Feature 5: Ticket Forms (Pink) ───────────────────────────── */}
-      <section className="py-24 md:py-36 px-6">
-        <div className="max-w-6xl mx-auto">
-          <NoiseCard className="rounded-[2rem] p-14 lg:p-20 min-h-[70vh] flex items-center" style={{ background: "#f4e0e8" }}>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center w-full">
-              <div className="order-2 lg:order-1">
-                <div className="bg-card rounded-2xl shadow-lg overflow-hidden max-w-sm w-full">
-                  <div className="px-4 py-3 flex items-center gap-2">
-                    <ClipboardList className="w-4 h-4 text-foreground" />
-                    <span className="text-sm font-medium text-foreground">Contact Form</span>
-                  </div>
-                  <div className="px-4 pb-4 space-y-3">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-foreground">Full Name</label>
-                      <div className="bg-muted rounded-lg px-3 py-2 text-[13px] text-foreground">
-                        Sarah Chen
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-foreground">Email</label>
-                      <div className="bg-muted rounded-lg px-3 py-2 text-[13px] text-foreground flex items-center gap-2">
-                        <Mail className="w-3.5 h-3.5 text-quaternary" />
-                        sarah@brightpath.io
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-foreground">Phone</label>
-                      <div className="bg-muted rounded-lg px-3 py-2 text-[13px] text-foreground flex items-center gap-2">
-                        <Phone className="w-3.5 h-3.5 text-quaternary" />
-                        +1 (555) 012-3456
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-foreground">Company</label>
-                      <div className="bg-muted rounded-lg px-3 py-2 text-[13px] text-foreground flex items-center gap-2">
-                        <Building2 className="w-3.5 h-3.5 text-quaternary" />
-                        BrightPath Inc.
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-foreground">Message</label>
-                      <div className="bg-muted rounded-lg px-3 py-2 text-[13px] text-quaternary min-h-[60px]">
-                        I'd like to discuss enterprise pricing for our team of 50+...
-                      </div>
-                    </div>
-                    <div className="glow-surface rounded-xl py-2.5 text-center text-[13px] font-medium">
-                      Submit Ticket
-                    </div>
-                  </div>
-                  <div className="px-4 py-2.5 bg-muted/30 flex items-center gap-2">
-                    <AlertCircle className="w-3 h-3 text-quaternary" />
-                    <span className="text-[10px] text-quaternary">Notifies via Telegram & email</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="order-1 lg:order-2 space-y-5">
-                <p className="text-sm font-medium text-foreground/60 uppercase tracking-wider">
-                  Ticket Forms
-                </p>
-                <h2 className="font-heading text-3xl sm:text-4xl lg:text-[2.75rem] font-normal text-foreground tracking-tight leading-[1.15]">
-                  Capture leads
-                  <br />
-                  without friction
-                </h2>
-                <p className="text-muted-foreground leading-relaxed max-w-md">
-                  Customizable contact forms with validation, pre-filled visitor data, and instant notifications to your team via Telegram and email.
-                </p>
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  {[
-                    { icon: ClipboardList, label: "Custom fields" },
-                    { icon: Mail, label: "Email alerts" },
-                    { icon: Send, label: "Telegram notify" },
-                    { icon: Shield, label: "Spam protection" },
-                  ].map((item) => (
-                    <div key={item.label} className="flex items-center gap-2.5 text-sm text-foreground">
-                      <item.icon className="w-4 h-4 text-muted-foreground" />
-                      {item.label}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </NoiseCard>
-        </div>
-      </section>
-
-      {/* ── Feature 6: Live Agent Handoff (Warm neutral) ──────────────── */}
-      <section className="pb-24 px-6">
-        <div className="max-w-6xl mx-auto">
-          <NoiseCard className="rounded-[2rem] p-14 lg:p-20 min-h-[70vh] flex items-center" style={{ background: "#f0ebe3" }}>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center w-full">
-              <div className="space-y-5">
-                <p className="text-sm font-medium text-foreground/60 uppercase tracking-wider">
-                  Live Agent Handoff
-                </p>
-                <h2 className="font-heading text-3xl sm:text-4xl lg:text-[2.75rem] font-normal text-foreground tracking-tight leading-[1.15]">
-                  Seamless escalation
-                  <br />
-                  when AI isn't enough
-                </h2>
-                <p className="text-muted-foreground leading-relaxed max-w-md">
-                  When the bot can't answer confidently, it hands off to a human via Telegram. The agent sees the full history and replies in the same chat window.
-                </p>
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  {[
-                    { icon: MessageSquare, label: "Telegram relay" },
-                    { icon: Users, label: "Full context" },
-                    { icon: Bot, label: "AI handback" },
-                    { icon: Zap, label: "Instant notify" },
-                  ].map((item) => (
-                    <div key={item.label} className="flex items-center gap-2.5 text-sm text-foreground">
-                      <item.icon className="w-4 h-4 text-muted-foreground" />
-                      {item.label}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-card rounded-2xl shadow-lg overflow-hidden">
-                <div className="px-4 py-3 flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-foreground" />
-                  <span className="text-sm font-medium text-foreground">Conversation</span>
-                  <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium ml-auto">
-                    Waiting for agent
-                  </span>
-                </div>
-                <div className="px-4 py-4 space-y-3 bg-muted/30">
-                  <div className="flex items-end gap-2">
-                    <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center shrink-0">
-                      <User className="w-3 h-3 text-quaternary" />
-                    </div>
-                    <div className="bg-card rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-[13px] text-foreground shadow-sm max-w-[260px]">
-                      I have a very specific billing issue with my annual plan renewal.
-                    </div>
-                  </div>
-                  <div className="flex items-end gap-2">
-                    <div className="w-6 h-6 rounded-full glow-surface flex items-center justify-center shrink-0">
-                      <Sparkles className="w-3 h-3" />
-                    </div>
-                    <div className="bg-card rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-[13px] text-foreground shadow-sm max-w-[260px]">
-                      Let me connect you with an engineer who can help with billing specifics. One moment!
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-center py-2">
-                    <div className="flex items-center gap-2 bg-amber-50 rounded-full px-3 py-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                      <span className="text-[11px] text-amber-700 font-medium">Agent notified via Telegram</span>
-                    </div>
-                  </div>
-                  <div className="flex items-end gap-2">
-                    <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                      <User className="w-3 h-3 text-blue-700" />
-                    </div>
-                    <div className="space-y-1">
-                      <div className="bg-blue-50 rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-[13px] text-foreground shadow-sm max-w-[260px]">
-                        Hi! I can see your account. Let me fix that billing cycle issue right now.
-                      </div>
-                      <p className="text-[10px] text-quaternary px-1">Alex · Support Engineer · via Telegram</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </NoiseCard>
-        </div>
-      </section>
-
-      {/* ── How It Works ───────────────────────────────────────────────── */}
-      <section id="how-it-works" className="py-24 md:py-36 px-6 bg-muted">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <p className="text-sm font-medium text-foreground/60 uppercase tracking-wider mb-4">
-              How It Works
-            </p>
-            <h2 className="font-heading text-3xl sm:text-4xl lg:text-[2.75rem] font-normal text-foreground tracking-tight leading-[1.15]">
-              Go live in minutes
+          </div>
+          <div>
+            <h2 className="text-4xl sm:text-5xl font-medium tracking-tight leading-[1.05] text-foreground">
+              One backend,<br />unlimited integrations
             </h2>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="bg-card rounded-2xl p-8 space-y-4">
-              <div className="flex items-center gap-3">
-                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-foreground text-background text-sm font-semibold">1</span>
-                <div className="w-10 h-10 rounded-xl glow-surface flex items-center justify-center">
-                  <FileText className="w-5 h-5" />
-                </div>
-              </div>
-              <h3 className="text-lg font-medium text-foreground">Add your knowledge</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">Upload docs, paste URLs, or write FAQs. Everything is indexed automatically.</p>
-              <div className="bg-muted rounded-xl p-3 space-y-2 mt-2">
-                {[
-                  { icon: Globe, label: "docs.acme.com", status: true },
-                  { icon: FileText, label: "API Reference.pdf", status: true },
-                  { icon: BookOpen, label: "Billing FAQ", status: false },
-                ].map((r) => (
-                  <div key={r.label} className="flex items-center gap-2">
-                    <div className="w-5 h-5 rounded-md glow-surface flex items-center justify-center">
-                      <r.icon className="w-2.5 h-2.5" />
-                    </div>
-                    <span className="text-[11px] text-foreground flex-1 truncate">{r.label}</span>
-                    {r.status ? (
-                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                    ) : (
-                      <RefreshCw className="w-3 h-3 text-amber-600 animate-spin" />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-card rounded-2xl p-8 space-y-4">
-              <div className="flex items-center gap-3">
-                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-foreground text-background text-sm font-semibold">2</span>
-                <div className="w-10 h-10 rounded-xl glow-surface flex items-center justify-center">
-                  <Palette className="w-5 h-5" />
-                </div>
-              </div>
-              <h3 className="text-lg font-medium text-foreground">Customize your bot</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">Match brand colors, set tone of voice, configure quick actions. Make it yours.</p>
-              <div className="bg-muted rounded-xl p-3 space-y-2.5 mt-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-quaternary">Primary Color</span>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-4 h-4 rounded-full" style={{ background: "#f97316" }} />
-                    <span className="text-[10px] text-foreground font-mono">#f97316</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-quaternary">Tone</span>
-                  <span className="text-[10px] bg-card text-foreground px-2 py-0.5 rounded-full">Friendly</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-quaternary">Bot Name</span>
-                  <span className="text-[10px] text-foreground">Luna</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-card rounded-2xl p-8 space-y-4">
-              <div className="flex items-center gap-3">
-                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-foreground text-background text-sm font-semibold">3</span>
-                <div className="w-10 h-10 rounded-xl glow-surface flex items-center justify-center">
-                  <Code className="w-5 h-5" />
-                </div>
-              </div>
-              <h3 className="text-lg font-medium text-foreground">Embed & go live</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">Copy one script tag into your site. Your AI support bot is live and ready.</p>
-              <div className="bg-muted rounded-xl p-3 mt-2">
-                <div className="font-mono text-[10px] text-foreground/70 leading-relaxed">
-                  <span className="text-quaternary">{'<!-- Add to your HTML -->'}</span>
-                  <br />
-                  <span className="text-blue-600">{'<script'}</span>
-                  <br />
-                  {'  '}<span className="text-emerald-600">src</span>=<span className="text-amber-600">"widget.js"</span>
-                  <br />
-                  {'  '}<span className="text-emerald-600">data-project</span>=<span className="text-amber-600">"your-slug"</span>
-                  <br />
-                  <span className="text-blue-600">{'>'}</span><span className="text-blue-600">{'</script>'}</span>
-                </div>
-                <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-border">
-                  <Play className="w-3 h-3 text-emerald-600" />
-                  <span className="text-[10px] text-emerald-600 font-medium">Widget is live!</span>
-                </div>
-              </div>
-            </div>
+            <Link to="/docs" className="mt-7 inline-flex items-center gap-2 rounded-full bg-foreground text-background px-6 py-3 text-sm font-medium hover:opacity-90 transition-opacity">
+              <BookOpen className="w-4 h-4" />
+              View documentation
+            </Link>
+            <p className="mt-7 text-lg text-muted-foreground leading-relaxed max-w-lg">
+              “Connect your tools, pipe every conversation anywhere with webhooks, and let AI agents check inventory or look up orders through the built-in MCP server — seamlessly and securely.”
+            </p>
           </div>
         </div>
       </section>
 
-      {/* ── Pricing ────────────────────────────────────────────────────── */}
-      <section id="pricing" className="py-24 px-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <p className="text-sm font-medium text-foreground/60 uppercase tracking-wider mb-4">
-              Pricing
-            </p>
-            <h2 className="font-heading text-3xl sm:text-4xl lg:text-[2.75rem] font-normal text-foreground tracking-tight leading-[1.15]">
-              Powerful AI support agent
-              <br className="hidden sm:block" />
-              at unbeatable price
-            </h2>
-          </div>
-
-          <LandingPricing
-            onCtaClick={handlePricingCta}
-            currentPlan={currentPlan}
-            currentInterval={currentInterval}
-            onManagePlan={handleManagePlan}
+      {/* ── Feature cards #2 (Ref 1) ──────────────────────────────────── */}
+      <section className="pb-24 md:pb-32 px-6">
+        <div className="max-w-6xl mx-auto">
+          <SectionHeading
+            title={<>Built for real<br className="hidden sm:block" /> support teams</>}
+            subtitle="Insights to improve, lead capture that converts, and a human in the loop the moment it matters."
           />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-16">
+            <FeatureCard
+              gradient={GRADIENTS.cream}
+              title="Shows what's working"
+              description="Track conversations, resolution rates, response times, and handoffs. Know exactly how your agent performs."
+            >
+              <AnalyticsMiniMock />
+            </FeatureCard>
+            <FeatureCard
+              gradient={GRADIENTS.pink}
+              title="Captures every lead"
+              description="Customizable forms with validation and pre-filled visitor data. Instant alerts via Telegram and email."
+            >
+              <FormMiniMock />
+            </FeatureCard>
+            <FeatureCard
+              gradient={GRADIENTS.mist}
+              title="Escalates to a human"
+              description="When the AI isn't confident, it escalates to a human via Telegram — full context, same chat window."
+            >
+              <HandoffMiniMock />
+            </FeatureCard>
+          </div>
+        </div>
+      </section>
 
-          <div className="mt-8 bg-muted rounded-2xl p-8">
+      {/* ── Pricing ───────────────────────────────────────────────────── */}
+      <section id="pricing" className="py-24 px-6 bg-muted/40">
+        <div className="max-w-6xl mx-auto">
+          <SectionHeading
+            eyebrow="Pricing"
+            title={<>Powerful support,<br className="hidden sm:block" /> honest pricing</>}
+          />
+          <div className="mt-16">
+            <LandingPricing
+              onCtaClick={handlePricingCta}
+              currentPlan={currentPlan}
+              currentInterval={currentInterval}
+              onManagePlan={handleManagePlan}
+            />
+          </div>
+
+          <div className="mt-8 bg-card border border-border rounded-[1.5rem] p-8">
             <div className="flex flex-col md:flex-row md:items-center gap-6">
               <div className="space-y-2 md:max-w-xs shrink-0">
                 <div className="flex items-center gap-3">
                   <h3 className="text-xl font-medium text-foreground">Enterprise</h3>
-                  <span className="text-[11px] glow-surface px-2.5 py-1 rounded-full font-medium">
-                    Custom Pricing
-                  </span>
+                  <span className="text-[11px] bg-foreground text-background px-2.5 py-1 rounded-full font-medium">Custom Pricing</span>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  For organizations with advanced needs. Unlimited everything with dedicated support.
-                </p>
+                <p className="text-sm text-muted-foreground">For organizations with advanced needs. Unlimited everything with dedicated support.</p>
               </div>
 
               <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
@@ -1412,11 +1077,7 @@ function Landing() {
                 ))}
               </div>
 
-              <button
-                type="button"
-                onClick={handleGenericCta}
-                className="shrink-0 inline-flex items-center gap-2 bg-foreground text-background px-6 py-3 rounded-full text-sm font-medium hover:brightness-110 transition-all"
-              >
+              <button type="button" onClick={handleGenericCta} className="shrink-0 inline-flex items-center gap-2 bg-foreground text-background px-6 py-3 rounded-full text-sm font-medium hover:opacity-90 transition-opacity">
                 Contact Sales
                 <ArrowRight className="w-4 h-4" />
               </button>
@@ -1425,132 +1086,94 @@ function Landing() {
         </div>
       </section>
 
-      {/* ── FAQ ────────────────────────────────────────────────────────── */}
-      <section id="faq" className="py-24 px-6 bg-muted">
+      {/* ── FAQ ───────────────────────────────────────────────────────── */}
+      <section id="faq" className="py-24 px-6">
         <div className="max-w-3xl mx-auto">
-          <div className="text-center mb-12">
-            <p className="text-sm font-medium text-foreground/60 uppercase tracking-wider mb-4">
-              FAQ
-            </p>
-            <h2 className="font-heading text-3xl sm:text-4xl lg:text-[2.75rem] font-normal text-foreground tracking-tight leading-[1.15]">
-              Frequently asked questions
-            </h2>
-          </div>
-
-          <div className="bg-card rounded-2xl px-8 py-2">
+          <SectionHeading eyebrow="FAQ" title="Frequently asked questions" />
+          <div className="mt-12 bg-card border border-border rounded-[1.5rem] px-8 py-2">
             {faqItems.map((item) => (
-              <FaqItem
-                key={item.question}
-                question={item.question}
-                answer={item.answer}
-              />
+              <FaqItem key={item.question} question={item.question} answer={item.answer} />
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── CTA Banner ─────────────────────────────────────────────────── */}
+      {/* ── CTA Banner ────────────────────────────────────────────────── */}
       <section className="py-16 px-6">
         <div className="max-w-5xl mx-auto">
-          <NoiseCard className="rounded-[2rem] px-10 py-14 text-center" style={{ background: "#d5edda" }}>
-            <h2 className="font-heading italic text-3xl sm:text-4xl lg:text-5xl font-normal text-foreground tracking-tight mb-4">
-              Let's get started
-            </h2>
-            <p className="text-muted-foreground text-lg mb-8">
-              Start your 7-day free trial today.
-            </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <button
-                type="button"
-                onClick={handleGenericCta}
-                className="glow-surface px-8 py-3.5 rounded-full text-[15px] font-medium transition-all inline-flex items-center gap-2"
-              >
+          <div className="relative rounded-[2rem] px-10 py-16 text-center overflow-hidden" style={{ background: GRADIENTS.sage }}>
+            <div aria-hidden className="pointer-events-none absolute inset-0 opacity-40" style={DOTS} />
+            <div className="relative">
+              <h2 className="text-4xl sm:text-5xl font-medium text-foreground tracking-tight leading-[1.05] mb-4">
+                Let's get started
+              </h2>
+              <p className="text-muted-foreground text-lg mb-8">Start your 7-day free trial today.</p>
+              <button type="button" onClick={handleGenericCta} className="bg-foreground text-background px-8 py-3.5 rounded-full text-[15px] font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-2">
                 Get Started Free
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
-          </NoiseCard>
+          </div>
         </div>
       </section>
 
-      {/* ── Footer ─────────────────────────────────────────────────────── */}
-      <footer className="bg-foreground max-w-7xl rounded-t-4xl mx-auto text-background pt-16 md:pt-24 pb-8 px-8">
+      {/* ── Footer ────────────────────────────────────────────────────── */}
+      <footer className="bg-foreground max-w-7xl rounded-t-[2.5rem] mx-auto text-background pt-16 md:pt-24 pb-8 px-8">
         <div className="max-w-5xl mx-auto">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-14">
             <div className="col-span-2 md:col-span-1 space-y-4">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl glow-surface flex items-center justify-center shrink-0">
-                  <svg viewBox="0 0 28 32" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-5 w-auto">
-                    <path
-                      d="M24 32H6C2.6875 32 0 29.3125 0 26V6C0 2.6875 2.6875 0 6 0H25C26.6562 0 28 1.34375 28 3V21C28 22.3062 27.1625 23.4187 26 23.8312V28C27.1063 28 28 28.8937 28 30C28 31.1063 27.1063 32 26 32H24ZM6 24C4.89375 24 4 24.8937 4 26C4 27.1063 4.89375 28 6 28H22V24H6Z"
-                      fill="currentColor"
-                    />
-                  </svg>
+                <div className="w-8 h-8 rounded-xl bg-background/10 flex items-center justify-center shrink-0">
+                  <LogoIcon className="h-5 w-auto text-background" />
                 </div>
-                <span className="font-semibold tracking-tight text-[15px]">ReplyMaven</span>
+                <span className="font-medium tracking-tight text-[15px]">ReplyMaven</span>
               </div>
-              <p className="text-sm text-background/50 leading-relaxed">
-                AI-powered customer support that knows your product.
-              </p>
+              <p className="text-sm text-background/50 leading-relaxed">AI-powered customer support that knows your product.</p>
             </div>
 
             <div className="space-y-4">
-              <h4 className="text-[11px] font-medium text-background/40 uppercase tracking-wider">
-                Product
-              </h4>
+              <h4 className="text-[11px] font-medium text-background/40 uppercase tracking-wider">Product</h4>
               <ul className="space-y-2.5">
                 {[
-                  { label: "Features", href: "#features" },
+                  { label: "Benefits", href: "#features" },
                   { label: "Pricing", href: "#pricing" },
                   { label: "FAQ", href: "#faq" },
                 ].map((item) => (
                   <li key={item.label}>
-                    <a href={item.href} className="text-sm text-background/60 hover:text-background transition-colors">
-                      {item.label}
-                    </a>
+                    <a href={item.href} className="text-sm text-background/60 hover:text-background transition-colors">{item.label}</a>
                   </li>
                 ))}
               </ul>
             </div>
 
             <div className="space-y-4">
-              <h4 className="text-[11px] font-medium text-background/40 uppercase tracking-wider">
-                Resources
-              </h4>
+              <h4 className="text-[11px] font-medium text-background/40 uppercase tracking-wider">Resources</h4>
               <ul className="space-y-2.5">
                 {[
                   { label: "Documentation", href: "/docs" },
                   { label: "Getting Started", href: "/docs" },
                 ].map((item) => (
                   <li key={item.label}>
-                    <Link to={item.href} className="text-sm text-background/60 hover:text-background transition-colors">
-                      {item.label}
-                    </Link>
+                    <Link to={item.href} className="text-sm text-background/60 hover:text-background transition-colors">{item.label}</Link>
                   </li>
                 ))}
               </ul>
             </div>
             <div className="space-y-4">
-              <h4 className="text-[11px] font-medium text-background/40 uppercase tracking-wider">
-                Legal
-              </h4>
+              <h4 className="text-[11px] font-medium text-background/40 uppercase tracking-wider">Legal</h4>
               <ul className="space-y-2.5">
                 {["Privacy Policy", "Terms of Service"].map((item) => (
                   <li key={item}>
-                    <a href="#" className="text-sm text-background/60 hover:text-background transition-colors">
-                      {item}
-                    </a>
+                    <a href="#" className="text-sm text-background/60 hover:text-background transition-colors">{item}</a>
                   </li>
                 ))}
               </ul>
             </div>
           </div>
 
-          <div className="pt-6 border-t border-background/10 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <p className="text-sm text-background/40">
-              &copy; {new Date().getFullYear()} ReplyMaven. All rights reserved.
-            </p>
-            <a href="https://launchfast.shop/" target="_blank" className={cn("text-sm text-background/40 flex items-center gap-2 hover:text-background/60 transition-colors")}>
+          <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="text-sm text-background/40">&copy; {new Date().getFullYear()} ReplyMaven. All rights reserved.</p>
+            <a href="https://launchfast.shop/" target="_blank" className="text-sm text-background/40 flex items-center gap-2 hover:text-background/60 transition-colors">
               <Heart className="w-4 h-4 text-background/40" /> LaunchFast.shop product
             </a>
           </div>

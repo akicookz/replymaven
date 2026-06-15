@@ -120,5 +120,5 @@ function Logo({
   );
 }
 
-export { Logo };
+export { Logo, LogoIcon };
 export default Logo;
