@@ -23,6 +23,10 @@ import {
   reformulateSearchQueries,
   summarizeTeamRequest,
 } from "../llm/auxiliary-calls";
+import {
+  fallbackRenderHandoffMessage,
+  renderHandoffMessage,
+} from "../llm/render-handoff-message";
 import { createTeamRequestSubmission } from "../post-turn/team-request";
 import {
   planNextAction,
@@ -49,6 +53,7 @@ import { executeHttpTool } from "../tools/http-tool-executor";
 import { type TicketRefinementDecision } from "../workflows/classify-ticket-refinement";
 import {
   type TicketFieldSpec,
+  type HandoffRenderDirective,
   type PlannerActionHistoryEntry,
   type PlannerDocsEvidence,
   type PlannerLoopResult,
@@ -124,6 +129,14 @@ interface RunPlannerLoopOptions {
   compiledFaqContext: string;
   hasIndexedResources: boolean;
   visitorInfo: { name: string | null; email: string | null };
+  // Escalation continuity carried over from the prior turn's persisted
+  // `chat_state` (see ConversationChatState). Lets the loop resume an
+  // in-progress handoff without regex-matching its own prior wording.
+  persistedContactState?: {
+    awaitingContactFields: Array<"name" | "email">;
+    awaitingHandoffConfirmation: boolean;
+    contactDeclined: boolean;
+  };
   existingTicket?: Record<string, string> | null;
   ticketFields?: TicketFieldSpec[] | null;
   ticketRefinementDecision?: TicketRefinementDecision | null;
@@ -254,6 +267,11 @@ function createInitialLoopState(
   turnPlan: SupportTurnPlan,
   conversationSummary: string | null,
   visitorInfo: { name: string | null; email: string | null },
+  persistedContactState?: {
+    awaitingContactFields: Array<"name" | "email">;
+    awaitingHandoffConfirmation: boolean;
+    contactDeclined: boolean;
+  },
 ): PlannerLoopState {
   return {
     goal: turnPlan.summary,
@@ -267,9 +285,10 @@ function createInitialLoopState(
     knownVisitorName: visitorInfo.name,
     knownVisitorEmail: visitorInfo.email,
     handoffRequested: false,
-    awaitingHandoffConfirmation: false,
-    awaitingContactFields: [],
-    contactDeclined: false,
+    awaitingHandoffConfirmation:
+      persistedContactState?.awaitingHandoffConfirmation ?? false,
+    awaitingContactFields: persistedContactState?.awaitingContactFields ?? [],
+    contactDeclined: persistedContactState?.contactDeclined ?? false,
     handoffSummary: null,
     finalDraft: null,
     terminationReason: null,
@@ -288,18 +307,6 @@ function pushActionHistory(
   state.actionHistory.push(entry);
 }
 
-function buildContactQuestion(missingFields: Array<"name" | "email">): string {
-  if (missingFields.length === 2) {
-    return "I can forward this to the team. Before I do, could you share your name and email so they can follow up directly? If you'd rather keep it in chat, just say that.";
-  }
-
-  if (missingFields[0] === "name") {
-    return "I can forward this to the team. Before I do, could you share your name so they know who to follow up with? If you'd rather keep it in chat, just say that.";
-  }
-
-  return "I can forward this to the team. Before I do, could you share your email so they can follow up directly? If you'd rather keep it in chat, just say that.";
-}
-
 function getMissingContactFields(state: PlannerLoopState): Array<"name" | "email"> {
   const missingFields: Array<"name" | "email"> = [];
 
@@ -312,17 +319,6 @@ function getMissingContactFields(state: PlannerLoopState): Array<"name" | "email
   }
 
   return missingFields;
-}
-
-function buildHandoffOfferMessage(options: {
-  hasIssueContext: boolean;
-  agentLabel: string;
-}): string {
-  if (!options.hasIssueContext) {
-    return `Sure — I can help get this to ${options.agentLabel}. Before I forward it, could you tell me a bit about what you need help with so the team gets the right context?`;
-  }
-
-  return `I can forward this to ${options.agentLabel} for a deeper look. If you'd like me to do that, reply yes and I'll collect anything still missing before sending it over.`;
 }
 
 function hasIssueContext(
@@ -342,6 +338,10 @@ function hasIssueContext(
   });
 }
 
+// LEGACY fallback. The runtime now persists `awaitingContactFields` across
+// turns (see ConversationChatState), so this regex over the bot's own prior
+// wording is only consulted for conversations whose chat_state predates the
+// persisted fields. Safe to delete once in-flight conversations have aged out.
 function lastAssistantRequestedStructuredContact(
   conversationHistory: ConversationTurnMessage[],
 ): boolean {
@@ -428,6 +428,47 @@ async function buildTeamRequestSummary(options: {
       options.buildLogContext(),
     );
     return fallbackSummarizeTeamRequest(options.conversationHistory);
+  }
+}
+
+// Renders an escalation directive into a tone-matched, language-matched message
+// via a scoped model call, falling back to the deterministic wording if both
+// providers fail. Guardrail violations are handled inside `renderHandoffMessage`
+// (it returns the deterministic fallback without throwing).
+async function buildRenderedHandoffMessage(options: {
+  modelRuntime: ModelRuntimeState;
+  directive: HandoffRenderDirective;
+  settings: Pick<
+    SupportPromptSettings,
+    "toneOfVoice" | "customTonePrompt" | "botName"
+  >;
+  conversationHistory: ConversationTurnMessage[];
+  buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
+}): Promise<string> {
+  try {
+    return await runWithModelFallback({
+      runtime: options.modelRuntime,
+      stage: "render_handoff_message",
+      logContext: options.buildLogContext({
+        directiveKind: options.directive.kind,
+      }),
+      operation: async (activeConfig) =>
+        renderHandoffMessage(
+          createLanguageModel(activeConfig),
+          {
+            directive: options.directive,
+            settings: options.settings,
+            conversationHistory: options.conversationHistory,
+          },
+          { throwOnModelError: true },
+        ),
+    });
+  } catch {
+    logWarn(
+      "widget_turn.render_handoff_message_fallback_used",
+      options.buildLogContext({ directiveKind: options.directive.kind }),
+    );
+    return fallbackRenderHandoffMessage(options.directive);
   }
 }
 
@@ -598,6 +639,7 @@ export async function runPlannerLoop(
     options.turnPlan,
     options.conversationSummary,
     options.visitorInfo,
+    options.persistedContactState,
   );
 
   if (options.faqMatchHint) {
@@ -625,11 +667,20 @@ export async function runPlannerLoop(
     buildLogContext: options.buildLogContext,
   });
 
-  if (lastAssistantRequestedStructuredContact(options.conversationHistory)) {
+  // Resume an in-progress contact request. The persisted signal (seeded into
+  // loopState above) is the source of truth; the legacy regex over the bot's
+  // own prior wording is only a fallback for conversations whose chat_state
+  // predates the persisted fields. `visitorDeclinedContactDetails` inspects the
+  // visitor's reply (not bot wording), so it stays correct regardless.
+  const hasPersistedContactRequest = loopState.awaitingContactFields.length > 0;
+  const legacyContactRequest =
+    !hasPersistedContactRequest &&
+    lastAssistantRequestedStructuredContact(options.conversationHistory);
+  if (hasPersistedContactRequest || legacyContactRequest) {
     loopState.awaitingContactFields = getMissingContactFields(loopState);
-    loopState.contactDeclined = visitorDeclinedContactDetails(
-      options.currentMessage,
-    );
+    loopState.contactDeclined =
+      loopState.contactDeclined ||
+      visitorDeclinedContactDetails(options.currentMessage);
   }
 
   while (loopState.stepCount < MAX_PLANNER_STEPS) {
@@ -1003,12 +1054,19 @@ export async function runPlannerLoop(
     }
 
     if (nextAction.type === "offer_handoff") {
-      const fullResponse = buildHandoffOfferMessage({
-        hasIssueContext: hasIssueContext(
-          options.conversationHistory,
-          options.currentMessage,
-        ),
-        agentLabel: options.settings.agentName ?? "the team",
+      const fullResponse = await buildRenderedHandoffMessage({
+        modelRuntime: options.modelRuntime,
+        directive: {
+          kind: "offer_handoff",
+          hasIssueContext: hasIssueContext(
+            options.conversationHistory,
+            options.currentMessage,
+          ),
+          agentLabel: options.settings.agentName ?? "the team",
+        },
+        settings: options.settings,
+        conversationHistory: options.conversationHistory,
+        buildLogContext: options.buildLogContext,
       });
 
       loopState.handoffRequested = true;
@@ -1038,9 +1096,21 @@ export async function runPlannerLoop(
     }
 
     if (nextAction.type === "collect_contact") {
-      const fullResponse = buildContactQuestion(nextAction.missingFields);
+      const fullResponse = await buildRenderedHandoffMessage({
+        modelRuntime: options.modelRuntime,
+        directive: {
+          kind: "collect_contact",
+          missingFields: nextAction.missingFields,
+          agentLabel: options.settings.agentName ?? "the team",
+        },
+        settings: options.settings,
+        conversationHistory: options.conversationHistory,
+        buildLogContext: options.buildLogContext,
+      });
       loopState.handoffRequested = true;
       loopState.contactDeclined = false;
+      // Past the yes/no handoff offer now — we're collecting contact details.
+      loopState.awaitingHandoffConfirmation = false;
       loopState.awaitingContactFields = nextAction.missingFields;
       loopState.missingInputs = nextAction.missingFields;
       pushActionHistory(loopState, {
@@ -1090,6 +1160,9 @@ export async function runPlannerLoop(
       loopState.handoffSummary = summary;
       loopState.handoffRequested = true;
       loopState.awaitingContactFields = [];
+      // Handoff is resolved (forwarded) — clear the pending-offer flag so it
+      // doesn't persist stale into later turns.
+      loopState.awaitingHandoffConfirmation = false;
       options.closeSafeAiReplayWindow("team_request_mutation");
       let submission;
       try {
@@ -1199,14 +1272,21 @@ export async function runPlannerLoop(
       }
 
       const agentLabel = options.settings.agentName ?? "a team member";
-      let fullResponse: string;
-      if (submission.appended) {
-        fullResponse = `I've added those details to your existing request. ${agentLabel} will follow up shortly!`;
-      } else if (submission.created) {
-        fullResponse = `I've forwarded this to the team. ${agentLabel} will follow up shortly!`;
-      } else {
-        fullResponse = `I've already forwarded this conversation to the team. ${agentLabel} will continue the follow-up there.`;
-      }
+      const fullResponse = await buildRenderedHandoffMessage({
+        modelRuntime: options.modelRuntime,
+        directive: {
+          kind: "ticket_created",
+          variant: submission.appended
+            ? "appended"
+            : submission.created
+              ? "created"
+              : "already_forwarded",
+          agentLabel,
+        },
+        settings: options.settings,
+        conversationHistory: options.conversationHistory,
+        buildLogContext: options.buildLogContext,
+      });
       pushActionHistory(loopState, {
         type: "create_ticket",
         reason: nextAction.reason,

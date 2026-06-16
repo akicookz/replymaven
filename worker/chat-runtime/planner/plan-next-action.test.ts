@@ -55,6 +55,10 @@ function createState(): PlannerLoopState {
     finalDraft: null,
     terminationReason: null,
     reformulationUsed: false,
+    queryTracker: {
+      normalizedQueries: new Map<string, number>(),
+      semanticGroups: [],
+    },
   };
 }
 
@@ -320,6 +324,44 @@ describe("fallbackPlanNextAction", () => {
           role: "bot",
           content:
             "I can forward this to the team. Before I do, could you share your email so they can follow up directly? If you'd rather keep it in chat, just say that.",
+        },
+        {
+          role: "visitor",
+          content: "No email, please keep it in chat.",
+        },
+      ],
+      currentMessage: "No email, please keep it in chat.",
+      turnPlan: {
+        ...createTurnPlan(),
+        intent: "handoff",
+        summary: "The visitor wants human help with an incomplete SEO Spider crawl.",
+      },
+      availableTools: [createTool()],
+      state,
+      maxSteps: 5,
+    });
+
+    expect(decision.nextAction.type).toBe("create_ticket");
+  });
+
+  test("persisted awaitingContactFields drives the flow even when the bot's prior wording is reworded/non-English", () => {
+    // No legacy phrasing in history for the regex to match — the contact
+    // request is known only from the persisted state. This proves the flow is
+    // decoupled from the bot's exact wording.
+    const state = createState();
+    state.awaitingContactFields = ["email"];
+    state.contactDeclined = true;
+
+    const decision = fallbackPlanNextAction({
+      conversationHistory: [
+        {
+          role: "visitor",
+          content: "The SEO Spider crawl is only finding 40 out of 300 pages.",
+        },
+        {
+          role: "bot",
+          content:
+            "¿Podrías compartir tu correo para que el equipo te responda? Si prefieres, seguimos por aquí.",
         },
         {
           role: "visitor",

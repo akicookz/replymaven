@@ -27,7 +27,7 @@ describe("documentation-only behavior", () => {
     expect(prompt).toContain("ALWAYS trust SOPs and FAQs over any other source");
   });
 
-  test("includes no-information template without exposing internal structure", () => {
+  test("gives no-information guidance without a fixed script or exposing internal structure", () => {
     const prompt = buildSupportSystemPrompt(
       mockSettings,
       "TestCompany",
@@ -36,8 +36,16 @@ describe("documentation-only behavior", () => {
       {},
     );
 
-    // Should use generic "documentation" language
-    expect(prompt).toContain("I've searched the documentation but couldn't find information about");
+    // Intent-based guidance (not a hardcoded English template) so the model can
+    // phrase the not-found + forward offer in the visitor's language and tone.
+    expect(prompt).toContain(
+      "searched the documentation but couldn't find information about the specific topic",
+    );
+    expect(prompt).toContain("do not recite a fixed script");
+    // The old hardcoded first-person template must be gone.
+    expect(prompt).not.toContain(
+      "I've searched the documentation but couldn't find information about [topic]",
+    );
     expect(prompt).toContain("Never provide undocumented suggestions, even if they seem helpful");
 
     // Should include instruction to hide internal structure

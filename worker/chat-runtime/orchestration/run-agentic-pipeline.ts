@@ -84,6 +84,12 @@ export interface AgenticTurnInput {
   guidelines: Array<{ condition: string; instruction: string }>;
   hasIndexedResources: boolean;
   visitorInfo: { name: string | null; email: string | null };
+  // Escalation continuity from the prior turn's persisted chat_state.
+  persistedContactState?: {
+    awaitingContactFields: Array<"name" | "email">;
+    awaitingHandoffConfirmation: boolean;
+    contactDeclined: boolean;
+  };
   existingTicket?: Record<string, string> | null;
   ticketFields?: TicketFieldSpec[] | null;
   agentHandbackInstructions?: string | null;
@@ -111,6 +117,10 @@ export interface AgenticTurnResult {
   // Capability-filter substitution happened — caller may want to skip
   // post-processing like [RESOLVED] handling.
   capabilityFallbackApplied: boolean;
+  // Post-loop escalation state to persist into chat_state for the next turn.
+  awaitingContactFields: Array<"name" | "email">;
+  awaitingHandoffConfirmation: boolean;
+  contactDeclined: boolean;
 }
 
 // Runs the planner loop and applies the capability-claim post-filter. Does
@@ -147,6 +157,7 @@ export async function runAgenticTurn(
     compiledFaqContext: input.compiledFaqContext,
     hasIndexedResources: input.hasIndexedResources,
     visitorInfo: input.visitorInfo,
+    persistedContactState: input.persistedContactState,
     existingTicket: input.existingTicket,
     ticketFields: input.ticketFields,
     agentHandbackInstructions: input.agentHandbackInstructions,
@@ -184,5 +195,9 @@ export async function runAgenticTurn(
     stepCount: loopResult.stepCount,
     terminationAction: loopResult.terminationAction,
     capabilityFallbackApplied,
+    awaitingContactFields: loopResult.loopState.awaitingContactFields,
+    awaitingHandoffConfirmation:
+      loopResult.loopState.awaitingHandoffConfirmation,
+    contactDeclined: loopResult.loopState.contactDeclined,
   };
 }

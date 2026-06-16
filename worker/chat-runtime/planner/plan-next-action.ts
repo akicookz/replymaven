@@ -356,6 +356,11 @@ function lastAssistantOfferedHandoff(
   );
 }
 
+// LEGACY fallback (only reached when the primary planner model fails). The
+// persisted `awaitingContactFields` signal is now the primary cue for an
+// in-progress contact request — see `contactFollowUp` below — so this regex
+// over the bot's own prior wording is a secondary safety net for conversations
+// predating the persisted state.
 function lastAssistantRequestedContact(
   conversationHistory: ConversationTurnMessage[],
 ): boolean {

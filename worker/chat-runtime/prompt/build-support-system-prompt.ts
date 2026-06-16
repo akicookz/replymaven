@@ -13,12 +13,11 @@ import {
   buildVisitorInfoSection,
 } from "./sections";
 
-export function buildSupportSystemPrompt(
-  settings: SupportPromptSettings,
-  projectName: string,
-  ragContext: string,
-  conversationSummary: string | null,
-  options?: SupportPromptOptions,
+// Single source of truth for how the bot's configured tone maps to a phrasing
+// instruction. Shared by the system prompt and the handoff-message renderer so
+// runtime-rendered messages match the same voice as freeform answers.
+export function resolveToneInstruction(
+  settings: Pick<SupportPromptSettings, "toneOfVoice" | "customTonePrompt">,
 ): string {
   const toneInstructions: Record<string, string> = {
     professional: "Be concise, clear, and solution-oriented.",
@@ -28,8 +27,19 @@ export function buildSupportSystemPrompt(
     custom: settings.customTonePrompt ?? "Be helpful and informative.",
   };
 
-  const tone =
-    toneInstructions[settings.toneOfVoice] ?? toneInstructions.professional;
+  return (
+    toneInstructions[settings.toneOfVoice] ?? toneInstructions.professional
+  );
+}
+
+export function buildSupportSystemPrompt(
+  settings: SupportPromptSettings,
+  projectName: string,
+  ragContext: string,
+  conversationSummary: string | null,
+  options?: SupportPromptOptions,
+): string {
+  const tone = resolveToneInstruction(settings);
 
   let prompt = "";
 
@@ -114,7 +124,7 @@ When you don't know:
 - Do not ask for name/email just because the answer is missing. Runtime decides whether handoff/contact collection is needed.
 
 When information is not found anywhere:
-- Use this template: "I've searched the documentation but couldn't find information about [topic]. I can forward this to our team to get you a proper answer. Would you like me to do that?"
+- Briefly acknowledge that you searched the documentation but couldn't find information about the specific topic, then offer to forward the question to the team for a proper answer and ask whether they'd like that. Phrase this naturally in the visitor's language and your configured tone — do not recite a fixed script.
 - Never provide undocumented suggestions, even if they seem helpful
 - Don't guess or provide general advice not found in the documentation
 - When referring to where information comes from, always say "the documentation" or "my knowledge base" - never mention SOPs, FAQs, guidelines, or tier-1 sources to the visitor

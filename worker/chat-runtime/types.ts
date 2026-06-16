@@ -175,6 +175,12 @@ export interface ConversationChatState {
   frustrationScore: number;
   lastIntent: string | null;
   pendingHandoffReason: string | null;
+  // Escalation continuity, persisted across turns so the runtime no longer
+  // has to regex-match its own (now LLM-rendered, possibly non-English)
+  // handoff wording back out of the transcript to know where it left off.
+  awaitingContactFields: Array<"name" | "email">;
+  awaitingHandoffConfirmation: boolean;
+  contactDeclined: boolean;
 }
 
 export function createInitialChatState(): ConversationChatState {
@@ -186,6 +192,9 @@ export function createInitialChatState(): ConversationChatState {
     frustrationScore: 0,
     lastIntent: null,
     pendingHandoffReason: null,
+    awaitingContactFields: [],
+    awaitingHandoffConfirmation: false,
+    contactDeclined: false,
   };
 }
 
@@ -218,6 +227,23 @@ export function parseChatState(
         typeof chat.pendingHandoffReason === "string"
           ? chat.pendingHandoffReason
           : null,
+      // Defensive reads: rows written before these fields existed simply
+      // parse to the defaults, so no migration is needed for the opaque
+      // `chat_state` JSON column.
+      awaitingContactFields: Array.isArray(chat.awaitingContactFields)
+        ? chat.awaitingContactFields.filter(
+            (field): field is "name" | "email" =>
+              field === "name" || field === "email",
+          )
+        : [],
+      awaitingHandoffConfirmation:
+        typeof chat.awaitingHandoffConfirmation === "boolean"
+          ? chat.awaitingHandoffConfirmation
+          : false,
+      contactDeclined:
+        typeof chat.contactDeclined === "boolean"
+          ? chat.contactDeclined
+          : false,
     };
   } catch {
     return createInitialChatState();
@@ -309,6 +335,28 @@ export interface PlannerDecision {
   goal: string;
   nextAction: PlannerNextAction;
 }
+
+// What the runtime decides to say at an escalation step, before any wording is
+// chosen. The runtime owns this decision (whether to hand off, which contact
+// fields to collect, whether the forward already happened); a scoped model call
+// renders it into the bot's tone and the visitor's language. `agentLabel` is the
+// already-resolved human-team label (e.g. settings.agentName ?? "the team").
+export type HandoffRenderDirective =
+  | {
+      kind: "offer_handoff";
+      hasIssueContext: boolean;
+      agentLabel: string;
+    }
+  | {
+      kind: "collect_contact";
+      missingFields: Array<"name" | "email">;
+      agentLabel: string;
+    }
+  | {
+      kind: "ticket_created";
+      variant: "appended" | "created" | "already_forwarded";
+      agentLabel: string;
+    };
 
 export interface PlannerActionHistoryEntry {
   type: PlannerActionType;

@@ -787,6 +787,11 @@ export async function handleWidgetMessageTurn(
           name: conversation.visitorName,
           email: conversation.visitorEmail,
         },
+        persistedContactState: {
+          awaitingContactFields: chatState.awaitingContactFields,
+          awaitingHandoffConfirmation: chatState.awaitingHandoffConfirmation,
+          contactDeclined: chatState.contactDeclined,
+        },
         existingTicket,
         ticketFields,
         agentHandbackInstructions,
@@ -809,6 +814,15 @@ export async function handleWidgetMessageTurn(
         lastToolError: loopResult.lastToolError,
         stepCount: loopResult.stepCount,
         detectedInternalTokens: loopResult.detectedInternalTokens,
+      };
+
+      // Persist escalation continuity so the next turn resumes the handoff
+      // without regex-matching the bot's own (now LLM-rendered) wording.
+      chatState = {
+        ...chatState,
+        awaitingContactFields: loopResult.awaitingContactFields,
+        awaitingHandoffConfirmation: loopResult.awaitingHandoffConfirmation,
+        contactDeclined: loopResult.contactDeclined,
       };
 
       logInfo(
