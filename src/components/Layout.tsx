@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Outlet, Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -9,11 +9,13 @@ import {
   Palette,
   LogOut,
   ChevronDown,
+  ChevronsUpDown,
   Plus,
   Check,
   PanelLeftClose,
   User,
   Users,
+  Building2,
   CreditCard,
   X,
   Zap,
@@ -28,6 +30,7 @@ import ProfileSetupDialog from "@/components/ProfileSetupDialog";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { useSubscription } from "@/hooks/use-subscription";
+import { useTeams } from "@/hooks/use-teams";
 import { formatPlanName, getTrialDaysRemaining, usagePercent } from "@/lib/plan";
 import {
   Popover,
@@ -58,7 +61,11 @@ function Layout() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: session } = useSession();
   const { data: subData } = useSubscription();
+  const { data: teamsData } = useTeams();
+  const queryClient = useQueryClient();
   const [selectorOpen, setSelectorOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [switchingTeam, setSwitchingTeam] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [forceProfileSetup, setForceProfileSetup] = useState(false);
@@ -201,6 +208,31 @@ function Layout() {
     }
   }
 
+  const teams = teamsData?.teams ?? [];
+  const activeTeam = teams.find((t) => t.isActive);
+
+  async function switchTeam(teamId: string) {
+    setTeamOpen(false);
+    if (switchingTeam || teamId === teamsData?.activeTeamId) return;
+    setSwitchingTeam(true);
+    try {
+      const res = await fetch("/api/teams/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teamId }),
+      });
+      if (!res.ok) throw new Error("Failed to switch team");
+      // Projects, conversations, settings, billing, and team all change with the
+      // active team — drop the whole cache and land on the new team's dashboard.
+      queryClient.clear();
+      navigate("/app");
+    } catch {
+      // Leave the user where they are on failure.
+    } finally {
+      setSwitchingTeam(false);
+    }
+  }
+
   async function handleSignOut() {
     await signOut();
     navigate("/");
@@ -303,6 +335,58 @@ function Layout() {
             </button>
           )}
         </div>
+
+        {/* Team Switcher (only when the user belongs to more than one team) */}
+        {teams.length > 1 && !collapsed && (
+          <div className="px-3 pb-2">
+            <Popover open={teamOpen} onOpenChange={setTeamOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  disabled={switchingTeam}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-accent transition-colors disabled:opacity-60"
+                >
+                  <Building2 className="w-4 h-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate font-medium flex-1 text-left text-foreground text-[13px]">
+                    {activeTeam?.name ?? "Select team"}
+                  </span>
+                  <ChevronsUpDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-60 p-1">
+                <p className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Teams
+                </p>
+                <div className="space-y-0.5">
+                  {teams.map((team) => (
+                    <button
+                      key={team.id}
+                      onClick={() => switchTeam(team.id)}
+                      className={cn(
+                        "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
+                        team.isActive
+                          ? "bg-accent text-foreground font-medium"
+                          : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                      )}
+                    >
+                      <span className="flex-1 truncate">
+                        {team.name}
+                        {team.own && (
+                          <span className="text-muted-foreground"> (you)</span>
+                        )}
+                      </span>
+                      <span className="text-[11px] capitalize text-muted-foreground shrink-0">
+                        {team.role}
+                      </span>
+                      {team.isActive && (
+                        <Check className="w-4 h-4 shrink-0 text-primary" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        )}
 
         {/* Project Selector */}
         {currentProject && projects && !collapsed && (

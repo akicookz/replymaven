@@ -351,6 +351,13 @@
       "when": 1781652663500,
       "tag": "0049_equal_johnny_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1781656729086,
+      "tag": "0050_brave_viper",
+      "breakpoints": true
     }
   ]
 }

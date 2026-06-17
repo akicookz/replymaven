@@ -560,6 +560,11 @@ export const updateTeamMemberRoleSchema = z.object({
   projectIds: z.array(z.string()).max(500).optional(),
 });
 
+export const switchTeamSchema = z.object({
+  // The owner id of the team to activate (the user's own id = their own team).
+  teamId: z.string().min(1),
+});
+
 // ─── Visitor Bans ────────────────────────────────────────────────────────────
 export const banVisitorSchema = z.object({
   visitorId: z.string().min(1).max(100),

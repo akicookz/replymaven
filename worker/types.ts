@@ -69,6 +69,11 @@ export interface HonoAppContext {
     db: DrizzleD1Database<Record<string, unknown>>;
     subscription: SubscriptionRow | null;
     planLimits: PlanLimits | null;
+    // Active-team context (resolved + cached per request). effectiveUserId is the
+    // active team's owner id.
     effectiveUserId: string | null;
+    activeRole: "owner" | "admin" | "member" | null;
+    activeAccessAllProjects: boolean;
+    activeProjectIds: string[] | null;
   };
 }

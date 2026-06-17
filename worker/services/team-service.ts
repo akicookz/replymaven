@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, and, or, inArray } from "drizzle-orm";
+import { eq, and, or, inArray, desc } from "drizzle-orm";
 import {
   teamMembers,
   teamMemberProjects,
@@ -140,10 +140,81 @@ export class TeamService {
    * Resolves the effective userId for billing purposes.
    * If the user is a team member, returns the owner's userId.
    * Otherwise returns the user's own userId.
+   *
+   * @deprecated Single-team resolution. The team switcher resolves the active
+   * team via {@link getMembershipForOwner} / team-context instead.
    */
   async getEffectiveUserId(userId: string): Promise<string> {
     const membership = await this.getTeamMembership(userId);
     return membership ? membership.ownerId : userId;
+  }
+
+  /** The user's accepted membership in one specific owner's team, if any. */
+  async getMembershipForOwner(
+    userId: string,
+    ownerId: string,
+  ): Promise<{ id: string; role: "admin" | "member"; accessAllProjects: boolean } | null> {
+    const rows = await this.db
+      .select()
+      .from(teamMembers)
+      .where(
+        and(
+          eq(teamMembers.userId, userId),
+          eq(teamMembers.ownerId, ownerId),
+          eq(teamMembers.status, "accepted"),
+        ),
+      )
+      .limit(1);
+    if (!rows[0]) return null;
+    return {
+      id: rows[0].id,
+      role: rows[0].role as "admin" | "member",
+      accessAllProjects: rows[0].accessAllProjects,
+    };
+  }
+
+  /** All teams the user is an accepted member of, most-recently-joined first. */
+  async getMembershipsForUser(userId: string): Promise<TeamMemberRow[]> {
+    return this.db
+      .select()
+      .from(teamMembers)
+      .where(
+        and(
+          eq(teamMembers.userId, userId),
+          eq(teamMembers.status, "accepted"),
+        ),
+      )
+      // id as a stable tiebreaker so same-second joins order deterministically.
+      .orderBy(desc(teamMembers.acceptedAt), desc(teamMembers.id));
+  }
+
+  /** The user's persisted active-team preference (null = not yet chosen). */
+  async getActiveTeamId(userId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ activeTeamId: users.activeTeamId })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    return rows[0]?.activeTeamId ?? null;
+  }
+
+  /** Persist the user's active-team choice (their own id for their own team). */
+  async setActiveTeamId(userId: string, teamId: string | null): Promise<void> {
+    await this.db
+      .update(users)
+      .set({ activeTeamId: teamId })
+      .where(eq(users.id, userId));
+  }
+
+  /** Basic display info for a set of owner ids (for the team switcher). */
+  async getOwnersInfo(
+    ownerIds: string[],
+  ): Promise<{ id: string; name: string; email: string }[]> {
+    if (ownerIds.length === 0) return [];
+    return this.db
+      .select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(inArray(users.id, ownerIds));
   }
 
   async getSeatCount(ownerId: string): Promise<number> {

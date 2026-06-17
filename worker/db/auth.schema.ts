@@ -17,6 +17,12 @@ export const users = sqliteTable("users", {
   profileSetupDismissedAt: integer("profile_setup_dismissed_at", {
     mode: "timestamp",
   }),
+  // Team switcher: the owner id of the team the user is currently acting in.
+  // null = no explicit choice yet (resolved by smart default); equal to the
+  // user's own id = their own team; another user's id = a team they're a member
+  // of. Validated against live membership on every resolution. No FK — a dangling
+  // value self-heals to the own team.
+  activeTeamId: text("active_team_id"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .default(sql`(current_timestamp)`)
     .notNull(),

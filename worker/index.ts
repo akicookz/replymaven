@@ -55,6 +55,10 @@ import {
 } from "./services/encryption-service";
 import { BillingService } from "./services/billing-service";
 import { TeamService } from "./services/team-service";
+import {
+  getTeamContext,
+  invalidateTeamContext,
+} from "./services/team-context";
 import { VisitorBanService } from "./services/visitor-ban-service";
 import { handleWidgetMessageTurn } from "./chat-runtime/orchestration/handle-widget-message-turn";
 import { handleCopilotTurn } from "./chat-runtime/orchestration/handle-copilot-turn";
@@ -111,6 +115,7 @@ import {
   createCheckoutSchema,
   inviteTeamMemberSchema,
   updateTeamMemberRoleSchema,
+  switchTeamSchema,
   updateProfileSchema,
   requestEmailChangeSchema,
   verifyEmailChangeSchema,
@@ -521,21 +526,14 @@ const projectAccessMiddleware: MiddlewareHandler<HonoAppContext> = async (
   const projectId = c.req.param("id");
   if (!projectId) return next();
 
-  const effectiveUserId = c.get("effectiveUserId") ?? user.id;
-  // The account owner (not a team member) always has full access.
-  if (user.id === effectiveUserId) return next();
+  // Owners, admins, and members with account-wide access pass through.
+  const role = c.get("activeRole");
+  if (role !== "member" || c.get("activeAccessAllProjects")) return next();
 
-  const teamService = new TeamService(c.get("db"));
-  const membership = await teamService.getTeamMembership(user.id);
-  if (!membership) return next();
-  if (membership.role === "admin" || membership.accessAllProjects) return next();
-
-  const allowed = await teamService.memberHasProjectAccess(
-    membership.id,
-    projectId,
-  );
-  if (!allowed) return c.json({ error: "Not found" }, 404);
-  return next();
+  // Scoped member: allow only their granted projects (resolved from cache).
+  const allowed = c.get("activeProjectIds");
+  if (allowed && allowed.includes(projectId)) return next();
+  return c.json({ error: "Not found" }, 404);
 };
 
 const app = new Hono<HonoAppContext>()
@@ -2157,9 +2155,14 @@ const app = new Hono<HonoAppContext>()
         const isOwner = candidate.id === project.userId;
         let hasAccess = isOwner;
         if (!isOwner) {
+          // Sender access is about this specific project's owner, independent of
+          // whichever team the sender currently has active.
           const teamService = new TeamService(db);
-          const membership = await teamService.getTeamMembership(candidate.id);
-          hasAccess = membership?.ownerId === project.userId;
+          const membership = await teamService.getMembershipForOwner(
+            candidate.id,
+            project.userId,
+          );
+          hasAccess = membership !== null;
         }
         if (hasAccess) {
           agentUser = {
@@ -2381,18 +2384,26 @@ const app = new Hono<HonoAppContext>()
     c.set("user", session?.user ?? null);
     c.set("session", session?.session ?? null);
 
-    // Set billing context defaults
+    // Set billing + active-team context defaults
     c.set("subscription", null);
     c.set("planLimits", null);
     c.set("effectiveUserId", null);
+    c.set("activeRole", null);
+    c.set("activeAccessAllProjects", true);
+    c.set("activeProjectIds", null);
 
-    // Resolve subscription + team membership for authenticated users
+    // Resolve the active team (KV-cached, 15-min TTL) + subscription.
     if (session?.user) {
-      const teamService = new TeamService(db);
-      const effectiveUserId = await teamService.getEffectiveUserId(
+      const teamContext = await getTeamContext(
+        c.env.CONVERSATIONS_CACHE,
+        db,
         session.user.id,
       );
+      const effectiveUserId = teamContext.effectiveUserId;
       c.set("effectiveUserId", effectiveUserId);
+      c.set("activeRole", teamContext.activeRole);
+      c.set("activeAccessAllProjects", teamContext.accessAllProjects);
+      c.set("activeProjectIds", teamContext.projectIds);
 
       const billingService = new BillingService(db, c.env);
       const subscription =
@@ -2771,14 +2782,17 @@ const app = new Hono<HonoAppContext>()
       subscription,
     );
     const seatCount = await teamService.getSeatCount(effectiveUserId);
-    const membership = await teamService.getTeamMembership(user.id);
+    // Role reflects the active team (resolved by the middleware).
+    const activeRole = c.get("activeRole") ?? "owner";
 
-    // If the user is not already an accepted team member, surface any pending
-    // invite so the client can route them to /app/team/accept/:id after login
-    // instead of the owner onboarding flow.
-    const pendingInvite = membership
-      ? null
-      : await teamService.getPendingInviteForEmail(user.email);
+    // If the user hasn't accepted any team invite yet, surface a pending one so
+    // the client can route them to /app/team/accept/:id after login instead of
+    // the owner onboarding flow.
+    const memberships = await teamService.getMembershipsForUser(user.id);
+    const pendingInvite =
+      memberships.length > 0
+        ? null
+        : await teamService.getPendingInviteForEmail(user.email);
 
     if (!subscription) {
       return c.json({
@@ -2788,7 +2802,7 @@ const app = new Hono<HonoAppContext>()
         usagePeriodEnd: null,
         limits: null,
         seats: { current: 1, max: 0 },
-        role: membership ? membership.role : "owner",
+        role: activeRole,
         pendingInvite: pendingInvite ? { id: pendingInvite.id } : null,
       });
     }
@@ -2818,7 +2832,7 @@ const app = new Hono<HonoAppContext>()
         current: seatCount,
         max: limits.maxSeats,
       },
-      role: membership ? membership.role : "owner",
+      role: activeRole,
       pendingInvite: pendingInvite ? { id: pendingInvite.id } : null,
     });
   })
@@ -3170,12 +3184,9 @@ const app = new Hono<HonoAppContext>()
     const members = await teamService.getAllMembers(effectiveUserId);
 
     // Per-member project scope is only meaningful to (and only managed by)
-    // owners and admins — don't expose it to regular members viewing the roster.
-    let isPrivileged = user.id === effectiveUserId;
-    if (!isPrivileged) {
-      const membership = await teamService.getTeamMembership(user.id);
-      isPrivileged = membership?.role === "admin";
-    }
+    // owners and admins of the active team — don't expose it to regular members.
+    const activeRole = c.get("activeRole");
+    const isPrivileged = activeRole === "owner" || activeRole === "admin";
     const projectMap = isPrivileged
       ? await teamService.getMemberProjectMap(effectiveUserId)
       : {};
@@ -3191,11 +3202,10 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    // Only owner and admin can invite
+    // Only owner and admin of the active team can invite
     const db = c.get("db");
     const teamService = new TeamService(db);
-    const membership = await teamService.getTeamMembership(user.id);
-    if (membership && membership.role === "member") {
+    if (c.get("activeRole") === "member") {
       return c.json(
         { error: "Only owners and admins can invite members" },
         403,
@@ -3290,6 +3300,8 @@ const app = new Hono<HonoAppContext>()
 
     try {
       await teamService.acceptInvite(inviteId, user.id, user.email);
+      // New membership — recompute the user's team context next request.
+      await invalidateTeamContext(c.env.CONVERSATIONS_CACHE, user.id);
       return c.json({ ok: true });
     } catch (err) {
       const message =
@@ -3303,13 +3315,13 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    // Only owner can change roles
+    // Only the owner of the active team can change roles
     const db = c.get("db");
     const teamService = new TeamService(db);
-    const membership = await teamService.getTeamMembership(user.id);
-    if (membership) {
+    if (c.get("activeRole") !== "owner") {
       return c.json({ error: "Only the account owner can change roles" }, 403);
     }
+    const effectiveUserId = c.get("effectiveUserId") ?? user.id;
 
     const body = await c.req.json();
     const parsed = validate(updateTeamMemberRoleSchema, body);
@@ -3318,7 +3330,7 @@ const app = new Hono<HonoAppContext>()
     try {
       const memberId = c.req.param("memberId");
       const member = await teamService.updateMemberRole(
-        user.id,
+        effectiveUserId,
         memberId,
         parsed.data.role,
       );
@@ -3333,11 +3345,11 @@ const app = new Hono<HonoAppContext>()
         const scopedProjectIds = accessAllProjects
           ? []
           : await teamService.filterOwnedProjectIds(
-              user.id,
+              effectiveUserId,
               parsed.data.projectIds ?? [],
             );
         await teamService.setMemberProjectAccess(
-          user.id,
+          effectiveUserId,
           memberId,
           accessAllProjects,
           scopedProjectIds,
@@ -3345,6 +3357,10 @@ const app = new Hono<HonoAppContext>()
       }
 
       const updated = await teamService.getMemberById(memberId);
+      // Role/access changed — drop the member's cached team context.
+      if (updated?.userId) {
+        await invalidateTeamContext(c.env.CONVERSATIONS_CACHE, updated.userId);
+      }
       return c.json(updated ?? member);
     } catch (err) {
       const message =
@@ -3358,11 +3374,10 @@ const app = new Hono<HonoAppContext>()
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-    // Owner and admin can remove members
+    // Owner and admin of the active team can remove members
     const db = c.get("db");
     const teamService = new TeamService(db);
-    const membership = await teamService.getTeamMembership(user.id);
-    if (membership && membership.role === "member") {
+    if (c.get("activeRole") === "member") {
       return c.json(
         { error: "Only owners and admins can remove members" },
         403,
@@ -3370,15 +3385,88 @@ const app = new Hono<HonoAppContext>()
     }
 
     const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+    const memberId = c.req.param("memberId");
 
     try {
-      await teamService.revokeMember(effectiveUserId, c.req.param("memberId"));
+      // Capture the member's user id before revoking so we can evict their
+      // cached team context immediately (the "revalidate on kick" path).
+      const member = await teamService.getMemberById(memberId);
+      await teamService.revokeMember(effectiveUserId, memberId);
+      if (member?.userId) {
+        await invalidateTeamContext(c.env.CONVERSATIONS_CACHE, member.userId);
+      }
       return c.json({ ok: true });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to remove member";
       return c.json({ error: message }, 400);
     }
+  })
+
+  // ─── Team Switcher: list the teams the user can act in ──────────────────────
+  .get("/api/teams", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const teamService = new TeamService(db);
+    const memberships = await teamService.getMembershipsForUser(user.id);
+    const owners = await teamService.getOwnersInfo(
+      memberships.map((m) => m.ownerId),
+    );
+    const ownerById = new Map(owners.map((o) => [o.id, o]));
+    const activeTeamId = c.get("effectiveUserId") ?? user.id;
+
+    const teams = [
+      {
+        id: user.id,
+        name: user.name || user.email || "My account",
+        role: "owner" as const,
+        own: true,
+        isActive: activeTeamId === user.id,
+      },
+      ...memberships.map((m) => {
+        const owner = ownerById.get(m.ownerId);
+        return {
+          id: m.ownerId,
+          name: owner?.name || owner?.email || "Team",
+          role: m.role as "admin" | "member",
+          own: false,
+          isActive: activeTeamId === m.ownerId,
+        };
+      }),
+    ];
+
+    return c.json({ teams, activeTeamId });
+  })
+
+  // ─── Team Switcher: change the active team ──────────────────────────────────
+  .post("/api/teams/switch", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const body = await c.req.json();
+    const parsed = validate(switchTeamSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const teamService = new TeamService(db);
+    const teamId = parsed.data.teamId;
+
+    // Validate: own team, or a team the user is an accepted member of.
+    if (teamId !== user.id) {
+      const membership = await teamService.getMembershipForOwner(
+        user.id,
+        teamId,
+      );
+      if (!membership) {
+        return c.json({ error: "You are not a member of that team" }, 403);
+      }
+    }
+
+    await teamService.setActiveTeamId(user.id, teamId);
+    await invalidateTeamContext(c.env.CONVERSATIONS_CACHE, user.id);
+    return c.json({ ok: true });
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -3397,16 +3485,9 @@ const app = new Hono<HonoAppContext>()
     // Scoped team members may only read stats for a specific project they can
     // access — never the account-wide aggregate (which would span projects they
     // weren't granted).
-    if (user.id !== effectiveUserId) {
-      const teamService = new TeamService(db);
-      const membership = await teamService.getTeamMembership(user.id);
-      if (
-        membership &&
-        membership.role !== "admin" &&
-        !membership.accessAllProjects &&
-        (!projectId ||
-          !(await teamService.memberHasProjectAccess(membership.id, projectId)))
-      ) {
+    if (c.get("activeRole") === "member" && !c.get("activeAccessAllProjects")) {
+      const allowed = c.get("activeProjectIds") ?? [];
+      if (!projectId || !allowed.includes(projectId)) {
         return c.json({ error: "Not found" }, 404);
       }
     }
@@ -3431,19 +3512,9 @@ const app = new Hono<HonoAppContext>()
     const allProjects = await service.getProjectsByUserId(effectiveUserId);
 
     // A team member scoped to specific projects only sees those.
-    if (user.id !== effectiveUserId) {
-      const teamService = new TeamService(db);
-      const membership = await teamService.getTeamMembership(user.id);
-      if (
-        membership &&
-        membership.role !== "admin" &&
-        !membership.accessAllProjects
-      ) {
-        const allowed = new Set(
-          await teamService.getMemberProjectIds(membership.id),
-        );
-        return c.json(allProjects.filter((p) => allowed.has(p.id)));
-      }
+    if (c.get("activeRole") === "member" && !c.get("activeAccessAllProjects")) {
+      const allowed = new Set(c.get("activeProjectIds") ?? []);
+      return c.json(allProjects.filter((p) => allowed.has(p.id)));
     }
 
     return c.json(allProjects);

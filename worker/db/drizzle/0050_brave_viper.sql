@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `active_team_id` text;
