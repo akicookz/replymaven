@@ -15,6 +15,7 @@ import {
   ticketConfig,
   projects,
   teamMembers,
+  teamMemberProjects,
   type TicketRow,
   type TicketConfigRow,
 } from "../db";
@@ -470,8 +471,10 @@ export class TicketService {
     // Accepted team members under this owner
     const memberRows = await this.db
       .select({
+        id: teamMembers.id,
         userId: teamMembers.userId,
         role: teamMembers.role,
+        accessAllProjects: teamMembers.accessAllProjects,
       })
       .from(teamMembers)
       .where(
@@ -481,7 +484,30 @@ export class TicketService {
         ),
       );
 
-    const memberUserIds = memberRows
+    // Members scoped to specific projects are only assignable on the projects
+    // they were granted.
+    const scopedMemberIds = memberRows
+      .filter((m) => m.role !== "admin" && !m.accessAllProjects)
+      .map((m) => m.id);
+    let grantedScopedIds = new Set<string>();
+    if (scopedMemberIds.length > 0) {
+      const grantRows = await this.db
+        .select({ teamMemberId: teamMemberProjects.teamMemberId })
+        .from(teamMemberProjects)
+        .where(
+          and(
+            eq(teamMemberProjects.projectId, projectId),
+            inArray(teamMemberProjects.teamMemberId, scopedMemberIds),
+          ),
+        );
+      grantedScopedIds = new Set(grantRows.map((r) => r.teamMemberId));
+    }
+    const accessibleMembers = memberRows.filter(
+      (m) =>
+        m.role === "admin" || m.accessAllProjects || grantedScopedIds.has(m.id),
+    );
+
+    const memberUserIds = accessibleMembers
       .map((m) => m.userId)
       .filter((v): v is string => Boolean(v));
 
@@ -498,7 +524,7 @@ export class TicketService {
         .where(inArray(users.id, memberUserIds));
 
       const roleByUserId = new Map(
-        memberRows
+        accessibleMembers
           .filter((m) => m.userId)
           .map((m) => [m.userId as string, m.role as "admin" | "member"]),
       );

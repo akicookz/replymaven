@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
@@ -502,6 +502,41 @@ async function fetchWebsiteMarkdownWithBrowserApi(
     return null;
   }
 }
+
+/**
+ * Enforces per-project access for team members scoped to specific projects.
+ * Owners and admins (and members with account-wide access) pass through; a
+ * scoped member hitting a project they weren't granted gets a 404, matching
+ * the "not found" response used elsewhere for cross-account access. Mounted on
+ * `/api/projects/:id` and `/api/projects/:id/*`; the per-route handlers still
+ * perform their own ownership checks (defense in depth).
+ */
+const projectAccessMiddleware: MiddlewareHandler<HonoAppContext> = async (
+  c,
+  next,
+) => {
+  const user = c.get("user");
+  if (!user) return next(); // handler returns 401
+
+  const projectId = c.req.param("id");
+  if (!projectId) return next();
+
+  const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+  // The account owner (not a team member) always has full access.
+  if (user.id === effectiveUserId) return next();
+
+  const teamService = new TeamService(c.get("db"));
+  const membership = await teamService.getTeamMembership(user.id);
+  if (!membership) return next();
+  if (membership.role === "admin" || membership.accessAllProjects) return next();
+
+  const allowed = await teamService.memberHasProjectAccess(
+    membership.id,
+    projectId,
+  );
+  if (!allowed) return c.json({ error: "Not found" }, 404);
+  return next();
+};
 
 const app = new Hono<HonoAppContext>()
   // ─── Global CORS ────────────────────────────────────────────────────────────
@@ -3133,7 +3168,22 @@ const app = new Hono<HonoAppContext>()
     const effectiveUserId = c.get("effectiveUserId") ?? user.id;
 
     const members = await teamService.getAllMembers(effectiveUserId);
-    return c.json({ members, ownerId: effectiveUserId });
+
+    // Per-member project scope is only meaningful to (and only managed by)
+    // owners and admins — don't expose it to regular members viewing the roster.
+    let isPrivileged = user.id === effectiveUserId;
+    if (!isPrivileged) {
+      const membership = await teamService.getTeamMembership(user.id);
+      isPrivileged = membership?.role === "admin";
+    }
+    const projectMap = isPrivileged
+      ? await teamService.getMemberProjectMap(effectiveUserId)
+      : {};
+    const membersWithProjects = members.map((m) => ({
+      ...m,
+      projectIds: projectMap[m.id] ?? [],
+    }));
+    return c.json({ members: membersWithProjects, ownerId: effectiveUserId });
   })
 
   // ─── Invite Team Member ─────────────────────────────────────────────────────
@@ -3175,11 +3225,24 @@ const app = new Hono<HonoAppContext>()
       );
     }
 
+    // Resolve project-access scope. Admins always get account-wide access;
+    // members may be limited to a set of projects owned by this account.
+    const accessAllProjects =
+      parsed.data.role === "admin" ? true : parsed.data.accessAllProjects ?? true;
+    const scopedProjectIds = accessAllProjects
+      ? []
+      : await teamService.filterOwnedProjectIds(
+          effectiveUserId,
+          parsed.data.projectIds ?? [],
+        );
+
     try {
       const member = await teamService.inviteMember(
         effectiveUserId,
         parsed.data.email,
         parsed.data.role,
+        accessAllProjects,
+        scopedProjectIds,
       );
 
       // Send invitation email
@@ -3253,12 +3316,36 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     try {
+      const memberId = c.req.param("memberId");
       const member = await teamService.updateMemberRole(
         user.id,
-        c.req.param("memberId"),
+        memberId,
         parsed.data.role,
       );
-      return c.json(member);
+
+      // Update project-access scope when provided (admins stay account-wide).
+      if (
+        parsed.data.role !== "admin" &&
+        (parsed.data.accessAllProjects !== undefined ||
+          parsed.data.projectIds !== undefined)
+      ) {
+        const accessAllProjects = parsed.data.accessAllProjects ?? false;
+        const scopedProjectIds = accessAllProjects
+          ? []
+          : await teamService.filterOwnedProjectIds(
+              user.id,
+              parsed.data.projectIds ?? [],
+            );
+        await teamService.setMemberProjectAccess(
+          user.id,
+          memberId,
+          accessAllProjects,
+          scopedProjectIds,
+        );
+      }
+
+      const updated = await teamService.getMemberById(memberId);
+      return c.json(updated ?? member);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to update role";
@@ -3306,10 +3393,32 @@ const app = new Hono<HonoAppContext>()
     const effectiveUserId = c.get("effectiveUserId") ?? user.id;
     const db = c.get("db");
     const projectId = c.req.query("projectId");
+
+    // Scoped team members may only read stats for a specific project they can
+    // access — never the account-wide aggregate (which would span projects they
+    // weren't granted).
+    if (user.id !== effectiveUserId) {
+      const teamService = new TeamService(db);
+      const membership = await teamService.getTeamMembership(user.id);
+      if (
+        membership &&
+        membership.role !== "admin" &&
+        !membership.accessAllProjects &&
+        (!projectId ||
+          !(await teamService.memberHasProjectAccess(membership.id, projectId)))
+      ) {
+        return c.json({ error: "Not found" }, 404);
+      }
+    }
+
     const dashboardService = new DashboardService(db);
     const stats = await dashboardService.getStats(effectiveUserId, projectId);
     return c.json(stats);
   })
+
+  // ─── Per-project access enforcement (scoped team members) ────────────────────
+  .use("/api/projects/:id", projectAccessMiddleware)
+  .use("/api/projects/:id/*", projectAccessMiddleware)
 
   // ─── Projects CRUD ──────────────────────────────────────────────────────────
   .get("/api/projects", async (c) => {
@@ -3319,8 +3428,25 @@ const app = new Hono<HonoAppContext>()
     const effectiveUserId = c.get("effectiveUserId") ?? user.id;
     const db = c.get("db");
     const service = new ProjectService(db);
-    const projects = await service.getProjectsByUserId(effectiveUserId);
-    return c.json(projects);
+    const allProjects = await service.getProjectsByUserId(effectiveUserId);
+
+    // A team member scoped to specific projects only sees those.
+    if (user.id !== effectiveUserId) {
+      const teamService = new TeamService(db);
+      const membership = await teamService.getTeamMembership(user.id);
+      if (
+        membership &&
+        membership.role !== "admin" &&
+        !membership.accessAllProjects
+      ) {
+        const allowed = new Set(
+          await teamService.getMemberProjectIds(membership.id),
+        );
+        return c.json(allProjects.filter((p) => allowed.has(p.id)));
+      }
+    }
+
+    return c.json(allProjects);
   })
   .get("/api/projects/:id", async (c) => {
     const user = c.get("user");

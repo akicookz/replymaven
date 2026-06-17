@@ -761,6 +761,13 @@ export const teamMembers = sqliteTable(
     status: text("status", { enum: ["pending", "accepted", "revoked"] })
       .notNull()
       .default("pending"),
+    // When true the member can access every project under the owner. When false
+    // access is limited to the projects listed in team_member_projects. Admins
+    // always have full access regardless of this flag. Defaults true so existing
+    // members keep the account-wide access they had before per-project scoping.
+    accessAllProjects: integer("access_all_projects", { mode: "boolean" })
+      .notNull()
+      .default(true),
     invitedAt: integer("invited_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -775,6 +782,37 @@ export const teamMembers = sqliteTable(
 
 export type TeamMemberRow = typeof teamMembers.$inferSelect;
 export type NewTeamMemberRow = typeof teamMembers.$inferInsert;
+
+// ─── Team Member Project Access ─────────────────────────────────────────────────
+// Maps a scoped team member (accessAllProjects = false) to the specific projects
+// they're allowed to access. Rows are cascade-deleted with the member or project.
+
+export const teamMemberProjects = sqliteTable(
+  "team_member_projects",
+  {
+    id: text("id").primaryKey(),
+    teamMemberId: text("team_member_id")
+      .notNull()
+      .references(() => teamMembers.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_team_member_projects_unique").on(
+      table.teamMemberId,
+      table.projectId,
+    ),
+    index("idx_team_member_projects_member").on(table.teamMemberId),
+    index("idx_team_member_projects_project").on(table.projectId),
+  ],
+);
+
+export type TeamMemberProjectRow = typeof teamMemberProjects.$inferSelect;
+export type NewTeamMemberProjectRow = typeof teamMemberProjects.$inferInsert;
 
 // ─── Usage ────────────────────────────────────────────────────────────────────
 

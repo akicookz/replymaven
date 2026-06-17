@@ -549,10 +549,15 @@ export const verifyEmailChangeSchema = z.object({
 export const inviteTeamMemberSchema = z.object({
   email: z.string().email("Must be a valid email address"),
   role: z.enum(["admin", "member"]),
+  // Project-access scope (members only; ignored for admins). Omitted = all projects.
+  accessAllProjects: z.boolean().optional(),
+  projectIds: z.array(z.string()).max(500).optional(),
 });
 
 export const updateTeamMemberRoleSchema = z.object({
   role: z.enum(["admin", "member"]),
+  accessAllProjects: z.boolean().optional(),
+  projectIds: z.array(z.string()).max(500).optional(),
 });
 
 // ─── Visitor Bans ────────────────────────────────────────────────────────────

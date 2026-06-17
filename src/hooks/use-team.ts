@@ -7,6 +7,9 @@ interface TeamMember {
   email: string;
   role: "admin" | "member";
   status: "pending" | "accepted" | "revoked";
+  // Account-wide access (always true for admins) vs. limited to `projectIds`.
+  accessAllProjects: boolean;
+  projectIds: string[];
   invitedAt: string;
   acceptedAt: string | null;
 }
