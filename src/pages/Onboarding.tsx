@@ -15,8 +15,11 @@ import {
   CreditCard,
   Sparkles,
   X,
+  LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/Logo";
+import { signOut } from "@/lib/auth-client";
 import { PricingCardsSelect, BillingToggle, getCtaLabel } from "@/components/PricingCards";
 import {
   Select,
@@ -1224,11 +1227,38 @@ function Step5({
   );
 }
 
+// ─── Onboarding Header ────────────────────────────────────────────────────────
+
+function OnboardingHeader() {
+  const navigate = useNavigate();
+
+  async function handleSignOut() {
+    await signOut();
+    navigate("/");
+  }
+
+  return (
+    <header className="flex items-center justify-between px-6 py-4">
+      <Logo size="sm" />
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={handleSignOut}
+        className="text-muted-foreground hover:text-foreground"
+      >
+        <LogOut className="w-4 h-4 mr-2" />
+        Sign out
+      </Button>
+    </header>
+  );
+}
+
 // ─── Onboarding Skeleton ──────────────────────────────────────────────────────
 
 function OnboardingSkeleton() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <OnboardingHeader />
       <main className="flex-1 flex flex-col px-6">
         <div className="flex-[2] min-h-0 shrink" aria-hidden />
         <div className={`${ONBOARDING_CONTENT_CLASS} space-y-8`}>
@@ -1563,6 +1593,7 @@ function Onboarding() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <OnboardingHeader />
       <main className="flex-1 flex flex-col px-6">
         <div className="flex-[2] min-h-0 shrink" aria-hidden />
         <div className={ONBOARDING_CONTENT_CLASS}>
