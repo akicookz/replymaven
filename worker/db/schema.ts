@@ -865,6 +865,136 @@ export const apiKeys = sqliteTable(
 export type ApiKeyRow = typeof apiKeys.$inferSelect;
 export type NewApiKeyRow = typeof apiKeys.$inferInsert;
 
+// ─── MCP OAuth ───────────────────────────────────────────────────────────────
+
+export const mcpOAuthClients = sqliteTable(
+  "mcp_oauth_clients",
+  {
+    id: text("id").primaryKey(),
+    clientName: text("client_name").notNull(),
+    redirectUris: text("redirect_uris").notNull(),
+    grantTypes: text("grant_types").notNull(),
+    responseTypes: text("response_types").notNull(),
+    scope: text("scope").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [index("idx_mcp_oauth_clients_created").on(table.createdAt)],
+);
+
+export type McpOAuthClientRow = typeof mcpOAuthClients.$inferSelect;
+export type NewMcpOAuthClientRow = typeof mcpOAuthClients.$inferInsert;
+
+export const mcpOAuthAuthorizations = sqliteTable(
+  "mcp_oauth_authorizations",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authSchema.users.id, { onDelete: "cascade" }),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => mcpOAuthClients.id, { onDelete: "cascade" }),
+    scope: text("scope").notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("idx_mcp_oauth_authorizations_user").on(table.userId),
+    index("idx_mcp_oauth_authorizations_client").on(table.clientId),
+  ],
+);
+
+export type McpOAuthAuthorizationRow =
+  typeof mcpOAuthAuthorizations.$inferSelect;
+export type NewMcpOAuthAuthorizationRow =
+  typeof mcpOAuthAuthorizations.$inferInsert;
+
+export const mcpOAuthAuthCodes = sqliteTable(
+  "mcp_oauth_auth_codes",
+  {
+    id: text("id").primaryKey(),
+    codeHash: text("code_hash").notNull(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => mcpOAuthClients.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authSchema.users.id, { onDelete: "cascade" }),
+    redirectUri: text("redirect_uri").notNull(),
+    scope: text("scope").notNull(),
+    codeChallenge: text("code_challenge").notNull(),
+    codeChallengeMethod: text("code_challenge_method").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_mcp_oauth_auth_codes_hash").on(table.codeHash),
+    index("idx_mcp_oauth_auth_codes_client").on(table.clientId),
+    index("idx_mcp_oauth_auth_codes_user").on(table.userId),
+  ],
+);
+
+export type McpOAuthAuthCodeRow = typeof mcpOAuthAuthCodes.$inferSelect;
+export type NewMcpOAuthAuthCodeRow = typeof mcpOAuthAuthCodes.$inferInsert;
+
+export const mcpOAuthTokens = sqliteTable(
+  "mcp_oauth_tokens",
+  {
+    id: text("id").primaryKey(),
+    authorizationId: text("authorization_id")
+      .notNull()
+      .references(() => mcpOAuthAuthorizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authSchema.users.id, { onDelete: "cascade" }),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => mcpOAuthClients.id, { onDelete: "cascade" }),
+    accessTokenHash: text("access_token_hash").notNull(),
+    refreshTokenHash: text("refresh_token_hash").notNull(),
+    scope: text("scope").notNull(),
+    accessExpiresAt: integer("access_expires_at", {
+      mode: "timestamp",
+    }).notNull(),
+    refreshExpiresAt: integer("refresh_expires_at", {
+      mode: "timestamp",
+    }).notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_mcp_oauth_tokens_access_hash").on(table.accessTokenHash),
+    uniqueIndex("idx_mcp_oauth_tokens_refresh_hash").on(table.refreshTokenHash),
+    index("idx_mcp_oauth_tokens_authorization").on(table.authorizationId),
+    index("idx_mcp_oauth_tokens_user").on(table.userId),
+    index("idx_mcp_oauth_tokens_client").on(table.clientId),
+  ],
+);
+
+export type McpOAuthTokenRow = typeof mcpOAuthTokens.$inferSelect;
+export type NewMcpOAuthTokenRow = typeof mcpOAuthTokens.$inferInsert;
+
 // ─── Guidelines (SOPs) ────────────────────────────────────────────────────────
 
 export const guidelines = sqliteTable(
@@ -993,6 +1123,10 @@ export const schema = {
   teamMembers,
   usage,
   apiKeys,
+  mcpOAuthClients,
+  mcpOAuthAuthorizations,
+  mcpOAuthAuthCodes,
+  mcpOAuthTokens,
   tools,
   toolExecutions,
   guidelines,

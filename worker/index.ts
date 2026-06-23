@@ -79,6 +79,16 @@ import {
   handleDashboardWsUpgrade,
   handleWidgetWsUpgrade,
 } from "./realtime/upgrade";
+import { handleMcpRequest } from "./mcp-server";
+import {
+  handleMcpAuthorizationServerMetadata,
+  handleMcpAuthorizeGet,
+  handleMcpAuthorizePost,
+  handleMcpClientRegistration,
+  handleMcpProtectedResourceMetadata,
+  handleMcpToken,
+  handleMcpTokenRevocation,
+} from "./mcp-oauth";
 export { ConversationDO } from "./durable-objects/conversation-do";
 import {
   createProjectSchema,
@@ -562,9 +572,19 @@ const app = new Hono<HonoAppContext>()
   // those paths before the SPA fallback fires.
   .use(
     "*",
-    except(["/api/*", "/help/*"], async (c) => {
+    except(["/api/*", "/help/*", "/.well-known/*"], async (c) => {
       return c.env.ASSETS.fetch(c.req.raw);
     }),
+  )
+
+  // ─── OAuth Metadata (public) ──────────────────────────────────────────────
+  .get(
+    "/.well-known/oauth-authorization-server",
+    handleMcpAuthorizationServerMetadata,
+  )
+  .get(
+    "/.well-known/oauth-protected-resource",
+    handleMcpProtectedResourceMetadata,
   )
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -2420,6 +2440,14 @@ const app = new Hono<HonoAppContext>()
 
     await next();
   })
+
+  // ─── MCP OAuth + Server ───────────────────────────────────────────────────
+  .post("/api/mcp/register", handleMcpClientRegistration)
+  .get("/api/mcp/authorize", handleMcpAuthorizeGet)
+  .post("/api/mcp/authorize", handleMcpAuthorizePost)
+  .post("/api/mcp/token", handleMcpToken)
+  .post("/api/mcp/revoke", handleMcpTokenRevocation)
+  .all("/api/mcp", async (c) => handleMcpRequest(c))
 
   // ═══════════════════════════════════════════════════════════════════════════
   // ONBOARDING ENDPOINTS (session-authenticated)

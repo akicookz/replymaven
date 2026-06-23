@@ -358,6 +358,13 @@
       "when": 1781656729086,
       "tag": "0050_brave_viper",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1782205547134,
+      "tag": "0051_rich_multiple_man",
+      "breakpoints": true
     }
   ]
 }
