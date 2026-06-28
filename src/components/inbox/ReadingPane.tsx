@@ -20,6 +20,8 @@ interface ReadingPaneProps {
   onFocus: () => void;
   /** Block the visitor associated with this conversation. */
   onBlock: (convId: string) => void;
+  /** Delete a sent agent message by id. */
+  onDeleteMessage: (messageId: string) => void;
 }
 
 export default function ReadingPane({
@@ -35,6 +37,7 @@ export default function ReadingPane({
   onRewrite,
   onFocus,
   onBlock,
+  onDeleteMessage,
 }: ReadingPaneProps) {
   return (
     <div className="glass-reading flex-1 min-w-0 overflow-y-auto relative flex flex-col">
@@ -49,8 +52,12 @@ export default function ReadingPane({
         onFocus={onFocus}
       />
 
-      {/* Chat thread — Task 10 replaces the stub */}
-      <ChatThread messages={messages} conversation={conversation} />
+      {/* Chat thread — Task 10 */}
+      <ChatThread
+        messages={messages}
+        conversation={conversation}
+        onDeleteMessage={onDeleteMessage}
+      />
 
       {/* Composer — Task 11 replaces the stub */}
       <Composer

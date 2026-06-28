@@ -594,6 +594,23 @@ function Conversations() {
     copilotSender.send({ endpoint: "auto-suggest" });
   }
 
+  async function handleDeleteMessage(messageId: string) {
+    if (!selectedConvo) return;
+    try {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${selectedConvo}/messages/${messageId}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) throw new Error("Failed to delete message");
+      queryClient.invalidateQueries({
+        queryKey: ["conversation-detail", selectedConvo],
+      });
+      toast.success("Message deleted");
+    } catch {
+      toast.error("Failed to delete message");
+    }
+  }
+
   function handleBlock(convId: string) {
     // Look up the conversation to get visitor identifiers. Prefer the detail
     // cache (most current) but only when its id matches the target — a stale
@@ -663,6 +680,7 @@ function Conversations() {
           onRewrite={handleRewrite}
           onFocus={() => setView("focus")}
           onBlock={handleBlock}
+          onDeleteMessage={handleDeleteMessage}
         />
       ) : (
         <div className="glass-reading flex-1 grid place-items-center text-ink-7 text-sm">
