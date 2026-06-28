@@ -390,6 +390,10 @@ export const conversations = sqliteTable(
     visitorLastSeenAt: integer("visitor_last_seen_at", { mode: "timestamp" }),
     visitorPresence: text("visitor_presence", { enum: ["active", "background"] }).default("active"),
     visitorLastOnlineAt: integer("visitor_last_online_at", { mode: "timestamp" }),
+    snoozedUntil: integer("snoozed_until", { mode: "timestamp" }),
+    priority: text("priority", { enum: ["low", "medium", "high"] })
+      .notNull()
+      .default("medium"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -425,7 +429,7 @@ export const messages = sqliteTable(
     conversationId: text("conversation_id")
       .notNull()
       .references(() => conversations.id, { onDelete: "cascade" }),
-    role: text("role", { enum: ["visitor", "bot", "agent"] }).notNull(),
+    role: text("role", { enum: ["visitor", "bot", "agent", "system"] }).notNull(),
     content: text("content").notNull(),
     imageUrl: text("image_url"),
     sources: text("sources"), // JSON string of RAG source references

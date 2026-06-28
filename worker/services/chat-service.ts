@@ -120,6 +120,8 @@ export class ChatService {
         visitorLastSeenAt: conversations.visitorLastSeenAt,
         visitorPresence: conversations.visitorPresence,
         visitorLastOnlineAt: conversations.visitorLastOnlineAt,
+        snoozedUntil: conversations.snoozedUntil,
+        priority: conversations.priority,
         createdAt: conversations.createdAt,
         updatedAt: conversations.updatedAt,
       })
@@ -435,7 +437,7 @@ export class ChatService {
       string,
       {
         id: string;
-        role: "visitor" | "bot" | "agent";
+        role: "visitor" | "bot" | "agent" | "system";
         content: string;
         senderName: string | null;
         emailedAt: Date | null;
@@ -474,7 +476,7 @@ export class ChatService {
       string,
       {
         id: string;
-        role: "visitor" | "bot" | "agent";
+        role: "visitor" | "bot" | "agent" | "system";
         content: string;
         senderName: string | null;
         emailedAt: Date | null;

@@ -8,7 +8,7 @@ export type ConversationStatus =
 
 export interface MessagePayload {
   id: string;
-  role: "visitor" | "bot" | "agent";
+  role: "visitor" | "bot" | "agent" | "system";
   content: string;
   imageUrl: string | null;
   sources: string | null;

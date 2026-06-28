@@ -17,7 +17,7 @@ interface BroadcastBody {
 
 function toMessagePayload(row: {
   id: string;
-  role: "visitor" | "bot" | "agent";
+  role: "visitor" | "bot" | "agent" | "system";
   content: string;
   imageUrl: string | null;
   sources: string | null;
