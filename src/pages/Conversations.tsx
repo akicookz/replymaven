@@ -1,117 +1,30 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
-import {
-  MessageSquare,
-  Send,
-  Bot,
-  Headphones,
-  XCircle,
-  Search,
-  ArrowLeft,
-  Check,
-  CheckCheck,
-  Clock,
-  Globe,
-  Monitor,
-  Wrench,
-  ChevronDown,
-  ChevronRight,
-  AlertCircle,
-  CheckCircle2,
-  LogOut,
-  ShieldBan,
-  Tag,
-  FileText,
-  Mail,
-  MailCheck,
-  Paperclip,
-  X,
-  Trash2,
-  Sparkles,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { MobileMenuButton } from "@/components/PageHeader";
-import { DetailsPanel } from "@/components/DetailsPanel";
-import {
-  getConversationActivityTimestamp,
-  getVisitorPresenceState,
-  type VisitorPresenceState,
-} from "@/lib/conversation-presence";
-import { cn, renderMarkdown } from "@/lib/utils";
 import { useConversationWs } from "@/lib/use-conversation-ws";
-import { CopilotDrawer } from "@/components/CopilotDrawer";
+import { useCopilotThread, useCopilotSender } from "@/lib/use-copilot";
+import type { InboxFilter } from "@/lib/inbox/filters";
+import type {
+  Conversation,
+  Message,
+  InboxCounts,
+  LastMessagePreview,
+} from "@/lib/inbox/types";
+import MessageList from "@/components/inbox/MessageList";
+import ReadingPane from "@/components/inbox/ReadingPane";
+import FocusView from "@/components/inbox/FocusView";
 
-interface ConversationMeta {
-  url?: string;
-  country?: string;
-  city?: string;
-  region?: string;
-  timezone?: string;
-  ip?: string;
-  userAgent?: string;
-  browser?: string;
-  os?: string;
-  device?: string;
-  screenResolution?: string;
-  language?: string;
-  referrer?: string;
-  currentPageUrl?: string;
-  pageTitle?: string;
-  online?: string;
-  [key: string]: unknown;
-}
-
-interface LastMessagePreview {
-  id: string;
-  role: "visitor" | "bot" | "agent";
-  content: string;
-  senderName: string | null;
-  emailedAt: string | null;
-  createdAt: string;
-}
-
-interface Conversation {
-  id: string;
-  visitorId: string;
-  visitorName: string | null;
-  visitorEmail: string | null;
-  status: string;
-  closeReason: string | null;
-  metadata: string | null;
-  visitorLastSeenAt: string | null;
-  visitorPresence: string | null;
-  visitorLastOnlineAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  lastActivityAt?: string | null;
-  lastMessage?: LastMessagePreview | null;
-}
+// ─── Wire shapes (orchestrator-local) ──────────────────────────────────────────
 
 interface ConversationsPage {
   conversations: Conversation[];
-  counts: { all: number; open: number; closed: number };
+  counts: InboxCounts;
   hasMore: boolean;
   serverTime?: number;
 }
@@ -129,6 +42,8 @@ interface ConversationUpdate {
   visitorLastSeenAt: string | null;
   visitorPresence: string | null;
   visitorLastOnlineAt: string | null;
+  snoozedUntil?: string | null;
+  priority?: "low" | "medium" | "high" | null;
   createdAt: string;
   updatedAt: string;
   lastMessage?: LastMessagePreview | null;
@@ -136,316 +51,34 @@ interface ConversationUpdate {
 
 interface ConversationUpdatesResponse {
   updates: ConversationUpdate[];
+  // The /updates endpoint still returns the legacy open/closed shape; the inbox
+  // counts that drive the sidebar/subtitle come from the list response instead.
   counts: { all: number; open: number; closed: number };
   serverTime: number;
 }
 
-interface ToolExecutionInfo {
-  id: string;
-  toolName: string;
-  displayName: string;
-  method: string;
-  input: Record<string, unknown> | null;
-  output: Record<string, unknown> | null;
-  status: "success" | "error" | "timeout";
-  httpStatus: number | null;
-  duration: number | null;
-  errorMessage: string | null;
-  createdAt: string;
+interface ConversationDetail {
+  conversation: Conversation;
+  messages: Message[];
+  hasMore: boolean;
+  botName: string | null;
+  agentName: string | null;
 }
 
-interface Message {
-  id: string;
-  role: "visitor" | "bot" | "agent";
-  content: string;
-  imageUrl?: string | null;
-  sources?: string | null;
-  senderName?: string | null;
-  senderAvatar?: string | null;
-  userId?: string | null;
-  createdAt: string;
-  emailedAt?: string | null;
-  toolExecutions?: ToolExecutionInfo[];
-}
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-interface SourceReference {
-  title: string;
-  url?: string | null;
-  type?: "webpage" | "pdf" | "faq";
-}
+const EMPTY_COUNTS: InboxCounts = {
+  "needs-you": 0,
+  all: 0,
+  snoozed: 0,
+  resolved: 0,
+  flagged: 0,
+};
 
-
-interface ConversationTicket {
-  id: string;
-  data: Record<string, string>;
-  status: "open" | "in_progress" | "resolved" | "closed";
-  priority: "low" | "medium" | "high" | "urgent";
-  assigneeId: string | null;
-  assignee: {
-    id: string;
-    name: string;
-    email: string;
-    image: string | null;
-  } | null;
-  dueDate: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-type ThreadItem =
-  | {
-    kind: "message";
-    id: string;
-    createdAt: string;
-    message: Message;
-  }
-  | {
-    kind: "ticket";
-    id: string;
-    createdAt: string;
-    ticket: ConversationTicket;
-    fields: Array<[string, string]>;
-  };
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function parseMeta(metadata: string | null): ConversationMeta {
-  if (!metadata) return {};
-  try {
-    return JSON.parse(metadata);
-  } catch {
-    return {};
-  }
-}
-
-const SYSTEM_META_KEYS = new Set([
-  "url",
-  "country",
-  "city",
-  "region",
-  "timezone",
-  "ip",
-  "userAgent",
-  "browser",
-  "os",
-  "device",
-  "screenResolution",
-  "language",
-  "referrer",
-  "currentPageUrl",
-  "pageTitle",
-  "online",
-  "agentHandbackInstructions",
-  "teamRequestPending",
-  "teamRequestSubmittedAt",
-  "teamRequestSubmissionId",
-  "teamRequestSummary",
-]);
-
-function splitMetadata(meta: ConversationMeta): {
-  system: Record<string, string>;
-  custom: Record<string, string>;
-} {
-  const system: Record<string, string> = {};
-  const custom: Record<string, string> = {};
-  for (const [key, value] of Object.entries(meta)) {
-    if (value == null || value === "") continue;
-    const strVal = String(value);
-    if (SYSTEM_META_KEYS.has(key)) {
-      system[key] = strVal;
-    } else {
-      custom[key] = strVal;
-    }
-  }
-  return { system, custom };
-}
-
-function parseBrowserName(ua?: string, browserField?: string): string {
-  if (browserField) return browserField;
-  if (!ua) return "Unknown";
-  if (ua.includes("Firefox/")) {
-    const match = ua.match(/Firefox\/([\d.]+)/);
-    return match ? `Firefox ${match[1].split(".")[0]}` : "Firefox";
-  }
-  if (ua.includes("Edg/")) {
-    const match = ua.match(/Edg\/([\d.]+)/);
-    return match ? `Edge ${match[1].split(".")[0]}` : "Edge";
-  }
-  if (ua.includes("Chrome/") && !ua.includes("Edg/")) {
-    const match = ua.match(/Chrome\/([\d.]+)/);
-    return match ? `Chrome ${match[1].split(".")[0]}` : "Chrome";
-  }
-  if (ua.includes("Safari/") && !ua.includes("Chrome/")) {
-    const match = ua.match(/Version\/([\d.]+)/);
-    return match ? `Safari ${match[1].split(".")[0]}` : "Safari";
-  }
-  return "Unknown";
-}
-
-function countryToFlag(countryCode: string): string {
-  if (!countryCode || countryCode.length !== 2) return "";
-  const base = 0x1f1e6;
-  const first = countryCode.charCodeAt(0) - 65 + base;
-  const second = countryCode.charCodeAt(1) - 65 + base;
-  return String.fromCodePoint(first) + String.fromCodePoint(second);
-}
-
-function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHr = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHr / 24);
-
-  if (diffSec < 60) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHr < 24) return `${diffHr}h ago`;
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return new Date(dateStr).toLocaleDateString();
-}
-
-function formatTime(dateStr: string): string {
-  return new Date(dateStr).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatDuration(startStr: string): string {
-  const now = Date.now();
-  const start = new Date(startStr).getTime();
-  const diffMs = now - start;
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffHr = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHr / 24);
-
-  if (diffMin < 1) return "just started";
-  if (diffMin < 60) return `${diffMin} min`;
-  if (diffHr < 24) return `${diffHr}h ${diffMin % 60}m`;
-  return `${diffDay}d ${diffHr % 24}h`;
-}
-
-function getVisitorDisplayName(convo: Conversation): string {
-  if (convo.visitorName) return convo.visitorName;
-  if (convo.visitorEmail) return convo.visitorEmail.split("@")[0];
-  return convo.visitorId;
-}
-
-function getPresenceDotClass(state: VisitorPresenceState): string {
-  switch (state) {
-    case "online":
-      return "bg-emerald-500";
-    case "background":
-      return "bg-amber-500";
-    default:
-      return "bg-muted-foreground/40";
-  }
-}
-
-function getPresenceBadge(state: VisitorPresenceState): {
-  label: string;
-  dotClass: string;
-  badgeClass: string;
-} {
-  switch (state) {
-    case "online":
-      return {
-        label: "Online",
-        dotClass: "bg-emerald-500",
-        badgeClass: "text-emerald-600 bg-emerald-500/10",
-      };
-    case "background":
-      return {
-        label: "In Background",
-        dotClass: "bg-amber-500",
-        badgeClass: "text-amber-600 bg-amber-500/10",
-      };
-    default:
-      return {
-        label: "Offline",
-        dotClass: "bg-muted-foreground/50",
-        badgeClass: "text-muted-foreground bg-muted/50",
-      };
-  }
-}
-
-function getConversationActivityLabel(convo: Pick<
-  Conversation,
-  "visitorLastSeenAt" | "updatedAt"
->): string {
-  const activityAt =
-    getConversationActivityTimestamp({
-      visitorLastSeenAt: convo.visitorLastSeenAt,
-      updatedAt: convo.updatedAt,
-    }) ?? new Date(convo.updatedAt).getTime();
-
-  return timeAgo(new Date(activityAt).toISOString());
-}
-
-function buildConversationThread(
-  messages: Message[],
-  ticket: ConversationTicket | null,
-): ThreadItem[] {
-  const threadItems: ThreadItem[] = messages.map((message) => ({
-    kind: "message",
-    id: message.id,
-    createdAt: message.createdAt,
-    message,
-  }));
-
-  if (ticket) {
-    const hiddenKeys = new Set(["Conversation ID", "Recent chat", "Type"]);
-    const fields = Object.entries(ticket.data).filter(
-      ([key]) => !hiddenKeys.has(key),
-    );
-
-    threadItems.push({
-      kind: "ticket",
-      id: `ticket:${ticket.id}`,
-      createdAt: ticket.createdAt,
-      ticket,
-      fields,
-    });
-  }
-
-  return threadItems.sort(
-    (a, b) =>
-      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-  );
-}
-
-// ─── Status helpers ──────────────────────────────────────────────────────────
-
-function getStatusLabel(status: string): string {
-  switch (status) {
-    case "active":
-      return "Active";
-    case "waiting_agent":
-      return "Pending human";
-    case "agent_replied":
-      return "Agent engaged";
-    case "closed":
-      return "Closed";
-    default:
-      return status;
-  }
-}
-
-function getCloseReasonLabel(reason: string | null): string {
-  switch (reason) {
-    case "resolved":
-      return "Resolved";
-    case "ended":
-      return "Ended";
-    case "spam":
-      return "Spam";
-    case "bot_resolved":
-      return "Resolved by bot";
-    default:
-      return "Closed";
-  }
+function getActivityMs(convo: Conversation): number {
+  const raw = convo.lastActivityAt ?? convo.updatedAt;
+  const ms = raw ? new Date(raw).getTime() : 0;
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -454,48 +87,20 @@ function Conversations() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
+
+  // Active inbox filter is owned by the URL (the sidebar deep-links to
+  // `?filter=<id>`); default to "needs-you" when absent.
+  const filter = (searchParams.get("filter") as InboxFilter) ?? "needs-you";
+
   const [selectedConvo, setSelectedConvo] = useState<string | null>(
     searchParams.get("id"),
   );
-  const [replyText, setReplyText] = useState("");
-  const [replyImageFile, setReplyImageFile] = useState<File | null>(null);
-  const [replyImagePreview, setReplyImagePreview] = useState<string | null>(null);
-  const [isUploadingReplyImage, setIsUploadingReplyImage] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"open" | "closed" | "all">("all");
-  const [expandedToolCards, setExpandedToolCards] = useState<Set<string>>(new Set());
-  const [messageToDelete, setMessageToDelete] = useState<{
-    id: string;
-    preview: string;
-    emailedAt: string | null;
-  } | null>(null);
-  const copilotStorageKey = `replymaven:copilotOpen:${projectId ?? "unknown"}`;
-  const [copilotOpen, setCopilotOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(copilotStorageKey) === "true";
-  });
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(copilotStorageKey, String(copilotOpen));
-  }, [copilotOpen, copilotStorageKey]);
+  const [draft, setDraft] = useState("");
+  const [view, setView] = useState<"split" | "focus">("split");
+  const lastSuggestionRef = useRef<string | null>(null);
 
-  function appendToComposer(text: string) {
-    setReplyText((prev) => (prev ? `${prev}\n\n${text}` : text));
-    setTimeout(() => {
-      const el = replyTextareaRef.current;
-      if (el) {
-        el.focus();
-        el.style.height = "auto";
-        el.style.height = `${el.scrollHeight}px`;
-      }
-    }, 0);
-  }
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const replyImageInputRef = useRef<HTMLInputElement>(null);
-
-  // Sync selectedConvo <-> ?id= URL param so deep links work and shares are stable
+  // Sync selectedConvo <-> ?id= URL param so deep links work and shares are
+  // stable. Other params (e.g. ?filter=) are preserved.
   useEffect(() => {
     const current = searchParams.get("id");
     if (selectedConvo && current !== selectedConvo) {
@@ -510,75 +115,34 @@ function Conversations() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConvo]);
 
-  const [loadedConversations, setLoadedConversations] = useState<Conversation[]>([]);
-  const [hasMore, setHasMore] = useState(true);
-  const [serverTimeBaseline, setServerTimeBaseline] = useState<number | null>(null);
-
-  // Debounce search input so we don't fire a request per keystroke. The
-  // backend endpoint searches across ALL conversations (not just the 25
-  // already loaded), so server-side search is required for correctness.
-  const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 250);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+  const [loadedConversations, setLoadedConversations] = useState<Conversation[]>(
+    [],
+  );
+  const [serverTimeBaseline, setServerTimeBaseline] = useState<number | null>(
+    null,
+  );
 
   // Open a WebSocket for the selected conversation. The hook patches the
   // ["conversation-detail", id] cache on incoming events so messages and
   // status changes appear in real time without polling.
   useConversationWs(projectId, selectedConvo);
 
-  // Per-project client-side last-read tracking for unread badges
-  const lastReadStorageKey = `replymaven:lastRead:${projectId ?? "unknown"}`;
-  const [lastReadMap, setLastReadMap] = useState<Record<string, number>>(() => {
-    if (typeof window === "undefined") return {};
-    try {
-      const raw = window.localStorage.getItem(`replymaven:lastRead:${projectId ?? "unknown"}`);
-      return raw ? (JSON.parse(raw) as Record<string, number>) : {};
-    } catch {
-      return {};
-    }
-  });
+  // Copilot: surface the conversation's auto-suggest draft and let the agent
+  // (re)generate it via handleRewrite. The drawer UI is superseded by the new
+  // inline draft + Rewrite action.
+  const copilotThread = useCopilotThread(projectId ?? "", selectedConvo);
+  const copilotSender = useCopilotSender(projectId ?? "", selectedConvo ?? "");
 
-  function persistLastReadMap(next: Record<string, number>) {
-    setLastReadMap(next);
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.setItem(lastReadStorageKey, JSON.stringify(next));
-      } catch {
-        // ignore storage errors (quota, private mode)
-      }
-    }
-  }
-
-  function markConversationRead(convId: string) {
-    const next = { ...lastReadMap, [convId]: Date.now() };
-    persistLastReadMap(next);
-  }
-
-  function getActivityMs(convo: Conversation): number {
-    const raw = convo.lastActivityAt ?? convo.updatedAt;
-    const ms = raw ? new Date(raw).getTime() : 0;
-    return Number.isFinite(ms) ? ms : 0;
-  }
-
-  function isUnread(convo: Conversation): boolean {
-    if (convo.status === "closed") return false;
-    if (selectedConvo === convo.id) return false;
-    const activity = getActivityMs(convo);
-    const read = lastReadMap[convo.id] ?? 0;
-    return activity > read;
-  }
-
-  const { data: convosPage, isLoading } = useQuery<ConversationsPage>({
-    queryKey: ["conversations", projectId, statusFilter, debouncedSearch],
+  // ── List query (drives the conversation column) ──────────────────────────
+  const { data: convosPage } = useQuery<ConversationsPage>({
+    queryKey: ["conversations", projectId, filter],
     queryFn: async () => {
       const params = new URLSearchParams({
-        status: statusFilter,
+        status: "all",
         limit: "25",
         offset: "0",
+        filter,
       });
-      if (debouncedSearch) params.set("q", debouncedSearch);
       const res = await fetch(
         `/api/projects/${projectId}/conversations?${params.toString()}`,
       );
@@ -588,19 +152,20 @@ function Conversations() {
     placeholderData: keepPreviousData,
   });
 
-  // Sync first page into loaded conversations and handle filter changes
+  // Sync the fetched first page into the live list and seed the sidebar's
+  // inbox-counts cache so its badges stay consistent with this view.
   useEffect(() => {
-    if (convosPage?.conversations) {
-      setLoadedConversations(convosPage.conversations);
-      setHasMore(convosPage.hasMore);
+    if (!convosPage) return;
+    setLoadedConversations(convosPage.conversations);
+    if (convosPage.serverTime) setServerTimeBaseline(convosPage.serverTime);
+    if (projectId) {
+      queryClient.setQueryData(["inbox-counts", projectId], convosPage.counts);
     }
-    if (convosPage?.serverTime) {
-      setServerTimeBaseline(convosPage.serverTime);
-    }
-  }, [convosPage, statusFilter]);
+  }, [convosPage, projectId, queryClient]);
 
-  // Lightweight polling: only fetch conversation updates (id + activity),
-  // not the entire list. Patch the local list in place to avoid UI jank.
+  // Lightweight polling: fetch conversation deltas (id + activity) and patch
+  // the local list in place. Brand-new conversations are prepended for the
+  // broad inbox views.
   const { data: updatesData } = useQuery<ConversationUpdatesResponse>({
     queryKey: ["conversation-updates", projectId, serverTimeBaseline],
     queryFn: async () => {
@@ -616,25 +181,18 @@ function Conversations() {
     refetchIntervalInBackground: false,
   });
 
-  // Merge incoming updates into the local list without any opacity/fetch jank.
-  // The delta endpoint now returns full sidebar-renderable rows, so we can
-  // prepend conversations that aren't in the loaded list — closing the
-  // "off-page conversation drops" hole.
   useEffect(() => {
     if (!updatesData) return;
-
-    // Advance the baseline so the next poll is a small delta
-    if (updatesData.serverTime) {
-      setServerTimeBaseline(updatesData.serverTime);
-    }
-
+    if (updatesData.serverTime) setServerTimeBaseline(updatesData.serverTime);
     if (updatesData.updates.length === 0) return;
 
+    // Only the broad inbox views surface brand-new conversations live; the
+    // narrow filters (snoozed/resolved/flagged) can't be evaluated from the
+    // delta row alone, so they wait for the next full refetch.
     const passesFilter = (status: string): boolean => {
-      if (statusFilter === "all") return true;
-      if (statusFilter === "closed") return status === "closed";
-      // "open" filter excludes closed
-      return status !== "closed";
+      if (filter === "all") return true;
+      if (filter === "needs-you") return status !== "closed";
+      return false;
     };
 
     const updateMap = new Map(updatesData.updates.map((u) => [u.id, u]));
@@ -643,7 +201,6 @@ function Conversations() {
       const seen = new Set(prev.map((c) => c.id));
       let changed = false;
 
-      // 1. Patch existing rows in place
       const next: Conversation[] = prev.map((c) => {
         const u = updateMap.get(c.id);
         if (!u) return c;
@@ -652,8 +209,6 @@ function Conversations() {
         return { ...c, ...u };
       });
 
-      // 2. Prepend brand-new conversations that match the active filter.
-      //    (Was previously dropped — the bug.)
       for (const u of updateMap.values()) {
         if (seen.has(u.id)) continue;
         if (!passesFilter(u.status)) continue;
@@ -662,14 +217,13 @@ function Conversations() {
       }
 
       if (!changed) return prev;
-      // Re-sort by activity desc so freshly active convos float to the top
       next.sort((a, b) => getActivityMs(b) - getActivityMs(a));
       return next;
     });
 
-    // Also patch the cached query data so status-filter switches stay consistent
+    // Keep the cached page consistent so a filter switch stays correct.
     queryClient.setQueryData<ConversationsPage | undefined>(
-      ["conversations", projectId, statusFilter, debouncedSearch],
+      ["conversations", projectId, filter],
       (old) => {
         if (!old) return old;
         const seen = new Set(old.conversations.map((c) => c.id));
@@ -677,53 +231,20 @@ function Conversations() {
           const u = updatesData.updates.find((x) => x.id === c.id);
           return u ? { ...c, ...u } : c;
         });
-        // Prepend new conversations into the cached page too
         for (const u of updatesData.updates) {
           if (seen.has(u.id)) continue;
           if (!passesFilter(u.status)) continue;
           patched.push(u as Conversation);
         }
         patched.sort((a, b) => getActivityMs(b) - getActivityMs(a));
-        return { ...old, counts: updatesData.counts, conversations: patched };
+        return { ...old, conversations: patched };
       },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [updatesData]);
 
-  const loadMoreConversations = useMutation({
-    mutationFn: async () => {
-      const params = new URLSearchParams({
-        status: statusFilter,
-        limit: "25",
-        offset: String(loadedConversations.length),
-      });
-      if (debouncedSearch) params.set("q", debouncedSearch);
-      const res = await fetch(
-        `/api/projects/${projectId}/conversations?${params.toString()}`,
-      );
-      if (!res.ok) throw new Error("Failed to fetch");
-      return res.json() as Promise<{ conversations: Conversation[]; counts: { all: number; open: number; closed: number }; hasMore: boolean }>;
-    },
-    onSuccess: (data) => {
-      setLoadedConversations((prev) => [...prev, ...data.conversations]);
-      setHasMore(data.hasMore);
-    },
-  });
-
-  const {
-    data: convoDetail,
-    isPending: isDetailLoading,
-    isError: isDetailError,
-    error: detailError,
-    refetch: refetchDetail,
-  } = useQuery<{
-    conversation: Conversation;
-    messages: Message[];
-    hasMore: boolean;
-    botName: string | null;
-    agentName: string | null;
-    ticket: ConversationTicket | null;
-  }>({
+  // ── Detail query (drives the reading pane / focus thread) ────────────────
+  const { data: convoDetail } = useQuery<ConversationDetail>({
     queryKey: ["conversation-detail", selectedConvo],
     queryFn: async () => {
       const res = await fetch(
@@ -739,190 +260,87 @@ function Conversations() {
     },
     enabled: !!selectedConvo,
     retry: 1,
-    // Conversation detail is kept fresh in real time by useConversationWs.
-    // Cache for 60s so revisiting a conversation is instant; the WS push
-    // keeps the cache current within that window. Dropping keepPreviousData
-    // means switching to a never-loaded conversation shows the skeleton
-    // instead of flashing the previous conversation's messages.
+    // Detail is kept fresh in real time by useConversationWs; cache 60s so
+    // revisiting a conversation is instant.
     staleTime: 1000 * 60,
   });
 
-  // Mark the open conversation as read whenever its latest activity advances
+  // Reset the composer draft when switching conversations so the auto-suggest
+  // prefill (below) can populate it cleanly for the newly selected thread.
   useEffect(() => {
-    if (!selectedConvo) return;
-    const activity = convoDetail?.conversation
-      ? getActivityMs(convoDetail.conversation as Conversation)
-      : Date.now();
-    const current = lastReadMap[selectedConvo] ?? 0;
-    if (activity > current) {
-      const next = { ...lastReadMap, [selectedConvo]: activity };
-      persistLastReadMap(next);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedConvo, convoDetail?.conversation?.lastActivityAt, convoDetail?.conversation?.updatedAt]);
+    setDraft("");
+    lastSuggestionRef.current = null;
+  }, [selectedConvo]);
 
-  const loadEarlier = useMutation({
-    mutationFn: async () => {
-      if (!selectedConvo || !convoDetail?.messages?.length) {
-        return { messages: [] as Message[], hasMore: false };
-      }
-      const oldest = convoDetail.messages[0];
-      // Capture scroll position before fetching so we can restore after
-      // prepending. Stored on the mutation context via a ref-like trick
-      // (we use the container's scrollHeight before prepend in onSuccess).
-      const params = new URLSearchParams({
-        before: oldest.createdAt,
-        limit: "30",
-      });
-      const res = await fetch(
-        `/api/projects/${projectId}/conversations/${selectedConvo}/messages?${params.toString()}`,
+  // Pre-fill the draft from the latest completed Copilot auto-suggest, but
+  // never clobber text the agent has already typed.
+  useEffect(() => {
+    const msgs = copilotThread.data;
+    if (!msgs || msgs.length === 0) return;
+    const suggestion = [...msgs]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === "copilot" &&
+          m.autoSuggest &&
+          !m._streaming &&
+          m.content.trim().length > 0,
       );
-      if (!res.ok) throw new Error("Failed to load earlier messages");
-      return res.json() as Promise<{ messages: Message[]; hasMore: boolean }>;
-    },
-    onMutate: () => {
-      // Snapshot scroll metrics before the new render
-      const el = messagesContainerRef.current;
-      return el
-        ? { prevScrollHeight: el.scrollHeight, prevScrollTop: el.scrollTop }
-        : null;
-    },
-    onSuccess: (data, _vars, ctx) => {
-      if (data.messages.length === 0) {
-        queryClient.setQueryData(
-          ["conversation-detail", selectedConvo],
-          (old: typeof convoDetail | undefined) => {
-            if (!old) return old;
-            return { ...old, hasMore: data.hasMore };
-          },
-        );
-        return;
-      }
-      queryClient.setQueryData(
-        ["conversation-detail", selectedConvo],
-        (old: typeof convoDetail | undefined) => {
-          if (!old) return old;
-          // Dedupe just in case (shouldn't happen but cheap insurance)
-          const existingIds = new Set(old.messages.map((m) => m.id));
-          const fresh = data.messages.filter((m) => !existingIds.has(m.id));
-          return {
-            ...old,
-            messages: [...fresh, ...old.messages],
-            hasMore: data.hasMore,
-          };
-        },
-      );
-      // Restore scroll position so the user stays anchored to the same
-      // message they were looking at before we prepended.
-      requestAnimationFrame(() => {
-        const el = messagesContainerRef.current;
-        if (!el || !ctx) return;
-        const heightDelta = el.scrollHeight - ctx.prevScrollHeight;
-        el.scrollTop = ctx.prevScrollTop + heightDelta;
-      });
-    },
-    onError: () => {
-      toast.error("Couldn't load earlier messages");
-    },
-  });
+    if (!suggestion) return;
+    if (lastSuggestionRef.current === suggestion.id) return;
+    lastSuggestionRef.current = suggestion.id;
+    setDraft((prev) => (prev.trim().length > 0 ? prev : suggestion.content));
+  }, [copilotThread.data]);
 
+  // ── Mutations ─────────────────────────────────────────────────────────────
   const sendReply = useMutation({
-    mutationFn: async ({
-      content,
-      imageFile,
-    }: {
-      content: string;
-      imageFile: File | null;
-    }) => {
-      let imageUrl: string | null = null;
-      if (imageFile) {
-        setIsUploadingReplyImage(true);
-        try {
-          const formData = new FormData();
-          formData.append("file", imageFile);
-          const uploadRes = await fetch("/api/upload", {
-            method: "POST",
-            body: formData,
-          });
-          if (!uploadRes.ok) {
-            const err = await uploadRes
-              .json()
-              .catch(() => ({ error: "Upload failed" }));
-            throw new Error(err.error ?? "Failed to upload image");
-          }
-          const uploadData = (await uploadRes.json()) as { url: string };
-          imageUrl = uploadData.url;
-        } finally {
-          setIsUploadingReplyImage(false);
-        }
-      }
-
+    mutationFn: async ({ content }: { content: string }) => {
       const res = await fetch(
         `/api/projects/${projectId}/conversations/${selectedConvo}/reply`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, imageUrl: imageUrl ?? undefined }),
+          body: JSON.stringify({ content }),
         },
       );
       if (!res.ok) throw new Error("Failed to send reply");
       return res.json();
     },
-    onMutate: async ({ content, imageFile }) => {
+    onMutate: async ({ content }) => {
       await queryClient.cancelQueries({
         queryKey: ["conversation-detail", selectedConvo],
       });
-      const previous = queryClient.getQueryData<{
-        conversation: Conversation;
-        messages: Message[];
-        botName: string | null;
-        agentName: string | null;
-        ticket: ConversationTicket | null;
-      }>(["conversation-detail", selectedConvo]);
-
-      const optimisticImageUrl = imageFile
-        ? replyImagePreview ?? null
-        : null;
-
-      queryClient.setQueryData(
+      const previous = queryClient.getQueryData<ConversationDetail>([
+        "conversation-detail",
+        selectedConvo,
+      ]);
+      queryClient.setQueryData<ConversationDetail | undefined>(
         ["conversation-detail", selectedConvo],
-        (old: typeof previous) => {
+        (old) => {
           if (!old) return old;
+          const optimistic: Message = {
+            id: `optimistic-${Date.now()}`,
+            role: "agent",
+            content,
+            createdAt: new Date().toISOString(),
+            senderName: null,
+            emailedAt: null,
+          };
           return {
             ...old,
             conversation: { ...old.conversation, status: "agent_replied" },
-            messages: [
-              ...old.messages,
-              {
-                id: `optimistic-${Date.now()}`,
-                conversationId: selectedConvo,
-                role: "agent",
-                content: content || (imageFile ? "Sent an image" : ""),
-                imageUrl: optimisticImageUrl,
-                createdAt: new Date().toISOString(),
-                sources: null,
-                senderName: null,
-                senderAvatar: null,
-                toolExecutions: [],
-                _optimistic: true,
-                _status: "sending" as const,
-              },
-            ],
+            messages: [...old.messages, optimistic],
           };
         },
       );
-
-      setReplyText("");
-      setReplyImageFile(null);
-      setReplyImagePreview(null);
-      if (replyImageInputRef.current) replyImageInputRef.current.value = "";
+      setDraft("");
       return { previous };
     },
-    onError: (err: Error, _vars, context) => {
-      if (context?.previous) {
+    onError: (err: Error, _vars, ctx) => {
+      if (ctx?.previous) {
         queryClient.setQueryData(
           ["conversation-detail", selectedConvo],
-          context.previous,
+          ctx.previous,
         );
       }
       toast.error(err.message || "Failed to send reply");
@@ -935,121 +353,6 @@ function Conversations() {
         queryKey: ["conversations", projectId],
       });
     },
-  });
-
-  const sendEmail = useMutation({
-    mutationFn: async (messageId: string) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/conversations/${selectedConvo}/send-email`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messageId }),
-        },
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Failed" }));
-        throw new Error(err.error ?? "Failed to send email");
-      }
-      return res.json() as Promise<{ ok: boolean; emailedAt: string }>;
-    },
-    onSuccess: (data, messageId) => {
-      queryClient.setQueryData(
-        ["conversation-detail", selectedConvo],
-        (old: { conversation: Conversation; messages: Message[]; botName: string | null; agentName: string | null; ticket: ConversationTicket | null } | undefined) => {
-          if (!old) return old;
-          return {
-            ...old,
-            messages: old.messages.map((m) =>
-              m.id === messageId ? { ...m, emailedAt: data.emailedAt } : m,
-            ),
-          };
-        },
-      );
-      toast.success("Email sent");
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const deleteMessage = useMutation({
-    mutationFn: async (messageId: string) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/conversations/${selectedConvo}/messages/${messageId}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Failed" }));
-        throw new Error(err.error ?? "Failed to delete message");
-      }
-      return messageId;
-    },
-    onMutate: async (messageId) => {
-      await queryClient.cancelQueries({
-        queryKey: ["conversation-detail", selectedConvo],
-      });
-      const previous = queryClient.getQueryData(["conversation-detail", selectedConvo]);
-      queryClient.setQueryData(
-        ["conversation-detail", selectedConvo],
-        (old: typeof previous) => {
-          if (!old || typeof old !== "object" || !("messages" in old)) return old;
-          const o = old as { conversation: Conversation; messages: Message[]; botName: string | null; agentName: string | null; ticket: ConversationTicket | null };
-          return { ...o, messages: o.messages.filter((m) => m.id !== messageId) };
-        },
-      );
-      return { previous };
-    },
-    onError: (err: Error, _vars, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(
-          ["conversation-detail", selectedConvo],
-          context.previous,
-        );
-      }
-      toast.error(err.message || "Failed to delete message");
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["conversations", projectId],
-      });
-    },
-  });
-
-  const banVisitor = useMutation({
-    mutationFn: async ({
-      convId,
-      visitorId,
-      visitorEmail,
-    }: {
-      convId: string;
-      visitorId: string;
-      visitorEmail: string | null;
-    }) => {
-      const res = await fetch(`/api/projects/${projectId}/visitors/ban`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          visitorId,
-          visitorEmail: visitorEmail ?? undefined,
-          conversationId: convId,
-          reason: "Banned from dashboard",
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Failed" }));
-        throw new Error(err.error ?? "Failed to ban visitor");
-      }
-      return res.json();
-    },
-    onSuccess: () => {
-      toast.success("Visitor banned");
-      queryClient.invalidateQueries({
-        queryKey: ["conversation-detail", selectedConvo],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["conversations", projectId],
-      });
-    },
-    onError: (err: Error) => toast.error(err.message),
   });
 
   const closeConversation = useMutation({
@@ -1075,44 +378,33 @@ function Conversations() {
       await queryClient.cancelQueries({
         queryKey: ["conversation-detail", convId],
       });
-      const previousDetail = queryClient.getQueryData(["conversation-detail", convId]);
-      const previousList = queryClient.getQueryData(["conversations", projectId, statusFilter]);
-
-      queryClient.setQueryData(
+      const previousDetail = queryClient.getQueryData<ConversationDetail>([
+        "conversation-detail",
+        convId,
+      ]);
+      queryClient.setQueryData<ConversationDetail | undefined>(
         ["conversation-detail", convId],
-        (old: typeof previousDetail & { conversation?: Conversation }) => {
-          if (!old || !("conversation" in (old as Record<string, unknown>))) return old;
-          const o = old as { conversation: Conversation; messages: Message[]; botName: string | null; agentName: string | null; ticket: ConversationTicket | null };
-          return { ...o, conversation: { ...o.conversation, status: "closed", closeReason } };
-        },
+        (old) =>
+          old
+            ? {
+                ...old,
+                conversation: { ...old.conversation, status: "closed", closeReason },
+              }
+            : old,
       );
-
-      queryClient.setQueryData(
-        ["conversations", projectId, statusFilter],
-        (old: { conversations: Conversation[]; counts: { all: number; open: number; closed: number }; hasMore: boolean } | undefined) => {
-          if (!old) return old;
-          return {
-            ...old,
-            conversations: old.conversations.map((c) =>
-              c.id === convId ? { ...c, status: "closed", closeReason } : c,
-            ),
-          };
-        },
-      );
-
-      // Also update local loaded state
       setLoadedConversations((prev) =>
-        prev.map((c) => c.id === convId ? { ...c, status: "closed", closeReason } : c),
+        prev.map((c) =>
+          c.id === convId ? { ...c, status: "closed", closeReason } : c,
+        ),
       );
-
-      return { previousDetail, previousList };
+      return { previousDetail };
     },
-    onError: (_err, { convId }, context) => {
-      if (context?.previousDetail) {
-        queryClient.setQueryData(["conversation-detail", convId], context.previousDetail);
-      }
-      if (context?.previousList) {
-        queryClient.setQueryData(["conversations", projectId, statusFilter], context.previousList);
+    onError: (_err, { convId }, ctx) => {
+      if (ctx?.previousDetail) {
+        queryClient.setQueryData(
+          ["conversation-detail", convId],
+          ctx.previousDetail,
+        );
       }
       toast.error("Failed to close conversation");
     },
@@ -1120,1480 +412,177 @@ function Conversations() {
       queryClient.invalidateQueries({
         queryKey: ["conversation-detail", convId],
       });
-      queryClient.invalidateQueries({
-        queryKey: ["conversations", projectId],
-      });
+      queryClient.invalidateQueries({ queryKey: ["conversations", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["inbox-counts", projectId] });
     },
   });
 
-  const threadItems = useMemo(
-    () => convoDetail
-      ? buildConversationThread(convoDetail.messages, convoDetail.ticket)
-      : [],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [convoDetail?.messages, convoDetail?.ticket],
-  );
-  const threadSignature = useMemo(
-    () => threadItems
-      .map((item) => `${item.kind}:${item.id}:${item.createdAt}`)
-      .join("|"),
-    [threadItems],
-  );
+  const snoozeConversation = useMutation({
+    mutationFn: async ({
+      convId,
+      until,
+    }: {
+      convId: string;
+      until: number | null;
+    }) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${convId}/snooze`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ until }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to snooze conversation");
+      return res.json();
+    },
+    onError: () => toast.error("Failed to snooze conversation"),
+    onSettled: (_data, _error, { convId }) => {
+      queryClient.invalidateQueries({ queryKey: ["conversations", projectId] });
+      queryClient.invalidateQueries({
+        queryKey: ["conversation-detail", convId],
+      });
+      queryClient.invalidateQueries({ queryKey: ["inbox-counts", projectId] });
+    },
+  });
 
-  // Auto-scroll to bottom when the thread actually changes.
-  // - On a conversation switch: jump instantly (no animation) — smooth-scroll
-  //   on switch feels like a stall.
-  // - On a new message in the same conversation: smooth-scroll for nice live UX.
-  const lastScrollConvoRef = useRef<string | null>(null);
-  useEffect(() => {
-    const switched = lastScrollConvoRef.current !== selectedConvo;
-    lastScrollConvoRef.current = selectedConvo;
-    messagesEndRef.current?.scrollIntoView({
-      behavior: switched ? "auto" : "smooth",
-    });
-  }, [threadSignature, selectedConvo]);
+  const setPriorityMutation = useMutation({
+    mutationFn: async ({
+      convId,
+      priority,
+    }: {
+      convId: string;
+      priority: "low" | "medium" | "high";
+    }) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${convId}/priority`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ priority }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to set priority");
+      return res.json();
+    },
+    onError: () => toast.error("Failed to set priority"),
+    onSettled: (_data, _error, { convId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["conversation-detail", convId],
+      });
+      queryClient.invalidateQueries({ queryKey: ["conversations", projectId] });
+    },
+  });
 
-  // Server-side search via the conversations list query (?q=). The local
-  // result is just whatever has been loaded — no extra client-side filter.
-  const filteredConversations = loadedConversations;
+  // ── Derived view data ─────────────────────────────────────────────────────
+  const conversations = loadedConversations;
+  const counts = convosPage?.counts ?? EMPTY_COUNTS;
+  const messages = convoDetail?.messages ?? [];
+  const selected =
+    convoDetail?.conversation ??
+    conversations.find((c) => c.id === selectedConvo) ??
+    null;
+  const selectedIndex = selected
+    ? conversations.findIndex((c) => c.id === selected.id)
+    : -1;
 
-  // Get last message for sidebar preview. Reads from the lastMessage attached
-  // to every conversation row (fetched server-side by the list/updates
-  // endpoints). Falls back to the live thread for the open conversation so
-  // optimistic agent replies show up immediately, before the next poll.
-  function getLastMessagePreview(
-    convo: Conversation,
-  ): { text: string; emailed: boolean; role: "visitor" | "bot" | "agent" } | null {
-    if (selectedConvo === convo.id && threadItems.length > 0) {
-      const last = threadItems[threadItems.length - 1];
-      if (last.kind === "ticket") {
-        return { text: "Submitted a ticket", emailed: false, role: "visitor" };
-      }
-      const isOutbound = last.message.role === "agent" || last.message.role === "bot";
-      // Detect both new-style "Ticket submission" and legacy "Inquiry submission"
-      // prefixes — historical rows pre-date the rename.
-      const isTicketMessage =
-        last.message.role === "visitor" &&
-        (last.message.content.startsWith("Ticket submission") ||
-          last.message.content.startsWith("Inquiry submission"));
-      return {
-        text: isTicketMessage ? "Submitted a ticket" : last.message.content,
-        emailed: isOutbound && !!last.message.emailedAt,
-        role: last.message.role,
-      };
-    }
-    if (convo.lastMessage) {
-      const isOutbound =
-        convo.lastMessage.role === "agent" || convo.lastMessage.role === "bot";
-      // Ticket-form submissions are stored as visitor messages whose content
-      // begins with "Ticket submission" (built by buildTicketConversationMessage
-      // in worker/index.ts). Detect legacy "Inquiry submission" prefix too for
-      // back-compat with rows written before the rename.
-      const isTicket =
-        convo.lastMessage.role === "visitor" &&
-        (convo.lastMessage.content.startsWith("Ticket submission") ||
-          convo.lastMessage.content.startsWith("Inquiry submission"));
-      return {
-        text: isTicket ? "Submitted a ticket" : convo.lastMessage.content,
-        emailed: isOutbound && !!convo.lastMessage.emailedAt,
-        role: convo.lastMessage.role,
-      };
-    }
-    return null;
+  // ── Handlers ──────────────────────────────────────────────────────────────
+  // When the acted-on conversation is the open one and it leaves the active
+  // view (resolved / spam / snoozed), advance selection to the neighbouring
+  // row so the agent keeps triaging without a dead selection.
+  function advanceSelectionPast(convId: string) {
+    if (selectedConvo !== convId) return;
+    const idx = conversations.findIndex((c) => c.id === convId);
+    const next = conversations[idx + 1] ?? conversations[idx - 1] ?? null;
+    setSelectedConvo(next ? next.id : null);
   }
 
-  function previewPrefix(role: "visitor" | "bot" | "agent"): string {
-    if (role === "agent") return "You: ";
-    if (role === "bot") return "Bot: ";
-    return "";
+  function handleSend(content?: string) {
+    const text = (content ?? draft).trim();
+    if (!text || !selectedConvo) return;
+    sendReply.mutate({ content: text });
   }
 
-  // Strip markdown so the sidebar preview doesn't show raw asterisks /
-  // backticks / link syntax. Lossy by design — full markdown still renders
-  // in the detail view.
-  function stripMarkdownForPreview(text: string): string {
-    return text
-      .replace(/```[\s\S]*?```/g, " ")
-      .replace(/`([^`]+)`/g, "$1")
-      .replace(/\*\*([^*]+)\*\*/g, "$1")
-      .replace(/__([^_]+)__/g, "$1")
-      .replace(/(?<!\w)\*([^*]+)\*(?!\w)/g, "$1")
-      .replace(/(?<!\w)_([^_]+)_(?!\w)/g, "$1")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/^#{1,6}\s+/gm, "")
-      .replace(/^>\s+/gm, "")
-      .replace(/\s+/g, " ")
-      .trim();
+  function handleResolve(convId: string) {
+    closeConversation.mutate({ convId, closeReason: "resolved" });
+    advanceSelectionPast(convId);
   }
 
-  if (isLoading) {
+  function handleFlagSpam(convId: string) {
+    closeConversation.mutate({ convId, closeReason: "spam" });
+    advanceSelectionPast(convId);
+  }
+
+  function handleSnooze(convId: string, until: number | null) {
+    snoozeConversation.mutate({ convId, until });
+    advanceSelectionPast(convId);
+  }
+
+  function handleSetPriority(
+    convId: string,
+    priority: "low" | "medium" | "high",
+  ) {
+    setPriorityMutation.mutate({ convId, priority });
+  }
+
+  function handleRewrite() {
+    if (!selectedConvo || copilotSender.isStreaming) return;
+    // Reset the guard so the prefill effect re-loads the fresh suggestion.
+    lastSuggestionRef.current = null;
+    copilotSender.send({ endpoint: "auto-suggest" });
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  if (view === "focus" && selected) {
     return (
-      <div className="-m-4 md:-m-8 h-screen flex">
-        <div className="w-full md:w-[360px] bg-card/30">
-          <div className="p-4">
-            <div className="h-8 w-40 rounded-lg bg-muted animate-pulse" />
-          </div>
-          <div className="p-3 space-y-2">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-3 p-3 rounded-xl"
-              >
-                <div className="w-12 h-12 rounded-full bg-muted animate-pulse" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-4 w-24 bg-muted animate-pulse rounded" />
-                  <div className="h-3 w-32 bg-muted animate-pulse rounded" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="flex-1 bg-white/[0.02]" />
-      </div>
+      <FocusView
+        conversation={selected}
+        messages={messages}
+        index={selectedIndex}
+        total={conversations.length}
+        onExit={() => setView("split")}
+        onSend={handleSend}
+        onResolve={handleResolve}
+        onRewrite={handleRewrite}
+        draft={draft}
+        setDraft={setDraft}
+      />
     );
   }
 
-  const selectedConversation = convoDetail?.conversation;
-  const selectedMeta = selectedConversation
-    ? parseMeta(selectedConversation.metadata)
-    : null;
-
   return (
-    <div className="-m-4 md:-m-8 h-screen flex overflow-hidden">
-      {/* ─── Left Panel: Conversation List ─────────────────────────────── */}
-      <div
-        className={cn(
-          "flex flex-col bg-card transition-all",
-          // On mobile: show full width when no convo selected, hide when convo selected
-          selectedConvo ? "hidden md:flex md:w-[360px]" : "w-full md:w-[360px]",
-        )}
-      >
-        {/* Header */}
-        <div className="px-4 pt-4 pb-2 flex items-center gap-3">
-          <MobileMenuButton />
-          <h1 className="text-xl md:text-2xl font-bold text-foreground">Conversations</h1>
-          <p className="text-xs text-muted-foreground">
-            {convosPage?.counts?.all ?? 0} total
-          </p>
-        </div>
-
-        {/* Search */}
-        <div className="px-3 pb-2">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search conversations..."
-              className="w-full pl-9 pr-3 py-2 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-          </div>
-        </div>
-
-        {/* Status Filter Segments */}
-        <div className="px-3 pb-2">
-          <div className="flex bg-muted rounded-lg p-0.5">
-            {(["all", "open", "closed"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setStatusFilter(tab)}
-                className={cn(
-                  "flex-1 text-center px-3 py-1.5 rounded-md text-xs font-medium transition-all",
-                  statusFilter === tab
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {tab === "all" ? "All" : tab === "open" ? "Open" : "Closed"}
-                {convosPage?.counts && (
-                  <span className="ml-1 text-[10px] opacity-60">
-                    {convosPage.counts[tab]}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* List */}
-        <div className="flex-1 overflow-y-auto">
-          {filteredConversations.map((convo) => {
-            const meta = parseMeta(convo.metadata);
-            const preview = getLastMessagePreview(convo);
-            const isSelected = selectedConvo === convo.id;
-            const unread = isUnread(convo);
-            const presenceState = getVisitorPresenceState({
-              visitorLastSeenAt: convo.visitorLastSeenAt,
-              visitorPresence: convo.visitorPresence,
-            });
-
-            return (
-              <button
-                key={convo.id}
-                onClick={() => {
-                  setSelectedConvo(convo.id);
-                  markConversationRead(convo.id);
-                }}
-                onMouseEnter={() => {
-                  // Warm the cache before the user clicks. TanStack dedupes
-                  // in-flight requests by key + the 60s staleTime makes
-                  // repeat hovers free, so no debounce needed.
-                  queryClient.prefetchQuery({
-                    queryKey: ["conversation-detail", convo.id],
-                    queryFn: async () => {
-                      const res = await fetch(
-                        `/api/projects/${projectId}/conversations/${convo.id}`,
-                      );
-                      if (!res.ok) throw new Error("Failed to load");
-                      return res.json();
-                    },
-                    staleTime: 1000 * 60,
-                  });
-                }}
-                className={cn(
-                  "w-full flex items-center gap-3 px-3 py-3.5 text-left transition-colors hover:bg-muted/50",
-                  isSelected && "bg-primary/10",
-                )}
-              >
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={cn(
-                        "text-sm truncate flex items-center gap-1.5 text-foreground min-w-0",
-                        unread ? "font-bold" : "font-semibold",
-                      )}
-                    >
-                      {convo.status !== "closed" && (
-                        <span
-                          aria-label={`Visitor is ${getPresenceBadge(presenceState).label.toLowerCase()}`}
-                          title={`Visitor is ${getPresenceBadge(presenceState).label.toLowerCase()}`}
-                          className={cn(
-                            "w-2 h-2 rounded-full shrink-0",
-                            getPresenceDotClass(presenceState),
-                          )}
-                        />
-                      )}
-                      {meta.country && (
-                        <span className="text-base leading-none shrink-0">
-                          {countryToFlag(meta.country)}
-                        </span>
-                      )}
-                      <span className="truncate">
-                        {getVisitorDisplayName(convo)}
-                      </span>
-                    </span>
-                    <span
-                      className={cn(
-                        "text-[11px] whitespace-nowrap",
-                        unread
-                          ? "text-primary font-semibold"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {getConversationActivityLabel(convo)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 mt-1">
-                    <p
-                      className={cn(
-                        "text-xs truncate flex items-center gap-1",
-                        unread
-                          ? "text-foreground font-medium"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {preview?.emailed && (
-                        <MailCheck className="w-3 h-3 shrink-0 text-status-replied/70" />
-                      )}
-                      <span className="truncate">
-                        {preview ? (() => {
-                          // "Submitted a ticket" is already pre-formatted —
-                          // skip the markdown stripper and the role prefix.
-                          const isTicketSummary =
-                            preview.text === "Submitted a ticket";
-                          const cleaned = isTicketSummary
-                            ? preview.text
-                            : stripMarkdownForPreview(preview.text);
-                          const truncated =
-                            cleaned.length > 60
-                              ? cleaned.slice(0, 60) + "…"
-                              : cleaned;
-                          return (
-                            <>
-                              {!isTicketSummary && previewPrefix(preview.role) && (
-                                <span className="font-medium">
-                                  {previewPrefix(preview.role)}
-                                </span>
-                              )}
-                              {truncated}
-                            </>
-                          );
-                        })() : (
-                          (convo.visitorEmail ?? (meta.city
-                            ? [meta.city, meta.country].filter(Boolean).join(", ")
-                            : convo.visitorId))
-                        )}
-                      </span>
-                    </p>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {convo.status !== "closed" && convo.status !== "active" && (
-                        <span
-                          className={cn(
-                            "text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap",
-                            convo.status === "waiting_agent" &&
-                            "bg-status-waiting/10 text-status-waiting",
-                            convo.status === "agent_replied" &&
-                            "bg-status-replied/10 text-status-replied",
-                          )}
-                        >
-                          {getStatusLabel(convo.status)}
-                        </span>
-                      )}
-                      {unread && (
-                        <span
-                          aria-label="Unread"
-                          className="w-2 h-2 rounded-full bg-primary"
-                        />
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-          {filteredConversations.length === 0 && (
-            <div className="p-8 text-center">
-              <MessageSquare className="w-10 h-10 mx-auto text-muted-foreground/30 mb-2" />
-              <p className="text-sm text-muted-foreground">
-                {searchQuery ? "No matching conversations" : "No conversations yet"}
-              </p>
-            </div>
-          )}
-          {hasMore && filteredConversations.length > 0 && (
-            <button
-              onClick={() => loadMoreConversations.mutate()}
-              disabled={loadMoreConversations.isPending}
-              className="w-full py-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {loadMoreConversations.isPending ? "Loading..." : "Load more"}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ─── Right Panel: Chat Thread + Copilot ───────────────────────── */}
-      <div
-        className={cn(
-          "flex-1 flex min-w-0 bg-white/[0.02]",
-          !selectedConvo && "hidden md:flex",
-        )}
-      >
-      <div className="flex-1 flex flex-col min-w-0">
-        {selectedConvo && isDetailLoading ? (
-          <div className="flex-1 flex flex-col">
-            {/* Skeleton header */}
-            <div className="px-4 py-3 flex items-center gap-3 bg-card">
-              <button
-                onClick={() => setSelectedConvo(null)}
-                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground md:hidden shrink-0"
-                aria-label="Back to list"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-              <div className="w-9 h-9 rounded-full bg-muted animate-pulse" />
-              <div className="space-y-1.5 flex-1">
-                <div className="h-3.5 w-28 bg-muted rounded animate-pulse" />
-                <div className="h-2.5 w-20 bg-muted/60 rounded animate-pulse" />
-              </div>
-            </div>
-            {/* Skeleton messages */}
-            <div className="flex-1 px-4 py-4 space-y-3">
-              <div className="flex justify-start">
-                <div className="h-12 w-48 bg-muted/30 rounded-lg rounded-tl-none animate-pulse" />
-              </div>
-              <div className="flex justify-end">
-                <div className="h-16 w-56 bg-primary/[0.04] rounded-lg rounded-tr-none animate-pulse" />
-              </div>
-              <div className="flex justify-start">
-                <div className="h-10 w-40 bg-muted/30 rounded-lg rounded-tl-none animate-pulse" />
-              </div>
-              <div className="flex justify-end">
-                <div className="h-20 w-52 bg-primary/[0.04] rounded-lg rounded-tr-none animate-pulse" />
-              </div>
-              <div className="flex justify-start">
-                <div className="h-12 w-44 bg-muted/30 rounded-lg rounded-tl-none animate-pulse" />
-              </div>
-            </div>
-          </div>
-        ) : selectedConvo && isDetailError ? (
-          <div className="flex-1 flex flex-col">
-            <div className="px-4 py-3 flex items-center gap-3 bg-card md:hidden">
-              <button
-                onClick={() => setSelectedConvo(null)}
-                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground shrink-0"
-                aria-label="Back to list"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-              <span className="text-sm font-semibold text-foreground">
-                Conversation
-              </span>
-            </div>
-            <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
-              <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mb-3">
-                <AlertCircle className="w-6 h-6 text-destructive" />
-              </div>
-              <h3 className="text-sm font-semibold text-foreground">
-                Couldn't load conversation
-              </h3>
-              <p className="text-xs text-muted-foreground max-w-xs mt-1">
-                {detailError instanceof Error
-                  ? detailError.message
-                  : "Something went wrong while loading this conversation."}
-              </p>
-              <div className="flex items-center gap-2 mt-4">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setSelectedConvo(null)}
-                >
-                  Back to list
-                </Button>
-                <Button size="sm" onClick={() => refetchDetail()}>
-                  Try again
-                </Button>
-              </div>
-            </div>
-          </div>
-        ) : selectedConvo && convoDetail ? (
-          <>
-            {/* Chat Header */}
-            <div className="px-4 py-3 flex items-center gap-3 bg-card">
-              {/* Mobile back button */}
-              <button
-                onClick={() => setSelectedConvo(null)}
-                className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground md:hidden shrink-0"
-                aria-label="Back to list"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-              {/* Info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 min-w-0">
-                  {(() => {
-                    const presenceState = getVisitorPresenceState({
-                      visitorLastSeenAt:
-                        convoDetail.conversation.visitorLastSeenAt,
-                      visitorPresence:
-                        convoDetail.conversation.visitorPresence,
-                    });
-                    const presenceLabel = getPresenceBadge(presenceState).label;
-                    if (convoDetail.conversation.status === "closed") return null;
-                    return (
-                      <span
-                        title={`Visitor is ${presenceLabel.toLowerCase()}`}
-                        aria-label={`Visitor is ${presenceLabel.toLowerCase()}`}
-                        className={cn(
-                          "w-2 h-2 rounded-full shrink-0",
-                          getPresenceDotClass(presenceState),
-                        )}
-                      />
-                    );
-                  })()}
-                  <h2 className="text-sm font-semibold text-foreground truncate">
-                    {selectedMeta?.country && (
-                      <span className="mr-1.5">
-                        {countryToFlag(selectedMeta.country)}
-                      </span>
-                    )}
-                    {getVisitorDisplayName(convoDetail.conversation)}
-                  </h2>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground min-w-0">
-                  {convoDetail.conversation.visitorEmail && (
-                    <span className="truncate min-w-0">
-                      {convoDetail.conversation.visitorEmail}
-                    </span>
-                  )}
-                  {selectedMeta?.city && selectedMeta?.country && (
-                    <span className="hidden md:inline-flex items-center gap-1 shrink-0">
-                      <Globe className="w-3 h-3" />
-                      {selectedMeta.city}
-                      {selectedMeta.region ? `, ${selectedMeta.region}` : ""}
-                    </span>
-                  )}
-                  <span className="hidden md:flex items-center gap-1 shrink-0">
-                    <Clock className="w-3 h-3" />
-                    In chat {formatDuration(convoDetail.conversation.createdAt)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-2 shrink-0">
-                <span
-                  className={cn(
-                    "text-xs px-2.5 py-1 rounded-full font-medium whitespace-nowrap",
-                    convoDetail.conversation.status === "active" &&
-                    "bg-status-active/10 text-status-active",
-                    convoDetail.conversation.status === "waiting_agent" &&
-                    "bg-status-waiting/10 text-status-waiting",
-                    convoDetail.conversation.status === "agent_replied" &&
-                    "bg-status-replied/10 text-status-replied",
-                    convoDetail.conversation.status === "closed" &&
-                    "bg-status-closed/10 text-status-closed",
-                  )}
-                >
-                  {convoDetail.conversation.status === "closed"
-                    ? getCloseReasonLabel(convoDetail.conversation.closeReason)
-                    : getStatusLabel(convoDetail.conversation.status)}
-                </span>
-                <Button
-                  variant={copilotOpen ? "secondary" : "ghost"}
-                  size="sm"
-                  onClick={() => setCopilotOpen((v) => !v)}
-                  className={cn(
-                    "h-8 px-2 gap-1.5",
-                    copilotOpen
-                      ? "text-primary"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                  aria-pressed={copilotOpen}
-                  title={copilotOpen ? "Hide Copilot" : "Open Copilot"}
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span className="hidden md:inline text-xs">Copilot</span>
-                </Button>
-                {convoDetail.conversation.status !== "closed" && (
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={closeConversation.isPending}
-                        className="text-muted-foreground hover:text-destructive h-8 px-2"
-                      >
-                        <XCircle className="w-4 h-4" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent align="end" className="w-48 p-1">
-                      <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
-                        Close as...
-                      </div>
-                      <button
-                        type="button"
-                        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-lg hover:bg-accent transition-colors"
-                        onClick={() =>
-                          closeConversation.mutate({
-                            convId: convoDetail.conversation.id,
-                            closeReason: "resolved",
-                          })
-                        }
-                      >
-                        <CheckCircle2 className="w-4 h-4 text-green-500" />
-                        Resolved
-                      </button>
-                      <button
-                        type="button"
-                        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-lg hover:bg-accent transition-colors"
-                        onClick={() =>
-                          closeConversation.mutate({
-                            convId: convoDetail.conversation.id,
-                            closeReason: "ended",
-                          })
-                        }
-                      >
-                        <LogOut className="w-4 h-4 text-muted-foreground" />
-                        Ended
-                      </button>
-                      <button
-                        type="button"
-                        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-lg hover:bg-accent transition-colors"
-                        onClick={() =>
-                          closeConversation.mutate({
-                            convId: convoDetail.conversation.id,
-                            closeReason: "spam",
-                          })
-                        }
-                      >
-                        <ShieldBan className="w-4 h-4 text-destructive" />
-                        Spam
-                      </button>
-                      <div className="my-1 mx-2 h-px bg-muted" />
-                      <button
-                        type="button"
-                        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-lg hover:bg-destructive/10 transition-colors text-destructive"
-                        disabled={banVisitor.isPending}
-                        onClick={() =>
-                          banVisitor.mutate({
-                            convId: convoDetail.conversation.id,
-                            visitorId: convoDetail.conversation.visitorId,
-                            visitorEmail: convoDetail.conversation.visitorEmail,
-                          })
-                        }
-                      >
-                        <ShieldBan className="w-4 h-4" />
-                        {banVisitor.isPending ? "Banning..." : "Ban Visitor"}
-                      </button>
-                    </PopoverContent>
-                  </Popover>
-                )}
-              </div>
-            </div>
-
-            {/* Visitor info bar */}
-            {selectedMeta && (() => {
-              const { system, custom } = splitMetadata(selectedMeta);
-              const browserName = parseBrowserName(
-                selectedMeta.userAgent as string | undefined,
-                selectedMeta.browser as string | undefined,
-              );
-              const customEntries = Object.entries(custom);
-              const currentPage = (selectedMeta.currentPageUrl ?? selectedMeta.url) as string | undefined;
-              const referrer = selectedMeta.referrer as string | undefined;
-              const timezone = selectedMeta.timezone as string | undefined;
-              const hasAnyInfo = browserName !== "Unknown" || currentPage || referrer || timezone || customEntries.length > 0;
-
-              if (!hasAnyInfo) return null;
-
-              const isIdentified = customEntries.length > 0;
-
-              return (
-                <Sheet>
-                  <SheetTrigger asChild>
-                    <div className="px-4 py-1.5 bg-card/80 flex items-center gap-x-3 text-[11px] text-muted-foreground w-full overflow-hidden cursor-pointer hover:bg-accent/50 transition-colors min-w-0">
-                      {isIdentified ? (
-                        <>
-                          {customEntries.slice(0, 3).map(([key, value]) => (
-                            <span
-                              key={key}
-                              title={`${key}: ${value}`}
-                              className="flex items-center gap-1 whitespace-nowrap shrink-0 bg-primary/10 text-primary px-1.5 py-0.5 rounded-md"
-                            >
-                              <Tag className="w-2.5 h-2.5 shrink-0" />
-                              <span className="font-medium">{key}:</span> {value}
-                            </span>
-                          ))}
-                          {currentPage && (
-                            <span
-                              className="flex items-center gap-1 whitespace-nowrap shrink-0"
-                              title={currentPage}
-                            >
-                              <Globe className="w-3 h-3 shrink-0" />
-                              <span className="font-medium">Page:</span>
-                              <span>{currentPage.replace(/^https?:\/\//, "")}</span>
-                            </span>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          {referrer && (
-                            <span
-                              className="flex items-center gap-1 whitespace-nowrap shrink-0"
-                              title={referrer}
-                            >
-                              <Globe className="w-3 h-3 shrink-0" />
-                              <span className="font-medium">Referrer:</span>
-                              <span>{referrer.replace(/^https?:\/\//, "")}</span>
-                            </span>
-                          )}
-                          {currentPage && (
-                            <span
-                              className="flex items-center gap-1 whitespace-nowrap shrink-0"
-                              title={currentPage}
-                            >
-                              <Globe className="w-3 h-3 shrink-0" />
-                              <span className="font-medium">Page:</span>
-                              <span>{currentPage.replace(/^https?:\/\//, "")}</span>
-                            </span>
-                          )}
-                          {timezone && (
-                            <span
-                              className="flex items-center gap-1 whitespace-nowrap shrink-0"
-                              title={timezone}
-                            >
-                              <Clock className="w-3 h-3 shrink-0" />
-                              <span className="font-medium">Timezone:</span>
-                              {timezone}
-                            </span>
-                          )}
-                          {browserName !== "Unknown" && (
-                            <span className="flex items-center gap-1 whitespace-nowrap shrink-0">
-                              <Monitor className="w-3 h-3 shrink-0" />
-                              <span className="font-medium">Browser:</span>
-                              {browserName}
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </SheetTrigger>
-                  <SheetContent side="right" className="overflow-y-auto">
-                    <SheetHeader>
-                      <SheetTitle>Details</SheetTitle>
-                    </SheetHeader>
-                    <div className="mt-4 px-4">
-                      <DetailsPanel
-                        stats={[{ label: "AI Messages (Billed)", value: convoDetail.messages.filter((m) => m.role === "bot").length }]}
-                        identity={[
-                          convoDetail.conversation.visitorName ? { label: "Name", value: convoDetail.conversation.visitorName } : null,
-                          convoDetail.conversation.visitorEmail ? { label: "Email", value: convoDetail.conversation.visitorEmail } : null,
-                        ].filter((x): x is { label: string; value: string } => x !== null)}
-                        fields={customEntries.length > 0 ? custom : undefined}
-                        fieldsLabel="Custom Metadata"
-                        systemFields={system}
-                        systemDefaultOpen={customEntries.length === 0 && !convoDetail.conversation.visitorName && !convoDetail.conversation.visitorEmail}
-                      />
-                    </div>
-                  </SheetContent>
-                </Sheet>
-              );
-            })()}
-
-            {/* Messages */}
-            <div
-              ref={messagesContainerRef}
-              className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-1 min-w-0"
-              style={{
-                backgroundImage:
-                  'url("data:image/svg+xml,%3Csvg width=\'200\' height=\'200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cdefs%3E%3Cpattern id=\'a\' patternUnits=\'userSpaceOnUse\' width=\'40\' height=\'40\'%3E%3Cpath d=\'M0 20h40M20 0v40\' fill=\'none\' stroke=\'%23000\' stroke-opacity=\'.02\' stroke-width=\'.5\'/%3E%3C/pattern%3E%3C/defs%3E%3Crect width=\'200\' height=\'200\' fill=\'url(%23a)\'/%3E%3C/svg%3E")',
-              }}
-            >
-              {/* Load earlier messages */}
-              {convoDetail.hasMore && (
-                <div className="flex justify-center pb-3">
-                  <button
-                    type="button"
-                    onClick={() => loadEarlier.mutate()}
-                    disabled={loadEarlier.isPending}
-                    className="px-3 py-1 rounded-lg bg-card/80 text-[11px] text-muted-foreground hover:text-foreground hover:bg-card transition-colors shadow-sm disabled:opacity-60"
-                  >
-                    {loadEarlier.isPending ? "Loading..." : "Load earlier messages"}
-                  </button>
-                </div>
-              )}
-
-              {/* Date separator for first message */}
-              {threadItems.length > 0 && (
-                <div className="flex justify-center mb-3">
-                  <span className="px-3 py-1 rounded-lg bg-card/80 text-[11px] text-muted-foreground font-medium shadow-sm">
-                    {new Date(
-                      threadItems[0].createdAt,
-                    ).toLocaleDateString([], {
-                      weekday: "long",
-                      month: "long",
-                      day: "numeric",
-                    })}
-                  </span>
-                </div>
-              )}
-
-              {threadItems.map((item, idx) => {
-                const prevItem = idx > 0 ? threadItems[idx - 1] : null;
-                const showDateSep =
-                  prevItem &&
-                  new Date(item.createdAt).toDateString() !==
-                  new Date(prevItem.createdAt).toDateString();
-
-                if (item.kind === "ticket") {
-                  const t = item.ticket;
-                  const statusLabel =
-                    t.status === "open"
-                      ? "Open"
-                      : t.status === "in_progress"
-                        ? "In progress"
-                        : t.status === "resolved"
-                          ? "Resolved"
-                          : "Closed";
-                  const priorityLabel =
-                    t.priority.charAt(0).toUpperCase() + t.priority.slice(1);
-                  const dueDateObj = t.dueDate ? new Date(t.dueDate) : null;
-                  const isPastDue =
-                    dueDateObj !== null &&
-                    dueDateObj.getTime() < Date.now() &&
-                    t.status !== "resolved" &&
-                    t.status !== "closed";
-
-                  return (
-                    <div key={item.id}>
-                      {showDateSep && (
-                        <div className="flex justify-center my-3">
-                          <span className="px-3 py-1 rounded-lg bg-card/80 text-[11px] text-muted-foreground font-medium shadow-sm">
-                            {new Date(item.createdAt).toLocaleDateString([], {
-                              weekday: "long",
-                              month: "long",
-                              day: "numeric",
-                            })}
-                          </span>
-                        </div>
-                      )}
-
-                      <div className="flex justify-start mb-0.5">
-                        <div className="relative max-w-[85%] sm:max-w-[65%] rounded-lg rounded-tl-none px-3 py-2 shadow-sm bg-muted/50 text-foreground overflow-hidden">
-                          <div className="flex items-center gap-1 mb-1.5 flex-wrap">
-                            <FileText className="w-3 h-3 text-muted-foreground" />
-                            <span className="text-[11px] font-semibold text-muted-foreground">
-                              Ticket
-                            </span>
-                            <span
-                              className={cn(
-                                "text-[10px] px-1.5 py-0.5 rounded-full ml-1",
-                                t.status === "open" &&
-                                "bg-blue-500/10 text-blue-400",
-                                t.status === "in_progress" &&
-                                "bg-amber-500/10 text-amber-400",
-                                t.status === "resolved" &&
-                                "bg-emerald-500/10 text-emerald-400",
-                                t.status === "closed" &&
-                                "bg-muted text-muted-foreground",
-                              )}
-                            >
-                              {statusLabel}
-                            </span>
-                            <span
-                              className={cn(
-                                "text-[10px] px-1.5 py-0.5 rounded-full",
-                                t.priority === "urgent" &&
-                                "bg-red-500/10 text-red-400",
-                                t.priority === "high" &&
-                                "bg-amber-500/10 text-amber-400",
-                                t.priority === "medium" &&
-                                "bg-blue-500/10 text-blue-400",
-                                t.priority === "low" &&
-                                "bg-muted text-muted-foreground",
-                              )}
-                            >
-                              {priorityLabel}
-                            </span>
-                          </div>
-                          {item.fields.length > 0 && (
-                            <div className="space-y-1">
-                              {item.fields.map(([key, value]) => (
-                                <div key={key} className="text-[13px] leading-relaxed">
-                                  <span className="font-medium text-foreground/80">
-                                    {key}:
-                                  </span>{" "}
-                                  <span className="text-foreground/70 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                                    {value}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {(t.assignee || dueDateObj) && (
-                            <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
-                              {t.assignee && (
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-medium text-foreground/70">
-                                    Assignee:
-                                  </span>
-                                  <span>{t.assignee.name}</span>
-                                </div>
-                              )}
-                              {dueDateObj && (
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-medium text-foreground/70">
-                                    Due:
-                                  </span>
-                                  <span
-                                    className={cn(
-                                      isPastDue && "text-red-400 font-medium",
-                                    )}
-                                  >
-                                    {dueDateObj.toLocaleDateString([], {
-                                      month: "short",
-                                      day: "numeric",
-                                      year: "numeric",
-                                    })}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          <div className="flex items-center justify-end mt-1">
-                            <span className="text-[10px] text-muted-foreground/70">
-                              {formatTime(String(t.createdAt))}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-
-                const msg = item.message;
-                const isVisitor = msg.role === "visitor";
-                const isBot = msg.role === "bot";
-                const isAgent = msg.role === "agent";
-
-                return (
-                  <div key={item.id}>
-                    {showDateSep && (
-                      <div className="flex justify-center my-3">
-                        <span className="px-3 py-1 rounded-lg bg-card/80 text-[11px] text-muted-foreground font-medium shadow-sm">
-                          {new Date(msg.createdAt).toLocaleDateString([], {
-                            weekday: "long",
-                            month: "long",
-                            day: "numeric",
-                          })}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Tool execution cards (shown above bot messages) */}
-                    {isBot && msg.toolExecutions && msg.toolExecutions.length > 0 && (
-                      <div className="flex justify-end mb-1">
-                        <div className="max-w-[85%] sm:max-w-[65%] w-full space-y-1">
-                          {msg.toolExecutions.map((exec) => {
-                            const isExpanded = expandedToolCards.has(exec.id);
-                            const toggleExpand = () => {
-                              setExpandedToolCards((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(exec.id)) {
-                                  next.delete(exec.id);
-                                } else {
-                                  next.add(exec.id);
-                                }
-                                return next;
-                              });
-                            };
-
-                            const statusColor =
-                              exec.status === "success"
-                                ? "text-emerald-400"
-                                : exec.status === "timeout"
-                                  ? "text-amber-400"
-                                  : "text-red-400";
-                            const statusBg =
-                              exec.status === "success"
-                                ? "bg-emerald-500/10"
-                                : exec.status === "timeout"
-                                  ? "bg-amber-500/10"
-                                  : "bg-red-500/10";
-                            const statusLabel =
-                              exec.status === "success"
-                                ? exec.httpStatus
-                                  ? `${exec.httpStatus} OK`
-                                  : "Success"
-                                : exec.status === "timeout"
-                                  ? "Timeout"
-                                  : "Error";
-
-                            return (
-                              <div
-                                key={exec.id}
-                                className="bg-white/[0.03] backdrop-blur-sm rounded-lg overflow-hidden"
-                              >
-                                {/* Card header — always visible */}
-                                <button
-                                  type="button"
-                                  onClick={toggleExpand}
-                                  className="w-full px-3 py-2 flex items-center gap-2 hover:bg-white/[0.02] transition-colors"
-                                >
-                                  <div className="w-5 h-5 rounded bg-primary/10 flex items-center justify-center shrink-0">
-                                    <Wrench className="w-3 h-3 text-primary" />
-                                  </div>
-                                  <div className="flex-1 text-left min-w-0">
-                                    <span className="text-[11px] text-muted-foreground">
-                                      Called tool
-                                    </span>
-                                    <span className="text-[11px] font-medium text-foreground ml-1.5 truncate">
-                                      {exec.displayName}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5 shrink-0">
-                                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full", statusBg, statusColor)}>
-                                      {statusLabel}
-                                    </span>
-                                    {exec.duration != null && (
-                                      <span className="text-[10px] text-muted-foreground">
-                                        {exec.duration}ms
-                                      </span>
-                                    )}
-                                    {isExpanded ? (
-                                      <ChevronDown className="w-3 h-3 text-muted-foreground" />
-                                    ) : (
-                                      <ChevronRight className="w-3 h-3 text-muted-foreground" />
-                                    )}
-                                  </div>
-                                </button>
-
-                                {/* Expandable details */}
-                                {isExpanded && (
-                                  <div>
-                                    {/* Input parameters */}
-                                    {exec.input && Object.keys(exec.input).length > 0 && (
-                                      <div className="px-3 py-2">
-                                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">
-                                          Parameters
-                                        </p>
-                                        <pre className="bg-black/20 rounded-md p-2 text-[11px] text-muted-foreground font-mono overflow-x-auto max-h-32 overflow-y-auto">
-                                          {JSON.stringify(exec.input, null, 2)}
-                                        </pre>
-                                      </div>
-                                    )}
-
-                                    {/* Output / Error */}
-                                    <div className="px-3 py-2">
-                                      <div className="flex items-center gap-2 mb-1.5">
-                                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                                          Result
-                                        </p>
-                                        {exec.status !== "success" && exec.errorMessage && (
-                                          <div className="flex items-center gap-1">
-                                            <AlertCircle className="w-3 h-3 text-red-400" />
-                                            <span className="text-[10px] text-red-400">
-                                              {exec.errorMessage}
-                                            </span>
-                                          </div>
-                                        )}
-                                      </div>
-                                      {exec.output ? (
-                                        <pre className="bg-black/20 rounded-md p-2 text-[11px] text-muted-foreground font-mono overflow-x-auto max-h-40 overflow-y-auto">
-                                          {JSON.stringify(exec.output, null, 2)}
-                                        </pre>
-                                      ) : (
-                                        <p className="text-[11px] text-muted-foreground/60 italic">
-                                          No output data
-                                        </p>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    <div
-                      className={cn(
-                        "group flex mb-3 min-w-0 items-center gap-2",
-                        isVisitor ? "justify-start" : "justify-end",
-                      )}
-                    >
-                      {isAgent && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setMessageToDelete({
-                              id: msg.id,
-                              preview: msg.content.slice(0, 80),
-                              emailedAt: msg.emailedAt ?? null,
-                            })
-                          }
-                          aria-label="Delete message"
-                          title="Delete message"
-                          className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <div
-                        className={cn(
-                          "flex flex-col max-w-[85%] sm:max-w-[65%] min-w-0 gap-1.5",
-                          isVisitor ? "items-start" : "items-end",
-                        )}
-                      >
-                      <div
-                        className={cn(
-                          "relative rounded-lg px-3 py-2 shadow-sm overflow-hidden max-w-full",
-                          isVisitor &&
-                          "bg-muted/50 text-foreground rounded-tl-none",
-                          isBot &&
-                          "bg-primary/[0.07] text-foreground rounded-tr-none",
-                          isAgent &&
-                          "bg-primary/[0.10] text-foreground rounded-tr-none",
-                        )}
-                      >
-                        {/* Role label for bot/agent */}
-                        {(isBot || isAgent) && (
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            {isAgent && msg.senderAvatar && (
-                              <img
-                                src={msg.senderAvatar}
-                                alt={msg.senderName ?? "Agent"}
-                                className="w-4 h-4 rounded-full object-cover"
-                              />
-                            )}
-                            {isBot && (
-                              <span className="text-[11px] font-semibold text-status-active flex items-center gap-0.5">
-                                <Bot className="w-3 h-3" />
-                                {msg.senderName ?? convoDetail.botName ?? "Bot"}
-                              </span>
-                            )}
-                            {isAgent && (
-                              <span className="text-[11px] font-semibold text-status-replied flex items-center gap-0.5">
-                                {!msg.senderAvatar && <Headphones className="w-3 h-3" />}
-                                {msg.senderName ?? convoDetail.agentName ?? "Agent"}
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Attached image */}
-                        {msg.imageUrl && (
-                          <a
-                            href={msg.imageUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block mb-1.5"
-                          >
-                            <img
-                              src={msg.imageUrl}
-                              alt="Attached"
-                              className="max-w-full max-h-72 rounded-lg object-cover"
-                            />
-                          </a>
-                        )}
-
-                        {/* Message content */}
-                        {(() => {
-                          const hideText =
-                            !!msg.imageUrl &&
-                            (!msg.content || msg.content.trim() === "Sent an image");
-                          if (hideText) return null;
-                          return msg.role === "visitor" ? (
-                            <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                              {msg.content}
-                            </p>
-                          ) : (
-                            <div
-                              className="text-[13.5px] leading-relaxed break-words [overflow-wrap:anywhere] prose-chat"
-                              dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-                            />
-                          );
-                        })()}
-
-                        {/* Source links */}
-                        {isBot && msg.sources && (() => {
-                          try {
-                            const sources: SourceReference[] = JSON.parse(msg.sources);
-                            if (!Array.isArray(sources) || sources.length === 0) return null;
-                            return (
-                              <div className="mt-1.5 pt-1.5 space-y-0.5">
-                                {sources.map((src, i) => {
-                                  const srcType = src.type || "webpage";
-                                  const typeLabel = srcType === "pdf" ? "Docs" : srcType === "faq" ? "FAQ" : "Website";
-                                  const Icon = srcType === "webpage" ? Globe : FileText;
-                                  return (
-                                    <div key={i} className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                      <Icon className="w-3 h-3 shrink-0" />
-                                      <span className="font-semibold text-[10px] uppercase tracking-wide shrink-0">{typeLabel}</span>
-                                      {src.url ? (
-                                        <a
-                                          href={src.url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="hover:opacity-70 truncate"
-                                        >
-                                          {src.title}
-                                        </a>
-                                      ) : (
-                                        <span className="truncate">{src.title}</span>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            );
-                          } catch {
-                            return null;
-                          }
-                        })()}
-
-                      </div>
-
-                      {/* Timestamp + checkmarks + email status — sits BELOW the bubble */}
-                      <div
-                        className={cn(
-                          "flex items-center gap-1 px-1 flex-wrap",
-                          isVisitor ? "justify-start" : "justify-end",
-                        )}
-                      >
-                        {(msg as Message & { _optimistic?: boolean })
-                          ._optimistic ? (
-                          <span className="text-[10px] text-muted-foreground/70 italic">
-                            {sendReply.isPending
-                              ? "Sending..."
-                              : sendReply.isError
-                                ? "Failed to send"
-                                : "Sent"}
-                          </span>
-                        ) : (
-                          <>
-                            <span className="text-[10px] text-muted-foreground/70">
-                              {formatTime(msg.createdAt)}
-                            </span>
-                            {!isVisitor && (
-                              <CheckCheck className="w-3.5 h-3.5 text-status-replied/70" />
-                            )}
-                            {isVisitor && (
-                              <Check className="w-3 h-3 text-muted-foreground/40" />
-                            )}
-                            {(isAgent || isBot) &&
-                              (msg.emailedAt ? (
-                                <span
-                                  title={`Emailed ${timeAgo(msg.emailedAt)}`}
-                                  aria-label={`Emailed ${timeAgo(msg.emailedAt)}`}
-                                  className="inline-flex"
-                                >
-                                  <MailCheck className="w-3.5 h-3.5 text-status-replied/70" />
-                                </span>
-                              ) : convoDetail?.conversation?.visitorEmail ? (
-                                <button
-                                  type="button"
-                                  onClick={() => sendEmail.mutate(msg.id)}
-                                  disabled={sendEmail.isPending}
-                                  className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 ml-1 transition-colors"
-                                >
-                                  <Mail className="w-3 h-3" />
-                                  {sendEmail.isPending &&
-                                  sendEmail.variables === msg.id
-                                    ? "Sending..."
-                                    : "Send as Email"}
-                                </button>
-                              ) : null)}
-                          </>
-                        )}
-                      </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Reply Input */}
-            <div className="px-3 py-2 bg-card">
-              {convoDetail.conversation.status === "closed" && (
-                <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-muted-foreground">
-                  <XCircle className="w-3 h-3" />
-                  {getCloseReasonLabel(convoDetail.conversation.closeReason)}
-                  <span className="text-muted-foreground/60">· Replying will reopen</span>
-                </div>
-              )}
-              {replyImagePreview && (
-                <div className="mb-2 inline-flex items-center gap-2 p-1.5 pr-2 rounded-xl bg-muted/60 border border-border max-w-xs">
-                  <img
-                    src={replyImagePreview}
-                    alt="Attachment preview"
-                    className="w-12 h-12 rounded-lg object-cover"
-                  />
-                  <span className="text-[12px] text-muted-foreground truncate flex-1">
-                    {replyImageFile?.name ?? "Image"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setReplyImageFile(null);
-                      setReplyImagePreview(null);
-                      if (replyImageInputRef.current)
-                        replyImageInputRef.current.value = "";
-                    }}
-                    className="text-muted-foreground hover:text-foreground p-0.5"
-                    aria-label="Remove image"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (replyText.trim() || replyImageFile) {
-                    sendReply.mutate({
-                      content: replyText.trim(),
-                      imageFile: replyImageFile,
-                    });
-                    if (replyTextareaRef.current) {
-                      replyTextareaRef.current.style.height = "auto";
-                    }
-                  }
-                }}
-                className="flex items-end gap-2"
-              >
-                <input
-                  ref={replyImageInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    if (file.size > 10 * 1024 * 1024) {
-                      toast.error("Image too large (max 10MB)");
-                      e.target.value = "";
-                      return;
-                    }
-                    setReplyImageFile(file);
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      setReplyImagePreview(reader.result as string);
-                    };
-                    reader.readAsDataURL(file);
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => replyImageInputRef.current?.click()}
-                  disabled={sendReply.isPending}
-                  className="h-10 w-10 rounded-full mb-0.5 shrink-0"
-                  aria-label="Attach image"
-                  title="Attach image"
-                >
-                  <Paperclip className="w-4 h-4" />
-                </Button>
-                <textarea
-                  ref={replyTextareaRef}
-                  value={replyText}
-                  onChange={(e) => {
-                    setReplyText(e.target.value);
-                    // Auto-resize
-                    e.target.style.height = "auto";
-                    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
-                  }}
-                  onPaste={(e) => {
-                    const item = Array.from(e.clipboardData.items).find((i) =>
-                      i.type.startsWith("image/"),
-                    );
-                    if (!item) return;
-                    const file = item.getAsFile();
-                    if (!file) return;
-                    if (file.size > 10 * 1024 * 1024) {
-                      toast.error("Image too large (max 10MB)");
-                      return;
-                    }
-                    e.preventDefault();
-                    setReplyImageFile(file);
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      setReplyImagePreview(reader.result as string);
-                    };
-                    reader.readAsDataURL(file);
-                  }}
-                  onKeyDown={(e) => {
-                    // On touch-primary devices the on-screen keyboard has no
-                    // Shift, so Enter must insert a newline. Send button only.
-                    const isTouch =
-                      typeof window !== "undefined" &&
-                      window.matchMedia("(pointer: coarse)").matches;
-                    if (isTouch) return;
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      if (replyText.trim() || replyImageFile) {
-                        sendReply.mutate({
-                          content: replyText.trim(),
-                          imageFile: replyImageFile,
-                        });
-                        if (replyTextareaRef.current) {
-                          replyTextareaRef.current.style.height = "auto";
-                        }
-                      }
-                    }
-                  }}
-                  placeholder={convoDetail.conversation.status === "closed" ? "Reply to reopen..." : "Type your reply..."}
-                  rows={1}
-                  className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none overflow-hidden leading-normal"
-                  style={{ maxHeight: 120 }}
-                />
-                <Button
-                  type="submit"
-                  size="icon"
-                  disabled={
-                    (!replyText.trim() && !replyImageFile) ||
-                    sendReply.isPending ||
-                    isUploadingReplyImage
-                  }
-                  className="h-10 w-10 rounded-full mb-0.5"
-                >
-                  <Send className="w-4 h-4" />
-                </Button>
-              </form>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 hidden md:flex items-center justify-center">
-            <div className="text-center space-y-3 opacity-50">
-              <MessageSquare className="w-16 h-16 mx-auto text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">
-                Select a conversation to start
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-      {copilotOpen && selectedConvo && projectId && (
-        <CopilotDrawer
-          projectId={projectId}
-          conversationId={selectedConvo}
-          onClose={() => setCopilotOpen(false)}
-          onAddToComposer={appendToComposer}
+    // The brief's shell is `flex h-screen min-w-0`; the negative margins +
+    // overflow-hidden escape the Layout's `p-4 md:p-8` Outlet padding so the
+    // inbox renders full-bleed (matching the prior page behavior).
+    <div className="-m-4 md:-m-8 flex h-screen min-w-0 overflow-hidden">
+      <MessageList
+        filter={filter}
+        conversations={conversations}
+        counts={counts}
+        selectedId={selectedConvo}
+        onSelect={setSelectedConvo}
+        onResolve={handleResolve}
+        onSnooze={handleSnooze}
+      />
+      {selected ? (
+        <ReadingPane
+          conversation={selected}
+          messages={messages}
+          draft={draft}
+          setDraft={setDraft}
+          onSend={handleSend}
+          onResolve={handleResolve}
+          onSnooze={handleSnooze}
+          onFlagSpam={handleFlagSpam}
+          onPriority={handleSetPriority}
+          onRewrite={handleRewrite}
+          onFocus={() => setView("focus")}
         />
+      ) : (
+        <div className="glass-reading flex-1 grid place-items-center text-ink-7 text-sm">
+          Select a conversation
+        </div>
       )}
-      </div>
-
-      <Dialog
-        open={!!messageToDelete}
-        onOpenChange={(open) => {
-          if (!open) setMessageToDelete(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete message?</DialogTitle>
-            <DialogDescription>
-              This permanently deletes the message from this conversation. The
-              visitor's widget will update in real time.
-            </DialogDescription>
-          </DialogHeader>
-          {messageToDelete && (
-            <div className="space-y-2">
-              <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground/80 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                {messageToDelete.preview}
-                {messageToDelete.preview.length >= 80 && "…"}
-              </div>
-              {messageToDelete.emailedAt && (
-                <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  <span>
-                    This reply was already emailed to the visitor. Deletion only
-                    removes it from the widget — the email cannot be recalled.
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setMessageToDelete(null)}
-              disabled={deleteMessage.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (!messageToDelete) return;
-                deleteMessage.mutate(messageToDelete.id, {
-                  onSuccess: () => setMessageToDelete(null),
-                });
-              }}
-              disabled={deleteMessage.isPending}
-            >
-              {deleteMessage.isPending ? "Deleting..." : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
