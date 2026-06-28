@@ -115,6 +115,20 @@ function Conversations() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConvo]);
 
+  // ── Search & pagination state ──────────────────────────────────────────
+  // searchQuery is the raw input value (controlled); debouncedSearch is what
+  // the query key and fetch URL use, updated after a 300ms idle window.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  // listLimit grows by 25 on each "Load more" click. We keep a flat response
+  // shape (not useInfiniteQuery) so the /updates patch logic stays unchanged.
+  const [listLimit, setListLimit] = useState(25);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
   const [loadedConversations, setLoadedConversations] = useState<Conversation[]>(
     [],
   );
@@ -135,14 +149,15 @@ function Conversations() {
 
   // ── List query (drives the conversation column) ──────────────────────────
   const { data: convosPage } = useQuery<ConversationsPage>({
-    queryKey: ["conversations", projectId, filter],
+    queryKey: ["conversations", projectId, filter, debouncedSearch, listLimit],
     queryFn: async () => {
       const params = new URLSearchParams({
         status: "all",
-        limit: "25",
+        limit: listLimit.toString(),
         offset: "0",
         filter,
       });
+      if (debouncedSearch) params.set("q", debouncedSearch);
       const res = await fetch(
         `/api/projects/${projectId}/conversations?${params.toString()}`,
       );
@@ -221,9 +236,12 @@ function Conversations() {
       return next;
     });
 
-    // Keep the cached page consistent so a filter switch stays correct.
+    // Keep the cached page consistent so a filter switch / limit bump stays
+    // correct. debouncedSearch and listLimit are read from the closure here;
+    // their staleness window matches the 5-second poll interval (same pattern
+    // as the existing `filter` closure variable).
     queryClient.setQueryData<ConversationsPage | undefined>(
-      ["conversations", projectId, filter],
+      ["conversations", projectId, filter, debouncedSearch, listLimit],
       (old) => {
         if (!old) return old;
         const seen = new Set(old.conversations.map((c) => c.id));
@@ -532,6 +550,10 @@ function Conversations() {
     setPriorityMutation.mutate({ convId, priority });
   }
 
+  function handleLoadMore() {
+    setListLimit((n) => n + 25);
+  }
+
   function handleRewrite() {
     if (!selectedConvo || copilotSender.isStreaming) return;
     // Reset the guard so the prefill effect re-loads the fresh suggestion.
@@ -570,6 +592,10 @@ function Conversations() {
         onSelect={setSelectedConvo}
         onResolve={handleResolve}
         onSnooze={handleSnooze}
+        search={searchQuery}
+        onSearchChange={setSearchQuery}
+        hasMore={convosPage?.hasMore ?? false}
+        onLoadMore={handleLoadMore}
       />
       {selected ? (
         <ReadingPane
