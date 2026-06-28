@@ -35,7 +35,9 @@ export default function ChatThread({
 }: ChatThreadProps) {
   return (
     <div className="min-h-full">
-      <div className="max-w-[760px] mx-auto px-[30px] pt-4 pb-[10px]">
+      {/* Full-bleed with the same 30px inset as the header/composer so bubbles
+          align to the pane edges (not a centered narrow column). */}
+      <div className="px-[30px] pt-4 pb-[10px]">
         {messages.map((message, i) => {
           const prev = messages[i - 1];
           const showDivider = !prev || !isSameDay(prev.createdAt, message.createdAt);
