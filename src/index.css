@@ -50,7 +50,9 @@
   .glass-focus {
     background: var(--glass-focus);
     backdrop-filter: blur(var(--blur-bar));
-    box-shadow: inset 0 0 0 0.5px var(--hairline-strong);
+    /* Subtle neutral edge — the brighter hairline-strong read as a cool/blue
+       border against the dark card. */
+    box-shadow: inset 0 0 0 0.5px var(--hairline);
   }
 
   .keycap {
