@@ -21,6 +21,52 @@
   }
 }
 
+@layer components {
+  /* Wallpaper lives on body; panes are translucent over it. */
+  body {
+    background-color: var(--wallpaper-base);
+    background-image:
+      radial-gradient(90% 80% at 6% -5%, rgba(58, 96, 142, 0.55), transparent 60%),
+      radial-gradient(80% 90% at 102% 8%, rgba(104, 64, 132, 0.5), transparent 55%),
+      radial-gradient(80% 80% at 60% 110%, rgba(40, 92, 104, 0.42), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  .glass-sidebar { background: var(--glass-sidebar); backdrop-filter: blur(var(--blur-panel)); }
+  .glass-list { background: var(--glass-list); backdrop-filter: blur(var(--blur-panel)); }
+  .glass-reading { background: var(--glass-reading); backdrop-filter: blur(var(--blur-panel)); }
+  .glass-bar { background: var(--glass-bar); backdrop-filter: blur(var(--blur-bar)); }
+
+  .glass-button {
+    background: var(--glass-button);
+    box-shadow: inset 0 0 0 0.5px var(--hairline-inset);
+    transition: background 0.12s;
+  }
+  .glass-button:hover { background: var(--glass-raised); }
+
+  .glass-focus {
+    background: var(--glass-focus);
+    backdrop-filter: blur(var(--blur-bar));
+    box-shadow: inset 0 0 0 0.5px var(--hairline-strong);
+  }
+
+  .keycap {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--glass-raised);
+    border-radius: var(--rad-keycap);
+    font-size: 10.5px; font-weight: 600; color: var(--ink-4);
+    min-width: 17px; height: 17px; padding: 0 4px;
+  }
+
+  .system-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    box-shadow: inset 0 0 0 0.5px var(--hairline);
+    border-radius: 20px; padding: 5px 13px;
+    font-size: 11.5px; color: var(--ink-6);
+  }
+}
+
 /* ─── Glow Surface Utility ─────────────────────────────────────────────────── */
 /* Reusable active/interactive glow surface for buttons, active nav, etc.     */
 .glow-surface {

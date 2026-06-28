@@ -47,6 +47,46 @@
 
   --font-sans: "Inter", system-ui, sans-serif;
   --font-heading: "Switzer", system-ui, sans-serif;
+
+  /* Glass surfaces → bg-glass-* / etc. */
+  --color-glass-sidebar: var(--glass-sidebar);
+  --color-glass-list: var(--glass-list);
+  --color-glass-reading: var(--glass-reading);
+  --color-glass-bar: var(--glass-bar);
+  --color-glass-button: var(--glass-button);
+  --color-glass-raised: var(--glass-raised);
+  --color-glass-focus: var(--glass-focus);
+  --color-glass-peek-1: var(--glass-peek-1);
+  --color-glass-peek-2: var(--glass-peek-2);
+  --color-bubble-received: var(--bubble-received);
+  --color-bubble-sent: var(--bubble-sent);
+
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-ink-5: var(--ink-5);
+  --color-ink-6: var(--ink-6);
+  --color-ink-7: var(--ink-7);
+  --color-ink-8: var(--ink-8);
+  --color-brand-label: var(--brand-label);
+  --color-brand-label-human: var(--brand-label-human);
+
+  --color-dot-green: var(--dot-green);
+  --color-dot-orange: var(--dot-orange);
+  --color-dot-yellow: var(--dot-yellow);
+  --color-dot-gray: var(--dot-gray);
+  --color-dot-blue: var(--dot-blue);
+
+  /* Radii → rounded-row / rounded-bubble / … (source vars are --rad-*) */
+  --radius-row: var(--rad-row);
+  --radius-glass: var(--rad-glass);
+  --radius-bubble: var(--rad-bubble);
+  --radius-card: var(--rad-card);
+  --radius-keycap: var(--rad-keycap);
 }
 
 /* ─── Dark-First Design Language ───────────────────────────────────────────── */
@@ -54,10 +94,12 @@
 :root {
   --radius: 0.75rem;
 
-  /* Orange accent scale */
-  --brand: #f97316;
-  --brand-dark: #ea580c;
-  --brand-soft: #fb923c;
+  /* Apple-blue accent scale (was orange) */
+  --brand: #0a84ff;
+  --brand-dark: #0060df;
+  --brand-soft: #409cff;
+  --brand-label: #5ea2ff;        /* Maven / AI sent-bubble label */
+  --brand-label-human: #9ad0ff;  /* human agent sent-bubble label */
 
   /* Surface scale (dark) */
   --background: #0b0600;
@@ -114,6 +156,49 @@
   --overlay-mid: oklch(0% 0 0 / 0.45);
   --on-overlay: oklch(100% 0 0);
   --on-overlay-muted: oklch(100% 0 0 / 0.85);
+
+  /* ─── Liquid-Glass layer ─────────────────────────────────────────── */
+  --wallpaper-base: #0b0c0f;
+  --glass-sidebar: rgba(28, 28, 32, 0.52);
+  --glass-list: rgba(24, 24, 27, 0.78);
+  --glass-reading: rgba(20, 20, 23, 0.72);
+  --glass-bar: rgba(22, 22, 26, 0.5);
+  --glass-button: rgba(255, 255, 255, 0.07);
+  --glass-raised: rgba(255, 255, 255, 0.12);
+  --glass-focus: rgba(37, 38, 44, 0.96);
+  --glass-peek-1: rgba(48, 49, 56, 0.92);
+  --glass-peek-2: rgba(43, 44, 51, 0.94);
+
+  --blur-panel: 40px;
+  --blur-bar: 24px;
+
+  --hairline: rgba(255, 255, 255, 0.07);
+  --hairline-strong: rgba(255, 255, 255, 0.16);
+  --hairline-inset: rgba(255, 255, 255, 0.1);
+
+  --ink-1: #ffffff;
+  --ink-2: #f5f5f7;
+  --ink-3: #e5e5ea;
+  --ink-4: #c7c7cc;
+  --ink-5: #aeaeb2;
+  --ink-6: #98989d;
+  --ink-7: #8e8e93;
+  --ink-8: #6e6e73;
+
+  --dot-green: #30d158;
+  --dot-orange: #ff9f0a;
+  --dot-yellow: #ffd60a;
+  --dot-gray: #98989d;
+  --dot-blue: #0a84ff;
+
+  --bubble-received: rgba(118, 118, 128, 0.28);
+  --bubble-sent: #0a84ff;
+
+  --rad-row: 9px;
+  --rad-glass: 9px;
+  --rad-bubble: 20px;
+  --rad-card: 15px;
+  --rad-keycap: 4px;
 }
 
 /* ─── Light Mode (for future toggle) ──────────────────────────────────────── */
