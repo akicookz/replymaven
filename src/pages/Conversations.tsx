@@ -129,6 +129,13 @@ function Conversations() {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
+  // Reset the pagination window when the filter or search changes — otherwise a
+  // prior "load more" (e.g. limit=50) would over-fetch against the new context
+  // and start the window artificially high.
+  useEffect(() => {
+    setListLimit(25);
+  }, [filter, debouncedSearch]);
+
   const [loadedConversations, setLoadedConversations] = useState<Conversation[]>(
     [],
   );
