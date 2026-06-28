@@ -39,6 +39,9 @@
 
   .glass-button {
     background: var(--glass-button);
+    /* Frost whatever scrolls/sits behind so the button reads as solid glass
+       instead of see-through (e.g. hover actions over list-row text). */
+    backdrop-filter: blur(var(--blur-bar));
     box-shadow: inset 0 0 0 0.5px var(--hairline-inset);
     transition: background 0.12s;
   }

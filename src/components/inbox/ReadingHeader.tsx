@@ -127,10 +127,11 @@ export default function ReadingHeader({
   if (browser) metaItems.push(browser);
 
   return (
-    <>
+    // Whole header sticks to the top; only the chat thread scrolls beneath it.
+    <div className="sticky top-0 z-[5] glass-bar">
       {/* ── Toolbar row ── */}
       <div
-        className="sticky top-0 z-[5] glass-bar flex items-center gap-2"
+        className="flex items-center gap-2"
         style={{ padding: "11px 22px" }}
       >
         {/* Reply */}
@@ -282,6 +283,6 @@ export default function ReadingHeader({
           />
         </div>
       </div>
-    </>
+    </div>
   );
 }

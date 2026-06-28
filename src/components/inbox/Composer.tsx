@@ -81,8 +81,8 @@ export default function Composer({
   const canSend = (draft.trim().length > 0 || !!pendingImage) && !uploading;
 
   return (
-    <div className="sticky bottom-0 z-[5] glass-bar px-4 pt-3 pb-4">
-      <div className="rounded-[20px] border border-hairline-strong bg-glass-button p-[14px_14px_11px_18px]">
+    <div className="sticky bottom-0 z-[5] px-4 pt-3 pb-4">
+      <div className="rounded-[20px] border border-hairline-strong glass-bar p-[14px_14px_11px_18px]">
         {/* Attachment chip — shown while uploading or when a pending image exists */}
         {(uploading || pendingImage) && (
           <div className="flex items-center gap-2 mb-[10px]">
@@ -147,19 +147,21 @@ export default function Composer({
           <div className="flex items-center gap-[7px]">
             <button
               type="button"
-              className="keycap cursor-pointer hover:opacity-80"
+              className="flex items-center gap-1.5 text-[13px] text-ink-5 hover:text-ink-2 transition-colors cursor-pointer"
               onClick={onRewrite}
               title="Rewrite with AI"
             >
-              R
+              Rewrite
+              <span className="keycap">R</span>
             </button>
             <button
               type="button"
-              className="keycap cursor-pointer hover:opacity-80"
+              className="flex items-center gap-1.5 text-[13px] text-ink-5 hover:text-ink-2 transition-colors cursor-pointer"
               onClick={() => onResolve(convId)}
               title="Resolve conversation"
             >
-              E
+              Resolve
+              <span className="keycap">E</span>
             </button>
 
             {/* Send button + email dropdown */}

@@ -310,16 +310,11 @@ function Layout() {
             : "fixed inset-y-0 left-0 z-50 -translate-x-full md:translate-x-0 md:relative",
         )}
       >
-        {/* macOS chrome */}
+        {/* Brand wordmark */}
         <div className="flex items-center justify-between px-4 h-12">
           <div className="flex items-center gap-2">
-            <span className="flex items-center gap-[6px]" aria-hidden>
-              <span className="w-3 h-3 rounded-full bg-[#ff5f57]" />
-              <span className="w-3 h-3 rounded-full bg-[#febc2e]" />
-              <span className="w-3 h-3 rounded-full bg-[#28c840]" />
-            </span>
             {!collapsed && (
-              <Link to="/app" className="text-[13px] font-semibold text-ink-2">
+              <Link to="/app" className="text-[14px] font-semibold text-ink-1">
                 ReplyMaven
               </Link>
             )}
