@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, desc, and, gt, lt, ne, inArray, isNotNull, or, like, sql } from "drizzle-orm";
+import { eq, desc, and, gt, lt, lte, ne, isNull, inArray, isNotNull, or, like, sql } from "drizzle-orm";
 import {
   conversations,
   messages,
@@ -13,6 +13,9 @@ import {
   createInitialChatState,
   parseChatState,
 } from "../chat-runtime/types";
+
+export type SystemEventKind = "flagged" | "joined" | "snoozed" | "snooze_ended" | "drafted";
+export type InboxFilter = "needs-you" | "all" | "snoozed" | "resolved" | "flagged";
 
 export class ChatService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
@@ -39,9 +42,22 @@ export class ChatService {
     offset = 0,
     statusFilter: "open" | "closed" | "all" = "all",
     searchQuery?: string,
+    inboxFilter?: InboxFilter,
   ): Promise<ConversationRow[]> {
+    const now = new Date();
     const conditions = [eq(conversations.projectId, projectId)];
-    if (statusFilter === "open") {
+    if (inboxFilter) {
+      switch (inboxFilter) {
+        case "needs-you":
+          conditions.push(eq(conversations.status, "waiting_agent"));
+          conditions.push(or(isNull(conversations.snoozedUntil), lte(conversations.snoozedUntil, now))!);
+          break;
+        case "snoozed": conditions.push(gt(conversations.snoozedUntil, now)); break;
+        case "resolved": conditions.push(eq(conversations.status, "closed")); break;
+        case "flagged": conditions.push(eq(conversations.closeReason, "spam")); break;
+        case "all": conditions.push(ne(conversations.status, "closed")); break;
+      }
+    } else if (statusFilter === "open") {
       conditions.push(ne(conversations.status, "closed"));
     } else if (statusFilter === "closed") {
       conditions.push(eq(conversations.status, "closed"));
@@ -89,6 +105,18 @@ export class ChatService {
       if (row.status === "closed") closed = row.count;
     }
     return { all, open: all - closed, closed };
+  }
+
+  async setSnooze(conversationId: string, projectId: string, until: Date | null): Promise<void> {
+    await this.db.update(conversations)
+      .set({ snoozedUntil: until })
+      .where(and(eq(conversations.id, conversationId), eq(conversations.projectId, projectId)));
+  }
+
+  async setPriority(conversationId: string, projectId: string, priority: "low" | "medium" | "high"): Promise<void> {
+    await this.db.update(conversations)
+      .set({ priority })
+      .where(and(eq(conversations.id, conversationId), eq(conversations.projectId, projectId)));
   }
 
   async getConversationUpdatesSince(
@@ -498,7 +526,7 @@ export class ChatService {
     return this.db
       .select()
       .from(messages)
-      .where(eq(messages.conversationId, conversationId))
+      .where(and(eq(messages.conversationId, conversationId), ne(messages.role, "system")))
       .orderBy(messages.createdAt);
   }
 
@@ -551,10 +579,31 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
+          ne(messages.role, "system"),
           gt(messages.createdAt, new Date(since)),
         ),
       )
       .orderBy(messages.createdAt);
+  }
+
+  // Writes an internal system event message. Does NOT bump lastActivityAt so
+  // snooze/flag actions don't reorder the conversation list.
+  async addSystemMessage(
+    conversationId: string,
+    kind: SystemEventKind,
+    content: string,
+  ): Promise<MessageRow> {
+    const id = crypto.randomUUID();
+    const now = new Date();
+    const sources = JSON.stringify({ systemKind: kind });
+    await this.db.insert(messages).values({
+      id, conversationId, role: "system", content, sources, createdAt: now,
+    });
+    return {
+      id, conversationId, role: "system", content, sources,
+      imageUrl: null, senderName: null, senderAvatar: null, userId: null,
+      createdAt: now, emailedAt: null,
+    };
   }
 
   async addMessage(
@@ -619,6 +668,29 @@ export class ChatService {
       .update(messages)
       .set({ emailedAt: new Date() })
       .where(eq(messages.id, messageId));
+  }
+
+  async getInboxCounts(projectId: string): Promise<Record<InboxFilter, number>> {
+    const now = new Date();
+    const [statusRows, snoozed, flagged] = await Promise.all([
+      this.db.select({ status: conversations.status, count: sql<number>`count(*)` })
+        .from(conversations).where(eq(conversations.projectId, projectId))
+        .groupBy(conversations.status),
+      this.db.select({ count: sql<number>`count(*)` }).from(conversations)
+        .where(and(eq(conversations.projectId, projectId), gt(conversations.snoozedUntil, now))),
+      this.db.select({ count: sql<number>`count(*)` }).from(conversations)
+        .where(and(eq(conversations.projectId, projectId), eq(conversations.closeReason, "spam"))),
+    ]);
+    let waiting = 0, open = 0, closed = 0;
+    for (const r of statusRows) {
+      if (r.status === "waiting_agent") waiting = r.count;
+      if (r.status !== "closed") open += r.count;
+      if (r.status === "closed") closed = r.count;
+    }
+    return {
+      "needs-you": waiting, all: open, snoozed: snoozed[0]?.count ?? 0,
+      resolved: closed, flagged: flagged[0]?.count ?? 0,
+    };
   }
 
   // Hard-delete a message. Caller must verify project ownership via the
