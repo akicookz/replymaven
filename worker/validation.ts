@@ -565,6 +565,10 @@ export const switchTeamSchema = z.object({
   teamId: z.string().min(1),
 });
 
+// ─── Conversations (Inbox) ────────────────────────────────────────────────────
+export const snoozeSchema = z.object({ until: z.number().int().positive().nullable() });
+export const prioritySchema = z.object({ priority: z.enum(["low", "medium", "high"]) });
+
 // ─── Visitor Bans ────────────────────────────────────────────────────────────
 export const banVisitorSchema = z.object({
   visitorId: z.string().min(1).max(100),

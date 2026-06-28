@@ -19,7 +19,7 @@ import {
   buildTicketTitle,
   parseTicketData,
 } from "./services/ticket-service";
-import { ChatService } from "./services/chat-service";
+import { ChatService, type InboxFilter } from "./services/chat-service";
 import { ResourceService, type FaqPair } from "./services/resource-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
 import { FAQ_SET_MAX_CHARS } from "../shared/faq-limits";
@@ -134,6 +134,8 @@ import {
   copilotSendMessageSchema,
   usageLogQuerySchema,
   sendMessageAsEmailSchema,
+  snoozeSchema,
+  prioritySchema,
   banVisitorSchema,
   createGreetingSchema,
   updateGreetingSchema,
@@ -6130,6 +6132,7 @@ const app = new Hono<HonoAppContext>()
 
     const statusFilter =
       (c.req.query("status") as "open" | "closed" | "all") ?? "all";
+    const inboxFilter = c.req.query("filter") as InboxFilter | undefined;
     const limit = Math.min(
       parseInt(c.req.query("limit") ?? "25", 10) || 25,
       100,
@@ -6146,8 +6149,9 @@ const app = new Hono<HonoAppContext>()
       offset,
       statusFilter,
       searchQuery,
+      inboxFilter,
     );
-    if (settings?.autoCloseMinutes && statusFilter !== "closed") {
+    if (settings?.autoCloseMinutes && statusFilter !== "closed" && inboxFilter !== "resolved") {
       const closedIds = await chatService.checkAndCloseStaleForProject(
         convos,
         settings.autoCloseMinutes,
@@ -6162,7 +6166,7 @@ const app = new Hono<HonoAppContext>()
       }
     }
     const [counts, lastMsgMap] = await Promise.all([
-      chatService.getConversationCounts(project.id),
+      chatService.getInboxCounts(project.id),
       chatService.getLastMessagesByConversationIds(convos.map((c) => c.id)),
     ]);
     const conversationsWithPreview = convos.map((c) => ({
@@ -6482,6 +6486,15 @@ const app = new Hono<HonoAppContext>()
       senderAvatar: avatar,
     });
 
+    // Emit "joined" once — only when picking up an escalated conversation for the first time
+    if (conversation.status === "waiting_agent") {
+      await chatService.addSystemMessage(
+        conversation.id,
+        "joined",
+        `${user.name} joined the conversation`,
+      ).catch(() => {});
+    }
+
     await chatService.updateConversationStatus(
       conversation.id,
       project.id,
@@ -6699,6 +6712,11 @@ const app = new Hono<HonoAppContext>()
         );
       }
 
+      c.executionCtx.waitUntil(
+        new ChatService(db).addSystemMessage(c.req.param("convId"), "drafted",
+          "Maven drafted a reply from KB").catch(() => {}),
+      );
+
       return handleCopilotTurn({
         db,
         env: c.env,
@@ -6771,6 +6789,51 @@ const app = new Hono<HonoAppContext>()
     );
 
     return c.json({ ok: true });
+  })
+  .post("/api/projects/:id/conversations/:convId/snooze", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
+      return c.json({ error: "Not found" }, 404);
+    const parsed = validate(snoozeSchema, await c.req.json());
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+    const chatService = new ChatService(db);
+    const convId = c.req.param("convId");
+    const until = parsed.data.until ? new Date(parsed.data.until) : null;
+    await chatService.setSnooze(convId, project.id, until);
+    if (until) {
+      await chatService.addSystemMessage(convId, "snoozed",
+        `Snoozed until ${until.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`);
+    } else {
+      await chatService.addSystemMessage(convId, "snooze_ended", "Snooze ended");
+    }
+    return c.json({ ok: true });
+  })
+  .patch("/api/projects/:id/conversations/:convId/priority", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
+      return c.json({ error: "Not found" }, 404);
+    const parsed = validate(prioritySchema, await c.req.json());
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+    await new ChatService(db).setPriority(c.req.param("convId"), project.id, parsed.data.priority);
+    return c.json({ ok: true });
+  })
+  .get("/api/projects/:id/inbox-counts", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
+      return c.json({ error: "Not found" }, 404);
+    return c.json(await new ChatService(db).getInboxCounts(project.id));
   })
 
   // ─── Visitor Bans ──────────────────────────────────────────────────────────

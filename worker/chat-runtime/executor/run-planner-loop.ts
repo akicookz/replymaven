@@ -1255,6 +1255,14 @@ export async function runPlannerLoop(
           options.conversation.id,
           "waiting_agent",
         );
+        // Emit "flagged" once — only on first transition to waiting_agent
+        if (options.conversation.status !== "waiting_agent") {
+          options.chatService.addSystemMessage(
+            options.conversation.id,
+            "flagged",
+            "Maven flagged this for human review",
+          ).catch(() => {});
+        }
       } catch (error) {
         logError(
           "widget_turn.team_request_status_update_failed",
