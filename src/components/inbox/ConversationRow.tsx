@@ -159,7 +159,7 @@ export default function ConversationRow({
           className="glass-button w-[26px] h-[26px] rounded-[6px] flex items-center justify-center text-ink-4 hover:text-ink-1"
           onClick={(e) => {
             e.stopPropagation();
-            onSnooze(conversation.id, null);
+            onSnooze(conversation.id, Date.now() + 24 * 60 * 60 * 1000);
           }}
           title="Snooze"
           tabIndex={-1}

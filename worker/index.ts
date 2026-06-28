@@ -6712,8 +6712,12 @@ const app = new Hono<HonoAppContext>()
         );
       }
 
+      const chatService = new ChatService(db);
+      const conversation = await chatService.getConversationById(c.req.param("convId"), project.id);
+      if (!conversation) return c.json({ error: "Not found" }, 404);
+
       c.executionCtx.waitUntil(
-        new ChatService(db).addSystemMessage(c.req.param("convId"), "drafted",
+        chatService.addSystemMessage(conversation.id, "drafted",
           "Maven drafted a reply from KB").catch(() => {}),
       );
 
@@ -6722,7 +6726,7 @@ const app = new Hono<HonoAppContext>()
         env: c.env,
         executionCtx: c.executionCtx,
         project: { id: project.id, userId: project.userId, name: project.name },
-        conversationId: c.req.param("convId"),
+        conversationId: conversation.id,
         agentUserId: user.id,
         payload: {
           content:
@@ -6802,6 +6806,8 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
     const chatService = new ChatService(db);
     const convId = c.req.param("convId");
+    const conversation = await chatService.getConversationById(convId, project.id);
+    if (!conversation) return c.json({ error: "Not found" }, 404);
     const until = parsed.data.until ? new Date(parsed.data.until) : null;
     await chatService.setSnooze(convId, project.id, until);
     if (until) {
@@ -6822,7 +6828,10 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     const parsed = validate(prioritySchema, await c.req.json());
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
-    await new ChatService(db).setPriority(c.req.param("convId"), project.id, parsed.data.priority);
+    const chatService = new ChatService(db);
+    const conversation = await chatService.getConversationById(c.req.param("convId"), project.id);
+    if (!conversation) return c.json({ error: "Not found" }, 404);
+    await chatService.setPriority(conversation.id, project.id, parsed.data.priority);
     return c.json({ ok: true });
   })
   .get("/api/projects/:id/inbox-counts", async (c) => {
