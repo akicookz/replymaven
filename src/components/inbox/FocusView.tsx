@@ -10,7 +10,10 @@ interface FocusViewProps {
   index: number;
   total: number;
   onExit: () => void;
-  onSend: (content?: string) => void;
+  onSend: (
+    content?: string,
+    opts?: { imageUrl?: string | null; asEmail?: boolean },
+  ) => void;
   onResolve: (convId: string) => void;
   onRewrite: () => void;
   draft: string;

@@ -11,7 +11,10 @@ interface ReadingPaneProps {
   messages: Message[];
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
-  onSend: (content?: string) => void;
+  onSend: (
+    content?: string,
+    opts?: { imageUrl?: string | null; asEmail?: boolean },
+  ) => void;
   onResolve: (convId: string) => void;
   onSnooze: (convId: string, until: number | null) => void;
   onFlagSpam: (convId: string) => void;
@@ -59,13 +62,15 @@ export default function ReadingPane({
         onDeleteMessage={onDeleteMessage}
       />
 
-      {/* Composer — Task 11 replaces the stub */}
+      {/* Composer — Task 11 */}
       <Composer
         draft={draft}
         setDraft={setDraft}
         onSend={onSend}
         onResolve={onResolve}
         onRewrite={onRewrite}
+        convId={conversation.id}
+        visitorEmail={conversation.visitorEmail}
       />
     </div>
   );

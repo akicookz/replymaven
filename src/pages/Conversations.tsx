@@ -98,6 +98,9 @@ function Conversations() {
   const [draft, setDraft] = useState("");
   const [view, setView] = useState<"split" | "focus">("split");
   const lastSuggestionRef = useRef<string | null>(null);
+  // Tracks which conversations have already had an auto-suggest triggered so
+  // we fire at most once per opened conversation.
+  const autoSuggestedRef = useRef<Set<string>>(new Set());
 
   // Sync selectedConvo <-> ?id= URL param so deep links work and shares are
   // stable. Other params (e.g. ?filter=) are preserved.
@@ -317,21 +320,78 @@ function Conversations() {
     setDraft((prev) => (prev.trim().length > 0 ? prev : suggestion.content));
   }, [copilotThread.data]);
 
+  // Conservative auto-prefill: when a conversation is opened with an empty
+  // draft and no existing auto-suggest, fire the endpoint once to seed the
+  // composer. Guards: at most once per selectedConvo; never overwrite typed
+  // text; swallow 409/errors silently.
+  useEffect(() => {
+    if (!selectedConvo || !projectId) return;
+    if (autoSuggestedRef.current.has(selectedConvo)) return;
+    // Wait until copilot thread has finished loading so we don't
+    // fire unnecessarily when a suggestion already exists.
+    if (copilotThread.isLoading || copilotThread.data === undefined) return;
+    const hasAutoSuggest = copilotThread.data.some(
+      (m) => m.role === "copilot" && m.autoSuggest,
+    );
+    // If a thread/suggestion already exists, mark as done and skip.
+    if (hasAutoSuggest) {
+      autoSuggestedRef.current.add(selectedConvo);
+      return;
+    }
+    // Don't overwrite anything the agent has typed.
+    if (draft.trim().length > 0) return;
+    // Mark before calling so a re-render can't fire a second request.
+    autoSuggestedRef.current.add(selectedConvo);
+    copilotSender.send({ endpoint: "auto-suggest" }).catch(() => {});
+  // copilotSender is stable per conversation; draft is guarded by the trim
+  // check so transient typing changes won't re-fire (the ref prevents it).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedConvo, copilotThread.data, copilotThread.isLoading, projectId]);
+
   // ── Mutations ─────────────────────────────────────────────────────────────
   const sendReply = useMutation({
-    mutationFn: async ({ content }: { content: string }) => {
+    mutationFn: async ({
+      content,
+      imageUrl,
+      asEmail,
+    }: {
+      content: string;
+      imageUrl?: string | null;
+      asEmail?: boolean;
+    }) => {
       const res = await fetch(
-        `/api/projects/${projectId}/conversations/${selectedConvo}/reply`,
+        `/api/projects/${projectId}/conversations/${selectedConvo}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content }),
+          body: JSON.stringify({ content, imageUrl: imageUrl ?? null }),
         },
       );
       if (!res.ok) throw new Error("Failed to send reply");
-      return res.json();
+      const data = (await res.json()) as { id: string };
+      // After a successful send, optionally email the message to the visitor.
+      if (asEmail && data.id) {
+        try {
+          const emailRes = await fetch(
+            `/api/projects/${projectId}/conversations/${selectedConvo}/send-email`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ messageId: data.id }),
+            },
+          );
+          if (emailRes.ok) {
+            toast.success("Emailed to visitor");
+          } else {
+            toast.error("Message sent but email delivery failed");
+          }
+        } catch {
+          toast.error("Message sent but email delivery failed");
+        }
+      }
+      return data;
     },
-    onMutate: async ({ content }) => {
+    onMutate: async ({ content, imageUrl }) => {
       await queryClient.cancelQueries({
         queryKey: ["conversation-detail", selectedConvo],
       });
@@ -347,6 +407,7 @@ function Conversations() {
             id: `optimistic-${Date.now()}`,
             role: "agent",
             content,
+            imageUrl: imageUrl ?? null,
             createdAt: new Date().toISOString(),
             senderName: null,
             emailedAt: null,
@@ -555,10 +616,18 @@ function Conversations() {
     setSelectedConvo(next ? next.id : null);
   }
 
-  function handleSend(content?: string) {
+  function handleSend(
+    content?: string,
+    opts?: { imageUrl?: string | null; asEmail?: boolean },
+  ) {
     const text = (content ?? draft).trim();
-    if (!text || !selectedConvo) return;
-    sendReply.mutate({ content: text });
+    if (!text && !opts?.imageUrl) return;
+    if (!selectedConvo) return;
+    sendReply.mutate({
+      content: text,
+      imageUrl: opts?.imageUrl ?? null,
+      asEmail: opts?.asEmail,
+    });
   }
 
   function handleResolve(convId: string) {
