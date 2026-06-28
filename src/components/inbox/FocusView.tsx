@@ -1,11 +1,10 @@
+import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import Composer from "@/components/inbox/Composer";
 import { countryFlag } from "@/lib/inbox/country-flag";
+import { renderMarkdown } from "@/lib/utils";
 
-// Stub for Task 7 orchestrator wiring. Task 13 replaces this with the
-// stacked-card focus mode. Props here are the contract the orchestrator
-// passes; Task 13 must keep these signatures.
 interface FocusViewProps {
   conversation: Conversation;
   messages: Message[];
@@ -38,11 +37,8 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-interface MiniBubbleProps {
-  message: Message;
-}
-
-function MiniBubble({ message }: MiniBubbleProps) {
+/** A full chat bubble for the focus thread (markdown, no truncation). */
+function FocusBubble({ message }: { message: Message }) {
   const isReceived = message.role === "visitor";
   const isBot = message.role === "bot";
 
@@ -58,28 +54,21 @@ function MiniBubble({ message }: MiniBubbleProps) {
       ? "Maven · AI"
       : (message.senderName ?? "Agent");
 
-  if (isReceived) {
-    return (
-      <div className="flex flex-col items-start mb-[10px]">
-        <span className={`text-[11px] font-semibold mb-[3px] ${labelClass}`}>
-          {senderLabel}
-        </span>
-        <div className="max-w-[80%] px-[10px] py-[6px] text-[13px] leading-[1.45] bg-bubble-received text-ink-2 rounded-[16px_16px_16px_5px] line-clamp-3 break-words">
-          {message.content}
-        </div>
-      </div>
-    );
-  }
+  const html = renderMarkdown(message.content);
 
-  // Bot or agent (sent side)
   return (
-    <div className="flex flex-col items-end mb-[10px]">
+    <div className={`flex flex-col mb-3 ${isReceived ? "items-start" : "items-end"}`}>
       <span className={`text-[11px] font-semibold mb-[3px] ${labelClass}`}>
         {senderLabel}
       </span>
-      <div className="max-w-[80%] px-[10px] py-[6px] text-[13px] leading-[1.45] bg-bubble-sent text-white rounded-[16px_16px_5px_16px] line-clamp-3 break-words">
-        {message.content}
-      </div>
+      <div
+        className={`prose-chat max-w-[78%] px-[14px] py-[9px] text-[14.5px] leading-[1.5] break-words ${
+          isReceived
+            ? "bg-bubble-received text-ink-2 rounded-[18px_18px_18px_6px]"
+            : "bg-bubble-sent text-white rounded-[18px_18px_6px_18px]"
+        }`}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
     </div>
   );
 }
@@ -112,29 +101,20 @@ export default function FocusView({
   const flag = countryFlag(country);
   const name = conversation.visitorName;
 
-  // Filter out system rows for the mini-thread
+  // Full thread (system rows excluded), scrollable inside the card.
   const visible = messages.filter((m) => m.role !== "system");
 
-  // Last-3 logic: first message + optional gap marker + last 2 messages.
-  // If ≤ 3 visible messages, show them all in order without a gap marker.
-  let showGap = false;
-  let displayMessages: Message[];
-  if (visible.length <= 3) {
-    displayMessages = visible;
-  } else {
-    displayMessages = [
-      visible[0],
-      visible[visible.length - 2],
-      visible[visible.length - 1],
-    ];
-    showGap = true;
-  }
+  // Keep the thread pinned to the latest message when it loads/changes.
+  const threadRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [visible.length, conversation.id]);
 
   return (
-    // Escape the Layout's p-4/md:p-8 padding so FocusView fills the full pane.
-    // `relative` anchors the absolute-positioned exit button.
-    <div className="relative -m-4 md:-m-8">
-      {/* Floating exit button — top-right of the content area */}
+    // Fill the pane (escape Layout's p-4/md:p-8); `relative` anchors the exit btn.
+    <div className="relative -m-4 md:-m-8 h-screen overflow-hidden">
+      {/* Floating exit button — top-right */}
       <button
         type="button"
         className="glass-button absolute top-[18px] right-[30px] z-10 flex items-center gap-[7px] rounded-[9px] px-[12px] h-[34px] text-[13px] text-ink-2 font-medium"
@@ -144,99 +124,88 @@ export default function FocusView({
         <span className="keycap">Esc</span>
       </button>
 
-      {/* Centered column */}
-      <div className="max-w-[680px] mx-auto pt-24 pb-10 px-6">
-        {/* Stacked-card wrapper — peek slivers render behind the main card */}
-        <div className="relative">
-          {/* Deeper peek (further back, more negative offset, wider inset) */}
-          <div className="absolute top-[-9px] inset-x-[24px] h-5 rounded-t-[18px] bg-glass-peek-2" />
-          {/* Middle peek (closer, narrower inset) */}
-          <div className="absolute top-[-4px] inset-x-[13px] h-5 rounded-t-[18px] bg-glass-peek-1" />
+      {/* Vertically + horizontally centered group */}
+      <div className="h-full flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-[780px]">
+          {/* Stacked-card wrapper — peek slivers behind the card top */}
+          <div className="relative">
+            <div className="absolute top-[-9px] inset-x-[24px] h-5 rounded-t-[18px] bg-glass-peek-2" />
+            <div className="absolute top-[-4px] inset-x-[13px] h-5 rounded-t-[18px] bg-glass-peek-1" />
 
-          {/* Main frosted card */}
-          <div className="glass-focus rounded-[18px] overflow-hidden relative z-[1]">
-            {/* Padded card body: user bar + mini-thread */}
-            <div className="pt-[22px] px-[24px] pb-4">
-              {/* User bar */}
-              <div className="flex items-center gap-3 mb-5">
-                {/* 44px initials avatar */}
-                <div className="w-11 h-11 rounded-full bg-glass-raised flex items-center justify-center flex-shrink-0 text-[14px] font-semibold text-ink-2 select-none">
-                  {initials(name)}
-                </div>
-
-                {/* Name + email */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    {flag && (
-                      <span className="text-[16px] leading-none shrink-0">
-                        {flag}
-                      </span>
-                    )}
-                    <span className="text-[18px] font-semibold text-ink-1 truncate">
-                      {name ?? "Visitor"}
-                    </span>
+            {/* Main frosted card — content-height, capped so the thread scrolls */}
+            <div className="glass-focus rounded-[18px] relative z-[1] flex flex-col max-h-[82vh] overflow-hidden">
+              {/* User bar (fixed) */}
+              <div className="pt-[22px] px-[28px] pb-3 shrink-0">
+                <div className="flex items-center gap-3">
+                  {/* 48px initials avatar */}
+                  <div className="w-12 h-12 rounded-full bg-glass-raised flex items-center justify-center flex-shrink-0 text-[15px] font-semibold text-ink-2 select-none">
+                    {initials(name)}
                   </div>
-                  {conversation.visitorEmail && (
-                    <div className="text-[13px] text-ink-7 truncate mt-0.5">
-                      {conversation.visitorEmail}
-                    </div>
-                  )}
-                </div>
 
-                {/* Status pill: "Open · {Priority}" with a green dot */}
-                <div className="glass-button flex items-center gap-[6px] rounded-full px-3 h-[28px] text-[12px] text-ink-3 font-medium flex-shrink-0">
-                  <span className="w-[7px] h-[7px] rounded-full bg-dot-green flex-shrink-0" />
-                  Open · {capitalize(priority)}
+                  {/* Name + email */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      {flag && (
+                        <span className="text-[17px] leading-none shrink-0">
+                          {flag}
+                        </span>
+                      )}
+                      <span className="text-[19px] font-semibold text-ink-1 truncate">
+                        {name ?? "Visitor"}
+                      </span>
+                    </div>
+                    {conversation.visitorEmail && (
+                      <div className="text-[13px] text-ink-7 truncate mt-0.5">
+                        {conversation.visitorEmail}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Status pill */}
+                  <div className="glass-button flex items-center gap-[6px] rounded-full px-3 h-[28px] text-[12px] text-ink-3 font-medium flex-shrink-0">
+                    <span className="w-[7px] h-[7px] rounded-full bg-dot-green flex-shrink-0" />
+                    Open · {capitalize(priority)}
+                  </div>
                 </div>
               </div>
 
-              {/* Mini-thread: compact preview of the conversation */}
-              {displayMessages.length > 0 && (
-                <div>
-                  {showGap ? (
-                    <>
-                      <MiniBubble message={displayMessages[0]} />
-                      <div className="text-center text-ink-6 text-[13px] my-1.5 select-none tracking-widest">
-                        ···
-                      </div>
-                      <MiniBubble message={displayMessages[1]} />
-                      <MiniBubble message={displayMessages[2]} />
-                    </>
-                  ) : (
-                    displayMessages.map((m) => (
-                      <MiniBubble key={m.id} message={m} />
-                    ))
-                  )}
-                </div>
-              )}
+              {/* Scrollable full thread */}
+              <div
+                ref={threadRef}
+                className="flex-1 min-h-0 overflow-y-auto px-[28px] py-2"
+              >
+                {visible.map((m) => (
+                  <FocusBubble key={m.id} message={m} />
+                ))}
+              </div>
+
+              {/* Composer (fixed at card bottom) */}
+              <Composer
+                draft={draft}
+                setDraft={setDraft}
+                onSend={onSend}
+                onResolve={onResolve}
+                onRewrite={onRewrite}
+                convId={conversation.id}
+                visitorEmail={conversation.visitorEmail}
+              />
             </div>
-
-            {/* Composer — renders at card bottom, clipped by overflow-hidden + rounded corners */}
-            <Composer
-              draft={draft}
-              setDraft={setDraft}
-              onSend={onSend}
-              onResolve={onResolve}
-              onRewrite={onRewrite}
-              convId={conversation.id}
-              visitorEmail={conversation.visitorEmail}
-            />
           </div>
-        </div>
 
-        {/* Below-card row: "{n} of {total}" left, keyboard legend right */}
-        <div className="flex items-center justify-between mt-4 px-1">
-          <span className="text-[13px] font-medium text-[--brand]">
-            {index + 1} of {total}
-          </span>
-          <div className="flex items-center gap-1.5 text-[12px] text-ink-6">
-            <span className="keycap">J</span>
-            <span className="keycap">K</span>
-            <span className="mx-1">next · prev</span>
-            <span className="keycap">S</span>
-            <span className="mx-1">snooze</span>
-            <span className="keycap">⌘K</span>
-            <span className="ml-0.5">commands</span>
+          {/* Below-card row: "{n} of {total}" + keyboard legend */}
+          <div className="flex items-center justify-between mt-4 px-1">
+            <span className="text-[13px] font-medium text-[--brand]">
+              {index + 1} of {total}
+            </span>
+            <div className="flex items-center gap-1.5 text-[12px] text-ink-6">
+              <span className="keycap">J</span>
+              <span className="keycap">K</span>
+              <span className="mx-1">next · prev</span>
+              <span className="keycap">S</span>
+              <span className="mx-1">snooze</span>
+              <span className="keycap">⌘K</span>
+              <span className="ml-0.5">commands</span>
+            </div>
           </div>
         </div>
       </div>
