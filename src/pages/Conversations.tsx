@@ -506,6 +506,32 @@ function Conversations() {
     },
   });
 
+  const blockVisitor = useMutation({
+    mutationFn: async ({
+      visitorId,
+      visitorEmail,
+      conversationId,
+    }: {
+      visitorId: string;
+      visitorEmail?: string;
+      conversationId: string;
+    }) => {
+      const res = await fetch(`/api/projects/${projectId}/visitors/ban`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visitorId, visitorEmail, conversationId }),
+      });
+      if (!res.ok) throw new Error("Failed to block visitor");
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success("Visitor blocked");
+      queryClient.invalidateQueries({ queryKey: ["conversations", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["inbox-counts", projectId] });
+    },
+    onError: () => toast.error("Failed to block visitor"),
+  });
+
   // ── Derived view data ─────────────────────────────────────────────────────
   const conversations = loadedConversations;
   const counts = convosPage?.counts ?? EMPTY_COUNTS;
@@ -568,6 +594,22 @@ function Conversations() {
     copilotSender.send({ endpoint: "auto-suggest" });
   }
 
+  function handleBlock(convId: string) {
+    // Look up the conversation to get visitor identifiers. Prefer the detail
+    // cache (most current) then fall back to the list.
+    const conv =
+      convoDetail?.conversation ??
+      conversations.find((c) => c.id === convId);
+    if (!conv) return;
+    blockVisitor.mutate({
+      visitorId: conv.visitorId,
+      ...(conv.visitorEmail ? { visitorEmail: conv.visitorEmail } : {}),
+      conversationId: convId,
+    });
+    // Advance selection immediately (optimistic) so the agent keeps triaging.
+    advanceSelectionPast(convId);
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
   if (view === "focus" && selected) {
     return (
@@ -617,6 +659,7 @@ function Conversations() {
           onPriority={handleSetPriority}
           onRewrite={handleRewrite}
           onFocus={() => setView("focus")}
+          onBlock={handleBlock}
         />
       ) : (
         <div className="glass-reading flex-1 grid place-items-center text-ink-7 text-sm">
