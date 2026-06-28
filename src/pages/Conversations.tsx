@@ -699,6 +699,45 @@ function Conversations() {
     advanceSelectionPast(convId);
   }
 
+  // ── Keyboard navigation ───────────────────────────────────────────────────
+  useEffect(() => {
+    function selectRelative(delta: number) {
+      if (conversations.length === 0) return;
+      const newIndex = Math.max(
+        0,
+        Math.min(conversations.length - 1, selectedIndex + delta),
+      );
+      setSelectedConvo(conversations[newIndex].id);
+    }
+
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement;
+      if (t.matches?.("input, textarea, [contenteditable='true']")) return;
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        selectRelative(1);
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        selectRelative(-1);
+      } else if (e.key === "e" || e.key === "E") {
+        if (selected) handleResolve(selected.id);
+      } else if (e.key === "r" || e.key === "R") {
+        handleRewrite();
+      } else if (e.key === "f" || e.key === "F") {
+        setView((v) => (v === "focus" ? "split" : "focus"));
+      } else if (e.key === "Escape") {
+        setView("split");
+      }
+    }
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // handleResolve and handleRewrite are function declarations that close over
+    // the same reactive values already listed (conversations, selected, etc.),
+    // so they are kept fresh by the existing deps without being listed here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, conversations, selectedIndex, view]);
+
   // ── Render ────────────────────────────────────────────────────────────────
   if (view === "focus" && selected) {
     return (
