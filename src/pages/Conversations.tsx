@@ -327,6 +327,15 @@ function Conversations() {
   useEffect(() => {
     if (!selectedConvo || !projectId) return;
     if (autoSuggestedRef.current.has(selectedConvo)) return;
+    // Cost gate: only auto-draft for conversations that still need a reply.
+    // Wait for the detail to load, and never fire for resolved/closed ones
+    // (e.g. browsing the Resolved view must not spend an LLM call per row).
+    const status = convoDetail?.conversation?.status;
+    if (status === undefined) return; // detail not loaded yet
+    if (status === "closed") {
+      autoSuggestedRef.current.add(selectedConvo);
+      return;
+    }
     // Wait until copilot thread has finished loading so we don't
     // fire unnecessarily when a suggestion already exists.
     if (copilotThread.isLoading || copilotThread.data === undefined) return;
@@ -346,7 +355,7 @@ function Conversations() {
   // copilotSender is stable per conversation; draft is guarded by the trim
   // check so transient typing changes won't re-fire (the ref prevents it).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedConvo, copilotThread.data, copilotThread.isLoading, projectId]);
+  }, [selectedConvo, copilotThread.data, copilotThread.isLoading, projectId, convoDetail?.conversation?.status]);
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   const sendReply = useMutation({
