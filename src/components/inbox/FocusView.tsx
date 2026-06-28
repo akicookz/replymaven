@@ -140,8 +140,9 @@ export default function FocusView({
                 ref={threadRef}
                 className="overflow-y-auto relative flex-1 min-h-0"
               >
-                {/* Sticky user header (same frosted bar as split mode) */}
-                <div className="sticky top-0 z-[5] glass-bar pt-[20px] px-[28px] pb-3">
+                {/* Sticky user header — seamless with the card surface (no
+                    darker bar), covers the thread as it scrolls beneath. */}
+                <div className="sticky top-0 z-[5] bg-glass-focus pt-[20px] px-[28px] pb-3">
                   <div className="flex items-center gap-3">
                     {/* 48px initials avatar */}
                     <div className="w-12 h-12 rounded-full bg-glass-raised flex items-center justify-center flex-shrink-0 text-[15px] font-semibold text-ink-2 select-none">
