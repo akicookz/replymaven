@@ -382,6 +382,10 @@ function Conversations() {
         "conversation-detail",
         convId,
       ]);
+      // Snapshot the local list too — onMutate patches it optimistically, so a
+      // failed close must restore it (not just the detail) to avoid a flash of
+      // a wrongly-closed row until onSettled's refetch corrects it.
+      const previousList = loadedConversations;
       queryClient.setQueryData<ConversationDetail | undefined>(
         ["conversation-detail", convId],
         (old) =>
@@ -397,7 +401,7 @@ function Conversations() {
           c.id === convId ? { ...c, status: "closed", closeReason } : c,
         ),
       );
-      return { previousDetail };
+      return { previousDetail, previousList };
     },
     onError: (_err, { convId }, ctx) => {
       if (ctx?.previousDetail) {
@@ -405,6 +409,9 @@ function Conversations() {
           ["conversation-detail", convId],
           ctx.previousDetail,
         );
+      }
+      if (ctx?.previousList) {
+        setLoadedConversations(ctx.previousList);
       }
       toast.error("Failed to close conversation");
     },
