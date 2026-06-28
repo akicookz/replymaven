@@ -158,7 +158,7 @@ function Conversations() {
   const copilotSender = useCopilotSender(projectId ?? "", selectedConvo ?? "");
 
   // ── List query (drives the conversation column) ──────────────────────────
-  const { data: convosPage } = useQuery<ConversationsPage>({
+  const { data: convosPage, isPending: convosLoading } = useQuery<ConversationsPage>({
     queryKey: ["conversations", projectId, filter, debouncedSearch, listLimit],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -745,7 +745,7 @@ function Conversations() {
         conversation={selected}
         messages={messages}
         index={selectedIndex}
-        total={conversations.length}
+        total={counts[filter] ?? conversations.length}
         onExit={() => setView("split")}
         onSend={handleSend}
         onResolve={handleResolve}
@@ -773,6 +773,7 @@ function Conversations() {
         onSearchChange={setSearchQuery}
         hasMore={convosPage?.hasMore ?? false}
         onLoadMore={handleLoadMore}
+        isLoading={convosLoading}
       />
       {selected ? (
         <ReadingPane

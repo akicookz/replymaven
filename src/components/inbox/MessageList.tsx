@@ -21,7 +21,18 @@ interface MessageListProps {
   /** Whether the server has more conversations beyond the current page. */
   hasMore: boolean;
   onLoadMore: () => void;
+  /** True while the conversation list query is in flight (first load). */
+  isLoading: boolean;
 }
+
+// Filter-appropriate noun for the "N <noun> · M unread" subtitle.
+const FILTER_NOUN: Record<InboxFilter, string> = {
+  "needs-you": "open",
+  all: "total",
+  snoozed: "snoozed",
+  resolved: "resolved",
+  flagged: "flagged",
+};
 
 export default function MessageList({
   filter,
@@ -35,6 +46,7 @@ export default function MessageList({
   onSearchChange,
   hasMore,
   onLoadMore,
+  isLoading,
 }: MessageListProps) {
   // Unread heuristic: conversation is unread when the last message came from
   // a visitor (awaiting an agent reply). The server has no explicit unread
@@ -55,7 +67,7 @@ export default function MessageList({
               {filterTitle(filter)}
             </h2>
             <p className="text-[12px] text-ink-7 mt-0.5">
-              {openCount} open · {unreadCount} unread
+              {openCount} {FILTER_NOUN[filter]} · {unreadCount} unread
             </p>
           </div>
           <div className="flex items-center gap-1.5 mt-1 shrink-0">
@@ -112,8 +124,14 @@ export default function MessageList({
           </button>
         )}
 
+        {/* Loading state — shown while the first page is in flight so we don't
+            flash the empty state (especially under remote-dev latency). */}
+        {isLoading && conversations.length === 0 && (
+          <div className="py-10 text-center text-[13px] text-ink-7">Loading…</div>
+        )}
+
         {/* Empty state */}
-        {conversations.length === 0 && (
+        {!isLoading && conversations.length === 0 && (
           <div className="py-10 text-center text-[13px] text-ink-7">
             {search
               ? "No conversations match your search."

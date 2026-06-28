@@ -43,7 +43,7 @@ export default function ReadingPane({
   onDeleteMessage,
 }: ReadingPaneProps) {
   return (
-    <div className="glass-reading flex-1 min-w-0 overflow-y-auto relative flex flex-col">
+    <div className="glass-reading flex-1 min-w-0 overflow-y-auto relative">
       {/* Sticky header: toolbar row + user bar */}
       <ReadingHeader
         conversation={conversation}

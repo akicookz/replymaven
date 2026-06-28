@@ -55,7 +55,7 @@ export class ChatService {
         case "snoozed": conditions.push(gt(conversations.snoozedUntil, now)); break;
         case "resolved": conditions.push(eq(conversations.status, "closed")); break;
         case "flagged": conditions.push(eq(conversations.closeReason, "spam")); break;
-        case "all": conditions.push(ne(conversations.status, "closed")); break;
+        case "all": break; // All Conversations = every conversation (no status filter)
       }
     } else if (statusFilter === "open") {
       conditions.push(ne(conversations.status, "closed"));
@@ -688,7 +688,9 @@ export class ChatService {
       if (r.status === "closed") closed = r.count;
     }
     return {
-      "needs-you": waiting, all: open, snoozed: snoozed[0]?.count ?? 0,
+      // "All Conversations" is the total bucket (open + closed), matching the
+      // handoff's "All Conversations" count — not open-only.
+      "needs-you": waiting, all: open + closed, snoozed: snoozed[0]?.count ?? 0,
       resolved: closed, flagged: flagged[0]?.count ?? 0,
     };
   }

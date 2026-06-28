@@ -34,7 +34,7 @@ export default function ChatThread({
   onDeleteMessage,
 }: ChatThreadProps) {
   return (
-    <div className="flex-1 min-h-0">
+    <div className="min-h-full">
       <div className="max-w-[760px] mx-auto px-[30px] pt-4 pb-[10px]">
         {messages.map((message, i) => {
           const prev = messages[i - 1];
