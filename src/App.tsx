@@ -17,10 +17,8 @@ import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
 import Resources from "./pages/Resources";
 import QuickActions from "./pages/QuickActions";
-import WidgetAppearance from "./pages/WidgetAppearance";
+import Configuration from "./pages/Configuration";
 import WidgetHome from "./pages/WidgetHome";
-import WidgetGreetings from "./pages/WidgetGreetings";
-import WidgetInstallation from "./pages/WidgetInstallation";
 import Tickets from "./pages/Tickets";
 import CompanyInfo from "./pages/CompanyInfo";
 import Sops from "./pages/Sops";
@@ -236,8 +234,12 @@ function App() {
           element={<Navigate to="../knowledgebase" replace />}
         />
         <Route
+          path="projects/:projectId/configuration"
+          element={<Configuration />}
+        />
+        <Route
           path="projects/:projectId/widget"
-          element={<WidgetAppearance />}
+          element={<Navigate to="../configuration?tab=appearance" replace />}
         />
         <Route
           path="projects/:projectId/widget/home"
@@ -245,11 +247,11 @@ function App() {
         />
         <Route
           path="projects/:projectId/widget/greetings"
-          element={<WidgetGreetings />}
+          element={<Navigate to="../../configuration?tab=greetings" replace />}
         />
         <Route
           path="projects/:projectId/widget/installation"
-          element={<WidgetInstallation />}
+          element={<Navigate to="../../configuration?tab=installation" replace />}
         />
         <Route
           path="projects/:projectId/widget/quick-actions"
