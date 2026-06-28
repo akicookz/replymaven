@@ -194,7 +194,9 @@
   --dot-gray: #98989d;
   --dot-blue: #0a84ff;
 
-  --bubble-received: rgba(118, 118, 128, 0.28);
+  /* Cool dark glass tone (same family as the frosted bars) instead of a warm
+     mid-grey, so received bubbles harmonize with the header/composer. */
+  --bubble-received: rgba(44, 46, 55, 0.9);
   --bubble-sent: #0a84ff;
 
   --rad-row: 9px;
