@@ -596,10 +596,13 @@ function Conversations() {
 
   function handleBlock(convId: string) {
     // Look up the conversation to get visitor identifiers. Prefer the detail
-    // cache (most current) then fall back to the list.
+    // cache (most current) but only when its id matches the target — a stale
+    // detail cache during a navigation/mutation race must not ban the wrong
+    // visitor. Fall back to the list otherwise.
     const conv =
-      convoDetail?.conversation ??
-      conversations.find((c) => c.id === convId);
+      (convoDetail?.conversation?.id === convId
+        ? convoDetail.conversation
+        : null) ?? conversations.find((c) => c.id === convId);
     if (!conv) return;
     blockVisitor.mutate({
       visitorId: conv.visitorId,
