@@ -360,7 +360,7 @@ function Conversations() {
       asEmail?: boolean;
     }) => {
       const res = await fetch(
-        `/api/projects/${projectId}/conversations/${selectedConvo}/messages`,
+        `/api/projects/${projectId}/conversations/${selectedConvo}/reply`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
