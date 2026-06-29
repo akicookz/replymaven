@@ -3350,6 +3350,36 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     return `${(bigint >> 16) & 255}, ${(bigint >> 8) & 255}, ${bigint & 255}`;
   }
 
+  // Perceived luminance (Rec. 601) — used to flip the widget's text/secondary
+  // tokens to a dark theme when a custom surface color is dark.
+  function isDarkColor(hex: string): boolean {
+    const [r, g, b] = hexToRgb(hex)
+      .split(",")
+      .map((n) => parseInt(n.trim(), 10));
+    return 0.299 * r + 0.587 * g + 0.114 * b < 140;
+  }
+
+  // Apply a custom solid surface color to an element's --rm-* tokens. A light
+  // pick just recolors the surface; a dark pick also flips text/secondary
+  // tokens so the widget stays readable. White (the default) is a no-op.
+  function applySurfaceColor(el: HTMLElement, surface: string): void {
+    if (!surface || /^f{3}(f{3})?$/i.test(surface.replace("#", ""))) return;
+    el.style.setProperty("--rm-bg", surface);
+    if (!isDarkColor(surface)) return;
+    el.style.setProperty("--rm-bg-secondary", "rgba(255,255,255,0.06)");
+    el.style.setProperty("--rm-bg-tertiary", "rgba(255,255,255,0.10)");
+    el.style.setProperty("--rm-text", "#ffffff");
+    el.style.setProperty("--rm-text-secondary", "rgba(255,255,255,0.7)");
+    el.style.setProperty("--rm-text-muted", "rgba(255,255,255,0.4)");
+    el.style.setProperty("--rm-border", "rgba(255,255,255,0.12)");
+    el.style.setProperty("--rm-border-subtle", "rgba(255,255,255,0.08)");
+    el.style.setProperty("--rm-bot-bg", "rgba(255,255,255,0.10)");
+    el.style.setProperty("--rm-bot-text", "#ffffff");
+    el.style.setProperty("--rm-input-bg", "rgba(255,255,255,0.08)");
+    el.style.setProperty("--rm-input-bg-focus", "rgba(255,255,255,0.12)");
+    el.style.setProperty("--rm-scrollbar", "rgba(255,255,255,0.12)");
+  }
+
   function resolveUrl(url: string): string {
     if (!url) return url;
     if (
@@ -3655,6 +3685,8 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
           container.style.setProperty("--rm-bot-text", "#18181b");
           container.style.setProperty("--rm-agent-bg", `rgba(${pRgb}, 0.06)`);
           container.style.setProperty("--rm-glow-border", `rgba(${pRgb}, 0.2)`);
+          // Custom solid surface color (no-op when left at the default white).
+          applySurfaceColor(container, w.backgroundColor || "#ffffff");
         }
 
         // ─── Message colors (always derived from primary) ─────────────────────
@@ -4168,6 +4200,10 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
           inlineBar.style.setProperty(
             "--rm-glow-border",
             `rgba(${iPRgb}, 0.2)`,
+          );
+          applySurfaceColor(
+            inlineBar,
+            loadedConfig.widget?.backgroundColor || "#ffffff",
           );
         }
 

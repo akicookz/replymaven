@@ -95,6 +95,19 @@ function WidgetAppearance() {
           Used for buttons, icons, and header accents.
         </p>
 
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">
+            Background
+          </label>
+          <ColorPicker
+            value={state.form.backgroundColor ?? "#ffffff"}
+            onChange={(color) => state.updateForm({ backgroundColor: color })}
+          />
+          <p className="text-xs text-muted-foreground">
+            Widget surface color (applies when Background Style is Solid).
+          </p>
+        </div>
+
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">
             Header Text
