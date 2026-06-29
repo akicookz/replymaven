@@ -80,7 +80,24 @@ export function Layout(props: LayoutProps) {
           href="https://fonts.gstatic.com"
           crossorigin=""
         />
-        {fontHref && <link href={fontHref} rel="stylesheet" />}
+        <link rel="preconnect" href="https://api.fontshare.com" crossorigin="" />
+        {/* Default typography matches the marketing docs: Switzer headings +
+            Inter body. A tenant's custom font, when set, loads instead and
+            drives both roles. */}
+        {fontHref ? (
+          <link href={fontHref} rel="stylesheet" />
+        ) : (
+          <>
+            <link
+              href="https://api.fontshare.com/v2/css?f[]=switzer@300,400,500,600,700&display=swap"
+              rel="stylesheet"
+            />
+            <link
+              href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+              rel="stylesheet"
+            />
+          </>
+        )}
         {props.jsonLd && (
           <script
             type="application/ld+json"

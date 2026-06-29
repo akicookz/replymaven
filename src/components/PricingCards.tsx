@@ -259,7 +259,7 @@ export function PricingCards({
                     }
                   }}
                   className={cn(
-                    "w-full rounded-xl h-11 text-sm font-medium",
+                    "w-full rounded-full h-11 text-sm font-medium",
                     !plan.highlighted &&
                     "bg-white/[0.05] hover:bg-white/[0.08] border-white/[0.06]",
                   )}

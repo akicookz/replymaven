@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useEffect } from "react";
 import { Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Toaster } from "sonner";
-import { ThemeContext, getStoredTheme, storeTheme } from "@/lib/theme";
+import { ThemeContext } from "@/lib/theme";
 
 import Layout from "./components/Layout";
 import AccountLayout from "./components/AccountLayout";
@@ -111,28 +111,16 @@ function ProjectPageRedirect({
 }
 
 function App() {
-  const [theme, setThemeState] = useState<"light" | "dark">(getStoredTheme);
-
-  const setTheme = useCallback((t: "light" | "dark") => {
-    setThemeState(t);
-    storeTheme(t);
-  }, []);
-
-  const toggleTheme = useCallback(() => {
-    setThemeState((prev) => {
-      const next = prev === "dark" ? "light" : "dark";
-      storeTheme(next);
-      return next;
-    });
-  }, []);
-
+  // The landing pages and the dashboard are dark-only — no theme switching.
+  // (The deployed help-desk widget keeps its own light/dark via per-project
+  // widget config; that is independent of this global app theme.)
   useEffect(() => {
-    document.documentElement.classList.remove("light", "dark");
-    document.documentElement.classList.add(theme);
-  }, [theme]);
+    document.documentElement.classList.remove("light");
+    document.documentElement.classList.add("dark");
+  }, []);
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme: "dark", setTheme: () => {}, toggleTheme: () => {} }}>
     <Toaster
       position="bottom-right"
       toastOptions={{

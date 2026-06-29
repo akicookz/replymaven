@@ -11,6 +11,9 @@ export function renderProjectTheme(widgetConfig: WidgetConfigRow | null): string
   const fg = "#0a0a0a";
   const radius = normalizeRadius(widgetConfig?.borderRadius);
   const fontSans = sanitizeFontName(widgetConfig?.fontFamily) ?? "Inter";
+  // Headings use Switzer (our display face) by default to match the marketing
+  // docs; a tenant's own font, when set, drives both body and headings.
+  const fontHeading = sanitizeFontName(widgetConfig?.fontFamily) ?? "Switzer";
 
   return `:root {
   --brand: ${primary};
@@ -38,7 +41,7 @@ export function renderProjectTheme(widgetConfig: WidgetConfigRow | null): string
   --code-foreground: ${fg};
   --radius: ${radius};
   --font-sans: "${fontSans}", system-ui, sans-serif;
-  --font-heading: "${fontSans}", system-ui, sans-serif;
+  --font-heading: "${fontHeading}", system-ui, sans-serif;
 }`;
 }
 

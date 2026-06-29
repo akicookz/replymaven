@@ -9,7 +9,6 @@ import {
   X,
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
-import ThemeToggle from "@/components/ThemeToggle";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { MobileSidebarContext } from "@/lib/mobile-sidebar";
@@ -130,7 +129,6 @@ function AccountLayout() {
                 {userEmail}
               </p>
             </div>
-            <ThemeToggle />
             <button
               onClick={handleSignOut}
               className="p-1.5 rounded-md hover:bg-accent text-muted-foreground transition-colors"

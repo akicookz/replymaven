@@ -26,7 +26,6 @@ import {
   Clock,
   CheckCircle2,
 } from "lucide-react";
-import ThemeToggle from "@/components/ThemeToggle";
 import ProfileSetupDialog from "@/components/ProfileSetupDialog";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
@@ -596,11 +595,6 @@ function Layout() {
                 <CreditCard className="w-4 h-4 shrink-0" />
                 Billing
               </Link>
-              <div className="h-px bg-muted my-1" />
-              <div className="flex items-center justify-between px-3 py-2">
-                <span className="text-sm text-muted-foreground">Theme</span>
-                <ThemeToggle />
-              </div>
               <div className="h-px bg-muted my-1" />
               <button
                 onClick={handleSignOut}

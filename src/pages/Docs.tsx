@@ -19,8 +19,7 @@ import {
   Layers,
   Smartphone,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import ThemeToggle from "@/components/ThemeToggle";
+import { Cta } from "@/components/ui/cta";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -346,20 +345,12 @@ function Docs() {
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <ThemeToggle />
-            <Button
-              variant="outline"
-              className="rounded-full h-8 text-[13px] px-4"
-              onClick={() => setAuthOpen(true)}
-            >
+            <Cta variant="ghost" size="sm" onClick={() => setAuthOpen(true)}>
               Log in
-            </Button>
-            <Button
-              className="rounded-full glow-surface h-8 text-[13px] px-4"
-              onClick={() => setAuthOpen(true)}
-            >
+            </Cta>
+            <Cta variant="primary" size="sm" onClick={() => setAuthOpen(true)}>
               Get Started
-            </Button>
+            </Cta>
           </div>
         </div>
       </header>
@@ -1679,20 +1670,13 @@ style-src 'self' 'unsafe-inline';`}
                 deploy the widget in under 5 minutes.
               </p>
               <div className="flex items-center justify-center gap-3">
-                <Button
-                  className="rounded-full glow-surface px-6"
-                  onClick={() => setAuthOpen(true)}
-                >
+                <Cta variant="primary" size="lg" onClick={() => setAuthOpen(true)}>
                   Start Free
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
-                <Button
-                  variant="outline"
-                  className="rounded-full px-6"
-                  onClick={() => setAuthOpen(true)}
-                >
+                  <ArrowRight className="w-4 h-4" />
+                </Cta>
+                <Cta variant="ghost" size="lg" onClick={() => setAuthOpen(true)}>
                   Log in
-                </Button>
+                </Cta>
               </div>
             </div>
           </div>

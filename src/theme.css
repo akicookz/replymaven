@@ -94,12 +94,12 @@
 :root {
   --radius: 0.75rem;
 
-  /* Apple-blue accent scale (was orange) */
-  --brand: #0a84ff;
-  --brand-dark: #0060df;
-  --brand-soft: #409cff;
-  --brand-label: #5ea2ff;        /* Maven / AI sent-bubble label */
-  --brand-label-human: #9ad0ff;  /* human agent sent-bubble label */
+  /* Blue accent scale (blue-600 family) */
+  --brand: #2563eb;
+  --brand-dark: #1d4ed8;
+  --brand-soft: #60a5fa;
+  --brand-label: #7ea7f5;        /* Maven / AI sent-bubble label */
+  --brand-label-human: #a9c9fa;  /* human agent sent-bubble label */
 
   /* Surface scale (dark) */
   --background: #0b0600;
@@ -195,12 +195,12 @@
   --dot-orange: #ff9f0a;
   --dot-yellow: #ffd60a;
   --dot-gray: #98989d;
-  --dot-blue: #0a84ff;
+  --dot-blue: #2563eb;
 
   /* Cool dark glass tone (same family as the frosted bars) instead of a warm
      mid-grey, so received bubbles harmonize with the header/composer. */
   --bubble-received: rgba(44, 46, 55, 0.9);
-  --bubble-sent: #0a84ff;
+  --bubble-sent: #2563eb;
 
   --rad-row: 9px;
   --rad-glass: 9px;
