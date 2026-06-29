@@ -119,10 +119,8 @@ function FaqItem({ question, answer }: { question: string; answer: string }) {
 
 function LandingLogo() {
   return (
-    <div className="flex items-center gap-2.5">
-      <div className="w-8 h-8 rounded-xl bg-foreground flex items-center justify-center shrink-0">
-        <LogoIcon className="h-5 w-auto text-background" />
-      </div>
+    <div className="flex items-center gap-2">
+      <LogoIcon className="h-5 w-auto text-foreground shrink-0" />
       <span className="font-medium tracking-tight text-[15px] text-foreground">
         ReplyMaven
       </span>
@@ -1122,10 +1120,8 @@ function Landing() {
         <div className="max-w-5xl mx-auto">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-14">
             <div className="col-span-2 md:col-span-1 space-y-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-background/10 flex items-center justify-center shrink-0">
-                  <LogoIcon className="h-5 w-auto text-background" />
-                </div>
+              <div className="flex items-center gap-2">
+                <LogoIcon className="h-5 w-auto text-background shrink-0" />
                 <span className="font-medium tracking-tight text-[15px]">ReplyMaven</span>
               </div>
               <p className="text-sm text-background/50 leading-relaxed">AI-powered customer support that knows your product.</p>

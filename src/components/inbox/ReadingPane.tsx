@@ -9,6 +9,8 @@ import Composer from "./Composer";
 interface ReadingPaneProps {
   conversation: Conversation;
   messages: Message[];
+  /** True while the conversation detail (messages) is loading for the first time. */
+  messagesLoading?: boolean;
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
   onSend: (
@@ -30,6 +32,7 @@ interface ReadingPaneProps {
 export default function ReadingPane({
   conversation,
   messages,
+  messagesLoading,
   draft,
   setDraft,
   onSend,
@@ -59,6 +62,7 @@ export default function ReadingPane({
       <ChatThread
         messages={messages}
         conversation={conversation}
+        loading={messagesLoading}
         onDeleteMessage={onDeleteMessage}
       />
 

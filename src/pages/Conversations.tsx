@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
   useQuery,
@@ -9,7 +9,7 @@ import {
 import { toast } from "sonner";
 import { useConversationWs } from "@/lib/use-conversation-ws";
 import { useCopilotThread, useCopilotSender } from "@/lib/use-copilot";
-import type { InboxFilter } from "@/lib/inbox/filters";
+import type { InboxFilter, InboxSort } from "@/lib/inbox/filters";
 import type {
   Conversation,
   Message,
@@ -81,6 +81,24 @@ function getActivityMs(convo: Conversation): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+// Priority sort rank (absent priority defaults to medium, matching the schema).
+function priorityRank(convo: Conversation): number {
+  switch (convo.priority) {
+    case "high":
+      return 3;
+    case "low":
+      return 1;
+    default:
+      return 2;
+  }
+}
+
+// Per-project localStorage key for the client-side "read" overlay. There is no
+// server read-state on conversations (unread is the lastMessage===visitor
+// heuristic), so "mark all as read" is stored locally as a per-conversation
+// watermark (read iff the conversation's last activity is at/under the mark).
+const readKey = (projectId: string) => `inbox-read:${projectId}`;
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 function Conversations() {
@@ -97,6 +115,12 @@ function Conversations() {
   );
   const [draft, setDraft] = useState("");
   const [view, setView] = useState<"split" | "focus">("split");
+  // List sort order + "unread only" filter, surfaced by the list's sort/filter
+  // control. Both apply client-side over the loaded page.
+  const [sort, setSort] = useState<InboxSort>("newest");
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  // Client-side read overlay (see readKey): convId -> activity ms marked read.
+  const [readMarks, setReadMarks] = useState<Record<string, number>>({});
   const lastSuggestionRef = useRef<string | null>(null);
   // Tracks which conversations have already had an auto-suggest triggered so
   // we fire at most once per opened conversation.
@@ -137,7 +161,36 @@ function Conversations() {
   // and start the window artificially high.
   useEffect(() => {
     setListLimit(25);
+    // Drop the old rows immediately so the list shows skeletons (not the prior
+    // filter's rows, nor a premature "No conversations") until fresh data lands.
+    setLoadedConversations([]);
   }, [filter, debouncedSearch]);
+
+  // Switching inbox filters (sidebar links to ?filter=<id>) keeps this page
+  // mounted, so the open conversation and focus overlay are just component
+  // state — they don't unmount on navigation. Clear the selection and drop back
+  // to split view whenever the filter changes, so the new view starts clean
+  // (no stale thread in the reading pane, no lingering focus mode). The mount
+  // run is skipped via the ref so deep links (?filter=…&id=…) still open.
+  const prevFilterRef = useRef(filter);
+  useEffect(() => {
+    if (prevFilterRef.current === filter) return;
+    prevFilterRef.current = filter;
+    setSelectedConvo(null);
+    setView("split");
+  }, [filter]);
+
+  // Load the per-project read overlay from localStorage (writes happen in
+  // handleMarkAllRead so the initial empty state can't clobber a stored value).
+  useEffect(() => {
+    if (!projectId) return;
+    try {
+      const raw = localStorage.getItem(readKey(projectId));
+      setReadMarks(raw ? (JSON.parse(raw) as Record<string, number>) : {});
+    } catch {
+      setReadMarks({});
+    }
+  }, [projectId]);
 
   const [loadedConversations, setLoadedConversations] = useState<Conversation[]>(
     [],
@@ -158,7 +211,11 @@ function Conversations() {
   const copilotSender = useCopilotSender(projectId ?? "", selectedConvo ?? "");
 
   // ── List query (drives the conversation column) ──────────────────────────
-  const { data: convosPage, isPending: convosLoading } = useQuery<ConversationsPage>({
+  const {
+    data: convosPage,
+    isPending: convosLoading,
+    isPlaceholderData,
+  } = useQuery<ConversationsPage>({
     queryKey: ["conversations", projectId, filter, debouncedSearch, listLimit],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -180,13 +237,16 @@ function Conversations() {
   // Sync the fetched first page into the live list and seed the sidebar's
   // inbox-counts cache so its badges stay consistent with this view.
   useEffect(() => {
-    if (!convosPage) return;
+    // Only adopt FRESH data for the active filter — ignore keepPreviousData
+    // placeholders, so a filter switch shows skeletons (over the cleared list)
+    // rather than briefly re-displaying the previous filter's rows.
+    if (!convosPage || isPlaceholderData) return;
     setLoadedConversations(convosPage.conversations);
     if (convosPage.serverTime) setServerTimeBaseline(convosPage.serverTime);
     if (projectId) {
       queryClient.setQueryData(["inbox-counts", projectId], convosPage.counts);
     }
-  }, [convosPage, projectId, queryClient]);
+  }, [convosPage, isPlaceholderData, projectId, queryClient]);
 
   // Lightweight polling: fetch conversation deltas (id + activity) and patch
   // the local list in place. Brand-new conversations are prepended for the
@@ -272,7 +332,7 @@ function Conversations() {
   }, [updatesData]);
 
   // ── Detail query (drives the reading pane / focus thread) ────────────────
-  const { data: convoDetail } = useQuery<ConversationDetail>({
+  const { data: convoDetail, isLoading: detailLoading } = useQuery<ConversationDetail>({
     queryKey: ["conversation-detail", selectedConvo],
     queryFn: async () => {
       const res = await fetch(
@@ -603,7 +663,28 @@ function Conversations() {
   });
 
   // ── Derived view data ─────────────────────────────────────────────────────
-  const conversations = loadedConversations;
+  // Unread = visitor sent last AND that activity is newer than any read mark.
+  const isUnread = useCallback(
+    (c: Conversation) =>
+      c.lastMessage?.role === "visitor" &&
+      getActivityMs(c) > (readMarks[c.id] ?? 0),
+    [readMarks],
+  );
+
+  // Apply the "unread only" filter and the chosen sort over the loaded page.
+  const conversations = useMemo(() => {
+    const list = unreadOnly
+      ? loadedConversations.filter(isUnread)
+      : [...loadedConversations];
+    list.sort((a, b) => {
+      if (sort === "oldest") return getActivityMs(a) - getActivityMs(b);
+      if (sort === "priority")
+        return priorityRank(b) - priorityRank(a) || getActivityMs(b) - getActivityMs(a);
+      return getActivityMs(b) - getActivityMs(a); // newest
+    });
+    return list;
+  }, [loadedConversations, unreadOnly, sort, isUnread]);
+
   const counts = convosPage?.counts ?? EMPTY_COUNTS;
   const messages = convoDetail?.messages ?? [];
   const selected =
@@ -663,6 +744,31 @@ function Conversations() {
 
   function handleLoadMore() {
     setListLimit((n) => n + 25);
+  }
+
+  // Mark every loaded conversation as read by watermarking it at its current
+  // activity (a later visitor message bumps activity past the mark → unread
+  // again). Persisted to localStorage; this browser only (no server state).
+  function handleMarkAllRead() {
+    setReadMarks((prev) => {
+      const next = { ...prev };
+      for (const c of loadedConversations) {
+        if (c.lastMessage?.role === "visitor") next[c.id] = getActivityMs(c);
+      }
+      if (projectId) {
+        try {
+          localStorage.setItem(readKey(projectId), JSON.stringify(next));
+        } catch {
+          // storage disabled / over quota — overlay stays in-memory only.
+        }
+      }
+      return next;
+    });
+  }
+
+  function handleRefresh() {
+    queryClient.invalidateQueries({ queryKey: ["conversations", projectId] });
+    queryClient.invalidateQueries({ queryKey: ["inbox-counts", projectId] });
   }
 
   function handleRewrite() {
@@ -782,12 +888,20 @@ function Conversations() {
         onSearchChange={setSearchQuery}
         hasMore={convosPage?.hasMore ?? false}
         onLoadMore={handleLoadMore}
-        isLoading={convosLoading}
+        isLoading={convosLoading || isPlaceholderData}
+        isUnread={isUnread}
+        sort={sort}
+        onSortChange={setSort}
+        unreadOnly={unreadOnly}
+        onUnreadOnlyChange={setUnreadOnly}
+        onMarkAllRead={handleMarkAllRead}
+        onRefresh={handleRefresh}
       />
       {selected ? (
         <ReadingPane
           conversation={selected}
           messages={messages}
+          messagesLoading={detailLoading}
           draft={draft}
           setDraft={setDraft}
           onSend={handleSend}

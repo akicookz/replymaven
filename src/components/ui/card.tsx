@@ -8,9 +8,9 @@ const cardVariants = cva("text-card-foreground", {
     variant: {
       default: "bg-card flex flex-col gap-6 rounded-xl py-6",
       "glow-primary":
-        "rounded-3xl bg-black/80 backdrop-blur-2xl border border-brand/10 shadow-[inset_0_10px_30px_-12px_rgba(249,115,22,0.2)]",
+        "rounded-3xl bg-black/80 backdrop-blur-2xl border border-brand/10 shadow-[inset_0_10px_30px_-12px_rgba(10,132,255,0.22)]",
       "glow-secondary":
-        "rounded-3xl bg-background/80 backdrop-blur-2xl border border-brand/10 shadow-[inset_0_10px_30px_-12px_rgba(249,115,22,0.12)]",
+        "rounded-3xl bg-background/80 backdrop-blur-2xl border border-brand/10 shadow-[inset_0_10px_30px_-12px_rgba(10,132,255,0.14)]",
     },
   },
   defaultVariants: {

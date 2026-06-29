@@ -1,3 +1,5 @@
+import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import MessageBubble from "./MessageBubble";
 import SystemPill from "./SystemPill";
@@ -5,7 +7,48 @@ import SystemPill from "./SystemPill";
 interface ChatThreadProps {
   messages: Message[];
   conversation: Conversation;
+  /** True while the thread is loading for the first time → show bubble skeletons. */
+  loading?: boolean;
   onDeleteMessage: (messageId: string) => void;
+}
+
+// Placeholder bubbles shown while the conversation detail loads. Mirrors the
+// MessageBubble layout (label + tail-cut bubble), alternating sides.
+const SKELETON_BUBBLES: { side: "left" | "right"; w: string; h: string }[] = [
+  { side: "left", w: "62%", h: "h-16" },
+  { side: "right", w: "48%", h: "h-11" },
+  { side: "left", w: "40%", h: "h-9" },
+  { side: "right", w: "55%", h: "h-14" },
+  { side: "left", w: "50%", h: "h-11" },
+];
+
+function ChatThreadSkeleton() {
+  return (
+    <div aria-hidden className="animate-in fade-in duration-200">
+      {SKELETON_BUBBLES.map((b, i) => {
+        const isLeft = b.side === "left";
+        return (
+          <div
+            key={i}
+            className={cn(
+              "mb-3 flex flex-col",
+              isLeft ? "items-start" : "items-end",
+            )}
+          >
+            <Skeleton className="h-2.5 w-14 mb-1.5 rounded" />
+            <Skeleton
+              className={cn(
+                b.h,
+                "rounded-[20px]",
+                isLeft ? "rounded-bl-[6px]" : "rounded-br-[6px]",
+              )}
+              style={{ width: b.w }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /** Returns midnight (local) for an ISO date string. */
@@ -31,6 +74,7 @@ function dateDividerLabel(isoStr: string): string {
 export default function ChatThread({
   messages,
   conversation,
+  loading,
   onDeleteMessage,
 }: ChatThreadProps) {
   return (
@@ -38,6 +82,7 @@ export default function ChatThread({
       {/* Full-bleed with the same 30px inset as the header/composer so bubbles
           align to the pane edges (not a centered narrow column). */}
       <div className="px-[30px] pt-4 pb-[10px]">
+        {loading && messages.length === 0 && <ChatThreadSkeleton />}
         {messages.map((message, i) => {
           const prev = messages[i - 1];
           const showDivider = !prev || !isSameDay(prev.createdAt, message.createdAt);

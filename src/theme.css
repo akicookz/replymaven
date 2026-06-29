@@ -105,10 +105,13 @@
   --background: #0b0600;
   --foreground: #f0f0f5;
 
-  --card: #0c0c10;
+  /* Cards/popovers/modals: solid cool charcoal in the glass family (panes
+     ≈ #141418, focus card ≈ #1f2026) so shadcn surfaces match the new shell
+     instead of reading as flat near-black. */
+  --card: #16171c;
   --card-foreground: #e8e8ee;
 
-  --popover: #0c0c10;
+  --popover: #1e1f26;
   --popover-foreground: #e8e8ee;
 
   /* Brand orange primary */
@@ -257,10 +260,11 @@
   --background: #08080a;
   --foreground: #f0f0f5;
 
-  --card: #0c0c10;
+  /* Match :root — cool charcoal surfaces in the glass family. */
+  --card: #16171c;
   --card-foreground: #e8e8ee;
 
-  --popover: #0c0c10;
+  --popover: #1e1f26;
   --popover-foreground: #e8e8ee;
 
   --primary: var(--brand);

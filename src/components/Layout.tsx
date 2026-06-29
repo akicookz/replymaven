@@ -11,6 +11,7 @@ import {
   Plus,
   Check,
   PanelLeftClose,
+  PanelLeftOpen,
   User,
   Users,
   Building2,
@@ -310,15 +311,20 @@ function Layout() {
             : "fixed inset-y-0 left-0 z-50 -translate-x-full md:translate-x-0 md:relative",
         )}
       >
-        {/* Brand wordmark */}
-        <div className="flex items-center justify-between px-4 h-12">
-          <div className="flex items-center gap-2">
-            {!collapsed && (
-              <Link to="/app" className="text-[14px] font-semibold text-ink-1">
-                ReplyMaven
-              </Link>
-            )}
-          </div>
+        {/* Brand wordmark + sidebar toggle. When collapsed the wordmark hides and
+            the toggle becomes the top-left icon (the only way to re-expand), kept
+            aligned with the nav icons below it. */}
+        <div
+          className={cn(
+            "flex items-center h-12",
+            collapsed ? "justify-center px-0" : "justify-between px-4",
+          )}
+        >
+          {!collapsed && (
+            <Link to="/app" className="text-[14px] font-semibold text-ink-1">
+              ReplyMaven
+            </Link>
+          )}
           {/* Mobile close button */}
           <button
             onClick={closeMobile}
@@ -327,23 +333,22 @@ function Layout() {
           >
             <X className="w-4 h-4" />
           </button>
-          {/* Desktop collapse button */}
-          {!collapsed && (
-            <button
-              onClick={() => setCollapsed(true)}
-              className="hidden md:block p-1 rounded-md hover:bg-glass-button text-ink-5 transition-colors"
-            >
+          {/* Desktop collapse / expand toggle */}
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            className={cn(
+              "hidden md:flex items-center justify-center rounded-md hover:bg-glass-button text-ink-5 transition-colors",
+              collapsed ? "w-9 h-9" : "p-1",
+            )}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="w-[18px] h-[18px]" />
+            ) : (
               <PanelLeftClose className="w-4 h-4" />
-            </button>
-          )}
-          {collapsed && (
-            <button
-              onClick={() => setCollapsed(false)}
-              className="sr-only"
-            >
-              Expand
-            </button>
-          )}
+            )}
+          </button>
         </div>
 
         {/* Team Switcher (only when the user belongs to more than one team) */}

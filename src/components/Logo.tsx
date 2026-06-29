@@ -31,46 +31,20 @@ function LogoIcon({ className }: { className?: string }) {
 }
 
 // ─── Size Presets ─────────────────────────────────────────────────────────────
+// Bare-mark sizes (no tile) — the book reads as the logo itself, so it carries
+// roughly the footprint the old tile had.
 const sizeConfig = {
-  sm: {
-    container: "w-7 h-7 rounded-lg",
-    icon: "h-[18px] w-auto",
-    text: "text-[15px]",
-  },
-  md: {
-    container: "w-8 h-8 rounded-xl",
-    icon: "h-5 w-auto",
-    text: "text-[15px]",
-  },
-  lg: {
-    container: "w-11 h-11 rounded-2xl",
-    icon: "h-7 w-auto",
-    text: "text-xl",
-  },
-  xl: {
-    container: "w-16 h-16 rounded-2xl",
-    icon: "h-10 w-auto",
-    text: "text-2xl",
-  },
+  sm: { icon: "h-[18px] w-auto", text: "text-[15px]" },
+  md: { icon: "h-5 w-auto", text: "text-[15px]" },
+  lg: { icon: "h-7 w-auto", text: "text-xl" },
+  xl: { icon: "h-10 w-auto", text: "text-2xl" },
 } as const;
 
 type LogoSize = keyof typeof sizeConfig;
 
-// ─── Variant Presets ──────────────────────────────────────────────────────────
-const variantConfig = {
-  default: {
-    surface: "glow-surface",
-    icon: "text-brand",
-    text: "text-card-foreground",
-  },
-  subtle: {
-    surface: "glow-surface-subtle",
-    icon: "text-brand",
-    text: "text-card-foreground",
-  },
-} as const;
-
-type LogoVariant = keyof typeof variantConfig;
+// Variant kept for API compatibility only — the logo is monochrome on every
+// surface now (bare mark in the foreground colour), so it has no visual effect.
+type LogoVariant = "default" | "subtle";
 
 // ─── Logo Component ───────────────────────────────────────────────────────────
 interface LogoProps {
@@ -84,32 +58,23 @@ interface LogoProps {
 
 function Logo({
   size = "sm",
-  variant = "default",
   iconOnly = false,
   showText = true,
   className,
   textClassName,
 }: LogoProps) {
   const s = sizeConfig[size];
-  const v = variantConfig[variant];
 
   return (
-    <div className={cn("flex items-center gap-2.5", className)}>
-      <div
-        className={cn(
-          s.container,
-          v.surface,
-          "flex items-center justify-center shrink-0",
-        )}
-      >
-        <LogoIcon className={cn(s.icon, v.icon)} />
-      </div>
+    <div className={cn("flex items-center gap-2", className)}>
+      {/* Bare mark, no tile — the foreground colour inverts with the surface
+          (dark book on light, light book on dark). */}
+      <LogoIcon className={cn(s.icon, "text-foreground shrink-0")} />
       {!iconOnly && showText && (
         <span
           className={cn(
-            "font-semibold tracking-tight",
+            "font-semibold tracking-tight text-foreground",
             s.text,
-            v.text,
             textClassName,
           )}
         >
