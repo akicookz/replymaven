@@ -65,12 +65,11 @@
   border-radius: 10px;
   font-size: 0.8125rem;
 }
-/* Light code block that sits calmly on the light KB page (a dark block reads
-   as a harsh blob here — our docs only get away with dark because that page
-   is dark). */
+/* Code block tracks the theme via tokens — light grey in light mode, soft dark
+   in dark mode — so it never reads as a harsh blob either way. */
 .help-prose pre {
-  background: #f6f8fa;
-  color: #1f2328;
+  background: var(--code);
+  color: var(--code-foreground);
   padding: 1rem;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1090,3 +1089,16 @@
 .hljs-number, .hljs-symbol, .hljs-bullet, .hljs-link, .hljs-meta, .hljs-selector-attr, .hljs-selector-pseudo { color: #005cc5; }
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 600; }
+/* Dark-mode syntax colors (the light set above is unreadable on the dark code
+   block). */
+.dark .hljs-comment, .dark .hljs-quote { color: #8b949e; }
+.dark .hljs-keyword, .dark .hljs-selector-tag, .dark .hljs-built_in, .dark .hljs-name, .dark .hljs-tag { color: #ff7b72; }
+.dark .hljs-string, .dark .hljs-section, .dark .hljs-attribute, .dark .hljs-literal, .dark .hljs-template-tag, .dark .hljs-template-variable, .dark .hljs-type, .dark .hljs-addition { color: #a5d6ff; }
+.dark .hljs-title { color: #d2a8ff; }
+.dark .hljs-number, .dark .hljs-symbol, .dark .hljs-bullet, .dark .hljs-link, .dark .hljs-meta, .dark .hljs-selector-attr, .dark .hljs-selector-pseudo { color: #79c0ff; }
+
+/* Theme toggle — show the moon in light mode (click → dark), sun in dark. */
+.help-theme-toggle .rm-icon-sun { display: none; }
+.dark .help-theme-toggle .rm-icon-sun { display: inline-flex; }
+.dark .help-theme-toggle .rm-icon-moon { display: none; }
+.help-theme-toggle svg { width: 16px; height: 16px; }
