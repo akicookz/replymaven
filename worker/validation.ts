@@ -342,7 +342,9 @@ export const updateConversationPublicSchema = z.object({
 export const agentReplySchema = z
   .object({
     content: z.string().max(5000).optional().default(""),
-    imageUrl: z.string().max(500).optional(),
+    // Client sends `imageUrl: null` for text-only replies, so accept null as
+    // well as undefined/string — `.optional()` alone rejects null and 400s.
+    imageUrl: z.string().max(500).nullish(),
   })
   .refine((data) => data.content.trim().length > 0 || !!data.imageUrl, {
     message: "Reply must include text or an image",

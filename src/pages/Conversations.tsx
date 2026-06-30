@@ -198,6 +198,18 @@ function Conversations() {
   const [serverTimeBaseline, setServerTimeBaseline] = useState<number | null>(
     null,
   );
+  // The `/updates` poll cursor lives in a ref, NOT in the query key. Each
+  // response carries a fresh `serverTime`; if that advanced value were in the
+  // query key it would churn the key on every response and React Query would
+  // refetch immediately, looping forever. The ref initialises from the first
+  // baseline and advances from each updates response, while the 5s interval
+  // drives the actual polling cadence.
+  const updatesSinceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (serverTimeBaseline != null && updatesSinceRef.current == null) {
+      updatesSinceRef.current = serverTimeBaseline;
+    }
+  }, [serverTimeBaseline]);
 
   // Open a WebSocket for the selected conversation. The hook patches the
   // ["conversation-detail", id] cache on incoming events so messages and
@@ -252,9 +264,9 @@ function Conversations() {
   // the local list in place. Brand-new conversations are prepended for the
   // broad inbox views.
   const { data: updatesData } = useQuery<ConversationUpdatesResponse>({
-    queryKey: ["conversation-updates", projectId, serverTimeBaseline],
+    queryKey: ["conversation-updates", projectId],
     queryFn: async () => {
-      const since = serverTimeBaseline ?? 0;
+      const since = updatesSinceRef.current ?? serverTimeBaseline ?? 0;
       const res = await fetch(
         `/api/projects/${projectId}/conversations/updates?since=${since}`,
       );
@@ -268,7 +280,7 @@ function Conversations() {
 
   useEffect(() => {
     if (!updatesData) return;
-    if (updatesData.serverTime) setServerTimeBaseline(updatesData.serverTime);
+    if (updatesData.serverTime) updatesSinceRef.current = updatesData.serverTime;
     if (updatesData.updates.length === 0) return;
 
     // Only the broad inbox views surface brand-new conversations live; the

@@ -46,10 +46,19 @@ export default function MessageBubble({
           <span className="text-[11px] text-ink-8">{formatTime(message.createdAt)}</span>
         </div>
         <div className="max-w-[74%] px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-received text-ink-2 rounded-[20px_20px_20px_6px]">
-          <div
-            className="prose-chat"
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
+          {message.imageUrl && (
+            <img
+              src={message.imageUrl}
+              alt="attachment"
+              className="block max-w-full max-h-[280px] rounded-[12px] object-contain"
+            />
+          )}
+          {message.content && (
+            <div
+              className={`prose-chat${message.imageUrl ? " mt-1.5" : ""}`}
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
+          )}
         </div>
       </div>
     );
@@ -64,10 +73,19 @@ export default function MessageBubble({
       </div>
       <div className="relative group max-w-[74%]">
         <div className="px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-sent text-white rounded-[20px_20px_6px_20px]">
-          <div
-            className="prose-chat"
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
+          {message.imageUrl && (
+            <img
+              src={message.imageUrl}
+              alt="attachment"
+              className="block max-w-full max-h-[280px] rounded-[12px] object-contain"
+            />
+          )}
+          {message.content && (
+            <div
+              className={`prose-chat${message.imageUrl ? " mt-1.5" : ""}`}
+              dangerouslySetInnerHTML={{ __html: html }}
+            />
+          )}
         </div>
         {isAgent && (
           <button

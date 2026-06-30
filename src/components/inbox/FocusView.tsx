@@ -62,13 +62,26 @@ function FocusBubble({ message }: { message: Message }) {
         {senderLabel}
       </span>
       <div
-        className={`prose-chat max-w-[78%] px-[14px] py-[9px] text-[14.5px] leading-[1.5] break-words ${
+        className={`max-w-[78%] px-[14px] py-[9px] text-[14.5px] leading-[1.5] break-words ${
           isReceived
             ? "bg-bubble-received text-ink-2 rounded-[18px_18px_18px_6px]"
             : "bg-bubble-sent text-white rounded-[18px_18px_6px_18px]"
         }`}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      >
+        {message.imageUrl && (
+          <img
+            src={message.imageUrl}
+            alt="attachment"
+            className="block max-w-full max-h-[280px] rounded-[12px] object-contain"
+          />
+        )}
+        {message.content && (
+          <div
+            className={`prose-chat${message.imageUrl ? " mt-1.5" : ""}`}
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        )}
+      </div>
     </div>
   );
 }
