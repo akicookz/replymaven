@@ -613,7 +613,7 @@ export class ChatService {
     return {
       id, conversationId, role: "system", content, sources,
       imageUrl: null, senderName: null, senderAvatar: null, userId: null,
-      createdAt: now, emailedAt: null,
+      createdAt: now, emailedAt: null, deliveredAt: null, readAt: null,
     };
   }
 
@@ -643,6 +643,8 @@ export class ChatService {
       userId: data.userId ?? null,
       createdAt: now,
       emailedAt: null,
+      deliveredAt: null,
+      readAt: null,
     };
   }
 
@@ -679,6 +681,85 @@ export class ChatService {
       .update(messages)
       .set({ emailedAt: new Date() })
       .where(eq(messages.id, messageId));
+  }
+
+  // Mark all outbound (agent/bot) messages in the conversation up to and
+  // including `cutoff` that aren't already delivered. Returns the ids that
+  // were newly marked (empty when there's nothing to do — keeps re-acks silent).
+  async markMessagesDelivered(
+    conversationId: string,
+    cutoff: Date,
+  ): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          inArray(messages.role, ["agent", "bot"]),
+          isNull(messages.deliveredAt),
+          lte(messages.createdAt, cutoff),
+        ),
+      );
+    const ids = rows.map((r) => r.id);
+    if (ids.length === 0) return [];
+    await this.db
+      .update(messages)
+      .set({ deliveredAt: new Date() })
+      .where(inArray(messages.id, ids));
+    return ids;
+  }
+
+  // Mark outbound messages up to `cutoff` as read. Read implies delivered, so
+  // any of those still missing `deliveredAt` get it backfilled. Returns the
+  // ids that were newly marked read.
+  async markMessagesRead(
+    conversationId: string,
+    cutoff: Date,
+  ): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          inArray(messages.role, ["agent", "bot"]),
+          isNull(messages.readAt),
+          lte(messages.createdAt, cutoff),
+        ),
+      );
+    const ids = rows.map((r) => r.id);
+    if (ids.length === 0) return [];
+    const now = new Date();
+    await this.db
+      .update(messages)
+      .set({ readAt: now })
+      .where(inArray(messages.id, ids));
+    await this.db
+      .update(messages)
+      .set({ deliveredAt: now })
+      .where(and(inArray(messages.id, ids), isNull(messages.deliveredAt)));
+    return ids;
+  }
+
+  // Resolve a widget-supplied "newest message id" to its createdAt (guarding
+  // that it belongs to this conversation) and mark delivered up to it.
+  async markDeliveredUpTo(
+    conversationId: string,
+    upToMessageId: string,
+  ): Promise<string[]> {
+    const m = await this.getMessageById(upToMessageId);
+    if (!m || m.conversationId !== conversationId) return [];
+    return this.markMessagesDelivered(conversationId, m.createdAt);
+  }
+
+  async markReadUpTo(
+    conversationId: string,
+    upToMessageId: string,
+  ): Promise<string[]> {
+    const m = await this.getMessageById(upToMessageId);
+    if (!m || m.conversationId !== conversationId) return [];
+    return this.markMessagesRead(conversationId, m.createdAt);
   }
 
   async getInboxCounts(projectId: string): Promise<Record<InboxFilter, number>> {

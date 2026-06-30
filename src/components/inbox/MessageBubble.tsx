@@ -1,4 +1,5 @@
-import { Trash2 } from "lucide-react";
+import { Mail, Trash2 } from "lucide-react";
+import { deriveMessageStatus } from "@/lib/inbox/message-status";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import { cn, renderMarkdown } from "@/lib/utils";
 
@@ -77,6 +78,15 @@ export default function MessageBubble({
     );
   }
 
+  const status = deriveMessageStatus(message);
+  const statusTooltip = [
+    message.deliveredAt ? `Delivered ${formatTime(message.deliveredAt)}` : null,
+    message.readAt ? `Seen ${formatTime(message.readAt)}` : null,
+    message.emailedAt ? `Emailed ${formatTime(message.emailedAt)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   // Sent bubble (bot or agent)
   return (
     <div className="flex flex-col items-end mb-3">
@@ -110,6 +120,29 @@ export default function MessageBubble({
           </button>
         )}
       </div>
+      {status && (
+        <div
+          className="mt-1 text-[11px] text-ink-8 flex items-center gap-1"
+          title={statusTooltip || undefined}
+        >
+          <span
+            className={
+              status.status === "seen"
+                ? "text-brand-label-human font-medium"
+                : undefined
+            }
+          >
+            {status.label}
+          </span>
+          {status.emailed && (
+            <>
+              <span aria-hidden="true">·</span>
+              <Mail size={11} />
+              <span>Emailed</span>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

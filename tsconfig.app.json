@@ -27,5 +27,11 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "shared"]
+  "include": ["src", "shared"],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "shared/**/*.test.ts",
+    "shared/**/*.spec.ts"
+  ]
 }

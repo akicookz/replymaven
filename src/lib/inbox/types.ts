@@ -48,6 +48,8 @@ export interface Message {
   userId?: string | null;
   createdAt: string;
   emailedAt?: string | null;
+  deliveredAt?: string | null;
+  readAt?: string | null;
 }
 
 export type InboxCounts = Record<InboxFilter, number>;

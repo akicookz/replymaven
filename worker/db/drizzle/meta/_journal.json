@@ -379,6 +379,13 @@
       "when": 1782827161370,
       "tag": "0053_handy_marvex",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1782861312561,
+      "tag": "0054_square_maddog",
+      "breakpoints": true
     }
   ]
 }

@@ -9,6 +9,7 @@ import { type CopilotMessageRow, type MessageRow } from "../db";
 
 interface BroadcastOptions {
   excludeSubjectId?: string;
+  audience?: "agents";
 }
 
 export function messageRowToPayload(row: MessageRow): MessagePayload {
@@ -45,6 +46,7 @@ function dispatch(
         body: JSON.stringify({
           event,
           excludeSubjectId: options.excludeSubjectId,
+          audience: options.audience,
         }),
       })
       .then(() => undefined)
@@ -151,4 +153,27 @@ export function broadcastClosed(
     conversationId,
     reason,
   });
+}
+
+export function broadcastMessageStatus(
+  env: AppEnv,
+  ctx: ExecutionContext,
+  conversationId: string,
+  status: "delivered" | "read",
+  messageIds: string[],
+): void {
+  if (messageIds.length === 0) return;
+  dispatch(
+    env,
+    ctx,
+    conversationId,
+    {
+      type: "message:status",
+      conversationId,
+      status,
+      messageIds,
+      at: Date.now(),
+    },
+    { audience: "agents" },
+  );
 }

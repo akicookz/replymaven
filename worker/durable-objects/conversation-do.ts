@@ -13,6 +13,7 @@ interface SocketAttachment {
 interface BroadcastBody {
   event: ServerEvent;
   excludeSubjectId?: string;
+  audience?: "agents";
 }
 
 function toMessagePayload(row: {
@@ -133,6 +134,7 @@ export class ConversationDO implements DurableObject {
       type?: string;
       lastMessageId?: string | null;
       state?: string;
+      upToMessageId?: string;
     };
 
     if (msg.type === "ping") {
@@ -157,6 +159,31 @@ export class ConversationDO implements DurableObject {
           msg.state,
         );
       }
+      return;
+    }
+
+    if (
+      (msg.type === "delivered" || msg.type === "read") &&
+      typeof msg.upToMessageId === "string"
+    ) {
+      const att = ws.deserializeAttachment() as SocketAttachment | undefined;
+      if (att?.kind !== "visitor") return;
+
+      const db = drizzle(this.env.DB);
+      const chatService = new ChatService(db);
+      const ids =
+        msg.type === "delivered"
+          ? await chatService.markDeliveredUpTo(att.conversationId, msg.upToMessageId)
+          : await chatService.markReadUpTo(att.conversationId, msg.upToMessageId);
+      if (ids.length === 0) return;
+
+      this.broadcastToAgents({
+        type: "message:status",
+        conversationId: att.conversationId,
+        status: msg.type,
+        messageIds: ids,
+        at: Date.now(),
+      });
       return;
     }
   }
@@ -229,6 +256,9 @@ export class ConversationDO implements DurableObject {
       ) {
         continue;
       }
+      if (body.audience === "agents" && attachment?.kind !== "agent") {
+        continue;
+      }
       try {
         ws.send(payload);
       } catch {
@@ -255,6 +285,19 @@ export class ConversationDO implements DurableObject {
       }
     }
     return new Response("ok");
+  }
+
+  private broadcastToAgents(event: ServerEvent): void {
+    const payload = JSON.stringify(event);
+    for (const ws of this.state.getWebSockets()) {
+      const att = ws.deserializeAttachment() as SocketAttachment | undefined;
+      if (att?.kind !== "agent") continue;
+      try {
+        ws.send(payload);
+      } catch {
+        // Socket might be in a weird state — Cloudflare will clean it up.
+      }
+    }
   }
 
   private safeSend(ws: WebSocket, event: ServerEvent): void {

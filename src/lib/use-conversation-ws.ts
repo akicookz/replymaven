@@ -21,6 +21,8 @@ interface ConversationDetailMessage extends MessagePayload {
   toolExecutions?: unknown[];
   emailedAt?: string | null;
   userId?: string | null;
+  deliveredAt?: string | null;
+  readAt?: string | null;
 }
 
 interface ConversationDetailData {
@@ -178,6 +180,33 @@ export function useConversationWs(
         queryClient.invalidateQueries({
           queryKey: ["conversations", projectId],
         });
+      } else if (parsed.type === "message:status") {
+        const idSet = new Set(parsed.messageIds);
+        const iso = new Date(parsed.at).toISOString();
+        const markRead = parsed.status === "read";
+        queryClient.setQueryData<ConversationDetailData | undefined>(
+          ["conversation-detail", conversationId],
+          (old) => {
+            if (!old) return old;
+            return {
+              ...old,
+              messages: old.messages.map((m) => {
+                if (!idSet.has(m.id)) return m;
+                if (markRead) {
+                  return {
+                    ...m,
+                    readAt: iso,
+                    deliveredAt: m.deliveredAt ?? iso,
+                  } as ConversationDetailMessage;
+                }
+                return {
+                  ...m,
+                  deliveredAt: m.deliveredAt ?? iso,
+                } as ConversationDetailMessage;
+              }),
+            };
+          },
+        );
       }
     }
 

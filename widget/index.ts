@@ -3224,6 +3224,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       titleOverridden = false;
     }
     sendPresenceOverWs(document.hidden ? "background" : "active");
+    if (isTabActive) reportRead();
   });
 
   function sendPresenceOverWs(state: "active" | "background"): void {
@@ -3232,6 +3233,60 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       wsSocket.send(JSON.stringify({ type: "presence", state }));
     } catch {
       // ignore
+    }
+  }
+
+  function sendAckOverWs(type: "delivered" | "read", messageId: string): void {
+    if (!wsHealthy || !wsSocket) return;
+    try {
+      wsSocket.send(JSON.stringify({ type, upToMessageId: messageId }));
+    } catch {
+      // ignore
+    }
+  }
+
+  async function sendAckViaHeartbeat(fields: {
+    deliveredUpTo?: string;
+    readUpTo?: string;
+  }): Promise<void> {
+    if (!conversationId) return;
+    try {
+      await fetch(
+        `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/heartbeat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            presence: document.hidden ? "background" : "active",
+            ...fields,
+          }),
+        },
+      );
+    } catch {
+      // best-effort
+    }
+  }
+
+  // Tell the server the newest outbound (bot/agent) message reached this widget
+  // so the dashboard can show a "Delivered" receipt.
+  function reportDelivered(): void {
+    if (!conversationId || !newestResponseId) return;
+    if (wsHealthy && wsSocket) {
+      sendAckOverWs("delivered", newestResponseId);
+    } else {
+      void sendAckViaHeartbeat({ deliveredUpTo: newestResponseId });
+    }
+  }
+
+  // Tell the server the visitor has actually seen the newest outbound message —
+  // only when the panel is open AND the tab is focused.
+  function reportRead(): void {
+    if (!conversationId || !newestResponseId) return;
+    if (!isOpen || !isTabActive) return;
+    if (wsHealthy && wsSocket) {
+      sendAckOverWs("read", newestResponseId);
+    } else {
+      void sendAckViaHeartbeat({ readUpTo: newestResponseId });
     }
   }
 
@@ -4646,6 +4701,9 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
                   if (data.messageId) {
                     renderedMessageIds.add(data.messageId);
                     lastSeenMessageId = data.messageId;
+                    newestResponseId = data.messageId;
+                    reportDelivered();
+                    reportRead();
                   }
                   lastMessageTimestamp = Date.now();
                   scrollToBottom();
@@ -5460,6 +5518,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
         const rendered = renderIncomingMessage(parsed.message);
         if (rendered) {
           lastNewMessageAt = Date.now();
+          reportDelivered();
           if (isOpen) {
             scrollToBottom();
             markConversationSeen();
@@ -5705,6 +5764,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
 
       if (hasNewMessages) {
         lastNewMessageAt = Date.now();
+        reportDelivered();
         if (isOpen) {
           scrollToBottom();
           markConversationSeen();
@@ -5810,6 +5870,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
   function markConversationSeen() {
     if (newestResponseId) setStoredSeenResponseId(newestResponseId);
     clearUnreadBadge();
+    reportRead();
   }
 
   // ─── Conversation History Loading ────────────────────────────────────────────
@@ -5902,6 +5963,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
           .find((m: { role: string }) => m.role !== "visitor");
         if (latestResponse) {
           newestResponseId = latestResponse.id;
+          reportDelivered();
           if (isOpen) {
             markConversationSeen();
           } else if (latestResponse.id !== getStoredSeenResponseId()) {
@@ -6248,6 +6310,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     isOpen = true;
     chatWindow.classList.add("open");
     trigger.classList.add("active");
+    reportDelivered();
     markConversationSeen();
     // Hide intro pill permanently
     if (introPillDelayTimer) {

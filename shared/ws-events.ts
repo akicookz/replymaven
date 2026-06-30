@@ -50,10 +50,19 @@ export type ServerEvent =
       conversationId: string;
       reason: string | null;
     }
+  | {
+      type: "message:status";
+      conversationId: string;
+      status: "delivered" | "read";
+      messageIds: string[];
+      at: number;
+    }
   | { type: "pong"; t: number };
 
 export type ClientEvent =
   | { type: "ping"; t: number }
-  | { type: "resume"; lastMessageId: string | null };
+  | { type: "resume"; lastMessageId: string | null }
+  | { type: "delivered"; upToMessageId: string }
+  | { type: "read"; upToMessageId: string };
 
 export type WsEvent = ServerEvent | ClientEvent;

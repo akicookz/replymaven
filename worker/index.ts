@@ -74,6 +74,7 @@ import {
   broadcastMessageDeleted,
   broadcastMessageNew,
   broadcastStatusChange,
+  broadcastMessageStatus,
 } from "./realtime/broadcast";
 import {
   handleDashboardWsUpgrade,
@@ -782,9 +783,13 @@ const app = new Hono<HonoAppContext>()
     if (!project) return c.json({ error: "Project not found" }, 404);
 
     let presence: "active" | "background" = "active";
+    let deliveredUpTo: string | undefined;
+    let readUpTo: string | undefined;
     try {
       const body = await c.req.json();
       if (body.presence === "background") presence = "background";
+      if (typeof body.deliveredUpTo === "string") deliveredUpTo = body.deliveredUpTo;
+      if (typeof body.readUpTo === "string") readUpTo = body.readUpTo;
     } catch {
       // No body or invalid JSON — default to active
     }
@@ -797,6 +802,15 @@ const app = new Hono<HonoAppContext>()
     );
     if (!conversation) {
       return c.json({ error: "Conversation not found" }, 404);
+    }
+
+    if (deliveredUpTo) {
+      const ids = await chatService.markDeliveredUpTo(conversationId, deliveredUpTo);
+      broadcastMessageStatus(c.env, c.executionCtx, conversationId, "delivered", ids);
+    }
+    if (readUpTo) {
+      const ids = await chatService.markReadUpTo(conversationId, readUpTo);
+      broadcastMessageStatus(c.env, c.executionCtx, conversationId, "read", ids);
     }
 
     return c.json({ ok: true, status: conversation.status });

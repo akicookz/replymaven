@@ -545,6 +545,8 @@ function Conversations() {
             createdAt: new Date().toISOString(),
             senderName: null,
             emailedAt: null,
+            deliveredAt: null,
+            readAt: null,
           };
           return {
             ...old,
