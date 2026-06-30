@@ -698,7 +698,19 @@ function Conversations() {
   }, [loadedConversations, unreadOnly, sort, isUnread]);
 
   const counts = convosPage?.counts ?? EMPTY_COUNTS;
-  const messages = convoDetail?.messages ?? [];
+  // Always render the thread in true chronological order. The server returns
+  // messages sorted by full createdAt, but the cached array can drift out of
+  // order as live WS messages append onto a stale cache that spans days — so
+  // sort by full timestamp here rather than trusting array order (which made
+  // messages from different days interleave by time-of-day).
+  const messages = useMemo(
+    () =>
+      [...(convoDetail?.messages ?? [])].sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      ),
+    [convoDetail?.messages],
+  );
   const selected =
     convoDetail?.conversation ??
     conversations.find((c) => c.id === selectedConvo) ??
