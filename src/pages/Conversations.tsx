@@ -7,6 +7,7 @@ import {
   keepPreviousData,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { useConversationWs } from "@/lib/use-conversation-ws";
 import { useCopilotThread, useCopilotSender } from "@/lib/use-copilot";
 import type { InboxFilter, InboxSort } from "@/lib/inbox/filters";
@@ -44,6 +45,7 @@ interface ConversationUpdate {
   visitorLastOnlineAt: string | null;
   snoozedUntil?: string | null;
   priority?: "low" | "medium" | "high" | null;
+  assigneeId?: string | null;
   createdAt: string;
   updatedAt: string;
   lastMessage?: LastMessagePreview | null;
@@ -365,15 +367,56 @@ function Conversations() {
     staleTime: 1000 * 60,
   });
 
-  // Reset the composer draft when switching conversations so the auto-suggest
-  // prefill (below) can populate it cleanly for the newly selected thread.
+  // Does the open conversation actually await an agent reply? Drives both the
+  // auto-draft trigger and the suggestion chip — we only suggest when there's
+  // genuinely something to reply to (visitor sent last; thread open & not
+  // snoozed). This is what stops the old "doesn't fit the conversation" drafts
+  // from appearing on resolved / already-answered threads.
+  const needsReply = useMemo(() => {
+    const conv = convoDetail?.conversation;
+    if (!conv || conv.status === "closed") return false;
+    if (conv.snoozedUntil && new Date(conv.snoozedUntil).getTime() > Date.now())
+      return false;
+    const msgs = convoDetail?.messages ?? [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "system") continue;
+      return msgs[i].role === "visitor";
+    }
+    return false;
+  }, [convoDetail]);
+
+  // Per-conversation dismissal of the suggestion chip, and a flag marking that
+  // the next completed suggestion was explicitly requested via "Rewrite" (and
+  // should land in the composer rather than the chip).
+  const [suggestionDismissed, setSuggestionDismissed] = useState(false);
+  const rewriteRequestedRef = useRef(false);
+
+  // Reset the composer draft + suggestion state when switching conversations.
   useEffect(() => {
     setDraft("");
     lastSuggestionRef.current = null;
+    rewriteRequestedRef.current = false;
+    setSuggestionDismissed(false);
   }, [selectedConvo]);
 
-  // Pre-fill the draft from the latest completed Copilot auto-suggest, but
-  // never clobber text the agent has already typed.
+  // Latest completed Copilot auto-suggest for the open conversation. Surfaced as
+  // a dismissible chip (NOT auto-typed into the composer) unless the agent
+  // explicitly pressed Rewrite, in which case it fills the composer.
+  const suggestionText = useMemo(() => {
+    const msgs = copilotThread.data;
+    if (!msgs || msgs.length === 0) return null;
+    const s = [...msgs]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === "copilot" &&
+          m.autoSuggest &&
+          !m._streaming &&
+          m.content.trim().length > 0,
+      );
+    return s?.content ?? null;
+  }, [copilotThread.data]);
+
   useEffect(() => {
     const msgs = copilotThread.data;
     if (!msgs || msgs.length === 0) return;
@@ -389,7 +432,13 @@ function Conversations() {
     if (!suggestion) return;
     if (lastSuggestionRef.current === suggestion.id) return;
     lastSuggestionRef.current = suggestion.id;
-    setDraft((prev) => (prev.trim().length > 0 ? prev : suggestion.content));
+    // Only auto-fill the composer when the agent explicitly asked (Rewrite);
+    // automatic suggestions stay in the dismissible chip.
+    if (rewriteRequestedRef.current) {
+      rewriteRequestedRef.current = false;
+      setDraft((prev) => (prev.trim().length > 0 ? prev : suggestion.content));
+      setSuggestionDismissed(true);
+    }
   }, [copilotThread.data]);
 
   // Conservative auto-prefill: when a conversation is opened with an empty
@@ -408,6 +457,10 @@ function Conversations() {
       autoSuggestedRef.current.add(selectedConvo);
       return;
     }
+    // Only auto-draft when the conversation genuinely needs a reply (visitor
+    // sent last, open, not snoozed). Don't mark as done — if a visitor message
+    // later flips this to true, the effect re-runs and fires then.
+    if (!needsReply) return;
     // Wait until copilot thread has finished loading so we don't
     // fire unnecessarily when a suggestion already exists.
     if (copilotThread.isLoading || copilotThread.data === undefined) return;
@@ -427,7 +480,7 @@ function Conversations() {
   // copilotSender is stable per conversation; draft is guarded by the trim
   // check so transient typing changes won't re-fire (the ref prevents it).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedConvo, copilotThread.data, copilotThread.isLoading, projectId, convoDetail?.conversation?.status]);
+  }, [selectedConvo, copilotThread.data, copilotThread.isLoading, projectId, convoDetail?.conversation?.status, needsReply]);
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   const sendReply = useMutation({
@@ -591,6 +644,67 @@ function Conversations() {
     },
   });
 
+  // Toggle-off for Resolve / Flag-as-spam: bring a closed conversation back to
+  // active (status "active", closeReason cleared). Mirrors closeConversation's
+  // optimistic patch of both the detail cache and the local list.
+  const reopenConversation = useMutation({
+    mutationFn: async ({ convId }: { convId: string }) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${convId}/reopen`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error("Failed to reopen conversation");
+      return res.json();
+    },
+    onMutate: async ({ convId }) => {
+      await queryClient.cancelQueries({
+        queryKey: ["conversation-detail", convId],
+      });
+      const previousDetail = queryClient.getQueryData<ConversationDetail>([
+        "conversation-detail",
+        convId,
+      ]);
+      const previousList = loadedConversations;
+      queryClient.setQueryData<ConversationDetail | undefined>(
+        ["conversation-detail", convId],
+        (old) =>
+          old
+            ? {
+                ...old,
+                conversation: {
+                  ...old.conversation,
+                  status: "active",
+                  closeReason: null,
+                },
+              }
+            : old,
+      );
+      setLoadedConversations((prev) =>
+        prev.map((c) =>
+          c.id === convId ? { ...c, status: "active", closeReason: null } : c,
+        ),
+      );
+      return { previousDetail, previousList };
+    },
+    onError: (_err, { convId }, ctx) => {
+      if (ctx?.previousDetail) {
+        queryClient.setQueryData(
+          ["conversation-detail", convId],
+          ctx.previousDetail,
+        );
+      }
+      if (ctx?.previousList) setLoadedConversations(ctx.previousList);
+      toast.error("Failed to reopen conversation");
+    },
+    onSettled: (_data, _error, { convId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["conversation-detail", convId],
+      });
+      queryClient.invalidateQueries({ queryKey: ["conversations", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["inbox-counts", projectId] });
+    },
+  });
+
   const snoozeConversation = useMutation({
     mutationFn: async ({
       convId,
@@ -648,6 +762,64 @@ function Conversations() {
     },
   });
 
+  const assignConversation = useMutation({
+    mutationFn: async ({
+      convId,
+      assigneeId,
+    }: {
+      convId: string;
+      assigneeId: string | null;
+    }) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${convId}/assign`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assigneeId }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to assign conversation");
+      return res.json();
+    },
+    onMutate: async ({ convId, assigneeId }) => {
+      await queryClient.cancelQueries({
+        queryKey: ["conversation-detail", convId],
+      });
+      const previousDetail = queryClient.getQueryData<ConversationDetail>([
+        "conversation-detail",
+        convId,
+      ]);
+      const previousList = loadedConversations;
+      queryClient.setQueryData<ConversationDetail | undefined>(
+        ["conversation-detail", convId],
+        (old) =>
+          old
+            ? { ...old, conversation: { ...old.conversation, assigneeId } }
+            : old,
+      );
+      setLoadedConversations((prev) =>
+        prev.map((c) => (c.id === convId ? { ...c, assigneeId } : c)),
+      );
+      return { previousDetail, previousList };
+    },
+    onError: (_err, { convId }, ctx) => {
+      if (ctx?.previousDetail) {
+        queryClient.setQueryData(
+          ["conversation-detail", convId],
+          ctx.previousDetail,
+        );
+      }
+      if (ctx?.previousList) setLoadedConversations(ctx.previousList);
+      toast.error("Failed to assign conversation");
+    },
+    onSettled: (_data, _error, { convId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["conversation-detail", convId],
+      });
+      queryClient.invalidateQueries({ queryKey: ["conversations", projectId] });
+    },
+  });
+
   const blockVisitor = useMutation({
     mutationFn: async ({
       visitorId,
@@ -666,12 +838,109 @@ function Conversations() {
       if (!res.ok) throw new Error("Failed to block visitor");
       return res.json();
     },
-    onSuccess: () => {
-      toast.success("Visitor blocked");
+    // Optimistically light up the Block icon (visitorBlocked lives on the detail
+    // cache, populated by the detail endpoint) and mark the row closed-as-spam,
+    // mirroring what the ban endpoint does server-side.
+    onMutate: async ({ conversationId }) => {
+      await queryClient.cancelQueries({
+        queryKey: ["conversation-detail", conversationId],
+      });
+      const previousDetail = queryClient.getQueryData<ConversationDetail>([
+        "conversation-detail",
+        conversationId,
+      ]);
+      const previousList = loadedConversations;
+      queryClient.setQueryData<ConversationDetail | undefined>(
+        ["conversation-detail", conversationId],
+        (old) =>
+          old
+            ? {
+                ...old,
+                conversation: {
+                  ...old.conversation,
+                  visitorBlocked: true,
+                  status: "closed",
+                  closeReason: "spam",
+                },
+              }
+            : old,
+      );
+      setLoadedConversations((prev) =>
+        prev.map((c) =>
+          c.id === conversationId
+            ? { ...c, status: "closed", closeReason: "spam" }
+            : c,
+        ),
+      );
+      return { previousDetail, previousList };
+    },
+    onSuccess: () => toast.success("Visitor blocked"),
+    onError: (_err, { conversationId }, ctx) => {
+      if (ctx?.previousDetail) {
+        queryClient.setQueryData(
+          ["conversation-detail", conversationId],
+          ctx.previousDetail,
+        );
+      }
+      if (ctx?.previousList) setLoadedConversations(ctx.previousList);
+      toast.error("Failed to block visitor");
+    },
+    onSettled: (_data, _error, { conversationId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["conversation-detail", conversationId],
+      });
       queryClient.invalidateQueries({ queryKey: ["conversations", projectId] });
       queryClient.invalidateQueries({ queryKey: ["inbox-counts", projectId] });
     },
-    onError: () => toast.error("Failed to block visitor"),
+  });
+
+  // Toggle-off for Block: lift the active ban on this conversation's visitor.
+  const unblockVisitor = useMutation({
+    mutationFn: async ({ convId }: { convId: string }) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${convId}/unblock`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error("Failed to unblock visitor");
+      return res.json();
+    },
+    onMutate: async ({ convId }) => {
+      await queryClient.cancelQueries({
+        queryKey: ["conversation-detail", convId],
+      });
+      const previousDetail = queryClient.getQueryData<ConversationDetail>([
+        "conversation-detail",
+        convId,
+      ]);
+      queryClient.setQueryData<ConversationDetail | undefined>(
+        ["conversation-detail", convId],
+        (old) =>
+          old
+            ? {
+                ...old,
+                conversation: { ...old.conversation, visitorBlocked: false },
+              }
+            : old,
+      );
+      return { previousDetail };
+    },
+    onSuccess: () => toast.success("Visitor unblocked"),
+    onError: (_err, { convId }, ctx) => {
+      if (ctx?.previousDetail) {
+        queryClient.setQueryData(
+          ["conversation-detail", convId],
+          ctx.previousDetail,
+        );
+      }
+      toast.error("Failed to unblock visitor");
+    },
+    onSettled: (_data, _error, { convId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["conversation-detail", convId],
+      });
+      queryClient.invalidateQueries({ queryKey: ["conversations", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["inbox-counts", projectId] });
+    },
   });
 
   // ── Derived view data ─────────────────────────────────────────────────────
@@ -720,14 +989,14 @@ function Conversations() {
     : -1;
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  // When the acted-on conversation is the open one and it leaves the active
-  // view (resolved / spam / snoozed), advance selection to the neighbouring
-  // row so the agent keeps triaging without a dead selection.
-  function advanceSelectionPast(convId: string) {
-    if (selectedConvo !== convId) return;
-    const idx = conversations.findIndex((c) => c.id === convId);
-    const next = conversations[idx + 1] ?? conversations[idx - 1] ?? null;
-    setSelectedConvo(next ? next.id : null);
+  // Resolve / flag / block are toggles: acting on an already-active state
+  // reverses it (reopen / un-flag / unblock). We read the current state from
+  // the same conversation the header lights its icons from, and keep that
+  // conversation selected after acting, so a lit icon is right there to click
+  // again to release.
+  function findConv(convId: string): Conversation | null {
+    if (selected?.id === convId) return selected;
+    return conversations.find((c) => c.id === convId) ?? null;
   }
 
   function handleSend(
@@ -737,26 +1006,43 @@ function Conversations() {
     const text = (content ?? draft).trim();
     if (!text && !opts?.imageUrl) return;
     if (!selectedConvo) return;
+    // The composer no longer has a "send as email" toggle. Decide automatically:
+    // if the visitor has an email on file and isn't live in the widget right now
+    // (email-origin or offline), also deliver the reply by email so it reaches
+    // them; active widget visitors just get it in-chat. An explicit opts.asEmail
+    // (future callers) still wins.
+    const autoEmail =
+      !!selected?.visitorEmail && selected?.visitorPresence !== "active";
     sendReply.mutate({
       content: text,
       imageUrl: opts?.imageUrl ?? null,
-      asEmail: opts?.asEmail,
+      asEmail: opts?.asEmail ?? autoEmail,
     });
   }
 
   function handleResolve(convId: string) {
-    closeConversation.mutate({ convId, closeReason: "resolved" });
-    advanceSelectionPast(convId);
+    const conv = findConv(convId);
+    // Lit (resolved, i.e. closed for a non-spam reason) → reopen; else resolve.
+    if (conv && conv.status === "closed" && conv.closeReason !== "spam") {
+      reopenConversation.mutate({ convId });
+    } else {
+      closeConversation.mutate({ convId, closeReason: "resolved" });
+    }
   }
 
   function handleFlagSpam(convId: string) {
-    closeConversation.mutate({ convId, closeReason: "spam" });
-    advanceSelectionPast(convId);
+    const conv = findConv(convId);
+    // Lit (already flagged as spam) → reopen / un-flag; else flag.
+    if (conv?.closeReason === "spam") {
+      reopenConversation.mutate({ convId });
+    } else {
+      closeConversation.mutate({ convId, closeReason: "spam" });
+    }
   }
 
   function handleSnooze(convId: string, until: number | null) {
+    // until === null is the un-snooze path (the header sends it when snoozed).
     snoozeConversation.mutate({ convId, until });
-    advanceSelectionPast(convId);
   }
 
   function handleSetPriority(
@@ -764,6 +1050,10 @@ function Conversations() {
     priority: "low" | "medium" | "high",
   ) {
     setPriorityMutation.mutate({ convId, priority });
+  }
+
+  function handleAssign(convId: string, assigneeId: string | null) {
+    assignConversation.mutate({ convId, assigneeId });
   }
 
   function handleLoadMore() {
@@ -797,9 +1087,21 @@ function Conversations() {
 
   function handleRewrite() {
     if (!selectedConvo || copilotSender.isStreaming) return;
-    // Reset the guard so the prefill effect re-loads the fresh suggestion.
+    // Mark this as an explicit request so the completed suggestion lands in the
+    // composer (not the chip), and reset the guard so it re-picks the fresh one.
+    // regenerate replaces any prior draft instead of 409-ing on the existing one.
+    rewriteRequestedRef.current = true;
     lastSuggestionRef.current = null;
-    copilotSender.send({ endpoint: "auto-suggest" });
+    copilotSender.send({ endpoint: "auto-suggest", regenerate: true });
+  }
+
+  function handleUseSuggestion() {
+    if (suggestionText) setDraft(suggestionText);
+    setSuggestionDismissed(true);
+  }
+
+  function handleDismissSuggestion() {
+    setSuggestionDismissed(true);
   }
 
   async function handleDeleteMessage(messageId: string) {
@@ -829,13 +1131,18 @@ function Conversations() {
         ? convoDetail.conversation
         : null) ?? conversations.find((c) => c.id === convId);
     if (!conv) return;
+    // Lit (visitor already blocked) → unblock; else block. visitorBlocked is
+    // only populated on the detail cache, so the toggle-off path is reachable
+    // only for the open conversation (which is exactly where the icon shows).
+    if (conv.visitorBlocked) {
+      unblockVisitor.mutate({ convId });
+      return;
+    }
     blockVisitor.mutate({
       visitorId: conv.visitorId,
       ...(conv.visitorEmail ? { visitorEmail: conv.visitorEmail } : {}),
       conversationId: convId,
     });
-    // Advance selection immediately (optimistic) so the agent keeps triaging.
-    advanceSelectionPast(convId);
   }
 
   // ── Keyboard navigation ───────────────────────────────────────────────────
@@ -920,6 +1227,9 @@ function Conversations() {
         onUnreadOnlyChange={setUnreadOnly}
         onMarkAllRead={handleMarkAllRead}
         onRefresh={handleRefresh}
+        // Mobile: collapse the list once a conversation is open so the chat +
+        // composer take the full screen (desktop keeps the split).
+        className={cn(selectedConvo ? "hidden md:flex" : "flex")}
       />
       {selected ? (
         <ReadingPane
@@ -936,10 +1246,22 @@ function Conversations() {
           onRewrite={handleRewrite}
           onFocus={() => setView("focus")}
           onBlock={handleBlock}
+          onAssign={handleAssign}
           onDeleteMessage={handleDeleteMessage}
+          onBack={() => setSelectedConvo(null)}
+          suggestion={
+            suggestionText &&
+            needsReply &&
+            !suggestionDismissed &&
+            draft.trim().length === 0
+              ? suggestionText
+              : null
+          }
+          onUseSuggestion={handleUseSuggestion}
+          onDismissSuggestion={handleDismissSuggestion}
         />
       ) : (
-        <div className="glass-reading flex-1 grid place-items-center text-ink-7 text-sm">
+        <div className="glass-reading flex-1 hidden md:grid place-items-center text-ink-7 text-sm">
           Select a conversation
         </div>
       )}

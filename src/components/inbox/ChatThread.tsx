@@ -10,6 +10,10 @@ interface ChatThreadProps {
   /** True while the thread is loading for the first time → show bubble skeletons. */
   loading?: boolean;
   onDeleteMessage: (messageId: string) => void;
+  /** Lowercased in-conversation search query (empty when not searching). */
+  searchQuery?: string;
+  /** The id of the currently-focused search match (scrolled into view). */
+  activeMatchId?: string | null;
 }
 
 // Placeholder bubbles shown while the conversation detail loads. Mirrors the
@@ -76,19 +80,27 @@ export default function ChatThread({
   conversation,
   loading,
   onDeleteMessage,
+  searchQuery,
+  activeMatchId,
 }: ChatThreadProps) {
+  const q = searchQuery ?? "";
   return (
     <div className="min-h-full">
       {/* Full-bleed with the same 30px inset as the header/composer so bubbles
           align to the pane edges (not a centered narrow column). */}
-      <div className="px-[30px] pt-4 pb-[10px]">
+      <div className="px-4 md:px-[30px] pt-4 pb-[10px]">
         {loading && messages.length === 0 && <ChatThreadSkeleton />}
         {messages.map((message, i) => {
           const prev = messages[i - 1];
           const showDivider = !prev || !isSameDay(prev.createdAt, message.createdAt);
+          const isMatch =
+            q.length > 0 &&
+            message.role !== "system" &&
+            message.content.toLowerCase().includes(q);
+          const isActiveMatch = isMatch && message.id === activeMatchId;
 
           return (
-            <div key={message.id}>
+            <div key={message.id} data-msg-id={message.id}>
               {showDivider && (
                 <div className="flex justify-center my-4">
                   <span className="text-[11px] font-semibold text-ink-8 tracking-wide uppercase">
@@ -103,6 +115,8 @@ export default function ChatThread({
                   message={message}
                   conversation={conversation}
                   onDelete={onDeleteMessage}
+                  isMatch={isMatch}
+                  isActiveMatch={isActiveMatch}
                 />
               )}
             </div>

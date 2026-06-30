@@ -59,6 +59,10 @@ export function useCopilotThread(
 interface SendOptions {
   endpoint: "messages" | "auto-suggest";
   content?: string;
+  // Auto-suggest only: force a fresh draft, replacing any prior auto-suggestion
+  // (the "Rewrite" action). Without it the endpoint is one-shot (409 if a
+  // thread already exists).
+  regenerate?: boolean;
 }
 
 export function useCopilotSender(
@@ -85,7 +89,12 @@ export function useCopilotSender(
       // Optimistic inserts: agent question (skipped for auto-suggest) +
       // a placeholder copilot row that accumulates streamed text.
       queryClient.setQueryData<CopilotMessage[] | undefined>(queryKey, (old) => {
-        const base = old ?? [];
+        // Regenerating drops the stale auto-suggestion(s) optimistically so the
+        // chip shows only the new draft as it streams (the server deletes them
+        // too). Agent↔Copilot Q&A rows are kept.
+        const base = (old ?? []).filter(
+          (m) => !(options.regenerate && m.autoSuggest),
+        );
         const next: CopilotMessage[] = [...base];
         if (options.endpoint === "messages" && options.content) {
           next.push({
@@ -124,7 +133,7 @@ export function useCopilotSender(
           body:
             options.endpoint === "messages"
               ? JSON.stringify({ content: options.content })
-              : "{}",
+              : JSON.stringify({ regenerate: !!options.regenerate }),
           signal: controller.signal,
         });
 

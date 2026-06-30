@@ -2,22 +2,18 @@ import {
   CheckIcon,
   ClockIcon,
   FlagIcon,
-  UserPlusIcon,
-  ChevronDownIcon,
-  ReplyIcon,
+  ArrowLeftIcon,
   SearchIcon,
   ShieldOffIcon,
-  UserIcon,
+  ChevronUpIcon,
+  ChevronDownIcon,
+  XIcon,
 } from "lucide-react";
 import type { Conversation } from "@/lib/inbox/types";
 import { countryFlag } from "@/lib/inbox/country-flag";
+import { cn } from "@/lib/utils";
 import PriorityMenu from "./PriorityMenu";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import AssigneeMenu from "./AssigneeMenu";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -70,11 +66,20 @@ function chatDuration(createdAt: string): string {
   return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
 }
 
-function statusInfo(status: string): { dotClass: string; label: string } {
-  if (["active", "waiting_agent", "agent_replied"].includes(status)) {
-    return { dotClass: "bg-dot-green", label: "Open" };
+function isSnoozedNow(c: Conversation): boolean {
+  return !!c.snoozedUntil && new Date(c.snoozedUntil).getTime() > Date.now();
+}
+
+// Single source of truth for "what state is this thread in" — drives the dot +
+// label shown once under the avatar.
+function conversationState(c: Conversation): { label: string; dotClass: string } {
+  if (c.visitorBlocked) return { label: "Blocked", dotClass: "bg-red-400" };
+  if (c.status === "closed") {
+    if (c.closeReason === "spam") return { label: "Spam", dotClass: "bg-dot-orange" };
+    return { label: "Resolved", dotClass: "bg-dot-gray" };
   }
-  return { dotClass: "bg-dot-gray", label: "Resolved" };
+  if (isSnoozedNow(c)) return { label: "Snoozed", dotClass: "bg-amber-400" };
+  return { label: "Open", dotClass: "bg-dot-green" };
 }
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -86,7 +91,21 @@ interface ReadingHeaderProps {
   onFlagSpam: (convId: string) => void;
   onPriority: (convId: string, priority: "low" | "medium" | "high") => void;
   onBlock: (convId: string) => void;
+  onAssign: (convId: string, assigneeId: string | null) => void;
   onFocus: () => void;
+  /** Mobile: go back to the conversation list. */
+  onBack?: () => void;
+  // Desktop: inline search field (highlight + jump between matches).
+  search: string;
+  onSearchChange: (q: string) => void;
+  matchCount: number;
+  matchIndex: number;
+  onMatchNext: () => void;
+  onMatchPrev: () => void;
+  /** Mobile: open the full-page search modal. */
+  onOpenSearch: () => void;
+  /** A search query is currently active (tints the mobile search icon). */
+  searchActive: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -98,25 +117,43 @@ export default function ReadingHeader({
   onFlagSpam,
   onPriority,
   onBlock,
+  onAssign,
   onFocus,
+  onBack,
+  search,
+  onSearchChange,
+  matchCount,
+  matchIndex,
+  onMatchNext,
+  onMatchPrev,
+  onOpenSearch,
+  searchActive,
 }: ReadingHeaderProps) {
   const meta = parseMetadata(conversation.metadata);
   const country: string | undefined = meta.country;
   const city: string | undefined = meta.city ?? meta.location;
   const browser: string | undefined = meta.browser;
 
-  const { dotClass, label: statusLabel } = statusInfo(conversation.status);
+  const state = conversationState(conversation);
   const duration = chatDuration(conversation.createdAt);
   const flag = countryFlag(country);
+
+  // Active states reflected on the toolbar icons.
+  const isResolved =
+    conversation.status === "closed" && conversation.closeReason !== "spam";
+  const isSnoozed = isSnoozedNow(conversation);
+  const isSpam = conversation.closeReason === "spam";
+  const isBlocked = !!conversation.visitorBlocked;
 
   const displayName =
     conversation.visitorName ?? conversation.visitorEmail ?? conversation.visitorId;
   const initials = getInitials(conversation.visitorName ?? conversation.visitorEmail);
   const tint = avatarTint(conversation.visitorId);
 
-  // Snooze until tomorrow (24h from now) as default toolbar action.
+  // Toggle: when already snoozed, the lit clock un-snoozes (until=null);
+  // otherwise snooze until tomorrow (24h from now).
   const snoozeTomorrow = () => {
-    onSnooze(conversation.id, Date.now() + 86_400_000);
+    onSnooze(conversation.id, isSnoozed ? null : Date.now() + 86_400_000);
   };
 
   // Build meta items for the user bar.
@@ -126,109 +163,184 @@ export default function ReadingHeader({
   metaItems.push(`In chat ${duration}`);
   if (browser) metaItems.push(browser);
 
-  return (
-    // Whole header sticks to the top; only the chat thread scrolls beneath it.
-    <div className="sticky top-0 z-[5] glass-bar">
-      {/* ── Toolbar row ── */}
-      <div
-        className="flex items-center gap-2"
-        style={{ padding: "11px 22px" }}
-      >
-        {/* Reply */}
-        <button
-          type="button"
-          aria-label="Reply"
-          className="glass-button rounded-glass flex items-center justify-center size-8 text-ink-3"
-        >
-          <ReplyIcon className="size-4" />
-        </button>
+  function handleSearchKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (e.shiftKey) onMatchPrev();
+      else onMatchNext();
+    } else if (e.key === "Escape") {
+      onSearchChange("");
+    }
+  }
 
-        {/* Action capsule: Resolve · Snooze · Flag-as-spam */}
-        <div className="flex items-center rounded-glass glass-button overflow-hidden">
+  return (
+    <div className="glass-bar shrink-0">
+      {/* ── Toolbar row ── */}
+      <div className="flex items-center gap-2 px-3 md:px-[22px] py-[11px]">
+        {/* Back (mobile only) — returns to the conversation list */}
+        {onBack && (
+          <button
+            type="button"
+            aria-label="Back to conversations"
+            onClick={onBack}
+            className="glass-button rounded-glass flex items-center justify-center size-8 text-ink-2 md:hidden shrink-0"
+          >
+            <ArrowLeftIcon className="size-4" />
+          </button>
+        )}
+
+        {/* Action capsule: Resolve · Snooze · Flag-as-spam. Each icon lights up
+            when that state is active (status itself is also shown under avatar). */}
+        <div className="flex items-center rounded-glass glass-button overflow-hidden shrink-0">
           <button
             type="button"
             aria-label="Resolve"
+            aria-pressed={isResolved}
             onClick={() => onResolve(conversation.id)}
-            className="flex items-center justify-center size-8 text-ink-3 hover:bg-white/5 transition-colors"
+            className={cn(
+              "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
+              isResolved ? "text-emerald-300 bg-emerald-400/15" : "text-ink-3",
+            )}
+            title={isResolved ? "Resolved — click to reopen" : "Resolve"}
           >
             <CheckIcon className="size-4" />
           </button>
           <button
             type="button"
             aria-label="Snooze"
+            aria-pressed={isSnoozed}
             onClick={snoozeTomorrow}
-            className="flex items-center justify-center size-8 text-ink-3 hover:bg-white/5 transition-colors"
+            className={cn(
+              "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
+              isSnoozed ? "text-amber-300 bg-amber-400/15" : "text-ink-3",
+            )}
+            title={isSnoozed ? "Snoozed — click to un-snooze" : "Snooze until tomorrow"}
           >
             <ClockIcon className="size-4" />
           </button>
           <button
             type="button"
             aria-label="Flag as spam"
+            aria-pressed={isSpam}
             onClick={() => onFlagSpam(conversation.id)}
-            className="flex items-center justify-center size-8 text-dot-orange hover:bg-white/5 transition-colors"
+            className={cn(
+              "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
+              isSpam ? "text-dot-orange bg-dot-orange/15" : "text-ink-3",
+            )}
+            title={
+              isSpam
+                ? "Flagged as spam — click to un-flag"
+                : "Mark as spam (silent — stays under Flagged, no notify)"
+            }
           >
             <FlagIcon className="size-4" />
           </button>
         </div>
 
-        {/* Assign / overflow → Block visitor */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="Assign or block visitor"
-              className="glass-button rounded-glass flex items-center gap-1 px-2.5 h-8 text-ink-3"
-            >
-              <UserPlusIcon className="size-4" />
-              <ChevronDownIcon className="size-3" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-[160px]">
-            <DropdownMenuItem
-              onSelect={() => onBlock(conversation.id)}
-              variant="destructive"
-            >
-              <ShieldOffIcon className="size-4" />
-              Block visitor
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled>
-              <UserIcon className="size-4" />
-              Assign…
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Assign to a teammate (lights up when assigned) */}
+        <AssigneeMenu
+          value={conversation.assigneeId ?? null}
+          onChange={(id) => onAssign(conversation.id, id)}
+        />
+
+        {/* Block visitor — lights up red when the visitor is banned */}
+        <button
+          type="button"
+          aria-label="Block visitor"
+          aria-pressed={isBlocked}
+          onClick={() => onBlock(conversation.id)}
+          className={cn(
+            "glass-button rounded-glass flex items-center justify-center size-8 transition-colors shrink-0",
+            isBlocked ? "text-red-400 bg-red-400/15" : "text-ink-3 hover:text-red-400",
+          )}
+          title={
+            isBlocked
+              ? "Visitor blocked — click to unblock"
+              : "Block visitor (can't message again)"
+          }
+        >
+          <ShieldOffIcon className="size-4" />
+        </button>
 
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Focus button */}
+        {/* Focus button (desktop) */}
         <button
           type="button"
           onClick={onFocus}
-          className="glass-button rounded-glass flex items-center gap-1.5 px-3 h-8 text-ink-3 text-[13px]"
+          className="glass-button rounded-glass hidden md:flex items-center gap-1.5 px-3 h-8 text-ink-3 text-[13px] shrink-0"
         >
           Focus
           <span className="keycap">F</span>
         </button>
 
-        {/* Search field (visual) */}
-        <div className="glass-button rounded-[8px] flex items-center gap-1.5 px-2.5 h-8 w-[170px]">
+        {/* Desktop: full inline search field — highlight + jump between matches */}
+        <div className="hidden md:flex glass-button rounded-[8px] items-center gap-1.5 px-2.5 h-8 w-[210px] shrink-0">
           <SearchIcon className="size-3.5 text-ink-7 shrink-0" />
           <input
             type="text"
-            placeholder="Search…"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            onKeyDown={handleSearchKey}
+            placeholder="Search chat…"
             className="bg-transparent flex-1 text-[13px] text-ink-3 placeholder:text-ink-7 outline-none min-w-0"
           />
+          {search && (
+            <>
+              <span className="text-[11px] text-ink-6 tabular-nums shrink-0">
+                {matchCount ? `${matchIndex}/${matchCount}` : "0/0"}
+              </span>
+              <button
+                type="button"
+                aria-label="Previous match"
+                onClick={onMatchPrev}
+                disabled={matchCount === 0}
+                className="text-ink-6 hover:text-ink-2 disabled:opacity-30 shrink-0"
+              >
+                <ChevronUpIcon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label="Next match"
+                onClick={onMatchNext}
+                disabled={matchCount === 0}
+                className="text-ink-6 hover:text-ink-2 disabled:opacity-30 shrink-0"
+              >
+                <ChevronDownIcon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => onSearchChange("")}
+                className="text-ink-6 hover:text-ink-2 shrink-0"
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </>
+          )}
         </div>
+
+        {/* Mobile: search icon → full-page modal */}
+        <button
+          type="button"
+          aria-label="Search conversation"
+          onClick={onOpenSearch}
+          className={cn(
+            "glass-button rounded-glass flex md:hidden items-center justify-center size-8 transition-colors shrink-0",
+            searchActive ? "text-[--brand] bg-glass-raised" : "text-ink-3 hover:text-ink-1",
+          )}
+          title="Search conversation"
+        >
+          <SearchIcon className="size-4" />
+        </button>
       </div>
 
       {/* ── User bar ── */}
-      <div
-        className="flex items-start justify-between"
-        style={{ padding: "15px 30px 16px" }}
-      >
-        {/* Left: avatar + identity */}
-        <div className="flex items-start gap-3">
+      <div className="flex items-start justify-between gap-4 px-4 md:px-[30px] pt-[15px] pb-4">
+        {/* Left: avatar + identity (takes the available width so the meta line
+            doesn't wrap prematurely) */}
+        <div className="flex items-start gap-3 min-w-0 flex-1">
           {/* 44px avatar */}
           <div
             className={`size-11 rounded-full flex items-center justify-center shrink-0 font-semibold text-sm select-none ${tint}`}
@@ -237,30 +349,28 @@ export default function ReadingHeader({
           </div>
 
           {/* Identity block */}
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-0.5 min-w-0">
             {/* Name row */}
-            <div className="flex items-center gap-1.5">
-              {flag && (
-                <span className="text-base leading-none">{flag}</span>
-              )}
-              <span className="text-[18px] font-semibold text-ink-1 leading-snug">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {flag && <span className="text-base leading-none shrink-0">{flag}</span>}
+              <span className="text-[18px] font-semibold text-ink-1 leading-snug truncate">
                 {displayName}
               </span>
             </div>
 
             {/* Email */}
             {conversation.visitorEmail && (
-              <span className="text-[12px] text-ink-7 leading-none">
+              <span className="text-[12px] text-ink-7 leading-none truncate">
                 {conversation.visitorEmail}
               </span>
             )}
 
-            {/* Meta line */}
-            <div className="flex items-center gap-2 mt-1">
+            {/* Meta line — single row; stays put while there's width to spare */}
+            <div className="flex items-center gap-2 mt-1 whitespace-nowrap">
               {/* Status dot + label */}
               <div className="flex items-center gap-1">
-                <span className={`size-2 rounded-full shrink-0 ${dotClass}`} />
-                <span className="text-[12px] text-ink-7">{statusLabel}</span>
+                <span className={`size-2 rounded-full shrink-0 ${state.dotClass}`} />
+                <span className="text-[12px] text-ink-7">{state.label}</span>
               </div>
 
               {metaItems.map((item, i) => (

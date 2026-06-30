@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, asc, count } from "drizzle-orm";
+import { and, eq, asc, count } from "drizzle-orm";
 import {
   copilotMessages,
   type CopilotMessageRow,
@@ -43,5 +43,19 @@ export class CopilotService {
       .from(copilotMessages)
       .where(eq(copilotMessages.conversationId, conversationId));
     return (rows[0]?.n ?? 0) > 0;
+  }
+
+  // Remove the proactive auto-draft rows for a conversation so a fresh one can
+  // be generated (the "Rewrite" / regenerate path). Agent↔Copilot Q&A rows are
+  // left intact — only the throwaway suggestion is replaced.
+  async clearAutoSuggestions(conversationId: string): Promise<void> {
+    await this.db
+      .delete(copilotMessages)
+      .where(
+        and(
+          eq(copilotMessages.conversationId, conversationId),
+          eq(copilotMessages.autoSuggest, true),
+        ),
+      );
   }
 }

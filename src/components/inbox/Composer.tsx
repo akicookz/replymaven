@@ -1,19 +1,18 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { toast } from "sonner";
-import { Paperclip, ArrowUp, ChevronDown, X } from "lucide-react";
+import { Paperclip, ArrowUp, X } from "lucide-react";
 
 export interface ComposerProps {
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
   onSend: (
     content?: string,
-    opts?: { imageUrl?: string | null; asEmail?: boolean },
+    opts?: { imageUrl?: string | null },
   ) => void;
   onResolve: (convId: string) => void;
   onRewrite: () => void;
   convId: string;
-  visitorEmail: string | null;
 }
 
 export default function Composer({
@@ -23,21 +22,25 @@ export default function Composer({
   onResolve,
   onRewrite,
   convId,
-  visitorEmail,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [showMenu, setShowMenu] = useState(false);
 
-  // Auto-grow: expand to content, capped by max-h-[200px] via CSS.
-  function handleInput() {
+  // Auto-grow: keep the textarea height synced to its content on EVERY draft
+  // change — typed, pasted, programmatically filled (AI "Use draft" / Rewrite),
+  // or cleared after send. Driving this from a layout effect (rather than only
+  // an onInput handler, which never fires on programmatic value changes) is
+  // what makes the box follow a multiline suggestion and snap back to one row
+  // once the draft is reset. Capped at max-h-[200px] via CSS; runs before
+  // paint so there's no height flash.
+  useLayoutEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = "auto";
     ta.style.height = `${ta.scrollHeight}px`;
-  }
+  }, [draft]);
 
   // Upload attachment to /api/upload (field: "file"), take back { url }.
   async function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
@@ -60,14 +63,10 @@ export default function Composer({
     }
   }
 
-  function send(opts?: { asEmail?: boolean }) {
+  function send() {
     if (!draft.trim() && !pendingImage) return;
-    onSend(draft || undefined, {
-      imageUrl: pendingImage,
-      asEmail: opts?.asEmail,
-    });
+    onSend(draft || undefined, { imageUrl: pendingImage });
     setPendingImage(null);
-    setShowMenu(false);
   }
 
   // Cmd/Ctrl+Enter shortcut to send.
@@ -113,7 +112,6 @@ export default function Composer({
           ref={textareaRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onInput={handleInput}
           onKeyDown={handleKeyDown}
           placeholder="Reply…"
           rows={1}
@@ -164,57 +162,16 @@ export default function Composer({
               <span className="keycap">E</span>
             </button>
 
-            {/* Send button + email dropdown */}
-            <div className="relative flex items-center gap-0.5">
-              <button
-                type="button"
-                className="flex items-center justify-center rounded-full bg-bubble-sent text-white w-8 h-8 hover:opacity-90 disabled:opacity-40 transition-opacity"
-                onClick={() => send()}
-                disabled={!canSend}
-                title="Send (⌘↵)"
-              >
-                <ArrowUp size={15} strokeWidth={2.5} />
-              </button>
-
-              {/* Caret — opens "Send as email" option */}
-              <button
-                type="button"
-                className="glass-button flex items-center justify-center rounded-[6px] w-5 h-5 text-ink-5 hover:text-ink-2"
-                onClick={() => setShowMenu((v) => !v)}
-                title="More send options"
-              >
-                <ChevronDown size={11} />
-              </button>
-
-              {showMenu && (
-                <>
-                  {/* Click-away backdrop */}
-                  <div
-                    className="fixed inset-0 z-[9]"
-                    onClick={() => setShowMenu(false)}
-                  />
-                  <div className="absolute bottom-full right-0 mb-1.5 z-[10] rounded-[10px] border border-hairline-strong bg-glass-reading backdrop-blur-[24px] shadow-lg overflow-hidden min-w-[150px]">
-                    <button
-                      type="button"
-                      className="block w-full text-left px-3 py-[8px] text-[12.5px] text-ink-2 hover:bg-glass-raised disabled:opacity-40"
-                      onClick={() => send()}
-                      disabled={!canSend}
-                    >
-                      Send
-                    </button>
-                    <button
-                      type="button"
-                      className="block w-full text-left px-3 py-[8px] text-[12.5px] text-ink-2 hover:bg-glass-raised disabled:opacity-40 disabled:cursor-not-allowed"
-                      onClick={() => send({ asEmail: true })}
-                      disabled={!visitorEmail || !canSend}
-                      title={!visitorEmail ? "No visitor email on file" : undefined}
-                    >
-                      Send as email
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            {/* Send button */}
+            <button
+              type="button"
+              className="flex items-center justify-center rounded-full bg-bubble-sent text-white w-8 h-8 hover:opacity-90 disabled:opacity-40 transition-opacity"
+              onClick={send}
+              disabled={!canSend}
+              title="Send (⌘↵)"
+            >
+              <ArrowUp size={15} strokeWidth={2.5} />
+            </button>
           </div>
         </div>
       </div>

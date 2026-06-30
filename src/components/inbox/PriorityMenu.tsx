@@ -28,7 +28,7 @@ export default function PriorityMenu({ value, onChange }: PriorityMenuProps) {
           type="button"
           className="glass-button rounded-[6px] flex items-center gap-1 px-2.5 py-1.5 text-[12px] text-ink-7 cursor-pointer select-none outline-none"
         >
-          Priority · {label}
+          {label}
           <ChevronDownIcon className="size-3" />
         </button>
       </DropdownMenuTrigger>

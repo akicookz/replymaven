@@ -75,6 +75,44 @@ function copilotHistoryToTurns(
   }));
 }
 
+// Auto-suggest has no real agent question — only a synthetic "draft a reply"
+// instruction. Routing the planner on that string (with an empty thread) runs
+// classify / summarize / FAQ-select / RAG reformulation blind, so the planner
+// produces a "please share the visitor's message" clarification that the
+// compose step then emits. Instead, route on the actual visitor↔bot transcript:
+// the latest visitor message becomes the message to reply to, everything before
+// it becomes history — exactly how the visitor-facing handler is anchored.
+export function buildAutoSuggestTurnInput(
+  messages: Array<{ role: string; content: string }>,
+  fallbackInstruction: string,
+): { conversationHistory: ConversationTurnMessage[]; currentMessage: string } {
+  const turns: ConversationTurnMessage[] = messages.map((m) => ({
+    role: m.role === "visitor" ? "visitor" : "bot",
+    content: m.content,
+  }));
+  let lastVisitorIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "visitor" && messages[i].content.trim()) {
+      lastVisitorIdx = i;
+      break;
+    }
+  }
+  // No visitor message to reply to → keep the friendly-opening instruction,
+  // with whatever transcript exists as background.
+  if (lastVisitorIdx === -1) {
+    return {
+      conversationHistory: turns.slice(-COPILOT_HISTORY_LIMIT),
+      currentMessage: fallbackInstruction,
+    };
+  }
+  return {
+    conversationHistory: turns
+      .slice(0, lastVisitorIdx)
+      .slice(-COPILOT_HISTORY_LIMIT),
+    currentMessage: messages[lastVisitorIdx].content,
+  };
+}
+
 export async function handleCopilotTurn(
   context: CopilotTurnContext,
 ): Promise<Response> {
@@ -202,12 +240,27 @@ export async function handleCopilotTurn(
     let teamRequestRejections = 0;
 
     try {
-      // Planner sees the agent↔copilot thread (mapped to visitor/bot
-      // vocabulary). Visitor conversation goes into the Copilot system prompt.
-      const conversationHistory: ConversationTurnMessage[] = [
-        ...copilotHistoryToTurns(copilotHistory),
-        { role: "visitor" as const, content: context.payload.content },
-      ].slice(-COPILOT_HISTORY_LIMIT);
+      // Agent-question turns: the planner sees the agent↔copilot thread (mapped
+      // to visitor/bot vocabulary). Auto-suggest turns: there's no agent
+      // question, so the planner must route on the real visitor↔bot transcript
+      // instead — otherwise it has no content to classify and drafts a "share
+      // the visitor's message" clarification. Either way the full visitor
+      // conversation still goes into the Copilot system prompt below.
+      const { conversationHistory, currentMessage }: {
+        conversationHistory: ConversationTurnMessage[];
+        currentMessage: string;
+      } = context.isAutoSuggest
+        ? buildAutoSuggestTurnInput(
+            visitorMessages.map((m) => ({ role: m.role, content: m.content })),
+            context.payload.content,
+          )
+        : {
+            conversationHistory: [
+              ...copilotHistoryToTurns(copilotHistory),
+              { role: "visitor" as const, content: context.payload.content },
+            ].slice(-COPILOT_HISTORY_LIMIT),
+            currentMessage: context.payload.content,
+          };
 
       const visitorTranscript = buildVisitorTranscript(
         visitorMessages.map((m) => ({
@@ -250,7 +303,7 @@ export async function handleCopilotTurn(
       const routing = await prepareTurnRouting({
         modelRuntime,
         conversationHistory,
-        currentMessage: context.payload.content,
+        currentMessage,
         pageContext,
         resources: allResources,
         kv: context.env.CONVERSATIONS_CACHE,
@@ -269,7 +322,7 @@ export async function handleCopilotTurn(
         encoder,
         modelRuntime,
         telemetry,
-        currentMessage: context.payload.content,
+        currentMessage,
         pageContext,
         conversationHistory,
         conversationSummary: routing.conversationSummary,
@@ -340,6 +393,7 @@ export async function handleCopilotTurn(
             ctx.state.conversationSummary,
             {
               visitorTranscript,
+              autoDraft: !!context.isAutoSuggest,
               guidelines: ctx.guidelines,
               pageContext: ctx.pageContext,
               visitorInfo: ctx.visitorInfo,

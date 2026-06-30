@@ -204,7 +204,6 @@ export default function FocusView({
                   onResolve={onResolve}
                   onRewrite={onRewrite}
                   convId={conversation.id}
-                  visitorEmail={conversation.visitorEmail}
                 />
               </div>
             </div>

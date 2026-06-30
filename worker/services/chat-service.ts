@@ -119,6 +119,16 @@ export class ChatService {
       .where(and(eq(conversations.id, conversationId), eq(conversations.projectId, projectId)));
   }
 
+  async setAssignee(
+    conversationId: string,
+    projectId: string,
+    assigneeId: string | null,
+  ): Promise<void> {
+    await this.db.update(conversations)
+      .set({ assigneeId })
+      .where(and(eq(conversations.id, conversationId), eq(conversations.projectId, projectId)));
+  }
+
   async getConversationUpdatesSince(
     projectId: string,
     since: Date,
@@ -150,6 +160,7 @@ export class ChatService {
         visitorLastOnlineAt: conversations.visitorLastOnlineAt,
         snoozedUntil: conversations.snoozedUntil,
         priority: conversations.priority,
+        assigneeId: conversations.assigneeId,
         createdAt: conversations.createdAt,
         updatedAt: conversations.updatedAt,
       })

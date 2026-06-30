@@ -330,7 +330,13 @@ export async function handleWidgetMessageTurn(
   }
   const availableTools = enabledTools.map(toToolDefinition);
 
-  if (conversation.status === "closed") {
+  // Spam-flagged conversations are "muted": never reopen them (reopening would
+  // clear the spam flag and pull the thread back into the active inbox). They
+  // stay closed/spam under the Flagged view; the visitor's message is still
+  // recorded below so it reaches the agent there — it just won't notify,
+  // escalate, or spend a bot turn.
+  const isSpam = conversation.closeReason === "spam";
+  if (conversation.status === "closed" && !isSpam) {
     const reopened = await chatService.reopenConversation(
       context.conversationId,
       context.project.id,
@@ -354,7 +360,8 @@ export async function handleWidgetMessageTurn(
   markStage("visitor_message_saved");
 
   // Broadcast visitor message to dashboard agents watching this conversation.
-  // Exclude the originating visitor (they already see it locally).
+  // Exclude the originating visitor (they already see it locally). This still
+  // fires for spam so the message reaches the agent under the Flagged view.
   broadcastMessageNew(
     context.env,
     context.executionCtx,
@@ -362,6 +369,16 @@ export async function handleWidgetMessageTurn(
     visitorMessage,
     { excludeSubjectId: conversation.visitorId },
   );
+
+  // Muted (spam) thread: the message is now recorded and broadcast, but we stop
+  // here — no Telegram forward, no agent escalation, no bot reply. Silent.
+  if (isSpam) {
+    logInfo(
+      "widget_turn.spam_muted",
+      buildWidgetTurnLogContext(context, turnId),
+    );
+    return Response.json({ ok: true, muted: true });
+  }
 
   const requestedAgent = isAgentRequestedStatus(conversation.status);
   // This is a pre-visitor-insert snapshot of the conversation — sufficient

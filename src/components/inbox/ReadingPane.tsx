@@ -1,8 +1,11 @@
+import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { Sparkles, X } from "lucide-react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import ReadingHeader from "./ReadingHeader";
 import ChatThread from "./ChatThread";
 import Composer from "./Composer";
+import ConversationSearchDialog from "./ConversationSearchDialog";
 
 // Props contract — orchestrator (Conversations.tsx) passes these; all props
 // are additive from the Task-7 stub. Tasks 10/11 receive the subset they need.
@@ -25,8 +28,18 @@ interface ReadingPaneProps {
   onFocus: () => void;
   /** Block the visitor associated with this conversation. */
   onBlock: (convId: string) => void;
+  /** Assign (or unassign with null) this conversation to a teammate. */
+  onAssign: (convId: string, assigneeId: string | null) => void;
   /** Delete a sent agent message by id. */
   onDeleteMessage: (messageId: string) => void;
+  /** Mobile: return to the conversation list (clears the selection). */
+  onBack?: () => void;
+  /** AI-drafted reply suggestion to offer above the composer (null = hide). */
+  suggestion?: string | null;
+  /** Drop the suggestion into the composer. */
+  onUseSuggestion?: () => void;
+  /** Dismiss the suggestion for this conversation. */
+  onDismissSuggestion?: () => void;
 }
 
 export default function ReadingPane({
@@ -43,11 +56,111 @@ export default function ReadingPane({
   onRewrite,
   onFocus,
   onBlock,
+  onAssign,
   onDeleteMessage,
+  onBack,
+  suggestion,
+  onUseSuggestion,
+  onDismissSuggestion,
 }: ReadingPaneProps) {
+  // The thread is its own scroll container now (header above / composer below
+  // are flex siblings, never overlapping the thread). This both fixes messages
+  // landing behind the composer and lets us pin the latest message into view.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const convIdRef = useRef<string | null>(null);
+  const pendingJumpRef = useRef(true);
+  const prevLenRef = useRef(0);
+
+  // In-conversation search: opened from a single toolbar icon into a modal.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [activeMatch, setActiveMatch] = useState(0);
+
+  const query = search.trim().toLowerCase();
+  const matchMessages = query
+    ? messages.filter(
+        (m) => m.role !== "system" && m.content.toLowerCase().includes(query),
+      )
+    : [];
+  const matchIds = matchMessages.map((m) => m.id);
+  // Clamp the active index whenever the match set changes.
+  const safeActive = matchIds.length ? Math.min(activeMatch, matchIds.length - 1) : 0;
+  const activeMatchId = matchIds[safeActive] ?? null;
+
+  // Reset the active match when the query changes.
+  useEffect(() => {
+    setActiveMatch(0);
+  }, [query]);
+
+  // Clear search when switching conversations.
+  useEffect(() => {
+    setSearch("");
+    setSearchOpen(false);
+    setActiveMatch(0);
+  }, [conversation.id]);
+
+  // Scroll the active search match into view as the user steps through them.
+  useEffect(() => {
+    if (!activeMatchId) return;
+    const el = scrollRef.current?.querySelector(
+      `[data-msg-id="${activeMatchId}"]`,
+    );
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [activeMatchId]);
+
+  // Pin the thread to the latest message on open, and keep it pinned when a new
+  // message arrives while the agent is already near the bottom (so live/sent
+  // messages land in view instead of below the fold). A search jump suppresses
+  // the auto-pin so stepping through matches isn't yanked back down.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (convIdRef.current !== conversation.id) {
+      convIdRef.current = conversation.id;
+      pendingJumpRef.current = true;
+      prevLenRef.current = 0;
+    }
+    if (query) {
+      prevLenRef.current = messages.length;
+      return;
+    }
+    if (pendingJumpRef.current) {
+      if (messages.length > 0) {
+        el.scrollTop = el.scrollHeight;
+        pendingJumpRef.current = false;
+      }
+      prevLenRef.current = messages.length;
+      return;
+    }
+    if (messages.length > prevLenRef.current) {
+      const nearBottom =
+        el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+      if (nearBottom) {
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      }
+    }
+    prevLenRef.current = messages.length;
+  }, [conversation.id, messages.length, query]);
+
+  // Desktop inline search: cycle through matches.
+  function stepMatch(delta: number) {
+    if (matchIds.length === 0) return;
+    setActiveMatch((i) => {
+      const len = matchIds.length;
+      return (((i + delta) % len) + len) % len;
+    });
+  }
+
+  // Mobile modal: jump to a chosen result.
+  function handlePickMatch(messageId: string) {
+    const idx = matchIds.indexOf(messageId);
+    if (idx >= 0) setActiveMatch(idx);
+    setSearchOpen(false);
+  }
+
   return (
-    <div className="glass-reading flex-1 min-w-0 overflow-y-auto relative">
-      {/* Sticky header: toolbar row + user bar */}
+    <div className="glass-reading flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+      {/* Header: toolbar row + user bar (fixed; thread scrolls below it) */}
       <ReadingHeader
         conversation={conversation}
         onResolve={onResolve}
@@ -55,18 +168,67 @@ export default function ReadingPane({
         onFlagSpam={onFlagSpam}
         onPriority={onPriority}
         onBlock={onBlock}
+        onAssign={onAssign}
         onFocus={onFocus}
+        onBack={onBack}
+        search={search}
+        onSearchChange={setSearch}
+        matchCount={matchIds.length}
+        matchIndex={matchIds.length ? safeActive + 1 : 0}
+        onMatchNext={() => stepMatch(1)}
+        onMatchPrev={() => stepMatch(-1)}
+        onOpenSearch={() => setSearchOpen(true)}
+        searchActive={query.length > 0}
       />
 
-      {/* Chat thread — Task 10 */}
-      <ChatThread
-        messages={messages}
-        conversation={conversation}
-        loading={messagesLoading}
-        onDeleteMessage={onDeleteMessage}
-      />
+      {/* Chat thread — the only scroll region in the pane */}
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
+        <ChatThread
+          messages={messages}
+          conversation={conversation}
+          loading={messagesLoading}
+          onDeleteMessage={onDeleteMessage}
+          searchQuery={query}
+          activeMatchId={activeMatchId}
+        />
+      </div>
 
-      {/* Composer — Task 11 */}
+      {/* AI suggestion chip — only when the thread actually awaits a reply.
+          Surfaced here (not auto-typed) so it never clobbers a real draft. */}
+      {suggestion && (
+        <div className="shrink-0 px-4 md:px-[30px] pt-2">
+          <div className="flex items-start gap-2.5 rounded-[12px] border border-hairline-strong bg-glass-raised px-3 py-2.5">
+            <Sparkles className="size-4 text-[--brand] shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[10.5px] font-semibold text-ink-6 uppercase tracking-wide mb-0.5">
+                Suggested reply
+              </div>
+              <p className="text-[13px] text-ink-3 line-clamp-2 leading-snug">
+                {suggestion}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={onUseSuggestion}
+                className="rounded-[8px] bg-bubble-sent text-white text-[12.5px] font-medium px-2.5 h-7 hover:opacity-90 transition-opacity"
+              >
+                Use draft
+              </button>
+              <button
+                type="button"
+                onClick={onDismissSuggestion}
+                aria-label="Dismiss suggestion"
+                className="flex items-center justify-center size-7 rounded-[8px] text-ink-6 hover:text-ink-2 hover:bg-white/5 transition-colors"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Composer — flex sibling below the thread (no longer overlaps it) */}
       <Composer
         draft={draft}
         setDraft={setDraft}
@@ -74,7 +236,16 @@ export default function ReadingPane({
         onResolve={onResolve}
         onRewrite={onRewrite}
         convId={conversation.id}
-        visitorEmail={conversation.visitorEmail}
+      />
+
+      {/* Search-conversation modal (opened from the toolbar search icon) */}
+      <ConversationSearchDialog
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        query={search}
+        onQueryChange={setSearch}
+        results={matchMessages}
+        onPick={handlePickMatch}
       />
     </div>
   );

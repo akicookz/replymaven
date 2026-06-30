@@ -136,6 +136,7 @@ import {
   sendMessageAsEmailSchema,
   snoozeSchema,
   prioritySchema,
+  assignSchema,
   banVisitorSchema,
   createGreetingSchema,
   updateGreetingSchema,
@@ -6304,14 +6305,20 @@ const app = new Hono<HonoAppContext>()
       // ignore
     }
 
-    // Wave 2: paginated messages + (optional) ticket, in parallel.
+    // Wave 2: paginated messages + (optional) ticket + ban status, in parallel.
     const toolService = new ToolService(db);
     const ticketService = new TicketService(db);
-    const [{ messages: msgs, hasMore }, ticketRow] = await Promise.all([
-      chatService.getRecentMessages(conversation.id, 30),
+    const banService = new VisitorBanService(db);
+    const [{ messages: msgs, hasMore }, ticketRow, ban] = await Promise.all([
+      chatService.getRecentMessages(conversation.id, 25),
       ticketId
         ? ticketService.getTicketByIdWithAssignee(ticketId, project.id)
         : Promise.resolve(null),
+      banService.isVisitorBanned(
+        project.id,
+        conversation.visitorId,
+        conversation.visitorEmail,
+      ),
     ]);
 
     // Wave 3: tool executions only for messages we're returning.
@@ -6361,7 +6368,7 @@ const app = new Hono<HonoAppContext>()
       : null;
 
     return c.json({
-      conversation,
+      conversation: { ...conversation, visitorBlocked: !!ban },
       messages: messagesWithTools,
       hasMore,
       botName: settings?.botName ?? null,
@@ -6704,8 +6711,18 @@ const app = new Hono<HonoAppContext>()
         return c.json({ error: "Not found" }, 404);
       }
 
+      // `regenerate` (sent by the "Rewrite" button) forces a fresh draft:
+      // clear the prior auto-suggestion and skip the once-only guard. The
+      // automatic open-conversation draft omits it and stays one-shot.
+      const body = await c.req
+        .json()
+        .catch(() => ({}) as Record<string, unknown>);
+      const regenerate = (body as { regenerate?: unknown }).regenerate === true;
+
       const copilotService = new CopilotService(db);
-      if (await copilotService.hasMessages(c.req.param("convId"))) {
+      if (regenerate) {
+        await copilotService.clearAutoSuggestions(c.req.param("convId"));
+      } else if (await copilotService.hasMessages(c.req.param("convId"))) {
         return c.json(
           { error: "Copilot thread already exists", code: "thread_exists" },
           409,
@@ -6780,18 +6797,66 @@ const app = new Hono<HonoAppContext>()
     broadcastStatusChange(c.env, c.executionCtx, conversation.id, "closed");
     broadcastClosed(c.env, c.executionCtx, conversation.id, closeReason ?? null);
 
-    // Auto-draft canned response in background
-    c.executionCtx.waitUntil(
-      triggerAutoRefinementIfEnabled({
-        projectId: project.id,
-        conversationId: conversation.id,
-        db,
-        env: c.env,
-        kv: c.env.CONVERSATIONS_CACHE,
-        source: "manual_close",
-      }),
-    );
+    // Auto-draft canned response in background — but never for spam: a spam
+    // close is a silent triage action, not a real resolution to learn from.
+    if (closeReason !== "spam") {
+      c.executionCtx.waitUntil(
+        triggerAutoRefinementIfEnabled({
+          projectId: project.id,
+          conversationId: conversation.id,
+          db,
+          env: c.env,
+          kv: c.env.CONVERSATIONS_CACHE,
+          source: "manual_close",
+        }),
+      );
+    }
 
+    return c.json({ ok: true });
+  })
+  .post("/api/projects/:id/conversations/:convId/reopen", async (c) => {
+    // Un-resolve / un-flag: bring a closed conversation back to active.
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
+      return c.json({ error: "Not found" }, 404);
+    const chatService = new ChatService(db);
+    const reopened = await chatService.reopenConversation(
+      c.req.param("convId"),
+      project.id,
+    );
+    if (!reopened) return c.json({ error: "Not found" }, 404);
+    broadcastStatusChange(c.env, c.executionCtx, reopened.id, "active");
+    return c.json({ ok: true });
+  })
+  .post("/api/projects/:id/conversations/:convId/unblock", async (c) => {
+    // Toggle-off for the Block button: lift the active ban on this
+    // conversation's visitor. We don't have the ban id on the client (the
+    // detail endpoint only exposes a boolean), so resolve it here from the
+    // conversation's visitor identifiers. Idempotent — no ban is a no-op.
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
+      return c.json({ error: "Not found" }, 404);
+    const chatService = new ChatService(db);
+    const conversation = await chatService.getConversationById(
+      c.req.param("convId"),
+      project.id,
+    );
+    if (!conversation) return c.json({ error: "Not found" }, 404);
+    const banService = new VisitorBanService(db);
+    const ban = await banService.isVisitorBanned(
+      project.id,
+      conversation.visitorId,
+      conversation.visitorEmail,
+    );
+    if (ban) await banService.unbanVisitor(ban.id, project.id);
     return c.json({ ok: true });
   })
   .post("/api/projects/:id/conversations/:convId/snooze", async (c) => {
@@ -6832,6 +6897,43 @@ const app = new Hono<HonoAppContext>()
     const conversation = await chatService.getConversationById(c.req.param("convId"), project.id);
     if (!conversation) return c.json({ error: "Not found" }, 404);
     await chatService.setPriority(conversation.id, project.id, parsed.data.priority);
+    return c.json({ ok: true });
+  })
+  .patch("/api/projects/:id/conversations/:convId/assign", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
+      return c.json({ error: "Not found" }, 404);
+    const parsed = validate(assignSchema, await c.req.json());
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+    const chatService = new ChatService(db);
+    const conversation = await chatService.getConversationById(
+      c.req.param("convId"),
+      project.id,
+    );
+    if (!conversation) return c.json({ error: "Not found" }, 404);
+
+    // Validate the assignee belongs to the owner's assignable users (owner +
+    // accepted team members with access to this project). Mirrors ticket assign.
+    if (parsed.data.assigneeId) {
+      const ticketService = new TicketService(db);
+      const assignable = await ticketService.getAssignableUsers(project.id);
+      if (!assignable.some((u) => u.id === parsed.data.assigneeId)) {
+        return c.json(
+          { error: "Assignee is not a member of this project's team" },
+          400,
+        );
+      }
+    }
+
+    await chatService.setAssignee(
+      conversation.id,
+      project.id,
+      parsed.data.assigneeId,
+    );
     return c.json({ ok: true });
   })
   .get("/api/projects/:id/inbox-counts", async (c) => {

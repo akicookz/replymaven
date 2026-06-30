@@ -394,6 +394,12 @@ export const conversations = sqliteTable(
     priority: text("priority", { enum: ["low", "medium", "high"] })
       .notNull()
       .default("medium"),
+    // Nullable FK to users.id — the agent this conversation is assigned to. No
+    // team-membership enforcement at the DB layer; validation lives in the
+    // assign endpoint against the owner's assignable users (mirrors tickets).
+    assigneeId: text("assignee_id").references(() => authSchema.users.id, {
+      onDelete: "set null",
+    }),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -406,6 +412,7 @@ export const conversations = sqliteTable(
     index("idx_conversations_project").on(table.projectId),
     index("idx_conversations_visitor").on(table.visitorId),
     index("idx_conversations_status").on(table.status),
+    index("idx_conversations_assignee").on(table.assigneeId),
     index("idx_conversations_visitor_name_lower").on(
       table.projectId,
       sql`LOWER(${table.visitorName})`,

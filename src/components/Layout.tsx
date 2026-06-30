@@ -16,7 +16,6 @@ import {
   Users,
   Building2,
   CreditCard,
-  X,
   Zap,
   BookOpen,
   Home,
@@ -324,13 +323,13 @@ function Layout() {
               ReplyMaven
             </Link>
           )}
-          {/* Mobile close button */}
+          {/* Mobile close button — same icon as the desktop collapse toggle */}
           <button
             onClick={closeMobile}
             className="p-1 rounded-md hover:bg-glass-button text-ink-5 transition-colors md:hidden"
             aria-label="Close menu"
           >
-            <X className="w-4 h-4" />
+            <PanelLeftClose className="w-4 h-4" />
           </button>
           {/* Desktop collapse / expand toggle */}
           <button

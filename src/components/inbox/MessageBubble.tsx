@@ -1,11 +1,15 @@
 import { Trash2 } from "lucide-react";
 import type { Conversation, Message } from "@/lib/inbox/types";
-import { renderMarkdown } from "@/lib/utils";
+import { cn, renderMarkdown } from "@/lib/utils";
 
 interface MessageBubbleProps {
   message: Message;
   conversation: Conversation;
   onDelete: (messageId: string) => void;
+  /** This message matches the active in-conversation search query. */
+  isMatch?: boolean;
+  /** This message is the currently-focused search match. */
+  isActiveMatch?: boolean;
 }
 
 function formatTime(isoStr: string): string {
@@ -19,10 +23,19 @@ export default function MessageBubble({
   message,
   conversation,
   onDelete,
+  isMatch,
+  isActiveMatch,
 }: MessageBubbleProps) {
   const isReceived = message.role === "visitor";
   const isBot = message.role === "bot";
   const isAgent = message.role === "agent";
+
+  // Search highlight: ring the matching bubble, brighter for the active match.
+  const matchClass = isActiveMatch
+    ? "ring-2 ring-amber-400/80"
+    : isMatch
+      ? "ring-1 ring-amber-400/40"
+      : "";
 
   const senderLabel = isReceived
     ? (message.senderName ?? conversation.visitorName ?? "Visitor")
@@ -45,7 +58,7 @@ export default function MessageBubble({
           <span className="text-[12px] font-semibold">{senderLabel}</span>
           <span className="text-[11px] text-ink-8">{formatTime(message.createdAt)}</span>
         </div>
-        <div className="max-w-[74%] px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-received text-ink-2 rounded-[20px_20px_20px_6px]">
+        <div className={cn("max-w-[74%] px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-received text-ink-2 rounded-[20px_20px_20px_6px]", matchClass)}>
           {message.imageUrl && (
             <img
               src={message.imageUrl}
@@ -72,7 +85,7 @@ export default function MessageBubble({
         <span className="text-[11px] text-ink-8">{formatTime(message.createdAt)}</span>
       </div>
       <div className="relative group max-w-[74%]">
-        <div className="px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-sent text-white rounded-[20px_20px_6px_20px]">
+        <div className={cn("px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-sent text-white rounded-[20px_20px_6px_20px]", matchClass)}>
           {message.imageUrl && (
             <img
               src={message.imageUrl}

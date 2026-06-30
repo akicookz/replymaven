@@ -28,6 +28,11 @@ import {
 export interface CopilotPromptOptions
   extends Omit<SupportPromptOptions, "existingTicket" | "ticketFields" | "agentHandbackInstructions"> {
   visitorTranscript: string; // pre-formatted "role: content" block, last N turns
+  // Auto-draft (suggestion chip) turns have no agent question — the agent
+  // didn't ask anything, the runtime is proactively drafting. Force a
+  // visitor-facing draft so the model never falls back to "answering the
+  // agent" or asking the agent to supply the visitor's message.
+  autoDraft?: boolean;
 }
 
 export function buildCopilotSystemPrompt(
@@ -57,7 +62,19 @@ Speak directly to the agent. When you write a reply for them to send, write the 
 
 `;
 
-  prompt += `<task>
+  if (options.autoDraft) {
+    // Proactive auto-draft: there is no agent question. Output ONLY the
+    // visitor-facing reply text. The <visitor-conversation> block below is the
+    // conversation to reply to — never ask the agent to supply it.
+    prompt += `<task>
+The agent has not asked a question — you are proactively drafting a reply for them to send to the visitor. Read the <visitor-conversation> below and write a single ${tone} reply to the visitor's most recent message, grounded in the provided evidence sources.
+
+Output ONLY the draft reply text the agent can send as-is — no preamble, no "Here's a draft", no questions directed at the agent. Never ask the agent to share or describe the visitor's message: it is already in <visitor-conversation> below. If the visitor's need is genuinely unclear, draft a brief, polite reply that asks the visitor (not the agent) a clarifying question.
+</task>
+
+`;
+  } else {
+    prompt += `<task>
 Help the agent in three ways:
 
 1. **Draft a reply** to the visitor's most recent message in a ${tone} tone. Base the draft on the provided evidence sources.
@@ -75,6 +92,7 @@ If you don't know, say so plainly. Never invent facts. Suggest what the agent co
 </task>
 
 `;
+  }
 
   prompt += buildCompanySection(projectName, settings.companyContext);
   prompt += buildGuidelinesSection(projectName, options.guidelines);
@@ -119,8 +137,13 @@ ${trimToCharBudget(options.visitorTranscript, MAX_CONVERSATION_SUMMARY_CHARS * 4
 - Markdown is allowed: **bold**, bullet points, short paragraphs. No headings (#).
 - Never emit internal sentinels like [RESOLVED] or [HANDOFF_REQUESTED]. The runtime does not interpret these in Copilot turns.
 - Never tell the agent to "forward this" or "escalate" — that's the visitor-facing flow. If you genuinely don't know the answer, say so and suggest what the agent could ask the visitor.
-- Never write text that's intended for the visitor unless the agent explicitly asks for a draft. Default to answering the agent.
-- If the agent's question is ambiguous, ask them one clarifying question instead of guessing.
+${
+  options.autoDraft
+    ? `- Output the visitor-facing draft reply only — no commentary addressed to the agent, no questions for the agent.
+- The visitor's message is in <visitor-conversation> above; never claim it's missing or ask the agent to provide it.`
+    : `- Never write text that's intended for the visitor unless the agent explicitly asks for a draft. Default to answering the agent.
+- If the agent's question is ambiguous, ask them one clarifying question instead of guessing.`
+}
 - When citing knowledge-base content, name the source in prose (e.g. "Per the refund policy doc, …"). The runtime attaches the actual links.
 </copilot-rules>
 

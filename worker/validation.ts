@@ -570,6 +570,7 @@ export const switchTeamSchema = z.object({
 // ─── Conversations (Inbox) ────────────────────────────────────────────────────
 export const snoozeSchema = z.object({ until: z.number().int().positive().nullable() });
 export const prioritySchema = z.object({ priority: z.enum(["low", "medium", "high"]) });
+export const assignSchema = z.object({ assigneeId: z.string().min(1).nullable() });
 
 // ─── Visitor Bans ────────────────────────────────────────────────────────────
 export const banVisitorSchema = z.object({

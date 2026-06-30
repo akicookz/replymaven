@@ -6,11 +6,13 @@ import {
   Check,
   CheckCheck,
   RefreshCw,
+  PanelLeftOpen,
 } from "lucide-react";
 import { filterTitle, INBOX_SORTS } from "@/lib/inbox/filters";
 import type { InboxFilter, InboxSort } from "@/lib/inbox/filters";
 import type { Conversation, InboxCounts } from "@/lib/inbox/types";
 import { cn } from "@/lib/utils";
+import { useMobileSidebar } from "@/lib/mobile-sidebar";
 import {
   Popover,
   PopoverTrigger,
@@ -47,6 +49,9 @@ interface MessageListProps {
   onUnreadOnlyChange: (v: boolean) => void;
   onMarkAllRead: () => void;
   onRefresh: () => void;
+  /** Extra classes for the root (used to hide the list on mobile when a
+   *  conversation is open). */
+  className?: string;
 }
 
 // Filter-appropriate noun for the "N <noun> · M unread" subtitle.
@@ -99,9 +104,13 @@ export default function MessageList({
   onUnreadOnlyChange,
   onMarkAllRead,
   onRefresh,
+  className,
 }: MessageListProps) {
   // Controlled so the overflow actions can close the menu after firing.
   const [moreOpen, setMoreOpen] = useState(false);
+  // The inbox renders full-bleed (no PageHeader), so it has to surface its own
+  // entry point to the app's dashboard sidebar on mobile.
+  const { openSidebar } = useMobileSidebar();
 
   // Unread is derived client-side (no server flag); the predicate also folds in
   // the local "mark as read" overlay.
@@ -110,17 +119,34 @@ export default function MessageList({
   const openCount = counts[filter] ?? 0;
 
   return (
-    <div className="glass-list border-r border-hairline w-[372px] shrink-0 flex flex-col">
+    <div
+      className={cn(
+        "glass-list border-r border-hairline w-full md:w-[372px] md:shrink-0 flex flex-col min-h-0",
+        className,
+      )}
+    >
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="px-4 pt-4 pb-2">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="text-[24px] font-bold tracking-[-0.5px] text-ink-1 leading-tight">
-              {filterTitle(filter)}
-            </h2>
-            <p className="text-[12px] text-ink-7 mt-0.5">
-              {openCount} {FILTER_NOUN[filter]} · {unreadCount} unread
-            </p>
+          <div className="flex items-center gap-2 min-w-0">
+            {/* Mobile: open the app's dashboard sidebar (nav). Hidden on desktop
+                where the sidebar is always docked beside the inbox. */}
+            <button
+              onClick={openSidebar}
+              className="glass-button w-8 h-8 rounded-[8px] flex md:hidden items-center justify-center text-ink-4 hover:text-ink-1 transition-colors shrink-0"
+              aria-label="Open navigation menu"
+              title="Open sidebar"
+            >
+              <PanelLeftOpen size={18} />
+            </button>
+            <div className="min-w-0">
+              <h2 className="text-[24px] font-bold tracking-[-0.5px] text-ink-1 leading-tight">
+                {filterTitle(filter)}
+              </h2>
+              <p className="text-[12px] text-ink-7 mt-0.5">
+                {openCount} {FILTER_NOUN[filter]} · {unreadCount} unread
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-1.5 mt-1 shrink-0">
             {/* Sort & filter */}

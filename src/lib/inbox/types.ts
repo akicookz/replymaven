@@ -22,6 +22,9 @@ export interface Conversation {
   closeReason: string | null;
   priority?: "low" | "medium" | "high" | null;
   snoozedUntil?: string | null;
+  assigneeId?: string | null;
+  /** Whether the visitor is currently banned (populated by the detail endpoint). */
+  visitorBlocked?: boolean;
   metadata: string | null;
   visitorLastSeenAt: string | null;
   visitorPresence: string | null;
