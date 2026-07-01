@@ -6,6 +6,10 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import "./index.css";
 import App from "./App.tsx";
 import { queryClient } from "./lib/query-client";
+import { installChunkReloadHandler } from "./lib/chunk-reload";
+
+// Recover from stale lazy-chunk 404s after a deploy by reloading once.
+installChunkReloadHandler();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
