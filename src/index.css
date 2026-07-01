@@ -112,6 +112,13 @@
 
 
 /* ─── Chat Markdown Prose ──────────────────────────────────────────────────── */
+/* Long links, inline code, and other unbreakable tokens must wrap inside the
+   chat bubble rather than overflow it — otherwise they leak past the bubble and
+   force horizontal scroll in the conversation view. overflow-wrap is inherited,
+   so this cascades to <p>, <a>, and <code>. */
+.prose-chat {
+  overflow-wrap: anywhere;
+}
 .prose-chat h1,
 .prose-chat h2,
 .prose-chat h3,
