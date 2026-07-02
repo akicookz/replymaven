@@ -322,6 +322,10 @@ export const sendMessageSchema = z.object({
       z.object({
         role: z.enum(["visitor", "bot", "agent"]),
         content: z.string().max(10000),
+        // ISO timestamp from the widget's history buffer — powers time-gap
+        // annotations in LLM transcripts. Shape-only validation; junk values
+        // are dropped during history normalization.
+        createdAt: z.string().max(40).optional(),
       }),
     )
     .max(50)

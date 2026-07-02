@@ -8,9 +8,16 @@
 // build-support-system-prompt.test.ts snapshots.
 
 import {
+  type ConversationTurnMessage,
   type GroundingConfidence,
   type PlannerActionHistoryEntry,
 } from "../types";
+import {
+  formatCurrentTime,
+  formatGapLabel,
+  toMessageTimestampMs,
+  TRANSCRIPT_GAP_THRESHOLD_MS,
+} from "./format-transcript";
 
 export const MAX_RAG_CONTEXT_CHARS = 30_000;
 export const MAX_COMPANY_CONTEXT_CHARS = 4_000;
@@ -57,6 +64,45 @@ These are specific standard operating procedures from the ${projectName} team. W
 
 ${guidelineEntries}
 </guidelines>
+
+`;
+}
+
+// ─── Time context ───────────────────────────────────────────────────────────
+
+// The compose model receives history as a structured message array (no inline
+// gap annotations), so this block carries the timing signal: current time,
+// conversation age, and the resume gap before the current message. Lines are
+// conditional — a fresh rapid chat gets only the current-time line.
+export function buildTimeContextSection(
+  timeContext:
+    | { nowMs: number; conversationHistory: ConversationTurnMessage[] }
+    | null
+    | undefined,
+): string {
+  if (!timeContext) return "";
+  const { nowMs, conversationHistory } = timeContext;
+  const lines = [`Current date and time: ${formatCurrentTime(nowMs)}.`];
+
+  const firstMs = toMessageTimestampMs(conversationHistory[0]?.createdAt);
+  if (firstMs != null && nowMs - firstMs > 60 * 60 * 1000) {
+    lines.push(
+      `The conversation started ${formatGapLabel(nowMs - firstMs)} ago.`,
+    );
+  }
+
+  const lastMs = toMessageTimestampMs(
+    conversationHistory[conversationHistory.length - 1]?.createdAt,
+  );
+  if (lastMs != null && nowMs - lastMs > TRANSCRIPT_GAP_THRESHOLD_MS) {
+    lines.push(
+      `The visitor's current message came ${formatGapLabel(nowMs - lastMs)} after the previous message.`,
+    );
+  }
+
+  return `<time-context>
+${lines.join("\n")}
+</time-context>
 
 `;
 }

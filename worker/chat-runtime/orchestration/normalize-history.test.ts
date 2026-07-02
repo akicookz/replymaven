@@ -63,11 +63,34 @@ describe("normalizeConversationHistory", () => {
 });
 
 describe("withCurrentTurn", () => {
-  test("appends the current message as a visitor turn", () => {
+  test("appends the current message as a visitor turn stamped with now", () => {
     const history = [{ role: "bot" as const, content: "Hello!" }];
-    expect(withCurrentTurn(history, "thanks")).toEqual([
-      { role: "bot", content: "Hello!" },
-      { role: "visitor", content: "thanks" },
-    ]);
+    const result = withCurrentTurn(history, "thanks");
+    expect(result).toHaveLength(2);
+    expect(result[1]).toMatchObject({ role: "visitor", content: "thanks" });
+    const stampedMs = new Date(result[1].createdAt ?? "").getTime();
+    expect(Math.abs(Date.now() - stampedMs)).toBeLessThan(5_000);
+  });
+});
+
+describe("timestamp normalization", () => {
+  test("maps Date and ISO-string createdAt to ISO strings, drops junk", () => {
+    const result = normalizeConversationHistory({
+      rawHistory: [
+        {
+          role: "visitor",
+          content: "a",
+          createdAt: new Date("2026-07-01T09:00:00Z"),
+        },
+        { role: "bot", content: "b", createdAt: "2026-07-01T09:01:00Z" },
+        { role: "visitor", content: "c", createdAt: "garbage" },
+        { role: "bot", content: "d" },
+      ],
+      currentMessage: "current",
+    });
+    expect(result[0].createdAt).toBe("2026-07-01T09:00:00.000Z");
+    expect(result[1].createdAt).toBe("2026-07-01T09:01:00.000Z");
+    expect(result[2].createdAt).toBeUndefined();
+    expect(result[3].createdAt).toBeUndefined();
   });
 });

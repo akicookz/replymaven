@@ -5,6 +5,7 @@ import {
   type SupportPromptSettings,
 } from "../types";
 import { buildVoiceContract } from "../prompt/voice";
+import { formatTranscript } from "../prompt/format-transcript";
 
 const renderAskUserSchema = z.object({
   message: z
@@ -49,10 +50,7 @@ export async function renderAskUserMessage(
   },
   options?: { throwOnModelError?: boolean },
 ): Promise<string> {
-  const transcript = params.conversationHistory
-    .slice(-6)
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n");
+  const transcript = formatTranscript(params.conversationHistory.slice(-6));
 
   try {
     const { output } = await generateText({

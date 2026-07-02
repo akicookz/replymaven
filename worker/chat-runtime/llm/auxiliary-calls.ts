@@ -4,6 +4,10 @@ import {
   type ConversationTurnMessage,
 } from "../types";
 import {
+  formatCurrentTime,
+  formatTranscript,
+} from "../prompt/format-transcript";
+import {
   buildExtractContactInfoPrompt,
   buildReformulateQueryPrompt,
   buildReformulateSearchQueriesPrompt,
@@ -53,9 +57,7 @@ export async function selectFaqSets(
   }
 
   const recentHistory = params.conversationHistory.slice(-4);
-  const transcript = recentHistory
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n");
+  const transcript = formatTranscript(recentHistory);
   const pageContextBlock =
     params.pageContext && Object.keys(params.pageContext).length > 0
       ? Object.entries(params.pageContext)
@@ -107,9 +109,7 @@ export async function reformulateQuery(
   }
 
   const recentHistory = conversationHistory.slice(-6);
-  const transcript = recentHistory
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n");
+  const transcript = formatTranscript(recentHistory, { nowMs: Date.now() });
 
   try {
     const { text } = await generateText({
@@ -147,9 +147,7 @@ export async function reformulateSearchQueries(
   }
 
   const recentHistory = params.conversationHistory.slice(-6);
-  const transcript = recentHistory
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n");
+  const transcript = formatTranscript(recentHistory, { nowMs: Date.now() });
   const pageContextBlock =
     params.pageContext && Object.keys(params.pageContext).length > 0
       ? Object.entries(params.pageContext)
@@ -253,14 +251,17 @@ export async function summarizeConversation(
 ): Promise<string | null> {
   if (conversationHistory.length < 6) return null;
 
-  const transcript = conversationHistory
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n");
+  // Includes the current turn (call sites pass withCurrentTurn history), so
+  // gap dividers cover the resume gap too — no trailing nowMs note needed.
+  const transcript = formatTranscript(conversationHistory);
 
   try {
     const { text } = await generateText({
       model,
-      prompt: buildSummarizeConversationPrompt({ transcript }),
+      prompt: buildSummarizeConversationPrompt({
+        transcript,
+        currentTime: formatCurrentTime(Date.now()),
+      }),
       temperature: 0,
       maxOutputTokens: 128,
     });
@@ -291,15 +292,15 @@ export async function summarizeTeamRequest(
   conversationHistory: Array<{ role: string; content: string }>,
   options?: AuxiliaryCallOptions,
 ): Promise<string> {
-  const transcript = conversationHistory
-    .slice(-16)
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n");
+  const transcript = formatTranscript(conversationHistory.slice(-16));
 
   try {
     const { text } = await generateText({
       model,
-      prompt: buildSummarizeTeamRequestPrompt({ transcript }),
+      prompt: buildSummarizeTeamRequestPrompt({
+        transcript,
+        currentTime: formatCurrentTime(Date.now()),
+      }),
       temperature: 0.2,
       maxOutputTokens: 320,
     });

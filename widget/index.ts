@@ -86,12 +86,35 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     role: "visitor" | "bot" | "agent";
     content: string;
     id?: string;
+    // ISO timestamp — shipped to the server so LLM transcripts can annotate
+    // time gaps between turns.
+    createdAt: string;
   }> = [];
+
+  // Server timestamps arrive as epoch seconds, epoch ms, Dates, or ISO
+  // strings depending on the endpoint; normalize to ISO or undefined.
+  function toIsoTimestamp(value: unknown): string | undefined {
+    if (value === null || value === undefined || value === "") return undefined;
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+    }
+    if (typeof value === "number") {
+      const ms = value < 1_000_000_000_000 ? value * 1000 : value;
+      const d = new Date(ms);
+      return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+    }
+    if (typeof value === "string") {
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+    }
+    return undefined;
+  }
 
   function pushHistoryEntry(
     role: string,
     content: string,
     id?: string,
+    createdAt?: unknown,
   ): void {
     if (role !== "visitor" && role !== "bot" && role !== "agent") return;
     const trimmed = (content ?? "").toString();
@@ -100,6 +123,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       role: role as "visitor" | "bot" | "agent",
       content: trimmed,
       id,
+      createdAt: toIsoTimestamp(createdAt) ?? new Date().toISOString(),
     });
     if (conversationHistoryBuffer.length > HISTORY_BUFFER_LIMIT * 2) {
       conversationHistoryBuffer.splice(
@@ -132,6 +156,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
   function getHistoryPayload(): Array<{
     role: "visitor" | "bot" | "agent";
     content: string;
+    createdAt: string;
   }> {
     return conversationHistoryBuffer.slice(-HISTORY_BUFFER_LIMIT);
   }
@@ -4798,6 +4823,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     imageUrl?: string,
     senderName?: string,
     senderAvatar?: string,
+    createdAt?: unknown,
   ): HTMLElement {
     // Track rendered message IDs for deduplication (polling)
     if (messageId) {
@@ -4811,7 +4837,9 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     // Record in the in-memory history buffer so we can ship the last N turns
     // with subsequent POSTs and skip the server-side D1/KV history fetch.
     // The id (when present) lets us prune the buffer on message:deleted.
-    pushHistoryEntry(role, content, messageId);
+    // createdAt (when present, e.g. restored history) keeps real timestamps;
+    // live messages default to now.
+    pushHistoryEntry(role, content, messageId, createdAt);
 
     const primaryColor = getPrimaryColor();
     const isRoleChange = lastMessageRole !== null && lastMessageRole !== role;
@@ -5404,6 +5432,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
         msg.imageUrl ?? undefined,
         msg.senderName ?? undefined,
         msg.senderAvatar ?? undefined,
+        msg.createdAt,
       );
       if (el.parentElement) {
         if (msg.sources) {
@@ -5717,6 +5746,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
             msg.imageUrl ?? undefined,
             msg.senderName ?? undefined,
             msg.senderAvatar ?? undefined,
+            msg.createdAt,
           );
           // addMessageToUI already rendered the markdown body and image; only
           // layer sources on top (re-setting innerHTML would wipe the image).
@@ -5911,6 +5941,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
             msg.imageUrl ?? undefined,
             msg.senderName ?? undefined,
             msg.senderAvatar ?? undefined,
+            msg.createdAt,
           );
           // addMessageToUI already rendered the markdown body and image; only
           // layer sources on top (re-setting innerHTML would wipe the image).

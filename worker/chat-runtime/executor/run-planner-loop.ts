@@ -580,6 +580,10 @@ async function executeCompose(options: {
           groundingConfidence: options.state.docsEvidence.groundingConfidence,
           topScore: options.state.docsEvidence.topScore,
           turnIntent: options.state.intent,
+          timeContext: {
+            nowMs: Date.now(),
+            conversationHistory: options.conversationHistory,
+          },
           plannerGoal: options.state.goal,
           plannerActionHistory: options.state.actionHistory,
           toolEvidenceSummary: summarizeToolEvidence(options.state.toolEvidence),

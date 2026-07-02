@@ -6,6 +6,7 @@ import {
   type SupportPromptSettings,
 } from "../types";
 import { buildVoiceContract } from "../prompt/voice";
+import { formatTranscript } from "../prompt/format-transcript";
 import { buildRenderHandoffMessagePrompt } from "./support-prompt-builders";
 
 interface RenderHandoffMessageOptions {
@@ -132,10 +133,7 @@ export async function renderHandoffMessage(
   params: RenderHandoffMessageParams,
   options?: RenderHandoffMessageOptions,
 ): Promise<string> {
-  const transcript = params.conversationHistory
-    .slice(-6)
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n");
+  const transcript = formatTranscript(params.conversationHistory.slice(-6));
 
   try {
     const { output } = await generateText({

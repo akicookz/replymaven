@@ -24,6 +24,9 @@ export type AgentToolChoice =
 export interface ConversationTurnMessage {
   role: "visitor" | "bot" | "agent";
   content: string;
+  // ISO timestamp. Optional — transcripts render time-gap annotations only
+  // when present (see prompt/format-transcript.ts).
+  createdAt?: string;
 }
 
 export interface SupportAgentImage {
@@ -85,6 +88,13 @@ export interface SupportPromptOptions {
   groundingConfidence?: GroundingConfidence;
   topScore?: number;
   turnIntent?: string | null;
+  // Current time + conversation timing for the <time-context> section. The
+  // compose model gets history as a structured message array (no inline gap
+  // annotations), so this block carries the timing signal instead.
+  timeContext?: {
+    nowMs: number;
+    conversationHistory: ConversationTurnMessage[];
+  } | null;
   plannerGoal?: string | null;
   plannerActionHistory?: PlannerActionHistoryEntry[];
   toolEvidenceSummary?: string | null;

@@ -9,6 +9,7 @@ import {
   buildKnowledgeBaseSection,
   buildPageContextSection,
   buildPlannerLoopSection,
+  buildTimeContextSection,
   buildToolEvidenceSection,
   buildVisitorInfoSection,
   trimToCharBudget,
@@ -228,5 +229,60 @@ describe("buildConversationSummarySection", () => {
     const out = buildConversationSummarySection("They asked about pricing.");
     expect(out).toContain("<conversation-summary>");
     expect(out).toContain("They asked about pricing.");
+  });
+});
+
+describe("buildTimeContextSection", () => {
+  const NOW = new Date("2026-07-02T10:00:00Z").getTime();
+  const isoAgo = (ms: number) => new Date(NOW - ms).toISOString();
+
+  test("returns empty without timeContext", () => {
+    expect(buildTimeContextSection(null)).toBe("");
+    expect(buildTimeContextSection(undefined)).toBe("");
+  });
+
+  test("renders current time only for a fresh rapid conversation", () => {
+    const out = buildTimeContextSection({
+      nowMs: NOW,
+      conversationHistory: [
+        { role: "visitor", content: "hi", createdAt: isoAgo(60_000) },
+      ],
+    });
+    expect(out).toContain(
+      "Current date and time: Thursday, 2026-07-02 10:00 UTC.",
+    );
+    expect(out).not.toContain("started");
+    expect(out).not.toContain("previous message");
+  });
+
+  test("notes conversation age and the resume gap", () => {
+    const out = buildTimeContextSection({
+      nowMs: NOW,
+      conversationHistory: [
+        {
+          role: "visitor",
+          content: "hi",
+          createdAt: isoAgo(5 * 24 * 60 * 60 * 1000),
+        },
+        {
+          role: "bot",
+          content: "hello",
+          createdAt: isoAgo(2 * 24 * 60 * 60 * 1000),
+        },
+      ],
+    });
+    expect(out).toContain("The conversation started 5 days ago.");
+    expect(out).toContain(
+      "The visitor's current message came 2 days after the previous message.",
+    );
+  });
+
+  test("renders only the current time when history lacks timestamps", () => {
+    const out = buildTimeContextSection({
+      nowMs: NOW,
+      conversationHistory: [{ role: "visitor", content: "hi" }],
+    });
+    expect(out).toContain("Current date and time:");
+    expect(out).not.toContain("started");
   });
 });

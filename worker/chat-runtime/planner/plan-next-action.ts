@@ -13,6 +13,10 @@ import {
   isDuplicateQuery,
 } from "./query-deduplication";
 import { detectSmallTalk } from "./small-talk";
+import {
+  formatCurrentTime,
+  formatTranscript,
+} from "../prompt/format-transcript";
 
 interface ToolParameterDefinition {
   name: string;
@@ -434,10 +438,11 @@ function getMissingContactFields(state: PlannerLoopState): Array<"name" | "email
 export async function planNextAction(
   options: PlanNextActionOptions,
 ): Promise<PlannerDecision> {
+  const nowMs = Date.now();
   const recentHistory = options.conversationHistory.slice(-8);
-  const transcript = recentHistory
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n");
+  // Gap-annotated transcript; `nowMs` appends a resume note when the current
+  // message (shown separately below) arrived long after the last turn.
+  const transcript = formatTranscript(recentHistory, { nowMs });
   const pageContextBlock =
     options.pageContext && Object.keys(options.pageContext).length > 0
       ? Object.entries(options.pageContext)
@@ -482,6 +487,7 @@ FAQs (tier-1, trust these second):
 ${faqBlock}
 
 Current planner state:
+- currentTime: ${formatCurrentTime(nowMs)}
 - goal: ${options.state.goal}
 - stepCount: ${options.state.stepCount}
 - missingInputs: ${options.state.missingInputs.join(", ") || "none"}

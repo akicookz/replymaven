@@ -4,6 +4,8 @@ interface PromptBlockOptions {
   transcript: string;
   currentMessage?: string;
   pageContextBlock?: string;
+  /** Pre-formatted current date/time line (see formatCurrentTime). */
+  currentTime?: string;
 }
 
 interface ReformulateSearchQueriesPromptOptions {
@@ -71,8 +73,8 @@ Output ONLY the rewritten search query, nothing else. If the latest message is a
 export function buildSummarizeConversationPrompt(
   options: PromptBlockOptions,
 ): string {
-  return `Summarize this customer support conversation in 1-2 sentences. Focus on: what the visitor needs help with and what has been discussed so far. Be factual and concise.
-
+  return `Summarize this customer support conversation in 1-2 sentences. Focus on: what the visitor needs help with and what has been discussed so far. Be factual and concise. Resolve relative time ("yesterday", "last week") against the current date when it matters.
+${options.currentTime ? `\nCurrent date and time: ${options.currentTime}\n` : ""}
 CONVERSATION:
 ${options.transcript}
 
@@ -83,7 +85,7 @@ export function buildSummarizeTeamRequestPrompt(
   options: PromptBlockOptions,
 ): string {
   return `You are preparing a human support agent to take over a conversation.
-
+${options.currentTime ? `\nCurrent date and time: ${options.currentTime}\n` : ""}
 CONVERSATION:
 ${options.transcript}
 
