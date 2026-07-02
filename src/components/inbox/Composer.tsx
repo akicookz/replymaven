@@ -11,6 +11,8 @@ export interface ComposerProps {
     opts?: { imageUrl?: string | null },
   ) => void;
   onResolve: (convId: string) => void;
+  onCompose: () => void;
+  composing: boolean;
   convId: string;
 }
 
@@ -19,6 +21,8 @@ export default function Composer({
   setDraft,
   onSend,
   onResolve,
+  onCompose,
+  composing,
   convId,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -69,13 +73,19 @@ export default function Composer({
 
   // Cmd/Ctrl+Enter shortcut to send.
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Tab" && e.shiftKey) {
+      e.preventDefault(); // keep focus in the textarea
+      if (!composing && draft.trim().length > 0) onCompose();
+      return;
+    }
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       send();
     }
   }
 
-  const canSend = (draft.trim().length > 0 || !!pendingImage) && !uploading;
+  const canSend =
+    (draft.trim().length > 0 || !!pendingImage) && !uploading && !composing;
 
   return (
     <div className="sticky bottom-0 z-[5] px-4 pt-3 pb-4">
@@ -111,9 +121,10 @@ export default function Composer({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Reply…"
+          placeholder={composing ? "Composing…" : "Reply…"}
           rows={1}
-          className="w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto"
+          disabled={composing}
+          className="w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60"
           style={{ fontSize: "14.5px", lineHeight: "1.5" }}
         />
 
@@ -139,8 +150,19 @@ export default function Composer({
             </button>
           </div>
 
-          {/* Right: Resolve / Send */}
+          {/* Right: Compose / Resolve / Send */}
           <div className="flex items-center gap-[7px]">
+            <button
+              type="button"
+              className="flex items-center gap-1.5 text-[13px] text-ink-5 hover:text-ink-2 transition-colors cursor-pointer disabled:opacity-40"
+              onClick={onCompose}
+              disabled={composing || draft.trim().length === 0}
+              title="Turn your instruction into a reply (Shift+Tab)"
+            >
+              {composing ? "Composing…" : "Compose"}
+              <span className="keycap">⇧⇥</span>
+            </button>
+
             <button
               type="button"
               className="flex items-center gap-1.5 text-[13px] text-ink-5 hover:text-ink-2 transition-colors cursor-pointer"

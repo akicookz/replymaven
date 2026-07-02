@@ -32,6 +32,10 @@ interface ReadingPaneProps {
   onDeleteMessage: (messageId: string) => void;
   /** Mobile: return to the conversation list (clears the selection). */
   onBack?: () => void;
+  /** Turn the composer's instruction into a tone-matched reply (Shift+Tab). */
+  onCompose: () => void;
+  /** True while a compose request is in flight. */
+  composing: boolean;
 }
 
 export default function ReadingPane({
@@ -50,6 +54,8 @@ export default function ReadingPane({
   onAssign,
   onDeleteMessage,
   onBack,
+  onCompose,
+  composing,
 }: ReadingPaneProps) {
   // The thread is its own scroll container now (header above / composer below
   // are flex siblings, never overlapping the thread). This both fixes messages
@@ -187,6 +193,8 @@ export default function ReadingPane({
         setDraft={setDraft}
         onSend={onSend}
         onResolve={onResolve}
+        onCompose={onCompose}
+        composing={composing}
         convId={conversation.id}
       />
 

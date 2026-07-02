@@ -18,6 +18,8 @@ interface FocusViewProps {
   onResolve: (convId: string) => void;
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
+  onCompose: () => void;
+  composing: boolean;
 }
 
 function initials(name: string | null): string {
@@ -95,6 +97,8 @@ export default function FocusView({
   onResolve,
   draft,
   setDraft,
+  onCompose,
+  composing,
 }: FocusViewProps) {
   // Parse country from metadata JSON (guarded against malformed data)
   let country: string | null = null;
@@ -200,6 +204,8 @@ export default function FocusView({
                   setDraft={setDraft}
                   onSend={onSend}
                   onResolve={onResolve}
+                  onCompose={onCompose}
+                  composing={composing}
                   convId={conversation.id}
                 />
               </div>

@@ -456,6 +456,38 @@ function Conversations() {
     },
   });
 
+  // Turn an agent's shorthand instruction into a tone-matched reply. Captures
+  // the target conversation at call time (convAtCall) so a stale success
+  // arriving after the agent has switched conversations doesn't clobber the
+  // draft of a different, now-open conversation.
+  const composeDraft = useMutation({
+    mutationFn: async (instruction: string) => {
+      const convAtCall = selectedConvo;
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${selectedConvo}/compose-draft`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ instruction }),
+        },
+      );
+      if (!res.ok) throw new Error("Failed to compose");
+      const data = (await res.json()) as { message: string };
+      return { message: data.message, convAtCall };
+    },
+    onSuccess: (data) => {
+      if (data.convAtCall === selectedConvo) setDraft(data.message);
+    },
+    onError: () =>
+      toast.error("Couldn't compose a reply — your instruction is untouched."),
+  });
+
+  function handleCompose() {
+    const instruction = draft.trim();
+    if (!instruction || !selectedConvo || composeDraft.isPending) return;
+    composeDraft.mutate(instruction);
+  }
+
   const closeConversation = useMutation({
     mutationFn: async ({
       convId,
@@ -1057,6 +1089,8 @@ function Conversations() {
         onResolve={handleResolve}
         draft={draft}
         setDraft={setDraft}
+        onCompose={handleCompose}
+        composing={composeDraft.isPending}
       />
     );
   }
@@ -1107,6 +1141,8 @@ function Conversations() {
           onAssign={handleAssign}
           onDeleteMessage={handleDeleteMessage}
           onBack={() => setSelectedConvo(null)}
+          onCompose={handleCompose}
+          composing={composeDraft.isPending}
         />
       ) : (
         <div className="glass-reading flex-1 hidden md:grid place-items-center text-ink-7 text-sm">
