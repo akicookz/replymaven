@@ -1353,8 +1353,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
 
     /* ─── Input Area ──────────────────────────────────────────────────────── */
     .rm-input-area {
-      padding: 12px 16px;
-      border-top: 1px solid var(--rm-border-subtle);
+      padding: 0 16px 12px;
       display: flex;
       align-items: flex-end;
       gap: 8px;
