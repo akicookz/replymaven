@@ -36,6 +36,8 @@ interface ReadingPaneProps {
   onCompose: () => void;
   /** True while a compose request is in flight. */
   composing: boolean;
+  /** The message id targeted by a `?msg=` deep link — pulses the review-summary card. */
+  highlightMessageId?: string | null;
 }
 
 export default function ReadingPane({
@@ -56,6 +58,7 @@ export default function ReadingPane({
   onBack,
   onCompose,
   composing,
+  highlightMessageId,
 }: ReadingPaneProps) {
   // The thread is its own scroll container now (header above / composer below
   // are flex siblings, never overlapping the thread). This both fixes messages
@@ -184,6 +187,7 @@ export default function ReadingPane({
           onDeleteMessage={onDeleteMessage}
           searchQuery={query}
           activeMatchId={activeMatchId}
+          highlightMessageId={highlightMessageId}
         />
       </div>
 

@@ -1,8 +1,10 @@
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Conversation, Message } from "@/lib/inbox/types";
+import { parseSystemKind } from "@/lib/inbox/system-events";
 import MessageBubble from "./MessageBubble";
 import SystemPill from "./SystemPill";
+import ReviewSummaryCard from "./ReviewSummaryCard";
 
 interface ChatThreadProps {
   messages: Message[];
@@ -14,6 +16,8 @@ interface ChatThreadProps {
   searchQuery?: string;
   /** The id of the currently-focused search match (scrolled into view). */
   activeMatchId?: string | null;
+  /** The message id targeted by a `?msg=` deep link — pulses the review-summary card. */
+  highlightMessageId?: string | null;
 }
 
 // Placeholder bubbles shown while the conversation detail loads. Mirrors the
@@ -82,6 +86,7 @@ export default function ChatThread({
   onDeleteMessage,
   searchQuery,
   activeMatchId,
+  highlightMessageId,
 }: ChatThreadProps) {
   const q = searchQuery ?? "";
   return (
@@ -109,7 +114,14 @@ export default function ChatThread({
                 </div>
               )}
               {message.role === "system" ? (
-                <SystemPill message={message} />
+                parseSystemKind(message.sources) === "review_summary" ? (
+                  <ReviewSummaryCard
+                    message={message}
+                    highlight={message.id === highlightMessageId}
+                  />
+                ) : (
+                  <SystemPill message={message} />
+                )
               ) : (
                 <MessageBubble
                   message={message}

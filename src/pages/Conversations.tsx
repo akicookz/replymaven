@@ -1143,6 +1143,8 @@ function Conversations() {
           onBack={() => setSelectedConvo(null)}
           onCompose={handleCompose}
           composing={composeDraft.isPending}
+          // `?msg=` deep-link scroll+pulse target — wired up in Task 13.
+          highlightMessageId={null}
         />
       ) : (
         <div className="glass-reading flex-1 hidden md:grid place-items-center text-ink-7 text-sm">
