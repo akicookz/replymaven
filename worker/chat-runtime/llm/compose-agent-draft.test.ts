@@ -7,7 +7,6 @@ import {
 const BASE_SETTINGS: ComposeAgentDraftSettings = {
   toneOfVoice: "professional",
   customTonePrompt: null,
-  botName: null,
   agentName: null,
   companyName: null,
   companyContext: null,

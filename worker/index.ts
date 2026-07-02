@@ -6378,10 +6378,15 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const [settings, { messages: msgs }] = await Promise.all([
+    // Fetch 25 and drop system rows (review_summary etc. are internal-only —
+    // they must not leak into the visitor-facing composed reply); ~20
+    // conversational rows survive the filter, and the prompt builder's own
+    // slice(-20) caps the transcript regardless.
+    const [settings, { messages: recentMessages }] = await Promise.all([
       projectService.getSettings(project.id),
-      chatService.getRecentMessages(conversation.id, 20),
+      chatService.getRecentMessages(conversation.id, 25),
     ]);
+    const msgs = recentMessages.filter((m) => m.role !== "system");
 
     const runtime = createModelRuntimeState({
       model: c.env.AI_MODEL,
