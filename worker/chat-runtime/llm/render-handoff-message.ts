@@ -5,7 +5,7 @@ import {
   type HandoffRenderDirective,
   type SupportPromptSettings,
 } from "../types";
-import { resolveToneInstruction } from "../prompt/build-support-system-prompt";
+import { buildVoiceContract } from "../prompt/voice";
 import { buildRenderHandoffMessagePrompt } from "./support-prompt-builders";
 
 interface RenderHandoffMessageOptions {
@@ -18,6 +18,7 @@ interface RenderHandoffMessageParams {
     SupportPromptSettings,
     "toneOfVoice" | "customTonePrompt" | "botName"
   >;
+  projectName: string;
   conversationHistory: ConversationTurnMessage[];
 }
 
@@ -143,8 +144,7 @@ export async function renderHandoffMessage(
       prompt: buildRenderHandoffMessagePrompt(
         {
           directive: params.directive,
-          toneInstruction: resolveToneInstruction(params.settings),
-          botName: params.settings.botName,
+          voiceContract: buildVoiceContract(params.settings, params.projectName),
         },
         transcript,
       ),

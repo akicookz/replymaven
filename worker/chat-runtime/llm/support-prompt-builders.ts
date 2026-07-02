@@ -177,8 +177,7 @@ Rules:
 
 interface RenderHandoffMessagePromptOptions {
   directive: HandoffRenderDirective;
-  toneInstruction: string;
-  botName: string | null;
+  voiceContract: string;
 }
 
 // Describes the exact intent + content requirements for each escalation
@@ -239,14 +238,11 @@ export function buildRenderHandoffMessagePrompt(
   transcript: string,
 ): string {
   const { intent, requirements } = describeHandoffDirective(options.directive);
-  const persona = options.botName
-    ? `You are ${options.botName}, a customer support assistant.`
-    : "You are a customer support assistant.";
   const requirementLines = requirements
     .map((requirement) => `- ${requirement}`)
     .join("\n");
 
-  return `${persona} ${options.toneInstruction}
+  return `${options.voiceContract}
 
 Write a single short chat message to the visitor.
 

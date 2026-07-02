@@ -447,6 +447,7 @@ async function buildRenderedHandoffMessage(options: {
     SupportPromptSettings,
     "toneOfVoice" | "customTonePrompt" | "botName"
   >;
+  projectName: string;
   conversationHistory: ConversationTurnMessage[];
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
 }): Promise<string> {
@@ -463,6 +464,7 @@ async function buildRenderedHandoffMessage(options: {
           {
             directive: options.directive,
             settings: options.settings,
+            projectName: options.projectName,
             conversationHistory: options.conversationHistory,
           },
           { throwOnModelError: true },
@@ -1098,6 +1100,7 @@ export async function runPlannerLoop(
           agentLabel: options.settings.agentName ?? "the team",
         },
         settings: options.settings,
+        projectName: options.project.name,
         conversationHistory: withCurrentTurn(
           options.conversationHistory,
           options.currentMessage,
@@ -1140,6 +1143,7 @@ export async function runPlannerLoop(
           agentLabel: options.settings.agentName ?? "the team",
         },
         settings: options.settings,
+        projectName: options.project.name,
         conversationHistory: withCurrentTurn(
           options.conversationHistory,
           options.currentMessage,
@@ -1327,6 +1331,7 @@ export async function runPlannerLoop(
           agentLabel,
         },
         settings: options.settings,
+        projectName: options.project.name,
         conversationHistory: withCurrentTurn(
           options.conversationHistory,
           options.currentMessage,
