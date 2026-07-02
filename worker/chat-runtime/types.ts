@@ -13,7 +13,8 @@ export type SupportIntent =
   | "lookup"
   | "policy"
   | "clarify"
-  | "handoff";
+  | "handoff"
+  | "smalltalk";
 export type AgentToolChoice =
   | "auto"
   | "none"
@@ -306,10 +307,15 @@ export interface PlannerEscalateAction {
   reason: string;
 }
 
+export type ComposeKind = "grounded" | "greeting" | "resolution" | "redirect";
+
 export interface PlannerComposeAction {
   type: "compose";
   reason: string;
   answerStyle?: "direct" | "step_by_step" | "summary";
+  // "grounded" composes require evidence (or an exhausted search); the other
+  // kinds are declared evidence-free turns the sanitizer must not rewrite.
+  composeKind?: ComposeKind;
 }
 
 export interface PlannerStopAction {
@@ -329,6 +335,10 @@ export type PlannerNextAction =
 
 export interface PlannerDecision {
   goal: string;
+  // Classification of the visitor's latest message, set by the planner's
+  // structured output (the planner IS the classifier). Optional because
+  // deterministic fast paths and legacy fallbacks may omit it.
+  intent?: SupportIntent;
   nextAction: PlannerNextAction;
 }
 
@@ -412,6 +422,11 @@ export interface PlannerLoopState {
     normalizedQueries: Map<string, number>; // normalized query -> search count
     semanticGroups: string[]; // track semantic groups of similar queries
   };
+  // Classification recorded from the first planner decision of this turn.
+  intent: SupportIntent | null;
+  // Cross-turn clarify continuity, persisted via ConversationChatState.
+  clarificationAttempts: number;
+  lastBotQuestion: string | null;
 }
 
 export interface PlannerLoopResult {

@@ -135,6 +135,12 @@ interface RunPlannerLoopOptions {
     awaitingHandoffConfirmation: boolean;
     contactDeclined: boolean;
   };
+  // Clarify continuity carried over from the prior turn's persisted
+  // `chat_state` (see ConversationChatState).
+  persistedClarifyState?: {
+    clarificationAttempts: number;
+    lastBotQuestion: string | null;
+  };
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
   faqMatchHint?: { question: string; answer: string; score: number } | null;
@@ -267,6 +273,10 @@ function createInitialLoopState(
     awaitingHandoffConfirmation: boolean;
     contactDeclined: boolean;
   },
+  persistedClarifyState?: {
+    clarificationAttempts: number;
+    lastBotQuestion: string | null;
+  },
 ): PlannerLoopState {
   return {
     goal: turnPlan.summary,
@@ -292,6 +302,9 @@ function createInitialLoopState(
       normalizedQueries: new Map<string, number>(),
       semanticGroups: [],
     },
+    intent: null,
+    clarificationAttempts: persistedClarifyState?.clarificationAttempts ?? 0,
+    lastBotQuestion: persistedClarifyState?.lastBotQuestion ?? null,
   };
 }
 
@@ -634,6 +647,7 @@ export async function runPlannerLoop(
     options.conversationSummary,
     options.visitorInfo,
     options.persistedContactState,
+    options.persistedClarifyState,
   );
 
   if (options.faqMatchHint) {
@@ -790,6 +804,11 @@ export async function runPlannerLoop(
       state: loopState,
       maxSteps: MAX_PLANNER_STEPS,
     });
+
+    if (!loopState.intent && plannerDecision.intent) {
+      loopState.intent = plannerDecision.intent;
+    }
+
     loopState.goal = sanitizedDecision.goal;
     loopState.stepCount += 1;
 

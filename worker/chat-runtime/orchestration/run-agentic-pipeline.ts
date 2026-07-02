@@ -86,6 +86,11 @@ export interface AgenticTurnInput {
     awaitingHandoffConfirmation: boolean;
     contactDeclined: boolean;
   };
+  // Clarify continuity from the prior turn's persisted chat_state.
+  persistedClarifyState?: {
+    clarificationAttempts: number;
+    lastBotQuestion: string | null;
+  };
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
   emitStatus: (
@@ -151,6 +156,7 @@ export async function runAgenticTurn(
     hasIndexedResources: input.hasIndexedResources,
     visitorInfo: input.visitorInfo,
     persistedContactState: input.persistedContactState,
+    persistedClarifyState: input.persistedClarifyState,
     agentHandbackInstructions: input.agentHandbackInstructions,
     image: input.image,
     faqMatchHint: input.faqMatchHint,

@@ -712,6 +712,10 @@ export async function handleWidgetMessageTurn(
           awaitingHandoffConfirmation: chatState.awaitingHandoffConfirmation,
           contactDeclined: chatState.contactDeclined,
         },
+        persistedClarifyState: {
+          clarificationAttempts: chatState.clarificationAttempts,
+          lastBotQuestion: chatState.lastBotQuestion,
+        },
         agentHandbackInstructions,
         image,
         faqMatchHint,
@@ -741,6 +745,14 @@ export async function handleWidgetMessageTurn(
         awaitingContactFields: loopResult.awaitingContactFields,
         awaitingHandoffConfirmation: loopResult.awaitingHandoffConfirmation,
         contactDeclined: loopResult.contactDeclined,
+        clarificationAttempts:
+          loopResult.terminationAction === "ask_user"
+            ? chatState.clarificationAttempts + 1
+            : 0,
+        lastBotQuestion:
+          loopResult.terminationAction === "ask_user"
+            ? loopResult.fullResponse
+            : null,
       };
 
       logInfo(

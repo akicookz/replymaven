@@ -59,6 +59,9 @@ function createState(): PlannerLoopState {
       normalizedQueries: new Map<string, number>(),
       semanticGroups: [],
     },
+    intent: null,
+    clarificationAttempts: 0,
+    lastBotQuestion: null,
   };
 }
 
@@ -574,6 +577,7 @@ llmDescribe("planNextAction (LLM integration)", () => {
 describe("recoverPlannerDecisionFromText", () => {
   const validJson = JSON.stringify({
     goal: "Answer the question",
+    intent: "policy",
     actionType: "compose",
     reason: "FAQ covers this",
     query: null,
@@ -583,6 +587,7 @@ describe("recoverPlannerDecisionFromText", () => {
     question: null,
     missingFields: null,
     answerStyle: "direct",
+    composeKind: "grounded",
   });
 
   test("returns null for empty input", () => {
@@ -617,5 +622,26 @@ describe("recoverPlannerDecisionFromText", () => {
   test("returns null when JSON does not match schema", () => {
     const invalid = JSON.stringify({ actionType: "nonexistent_type" });
     expect(recoverPlannerDecisionFromText(invalid)).toBeNull();
+  });
+
+  test("planner decision carries intent and composeKind through mapping", () => {
+    const recovered = recoverPlannerDecisionFromText(
+      JSON.stringify({
+        goal: "Greet the visitor",
+        intent: "smalltalk",
+        actionType: "compose",
+        reason: "Greeting",
+        query: null,
+        broaderQueries: null,
+        toolName: null,
+        toolInput: null,
+        question: null,
+        missingFields: null,
+        answerStyle: "direct",
+        composeKind: "greeting",
+      }),
+    );
+    expect(recovered?.intent).toBe("smalltalk");
+    expect(recovered?.composeKind).toBe("greeting");
   });
 });

@@ -55,6 +55,17 @@ interface SanitizePlannerDecisionOptions {
 
 const plannerDecisionSchema = z.object({
   goal: z.string().min(1).max(220).describe("Current planner goal."),
+  intent: z
+    .enum([
+      "how_to",
+      "troubleshoot",
+      "lookup",
+      "policy",
+      "clarify",
+      "handoff",
+      "smalltalk",
+    ])
+    .describe("Classification of the visitor's latest message."),
   actionType: z
     .enum([
       "search_docs",
@@ -117,6 +128,12 @@ const plannerDecisionSchema = z.object({
     .enum(["direct", "step_by_step", "summary"])
     .nullable()
     .describe("Answer style hint (only for compose; null otherwise)."),
+  composeKind: z
+    .enum(["grounded", "greeting", "resolution", "redirect"])
+    .nullable()
+    .describe(
+      "Required when actionType is compose: 'grounded' for evidence-based answers, 'greeting' for greetings/small talk, 'resolution' when the visitor signals the issue is resolved or says thanks/goodbye, 'redirect' for off-topic redirects. Null for non-compose actions.",
+    ),
 });
 
 
@@ -483,6 +500,8 @@ Current planner state:
 - awaitingHandoffConfirmation: ${options.state.awaitingHandoffConfirmation}
 - awaitingContactFields: ${options.state.awaitingContactFields.join(", ") || "none"}
 - contactDeclined: ${options.state.contactDeclined}
+- clarificationAttemptsThisConversation: ${options.state.clarificationAttempts}
+- lastClarifyingQuestionAsked: ${options.state.lastBotQuestion ?? "none"}
 
 Action history:
 ${buildActionHistorySummary(options.state.actionHistory)}
@@ -507,12 +526,13 @@ Allowed next actions:
 - stop: no further search or tool action is useful; compose a best-effort answer using whatever evidence was gathered, or acknowledge the gap honestly
 
 Message classification (YOU are the classifier — there is no separate routing step):
-- Greetings ("hi", "hello", "hey", "good morning"): choose compose with answerStyle "direct". No search needed.
-- Resolution signals ("thanks", "that worked", "got it", "it's ok now", "never mind", "all good", "no worries"): choose compose with answerStyle "direct". The compose step will produce [RESOLVED]. No search needed.
+- Greetings ("hi", "hello", "hey", "good morning"): choose compose with composeKind "greeting" and intent "smalltalk". No search needed.
+- Resolution signals ("thanks", "that worked", "got it", "it's ok now", "never mind", "all good", "no worries"): choose compose with composeKind "resolution" and intent "smalltalk". No search needed.
 - Frustration/anger ("this is useless", "not helping", profanity, "I already told you"): choose offer_handoff immediately. Do NOT search docs or ask clarifying questions.
 - Explicit human requests ("talk to a person", "live agent", "speak to someone"): choose offer_handoff if issue context is thin, or collect_contact/escalate if context is sufficient.
 - Account actions ("cancel my account", "delete my data", "close my account"): choose offer_handoff immediately. These require human authorization and cannot be handled by the bot.
-- Chit-chat or off-topic ("what's the weather", "tell me a joke"): choose compose with answerStyle "direct" to politely redirect.
+- Chit-chat or off-topic ("what's the weather", "tell me a joke"): choose compose with composeKind "redirect" and intent "smalltalk" to politely redirect.
+- Product-overview questions ("what is this?", "how does it work?", "what does this product do?", "what do you offer?", "is this right for me?") are NOT ambiguous — the subject is this product and company. Never choose ask_user for them. If the SOPs, FAQs, or company background above already describe the product, choose compose with composeKind "grounded". Otherwise choose search_docs with an overview-style query such as "product overview what it does features getting started".
 - Affirmative confirmations ("yes", "yeah", "please do", "go ahead") when the last bot message offered a handoff: choose collect_contact or escalate to proceed with the handoff flow.
 - Contact detail responses (visitor provides name/email after being asked): recognize as contact info and proceed to escalate.
 - Declining contact details ("no email", "prefer not to share", "continue here"): proceed to escalate without contact details.
@@ -531,7 +551,7 @@ Rules:
 - Use collect_contact only when optional contact details would genuinely help follow-up and the visitor has not already declined to share them.
 - Use escalate when the visitor wants human follow-up, there is enough issue context to forward, and either contact details are already known or the visitor has declined to share them.
 - After search_docs returns evidence, prefer compose. After search_docs returns nothing even after the runtime's automatic reformulation, prefer compose with an honest acknowledgment over endless retries.
-- Choose compose ONLY when SOPs, FAQs, or docs/tool evidence directly answers the question, OR when you are responding to a greeting, resolution signal, chit-chat, or off-topic message, OR when documentation searches have already been exhausted.
+- Choose compose with composeKind "grounded" ONLY when SOPs, FAQs, or docs/tool evidence directly answers the question, OR when documentation searches have already been exhausted. Greetings, resolution signals, and off-topic redirects use their own composeKind and need no evidence.
 - Do NOT compose answers based on general context or business domain knowledge without explicit documentation.
 - When partial information exists across tiers:
   * Combine complementary information from different tiers only if no conflicts exist
@@ -548,6 +568,7 @@ Anti-loop rules (CRITICAL):
 - If the visitor already provided an image, URL, page context, or specific feature name, do NOT ask what feature/page they mean. Use what they gave you.
 - If the visitor shows frustration signals ("useless", "not helping", "stop asking", "I already said"), immediately prefer offer_handoff over any further ask_user.
 - If the visitor says the issue is resolved or thanks you, choose compose — do NOT search docs or ask further questions.
+- If clarificationAttemptsThisConversation is 2 or more, ask_user is forbidden for the rest of this conversation — choose offer_handoff or compose instead.
 
 - If no safe action remains, choose stop. The runtime will still compose a reply using available evidence or a candid acknowledgment that no concrete answer was found.`;
 
@@ -586,6 +607,7 @@ Anti-loop rules (CRITICAL):
 
   return {
     goal: object.goal,
+    intent: object.intent,
     nextAction: {
       type: object.actionType,
       reason: object.reason,
@@ -605,6 +627,7 @@ Anti-loop rules (CRITICAL):
           | Array<"name" | "email">
           | undefined,
       answerStyle: object.answerStyle ?? undefined,
+      composeKind: object.composeKind ?? undefined,
     } as PlannerNextAction,
   };
 }
