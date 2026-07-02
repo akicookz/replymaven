@@ -274,7 +274,7 @@ export type PlannerActionType =
   | "ask_user"
   | "offer_handoff"
   | "collect_contact"
-  | "create_ticket"
+  | "escalate"
   | "compose"
   | "stop";
 
@@ -309,8 +309,8 @@ export interface PlannerCollectContactAction {
   missingFields: Array<"name" | "email">;
 }
 
-export interface PlannerCreateTicketAction {
-  type: "create_ticket";
+export interface PlannerEscalateAction {
+  type: "escalate";
   reason: string;
 }
 
@@ -331,7 +331,7 @@ export type PlannerNextAction =
   | PlannerAskUserAction
   | PlannerOfferHandoffAction
   | PlannerCollectContactAction
-  | PlannerCreateTicketAction
+  | PlannerEscalateAction
   | PlannerComposeAction
   | PlannerStopAction;
 

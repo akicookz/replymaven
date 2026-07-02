@@ -62,7 +62,7 @@ const plannerDecisionSchema = z.object({
       "ask_user",
       "offer_handoff",
       "collect_contact",
-      "create_ticket",
+      "escalate",
       "compose",
       "stop",
     ])
@@ -502,7 +502,7 @@ Allowed next actions:
 - ask_user: ask one focused question when a required detail is missing
 - offer_handoff: offer team follow-up when support is exhausted and wait for confirmation
 - collect_contact: ask only for the missing name/email needed for a team follow-up
-- create_ticket: create the actual team follow-up request in runtime
+- escalate: flag this conversation for human review and notify the team
 - compose: answer now using the gathered evidence
 - stop: no further search or tool action is useful; compose a best-effort answer using whatever evidence was gathered, or acknowledge the gap honestly
 
@@ -510,12 +510,12 @@ Message classification (YOU are the classifier — there is no separate routing 
 - Greetings ("hi", "hello", "hey", "good morning"): choose compose with answerStyle "direct". No search needed.
 - Resolution signals ("thanks", "that worked", "got it", "it's ok now", "never mind", "all good", "no worries"): choose compose with answerStyle "direct". The compose step will produce [RESOLVED]. No search needed.
 - Frustration/anger ("this is useless", "not helping", profanity, "I already told you"): choose offer_handoff immediately. Do NOT search docs or ask clarifying questions.
-- Explicit human requests ("talk to a person", "live agent", "speak to someone"): choose offer_handoff if issue context is thin, or collect_contact/create_ticket if context is sufficient.
+- Explicit human requests ("talk to a person", "live agent", "speak to someone"): choose offer_handoff if issue context is thin, or collect_contact/escalate if context is sufficient.
 - Account actions ("cancel my account", "delete my data", "close my account"): choose offer_handoff immediately. These require human authorization and cannot be handled by the bot.
 - Chit-chat or off-topic ("what's the weather", "tell me a joke"): choose compose with answerStyle "direct" to politely redirect.
-- Affirmative confirmations ("yes", "yeah", "please do", "go ahead") when the last bot message offered a handoff: choose collect_contact or create_ticket to proceed with the handoff flow.
-- Contact detail responses (visitor provides name/email after being asked): recognize as contact info and proceed to create_ticket.
-- Declining contact details ("no email", "prefer not to share", "continue here"): proceed to create_ticket without contact details.
+- Affirmative confirmations ("yes", "yeah", "please do", "go ahead") when the last bot message offered a handoff: choose collect_contact or escalate to proceed with the handoff flow.
+- Contact detail responses (visitor provides name/email after being asked): recognize as contact info and proceed to escalate.
+- Declining contact details ("no email", "prefer not to share", "continue here"): proceed to escalate without contact details.
 
 Rules:
 - Output exactly one next action.
@@ -529,7 +529,7 @@ Rules:
 - If the visitor explicitly asks for a human, do not route them back into normal docs troubleshooting unless the issue context is still missing.
 - Use offer_handoff only when you need visitor confirmation before forwarding.
 - Use collect_contact only when optional contact details would genuinely help follow-up and the visitor has not already declined to share them.
-- Use create_ticket when the visitor wants human follow-up, there is enough issue context to forward, and either contact details are already known or the visitor has declined to share them.
+- Use escalate when the visitor wants human follow-up, there is enough issue context to forward, and either contact details are already known or the visitor has declined to share them.
 - After search_docs returns evidence, prefer compose. After search_docs returns nothing even after the runtime's automatic reformulation, prefer compose with an honest acknowledgment over endless retries.
 - Choose compose ONLY when SOPs, FAQs, or docs/tool evidence directly answers the question, OR when you are responding to a greeting, resolution signal, chit-chat, or off-topic message, OR when documentation searches have already been exhausted.
 - Do NOT compose answers based on general context or business domain knowledge without explicit documentation.
@@ -543,7 +543,7 @@ Rules:
 - Only use ask_user when critical details are genuinely missing relative to the business context and what would be reasonable to expect.
 
 Anti-loop rules (CRITICAL):
-- If action history already contains one or more ask_user entries, do NOT choose ask_user again. Instead choose offer_handoff, create_ticket, or compose with best-effort grounding.
+- If action history already contains one or more ask_user entries, do NOT choose ask_user again. Instead choose offer_handoff, escalate, or compose with best-effort grounding.
 - Never repeat the same ask_user question or a paraphrase of it. Cross-check the action history before picking ask_user.
 - If the visitor already provided an image, URL, page context, or specific feature name, do NOT ask what feature/page they mean. Use what they gave you.
 - If the visitor shows frustration signals ("useless", "not helping", "stop asking", "I already said"), immediately prefer offer_handoff over any further ask_user.
@@ -705,7 +705,7 @@ export function fallbackPlanNextAction(options: {
       return {
         goal: options.state.goal,
         nextAction: {
-          type: "create_ticket",
+          type: "escalate",
           reason: "The visitor declined to share contact details but still wants human follow-up.",
         },
       };
@@ -725,7 +725,7 @@ export function fallbackPlanNextAction(options: {
     return {
       goal: options.state.goal,
       nextAction: {
-        type: "create_ticket",
+        type: "escalate",
         reason: "The visitor wants human follow-up and enough issue context is available.",
       },
     };
@@ -968,7 +968,7 @@ export function sanitizePlannerDecision(
       return {
         goal: nextGoal,
         nextAction: {
-          type: "create_ticket",
+          type: "escalate",
           reason: "A human was explicitly requested and enough context already exists.",
         },
       };
@@ -980,7 +980,7 @@ export function sanitizePlannerDecision(
       return {
         goal: nextGoal,
         nextAction: {
-          type: "create_ticket",
+          type: "escalate",
           reason: "The visitor declined contact details, so proceed with the ticket without them.",
         },
       };
@@ -996,7 +996,7 @@ export function sanitizePlannerDecision(
       return {
         goal: nextGoal,
         nextAction: {
-          type: "create_ticket",
+          type: "escalate",
           reason: "The required contact details are already available.",
         },
       };
@@ -1011,7 +1011,7 @@ export function sanitizePlannerDecision(
     };
   }
 
-  if (nextAction.type === "create_ticket") {
+  if (nextAction.type === "escalate") {
     const missingFields = getMissingContactFields(options.state);
     if (
       missingFields.length > 0 &&

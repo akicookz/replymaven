@@ -230,7 +230,7 @@ describe("sanitizePlannerDecision", () => {
       decision: {
         goal: "Forward this to the team",
         nextAction: {
-          type: "create_ticket",
+          type: "escalate",
           reason: "Human follow-up requested.",
         },
       },
@@ -249,7 +249,7 @@ describe("sanitizePlannerDecision", () => {
     expect(sanitized.nextAction.type).toBe("collect_contact");
   });
 
-  test("allows create_ticket after contact details were declined", () => {
+  test("allows escalate after contact details were declined", () => {
     const state = createState();
     state.awaitingContactFields = ["email"];
     state.contactDeclined = true;
@@ -259,7 +259,7 @@ describe("sanitizePlannerDecision", () => {
       decision: {
         goal: "Forward this to the team",
         nextAction: {
-          type: "create_ticket",
+          type: "escalate",
           reason: "The visitor still wants human follow-up.",
         },
       },
@@ -276,7 +276,7 @@ describe("sanitizePlannerDecision", () => {
       ],
     });
 
-    expect(sanitized.nextAction.type).toBe("create_ticket");
+    expect(sanitized.nextAction.type).toBe("escalate");
   });
 });
 
@@ -341,7 +341,7 @@ describe("fallbackPlanNextAction", () => {
       maxSteps: 5,
     });
 
-    expect(decision.nextAction.type).toBe("create_ticket");
+    expect(decision.nextAction.type).toBe("escalate");
   });
 
   test("persisted awaitingContactFields drives the flow even when the bot's prior wording is reworded/non-English", () => {
@@ -379,7 +379,7 @@ describe("fallbackPlanNextAction", () => {
       maxSteps: 5,
     });
 
-    expect(decision.nextAction.type).toBe("create_ticket");
+    expect(decision.nextAction.type).toBe("escalate");
   });
 
   test("does not mistake generic contact wording for contact collection flow", () => {
@@ -404,7 +404,7 @@ describe("fallbackPlanNextAction", () => {
       maxSteps: 5,
     });
 
-    expect(decision.nextAction.type).not.toBe("create_ticket");
+    expect(decision.nextAction.type).not.toBe("escalate");
     expect(decision.nextAction.type).not.toBe("collect_contact");
   });
 });
@@ -513,7 +513,7 @@ llmDescribe("planNextAction (LLM integration)", () => {
       state,
     });
 
-    expect(["offer_handoff", "collect_contact", "create_ticket"]).toContain(
+    expect(["offer_handoff", "collect_contact", "escalate"]).toContain(
       decision.nextAction.type,
     );
   }, 15_000);

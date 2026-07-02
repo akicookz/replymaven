@@ -6,10 +6,6 @@ import {
   type RetrievalResult,
 } from "../retrieval/run-ai-search";
 import { classifyTaskScope } from "../workflows/classify-task-scope";
-import {
-  classifyTicketRefinement,
-  type TicketRefinementDecision,
-} from "../workflows/classify-ticket-refinement";
 import { createWidgetSseResponse } from "../streaming/create-widget-sse-response";
 import {
   createInitialAgentEventState,
@@ -37,11 +33,6 @@ import { ProjectService } from "../../services/project-service";
 import { ResourceService } from "../../services/resource-service";
 import { TelegramService } from "../../services/telegram-service";
 import { ToolService } from "../../services/tool-service";
-import {
-  TicketService,
-  parseTicketData,
-} from "../../services/ticket-service";
-import { type TicketFieldSpec } from "../types";
 import { type MessageRow } from "../../db";
 import { decryptEnabledToolHeaders } from "../../services/encryption-service";
 
@@ -123,7 +114,7 @@ function getLastTeamMessageRole(
   return null;
 }
 
-function shouldAllowTeamRequest(options: {
+function shouldAllowEscalation(options: {
   conversation: {
     status: string;
   };
@@ -162,7 +153,6 @@ export async function handleWidgetMessageTurn(
   const toolService = new ToolService(context.db);
   const guidelineService = new GuidelineService(context.db);
   const resourceService = new ResourceService(context.db, context.env.UPLOADS);
-  const ticketService = new TicketService(context.db);
 
   const startedAt = Date.now();
   const stageTimings: Record<string, number> = {};
@@ -194,8 +184,6 @@ export async function handleWidgetMessageTurn(
     enabledTools,
     enabledGuidelines,
     allResources,
-    existingTicketRow,
-    ticketConfigRow,
     parallelPrefetchedHistory,
   ] = await Promise.all([
     billingService.getSubscriptionByUserId(context.project.userId),
@@ -207,11 +195,6 @@ export async function handleWidgetMessageTurn(
     toolService.getEnabledTools(context.project.id),
     guidelineService.getEnabledByProject(context.project.id),
     resourceService.getResourcesByProject(context.project.id),
-    ticketService.getTicketByConversationId(
-      context.project.id,
-      context.conversationId,
-    ),
-    ticketService.getConfig(context.project.id),
     clientSuppliedHistory
       ? Promise.resolve<MessageRow[] | null>(null)
       : chatService.getMessages(context.conversationId),
@@ -274,29 +257,6 @@ export async function handleWidgetMessageTurn(
   let chatState: ConversationChatState = parseChatState(
     conversation.chatState,
   );
-
-  const existingTicket: Record<string, string> | null = existingTicketRow
-    ? parseTicketData(existingTicketRow.data)
-    : null;
-  let ticketFields: TicketFieldSpec[] | null = null;
-  if (ticketConfigRow?.fields) {
-    try {
-      const parsed = JSON.parse(ticketConfigRow.fields) as unknown;
-      if (Array.isArray(parsed)) {
-        ticketFields = parsed
-          .filter(
-            (entry): entry is TicketFieldSpec =>
-              typeof entry === "object" &&
-              entry !== null &&
-              typeof (entry as { label?: unknown }).label === "string" &&
-              typeof (entry as { type?: unknown }).type === "string" &&
-              typeof (entry as { required?: unknown }).required === "boolean",
-          );
-      }
-    } catch {
-      ticketFields = null;
-    }
-  }
 
   if (enabledTools.length > 0) {
     if (!context.checkRateLimit(`toolmsg:${context.project.id}`, 100, 60_000)) {
@@ -653,26 +613,6 @@ export async function handleWidgetMessageTurn(
         return;
       }
 
-      const ticketRefinementDecision: TicketRefinementDecision | null =
-        existingTicket && ticketFields && ticketFields.length > 0
-          ? classifyTicketRefinement({
-              message: context.payload.content,
-              ticketFields,
-              existingData: existingTicket,
-              hasExistingTicket: true,
-            })
-          : null;
-      if (ticketRefinementDecision?.isRefinement) {
-        logInfo(
-          "widget_turn.ticket_refinement_detected",
-          buildWidgetTurnLogContext(context, turnId, {
-            signals: ticketRefinementDecision.signals,
-            extractedKeys: Object.keys(ticketRefinementDecision.extracted),
-            reason: ticketRefinementDecision.reason,
-          }),
-        );
-      }
-
       currentStage = "classify_turn";
       emitStatus("Understanding your message...", "thinking");
       const routing = await prepareTurnRouting({
@@ -768,7 +708,6 @@ export async function handleWidgetMessageTurn(
         conversationHistory,
         conversationSummary,
         turnPlan,
-        ticketRefinementDecision,
         availableTools,
         enabledToolRows: enabledTools,
         toolService,
@@ -809,13 +748,11 @@ export async function handleWidgetMessageTurn(
           awaitingHandoffConfirmation: chatState.awaitingHandoffConfirmation,
           contactDeclined: chatState.contactDeclined,
         },
-        existingTicket,
-        ticketFields,
         agentHandbackInstructions,
         image,
         faqMatchHint,
         emitStatus,
-        shouldAllowTeamRequest: () => shouldAllowTeamRequest({ conversation }),
+        shouldAllowEscalation: () => shouldAllowEscalation({ conversation }),
         closeSafeAiReplayWindow,
         buildLogContext: (extra = {}) =>
           buildWidgetTurnLogContext(context, turnId, extra),
@@ -893,7 +830,7 @@ export async function handleWidgetMessageTurn(
 
       const flaggedForReview =
         conversation.status === "waiting_agent" ||
-        loopResult.terminationAction === "create_ticket";
+        loopResult.terminationAction === "escalate";
       if (loopResult.detectedInternalTokens.includes("[RESOLVED]") && !flaggedForReview) {
         currentStage = "close_conversation";
         await chatService.updateConversationStatus(

@@ -51,7 +51,6 @@ import {
 import { streamSupportAgent } from "../agents/support-agent";
 import { stripTrailingSolicitedFollowUp } from "./strip-trailing-solicited-follow-up";
 import { executeHttpTool } from "../tools/http-tool-executor";
-import { type TicketRefinementDecision } from "../workflows/classify-ticket-refinement";
 import {
   type TicketFieldSpec,
   type HandoffRenderDirective,
@@ -138,9 +137,6 @@ interface RunPlannerLoopOptions {
     awaitingHandoffConfirmation: boolean;
     contactDeclined: boolean;
   };
-  existingTicket?: Record<string, string> | null;
-  ticketFields?: TicketFieldSpec[] | null;
-  ticketRefinementDecision?: TicketRefinementDecision | null;
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
   faqMatchHint?: { question: string; answer: string; score: number } | null;
@@ -148,7 +144,7 @@ interface RunPlannerLoopOptions {
     message: string,
     phase: "thinking" | "retrieval" | "tool" | "verify" | "compose",
   ) => void;
-  shouldAllowTeamRequest: () => { allowed: boolean; reason: string };
+  shouldAllowEscalation: () => { allowed: boolean; reason: string };
   closeSafeAiReplayWindow: (reason: string) => void;
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
   // Optional override for the compose-stage system prompt. When omitted the
@@ -1143,12 +1139,12 @@ export async function runPlannerLoop(
       };
     }
 
-    if (nextAction.type === "create_ticket") {
-      const teamRequestDecision = options.shouldAllowTeamRequest();
+    if (nextAction.type === "escalate") {
+      const teamRequestDecision = options.shouldAllowEscalation();
 
       if (!teamRequestDecision.allowed) {
         pushActionHistory(loopState, {
-          type: "create_ticket",
+          type: "escalate",
           reason: `${nextAction.reason} Blocked: ${teamRequestDecision.reason}.`,
           outcome: "rejected",
           note: teamRequestDecision.reason,
@@ -1215,7 +1211,7 @@ export async function runPlannerLoop(
         const fullResponse =
           "I couldn't forward that to the team just now. I can keep helping here, or you can try again in a moment.";
         pushActionHistory(loopState, {
-          type: "create_ticket",
+          type: "escalate",
           reason: `${nextAction.reason} Submission failed.`,
           outcome: "rejected",
           note: fullResponse,
@@ -1232,7 +1228,7 @@ export async function runPlannerLoop(
           lastToolOutput,
           lastToolError,
           stepCount: loopState.stepCount,
-          terminationAction: "create_ticket",
+          terminationAction: "escalate",
           loopState,
           detectedInternalTokens: [],
         };
@@ -1290,7 +1286,7 @@ export async function runPlannerLoop(
         buildLogContext: options.buildLogContext,
       });
       pushActionHistory(loopState, {
-        type: "create_ticket",
+        type: "escalate",
         reason: nextAction.reason,
         outcome: "completed",
         note: summary,
@@ -1308,7 +1304,7 @@ export async function runPlannerLoop(
         lastToolOutput,
         lastToolError,
         stepCount: loopState.stepCount,
-        terminationAction: "create_ticket",
+        terminationAction: "escalate",
         loopState,
         detectedInternalTokens: [],
       };
@@ -1365,8 +1361,6 @@ export async function runPlannerLoop(
         faqMatchHint: options.faqMatchHint ?? null,
         pageContext: options.pageContext,
         visitorInfo: options.visitorInfo,
-        existingTicket: options.existingTicket,
-        ticketFields: options.ticketFields,
         agentHandbackInstructions: options.agentHandbackInstructions,
         image: options.image,
         emitStatus: options.emitStatus,
@@ -1416,8 +1410,6 @@ export async function runPlannerLoop(
         faqMatchHint: options.faqMatchHint ?? null,
         pageContext: options.pageContext,
         visitorInfo: options.visitorInfo,
-        existingTicket: options.existingTicket,
-        ticketFields: options.ticketFields,
         agentHandbackInstructions: options.agentHandbackInstructions,
         image: options.image,
         emitStatus: options.emitStatus,
@@ -1488,8 +1480,6 @@ export async function runPlannerLoop(
       faqMatchHint: options.faqMatchHint ?? null,
       pageContext: options.pageContext,
       visitorInfo: options.visitorInfo,
-      existingTicket: options.existingTicket,
-      ticketFields: options.ticketFields,
       agentHandbackInstructions: options.agentHandbackInstructions,
       image: options.image,
       emitStatus: options.emitStatus,

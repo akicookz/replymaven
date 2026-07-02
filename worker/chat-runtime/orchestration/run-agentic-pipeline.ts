@@ -16,7 +16,6 @@ import {
   type SupportPromptSettings,
   type SupportToolDefinition,
   type SupportTurnPlan,
-  type TicketFieldSpec,
   type TurnTelemetry,
 } from "../types";
 import { type RetrievalResult } from "../retrieval/run-ai-search";
@@ -27,7 +26,6 @@ import { ToolService } from "../../services/tool-service";
 import { type AppEnv } from "../../types";
 import { type ToolRow } from "../../db";
 import { type ModelRuntimeState } from "../llm/create-language-model";
-import { type TicketRefinementDecision } from "../workflows/classify-ticket-refinement";
 
 // Final post-filter: if the model claims it browsed the web / used unassigned
 // tools, replace the response with a canned safety string — the visitor bot
@@ -56,7 +54,6 @@ export interface AgenticTurnInput {
   turnPlan: SupportTurnPlan;
   compiledFaqContext: string;
   faqMatchHint?: { question: string; answer: string; score: number } | null;
-  ticketRefinementDecision?: TicketRefinementDecision | null;
   availableTools: SupportToolDefinition[];
   enabledToolRows: ToolRow[];
   toolService: ToolService;
@@ -89,8 +86,6 @@ export interface AgenticTurnInput {
     awaitingHandoffConfirmation: boolean;
     contactDeclined: boolean;
   };
-  existingTicket?: Record<string, string> | null;
-  ticketFields?: TicketFieldSpec[] | null;
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
   emitStatus: (
@@ -99,7 +94,7 @@ export interface AgenticTurnInput {
   ) => void;
   closeSafeAiReplayWindow: (reason: string) => void;
   // Audience-specific planner gate and prompt builder.
-  shouldAllowTeamRequest: () => { allowed: boolean; reason: string };
+  shouldAllowEscalation: () => { allowed: boolean; reason: string };
   buildSystemPrompt?: BuildSystemPromptFn;
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
 }
@@ -140,7 +135,6 @@ export async function runAgenticTurn(
     conversationHistory: input.conversationHistory,
     conversationSummary: input.conversationSummary,
     turnPlan: input.turnPlan,
-    ticketRefinementDecision: input.ticketRefinementDecision ?? null,
     availableTools: input.availableTools,
     enabledToolRows: input.enabledToolRows,
     toolService: input.toolService,
@@ -157,13 +151,11 @@ export async function runAgenticTurn(
     hasIndexedResources: input.hasIndexedResources,
     visitorInfo: input.visitorInfo,
     persistedContactState: input.persistedContactState,
-    existingTicket: input.existingTicket,
-    ticketFields: input.ticketFields,
     agentHandbackInstructions: input.agentHandbackInstructions,
     image: input.image,
     faqMatchHint: input.faqMatchHint,
     emitStatus: input.emitStatus,
-    shouldAllowTeamRequest: input.shouldAllowTeamRequest,
+    shouldAllowEscalation: input.shouldAllowEscalation,
     closeSafeAiReplayWindow: input.closeSafeAiReplayWindow,
     buildLogContext: input.buildLogContext,
     buildSystemPrompt: input.buildSystemPrompt,
