@@ -19,7 +19,6 @@ import Resources from "./pages/Resources";
 import QuickActions from "./pages/QuickActions";
 import Configuration from "./pages/Configuration";
 import WidgetHome from "./pages/WidgetHome";
-import Tickets from "./pages/Tickets";
 import CompanyInfo from "./pages/CompanyInfo";
 import Sops from "./pages/Sops";
 import Profile from "./pages/Profile";
@@ -255,11 +254,11 @@ function App() {
         />
         <Route
           path="projects/:projectId/tickets"
-          element={<Tickets />}
+          element={<Navigate to="../conversations?filter=needs-you" replace />}
         />
         <Route
           path="projects/:projectId/inquiries"
-          element={<Navigate to="../tickets" replace />}
+          element={<Navigate to="../conversations?filter=needs-you" replace />}
         />
         <Route
           path="projects/:projectId/quick-actions"

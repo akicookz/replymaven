@@ -7,7 +7,6 @@ import {
   Plus,
   ArrowUpRight,
   ArrowDownRight,
-  Mail,
   Clock,
   Globe,
 } from "lucide-react";
@@ -74,11 +73,11 @@ function countryToFlag(countryCode: string): string {
   return String.fromCodePoint(first) + String.fromCodePoint(second);
 }
 
-interface RecentTicket {
+interface NeedsReviewConversation {
   id: string;
-  visitorId: string | null;
-  data: string;
-  createdAt: string;
+  visitorName: string | null;
+  visitorEmail: string | null;
+  lastActivityAt: string;
 }
 
 interface DashboardData {
@@ -90,7 +89,6 @@ interface DashboardData {
   pendingCannedDrafts: number;
   conversationsByDay: ConversationsByDay[];
   recentConversations: RecentConversation[];
-  recentTickets: RecentTicket[];
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -219,6 +217,22 @@ function Dashboard() {
     refetchInterval: 30_000,
   });
 
+  const { data: needsReviewData } = useQuery<{
+    conversations: NeedsReviewConversation[];
+  }>({
+    queryKey: ["dashboard-needs-review", projectId],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations?status=all&filter=needs-you&limit=8`,
+      );
+      if (!res.ok) throw new Error("Failed to fetch conversations");
+      return res.json();
+    },
+    enabled: !!projectId,
+    refetchInterval: 30_000,
+  });
+  const needsReview = needsReviewData?.conversations ?? [];
+
   if (!projectId) {
     return <Navigate to="/app" replace />;
   }
@@ -300,53 +314,6 @@ function Dashboard() {
   // ─── Data Preparation ─────────────────────────────────────────────────────
 
     const dailyData = fillDailyData(data.conversationsByDay);
-
-    // ─── Build Activity Timeline ────────────────────────────────────────────
-    type TimelineItem = {
-      id: string;
-      type: "ticket";
-      name: string;
-      email: string | null;
-      firstLine: string | null;
-      timestamp: string;
-    };
-
-    const timelineItems: TimelineItem[] = [];
-
-    for (const s of data.recentTickets) {
-      let parsedData: Record<string, string> = {};
-      try {
-        parsedData = JSON.parse(s.data);
-      } catch {
-        // ignore
-      }
-      const nameKey = Object.keys(parsedData).find((k) =>
-        k.toLowerCase().includes("name"),
-      );
-      const emailKey = Object.keys(parsedData).find((k) =>
-        k.toLowerCase().includes("email"),
-      );
-      const name = nameKey ? parsedData[nameKey] : null;
-      const email = emailKey ? parsedData[emailKey] : null;
-      const excludeKeys = new Set(
-        [nameKey, emailKey].filter(Boolean).map((k) => k!.toLowerCase()),
-      );
-      const firstLine =
-        Object.entries(parsedData).find(
-          ([k]) => !excludeKeys.has(k.toLowerCase()),
-        )?.[1] ?? null;
-
-      timelineItems.push({
-        id: s.id,
-        type: "ticket",
-        name: name ?? email ?? "Unknown",
-        email: name ? email : null,
-        firstLine,
-        timestamp: s.createdAt,
-      });
-    }
-
-    timelineItems.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -447,41 +414,36 @@ function Dashboard() {
           )}
         </div>
 
-        {/* Activity Timeline */}
+        {/* Needs Review */}
         <div className="bg-card rounded-xl p-6">
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-sm font-semibold text-foreground">
-              Recent Tickets
+              Needs review
             </h2>
           </div>
-          {timelineItems.length > 0 ? (
+          {needsReview.length > 0 ? (
             <div className="space-y-1">
-              {timelineItems.slice(0, 8).map((item) => (
+              {needsReview.map((conv) => (
                 <Link
-                  key={item.id}
-                  to={`/app/projects/${projectId}/tickets`}
+                  key={conv.id}
+                  to={`/app/projects/${projectId}/conversations?filter=needs-you&id=${conv.id}`}
                   className="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-accent/50 transition-colors group"
                 >
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 bg-orange-500/10">
-                    <Mail className="w-3.5 h-3.5 text-orange-500" />
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5 bg-status-waiting/10">
+                    <MessageSquare className="w-3.5 h-3.5 text-status-waiting" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <span className="text-[13px] font-medium text-foreground truncate block">
-                      {item.name}
+                      {conv.visitorName ?? "Visitor"}
                     </span>
-                    {item.email && (
+                    {conv.visitorEmail && (
                       <p className="text-[12px] text-muted-foreground truncate">
-                        {item.email}
-                      </p>
-                    )}
-                    {item.firstLine && (
-                      <p className="text-[12px] text-muted-foreground/70 truncate">
-                        {item.firstLine}
+                        {conv.visitorEmail}
                       </p>
                     )}
                   </div>
                   <span className="text-[11px] text-muted-foreground shrink-0 mt-0.5">
-                    {formatTimeAgo(item.timestamp)}
+                    {formatTimeAgo(conv.lastActivityAt)}
                   </span>
                 </Link>
               ))}
@@ -489,7 +451,7 @@ function Dashboard() {
           ) : (
             <div className="flex flex-col items-center justify-center h-[200px] text-sm text-muted-foreground gap-1">
               <Clock className="w-5 h-5 mb-1 text-muted-foreground/50" />
-              No tickets yet
+              Nothing needs review
             </div>
           )}
         </div>

@@ -54,7 +54,7 @@ const navItems: NavItem[] = [
       { id: "set-metadata", label: "Set Custom Metadata" },
       { id: "page-context", label: "Page Context" },
       { id: "notifications", label: "Request Notifications" },
-      { id: "open-ticket-form", label: "Open Ticket Form" },
+      { id: "open-ticket-form", label: "Open Contact Form" },
     ],
   },
   {
@@ -120,7 +120,7 @@ const navItems: NavItem[] = [
     icon: <Settings className="w-4 h-4" />,
     children: [
       { id: "telegram", label: "Telegram" },
-      { id: "tickets", label: "Tickets" },
+      { id: "tickets", label: "Contact Form" },
       { id: "tone-of-voice", label: "Tone of Voice" },
       { id: "knowledge-refinement", label: "Knowledge Refinement" },
     ],
@@ -614,16 +614,16 @@ window.ReplyMaven.toggle();`}
             />
 
             <SectionHeading id="open-ticket-form" level={3}>
-              Open Ticket Form
+              Open Contact Form
             </SectionHeading>
             <p className="text-muted-foreground leading-relaxed mb-4">
-              Open the ticket form programmatically. If the widget is
-              closed, it will be opened first. The ticket form must be
+              Open the contact form programmatically. If the widget is
+              closed, it will be opened first. The contact form must be
               enabled in your project settings under{" "}
-              <strong>Tickets</strong>.
+              <strong>Quick Actions</strong>.
             </p>
             <CodeBlock
-              title="Open the ticket form"
+              title="Open the contact form"
               language="javascript"
               code={`window.ReplyMaven.openInquiryForm();`}
             />
@@ -631,7 +631,7 @@ window.ReplyMaven.toggle();`}
               <IC>openTicketForm()</IC> is also exposed as an alias.
             </p>
             <Callout type="tip">
-              Use this to trigger the ticket form from custom buttons or
+              Use this to trigger the contact form from custom buttons or
               links on your page -- for example, a "Contact Us" button in
               your navigation.
             </Callout>
@@ -1404,16 +1404,16 @@ window.ReplyMaven.setMetadata({
             </ul>
 
             <SectionHeading id="tickets" level={3}>
-              Tickets
+              Contact Form
             </SectionHeading>
             <p className="text-muted-foreground leading-relaxed mb-4">
-              Enable a "Leave a message" ticket form on the widget's home
+              Enable a "Leave a message" contact form on the widget's home
               screen. Visitors can submit structured information when they
-              prefer not to chat. Configure fields in{" "}
-              <strong>Tickets</strong> in the dashboard.
+              prefer not to chat. Configure fields under{" "}
+              <strong>Quick Actions</strong> in the dashboard.
             </p>
             <p className="text-muted-foreground leading-relaxed mb-4">
-              You can also open the ticket form programmatically using{" "}
+              You can also open the contact form programmatically using{" "}
               <IC>window.ReplyMaven.openInquiryForm()</IC>.{" "}
               <IC>openTicketForm()</IC> is also exposed as an alias.
             </p>

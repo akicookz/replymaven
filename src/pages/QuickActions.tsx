@@ -97,8 +97,8 @@ const TYPE_CONFIG: Record<
     iconColor: "text-status-replied",
   },
   inquiry: {
-    label: "Ticket form",
-    description: "Opens the ticket form",
+    label: "Contact form",
+    description: "Opens the contact form",
     RightIcon: ChevronRight,
     iconColor: "text-status-active",
   },
@@ -145,7 +145,7 @@ function QuickActions() {
             Quick Actions and Tools
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Manage widget shortcuts, ticket form, and bot tools from one
+            Manage widget shortcuts, contact form, and bot tools from one
             place.
           </p>
         </div>
@@ -446,7 +446,7 @@ function ActionsTab({
                 >
                   <span className="flex items-center gap-1.5">
                     <MessageSquareText className="w-3.5 h-3.5" />
-                    Ticket form
+                    Contact form
                     {hasTicketAction && (
                       <span className="text-[10px] text-muted-foreground ml-1">(exists)</span>
                     )}
@@ -687,7 +687,7 @@ function ActionsTab({
                       <>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-2">
                           <div>
-                            <p className="text-sm font-semibold text-foreground">Ticket form</p>
+                            <p className="text-sm font-semibold text-foreground">Contact form</p>
                             <p className="text-xs text-muted-foreground mt-0.5">
                               Configure the form visitors see when they tap this action.
                             </p>
@@ -885,7 +885,7 @@ function ActionsTab({
             No quick actions yet
           </h2>
           <p className="text-sm text-muted-foreground max-w-md leading-relaxed">
-            Add actions like AI prompts, external links, and ticket form
+            Add actions like AI prompts, external links, and contact form
             buttons. They appear on the widget home screen and chat view.
           </p>
         </div>

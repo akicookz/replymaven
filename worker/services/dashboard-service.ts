@@ -34,7 +34,6 @@ export class DashboardService {
         conversationsByDay: [],
         conversationsByStatus: [],
         recentConversations: [],
-        recentTickets: [],
       };
     }
 
@@ -163,10 +162,6 @@ export class DashboardService {
       conversationsByDay,
       conversationsByStatus,
       recentConversations,
-      // Tickets were removed (conversation-first "Needs You" replaced them);
-      // kept as an always-empty array so the dashboard's frontend type/shape
-      // (RecentTicket[]) doesn't need updating in this pass — see Task 11.
-      recentTickets: [] as never[],
     };
   }
 }

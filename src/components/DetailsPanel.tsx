@@ -9,7 +9,7 @@ interface DetailsPanelProps {
   stats?: { label: string; value: string | number }[];
   /** Top-level identity fields (name, email, phone) shown first */
   identity?: { label: string; value: string }[];
-  /** Key-value fields (ticket form data or custom metadata) */
+  /** Key-value fields (contact form data or custom metadata) */
   fields?: Record<string, string>;
   /** Optional section header for fields, e.g. "Custom Metadata" */
   fieldsLabel?: string;
@@ -17,6 +17,9 @@ interface DetailsPanelProps {
   systemFields?: Record<string, string>;
   /** Whether system fields are expanded by default */
   systemDefaultOpen?: boolean;
+  /** The AI's escalation summary (conversation metadata.teamRequestSummary),
+   * shown as a plain-text "Review summary" section when present. */
+  reviewSummary?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -128,12 +131,14 @@ function DetailsPanel({
   fieldsLabel,
   systemFields,
   systemDefaultOpen = false,
+  reviewSummary,
 }: DetailsPanelProps) {
   const hasStats = stats && stats.length > 0;
   const hasIdentity = identity && identity.length > 0;
   const fieldEntries = fields ? Object.entries(fields) : [];
   const hasFields = fieldEntries.length > 0;
   const hasSystem = systemFields && Object.keys(systemFields).length > 0;
+  const hasReviewSummary = typeof reviewSummary === "string" && reviewSummary.length > 0;
 
   return (
     <div className="space-y-5">
@@ -152,6 +157,20 @@ function DetailsPanel({
           {identity.map((item) => (
             <CopyCard key={item.label} label={item.label} value={item.value} />
           ))}
+        </div>
+      )}
+
+      {/* Review summary — the AI's escalation summary for the team */}
+      {hasReviewSummary && (
+        <div>
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5 px-1">
+            Review summary
+          </h4>
+          <div className="bg-muted/50 rounded-lg p-3">
+            <p className="text-sm text-foreground whitespace-pre-line">
+              {reviewSummary}
+            </p>
+          </div>
         </div>
       )}
 
