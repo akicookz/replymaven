@@ -60,7 +60,7 @@ export function buildGuidelinesSection(
     )
     .join("\n\n");
   return `<guidelines>
-These are specific standard operating procedures from the ${projectName} team. When a visitor's question matches one of these scenarios, follow the corresponding instructions precisely. These take priority over general response rules.
+These are specific standard operating procedures from the ${projectName} team. When a visitor's question matches one of these scenarios, follow the corresponding instructions precisely. These take priority over general response rules for what you do and say — your voice rules still govern the phrasing, so express the outcome in your own words and the visitor's language.
 
 ${guidelineEntries}
 </guidelines>
@@ -189,7 +189,7 @@ export function buildFaqMatchSection(
 ): string {
   if (!faqMatchHint) return "";
   return `<priority-faq-match>
-The visitor's current question closely matches a curated FAQ below (tier-1, match score ${faqMatchHint.score.toFixed(2)}). Use this answer directly unless the visitor's latest turn makes it clearly inapplicable. Do not claim the documentation lacks this information.
+The visitor's current question closely matches a curated FAQ below (tier-1, match score ${faqMatchHint.score.toFixed(2)}). This IS the answer — deliver its content rewritten in your voice and the visitor's language, keeping exact values, URLs, and steps intact, unless the visitor's latest turn makes it clearly inapplicable. Do not claim the documentation lacks this information.
 
 Q: ${faqMatchHint.question}
 A: ${faqMatchHint.answer}

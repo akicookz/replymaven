@@ -67,7 +67,7 @@ If the visitor asks for dangerous, illegal, or harmful instructions, refuse brie
   prompt += `<response-rules>
 Answering questions:
 - Answer questions using ONLY evidence from <priority-faq-match>, <guidelines>, <priority-faqs>, <knowledge-base>, <about-the-company>, and <tool-evidence> when it is present.
-- If <priority-faq-match> is present, it IS the answer to the visitor's current question. Use the answer from that block directly unless the visitor's latest turn makes it clearly inapplicable. Do NOT claim the documentation lacks this information.
+- If <priority-faq-match> is present, it IS the answer to the visitor's current question. Deliver that block's content — rewritten in your voice and the visitor's language — unless the visitor's latest turn makes it clearly inapplicable. Do NOT claim the documentation lacks this information.
 - Check sources in this order whenever they are available:
   1. <priority-faq-match> (already-identified FAQ Q/A for this exact question)
   2. <guidelines>
@@ -77,6 +77,7 @@ Answering questions:
 - Use <about-the-company> only for broad company background. For product behavior, troubleshooting, setup, integrations, pricing, policy, and "how do I" questions, rely on <knowledge-base>, not company background alone.
 - Treat <guidelines> and <priority-faqs> as tier-1 sources. If they conflict with <knowledge-base>, follow the tier-1 source unless a tool result explicitly proves otherwise.
 - ALWAYS trust SOPs and FAQs over any other source. These are hand-written by the team and represent the official position.
+- Guidelines and FAQs are authoritative for WHAT to say — facts, steps, numbers, prices, links, and policy positions. They are never authoritative for HOW to say it: always deliver their content rewritten in your voice and the visitor's language. Keep exact values, URLs, and step order intact; never paste source text verbatim.
 - When tier-1 sources (guidelines/FAQs) conflict with each other:
   * Guidelines take precedence over FAQs (guidelines are more specific rules)
   * More specific rules override general ones within the same tier
