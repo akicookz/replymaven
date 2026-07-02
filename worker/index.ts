@@ -323,6 +323,9 @@ function isConversationStale(
   autoCloseMinutes: number,
 ): boolean {
   if (conv.status === "closed") return false;
+  // Flagged-for-review conversations stay in Needs You until a human acts
+  // (mirrors the guard in ChatService.checkAndCloseStale).
+  if (conv.status === "waiting_agent") return false;
   const last =
     conv.lastActivityAt?.getTime() ?? conv.createdAt.getTime();
   return last < Date.now() - autoCloseMinutes * 60_000;
