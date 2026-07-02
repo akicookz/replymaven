@@ -28,6 +28,7 @@ import {
   fallbackRenderHandoffMessage,
   renderHandoffMessage,
 } from "../llm/render-handoff-message";
+import { renderAskUserMessage } from "../llm/render-ask-user-message";
 import { createEscalation } from "../post-turn/escalation";
 import {
   planNextAction,
@@ -476,6 +477,45 @@ async function buildRenderedHandoffMessage(options: {
       options.buildLogContext({ directiveKind: options.directive.kind }),
     );
     return fallbackRenderHandoffMessage(options.directive);
+  }
+}
+
+// Same contract as buildRenderedHandoffMessage: model errors fall back to the
+// planner's raw question so a render failure never blocks the turn.
+async function buildRenderedAskUserMessage(options: {
+  modelRuntime: ModelRuntimeState;
+  question: string;
+  settings: Pick<
+    SupportPromptSettings,
+    "toneOfVoice" | "customTonePrompt" | "botName"
+  >;
+  projectName: string;
+  conversationHistory: ConversationTurnMessage[];
+  buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
+}): Promise<string> {
+  try {
+    return await runWithModelFallback({
+      runtime: options.modelRuntime,
+      stage: "render_ask_user_message",
+      logContext: options.buildLogContext(),
+      operation: async (activeConfig) =>
+        renderAskUserMessage(
+          createLanguageModel(activeConfig),
+          {
+            question: options.question,
+            settings: options.settings,
+            projectName: options.projectName,
+            conversationHistory: options.conversationHistory,
+          },
+          { throwOnModelError: true },
+        ),
+    });
+  } catch {
+    logWarn(
+      "widget_turn.render_ask_user_message_fallback_used",
+      options.buildLogContext(),
+    );
+    return options.question;
   }
 }
 
@@ -1366,19 +1406,33 @@ export async function runPlannerLoop(
     if (nextAction.type === "ask_user") {
       loopState.missingInputs = [];
       loopState.awaitingContactFields = [];
+      // The action history keeps the planner's original wording so later
+      // steps can cross-check their own question; the visitor sees the
+      // voice-rendered version.
       pushActionHistory(loopState, {
         type: "ask_user",
         reason: nextAction.reason,
         outcome: "completed",
         note: nextAction.question,
       });
-      loopState.finalDraft = nextAction.question;
+      const renderedQuestion = await buildRenderedAskUserMessage({
+        modelRuntime: options.modelRuntime,
+        question: nextAction.question,
+        settings: options.settings,
+        projectName: options.project.name,
+        conversationHistory: withCurrentTurn(
+          options.conversationHistory,
+          options.currentMessage,
+        ),
+        buildLogContext: options.buildLogContext,
+      });
+      loopState.finalDraft = renderedQuestion;
       loopState.terminationReason = nextAction.reason;
       emitSseEvent(options.controller, options.encoder, {
-        finalText: nextAction.question,
+        finalText: renderedQuestion,
       });
       return {
-        fullResponse: nextAction.question,
+        fullResponse: renderedQuestion,
         retrieval: loopState.docsEvidence,
         hadToolCalls,
         lastToolOutput,
