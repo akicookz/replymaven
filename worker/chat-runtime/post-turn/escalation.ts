@@ -4,6 +4,7 @@ import { type ProjectService } from "../../services/project-service";
 import { type TelegramService } from "../../services/telegram-service";
 import { type MessageRow } from "../../db";
 import { logError, logInfo } from "../../observability";
+import { buildConversationDeepLink } from "../../lib/deep-links";
 
 export function parseTelegramThreadId(
   value: string | null | undefined,
@@ -123,10 +124,12 @@ export async function createEscalation(params: {
     summaryMessageId: summaryMessageId ?? null,
   });
 
-  const conversationUrl =
-    `${params.env.BETTER_AUTH_URL}/app/projects/${params.project.id}/conversations` +
-    `?filter=needs-you&id=${params.conversation.id}` +
-    (summaryMessageId ? `&msg=${summaryMessageId}` : "");
+  const conversationUrl = buildConversationDeepLink(
+    params.env.BETTER_AUTH_URL,
+    params.project.id,
+    params.conversation.id,
+    summaryMessageId,
+  );
 
   const isUpdate = !created;
 

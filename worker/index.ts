@@ -70,6 +70,7 @@ import { composeAgentDraft } from "./chat-runtime/llm/compose-agent-draft";
 import { logError, logInfo, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
+import { buildConversationDeepLink } from "./lib/deep-links";
 import {
   broadcastClosed,
   broadcastMessageDeleted,
@@ -1083,6 +1084,20 @@ const app = new Hono<HonoAppContext>()
       visitorEmail,
     );
 
+    // Stamp a short preview of this submission so needs-review pings (which read
+    // `teamRequestSummary` from conversation metadata) render context, mirroring
+    // escalation.ts. `updateConversation` merges against the stored row, so
+    // existing keys (source/country/…) are preserved. We deliberately do NOT set
+    // `escalatedAt`: that key drives escalation.ts's emit-once dedupe, so setting
+    // it here would suppress the review_summary post + first-escalation Telegram/
+    // email if the bot later escalates this same conversation.
+    conversation =
+      (await chatService.updateConversation(conversation.id, project.id, {
+        metadata: JSON.stringify({
+          teamRequestSummary: formMessage.slice(0, 300),
+        }),
+      })) ?? conversation;
+
     const formVisitorMessage = await chatService.addMessage({
       conversationId: conversation.id,
       role: "visitor",
@@ -1133,7 +1148,11 @@ const app = new Hono<HonoAppContext>()
                 visitorName: conversation.visitorName,
                 visitorEmail: conversation.visitorEmail,
                 summary: formMessage,
-                conversationUrl: `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations?filter=needs-you&id=${conversation.id}`,
+                conversationUrl: buildConversationDeepLink(
+                  c.env.BETTER_AUTH_URL,
+                  project.id,
+                  conversation.id,
+                ),
                 isUpdate: false,
               },
             )
@@ -1143,13 +1162,21 @@ const app = new Hono<HonoAppContext>()
       );
     }
 
-    // Notify project owner via email
-    if (c.env.RESEND_API_KEY) {
+    // Notify project owner via email — first touch only. A repeat submission on
+    // a conversation already with the team reaches them via the Telegram forward
+    // above and shows up in the inbox, so re-sending the full "Needs human
+    // review" escalation email on every submission would just be noise. Mirrors
+    // the Telegram branch's wasAlreadyWithTeam fork.
+    if (!wasAlreadyWithTeam && c.env.RESEND_API_KEY) {
       const emailService = new EmailService(c.env.RESEND_API_KEY);
       const ownerEmail = await projectService.getOwnerEmail(project.id);
       if (ownerEmail) {
         const projectName = settings?.companyName ?? project.name;
-        const conversationUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations?filter=needs-you&id=${conversation.id}`;
+        const conversationUrl = buildConversationDeepLink(
+          c.env.BETTER_AUTH_URL,
+          project.id,
+          conversation.id,
+        );
         c.executionCtx.waitUntil(
           emailService
             .sendEscalationNotification({

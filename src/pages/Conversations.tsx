@@ -139,23 +139,42 @@ function Conversations() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConvo]);
 
-  // One-shot deep-link target from ?msg= (Telegram/email/ping links). Captured
-  // once on mount and cleared from the URL immediately so refreshes don't
-  // re-pulse. highlightConvRef snapshots the ?id= this ?msg= targeted so the
-  // clear effect below only fires when the agent navigates AWAY from that
-  // conversation — a naive unconditional clear on [selectedConvo] would also
-  // run on mount and wipe the highlight before the target ever rendered.
+  // One-shot deep-link target from ?msg= (Telegram/email/ping links). Cleared
+  // from the URL immediately so refreshes don't re-pulse. highlightConvRef
+  // snapshots the ?id= this ?msg= targeted so the clear effect below only fires
+  // when the agent navigates AWAY from that conversation — a naive unconditional
+  // clear on [selectedConvo] would also run on mount and wipe the highlight
+  // before the target ever rendered.
   const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
   const highlightConvRef = useRef<string | null>(searchParams.get("id"));
+
+  // URL → state adoption. React Router keeps this route element MOUNTED across
+  // same-route navigations (sidebar filters, dashboard rows, the ping toast's
+  // "View"), so a navigate() that changes ?id=/?msg= only mutates searchParams
+  // — it does NOT re-run the useState initializers. This effect is what turns
+  // those in-place navigations into an actual selection + ?msg= consumption,
+  // and it also covers the very first mount (fresh deep link) so both paths run
+  // through one code path. It converges with the state→URL sync effect above:
+  // once we adopt ?id= into selectedConvo, that effect sees the URL already
+  // matches and no-ops; once ?msg= is stripped this effect re-runs to a no-op —
+  // no loop. Keyed on searchParams ONLY (not selectedConvo) so a plain row
+  // click isn't reverted by a stale URL id before the sync effect catches up.
   useEffect(() => {
-    const msg = searchParams.get("msg");
-    if (!msg) return;
-    setHighlightMsgId(msg);
-    const next = new URLSearchParams(searchParams);
-    next.delete("msg");
-    setSearchParams(next, { replace: true });
+    const urlId = searchParams.get("id");
+    const urlMsg = searchParams.get("msg");
+    if (urlId && urlId !== selectedConvo) setSelectedConvo(urlId);
+    if (urlMsg) {
+      setHighlightMsgId(urlMsg);
+      // Anchor the highlight to the conversation the URL targeted so the
+      // clear-on-switch effect only fires when the agent navigates AWAY.
+      highlightConvRef.current = urlId;
+      const next = new URLSearchParams(searchParams);
+      next.delete("msg");
+      setSearchParams(next, { replace: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams]);
+
   useEffect(() => {
     if (selectedConvo !== highlightConvRef.current) setHighlightMsgId(null);
   }, [selectedConvo]);
@@ -190,13 +209,20 @@ function Conversations() {
   // to split view whenever the filter changes, so the new view starts clean
   // (no stale thread in the reading pane, no lingering focus mode). The mount
   // run is skipped via the ref so deep links (?filter=…&id=…) still open.
+  //
+  // But a filter change can arrive TOGETHER with an explicit selection: the ping
+  // toast and dashboard rows navigate to `?filter=…&id=…` in one shot. Bail out
+  // when the incoming URL carries an ?id= so we don't clear the very
+  // conversation the adoption effect is about to open; a bare filter change
+  // (sidebar click, no id) still resets to a clean split view.
   const prevFilterRef = useRef(filter);
   useEffect(() => {
     if (prevFilterRef.current === filter) return;
     prevFilterRef.current = filter;
+    if (searchParams.get("id")) return;
     setSelectedConvo(null);
     setView("split");
-  }, [filter]);
+  }, [filter, searchParams]);
 
   // Load the per-project read overlay from localStorage (writes happen in
   // handleMarkAllRead so the initial empty state can't clobber a stored value).

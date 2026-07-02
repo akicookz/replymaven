@@ -874,6 +874,34 @@ export async function handleWidgetMessageTurn(
         );
       }
 
+      // Task 3 guard fallout: on an escalated / waiting_agent conversation the
+      // model can emit ONLY [RESOLVED], which strips to empty text AND has its
+      // resolved-close branch suppressed above (flaggedForReview). Persisting +
+      // streaming that empty response would paint a blank bubble in the widget
+      // and a blank row in the inbox. A human is already handling the thread, so
+      // the bot has nothing to add — skip the empty message entirely (no message
+      // beats an empty bubble) while still emitting `done` so the widget
+      // finalizes, and still persisting chat state.
+      if (!fullResponse.trim()) {
+        logInfo(
+          "widget_turn.empty_bot_message_skipped",
+          buildWidgetTurnLogContext(context, turnId, { flaggedForReview }),
+        );
+        emitSseEvent(controller, encoder, { done: true });
+        context.executionCtx.waitUntil(
+          chatService
+            .saveChatState(context.conversationId, context.project.id, chatState)
+            .catch((err) => {
+              logError(
+                "widget_turn.save_chat_state_failed",
+                err,
+                buildWidgetTurnLogContext(context, turnId),
+              );
+            }),
+        );
+        return;
+      }
+
       currentStage = "save_bot_message";
       const botMessage = await chatService.addMessage({
         conversationId: context.conversationId,

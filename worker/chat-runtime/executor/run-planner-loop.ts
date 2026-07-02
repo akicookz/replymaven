@@ -1185,12 +1185,17 @@ export async function runPlannerLoop(
             RESEND_API_KEY: options.env.RESEND_API_KEY,
           },
           executionCtx: options.executionCtx,
+          // The review_summary is an internal agent brief. Scope its broadcast
+          // to dashboard (agent) sockets so it never crosses the visitor's
+          // widget WebSocket — same audience gate the read-receipt broadcast
+          // uses (see worker/realtime/broadcast.ts).
           broadcast: (row) =>
             broadcastMessageNew(
               options.env,
               options.executionCtx,
               options.conversation.id,
               row,
+              { audience: "agents" },
             ),
         });
       } catch (error) {
