@@ -141,15 +141,24 @@ export default function ReadingPane({
 
   // Deep-link (?msg=): scroll the target message into view once it's
   // rendered. Placed after the auto-pin effect above (and keyed on
-  // messages.length, not just highlightMessageId) so this scroll wins once
-  // the target conversation's messages have actually landed.
+  // messages.length) so this scroll wins once the target conversation's
+  // messages have actually landed. The scroll is one-shot per conversation
+  // view: scrolledForRef records the conversation it fired for, and is only
+  // set AFTER the target element is found — so the effect retries while
+  // messages are still loading, but later length bumps (optimistic sends,
+  // live visitor messages) can't yank the view back up to the summary while
+  // the highlight styling is still active.
+  const scrolledForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!highlightMessageId) return;
+    if (scrolledForRef.current === conversation.id) return;
     const el = scrollRef.current?.querySelector(
       `[data-msg-id="${highlightMessageId}"]`,
     );
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [highlightMessageId, messages.length]);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    scrolledForRef.current = conversation.id;
+  }, [highlightMessageId, messages.length, conversation.id]);
 
   // Desktop inline search: cycle through matches.
   function stepMatch(delta: number) {

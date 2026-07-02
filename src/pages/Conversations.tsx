@@ -142,9 +142,9 @@ function Conversations() {
   // One-shot deep-link target from ?msg= (Telegram/email/ping links). Captured
   // once on mount and cleared from the URL immediately so refreshes don't
   // re-pulse. highlightConvRef snapshots the ?id= this ?msg= targeted so the
-  // highlight survives that conversation's first render (the ?id= sync effect
-  // above can race it) and is only cleared once the agent navigates AWAY from
-  // that conversation — not on the mount render that opens it.
+  // clear effect below only fires when the agent navigates AWAY from that
+  // conversation — a naive unconditional clear on [selectedConvo] would also
+  // run on mount and wipe the highlight before the target ever rendered.
   const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
   const highlightConvRef = useRef<string | null>(searchParams.get("id"));
   useEffect(() => {
