@@ -51,7 +51,6 @@ import {
   stripInternalTokensStreaming,
 } from "../streaming/internal-tokens";
 import { streamSupportAgent } from "../agents/support-agent";
-import { stripTrailingSolicitedFollowUp } from "./strip-trailing-solicited-follow-up";
 import { executeHttpTool } from "../tools/http-tool-executor";
 import { withCurrentTurn } from "../orchestration/normalize-history";
 import {
@@ -655,16 +654,6 @@ async function executeCompose(options: {
     });
   }
 
-
-  if (!detectedInternalTokens.includes("[RESOLVED]")) {
-    const strippedResponse = stripTrailingSolicitedFollowUp(fullResponse);
-    if (strippedResponse !== fullResponse.trim()) {
-      fullResponse = strippedResponse;
-      emitSseEvent(options.controller, options.encoder, {
-        finalText: fullResponse,
-      });
-    }
-  }
 
   return {
     fullResponse,
