@@ -14,11 +14,8 @@ import { createAuth } from "./auth";
 import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
 import { WidgetService } from "./services/widget-service";
-import {
-  TicketService,
-  buildTicketTitle,
-  parseTicketData,
-} from "./services/ticket-service";
+import { TicketService, parseTicketData } from "./services/ticket-service";
+import { ContactFormService } from "./services/contact-form-service";
 import { ChatService, type InboxFilter } from "./services/chat-service";
 import { ResourceService, type FaqPair } from "./services/resource-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
@@ -120,7 +117,7 @@ import {
   updateVisitorEmailSchema,
   updateConversationPublicSchema,
   updateTicketConfigSchema,
-  submitTicketSchema,
+  submitContactFormSchema,
   updateTicketSchema,
   bulkUpdateTicketStatusSchema,
   ticketListQuerySchema,
@@ -338,25 +335,11 @@ function isConversationStale(
   return last < Date.now() - autoCloseMinutes * 60_000;
 }
 
-function buildTicketConversationMessage(
-  formData: Record<string, string>,
-): string {
-  const lines = ["Ticket submission"];
-
-  for (const [key, value] of Object.entries(formData)) {
-    const trimmedValue = value.trim();
-    if (!trimmedValue) continue;
-    lines.push(`${key}: ${trimmedValue}`);
-  }
-
-  return lines.join("\n");
-}
-
 function isLikelyEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-function extractTicketEmail(formData: Record<string, string>): string | null {
+function extractFormEmail(formData: Record<string, string>): string | null {
   for (const [key, value] of Object.entries(formData)) {
     if (!/email/i.test(key)) continue;
     if (isLikelyEmail(value)) return value.trim();
@@ -365,7 +348,7 @@ function extractTicketEmail(formData: Record<string, string>): string | null {
   return null;
 }
 
-function extractTicketName(formData: Record<string, string>): string | null {
+function extractFormName(formData: Record<string, string>): string | null {
   for (const [key, value] of Object.entries(formData)) {
     const normalizedKey = key.trim().toLowerCase();
     if (normalizedKey.includes("company")) continue;
@@ -379,22 +362,33 @@ function extractTicketName(formData: Record<string, string>): string | null {
   return null;
 }
 
-function buildTicketRecord(
+// Contact-form submissions become the visitor's first message in the
+// conversation thread — enrich with name/email lines (mirrors what
+// buildTicketRecord used to persist onto the now-removed ticket row) so the
+// team still sees them even when the form itself didn't collect them.
+function buildContactFormMessage(
   formData: Record<string, string>,
   visitorName: string | null,
   visitorEmail: string | null,
-): Record<string, string> {
+): string {
   const enrichedData = { ...formData };
 
-  if (visitorName && !extractTicketName(enrichedData)) {
+  if (visitorName && !extractFormName(enrichedData)) {
     enrichedData["Visitor name"] = visitorName;
   }
 
-  if (visitorEmail && !extractTicketEmail(enrichedData)) {
+  if (visitorEmail && !extractFormEmail(enrichedData)) {
     enrichedData["Visitor email"] = visitorEmail;
   }
 
-  return enrichedData;
+  const lines = ["Contact form submission"];
+  for (const [key, value] of Object.entries(enrichedData)) {
+    const trimmedValue = value.trim();
+    if (!trimmedValue) continue;
+    lines.push(`${key}: ${trimmedValue}`);
+  }
+
+  return lines.join("\n");
 }
 
 
@@ -1004,9 +998,11 @@ const app = new Hono<HonoAppContext>()
     return c.json(updated);
   })
 
-  // ─── Ticket Submit (public) ───────────────────────────────────────────────
+  // ─── Contact Form Submit (public) ────────────────────────────────────────
   // Mounted on both /inquiries (legacy back-compat for installed widgets) and
-  // /tickets (new canonical path). Same handler.
+  // /tickets (new canonical path). Same handler. Submissions no longer create
+  // ticket rows — they post a visitor message and put the conversation into
+  // Needs You, same as any other escalation.
   .on(
     "POST",
     [
@@ -1027,34 +1023,23 @@ const app = new Hono<HonoAppContext>()
     if (!project) return c.json({ error: "Project not found" }, 404);
 
     const body = await c.req.json();
-    const parsed = validate(submitTicketSchema, body);
+    const parsed = validate(submitContactFormSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-    const widgetService = new WidgetService(db);
-    const ticketService = new TicketService(db);
+    const contactFormService = new ContactFormService(db);
     const chatService = new ChatService(db);
 
-    // Verify ticket form is enabled
-    const formConfig = await ticketService.getConfig(project.id);
+    // Verify contact form is enabled
+    const formConfig = await contactFormService.getConfig(project.id);
     if (!formConfig?.enabled) {
       return c.json({ error: "Ticket form is not enabled" }, 400);
     }
 
     const visitorId = parsed.data.visitorId ?? crypto.randomUUID();
     const visitorEmail =
-      parsed.data.visitorEmail ?? extractTicketEmail(parsed.data.data);
+      parsed.data.visitorEmail ?? extractFormEmail(parsed.data.data);
     const visitorName =
-      parsed.data.visitorName ?? extractTicketName(parsed.data.data);
-    const ticketData = buildTicketRecord(
-      parsed.data.data,
-      visitorName,
-      visitorEmail,
-    );
-    const ticketTitle = buildTicketTitle({
-      visitorName,
-      visitorEmail,
-      visitorId,
-    });
+      parsed.data.visitorName ?? extractFormName(parsed.data.data);
 
     let conversation = await chatService.getActiveConversationByVisitor(
       project.id,
@@ -1095,20 +1080,16 @@ const app = new Hono<HonoAppContext>()
       });
     }
 
-    const submission = await ticketService.createTicket({
-      projectId: project.id,
-      conversationId: conversation.id,
-      visitorId,
-      title: ticketTitle,
-      data: ticketData,
-    });
+    const formMessage = buildContactFormMessage(
+      parsed.data.data,
+      visitorName,
+      visitorEmail,
+    );
 
-    const ticketMessage = buildTicketConversationMessage(ticketData);
-
-    const ticketVisitorMessage = await chatService.addMessage({
+    const formVisitorMessage = await chatService.addMessage({
       conversationId: conversation.id,
       role: "visitor",
-      content: ticketMessage,
+      content: formMessage,
       imageUrl: null,
       sources: null,
     });
@@ -1116,25 +1097,33 @@ const app = new Hono<HonoAppContext>()
       c.env,
       c.executionCtx,
       conversation.id,
-      ticketVisitorMessage,
+      formVisitorMessage,
     );
+
+    // Contact-form submissions are a direct line to the team → Needs You.
+    const wasAlreadyWithTeam =
+      conversation.status === "waiting_agent" ||
+      conversation.status === "agent_replied";
+    if (conversation.status !== "waiting_agent") {
+      await chatService.updateConversationStatus(
+        conversation.id,
+        project.id,
+        "waiting_agent",
+      );
+      broadcastStatusChange(c.env, c.executionCtx, conversation.id, "waiting_agent");
+    }
 
     // Notify via Telegram if configured
     const settings = await projectService.getSettings(project.id);
-    if (
-      submission.created &&
-      settings?.telegramBotToken &&
-      settings?.telegramChatId
-    ) {
+    if (settings?.telegramBotToken && settings?.telegramChatId) {
       const telegramService = new TelegramService(db);
       c.executionCtx.waitUntil(
-        (conversation.status === "waiting_agent" ||
-        conversation.status === "agent_replied"
+        (wasAlreadyWithTeam
           ? telegramService.forwardVisitorMessage(
               settings.telegramBotToken,
               settings.telegramChatId,
               conversation.visitorName,
-              ticketMessage,
+              formMessage,
               conversation.id,
               conversation.telegramThreadId
                 ? parseInt(conversation.telegramThreadId, 10)
@@ -1146,7 +1135,7 @@ const app = new Hono<HonoAppContext>()
               {
                 visitorName: conversation.visitorName,
                 visitorEmail: conversation.visitorEmail,
-                summary: ticketMessage,
+                summary: formMessage,
                 conversationUrl: `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations?filter=needs-you&id=${conversation.id}`,
                 isUpdate: false,
               },
@@ -1158,13 +1147,12 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Notify project owner via email
-    if (submission.created && c.env.RESEND_API_KEY) {
+    if (c.env.RESEND_API_KEY) {
       const emailService = new EmailService(c.env.RESEND_API_KEY);
       const ownerEmail = await projectService.getOwnerEmail(project.id);
       if (ownerEmail) {
         const projectName = settings?.companyName ?? project.name;
         const conversationUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations?filter=needs-you&id=${conversation.id}`;
-        const widgetCfg = await widgetService.getWidgetConfig(project.id);
         c.executionCtx.waitUntil(
           emailService
             .sendEscalationNotification({
@@ -1173,9 +1161,9 @@ const app = new Hono<HonoAppContext>()
               visitorName,
               visitorEmail,
               visitorId,
-              summary: ticketMessage,
+              summary: formMessage,
               conversationUrl,
-              accentColor: widgetCfg?.primaryColor ?? null,
+              accentColor: null,
             })
             .catch((err) => {
               console.error("Escalation notification email failed:", err);
@@ -1186,12 +1174,12 @@ const app = new Hono<HonoAppContext>()
 
     return c.json(
       {
-        ...submission.ticket,
-        created: submission.created,
+        id: conversation.id,
+        created: true,
         conversationId: conversation.id,
-        conversationStatus: conversation.status,
-        visitorEmail,
-        visitorName,
+        conversationStatus: "waiting_agent",
+        visitorEmail: visitorEmail ?? null,
+        visitorName: visitorName ?? null,
       },
       201,
     );
@@ -4431,8 +4419,8 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const ticketService = new TicketService(db);
-    const config = await ticketService.getConfig(project.id);
+    const contactFormService = new ContactFormService(db);
+    const config = await contactFormService.getConfig(project.id);
     if (!config) {
       return c.json({
         enabled: false,
@@ -4461,8 +4449,11 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const ticketService = new TicketService(db);
-    const config = await ticketService.upsertConfig(project.id, parsed.data);
+    const contactFormService = new ContactFormService(db);
+    const config = await contactFormService.upsertConfig(
+      project.id,
+      parsed.data,
+    );
     return c.json({
       enabled: config.enabled,
       description: config.description,

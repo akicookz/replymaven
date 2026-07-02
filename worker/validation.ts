@@ -420,7 +420,7 @@ export const updateTicketConfigSchema = z.object({
     .optional(),
 });
 
-export const submitTicketSchema = z.object({
+export const submitContactFormSchema = z.object({
   visitorId: z.string().min(1).max(100).optional(),
   visitorName: z.string().max(100).optional(),
   visitorEmail: z.string().email().optional(),
