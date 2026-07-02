@@ -3,6 +3,7 @@ import {
   buildClassifySupportTurnPrompt,
   buildExtractContactInfoPrompt,
   buildReformulateQueryPrompt,
+  buildSummarizeTeamRequestPrompt,
 } from "./support-prompt-builders";
 
 describe("support prompt builders", () => {
@@ -36,5 +37,20 @@ describe("support prompt builders", () => {
 
     expect(prompt).toContain("Extract only contact details the visitor explicitly shared");
     expect(prompt).toContain('return "unknown"');
+  });
+
+  test("team request summary prompt asks for a sectioned agent brief", () => {
+    const prompt = buildSummarizeTeamRequestPrompt({
+      transcript: "visitor: my order #1234 hasn't arrived",
+    });
+
+    expect(prompt).toContain("Inquiry:");
+    expect(prompt).toContain("Details:");
+    expect(prompt).toContain("Already tried:");
+    expect(prompt).toContain("Contact:");
+    expect(prompt).toContain("otherwise \"not provided\"");
+    expect(prompt).toContain("Maximum 120 words.");
+    expect(prompt).toContain("never invent details not present in the transcript");
+    expect(prompt).toContain("visitor: my order #1234 hasn't arrived");
   });
 });

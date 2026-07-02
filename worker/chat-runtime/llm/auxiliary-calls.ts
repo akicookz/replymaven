@@ -445,7 +445,7 @@ export async function summarizeTeamRequest(
       model,
       prompt: buildSummarizeTeamRequestPrompt({ transcript }),
       temperature: 0.2,
-      maxOutputTokens: 256,
+      maxOutputTokens: 320,
     });
 
     return text.trim();

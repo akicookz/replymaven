@@ -131,22 +131,17 @@ SUMMARY:`;
 export function buildSummarizeTeamRequestPrompt(
   options: PromptBlockOptions,
 ): string {
-  return `Summarize this support conversation for an internal team follow-up request created by the runtime.
+  return `You are preparing a human support agent to take over a conversation.
 
 CONVERSATION:
 ${options.transcript}
 
-Write a short factual summary that covers:
-- what the visitor is trying to do
-- what is not working or still unclear
-- any concrete details already shared
-- what the team should investigate or respond with
-
-Rules:
-- Keep it under 700 characters
-- Do not invent details
-- Do not use markdown headings
-- Write in plain text for an internal support note`;
+From the transcript, write a detailed brief with these sections (plain text, one line each, omit a line only if truly unknown):
+Inquiry: what the visitor wants, in one or two sentences.
+Details: key specifics they provided — account/order/product identifiers, URLs, error messages, plan names, amounts.
+Already tried: what the assistant already answered or attempted, and why it wasn't enough.
+Contact: the visitor's name and email if given, otherwise "not provided".
+Write in English. Be factual — never invent details not present in the transcript. Maximum 120 words.`;
 }
 
 export function buildExtractContactInfoPrompt(
