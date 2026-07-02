@@ -38,6 +38,7 @@ import {
   getQuerySemanticGroup,
   normalizeQuery
 } from "../planner/query-deduplication";
+import { detectSmallTalk } from "../planner/small-talk";
 import { buildRetrievalQueries } from "../retrieval/build-retrieval-queries";
 import { getSourceReferenceDedupKey } from "../retrieval/build-rag-context";
 import { runAiSearch, type RetrievalResult } from "../retrieval/run-ai-search";
@@ -710,6 +711,17 @@ export async function runPlannerLoop(
       loopState.toolEvidence.length === 0 &&
       !loopState.handoffRequested;
 
+    // Pure greetings / resolution signals skip the planner LLM entirely —
+    // but never while a handoff or contact-collection flow is mid-flight
+    // ("thanks" while awaiting contact fields must reach the planner).
+    const smallTalkKind =
+      loopState.stepCount === 0 &&
+      !loopState.handoffRequested &&
+      !loopState.awaitingHandoffConfirmation &&
+      loopState.awaitingContactFields.length === 0
+        ? detectSmallTalk(options.currentMessage)
+        : null;
+
     // High-confidence FAQ match → skip planner + retrieval entirely on the
     // first step. The answer is already in hand and any further search just
     // adds noise and latency.
@@ -721,7 +733,24 @@ export async function runPlannerLoop(
 
     let plannerDecision;
     const plannerStepStart = Date.now();
-    if (shouldFaqFastPath) {
+    if (smallTalkKind) {
+      plannerDecision = {
+        goal: loopState.goal,
+        intent: "smalltalk" as const,
+        nextAction: {
+          type: "compose" as const,
+          reason:
+            smallTalkKind === "greeting"
+              ? "Greeting; respond directly."
+              : "Resolution signal; close politely.",
+          composeKind: smallTalkKind,
+        },
+      };
+      logInfo(
+        "widget_turn.plan_next_action_small_talk_fast_path",
+        options.buildLogContext({ smallTalkKind }),
+      );
+    } else if (shouldFaqFastPath) {
       plannerDecision = {
         goal: loopState.goal,
         nextAction: {

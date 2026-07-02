@@ -13,6 +13,7 @@ import {
 import {
   isDuplicateQuery,
 } from "./query-deduplication";
+import { detectSmallTalk } from "./small-talk";
 
 interface ToolParameterDefinition {
   name: string;
@@ -685,6 +686,22 @@ export function fallbackPlanNextAction(options: {
   state: PlannerLoopState;
   maxSteps: number;
 }): PlannerDecision {
+  const smallTalk = detectSmallTalk(options.currentMessage);
+  if (smallTalk) {
+    return {
+      goal: options.state.goal,
+      intent: "smalltalk",
+      nextAction: {
+        type: "compose",
+        reason:
+          smallTalk === "greeting"
+            ? "Greeting; respond directly without evidence."
+            : "Resolution signal; close politely.",
+        composeKind: smallTalk,
+      },
+    };
+  }
+
   if (options.state.stepCount >= options.maxSteps) {
     return {
       goal: options.state.goal,
@@ -938,7 +955,9 @@ export function sanitizePlannerDecision(
   }
 
   if (nextAction.type === "compose") {
+    const composeKind = nextAction.composeKind ?? "grounded";
     if (
+      composeKind === "grounded" &&
       !options.state.docsEvidence.ragContext.trim() &&
       options.state.toolEvidence.length === 0
     ) {
@@ -947,11 +966,9 @@ export function sanitizePlannerDecision(
           goal: nextGoal,
           nextAction: {
             type: "search_docs",
-            reason: "Compose is not allowed before any evidence is gathered.",
-            query:
-              options.turnPlan.retrievalQueries[0] ??
-              options.currentMessage,
-            broaderQueries: options.turnPlan.broaderQueries.slice(0, 2),
+            reason: "A grounded answer needs evidence; search the docs first.",
+            query: options.currentMessage,
+            broaderQueries: [],
           },
         };
       }
@@ -960,7 +977,8 @@ export function sanitizePlannerDecision(
         goal: nextGoal,
         nextAction: {
           ...nextAction,
-          reason: "No evidence was found in the knowledge base; compose a response acknowledging that.",
+          reason:
+            "No evidence was found in the knowledge base; compose a response acknowledging that.",
         },
       };
     }
@@ -1053,6 +1071,20 @@ export function sanitizePlannerDecision(
   }
 
   if (nextAction.type === "ask_user") {
+    const alreadyAskedThisTurn = options.state.actionHistory.some(
+      (entry) => entry.type === "ask_user",
+    );
+    if (alreadyAskedThisTurn || options.state.clarificationAttempts >= 2) {
+      return {
+        goal: nextGoal,
+        nextAction: {
+          type: "offer_handoff",
+          reason:
+            "Clarification limit reached; offer human follow-up instead of asking again.",
+        },
+      };
+    }
+
     return {
       goal: nextGoal,
       nextAction: {

@@ -645,3 +645,94 @@ describe("recoverPlannerDecisionFromText", () => {
     expect(recovered?.composeKind).toBe("greeting");
   });
 });
+
+describe("sanitizePlannerDecision invariants (Task 3)", () => {
+  test("sanitize lets a declared greeting compose through with no evidence", () => {
+    const decision: PlannerDecision = {
+      goal: "Greet the visitor",
+      intent: "smalltalk",
+      nextAction: { type: "compose", reason: "Greeting", composeKind: "greeting" },
+    };
+    const sanitized = sanitizePlannerDecision({
+      decision,
+      conversationHistory: [],
+      currentMessage: "hi",
+      turnPlan: createTurnPlan(),
+      availableTools: [],
+      state: createState(),
+      maxSteps: 8,
+    });
+    expect(sanitized.nextAction.type).toBe("compose");
+  });
+
+  test("sanitize still forces search for grounded compose without evidence", () => {
+    const decision: PlannerDecision = {
+      goal: "Answer",
+      nextAction: { type: "compose", reason: "Answer now", composeKind: "grounded" },
+    };
+    const sanitized = sanitizePlannerDecision({
+      decision,
+      conversationHistory: [],
+      currentMessage: "how do I embed the widget?",
+      turnPlan: createTurnPlan(),
+      availableTools: [],
+      state: createState(),
+      maxSteps: 8,
+    });
+    expect(sanitized.nextAction.type).toBe("search_docs");
+  });
+
+  test("sanitize blocks a second ask_user in the same turn", () => {
+    const state = createState();
+    state.actionHistory.push({
+      type: "ask_user",
+      reason: "asked already",
+      outcome: "completed",
+      note: "Which page?",
+    });
+    const sanitized = sanitizePlannerDecision({
+      decision: {
+        goal: "Clarify",
+        nextAction: { type: "ask_user", reason: "still unclear", question: "Which browser?" },
+      },
+      conversationHistory: [],
+      currentMessage: "it is broken",
+      turnPlan: createTurnPlan(),
+      availableTools: [],
+      state,
+      maxSteps: 8,
+    });
+    expect(sanitized.nextAction.type).toBe("offer_handoff");
+  });
+
+  test("sanitize blocks ask_user after two clarify turns in the conversation", () => {
+    const state = createState();
+    state.clarificationAttempts = 2;
+    const sanitized = sanitizePlannerDecision({
+      decision: {
+        goal: "Clarify",
+        nextAction: { type: "ask_user", reason: "unclear", question: "Which page?" },
+      },
+      conversationHistory: [],
+      currentMessage: "it is broken",
+      turnPlan: createTurnPlan(),
+      availableTools: [],
+      state,
+      maxSteps: 8,
+    });
+    expect(sanitized.nextAction.type).toBe("offer_handoff");
+  });
+
+  test("fallback planner composes greetings without retrieval", () => {
+    const decision = fallbackPlanNextAction({
+      conversationHistory: [],
+      currentMessage: "hi",
+      turnPlan: createTurnPlan(),
+      availableTools: [],
+      state: createState(),
+      maxSteps: 8,
+    });
+    expect(decision.nextAction.type).toBe("compose");
+    expect(decision.intent).toBe("smalltalk");
+  });
+});
