@@ -19,6 +19,7 @@ import {
   findBestFaqMatch,
   getOrBuildCompiledFaqContext,
 } from "../prompt/build-compiled-faq-context";
+import { withCurrentTurn } from "./normalize-history";
 
 interface FaqLikeResource {
   id: string;
@@ -100,7 +101,7 @@ export async function prepareTurnRouting(
       operation: async (cfg) =>
         summarizeConversation(
           createLanguageModel(cfg),
-          input.conversationHistory,
+          withCurrentTurn(input.conversationHistory, input.currentMessage),
           { throwOnModelError: true },
         ),
     }).catch(() => null),
