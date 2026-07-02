@@ -14,55 +14,6 @@ interface ReformulateSearchQueriesPromptOptions {
   pageContextBlock?: string;
 }
 
-export function buildClassifySupportTurnPrompt(
-  options: PromptBlockOptions,
-): string {
-  return `Classify the next support-chat turn and provide retrieval hints for the orchestrator.
-
-Conversation:
-${options.transcript || "No prior conversation"}
-
-Latest user message:
-${options.currentMessage ?? ""}
-
-Page context:
-${options.pageContextBlock ?? "None"}
-
-You must produce:
-- intent:
-  - how_to: asks how to perform, set up, configure, or use something
-  - troubleshoot: reports something broken, failing, or not working
-  - lookup: needs account-specific data, status, or a backend lookup/action
-  - policy: asks about plans, pricing, billing, limits, refund, security, or policy
-  - clarify: too ambiguous to act on confidently yet
-  - handoff: explicitly wants a human or support team handoff
-- summary: one short line describing the handling posture
-- retrievalQueries: focused documentation searches that would help if docs should be consulted
-- broaderQueries: broader second-pass documentation searches if focused docs miss
-- followUpQuestion: one focused question to ask when the request remains underspecified
-
-Important context assessment:
-- Consider the business context when determining if a message has enough detail
-- A message is NOT vague just because it's short - assess whether it provides enough context for the specific business domain
-- Consider industry-specific terminology and concepts when evaluating clarity
-- If the user mentions specific items, features, or issues relevant to their context, treat it as actionable
-
-Rules:
-- Do not invent product-specific features or terminology.
-- Assess message completeness based on what would be reasonable for the business context
-- A message mentioning specific business elements (products, services, features) has sufficient context
-- Only mark as "clarify" if genuinely ambiguous for any business context
-- Retrieval hints are only hints. Do not use them to decide tool policy or runtime escalation state.
-- Questions like "how do I check if X is working?" or "how can I verify X is connected?" are troubleshooting/docs turns, not lookup turns, unless they clearly require account-specific backend data.
-- For lookup turns, retrievalQueries can be empty if documentation is unlikely to help.
-- For clarify turns, include focused retrieval queries whenever a feature, page, integration, or topic is already known. Do not skip docs just because the request is underspecified.
-- For handoff turns, retrievalQueries and broaderQueries should usually be empty unless the same message also contains a concrete product question that still needs documentation context.
-- Prefer troubleshooting-oriented search phrases over repeating raw complaints.
-- If a product, page, step, error, pricing topic, or integration is mentioned, include it in retrieval queries when relevant.
-- Broader queries should be more general than focused queries, but still relevant to the issue.
-- Keep queries short and search-friendly.`;
-}
-
 export function buildReformulateSearchQueriesPrompt(
   options: ReformulateSearchQueriesPromptOptions,
 ): string {

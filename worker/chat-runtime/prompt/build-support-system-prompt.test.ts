@@ -28,11 +28,7 @@ describe("buildSupportSystemPrompt", () => {
         toolEvidenceSummary: '{"status":"ok"}',
         retrievalAttempted: true,
         groundingConfidence: "low",
-        turnPlan: {
-          intent: "policy",
-          summary: "The visitor wants pricing guidance.",
-          followUpQuestion: "Which pricing detail do you want checked?",
-        },
+        turnIntent: "policy",
       },
     );
 

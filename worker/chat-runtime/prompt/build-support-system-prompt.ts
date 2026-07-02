@@ -188,7 +188,7 @@ ${options.agentHandbackInstructions}
   }
 
   prompt += buildPlannerLoopSection(
-    options?.turnPlan,
+    options?.turnIntent,
     options?.plannerGoal,
     options?.plannerActionHistory,
   );

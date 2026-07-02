@@ -595,7 +595,6 @@ export async function handleWidgetMessageTurn(
           buildWidgetTurnLogContext(context, turnId, extra),
       });
       const {
-        turnPlan,
         conversationSummary,
         compiledFaqContext,
         faqMatchHint,
@@ -621,32 +620,12 @@ export async function handleWidgetMessageTurn(
         }),
       );
 
-      if (turnPlan.retrievalQueries.length > 0) {
-        emitStatus("Searching docs...", "retrieval");
-      }
-
-      turnIntent = turnPlan.intent;
       executionPath = "agentic_loop";
-      retrievalMode = turnPlan.retrievalQueries.length > 0
-        ? "bounded_actions"
-        : "none";
 
       chatState = {
         ...chatState,
         state: "answering",
-        lastIntent: turnPlan.intent,
       };
-      logInfo(
-        "widget_turn.plan_computed",
-        buildWidgetTurnLogContext(context, turnId, {
-          intent: turnPlan.intent,
-          executionPath,
-          retrievalMode,
-          hasConversationSummary: Boolean(conversationSummary),
-          hasFollowUpQuestion: Boolean(turnPlan.followUpQuestion),
-          allowedTools: getToolNames(availableTools),
-        }),
-      );
 
       const conversationMetadata = parseConversationMetadata(conversation.metadata);
       const agentHandbackInstructions =
@@ -671,7 +650,6 @@ export async function handleWidgetMessageTurn(
         pageContext: context.payload.pageContext,
         conversationHistory,
         conversationSummary,
-        turnPlan,
         availableTools,
         enabledToolRows: enabledTools,
         toolService,
@@ -738,10 +716,16 @@ export async function handleWidgetMessageTurn(
         detectedInternalTokens: loopResult.detectedInternalTokens,
       };
 
+      turnIntent = loopResult.turnIntent;
+      retrievalMode = loopResult.retrieval.retrievalAttempted
+        ? "bounded_actions"
+        : "none";
+
       // Persist escalation continuity so the next turn resumes the handoff
       // without regex-matching the bot's own (now LLM-rendered) wording.
       chatState = {
         ...chatState,
+        lastIntent: loopResult.turnIntent ?? chatState.lastIntent,
         awaitingContactFields: loopResult.awaitingContactFields,
         awaitingHandoffConfirmation: loopResult.awaitingHandoffConfirmation,
         contactDeclined: loopResult.contactDeclined,

@@ -9,26 +9,14 @@ import {
   type PlannerDecision,
   type PlannerLoopState,
   type SupportToolDefinition,
-  type SupportTurnPlan,
 } from "../types";
 import { createLanguageModel } from "../llm/create-language-model";
-
-function createTurnPlan(): SupportTurnPlan {
-  return {
-    intent: "troubleshoot",
-    summary: "Help the visitor verify whether the widget is working.",
-    retrievalQueries: ["widget troubleshooting"],
-    broaderQueries: ["widget setup troubleshooting"],
-    followUpQuestion: "What exact page, step, or error are you seeing?",
-  };
-}
 
 function createState(): PlannerLoopState {
   return {
     goal: "Help the visitor verify whether the widget is working.",
     stepCount: 0,
     conversationSummary: null,
-    initialTurnPlan: createTurnPlan(),
     actionHistory: [],
     docsEvidence: {
       ragContext: "",
@@ -104,7 +92,6 @@ function sanitize(options: {
         },
       ],
     currentMessage: "The widget is not working on my pricing page.",
-    turnPlan: createTurnPlan(),
     availableTools: options.tools ?? [createTool()],
     state: options.state ?? createState(),
     maxSteps: 5,
@@ -299,11 +286,6 @@ describe("fallbackPlanNextAction", () => {
         },
       ],
       currentMessage: "live agent",
-      turnPlan: {
-        ...createTurnPlan(),
-        intent: "handoff",
-        summary: "The visitor wants human help with an incomplete SEO Spider crawl.",
-      },
       availableTools: [createTool()],
       state,
       maxSteps: 5,
@@ -334,11 +316,6 @@ describe("fallbackPlanNextAction", () => {
         },
       ],
       currentMessage: "No email, please keep it in chat.",
-      turnPlan: {
-        ...createTurnPlan(),
-        intent: "handoff",
-        summary: "The visitor wants human help with an incomplete SEO Spider crawl.",
-      },
       availableTools: [createTool()],
       state,
       maxSteps: 5,
@@ -372,11 +349,6 @@ describe("fallbackPlanNextAction", () => {
         },
       ],
       currentMessage: "No email, please keep it in chat.",
-      turnPlan: {
-        ...createTurnPlan(),
-        intent: "handoff",
-        summary: "The visitor wants human help with an incomplete SEO Spider crawl.",
-      },
       availableTools: [createTool()],
       state,
       maxSteps: 5,
@@ -401,7 +373,6 @@ describe("fallbackPlanNextAction", () => {
         },
       ],
       currentMessage: "Still broken on my pricing page.",
-      turnPlan: createTurnPlan(),
       availableTools: [createTool()],
       state,
       maxSteps: 5,
@@ -434,13 +405,6 @@ llmDescribe("planNextAction (LLM integration)", () => {
       model: createModel(),
       conversationHistory: [],
       currentMessage: "Hello!",
-      turnPlan: {
-        intent: "greeting",
-        summary: "The visitor is greeting the bot.",
-        retrievalQueries: [],
-        broaderQueries: [],
-        followUpQuestion: null,
-      },
       availableTools: [],
       state,
     });
@@ -453,13 +417,6 @@ llmDescribe("planNextAction (LLM integration)", () => {
       model: createModel(),
       conversationHistory: [],
       currentMessage: "How do I set up the chat widget on my website?",
-      turnPlan: {
-        intent: "how_to",
-        summary: "The visitor wants to install the chat widget.",
-        retrievalQueries: ["chat widget setup", "install widget"],
-        broaderQueries: ["widget installation guide"],
-        followUpQuestion: null,
-      },
       availableTools: [],
       state: createState(),
     });
@@ -480,13 +437,6 @@ llmDescribe("planNextAction (LLM integration)", () => {
         { role: "bot", content: "Add the script tag to your HTML head section." },
       ],
       currentMessage: "Thanks, that worked!",
-      turnPlan: {
-        intent: "resolution",
-        summary: "The visitor confirms the issue is resolved.",
-        retrievalQueries: [],
-        broaderQueries: [],
-        followUpQuestion: null,
-      },
       availableTools: [],
       state,
     });
@@ -505,13 +455,6 @@ llmDescribe("planNextAction (LLM integration)", () => {
         { role: "bot", content: "I understand the concern. Could you share more details?" },
       ],
       currentMessage: "I want to talk to a real person.",
-      turnPlan: {
-        intent: "handoff",
-        summary: "The visitor wants to speak with a human agent about billing.",
-        retrievalQueries: [],
-        broaderQueries: [],
-        followUpQuestion: null,
-      },
       availableTools: [],
       state,
     });
@@ -533,13 +476,6 @@ llmDescribe("planNextAction (LLM integration)", () => {
         { role: "visitor", content: "The widget on https://example.com/pricing is not showing." },
       ],
       currentMessage: "The widget on https://example.com/pricing is not showing.",
-      turnPlan: {
-        intent: "troubleshoot",
-        summary: "Widget not visible on pricing page.",
-        retrievalQueries: ["widget not showing"],
-        broaderQueries: ["widget troubleshooting"],
-        followUpQuestion: null,
-      },
       availableTools: [createTool()],
       state,
     });
@@ -555,13 +491,6 @@ llmDescribe("planNextAction (LLM integration)", () => {
       model: createModel(),
       conversationHistory: [],
       currentMessage: "What is your refund policy?",
-      turnPlan: {
-        intent: "policy",
-        summary: "The visitor is asking about the refund policy.",
-        retrievalQueries: ["refund policy"],
-        broaderQueries: ["policies"],
-        followUpQuestion: null,
-      },
       availableTools: [],
       state: createState(),
     });
@@ -657,7 +586,6 @@ describe("sanitizePlannerDecision invariants (Task 3)", () => {
       decision,
       conversationHistory: [],
       currentMessage: "hi",
-      turnPlan: createTurnPlan(),
       availableTools: [],
       state: createState(),
       maxSteps: 8,
@@ -674,7 +602,6 @@ describe("sanitizePlannerDecision invariants (Task 3)", () => {
       decision,
       conversationHistory: [],
       currentMessage: "how do I embed the widget?",
-      turnPlan: createTurnPlan(),
       availableTools: [],
       state: createState(),
       maxSteps: 8,
@@ -697,7 +624,6 @@ describe("sanitizePlannerDecision invariants (Task 3)", () => {
       },
       conversationHistory: [],
       currentMessage: "it is broken",
-      turnPlan: createTurnPlan(),
       availableTools: [],
       state,
       maxSteps: 8,
@@ -715,7 +641,6 @@ describe("sanitizePlannerDecision invariants (Task 3)", () => {
       },
       conversationHistory: [],
       currentMessage: "it is broken",
-      turnPlan: createTurnPlan(),
       availableTools: [],
       state,
       maxSteps: 8,
@@ -727,7 +652,6 @@ describe("sanitizePlannerDecision invariants (Task 3)", () => {
     const decision = fallbackPlanNextAction({
       conversationHistory: [],
       currentMessage: "hi",
-      turnPlan: createTurnPlan(),
       availableTools: [],
       state: createState(),
       maxSteps: 8,

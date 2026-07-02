@@ -8,7 +8,6 @@ import {
   type PlannerLoopState,
   type PlannerNextAction,
   type SupportToolDefinition,
-  type SupportTurnPlan,
 } from "../types";
 import {
   isDuplicateQuery,
@@ -28,7 +27,6 @@ interface PlanNextActionOptions {
   conversationHistory: ConversationTurnMessage[];
   currentMessage: string;
   pageContext?: Record<string, string>;
-  turnPlan: SupportTurnPlan;
   availableTools: SupportToolDefinition[];
   state: PlannerLoopState;
   faqContext?: string | null;
@@ -48,7 +46,6 @@ interface SanitizePlannerDecisionOptions {
   decision: PlannerDecision;
   conversationHistory: ConversationTurnMessage[];
   currentMessage: string;
-  turnPlan: SupportTurnPlan;
   availableTools: SupportToolDefinition[];
   state: PlannerLoopState;
   maxSteps: number;
@@ -484,13 +481,6 @@ ${guidelinesBlock}
 FAQs (tier-1, trust these second):
 ${faqBlock}
 
-Initial turn analysis:
-- intent: ${options.turnPlan.intent}
-- summary: ${options.turnPlan.summary}
-- retrievalQueries: ${options.turnPlan.retrievalQueries.join(" | ") || "none"}
-- broaderQueries: ${options.turnPlan.broaderQueries.join(" | ") || "none"}
-- focusedFollowUp: ${options.turnPlan.followUpQuestion ?? "none"}
-
 Current planner state:
 - goal: ${options.state.goal}
 - stepCount: ${options.state.stepCount}
@@ -681,7 +671,6 @@ function tryParseJson(raw: string): unknown {
 export function fallbackPlanNextAction(options: {
   conversationHistory: ConversationTurnMessage[];
   currentMessage: string;
-  turnPlan: SupportTurnPlan;
   availableTools: SupportToolDefinition[];
   state: PlannerLoopState;
   maxSteps: number;
@@ -712,9 +701,7 @@ export function fallbackPlanNextAction(options: {
     };
   }
 
-  const explicitHumanRequest =
-    options.turnPlan.intent === "handoff" ||
-    isExplicitHumanRequest(options.currentMessage);
+  const explicitHumanRequest = isExplicitHumanRequest(options.currentMessage);
   const confirmedHandoff =
     isAffirmativeConfirmation(options.currentMessage) &&
     lastAssistantOfferedHandoff(options.conversationHistory);
@@ -777,10 +764,8 @@ export function fallbackPlanNextAction(options: {
       nextAction: {
         type: "search_docs",
         reason: "Start with documentation before taking other actions.",
-        query:
-          options.turnPlan.retrievalQueries[0] ??
-          options.currentMessage,
-        broaderQueries: options.turnPlan.broaderQueries.slice(0, 2),
+        query: options.currentMessage,
+        broaderQueries: [],
       },
     };
   }
@@ -883,10 +868,8 @@ export function sanitizePlannerDecision(
           nextAction: {
             type: "search_docs",
             reason: "The requested tool is not assigned, so retry with docs first.",
-            query:
-              options.turnPlan.retrievalQueries[0] ??
-              options.currentMessage,
-            broaderQueries: options.turnPlan.broaderQueries.slice(0, 2),
+            query: options.currentMessage,
+            broaderQueries: [],
           },
         };
       }
@@ -985,9 +968,9 @@ export function sanitizePlannerDecision(
   }
 
   if (nextAction.type === "offer_handoff") {
-    const explicitHumanRequest =
-      options.turnPlan.intent === "handoff" ||
-      isExplicitHumanRequest(options.currentMessage);
+    const explicitHumanRequest = isExplicitHumanRequest(
+      options.currentMessage,
+    );
     const hasIssueContext = hasPriorIssueContext(
       options.conversationHistory,
       options.currentMessage,

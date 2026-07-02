@@ -13,9 +13,9 @@ import { emitSseEvent } from "../streaming/map-agent-events-to-sse";
 import { type InternalToken } from "../streaming/internal-tokens";
 import {
   type ConversationTurnMessage,
+  type SupportIntent,
   type SupportPromptSettings,
   type SupportToolDefinition,
-  type SupportTurnPlan,
   type TurnTelemetry,
 } from "../types";
 import { type RetrievalResult } from "../retrieval/run-ai-search";
@@ -51,7 +51,6 @@ export interface AgenticTurnInput {
   pageContext?: Record<string, string>;
   conversationHistory: ConversationTurnMessage[];
   conversationSummary: string | null;
-  turnPlan: SupportTurnPlan;
   compiledFaqContext: string;
   faqMatchHint?: { question: string; answer: string; score: number } | null;
   availableTools: SupportToolDefinition[];
@@ -113,6 +112,8 @@ export interface AgenticTurnResult {
   lastToolError: string | null;
   stepCount: number;
   terminationAction: string;
+  // Classification the planner recorded on its first decision this turn.
+  turnIntent: SupportIntent | null;
   // Capability-filter substitution happened — caller may want to skip
   // post-processing like [RESOLVED] handling.
   capabilityFallbackApplied: boolean;
@@ -139,7 +140,6 @@ export async function runAgenticTurn(
     pageContext: input.pageContext,
     conversationHistory: input.conversationHistory,
     conversationSummary: input.conversationSummary,
-    turnPlan: input.turnPlan,
     availableTools: input.availableTools,
     enabledToolRows: input.enabledToolRows,
     toolService: input.toolService,
@@ -191,6 +191,7 @@ export async function runAgenticTurn(
     lastToolError: loopResult.lastToolError,
     stepCount: loopResult.stepCount,
     terminationAction: loopResult.terminationAction,
+    turnIntent: loopResult.loopState.intent,
     capabilityFallbackApplied,
     awaitingContactFields: loopResult.loopState.awaitingContactFields,
     awaitingHandoffConfirmation:

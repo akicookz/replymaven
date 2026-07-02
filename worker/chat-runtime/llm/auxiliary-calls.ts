@@ -2,10 +2,8 @@ import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 import {
   type ConversationTurnMessage,
-  type SupportTurnPlan,
 } from "../types";
 import {
-  buildClassifySupportTurnPrompt,
   buildExtractContactInfoPrompt,
   buildReformulateQueryPrompt,
   buildReformulateSearchQueriesPrompt,
@@ -22,22 +20,8 @@ function shouldThrowOnModelError(options?: AuxiliaryCallOptions): boolean {
   return options?.throwOnModelError === true;
 }
 
-// Removed hardcoded pattern detection - let LLM assess message completeness
-
-const supportTurnPlanSchema = z.object({
-  intent: z.enum([
-    "how_to",
-    "troubleshoot",
-    "lookup",
-    "policy",
-    "clarify",
-    "handoff",
-  ]),
-  summary: z.string().min(1).max(220),
-  retrievalQueries: z.array(z.string().min(3).max(180)).max(4),
-  broaderQueries: z.array(z.string().min(3).max(180)).max(4),
-  followUpQuestion: z.string().max(220).nullable(),
-});
+// Turn classification lives in the planner (plan-next-action.ts) — the
+// planner's first step IS the classifier; there is no separate routing call.
 
 const reformulateSearchQueriesSchema = z.object({
   queries: z.array(z.string().min(3).max(180)).min(1).max(3),
@@ -109,134 +93,6 @@ export async function selectFaqSets(
       throw error;
     }
     return [];
-  }
-}
-
-export function fallbackClassifySupportTurn(
-  currentMessage: string,
-): SupportTurnPlan {
-  const normalized = currentMessage.trim().toLowerCase();
-  const explicitHandoff =
-    /\b(live agent|human|person|agent|support team|someone|representative|engineer)\b/.test(
-      normalized,
-    ) &&
-    (
-      /\b(help|talk|speak|contact|reach|connect|handoff|hand off|escalate)\b/.test(
-        normalized,
-      ) ||
-      /^live agent$/.test(normalized)
-    );
-  if (explicitHandoff) {
-    return {
-      intent: "handoff",
-      summary: "The visitor is explicitly asking for a human handoff.",
-      retrievalQueries: [],
-      broaderQueries: [],
-      followUpQuestion: null,
-    };
-  }
-
-  if (
-    /\b(price|pricing|refund|billing|invoice|subscription|plan|trial|cancel|security|compliance|sla|policy|terms)\b/.test(
-      normalized,
-    )
-  ) {
-    return {
-      intent: "policy",
-      summary: "The visitor is asking about plans, billing, or policy details.",
-      retrievalQueries: [currentMessage],
-      broaderQueries: [currentMessage],
-      followUpQuestion: null,
-    };
-  }
-
-
-  if (
-    /\b(check|lookup|look up|find|show|status|track|verify|search|order|account|customer|booking|subscription)\b/.test(
-      normalized,
-    )
-  ) {
-    return {
-      intent: "lookup",
-      summary: "The visitor likely needs account-specific data or a backend lookup.",
-      retrievalQueries: [],
-      broaderQueries: [],
-      followUpQuestion: null,
-    };
-  }
-
-
-  if (
-    /^(how|where|when|can|does|do|is|are|what)\b/.test(normalized) ||
-    /\b(set up|setup|configure|install|connect|integrate|embed|create)\b/.test(
-      normalized,
-    )
-  ) {
-    return {
-      intent: "how_to",
-      summary: "The visitor is asking how to do something.",
-      retrievalQueries: [currentMessage],
-      broaderQueries: [currentMessage],
-      followUpQuestion: null,
-    };
-  }
-
-  return {
-    intent: "clarify",
-    summary: "The request is too underspecified and needs a focused follow-up.",
-    retrievalQueries: [currentMessage],
-    broaderQueries: [],
-    followUpQuestion: null,
-  };
-}
-
-export async function classifySupportTurn(
-  model: LanguageModel,
-  conversationHistory: ConversationTurnMessage[],
-  currentMessage: string,
-  pageContext?: Record<string, string>,
-  options?: AuxiliaryCallOptions,
-): Promise<SupportTurnPlan> {
-  const recentHistory = conversationHistory.slice(-6);
-  const transcript = recentHistory
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n");
-  const pageContextBlock =
-    pageContext && Object.keys(pageContext).length > 0
-      ? Object.entries(pageContext)
-          .map(([key, value]) => `${key}: ${value}`)
-          .join("\n")
-      : "None";
-
-  try {
-    const { output: object } = await generateText({
-      model,
-      output: Output.object({ schema: supportTurnPlanSchema }),
-      temperature: 0,
-      maxOutputTokens: 384,
-      prompt: buildClassifySupportTurnPrompt({
-        transcript,
-        currentMessage,
-        pageContextBlock,
-      }),
-    });
-
-    if (!object) {
-      throw new Error("AI_NoObjectGeneratedError: model did not produce a valid structured output");
-    }
-
-    return {
-      intent: object.intent,
-      summary: object.summary,
-      retrievalQueries: object.retrievalQueries,
-      broaderQueries: object.broaderQueries,
-      followUpQuestion: object.followUpQuestion ?? null,
-    };
-  } catch (error) {
-    if (shouldThrowOnModelError(options)) {
-      throw error;
-    }
-    return fallbackClassifySupportTurn(currentMessage);
   }
 }
 

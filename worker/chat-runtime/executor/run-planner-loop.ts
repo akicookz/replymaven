@@ -62,7 +62,6 @@ import {
   type PlannerToolEvidence,
   type SupportPromptSettings,
   type SupportToolDefinition,
-  type SupportTurnPlan,
   type TurnTelemetry,
   type ConversationTurnMessage,
 } from "../types";
@@ -97,7 +96,6 @@ interface RunPlannerLoopOptions {
   pageContext?: Record<string, string>;
   conversationHistory: ConversationTurnMessage[];
   conversationSummary: string | null;
-  turnPlan: SupportTurnPlan;
   availableTools: SupportToolDefinition[];
   enabledToolRows: ToolRow[];
   toolService: ToolService;
@@ -266,7 +264,6 @@ function summarizeToolEvidence(
 }
 
 function createInitialLoopState(
-  turnPlan: SupportTurnPlan,
   conversationSummary: string | null,
   visitorInfo: { name: string | null; email: string | null },
   persistedContactState?: {
@@ -280,10 +277,9 @@ function createInitialLoopState(
   },
 ): PlannerLoopState {
   return {
-    goal: turnPlan.summary,
+    goal: "Understand and resolve the visitor's latest message.",
     stepCount: 0,
     conversationSummary,
-    initialTurnPlan: turnPlan,
     actionHistory: [],
     docsEvidence: createEmptyPlannerDocsEvidence(),
     toolEvidence: [],
@@ -542,11 +538,7 @@ async function executeCompose(options: {
           faqMatchHint: options.faqMatchHint ?? null,
           groundingConfidence: options.state.docsEvidence.groundingConfidence,
           topScore: options.state.docsEvidence.topScore,
-          turnPlan: {
-            intent: options.state.initialTurnPlan.intent,
-            summary: options.state.initialTurnPlan.summary,
-            followUpQuestion: options.state.initialTurnPlan.followUpQuestion,
-          },
+          turnIntent: options.state.intent,
           plannerGoal: options.state.goal,
           plannerActionHistory: options.state.actionHistory,
           toolEvidenceSummary: summarizeToolEvidence(options.state.toolEvidence),
@@ -644,7 +636,6 @@ export async function runPlannerLoop(
   options: RunPlannerLoopOptions,
 ): Promise<PlannerLoopResult> {
   const loopState = createInitialLoopState(
-    options.turnPlan,
     options.conversationSummary,
     options.visitorInfo,
     options.persistedContactState,
@@ -795,7 +786,6 @@ export async function runPlannerLoop(
               conversationHistory: options.conversationHistory,
               currentMessage: options.currentMessage,
               pageContext: options.pageContext,
-              turnPlan: options.turnPlan,
               availableTools: options.availableTools,
               state: loopState,
               faqContext: options.compiledFaqContext,
@@ -808,7 +798,6 @@ export async function runPlannerLoop(
         plannerDecision = fallbackPlanNextAction({
           conversationHistory: options.conversationHistory,
           currentMessage: options.currentMessage,
-          turnPlan: options.turnPlan,
           availableTools: options.availableTools,
           state: loopState,
           maxSteps: MAX_PLANNER_STEPS,
@@ -828,7 +817,6 @@ export async function runPlannerLoop(
       decision: plannerDecision,
       conversationHistory: options.conversationHistory,
       currentMessage: options.currentMessage,
-      turnPlan: options.turnPlan,
       availableTools: options.availableTools,
       state: loopState,
       maxSteps: MAX_PLANNER_STEPS,
@@ -968,7 +956,7 @@ export async function runPlannerLoop(
                   conversationHistory: options.conversationHistory,
                   currentMessage: options.currentMessage,
                   failedQueries,
-                  intent: options.turnPlan.intent ?? undefined,
+                  intent: loopState.intent ?? undefined,
                   pageContext: options.pageContext,
                 },
                 { throwOnModelError: true },

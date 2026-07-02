@@ -114,13 +114,9 @@ describe("buildVisitorInfoSection", () => {
 });
 
 describe("buildPlannerLoopSection", () => {
-  test("renders intent, goal, follow-up, and history", () => {
+  test("renders intent, goal, and history", () => {
     const out = buildPlannerLoopSection(
-      {
-        intent: "how_to",
-        summary: "Help with setup",
-        followUpQuestion: "Which platform?",
-      },
+      "how_to",
       "Resolve the setup question",
       [
         { type: "search_docs", reason: "look up docs" },
@@ -129,7 +125,7 @@ describe("buildPlannerLoopSection", () => {
     );
     expect(out).toContain("Support intent: how_to");
     expect(out).toContain("Planner goal: Resolve the setup question");
-    expect(out).toContain("Focused follow-up if needed: Which platform?");
+    expect(out).not.toContain("Focused follow-up");
     expect(out).toContain("1. search_docs: look up docs");
     expect(out).toContain("2. compose: answer (low confidence)");
   });

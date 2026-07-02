@@ -84,11 +84,7 @@ export interface SupportPromptOptions {
   faqMatchHint?: { question: string; answer: string; score: number } | null;
   groundingConfidence?: GroundingConfidence;
   topScore?: number;
-  turnPlan?: {
-    intent: SupportIntent;
-    summary: string;
-    followUpQuestion?: string | null;
-  } | null;
+  turnIntent?: string | null;
   plannerGoal?: string | null;
   plannerActionHistory?: PlannerActionHistoryEntry[];
   toolEvidenceSummary?: string | null;
@@ -253,14 +249,6 @@ export interface ChatRuntimeAiConfig {
   openaiApiKey: string | null;
 }
 
-export interface SupportTurnPlan {
-  intent: SupportIntent;
-  summary: string;
-  retrievalQueries: string[];
-  broaderQueries: string[];
-  followUpQuestion: string | null;
-}
-
 export type PlannerActionType =
   | "search_docs"
   | "call_tool"
@@ -403,7 +391,6 @@ export interface PlannerLoopState {
   goal: string;
   stepCount: number;
   conversationSummary: string | null;
-  initialTurnPlan: SupportTurnPlan;
   actionHistory: PlannerActionHistoryEntry[];
   docsEvidence: PlannerDocsEvidence;
   toolEvidence: PlannerToolEvidence[];

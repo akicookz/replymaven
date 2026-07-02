@@ -1,25 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
-  buildClassifySupportTurnPrompt,
   buildExtractContactInfoPrompt,
   buildReformulateQueryPrompt,
   buildSummarizeTeamRequestPrompt,
 } from "./support-prompt-builders";
 
 describe("support prompt builders", () => {
-  test("classification prompt does not mention light retrieval", () => {
-    const prompt = buildClassifySupportTurnPrompt({
-      transcript: "visitor: pricing seems wrong",
-      currentMessage: "can I get a discount?",
-      pageContextBlock: "page: pricing",
-    });
-
-    expect(prompt).not.toContain("keep retrieval light");
-    expect(prompt).toContain(
-      "Do not skip docs just because the request is underspecified.",
-    );
-  });
-
   test("reformulation prompt does not mention handoff steps", () => {
     const prompt = buildReformulateQueryPrompt({
       transcript: "visitor: SEO Spider is missing pages",

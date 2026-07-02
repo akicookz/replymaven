@@ -1,17 +1,16 @@
 // Routing pipeline used by the visitor-facing widget handler. Runs the
-// parallel classify/summarize/select-FAQs probes, compiles the FAQ context,
-// and returns everything the planner loop needs to start composing. Has no
-// side effects beyond LLM calls and the KV-cached FAQ-context build.
+// parallel summarize/select-FAQs probes and compiles the FAQ context. Turn
+// classification lives in the planner's first step (plan-next-action.ts) —
+// there is deliberately no separate classifier here. Has no side effects
+// beyond LLM calls and the KV-cached FAQ-context build.
 
-import { type ConversationTurnMessage, type SupportTurnPlan } from "../types";
+import { type ConversationTurnMessage } from "../types";
 import {
   createLanguageModel,
   runWithModelFallback,
   type ModelRuntimeState,
 } from "../llm/create-language-model";
 import {
-  classifySupportTurn,
-  fallbackClassifySupportTurn,
   selectFaqSets,
   summarizeConversation,
 } from "../llm/auxiliary-calls";
@@ -48,7 +47,6 @@ export interface TurnRoutingInput {
 }
 
 export interface TurnRoutingResult {
-  turnPlan: SupportTurnPlan;
   conversationSummary: string | null;
   compiledFaqContext: string;
   faqMatchHint: { question: string; answer: string; score: number } | null;
@@ -79,21 +77,8 @@ export async function prepareTurnRouting(
     input.currentMessage,
   );
 
-  const classifyStartedAt = Date.now();
-  const [turnPlan, conversationSummary, faqSelection] = await Promise.all([
-    runWithModelFallback({
-      runtime: input.modelRuntime,
-      stage: "classify_support_turn",
-      logContext: input.buildLogContext(),
-      operation: async (cfg) =>
-        classifySupportTurn(
-          createLanguageModel(cfg),
-          input.conversationHistory,
-          input.currentMessage,
-          input.pageContext,
-          { throwOnModelError: true },
-        ),
-    }).catch(() => fallbackClassifySupportTurn(input.currentMessage)),
+  const routingStartedAt = Date.now();
+  const [conversationSummary, faqSelection] = await Promise.all([
     runWithModelFallback({
       runtime: input.modelRuntime,
       stage: "summarize_conversation",
@@ -137,7 +122,7 @@ export async function prepareTurnRouting(
       }
     })(),
   ]);
-  input.onRouterFinished?.(Date.now() - classifyStartedAt);
+  input.onRouterFinished?.(Date.now() - routingStartedAt);
 
   // Fail-open: when the selector errored (not "returned empty"), include all
   // FAQ sets so the model still has tier-1 context. The compile budget keeps
@@ -171,7 +156,6 @@ export async function prepareTurnRouting(
   });
 
   return {
-    turnPlan,
     conversationSummary,
     compiledFaqContext,
     faqMatchHint,

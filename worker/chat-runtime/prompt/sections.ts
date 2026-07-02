@@ -9,7 +9,6 @@
 
 import {
   type GroundingConfidence,
-  type SupportIntent,
   type PlannerActionHistoryEntry,
 } from "../types";
 
@@ -104,19 +103,12 @@ Email: ${emailStr}
 // ─── Planner loop state ─────────────────────────────────────────────────────
 
 export function buildPlannerLoopSection(
-  turnPlan:
-    | {
-        intent: SupportIntent;
-        summary: string;
-        followUpQuestion?: string | null;
-      }
-    | null
-    | undefined,
+  turnIntent: string | null | undefined,
   plannerGoal: string | null | undefined,
   plannerActionHistory: PlannerActionHistoryEntry[] | undefined,
 ): string {
   if (
-    !turnPlan &&
+    !turnIntent &&
     !plannerGoal &&
     (!plannerActionHistory || plannerActionHistory.length === 0)
   ) {
@@ -132,9 +124,8 @@ export function buildPlannerLoopSection(
       : "No prior planner actions.";
 
   return `<planner-loop>
-Support intent: ${turnPlan?.intent ?? "unknown"}
-Planner goal: ${plannerGoal ?? turnPlan?.summary ?? "unknown"}
-${turnPlan?.followUpQuestion ? `Focused follow-up if needed: ${turnPlan.followUpQuestion}` : ""}
+Support intent: ${turnIntent ?? "unknown"}
+Planner goal: ${plannerGoal ?? "unknown"}
 Action history:
 ${plannerHistory}
 </planner-loop>
