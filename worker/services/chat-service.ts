@@ -322,6 +322,8 @@ export class ChatService {
     const conversation = await this.getConversationById(conversationId, projectId);
     if (!conversation) return { closed: false, conversation: null };
     if (conversation.status === "closed") return { closed: false, conversation };
+    // Flagged-for-review conversations stay in Needs You until a human acts.
+    if (conversation.status === "waiting_agent") return { closed: false, conversation };
 
     const lastActivity = conversation.lastActivityAt?.getTime() ?? conversation.createdAt.getTime();
     const staleThreshold = Date.now() - autoCloseMinutes * 60 * 1000;
@@ -344,6 +346,7 @@ export class ChatService {
     const staleIds = projectConversations
       .filter((conv) => {
         if (conv.status === "closed") return false;
+        if (conv.status === "waiting_agent") return false;
         const lastActivity = conv.lastActivityAt?.getTime() ?? conv.createdAt.getTime();
         return lastActivity < staleThreshold;
       })

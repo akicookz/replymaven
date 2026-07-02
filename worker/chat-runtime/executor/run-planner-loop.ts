@@ -498,6 +498,10 @@ async function executeCompose(options: {
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
   closeSafeAiReplayWindow: (reason: string) => void;
   buildSystemPrompt?: BuildSystemPromptFn;
+  // Conversation has been flagged for human review (status === "waiting_agent").
+  // Suppresses the model's own [RESOLVED] instruction so it never self-closes
+  // while a teammate is expected to act.
+  escalated?: boolean;
 }): Promise<{
   fullResponse: string;
   lastToolOutput: unknown;
@@ -545,6 +549,7 @@ async function executeCompose(options: {
           broaderSearchAttempted: options.state.docsEvidence.broaderSearchAttempted,
           existingTicket: options.existingTicket,
           ticketFields: options.ticketFields,
+          escalated: options.escalated,
         },
       );
 
@@ -1379,6 +1384,7 @@ export async function runPlannerLoop(
         buildLogContext: options.buildLogContext,
         closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
         buildSystemPrompt: options.buildSystemPrompt,
+        escalated: options.conversation.status === "waiting_agent",
       });
       options.telemetry.composeMs = Date.now() - composeStart;
 
@@ -1429,6 +1435,7 @@ export async function runPlannerLoop(
         buildLogContext: options.buildLogContext,
         closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
         buildSystemPrompt: options.buildSystemPrompt,
+        escalated: options.conversation.status === "waiting_agent",
       });
 
       loopState.finalDraft = stopComposeResult.fullResponse;
@@ -1500,6 +1507,7 @@ export async function runPlannerLoop(
       buildLogContext: options.buildLogContext,
       closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
       buildSystemPrompt: options.buildSystemPrompt,
+      escalated: options.conversation.status === "waiting_agent",
     });
 
     loopState.finalDraft = limitComposeResult.fullResponse;

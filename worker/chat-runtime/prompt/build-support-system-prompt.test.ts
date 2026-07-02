@@ -186,4 +186,22 @@ describe("buildSupportSystemPrompt", () => {
 
     expect(prompt).not.toContain("<handoff-sop-override>");
   });
+
+  test("instructs the model to emit [RESOLVED] when not escalated", () => {
+    const prompt = buildSupportSystemPrompt(BASE_SETTINGS, "ReplyMaven", "", "");
+
+    expect(prompt).toContain('respond with ONLY the exact text "[RESOLVED]"');
+    expect(prompt).not.toContain("Never output [RESOLVED]");
+  });
+
+  test("never instructs [RESOLVED] once the conversation is escalated", () => {
+    const prompt = buildSupportSystemPrompt(BASE_SETTINGS, "ReplyMaven", "", "", {
+      escalated: true,
+    });
+
+    expect(prompt).not.toContain('respond with ONLY the exact text "[RESOLVED]"');
+    expect(prompt).toContain(
+      "This conversation has been escalated to the human team. Never output [RESOLVED]; keep helping until a teammate takes over.",
+    );
+  });
 });

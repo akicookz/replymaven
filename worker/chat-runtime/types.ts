@@ -101,6 +101,10 @@ export interface SupportPromptOptions {
   broaderSearchAttempted?: boolean;
   existingTicket?: Record<string, string> | null;
   ticketFields?: TicketFieldSpec[] | null;
+  // True when the conversation has been flagged for human review
+  // (status === "waiting_agent"). Suppresses the [RESOLVED] instruction so
+  // the model never self-closes a conversation waiting on a teammate.
+  escalated?: boolean;
 }
 
 export type SupportPromptSettings = Pick<

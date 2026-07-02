@@ -891,7 +891,10 @@ export async function handleWidgetMessageTurn(
         );
       }
 
-      if (loopResult.detectedInternalTokens.includes("[RESOLVED]")) {
+      const flaggedForReview =
+        conversation.status === "waiting_agent" ||
+        loopResult.terminationAction === "create_ticket";
+      if (loopResult.detectedInternalTokens.includes("[RESOLVED]") && !flaggedForReview) {
         currentStage = "close_conversation";
         await chatService.updateConversationStatus(
           context.conversationId,
