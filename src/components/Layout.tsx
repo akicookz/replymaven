@@ -31,6 +31,8 @@ import { cn } from "@/lib/utils";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useTeams } from "@/hooks/use-teams";
 import { formatPlanName, getTrialDaysRemaining, usagePercent } from "@/lib/plan";
+import { useNeedsYouPing } from "@/lib/use-needs-you-ping";
+import { formatTitleWithBadge } from "@/lib/title-badge";
 import {
   Popover,
   PopoverContent,
@@ -141,7 +143,22 @@ function Layout() {
     },
     enabled: !!currentProject,
     staleTime: 30_000,
+    refetchInterval: 30_000,
   });
+
+  // Needs-review ping surfaces (toast + chime + browser notification) —
+  // self-contained; polls Task 14's endpoint independently of inboxCounts.
+  useNeedsYouPing(currentProject?.id);
+
+  // Tab-title badge: "(N) …" while conversations wait for review.
+  useEffect(() => {
+    const { title, base } = formatTitleWithBadge(
+      document.title,
+      inboxCounts?.["needs-you"] ?? 0,
+    );
+    document.title = title;
+    return () => { document.title = base; };
+  }, [inboxCounts]);
 
   const inboxNav = currentProject ? [
     { label: "Needs You",         filter: "needs-you", icon: Inbox },
