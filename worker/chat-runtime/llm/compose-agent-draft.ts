@@ -18,30 +18,36 @@ export interface ComposeAgentDraftParams {
   settings: ComposeAgentDraftSettings | null;
 }
 
-interface ComposeAgentDraftPromptOptions {
-  instruction: string;
-  transcript: string;
-  toneInstruction: string;
-  agentName?: string | null;
-  companyName?: string | null;
-  companyContext?: string | null;
-}
-
-// Pure prompt construction, kept separate from the model call so it can be
-// unit tested without invoking generateText (mirrors support-prompt-builders.ts).
+// Pure prompt construction — takes the raw params (full history + settings)
+// and does the transcript truncation and tone resolution itself, so every
+// prompt-shaping behavior is unit-testable without invoking generateText
+// (mirrors the builder-vs-call split in support-prompt-builders.ts).
 export function buildComposeAgentDraftPrompt(
-  options: ComposeAgentDraftPromptOptions,
+  params: ComposeAgentDraftParams,
 ): string {
+  const transcript = params.conversationHistory
+    .slice(-20)
+    .map((message) => `${message.role}: ${message.content}`)
+    .join("\n");
+
+  const settings = params.settings;
+  const toneInstruction = resolveToneInstruction({
+    toneOfVoice: settings?.toneOfVoice ?? "professional",
+    customTonePrompt: settings?.customTonePrompt ?? null,
+  });
+
   return [
-    `You write chat replies on behalf of ${options.agentName ?? "a human support agent"}${options.companyName ? ` at ${options.companyName}` : ""}.`,
-    options.companyContext ? `Company context: ${options.companyContext}` : null,
-    `Tone: ${options.toneInstruction}`,
+    `You write chat replies on behalf of ${settings?.agentName ?? "a human support agent"}${settings?.companyName ? ` at ${settings.companyName}` : ""}.`,
+    settings?.companyContext
+      ? `Company context: ${settings.companyContext}`
+      : null,
+    `Tone: ${toneInstruction}`,
     ``,
     `Conversation so far:`,
-    options.transcript || "(no messages yet)",
+    transcript || "(no messages yet)",
     ``,
     `The agent's instruction for the reply:`,
-    options.instruction,
+    params.instruction,
     ``,
     `Write the message the agent should send to the visitor.`,
     `Rules:`,
@@ -57,31 +63,14 @@ export function buildComposeAgentDraftPrompt(
 // Turns a human agent's shorthand instruction ("tell him we don't offer trial
 // extensions") into a polished visitor-facing reply matching the configured
 // tone and the visitor's language. Single scoped call — the agent supplies the
-// substance, the model does phrasing; no retrieval.
+// substance, the model does phrasing; no retrieval. Thin generateText wrapper
+// around buildComposeAgentDraftPrompt.
 export async function composeAgentDraft(
   model: LanguageModel,
   params: ComposeAgentDraftParams,
   options?: { throwOnModelError?: boolean },
 ): Promise<string> {
-  const transcript = params.conversationHistory
-    .slice(-20)
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n");
-
-  const settings = params.settings;
-  const toneInstruction = resolveToneInstruction({
-    toneOfVoice: settings?.toneOfVoice ?? "professional",
-    customTonePrompt: settings?.customTonePrompt ?? null,
-  });
-
-  const prompt = buildComposeAgentDraftPrompt({
-    instruction: params.instruction,
-    transcript,
-    toneInstruction,
-    agentName: settings?.agentName,
-    companyName: settings?.companyName,
-    companyContext: settings?.companyContext,
-  });
+  const prompt = buildComposeAgentDraftPrompt(params);
 
   try {
     const { text } = await generateText({
