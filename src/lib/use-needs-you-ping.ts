@@ -30,9 +30,9 @@ function writeSince(projectId: string, value: string): void {
   try {
     localStorage.setItem(sinceKey(projectId), value);
   } catch {
-    // Storage unavailable — the watermark stays in-memory only for this
-    // load, so a reload may re-baseline. Acceptable: worst case we just
-    // don't ping, we never re-ping the whole backlog.
+    // Storage unavailable — there's no in-memory fallback, so every later
+    // readSince() call fails too and looks like a first-ever poll. Net
+    // effect: this session never pings at all (not "re-baseline on reload").
   }
 }
 
@@ -115,7 +115,7 @@ export function useNeedsYouPing(projectId: string | undefined): void {
       ) {
         const n = new Notification(`${who} needs your review`, {
           body: item.summary?.slice(0, 140) ?? "Open the inbox to reply.",
-          tag: item.id,
+          tag: pingKey(item),
         });
         n.onclick = () => { window.focus(); navigate(url); n.close(); };
       }

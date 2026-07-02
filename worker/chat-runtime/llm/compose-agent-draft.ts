@@ -6,7 +6,6 @@ export type ComposeAgentDraftSettings = Pick<
   ProjectSettingsRow,
   | "toneOfVoice"
   | "customTonePrompt"
-  | "botName"
   | "agentName"
   | "companyName"
   | "companyContext"

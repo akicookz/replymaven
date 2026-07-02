@@ -66,6 +66,7 @@ export default function Composer({
   }
 
   function send() {
+    if (composing) return;
     if (!draft.trim() && !pendingImage) return;
     onSend(draft || undefined, { imageUrl: pendingImage });
     setPendingImage(null);
@@ -143,7 +144,7 @@ export default function Composer({
               type="button"
               className="glass-button flex items-center justify-center rounded-[8px] w-[30px] h-[30px] text-ink-5 hover:text-ink-2 disabled:opacity-40"
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
+              disabled={uploading || composing}
               title="Attach image"
             >
               <Paperclip size={14} />

@@ -217,6 +217,19 @@ describe("createEscalation - first escalation (created)", () => {
       "Visitor asked for team follow-up.",
     );
   });
+
+  test('treats the metadata literal "null" as absent instead of crashing', async () => {
+    const { params, calls } = baseParams({
+      conversation: makeConversation({ metadata: "null" }),
+    });
+
+    const result = await createEscalation(params as never);
+
+    expect(result.created).toBe(true);
+    const meta = JSON.parse(calls.updateConversation[0].data.metadata!);
+    expect(typeof meta.escalatedAt).toBe("string");
+    expect(meta.teamRequestSummary).toBe("Visitor needs a refund on order 123.");
+  });
 });
 
 describe("createEscalation - repeat escalation (already forwarded)", () => {

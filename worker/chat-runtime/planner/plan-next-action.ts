@@ -981,7 +981,7 @@ export function sanitizePlannerDecision(
         goal: nextGoal,
         nextAction: {
           type: "escalate",
-          reason: "The visitor declined contact details, so proceed with the ticket without them.",
+          reason: "The visitor declined contact details, so proceed with the escalation without them.",
         },
       };
     }
@@ -1022,7 +1022,7 @@ export function sanitizePlannerDecision(
         goal: nextGoal,
         nextAction: {
           type: "collect_contact",
-          reason: "A ticket cannot be created until the missing contact details are collected.",
+          reason: "The escalation cannot proceed until the missing contact details are collected.",
           missingFields,
         },
       };

@@ -6061,7 +6061,10 @@ const app = new Hono<HonoAppContext>()
     const rows = await new ChatService(db).getNeedsReviewSince(project.id, since);
     const items = rows.map((row) => {
       let meta: Record<string, unknown> = {};
-      try { meta = row.metadata ? JSON.parse(row.metadata) : {}; } catch { /* ignore */ }
+      try {
+        const parsed = row.metadata ? JSON.parse(row.metadata) : {};
+        meta = typeof parsed === "object" && parsed !== null ? parsed : {};
+      } catch { /* ignore */ }
       return {
         id: row.id,
         visitorName: row.visitorName,
@@ -6375,9 +6378,9 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const [settings, msgs] = await Promise.all([
+    const [settings, { messages: msgs }] = await Promise.all([
       projectService.getSettings(project.id),
-      chatService.getMessages(conversation.id),
+      chatService.getRecentMessages(conversation.id, 20),
     ]);
 
     const runtime = createModelRuntimeState({

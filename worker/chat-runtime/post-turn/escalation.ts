@@ -61,9 +61,10 @@ export async function createEscalation(params: {
   // conversation metadata.
   let existingMeta: Record<string, unknown> = {};
   try {
-    existingMeta = params.conversation.metadata
+    const parsed = params.conversation.metadata
       ? JSON.parse(params.conversation.metadata)
       : {};
+    existingMeta = typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
     /* ignore malformed metadata */
   }
