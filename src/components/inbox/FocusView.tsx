@@ -214,7 +214,7 @@ export default function FocusView({
 
           {/* Below-card row: "{n} of {total}" + keyboard legend */}
           <div className="flex items-center justify-between mt-4 px-1">
-            <span className="text-[13px] font-medium text-[--brand]">
+            <span className="text-[13px] font-medium text-brand">
               {index + 1} of {total}
             </span>
             <div className="flex items-center gap-1.5 text-[12px] text-ink-6">

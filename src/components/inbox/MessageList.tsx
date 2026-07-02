@@ -155,7 +155,7 @@ export default function MessageList({
                 <button
                   className={cn(
                     "glass-button w-7 h-7 rounded-[7px] flex items-center justify-center transition-colors",
-                    unreadOnly ? "text-[--brand]" : "text-ink-5 hover:text-ink-2",
+                    unreadOnly ? "text-brand" : "text-ink-5 hover:text-ink-2",
                   )}
                   title="Sort & filter"
                   aria-label="Sort & filter"
@@ -175,7 +175,7 @@ export default function MessageList({
                   >
                     <span className="flex-1 text-left">{opt.label}</span>
                     {sort === opt.id && (
-                      <Check size={14} className="text-[--brand] shrink-0" />
+                      <Check size={14} className="text-brand shrink-0" />
                     )}
                   </button>
                 ))}
@@ -188,7 +188,7 @@ export default function MessageList({
                 >
                   <span className="flex-1 text-left">Unread only</span>
                   {unreadOnly && (
-                    <Check size={14} className="text-[--brand] shrink-0" />
+                    <Check size={14} className="text-brand shrink-0" />
                   )}
                 </button>
               </PopoverContent>

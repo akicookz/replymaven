@@ -328,7 +328,7 @@ export default function ReadingHeader({
           onClick={onOpenSearch}
           className={cn(
             "glass-button rounded-glass flex md:hidden items-center justify-center size-8 transition-colors shrink-0",
-            searchActive ? "text-[--brand] bg-glass-raised" : "text-ink-3 hover:text-ink-1",
+            searchActive ? "text-brand bg-glass-raised" : "text-ink-3 hover:text-ink-1",
           )}
           title="Search conversation"
         >

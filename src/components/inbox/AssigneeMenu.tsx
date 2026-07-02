@@ -77,7 +77,7 @@ export default function AssigneeMenu({ value, onChange }: AssigneeMenuProps) {
           aria-pressed={!!current}
           className={cn(
             "glass-button rounded-glass flex items-center gap-1.5 pl-1.5 pr-2 h-8 text-[12.5px] cursor-pointer select-none outline-none shrink-0 transition-colors",
-            current ? "text-[--brand] bg-glass-raised" : "text-ink-3",
+            current ? "text-brand bg-glass-raised" : "text-ink-3",
           )}
           title="Assign to a teammate"
         >
@@ -96,13 +96,13 @@ export default function AssigneeMenu({ value, onChange }: AssigneeMenuProps) {
         <DropdownMenuItem onSelect={() => onChange(null)}>
           <UserIcon className="size-4 text-ink-6" />
           <span className="flex-1">Unassigned</span>
-          {value == null && <Check className="size-4 text-[--brand]" />}
+          {value == null && <Check className="size-4 text-brand" />}
         </DropdownMenuItem>
         {list.map((u) => (
           <DropdownMenuItem key={u.id} onSelect={() => onChange(u.id)}>
             <Avatar user={u} size={20} />
             <span className="flex-1 min-w-0 truncate">{u.name || u.email}</span>
-            {value === u.id && <Check className="size-4 text-[--brand] shrink-0" />}
+            {value === u.id && <Check className="size-4 text-brand shrink-0" />}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

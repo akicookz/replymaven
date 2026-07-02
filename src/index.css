@@ -4,6 +4,10 @@
 @import "tw-animate-css";
 @import "./theme.css";
 
+/* Docs contain code snippets whose class-like strings would otherwise be
+   picked up by automatic source detection and emitted as (dead) utilities. */
+@source not "../docs";
+
 @custom-variant dark (&:is(.dark *));
 
 @layer base {

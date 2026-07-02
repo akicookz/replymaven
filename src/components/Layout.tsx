@@ -266,7 +266,7 @@ function Layout() {
         <item.icon
           className={cn(
             "w-[18px] h-[18px] shrink-0",
-            active ? "text-[--brand]" : "text-ink-5",
+            active ? "text-brand" : "text-ink-5",
           )}
         />
         {!collapsed && item.label}
@@ -274,7 +274,7 @@ function Layout() {
           <span
             className={cn(
               "ml-auto text-[11px] font-medium tabular-nums",
-              active ? "text-[--brand]" : "text-ink-7",
+              active ? "text-brand" : "text-ink-7",
             )}
           >
             {item.count ?? 0}
