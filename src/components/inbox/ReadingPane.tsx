@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { Sparkles, X } from "lucide-react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import ReadingHeader from "./ReadingHeader";
 import ChatThread from "./ChatThread";
@@ -24,7 +23,6 @@ interface ReadingPaneProps {
   onSnooze: (convId: string, until: number | null) => void;
   onFlagSpam: (convId: string) => void;
   onPriority: (convId: string, priority: "low" | "medium" | "high") => void;
-  onRewrite: () => void;
   onFocus: () => void;
   /** Block the visitor associated with this conversation. */
   onBlock: (convId: string) => void;
@@ -34,12 +32,6 @@ interface ReadingPaneProps {
   onDeleteMessage: (messageId: string) => void;
   /** Mobile: return to the conversation list (clears the selection). */
   onBack?: () => void;
-  /** AI-drafted reply suggestion to offer above the composer (null = hide). */
-  suggestion?: string | null;
-  /** Drop the suggestion into the composer. */
-  onUseSuggestion?: () => void;
-  /** Dismiss the suggestion for this conversation. */
-  onDismissSuggestion?: () => void;
 }
 
 export default function ReadingPane({
@@ -53,15 +45,11 @@ export default function ReadingPane({
   onSnooze,
   onFlagSpam,
   onPriority,
-  onRewrite,
   onFocus,
   onBlock,
   onAssign,
   onDeleteMessage,
   onBack,
-  suggestion,
-  onUseSuggestion,
-  onDismissSuggestion,
 }: ReadingPaneProps) {
   // The thread is its own scroll container now (header above / composer below
   // are flex siblings, never overlapping the thread). This both fixes messages
@@ -193,48 +181,12 @@ export default function ReadingPane({
         />
       </div>
 
-      {/* AI suggestion chip — only when the thread actually awaits a reply.
-          Surfaced here (not auto-typed) so it never clobbers a real draft. */}
-      {suggestion && (
-        <div className="shrink-0 px-4 md:px-[30px] pt-2">
-          <div className="flex items-start gap-2.5 rounded-[12px] border border-hairline-strong bg-glass-raised px-3 py-2.5">
-            <Sparkles className="size-4 text-[--brand] shrink-0 mt-0.5" />
-            <div className="min-w-0 flex-1">
-              <div className="text-[10.5px] font-semibold text-ink-6 uppercase tracking-wide mb-0.5">
-                Suggested reply
-              </div>
-              <p className="text-[13px] text-ink-3 line-clamp-2 leading-snug">
-                {suggestion}
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={onUseSuggestion}
-                className="rounded-[8px] bg-bubble-sent text-white text-[12.5px] font-medium px-2.5 h-7 hover:opacity-90 transition-opacity"
-              >
-                Use draft
-              </button>
-              <button
-                type="button"
-                onClick={onDismissSuggestion}
-                aria-label="Dismiss suggestion"
-                className="flex items-center justify-center size-7 rounded-[8px] text-ink-6 hover:text-ink-2 hover:bg-white/5 transition-colors"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Composer — flex sibling below the thread (no longer overlaps it) */}
       <Composer
         draft={draft}
         setDraft={setDraft}
         onSend={onSend}
         onResolve={onResolve}
-        onRewrite={onRewrite}
         convId={conversation.id}
       />
 

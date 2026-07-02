@@ -16,7 +16,6 @@ interface FocusViewProps {
     opts?: { imageUrl?: string | null; asEmail?: boolean },
   ) => void;
   onResolve: (convId: string) => void;
-  onRewrite: () => void;
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
 }
@@ -94,7 +93,6 @@ export default function FocusView({
   onExit,
   onSend,
   onResolve,
-  onRewrite,
   draft,
   setDraft,
 }: FocusViewProps) {
@@ -202,7 +200,6 @@ export default function FocusView({
                   setDraft={setDraft}
                   onSend={onSend}
                   onResolve={onResolve}
-                  onRewrite={onRewrite}
                   convId={conversation.id}
                 />
               </div>

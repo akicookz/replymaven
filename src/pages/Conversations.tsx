@@ -9,7 +9,6 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useConversationWs } from "@/lib/use-conversation-ws";
-import { useCopilotThread, useCopilotSender } from "@/lib/use-copilot";
 import type { InboxFilter, InboxSort } from "@/lib/inbox/filters";
 import type {
   Conversation,
@@ -123,10 +122,6 @@ function Conversations() {
   const [unreadOnly, setUnreadOnly] = useState(false);
   // Client-side read overlay (see readKey): convId -> activity ms marked read.
   const [readMarks, setReadMarks] = useState<Record<string, number>>({});
-  const lastSuggestionRef = useRef<string | null>(null);
-  // Tracks which conversations have already had an auto-suggest triggered so
-  // we fire at most once per opened conversation.
-  const autoSuggestedRef = useRef<Set<string>>(new Set());
 
   // Sync selectedConvo <-> ?id= URL param so deep links work and shares are
   // stable. Other params (e.g. ?filter=) are preserved.
@@ -217,12 +212,6 @@ function Conversations() {
   // ["conversation-detail", id] cache on incoming events so messages and
   // status changes appear in real time without polling.
   useConversationWs(projectId, selectedConvo);
-
-  // Copilot: surface the conversation's auto-suggest draft and let the agent
-  // (re)generate it via handleRewrite. The drawer UI is superseded by the new
-  // inline draft + Rewrite action.
-  const copilotThread = useCopilotThread(projectId ?? "", selectedConvo);
-  const copilotSender = useCopilotSender(projectId ?? "", selectedConvo ?? "");
 
   // ── List query (drives the conversation column) ──────────────────────────
   const {
@@ -367,120 +356,10 @@ function Conversations() {
     staleTime: 1000 * 60,
   });
 
-  // Does the open conversation actually await an agent reply? Drives both the
-  // auto-draft trigger and the suggestion chip — we only suggest when there's
-  // genuinely something to reply to (visitor sent last; thread open & not
-  // snoozed). This is what stops the old "doesn't fit the conversation" drafts
-  // from appearing on resolved / already-answered threads.
-  const needsReply = useMemo(() => {
-    const conv = convoDetail?.conversation;
-    if (!conv || conv.status === "closed") return false;
-    if (conv.snoozedUntil && new Date(conv.snoozedUntil).getTime() > Date.now())
-      return false;
-    const msgs = convoDetail?.messages ?? [];
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role === "system") continue;
-      return msgs[i].role === "visitor";
-    }
-    return false;
-  }, [convoDetail]);
-
-  // Per-conversation dismissal of the suggestion chip, and a flag marking that
-  // the next completed suggestion was explicitly requested via "Rewrite" (and
-  // should land in the composer rather than the chip).
-  const [suggestionDismissed, setSuggestionDismissed] = useState(false);
-  const rewriteRequestedRef = useRef(false);
-
-  // Reset the composer draft + suggestion state when switching conversations.
+  // Reset the composer draft when switching conversations.
   useEffect(() => {
     setDraft("");
-    lastSuggestionRef.current = null;
-    rewriteRequestedRef.current = false;
-    setSuggestionDismissed(false);
   }, [selectedConvo]);
-
-  // Latest completed Copilot auto-suggest for the open conversation. Surfaced as
-  // a dismissible chip (NOT auto-typed into the composer) unless the agent
-  // explicitly pressed Rewrite, in which case it fills the composer.
-  const suggestionText = useMemo(() => {
-    const msgs = copilotThread.data;
-    if (!msgs || msgs.length === 0) return null;
-    const s = [...msgs]
-      .reverse()
-      .find(
-        (m) =>
-          m.role === "copilot" &&
-          m.autoSuggest &&
-          !m._streaming &&
-          m.content.trim().length > 0,
-      );
-    return s?.content ?? null;
-  }, [copilotThread.data]);
-
-  useEffect(() => {
-    const msgs = copilotThread.data;
-    if (!msgs || msgs.length === 0) return;
-    const suggestion = [...msgs]
-      .reverse()
-      .find(
-        (m) =>
-          m.role === "copilot" &&
-          m.autoSuggest &&
-          !m._streaming &&
-          m.content.trim().length > 0,
-      );
-    if (!suggestion) return;
-    if (lastSuggestionRef.current === suggestion.id) return;
-    lastSuggestionRef.current = suggestion.id;
-    // Only auto-fill the composer when the agent explicitly asked (Rewrite);
-    // automatic suggestions stay in the dismissible chip.
-    if (rewriteRequestedRef.current) {
-      rewriteRequestedRef.current = false;
-      setDraft((prev) => (prev.trim().length > 0 ? prev : suggestion.content));
-      setSuggestionDismissed(true);
-    }
-  }, [copilotThread.data]);
-
-  // Conservative auto-prefill: when a conversation is opened with an empty
-  // draft and no existing auto-suggest, fire the endpoint once to seed the
-  // composer. Guards: at most once per selectedConvo; never overwrite typed
-  // text; swallow 409/errors silently.
-  useEffect(() => {
-    if (!selectedConvo || !projectId) return;
-    if (autoSuggestedRef.current.has(selectedConvo)) return;
-    // Cost gate: only auto-draft for conversations that still need a reply.
-    // Wait for the detail to load, and never fire for resolved/closed ones
-    // (e.g. browsing the Resolved view must not spend an LLM call per row).
-    const status = convoDetail?.conversation?.status;
-    if (status === undefined) return; // detail not loaded yet
-    if (status === "closed") {
-      autoSuggestedRef.current.add(selectedConvo);
-      return;
-    }
-    // Only auto-draft when the conversation genuinely needs a reply (visitor
-    // sent last, open, not snoozed). Don't mark as done — if a visitor message
-    // later flips this to true, the effect re-runs and fires then.
-    if (!needsReply) return;
-    // Wait until copilot thread has finished loading so we don't
-    // fire unnecessarily when a suggestion already exists.
-    if (copilotThread.isLoading || copilotThread.data === undefined) return;
-    const hasAutoSuggest = copilotThread.data.some(
-      (m) => m.role === "copilot" && m.autoSuggest,
-    );
-    // If a thread/suggestion already exists, mark as done and skip.
-    if (hasAutoSuggest) {
-      autoSuggestedRef.current.add(selectedConvo);
-      return;
-    }
-    // Don't overwrite anything the agent has typed.
-    if (draft.trim().length > 0) return;
-    // Mark before calling so a re-render can't fire a second request.
-    autoSuggestedRef.current.add(selectedConvo);
-    copilotSender.send({ endpoint: "auto-suggest" }).catch(() => {});
-  // copilotSender is stable per conversation; draft is guarded by the trim
-  // check so transient typing changes won't re-fire (the ref prevents it).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedConvo, copilotThread.data, copilotThread.isLoading, projectId, convoDetail?.conversation?.status, needsReply]);
 
   // ── Mutations ─────────────────────────────────────────────────────────────
   const sendReply = useMutation({
@@ -1087,25 +966,6 @@ function Conversations() {
     queryClient.invalidateQueries({ queryKey: ["inbox-counts", projectId] });
   }
 
-  function handleRewrite() {
-    if (!selectedConvo || copilotSender.isStreaming) return;
-    // Mark this as an explicit request so the completed suggestion lands in the
-    // composer (not the chip), and reset the guard so it re-picks the fresh one.
-    // regenerate replaces any prior draft instead of 409-ing on the existing one.
-    rewriteRequestedRef.current = true;
-    lastSuggestionRef.current = null;
-    copilotSender.send({ endpoint: "auto-suggest", regenerate: true });
-  }
-
-  function handleUseSuggestion() {
-    if (suggestionText) setDraft(suggestionText);
-    setSuggestionDismissed(true);
-  }
-
-  function handleDismissSuggestion() {
-    setSuggestionDismissed(true);
-  }
-
   async function handleDeleteMessage(messageId: string) {
     if (!selectedConvo) return;
     try {
@@ -1169,8 +1029,6 @@ function Conversations() {
         selectRelative(-1);
       } else if (e.key === "e" || e.key === "E") {
         if (selected) handleResolve(selected.id);
-      } else if (e.key === "r" || e.key === "R") {
-        handleRewrite();
       } else if (e.key === "f" || e.key === "F") {
         setView((v) => (v === "focus" ? "split" : "focus"));
       } else if (e.key === "Escape") {
@@ -1180,9 +1038,9 @@ function Conversations() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // handleResolve and handleRewrite are function declarations that close over
-    // the same reactive values already listed (conversations, selected, etc.),
-    // so they are kept fresh by the existing deps without being listed here.
+    // handleResolve is a function declaration that closes over the same
+    // reactive values already listed (conversations, selected, etc.), so it is
+    // kept fresh by the existing deps without being listed here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, conversations, selectedIndex, view]);
 
@@ -1197,7 +1055,6 @@ function Conversations() {
         onExit={() => setView("split")}
         onSend={handleSend}
         onResolve={handleResolve}
-        onRewrite={handleRewrite}
         draft={draft}
         setDraft={setDraft}
       />
@@ -1245,22 +1102,11 @@ function Conversations() {
           onSnooze={handleSnooze}
           onFlagSpam={handleFlagSpam}
           onPriority={handleSetPriority}
-          onRewrite={handleRewrite}
           onFocus={() => setView("focus")}
           onBlock={handleBlock}
           onAssign={handleAssign}
           onDeleteMessage={handleDeleteMessage}
           onBack={() => setSelectedConvo(null)}
-          suggestion={
-            suggestionText &&
-            needsReply &&
-            !suggestionDismissed &&
-            draft.trim().length === 0
-              ? suggestionText
-              : null
-          }
-          onUseSuggestion={handleUseSuggestion}
-          onDismissSuggestion={handleDismissSuggestion}
         />
       ) : (
         <div className="glass-reading flex-1 hidden md:grid place-items-center text-ink-7 text-sm">

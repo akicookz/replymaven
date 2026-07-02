@@ -11,7 +11,6 @@ export interface ComposerProps {
     opts?: { imageUrl?: string | null },
   ) => void;
   onResolve: (convId: string) => void;
-  onRewrite: () => void;
   convId: string;
 }
 
@@ -20,7 +19,6 @@ export default function Composer({
   setDraft,
   onSend,
   onResolve,
-  onRewrite,
   convId,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -29,12 +27,12 @@ export default function Composer({
   const [uploading, setUploading] = useState(false);
 
   // Auto-grow: keep the textarea height synced to its content on EVERY draft
-  // change — typed, pasted, programmatically filled (AI "Use draft" / Rewrite),
-  // or cleared after send. Driving this from a layout effect (rather than only
-  // an onInput handler, which never fires on programmatic value changes) is
-  // what makes the box follow a multiline suggestion and snap back to one row
-  // once the draft is reset. Capped at max-h-[200px] via CSS; runs before
-  // paint so there's no height flash.
+  // change — typed, pasted, programmatically filled, or cleared after send.
+  // Driving this from a layout effect (rather than only an onInput handler,
+  // which never fires on programmatic value changes) is what makes the box
+  // follow a multiline paste and snap back to one row once the draft is
+  // reset. Capped at max-h-[200px] via CSS; runs before paint so there's no
+  // height flash.
   useLayoutEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
@@ -141,17 +139,8 @@ export default function Composer({
             </button>
           </div>
 
-          {/* Right: Rewrite / Resolve / Send */}
+          {/* Right: Resolve / Send */}
           <div className="flex items-center gap-[7px]">
-            <button
-              type="button"
-              className="flex items-center gap-1.5 text-[13px] text-ink-5 hover:text-ink-2 transition-colors cursor-pointer"
-              onClick={onRewrite}
-              title="Rewrite with AI"
-            >
-              Rewrite
-              <span className="keycap">R</span>
-            </button>
             <button
               type="button"
               className="flex items-center gap-1.5 text-[13px] text-ink-5 hover:text-ink-2 transition-colors cursor-pointer"
