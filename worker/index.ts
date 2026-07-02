@@ -6048,6 +6048,32 @@ const app = new Hono<HonoAppContext>()
 
     return c.json({ updates: updatesWithPreview, counts, serverTime });
   })
+  .get("/api/projects/:id/needs-review-updates", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    const since = parseInt(c.req.query("since") ?? "0", 10) || 0;
+    const rows = await new ChatService(db).getNeedsReviewSince(project.id, since);
+    const items = rows.map((row) => {
+      let meta: Record<string, unknown> = {};
+      try { meta = row.metadata ? JSON.parse(row.metadata) : {}; } catch { /* ignore */ }
+      return {
+        id: row.id,
+        visitorName: row.visitorName,
+        visitorEmail: row.visitorEmail,
+        summary: typeof meta.teamRequestSummary === "string" ? meta.teamRequestSummary : null,
+        summaryMessageId:
+          typeof meta.reviewSummaryMessageId === "string" ? meta.reviewSummaryMessageId : null,
+        updatedAt: row.updatedAt.getTime(),
+      };
+    });
+    return c.json({ serverTime: Date.now(), items });
+  })
   .get("/api/projects/:id/conversations/:convId/ws", (c) =>
     handleDashboardWsUpgrade(c),
   )

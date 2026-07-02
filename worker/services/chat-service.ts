@@ -176,6 +176,23 @@ export class ChatService {
     return rows;
   }
 
+  // Conversations that entered (or re-entered) Needs You since `since` (ms).
+  // Status changes bump updatedAt, so it doubles as the escalation watermark.
+  async getNeedsReviewSince(projectId: string, since: number): Promise<ConversationRow[]> {
+    return this.db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.projectId, projectId),
+          eq(conversations.status, "waiting_agent"),
+          gt(conversations.updatedAt, new Date(since)),
+        ),
+      )
+      .orderBy(desc(conversations.updatedAt))
+      .limit(20);
+  }
+
   async createConversation(
     data: Omit<NewConversationRow, "id" | "createdAt" | "updatedAt">,
   ): Promise<ConversationRow> {
