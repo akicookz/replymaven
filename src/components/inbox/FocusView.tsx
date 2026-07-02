@@ -63,7 +63,7 @@ function FocusBubble({ message }: { message: Message }) {
         {senderLabel}
       </span>
       <div
-        className={`max-w-[78%] px-[14px] py-[9px] text-[14.5px] leading-[1.5] break-words ${
+        className={`max-w-[90%] sm:max-w-[78%] px-[14px] py-[9px] text-[14.5px] leading-[1.5] break-words ${
           isReceived
             ? "bg-bubble-received text-ink-2 rounded-[18px_18px_18px_6px]"
             : "bg-bubble-sent text-white rounded-[18px_18px_6px_18px]"

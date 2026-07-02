@@ -68,7 +68,7 @@ export default function MessageBubble({
             <span className="text-[11px] text-ink-8">{formatTime(message.createdAt)}</span>
           </div>
         )}
-        <div className={cn("max-w-[74%] px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-received text-ink-2 rounded-[20px_20px_20px_6px]", matchClass)}>
+        <div className={cn("max-w-[90%] sm:max-w-[74%] px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-received text-ink-2 rounded-[20px_20px_20px_6px]", matchClass)}>
           {message.imageUrl && (
             <img
               src={message.imageUrl}
@@ -135,7 +135,7 @@ export default function MessageBubble({
           {renderStatus(true)}
         </div>
       )}
-      <div className="relative group max-w-[74%]">
+      <div className="relative group max-w-[90%] sm:max-w-[74%]">
         <div className={cn("px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-sent text-white rounded-[20px_20px_6px_20px]", matchClass)}>
           {message.imageUrl && (
             <img
