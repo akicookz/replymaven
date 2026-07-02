@@ -64,6 +64,12 @@ import { handleWidgetMessageTurn } from "./chat-runtime/orchestration/handle-wid
 import { triggerAutoRefinementIfEnabled } from "./chat-runtime/post-turn/auto-refine";
 import { buildToolRegistry } from "./chat-runtime/tools/build-tool-registry";
 import { toToolDefinition } from "./chat-runtime/types";
+import {
+  createLanguageModel,
+  createModelRuntimeState,
+  runWithModelFallback,
+} from "./chat-runtime/llm/create-language-model";
+import { composeAgentDraft } from "./chat-runtime/llm/compose-agent-draft";
 import { logError, logInfo, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
@@ -132,6 +138,7 @@ import {
   updateGuidelineSchema,
   usageLogQuerySchema,
   sendMessageAsEmailSchema,
+  composeDraftSchema,
   snoozeSchema,
   prioritySchema,
   assignSchema,
@@ -6533,6 +6540,83 @@ const app = new Hono<HonoAppContext>()
     );
 
     return c.json(message, 201);
+  })
+  // ─── Compose draft: turn an agent's shorthand instruction into a
+  // tone-matched, visitor-language chat reply (no persistence, no RAG) ───────
+  .post("/api/projects/:id/conversations/:convId/compose-draft", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const ip = getClientIp(c);
+    if (
+      !checkRateLimit(
+        `compose-draft:${c.req.param("id")}:${user.id}:${ip}`,
+        30,
+        60_000,
+      )
+    ) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(composeDraftSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const chatService = new ChatService(db);
+    const conversation = await chatService.getConversationById(
+      c.req.param("convId"),
+      project.id,
+    );
+    if (!conversation) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const [settings, msgs] = await Promise.all([
+      projectService.getSettings(project.id),
+      chatService.getMessages(conversation.id),
+    ]);
+
+    const runtime = createModelRuntimeState({
+      model: c.env.AI_MODEL,
+      geminiApiKey: c.env.GEMINI_API_KEY,
+      openaiApiKey: c.env.OPENAI_API_KEY,
+    });
+
+    try {
+      const message = await runWithModelFallback({
+        runtime,
+        stage: "compose_agent_draft",
+        logContext: { projectId: project.id, conversationId: conversation.id },
+        operation: (activeConfig) =>
+          composeAgentDraft(
+            createLanguageModel(activeConfig),
+            {
+              instruction: parsed.data.instruction,
+              conversationHistory: msgs.map((m) => ({
+                role: m.role,
+                content: m.content,
+              })),
+              settings,
+            },
+            { throwOnModelError: true },
+          ),
+      });
+      if (!message) return c.json({ error: "compose_failed" }, 502);
+      return c.json({ message });
+    } catch (error) {
+      logError("compose_draft.failed", error, {
+        projectId: project.id,
+        conversationId: conversation.id,
+      });
+      return c.json({ error: "compose_failed" }, 502);
+    }
   })
   .post("/api/projects/:id/conversations/:convId/send-email", async (c) => {
     const user = c.get("user");

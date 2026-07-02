@@ -355,6 +355,11 @@ export const sendMessageAsEmailSchema = z.object({
   messageId: z.string().min(1),
 });
 
+// ─── Compose Draft (agent instruction → tone-matched visitor message) ────────
+export const composeDraftSchema = z.object({
+  instruction: z.string().min(1).max(2000),
+});
+
 // ─── Telegram ─────────────────────────────────────────────────────────────────
 export const updateTelegramSchema = z.object({
   telegramBotToken: z.string().max(255).optional(),
