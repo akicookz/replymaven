@@ -1,6 +1,7 @@
 import { generateText, type LanguageModel } from "ai";
 import { type ProjectSettingsRow } from "../../db";
 import { resolveToneInstruction } from "../prompt/build-support-system-prompt";
+import { formatTranscript } from "../prompt/format-transcript";
 
 export type ComposeAgentDraftSettings = Pick<
   ProjectSettingsRow,
@@ -13,7 +14,11 @@ export type ComposeAgentDraftSettings = Pick<
 
 export interface ComposeAgentDraftParams {
   instruction: string;
-  conversationHistory: Array<{ role: string; content: string }>;
+  conversationHistory: Array<{
+    role: string;
+    content: string;
+    createdAt?: string;
+  }>;
   settings: ComposeAgentDraftSettings | null;
 }
 
@@ -24,10 +29,7 @@ export interface ComposeAgentDraftParams {
 export function buildComposeAgentDraftPrompt(
   params: ComposeAgentDraftParams,
 ): string {
-  const transcript = params.conversationHistory
-    .slice(-20)
-    .map((message) => `${message.role}: ${message.content}`)
-    .join("\n");
+  const transcript = formatTranscript(params.conversationHistory.slice(-20));
 
   const settings = params.settings;
   const toneInstruction = resolveToneInstruction({

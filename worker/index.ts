@@ -6434,6 +6434,10 @@ const app = new Hono<HonoAppContext>()
               conversationHistory: msgs.map((m) => ({
                 role: m.role,
                 content: m.content,
+                createdAt:
+                  m.createdAt instanceof Date
+                    ? m.createdAt.toISOString()
+                    : undefined,
               })),
               settings,
             },
