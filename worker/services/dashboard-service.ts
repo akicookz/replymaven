@@ -6,7 +6,6 @@ import {
   messages,
   resources,
   knowledgeSuggestions,
-  tickets,
 } from "../db";
 
 export class DashboardService {
@@ -154,19 +153,6 @@ export class DashboardService {
       )
       .limit(5);
 
-    // ─── Recent tickets (last 5) ────────────────────────────────────────────
-    const recentTickets = await this.db
-      .select()
-      .from(tickets)
-      .where(
-        sql`${tickets.projectId} IN (${sql.join(
-          projectIds.map((id) => sql`${id}`),
-          sql`, `,
-        )})`,
-      )
-      .orderBy(desc(tickets.createdAt))
-      .limit(5);
-
     return {
       totalProjects: projectId ? undefined : userProjects.length,
       totalConversations: conversationCounts[0]?.total ?? 0,
@@ -177,7 +163,10 @@ export class DashboardService {
       conversationsByDay,
       conversationsByStatus,
       recentConversations,
-      recentTickets,
+      // Tickets were removed (conversation-first "Needs You" replaced them);
+      // kept as an always-empty array so the dashboard's frontend type/shape
+      // (RecentTicket[]) doesn't need updating in this pass — see Task 11.
+      recentTickets: [] as never[],
     };
   }
 }

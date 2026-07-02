@@ -419,7 +419,7 @@ function hiddenInput(name: string, value: string): string {
 function formatScope(scope: string): string {
   switch (scope) {
     case "projects:read":
-      return "Read projects, resources, conversations, and tickets";
+      return "Read projects, resources, and conversations";
     case "conversations:reply":
       return "Send agent replies to conversations";
     case "resources:write":

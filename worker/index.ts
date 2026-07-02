@@ -14,7 +14,7 @@ import { createAuth } from "./auth";
 import { type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
 import { WidgetService } from "./services/widget-service";
-import { TicketService, parseTicketData } from "./services/ticket-service";
+import { getAssignableUsers } from "./services/assignable-users";
 import { ContactFormService } from "./services/contact-form-service";
 import { ChatService, type InboxFilter } from "./services/chat-service";
 import { ResourceService, type FaqPair } from "./services/resource-service";
@@ -118,9 +118,6 @@ import {
   updateConversationPublicSchema,
   updateTicketConfigSchema,
   submitContactFormSchema,
-  updateTicketSchema,
-  bulkUpdateTicketStatusSchema,
-  ticketListQuerySchema,
   createToolSchema,
   updateToolSchema,
   testToolSchema,
@@ -1032,7 +1029,7 @@ const app = new Hono<HonoAppContext>()
     // Verify contact form is enabled
     const formConfig = await contactFormService.getConfig(project.id);
     if (!formConfig?.enabled) {
-      return c.json({ error: "Ticket form is not enabled" }, 400);
+      return c.json({ error: "Contact form is not enabled" }, 400);
     }
 
     const visitorId = parsed.data.visitorId ?? crypto.randomUUID();
@@ -4473,189 +4470,8 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const ticketService = new TicketService(db);
-    const assignable = await ticketService.getAssignableUsers(project.id);
+    const assignable = await getAssignableUsers(db, project.id);
     return c.json(assignable);
-  })
-
-  // ─── Tickets List ─────────────────────────────────────────────────────────
-  .get("/api/projects/:id/tickets", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const rawQuery = {
-      status: c.req.queries("status"),
-      priority: c.req.queries("priority"),
-      assigneeId: c.req.query("assigneeId"),
-      unassigned: c.req.query("unassigned") === "true" ? true : undefined,
-      q: c.req.query("q"),
-      sortBy: c.req.query("sortBy"),
-      sortDir: c.req.query("sortDir"),
-      limit: c.req.query("limit")
-        ? parseInt(c.req.query("limit")!, 10)
-        : undefined,
-      offset: c.req.query("offset")
-        ? parseInt(c.req.query("offset")!, 10)
-        : undefined,
-    };
-    const parsed = validate(ticketListQuerySchema, rawQuery);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
-    const ticketService = new TicketService(db);
-    // Fetch one extra row to detect whether another page exists, then trim.
-    const requestedLimit = parsed.data.limit;
-    const optsWithPeek = {
-      ...parsed.data,
-      limit: requestedLimit != null ? requestedLimit + 1 : undefined,
-    };
-    const enriched = await ticketService.getTicketsWithAssignees(
-      project.id,
-      optsWithPeek,
-    );
-    const hasMore =
-      requestedLimit != null && enriched.length > requestedLimit;
-    const trimmed = hasMore ? enriched.slice(0, requestedLimit!) : enriched;
-    return c.json({
-      rows: trimmed.map((t) => ({
-        ...t,
-        data: JSON.parse(t.data || "{}"),
-      })),
-      hasMore,
-    });
-  })
-
-  // ─── Bulk Update Ticket Status ────────────────────────────────────────────
-  .patch("/api/projects/:id/tickets/bulk-status", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const body = await c.req.json();
-    const parsed = validate(bulkUpdateTicketStatusSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const ticketService = new TicketService(db);
-    const updated = await ticketService.bulkUpdateTicketStatus(
-      parsed.data.ids,
-      project.id,
-      parsed.data.status,
-    );
-    return c.json({ updated });
-  })
-
-  // ─── Update Ticket (status / priority / assignee / dueDate) ───────────────
-  .patch("/api/projects/:id/tickets/:ticketId", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const body = await c.req.json();
-    const parsed = validate(updateTicketSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const ticketService = new TicketService(db);
-    try {
-      const ticket = await ticketService.updateTicket(
-        c.req.param("ticketId"),
-        project.id,
-        {
-          status: parsed.data.status,
-          priority: parsed.data.priority,
-          assigneeId: parsed.data.assigneeId,
-          dueDate:
-            parsed.data.dueDate === undefined
-              ? undefined
-              : parsed.data.dueDate === null
-                ? null
-                : new Date(parsed.data.dueDate),
-        },
-      );
-      if (!ticket) return c.json({ error: "Not found" }, 404);
-      const withAssignee = await ticketService.getTicketByIdWithAssignee(
-        ticket.id,
-        project.id,
-      );
-      return c.json({
-        ...(withAssignee ?? ticket),
-        data: JSON.parse((withAssignee ?? ticket).data || "{}"),
-      });
-    } catch (err) {
-      if (err instanceof Error && err.message === "ASSIGNEE_NOT_ALLOWED") {
-        return c.json(
-          { error: "Assignee is not a member of this project's team" },
-          400,
-        );
-      }
-      throw err;
-    }
-  })
-
-  // ─── Compose Ticket Reply ─────────────────────────────────────────────────
-  .post("/api/projects/:id/tickets/:ticketId/compose", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const ticketService = new TicketService(db);
-    const ticket = await ticketService.getTicketById(
-      c.req.param("ticketId"),
-      project.id,
-    );
-    if (!ticket) return c.json({ error: "Not found" }, 404);
-
-    const settings = await projectService.getSettings(project.id);
-    const aiService = new AiService({
-      model: c.env.AI_MODEL,
-      geminiApiKey: c.env.GEMINI_API_KEY,
-      openaiApiKey: c.env.OPENAI_API_KEY,
-    });
-    const ticketData = parseTicketData(ticket.data);
-
-    // Fetch user's work title for email signature
-    const [userProfile] = await db
-      .select({ workTitle: users.workTitle })
-      .from(users)
-      .where(eq(users.id, user.id))
-      .limit(1);
-
-    const reply = await aiService.composeTicketReply(
-      {
-        toneOfVoice: settings?.toneOfVoice,
-        customTonePrompt: settings?.customTonePrompt,
-        companyContext: settings?.companyContext,
-        companyName: settings?.companyName,
-      },
-      settings?.companyName ?? project.name,
-      ticketData,
-      { name: user.name, email: user.email, workTitle: userProfile?.workTitle },
-    );
-
-    return c.json(reply);
   })
 
   // ─── Resources ─────────────────────────────────────────────────────────────
@@ -6300,30 +6116,11 @@ const app = new Hono<HonoAppContext>()
       );
     }
 
-    // Parse metadata once for the ticket lookup decision.
-    // The metadata key `teamRequestSubmissionId` is historical (predates the
-    // inquiry → ticket rename); kept as-is to avoid migrating JSON columns.
-    let ticketId: string | null = null;
-    try {
-      const metadata = conversation.metadata
-        ? (JSON.parse(conversation.metadata as string) as Record<string, unknown>)
-        : {};
-      if (typeof metadata.teamRequestSubmissionId === "string") {
-        ticketId = metadata.teamRequestSubmissionId;
-      }
-    } catch {
-      // ignore
-    }
-
-    // Wave 2: paginated messages + (optional) ticket + ban status, in parallel.
+    // Wave 2: paginated messages + ban status, in parallel.
     const toolService = new ToolService(db);
-    const ticketService = new TicketService(db);
     const banService = new VisitorBanService(db);
-    const [{ messages: msgs, hasMore }, ticketRow, ban] = await Promise.all([
+    const [{ messages: msgs, hasMore }, ban] = await Promise.all([
       chatService.getRecentMessages(conversation.id, 25),
-      ticketId
-        ? ticketService.getTicketByIdWithAssignee(ticketId, project.id)
-        : Promise.resolve(null),
       banService.isVisitorBanned(
         project.id,
         conversation.visitorId,
@@ -6363,27 +6160,12 @@ const app = new Hono<HonoAppContext>()
         })) ?? [],
     }));
 
-    const ticket = ticketRow
-      ? {
-          id: ticketRow.id,
-          data: parseTicketData(ticketRow.data),
-          status: ticketRow.status,
-          priority: ticketRow.priority,
-          assigneeId: ticketRow.assigneeId,
-          assignee: ticketRow.assignee,
-          dueDate: ticketRow.dueDate,
-          createdAt: ticketRow.createdAt,
-          updatedAt: ticketRow.updatedAt,
-        }
-      : null;
-
     return c.json({
       conversation: { ...conversation, visitorBlocked: !!ban },
       messages: messagesWithTools,
       hasMore,
       botName: settings?.botName ?? null,
       agentName: settings?.agentName ?? null,
-      ticket,
     });
   })
   .get("/api/projects/:id/conversations/:convId/messages", async (c) => {
@@ -6885,10 +6667,9 @@ const app = new Hono<HonoAppContext>()
     if (!conversation) return c.json({ error: "Not found" }, 404);
 
     // Validate the assignee belongs to the owner's assignable users (owner +
-    // accepted team members with access to this project). Mirrors ticket assign.
+    // accepted team members with access to this project).
     if (parsed.data.assigneeId) {
-      const ticketService = new TicketService(db);
-      const assignable = await ticketService.getAssignableUsers(project.id);
+      const assignable = await getAssignableUsers(db, project.id);
       if (!assignable.some((u) => u.id === parsed.data.assigneeId)) {
         return c.json(
           { error: "Assignee is not a member of this project's team" },

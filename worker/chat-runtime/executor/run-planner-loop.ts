@@ -52,7 +52,6 @@ import { streamSupportAgent } from "../agents/support-agent";
 import { stripTrailingSolicitedFollowUp } from "./strip-trailing-solicited-follow-up";
 import { executeHttpTool } from "../tools/http-tool-executor";
 import {
-  type TicketFieldSpec,
   type HandoffRenderDirective,
   type PlannerActionHistoryEntry,
   type PlannerDocsEvidence,
@@ -80,8 +79,6 @@ export interface ComposeSystemPromptContext {
   faqMatchHint?: { question: string; answer: string; score: number } | null;
   pageContext?: Record<string, string>;
   visitorInfo: { name: string | null; email: string | null };
-  existingTicket?: Record<string, string> | null;
-  ticketFields?: TicketFieldSpec[] | null;
   agentHandbackInstructions?: string | null;
 }
 
@@ -484,8 +481,6 @@ async function executeCompose(options: {
   faqMatchHint?: { question: string; answer: string; score: number } | null;
   pageContext?: Record<string, string>;
   visitorInfo: { name: string | null; email: string | null };
-  existingTicket?: Record<string, string> | null;
-  ticketFields?: TicketFieldSpec[] | null;
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
   emitStatus: (
@@ -514,8 +509,6 @@ async function executeCompose(options: {
     faqMatchHint: options.faqMatchHint,
     pageContext: options.pageContext,
     visitorInfo: options.visitorInfo,
-    existingTicket: options.existingTicket,
-    ticketFields: options.ticketFields,
     agentHandbackInstructions: options.agentHandbackInstructions,
   };
   const systemPrompt = options.buildSystemPrompt
@@ -544,8 +537,6 @@ async function executeCompose(options: {
           toolEvidenceSummary: summarizeToolEvidence(options.state.toolEvidence),
           retrievalAttempted: options.state.docsEvidence.retrievalAttempted,
           broaderSearchAttempted: options.state.docsEvidence.broaderSearchAttempted,
-          existingTicket: options.existingTicket,
-          ticketFields: options.ticketFields,
           escalated: options.escalated,
         },
       );

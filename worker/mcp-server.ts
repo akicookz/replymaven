@@ -11,7 +11,6 @@ import {
   type ProjectSettingsRow,
   type QuickActionRow,
   type ResourceRow,
-  type TicketRow,
   type WidgetConfigRow,
 } from "./db";
 import { users } from "./db/auth.schema";
@@ -22,7 +21,6 @@ import { WidgetService } from "./services/widget-service";
 import { ResourceService } from "./services/resource-service";
 import { ChatService } from "./services/chat-service";
 import { DashboardService } from "./services/dashboard-service";
-import { TicketService, parseTicketData } from "./services/ticket-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
 import { getTeamContext } from "./services/team-context";
 import {
@@ -178,7 +176,6 @@ function createReplyMavenMcpServer(context: McpRequestContext): McpServer {
   registerGetResourceContentTool(server, context);
   registerListConversationsTool(server, context);
   registerGetConversationTool(server, context);
-  registerListTicketsTool(server, context);
   registerSendAgentReplyTool(server, context);
   registerCreateFaqResourceTool(server, context);
   registerUpdateFaqResourceTool(server, context);
@@ -477,7 +474,6 @@ function registerGetConversationTool(
       await getAccessibleProject(context, projectId);
 
       const chatService = new ChatService(context.db);
-      const ticketService = new TicketService(context.db);
       const conversation = await chatService.getConversationById(
         conversationId,
         projectId,
@@ -486,78 +482,10 @@ function registerGetConversationTool(
 
       const messages = await chatService.getMessages(conversation.id);
       const latestMessages = messages.slice(-(maxMessages ?? 50));
-      const ticket = await ticketService.getTicketByConversationId(
-        projectId,
-        conversation.id,
-      );
 
       return textResult({
         conversation: summarizeConversation(conversation),
         messages: latestMessages.map(summarizeMessage),
-        ticket: ticket ? summarizeTicket(ticket) : null,
-      });
-    },
-  );
-}
-
-function registerListTicketsTool(
-  server: McpServer,
-  context: McpRequestContext,
-): void {
-  server.registerTool(
-    "list_tickets",
-    {
-      title: "List tickets",
-      description:
-        "List recent tickets for a ReplyMaven project, optionally filtered by status, priority, or search text.",
-      inputSchema: {
-        projectId: z.string().min(1).describe("ReplyMaven project ID."),
-        status: z
-          .enum(["open", "in_progress", "resolved", "closed"])
-          .optional()
-          .describe("Optional ticket status filter."),
-        priority: z
-          .enum(["low", "medium", "high", "urgent"])
-          .optional()
-          .describe("Optional ticket priority filter."),
-        query: z
-          .string()
-          .max(100)
-          .optional()
-          .describe("Optional search across ticket title and form data."),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
-          .optional()
-          .describe("Maximum tickets to return. Defaults to 20."),
-      },
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async ({ projectId, status, priority, query, limit }) => {
-      requireScope(context, "projects:read");
-
-      await getAccessibleProject(context, projectId);
-
-      const ticketService = new TicketService(context.db);
-      const tickets = await ticketService.getTicketsWithAssignees(projectId, {
-        status: status ? [status] : undefined,
-        priority: priority ? [priority] : undefined,
-        q: query,
-        limit: limit ?? 20,
-      });
-
-      return textResult({
-        tickets: tickets.map((ticket) => ({
-          ...summarizeTicket(ticket),
-          assignee: ticket.assignee,
-        })),
       });
     },
   );
@@ -1129,23 +1057,6 @@ function summarizeMessage(message: MessageRow): Record<string, unknown> {
   };
 }
 
-function summarizeTicket(ticket: TicketRow): Record<string, unknown> {
-  return {
-    id: ticket.id,
-    projectId: ticket.projectId,
-    conversationId: ticket.conversationId,
-    visitorId: ticket.visitorId,
-    title: ticket.title,
-    data: parseTicketData(ticket.data),
-    status: ticket.status,
-    priority: ticket.priority,
-    assigneeId: ticket.assigneeId,
-    dueDate: serializeDate(ticket.dueDate),
-    createdAt: serializeDate(ticket.createdAt),
-    updatedAt: serializeDate(ticket.updatedAt),
-  };
-}
-
 function sanitizeDashboardStats(
   stats: Awaited<ReturnType<DashboardService["getStats"]>>,
 ): Record<string, unknown> {
@@ -1159,7 +1070,6 @@ function sanitizeDashboardStats(
     conversationsByDay: stats.conversationsByDay,
     conversationsByStatus: stats.conversationsByStatus,
     recentConversations: stats.recentConversations.map(summarizeConversation),
-    recentTickets: stats.recentTickets.map(summarizeTicket),
   };
 }
 

@@ -396,7 +396,8 @@ export const conversations = sqliteTable(
       .default("medium"),
     // Nullable FK to users.id — the agent this conversation is assigned to. No
     // team-membership enforcement at the DB layer; validation lives in the
-    // assign endpoint against the owner's assignable users (mirrors tickets).
+    // assign endpoint against the owner's assignable users (see
+    // services/assignable-users.ts).
     assigneeId: text("assignee_id").references(() => authSchema.users.id, {
       onDelete: "set null",
     }),
@@ -550,57 +551,6 @@ export const ticketConfig = sqliteTable(
 
 export type TicketConfigRow = typeof ticketConfig.$inferSelect;
 export type NewTicketConfigRow = typeof ticketConfig.$inferInsert;
-
-// ─── Tickets ──────────────────────────────────────────────────────────────
-
-export const tickets = sqliteTable(
-  "tickets",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    conversationId: text("conversation_id").references(() => conversations.id, {
-      onDelete: "set null",
-    }),
-    visitorId: text("visitor_id"),
-    title: text("title").notNull().default("Ticket"),
-    data: text("data").notNull(), // JSON object of { fieldLabel: value }
-    status: text("status", {
-      enum: ["open", "in_progress", "resolved", "closed"],
-    })
-      .notNull()
-      .default("open"),
-    priority: text("priority", {
-      enum: ["low", "medium", "high", "urgent"],
-    })
-      .notNull()
-      .default("medium"),
-    // Nullable FK to users.id. No team-membership enforcement at the DB layer —
-    // validation lives in TicketService.updateTicket against the owner's team.
-    assigneeId: text("assignee_id").references(() => authSchema.users.id, {
-      onDelete: "set null",
-    }),
-    dueDate: integer("due_date", { mode: "timestamp" }),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .$onUpdate(() => new Date())
-      .notNull(),
-  },
-  (table) => [
-    index("idx_tickets_project").on(table.projectId),
-    uniqueIndex("idx_tickets_conversation").on(table.conversationId),
-    index("idx_tickets_status").on(table.status),
-    index("idx_tickets_assignee").on(table.assigneeId),
-    index("idx_tickets_priority").on(table.priority),
-  ],
-);
-
-export type TicketRow = typeof tickets.$inferSelect;
-export type NewTicketRow = typeof tickets.$inferInsert;
 
 // ─── Tools ────────────────────────────────────────────────────────────────────
 
@@ -1094,7 +1044,6 @@ export const schema = {
   messages,
   knowledgeSuggestions,
   ticketConfig,
-  tickets,
   subscriptions,
   teamMembers,
   usage,

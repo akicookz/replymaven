@@ -74,12 +74,6 @@ export interface SupportAgentStreamOptions {
   onToolCallFinish?: (info: ToolCallFinishInfo) => void;
 }
 
-export interface TicketFieldSpec {
-  label: string;
-  type: string;
-  required: boolean;
-}
-
 export interface SupportPromptOptions {
   guidelines?: Array<{ condition: string; instruction: string }>;
   agentHandbackInstructions?: string | null;
@@ -99,8 +93,6 @@ export interface SupportPromptOptions {
   toolEvidenceSummary?: string | null;
   retrievalAttempted?: boolean;
   broaderSearchAttempted?: boolean;
-  existingTicket?: Record<string, string> | null;
-  ticketFields?: TicketFieldSpec[] | null;
   // True when the conversation has been flagged for human review
   // (status === "waiting_agent"). Suppresses the [RESOLVED] instruction so
   // the model never self-closes a conversation waiting on a teammate.

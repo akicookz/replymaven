@@ -12,7 +12,7 @@ import {
   type NewGreetingRow,
 } from "../db";
 import { users } from "../db/auth.schema";
-import { TicketService } from "./ticket-service";
+import { ContactFormService } from "./contact-form-service";
 
 export interface GreetingPublic {
   id: string;
@@ -397,7 +397,7 @@ export class WidgetService {
   // ─── Full Widget Config for Embed ───────────────────────────────────────────
 
   async getFullWidgetConfig(projectId: string) {
-    const ticketService = new TicketService(this.db);
+    const contactFormService = new ContactFormService(this.db);
     const [config, actions, settings, formConfig, greetingList] =
       await Promise.all([
         this.getWidgetConfig(projectId),
@@ -407,7 +407,7 @@ export class WidgetService {
           .from(projectSettings)
           .where(eq(projectSettings.projectId, projectId))
           .limit(1),
-        ticketService.getConfig(projectId),
+        contactFormService.getConfig(projectId),
         this.getEnabledGreetingsWithAuthors(projectId),
       ]);
 

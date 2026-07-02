@@ -7,7 +7,6 @@ import {
   buildExtractContactInfoPrompt,
   buildReformulateQueryPrompt,
   buildSummarizeConversationPrompt,
-  buildSummarizeTeamRequestPrompt,
 } from "../chat-runtime/llm/support-prompt-builders";
 import { buildSupportSystemPrompt } from "../chat-runtime/prompt/build-support-system-prompt";
 
@@ -288,36 +287,6 @@ export class AiService {
       return text.trim() || null;
     } catch {
       return null;
-    }
-  }
-
-  // ─── Summarize Team Request ──────────────────────────────────────────────────
-
-  async summarizeTeamRequest(
-    conversationHistory: Array<{ role: string; content: string }>,
-  ): Promise<string> {
-    const transcript = conversationHistory
-      .slice(-16)
-      .map((m) => `${m.role}: ${m.content}`)
-      .join("\n");
-
-    try {
-      const { text } = await generateText({
-        model: this.model,
-        prompt: buildSummarizeTeamRequestPrompt({ transcript }),
-        temperature: 0.2,
-        maxOutputTokens: 256,
-      });
-
-      return text.trim();
-    } catch {
-      const visitorMessages = conversationHistory
-        .filter((message) => message.role === "visitor")
-        .slice(-4)
-        .map((message) => message.content.trim())
-        .filter(Boolean);
-
-      return visitorMessages.join(" ").slice(0, 700);
     }
   }
 
@@ -1186,84 +1155,6 @@ Return this exact shape:
     if (!title || pairs.length === 0) return null;
 
     return { title, description, pairs };
-  }
-
-  // ─── Compose Ticket Reply ──────────────────────────────────────────────────
-
-  async composeTicketReply(
-    settings: {
-      toneOfVoice?: string | null;
-      customTonePrompt?: string | null;
-      companyContext?: string | null;
-      companyName?: string | null;
-    },
-    projectName: string,
-    ticketData: Record<string, string>,
-    senderInfo?: {
-      name: string;
-      email: string;
-      workTitle?: string | null;
-    } | null,
-  ): Promise<{ subject: string; body: string }> {
-    const toneInstruction =
-      settings.toneOfVoice === "custom" && settings.customTonePrompt
-        ? settings.customTonePrompt
-        : settings.toneOfVoice === "friendly"
-          ? "Write in a warm, friendly, and approachable tone."
-          : settings.toneOfVoice === "casual"
-            ? "Write in a casual, relaxed tone."
-            : settings.toneOfVoice === "formal"
-              ? "Write in a formal, respectful tone."
-              : "Write in a professional, clear tone.";
-
-    const companyCtx = settings.companyContext
-      ? `\nCompany context:\n${settings.companyContext}`
-      : "";
-
-    const fieldLines = Object.entries(ticketData)
-      .map(([key, val]) => `${key}: ${val}`)
-      .join("\n");
-
-    const signOff = senderInfo
-      ? `End with this sign-off:\n\nBest regards,\n${senderInfo.name}${senderInfo.workTitle ? `\n${senderInfo.workTitle}` : ""}\n${projectName}\n${senderInfo.email}`
-      : `End with an appropriate sign-off using "[Your name]" as placeholder`;
-
-    const cannedHint = "";
-
-    const { text } = await generateText({
-      model: this.model,
-      system: `You are a helpful assistant composing email replies on behalf of "${projectName}".
-${toneInstruction}${companyCtx}${cannedHint}
-
-Compose a professional reply email to a ticket submission. The reply should:
-- Address the person by name if available
-- Acknowledge what they wrote
-- Provide a helpful, relevant response based on the company context
-- Be concise but thorough
-- ${signOff}
-
-Return ONLY valid JSON in this exact format:
-{"subject":"<email subject line>","body":"<email body text>"}
-
-Do not wrap in markdown code blocks. Do not include any text outside the JSON.`,
-      prompt: `Ticket submission:\n${fieldLines}`,
-      temperature: 0.5,
-      maxOutputTokens: 1024,
-    });
-
-    try {
-      const cleaned = text.replace(/```json?\s*/g, "").replace(/```\s*/g, "").trim();
-      const parsed = JSON.parse(cleaned);
-      return {
-        subject: parsed.subject || "Re: Your ticket",
-        body: parsed.body || "",
-      };
-    } catch {
-      return {
-        subject: "Re: Your ticket",
-        body: text.trim(),
-      };
-    }
   }
 
   // ─── Extract Company Profile From Website ───────────────────────────────────
