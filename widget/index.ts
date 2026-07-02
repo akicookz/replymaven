@@ -1980,38 +1980,11 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       color: #f87171;
       text-align: center;
     }
-    .rm-form-success {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      padding: 40px 20px;
+    .rm-chat-note {
       text-align: center;
-      flex: 1;
-      background: transparent;
-    }
-    .rm-form-success-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .rm-form-success-icon svg {
-      width: 24px;
-      height: 24px;
-    }
-    .rm-form-success-title {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--rm-text);
-    }
-    .rm-form-success-subtitle {
-      font-size: 13px;
-      color: var(--rm-text-secondary);
-      line-height: 1.4;
+      font-size: 11.5px;
+      color: rgba(107, 114, 128, 0.9);
+      margin: 6px 0 10px;
     }
 
     /* Quick action bar in home */
@@ -4087,42 +4060,21 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
               conversationStatus =
                 (result as { conversationStatus?: string | null })
                   .conversationStatus ?? conversationStatus;
+              syncConversationModeUi();
               persistConversationId(conversationId);
               startPolling();
               inlineBarActions.classList.remove("has-actions");
               await loadConversationHistory(false);
             }
 
-            // Show success state
+            // Land the visitor in the conversation so follow-ups are just chat.
             formView.removeChild(formBody);
-            const success = document.createElement("div");
-            success.className = "rm-form-success";
-
-            const successIcon = document.createElement("div");
-            successIcon.className = "rm-form-success-icon";
-            successIcon.style.backgroundColor = `rgba(${hexToRgb(primary)}, 0.12)`;
-            successIcon.style.color = primary;
-            successIcon.innerHTML = ICONS.check;
-
-            const successTitle = document.createElement("div");
-            successTitle.className = "rm-form-success-title";
-            successTitle.textContent = "Message sent!";
-
-            const successSubtitle = document.createElement("div");
-            successSubtitle.className = "rm-form-success-subtitle";
-            successSubtitle.textContent =
-              cf.description || "We'll get back to you soon.";
-
-            const formBackBtn = document.createElement("button");
-            formBackBtn.className = "rm-form-back-btn";
-            formBackBtn.textContent = "Back to Chat";
-            formBackBtn.onclick = () => showChatScreen();
-
-            success.appendChild(successIcon);
-            success.appendChild(successTitle);
-            success.appendChild(successSubtitle);
-            success.appendChild(formBackBtn);
-            formView.appendChild(success);
+            showChatScreen();
+            const note = document.createElement("div");
+            note.className = "rm-chat-note";
+            note.textContent = "Sent — the team will reply here";
+            messagesContainer.appendChild(note);
+            scrollToBottom();
           } catch {
             formError.textContent =
               "Couldn't send message. Please check your connection.";
