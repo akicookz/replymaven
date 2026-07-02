@@ -266,6 +266,8 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     close:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
     send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
+    image:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>',
     bot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>',
     headset:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>',
@@ -1360,17 +1362,36 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       position: relative;
       z-index: 2;
     }
-    .rm-input {
+    /* Pill wrapper — carries the border/focus ring; the textarea inside is
+       transparent and the image/send buttons pin to the pill's bottom corners
+       (iMessage-style), staying put as the textarea grows upward. */
+    .rm-input-shell {
+      position: relative;
       flex: 1;
-      padding: 8px 14px;
+      display: flex;
+      align-items: flex-end;
       border: 1px solid var(--rm-border);
       border-radius: var(--rm-btn-radius);
+      background: var(--rm-input-bg);
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+      box-sizing: border-box;
+    }
+    .rm-input-shell:focus-within {
+      border-color: var(--rm-primary, #2563eb);
+      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
+      background: var(--rm-input-bg-focus);
+    }
+    .rm-input {
+      flex: 1;
+      width: 100%;
+      padding: 9px 44px 9px 40px;
+      border: none;
+      border-radius: inherit;
       font-size: 14px;
       line-height: 1.5;
       outline: none;
-      background: var(--rm-input-bg);
+      background: transparent;
       color: var(--rm-text);
-      transition: border-color 0.2s, box-shadow 0.2s;
       font-family: inherit;
       touch-action: manipulation;
       resize: none;
@@ -1378,18 +1399,16 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       max-height: 120px;
       box-sizing: border-box;
     }
-    .rm-input:focus {
-      border-color: var(--rm-primary, #2563eb);
-      box-shadow: 0 0 0 3px rgba(var(--rm-primary-rgb, 37,99,235), 0.12);
-      background: var(--rm-input-bg-focus);
-    }
     .rm-input::placeholder {
       color: var(--rm-text-muted);
     }
     .rm-send-btn {
-      width: 36px;
-      height: 36px;
-      min-width: 36px;
+      position: absolute;
+      right: 5px;
+      bottom: 5px;
+      width: 30px;
+      height: 30px;
+      min-width: 30px;
       border-radius: 50%;
       border: none;
       cursor: pointer;
@@ -1412,15 +1431,18 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       transform: none;
     }
     .rm-send-btn svg {
-      width: 18px;
-      height: 18px;
+      width: 16px;
+      height: 16px;
     }
 
     /* ─── Image Upload ─────────────────────────────────────────────────────── */
     .rm-attach-btn {
-      width: 36px;
-      height: 36px;
-      min-width: 36px;
+      position: absolute;
+      left: 5px;
+      bottom: 5px;
+      width: 30px;
+      height: 30px;
+      min-width: 30px;
       border-radius: 50%;
       border: none;
       background: transparent;
@@ -1437,8 +1459,8 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       background: var(--rm-bg-secondary);
     }
     .rm-attach-btn svg {
-      width: 18px;
-      height: 18px;
+      width: 17px;
+      height: 17px;
     }
     .rm-image-preview {
       padding: 8px 16px 0;
@@ -2503,9 +2525,11 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       .rm-widget-container.center-inline .rm-chat-window.open .rm-input-area {
         display: flex;
       }
-      .rm-widget-container.center-inline .rm-chat-window.open .rm-input {
+      .rm-widget-container.center-inline .rm-chat-window.open .rm-input-shell {
         border-radius: var(--rm-card-radius);
-        padding: 10px 14px;
+      }
+      .rm-widget-container.center-inline .rm-chat-window.open .rm-input {
+        padding: 10px 44px 10px 40px;
         font-size: 16px;
       }
       /* Prevent iOS input zoom — all inputs must be 16px */
@@ -2746,7 +2770,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
   // Paperclip button
   const attachBtn = document.createElement("button");
   attachBtn.className = "rm-attach-btn";
-  attachBtn.innerHTML = ICONS.paperclip;
+  attachBtn.innerHTML = ICONS.image;
   attachBtn.type = "button";
 
   const defaultMessagePlaceholder = "Type a message...";
@@ -2761,10 +2785,16 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
   sendBtn.className = "rm-send-btn";
   sendBtn.innerHTML = ICONS.send;
 
+  // Pill shell hosts the textarea with the image/send buttons pinned inside
+  // its bottom corners (iMessage-style).
+  const inputShell = document.createElement("div");
+  inputShell.className = "rm-input-shell";
+  inputShell.appendChild(attachBtn);
+  inputShell.appendChild(input);
+  inputShell.appendChild(sendBtn);
+
   inputArea.appendChild(fileInput);
-  inputArea.appendChild(attachBtn);
-  inputArea.appendChild(input);
-  inputArea.appendChild(sendBtn);
+  inputArea.appendChild(inputShell);
 
   // Track pending image file
   let pendingImageFile: File | null = null;
