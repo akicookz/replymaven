@@ -63,7 +63,7 @@ function FocusBubble({ message }: { message: Message }) {
         {senderLabel}
       </span>
       <div
-        className={`max-w-[90%] sm:max-w-[78%] px-[14px] py-[9px] text-[14.5px] leading-[1.5] break-words ${
+        className={`max-w-9/10 sm:max-w-[78%] px-3.5 py-2.25 text-[14.5px] leading-normal break-words ${
           isReceived
             ? "bg-bubble-received text-ink-2 rounded-[18px_18px_18px_6px]"
             : "bg-bubble-sent text-white rounded-[18px_18px_6px_18px]"
@@ -73,7 +73,7 @@ function FocusBubble({ message }: { message: Message }) {
           <img
             src={message.imageUrl}
             alt="attachment"
-            className="block max-w-full max-h-[280px] rounded-[12px] object-contain"
+            className="block max-w-full max-h-70 rounded-lg object-contain"
           />
         )}
         {message.content && (

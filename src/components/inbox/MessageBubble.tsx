@@ -64,16 +64,16 @@ export default function MessageBubble({
       <div className={cn("flex flex-col items-start", rootSpacing)}>
         {showHeader && (
           <div className={`flex items-baseline gap-2 mb-1 ${labelColorClass}`}>
-            <span className="text-[12px] font-semibold">{senderLabel}</span>
+            <span className="text-xs leading-normal font-semibold">{senderLabel}</span>
             <span className="text-[11px] text-ink-8">{formatTime(message.createdAt)}</span>
           </div>
         )}
-        <div className={cn("max-w-[90%] sm:max-w-[74%] px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-received text-ink-2 rounded-[20px_20px_20px_6px]", matchClass)}>
+        <div className={cn("max-w-9/10 sm:max-w-3/4 px-3.5 py-2.5 text-[14.5px] leading-normal bg-bubble-received text-ink-2 rounded-bubble rounded-bl-[6px]", matchClass)}>
           {message.imageUrl && (
             <img
               src={message.imageUrl}
               alt="attachment"
-              className="block max-w-full max-h-[280px] rounded-[12px] object-contain"
+              className="block max-w-full max-h-70 rounded-lg object-contain"
             />
           )}
           {message.content && (
@@ -135,13 +135,13 @@ export default function MessageBubble({
           {renderStatus(true)}
         </div>
       )}
-      <div className="relative group max-w-[90%] sm:max-w-[74%]">
-        <div className={cn("px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-sent text-white rounded-[20px_20px_6px_20px]", matchClass)}>
+      <div className="relative group max-w-9/10 sm:max-w-3/4">
+        <div className={cn("px-3.5 py-2.5 text-[14.5px] leading-normal bg-bubble-sent text-white rounded-bubble rounded-br-[6px]", matchClass)}>
           {message.imageUrl && (
             <img
               src={message.imageUrl}
               alt="attachment"
-              className="block max-w-full max-h-[280px] rounded-[12px] object-contain"
+              className="block max-w-full max-h-70 rounded-lg object-contain"
             />
           )}
           {message.content && (
