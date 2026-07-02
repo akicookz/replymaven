@@ -17,6 +17,30 @@ import {
 export type SystemEventKind = "flagged" | "joined" | "snoozed" | "snooze_ended" | "drafted" | "review_summary";
 export type InboxFilter = "needs-you" | "all" | "snoozed" | "resolved" | "flagged";
 
+// Query for conversations that entered (or re-entered) Needs You since
+// `since` (ms). Status changes bump updatedAt, so it doubles as the
+// escalation watermark. Exported as a standalone builder (not executed here)
+// so tests can introspect the generated SQL via .toSQL() — the method below
+// has zero JS-side logic, so the built query IS the behavior under test.
+export function buildNeedsReviewQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  projectId: string,
+  since: number,
+) {
+  return db
+    .select()
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.projectId, projectId),
+        eq(conversations.status, "waiting_agent"),
+        gt(conversations.updatedAt, new Date(since)),
+      ),
+    )
+    .orderBy(desc(conversations.updatedAt))
+    .limit(20);
+}
+
 export class ChatService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
 
@@ -176,21 +200,9 @@ export class ChatService {
     return rows;
   }
 
-  // Conversations that entered (or re-entered) Needs You since `since` (ms).
-  // Status changes bump updatedAt, so it doubles as the escalation watermark.
+  // See buildNeedsReviewQuery for the query semantics and why it's extracted.
   async getNeedsReviewSince(projectId: string, since: number): Promise<ConversationRow[]> {
-    return this.db
-      .select()
-      .from(conversations)
-      .where(
-        and(
-          eq(conversations.projectId, projectId),
-          eq(conversations.status, "waiting_agent"),
-          gt(conversations.updatedAt, new Date(since)),
-        ),
-      )
-      .orderBy(desc(conversations.updatedAt))
-      .limit(20);
+    return buildNeedsReviewQuery(this.db, projectId, since);
   }
 
   async createConversation(
