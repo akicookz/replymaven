@@ -17,27 +17,12 @@ export interface MessagePayload {
   createdAt: number;
 }
 
-export interface CopilotMessagePayload {
-  id: string;
-  role: "agent" | "copilot";
-  content: string;
-  sources: string | null;
-  agentUserId: string | null;
-  autoSuggest: boolean;
-  createdAt: number;
-}
-
 export type ServerEvent =
   | { type: "message:new"; conversationId: string; message: MessagePayload }
   | {
       type: "message:deleted";
       conversationId: string;
       messageId: string;
-    }
-  | {
-      type: "copilot:message:new";
-      conversationId: string;
-      message: CopilotMessagePayload;
     }
   | {
       type: "status:change";

@@ -647,11 +647,6 @@ export const updateGuidelineSchema = z.object({
   sortOrder: z.number().int().min(0).optional(),
 });
 
-// ─── Copilot ──────────────────────────────────────────────────────────────────
-export const copilotSendMessageSchema = z.object({
-  content: z.string().min(1, "Message cannot be empty").max(5000),
-});
-
 // ─── Help Categories ──────────────────────────────────────────────────────────
 export const createHelpCategorySchema = z.object({
   name: z.string().min(1, "Name is required").max(100),

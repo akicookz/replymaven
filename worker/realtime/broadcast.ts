@@ -1,11 +1,10 @@
 import { type AppEnv } from "../types";
 import {
   type ConversationStatus,
-  type CopilotMessagePayload,
   type MessagePayload,
   type ServerEvent,
 } from "../../shared/ws-events";
-import { type CopilotMessageRow, type MessageRow } from "../db";
+import { type MessageRow } from "../db";
 
 interface BroadcastOptions {
   excludeSubjectId?: string;
@@ -69,40 +68,6 @@ export function broadcastMessageNew(
       type: "message:new",
       conversationId,
       message: messageRowToPayload(row),
-    },
-    options,
-  );
-}
-
-export function copilotRowToPayload(
-  row: CopilotMessageRow,
-): CopilotMessagePayload {
-  return {
-    id: row.id,
-    role: row.role,
-    content: row.content,
-    sources: row.sources,
-    agentUserId: row.agentUserId,
-    autoSuggest: row.autoSuggest,
-    createdAt: row.createdAt.getTime(),
-  };
-}
-
-export function broadcastCopilotMessage(
-  env: AppEnv,
-  ctx: ExecutionContext,
-  conversationId: string,
-  row: CopilotMessageRow,
-  options: BroadcastOptions = {},
-): void {
-  dispatch(
-    env,
-    ctx,
-    conversationId,
-    {
-      type: "copilot:message:new",
-      conversationId,
-      message: copilotRowToPayload(row),
     },
     options,
   );

@@ -1,8 +1,7 @@
-// Shared routing pipeline used by both the visitor-facing widget handler and
-// the agent-facing Copilot handler. Runs the parallel classify/summarize/
-// select-FAQs probes, compiles the FAQ context, and returns everything the
-// planner loop needs to start composing. Has no side effects beyond LLM calls
-// and the KV-cached FAQ-context build.
+// Routing pipeline used by the visitor-facing widget handler. Runs the
+// parallel classify/summarize/select-FAQs probes, compiles the FAQ context,
+// and returns everything the planner loop needs to start composing. Has no
+// side effects beyond LLM calls and the KV-cached FAQ-context build.
 
 import { type ConversationTurnMessage, type SupportTurnPlan } from "../types";
 import {
@@ -43,7 +42,7 @@ export interface TurnRoutingInput {
   executionCtx: ExecutionContext;
   // Hook so the visitor handler can record router latency in its telemetry.
   onRouterFinished?: (elapsedMs: number) => void;
-  // Log-context builder shared between visitor + Copilot.
+  // Log-context builder for the calling handler.
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
 }
 

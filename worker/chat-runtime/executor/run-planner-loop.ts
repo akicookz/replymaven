@@ -68,9 +68,9 @@ import {
 
 const MAX_PLANNER_STEPS = 8; // Increased to allow more search attempts for thorough documentation checking
 
-// Callback signature for the system prompt builder. Visitor flow leaves this
-// undefined and falls back to `buildSupportSystemPrompt`; Copilot flow passes
-// a `buildCopilotSystemPrompt` adapter so we don't fork the planner loop.
+// Callback signature for the system prompt builder. The visitor flow leaves
+// this undefined and falls back to `buildSupportSystemPrompt`; other callers
+// may pass their own adapter so we don't fork the planner loop.
 export interface ComposeSystemPromptContext {
   state: PlannerLoopState;
   settings: SupportPromptSettings;
@@ -151,7 +151,7 @@ interface RunPlannerLoopOptions {
   closeSafeAiReplayWindow: (reason: string) => void;
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
   // Optional override for the compose-stage system prompt. When omitted the
-  // visitor-facing prompt is used. Copilot turns inject a Copilot-facing prompt.
+  // visitor-facing prompt is used.
   buildSystemPrompt?: BuildSystemPromptFn;
 }
 

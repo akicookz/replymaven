@@ -102,8 +102,8 @@ export async function decryptHeaders(
  */
 /**
  * In-place decrypt of `headers` on each tool row whose value looks encrypted.
- * Both visitor and Copilot agentic flows must call this before passing tool
- * rows to `executeHttpTool` — otherwise outbound HTTP requests would send the
+ * The visitor agentic flow must call this before passing tool rows to
+ * `executeHttpTool` — otherwise outbound HTTP requests would send the
  * encrypted blob as the Authorization/custom header values.
  */
 export async function decryptEnabledToolHeaders(

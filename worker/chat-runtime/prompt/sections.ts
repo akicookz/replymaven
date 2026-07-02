@@ -1,7 +1,7 @@
-// Reusable prompt-section builders shared across system prompts (visitor-facing
-// support prompt + agent-facing Copilot prompt). Each builder returns a string
-// that already contains the section's trailing blank line, or "" if the section
-// doesn't apply for the given inputs. Callers concatenate the returned strings.
+// Reusable prompt-section builders shared across system prompts (currently the
+// visitor-facing support prompt). Each builder returns a string that already
+// contains the section's trailing blank line, or "" if the section doesn't
+// apply for the given inputs. Callers concatenate the returned strings.
 //
 // The output of these helpers is verified byte-identical to the pre-refactor
 // inline blocks in build-support-system-prompt.ts via the existing

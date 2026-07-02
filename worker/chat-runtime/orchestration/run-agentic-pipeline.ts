@@ -1,9 +1,9 @@
-// Shared planner-loop runner used by both the visitor (`handle-widget-message-turn`)
-// and Copilot (`handle-copilot-turn`) handlers. Owns the planner-loop
-// invocation and the capability-claim post-filter. Persistence, broadcasts,
-// the final `done` SSE frame, and audience-specific post-processing (like
-// `[RESOLVED]` conversation close) stay in the outer handlers because they
-// depend on audience-specific state and ordering.
+// Planner-loop runner used by the visitor-facing widget handler
+// (`handle-widget-message-turn`). Owns the planner-loop invocation and the
+// capability-claim post-filter. Persistence, broadcasts, the final `done`
+// SSE frame, and other post-processing (like `[RESOLVED]` conversation
+// close) stay in the outer handler because they depend on handler-specific
+// state and ordering.
 
 import { runPlannerLoop } from "../executor/run-planner-loop";
 import {
@@ -30,9 +30,8 @@ import { type ModelRuntimeState } from "../llm/create-language-model";
 import { type TicketRefinementDecision } from "../workflows/classify-ticket-refinement";
 
 // Final post-filter: if the model claims it browsed the web / used unassigned
-// tools, replace the response with a canned safety string. Same rule for both
-// audiences — the agent watching Copilot shouldn't be told "I searched Google"
-// either, since Copilot has the same RAG/tool sandbox as the visitor bot.
+// tools, replace the response with a canned safety string — the visitor bot
+// has no such capability and must not claim otherwise.
 function claimsUnavailableCapabilities(response: string): boolean {
   if (!response.trim()) return false;
   return (
