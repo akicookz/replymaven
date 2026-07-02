@@ -51,6 +51,7 @@ import {
 import { streamSupportAgent } from "../agents/support-agent";
 import { stripTrailingSolicitedFollowUp } from "./strip-trailing-solicited-follow-up";
 import { executeHttpTool } from "../tools/http-tool-executor";
+import { withCurrentTurn } from "../orchestration/normalize-history";
 import {
   type HandoffRenderDirective,
   type PlannerActionHistoryEntry,
@@ -655,7 +656,10 @@ export async function runPlannerLoop(
 
   await populateKnownVisitorInfo({
     modelRuntime: options.modelRuntime,
-    conversationHistory: options.conversationHistory,
+    conversationHistory: withCurrentTurn(
+      options.conversationHistory,
+      options.currentMessage,
+    ),
     state: loopState,
     buildLogContext: options.buildLogContext,
   });
@@ -1058,7 +1062,10 @@ export async function runPlannerLoop(
           agentLabel: options.settings.agentName ?? "the team",
         },
         settings: options.settings,
-        conversationHistory: options.conversationHistory,
+        conversationHistory: withCurrentTurn(
+          options.conversationHistory,
+          options.currentMessage,
+        ),
         buildLogContext: options.buildLogContext,
       });
 
@@ -1097,7 +1104,10 @@ export async function runPlannerLoop(
           agentLabel: options.settings.agentName ?? "the team",
         },
         settings: options.settings,
-        conversationHistory: options.conversationHistory,
+        conversationHistory: withCurrentTurn(
+          options.conversationHistory,
+          options.currentMessage,
+        ),
         buildLogContext: options.buildLogContext,
       });
       loopState.handoffRequested = true;
@@ -1147,7 +1157,10 @@ export async function runPlannerLoop(
         loopState.handoffSummary ??
         (await buildTeamRequestSummary({
           modelRuntime: options.modelRuntime,
-          conversationHistory: options.conversationHistory,
+          conversationHistory: withCurrentTurn(
+            options.conversationHistory,
+            options.currentMessage,
+          ),
           buildLogContext: options.buildLogContext,
         }));
       loopState.handoffSummary = summary;
@@ -1278,7 +1291,10 @@ export async function runPlannerLoop(
           agentLabel,
         },
         settings: options.settings,
-        conversationHistory: options.conversationHistory,
+        conversationHistory: withCurrentTurn(
+          options.conversationHistory,
+          options.currentMessage,
+        ),
         buildLogContext: options.buildLogContext,
       });
       pushActionHistory(loopState, {

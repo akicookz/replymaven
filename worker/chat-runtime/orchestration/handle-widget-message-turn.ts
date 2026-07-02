@@ -1,6 +1,7 @@
 import { createModelRuntimeState } from "../llm/create-language-model";
 import { runAgenticTurn } from "./run-agentic-pipeline";
 import { prepareTurnRouting } from "./prepare-turn-routing";
+import { normalizeConversationHistory } from "./normalize-history";
 import { triggerAutoRefinementIfEnabled } from "../post-turn/auto-refine";
 import {
   type RetrievalResult,
@@ -533,54 +534,17 @@ export async function handleWidgetMessageTurn(
       const clientHistory = context.payload.history;
       const usedClientHistory =
         Array.isArray(clientHistory) && clientHistory.length > 0;
-      let conversationHistory: Array<{
-        role: "visitor" | "bot" | "agent";
-        content: string;
-      }>;
-      if (usedClientHistory) {
-        // Frontend-supplied history never includes the just-received visitor
-        // message, so we unconditionally append it (no dedup guard needed —
-        // in contrast to the server branch, which may or may not already
-        // contain this turn depending on prefetch timing).
-        const normalized = clientHistory
-          .filter((message) => message.role !== "bot" || message.content)
-          .map((message) => ({
-            role: message.role as "visitor" | "bot" | "agent",
-            content: message.content,
-          }));
-        normalized.push({
-          role: "visitor",
-          content: context.payload.content,
-        });
-        conversationHistory = normalized.slice(-10);
-      } else {
-        // `parallelPrefetchedHistory` ran concurrently with setup BEFORE the
-        // visitor message was saved, so we need to append the current visitor
-        // turn. The fresh `getMessages` fallback, by contrast, runs AFTER the
-        // insert and already contains it — hence the dedup guard below.
-        const history =
-          parallelPrefetchedHistory ??
+      const rawHistory = usedClientHistory
+        ? clientHistory
+        : (parallelPrefetchedHistory ??
           prefetchedHistory ??
-          (await chatService.getMessages(context.conversationId));
-        const normalized = history
-          .filter((message) => message.role !== "bot" || message.content)
-          .map((message) => ({
-            role: message.role as "visitor" | "bot" | "agent",
-            content: message.content,
-          }));
-        const alreadyHasCurrentTurn =
-          normalized.length > 0 &&
-          normalized[normalized.length - 1].role === "visitor" &&
-          normalized[normalized.length - 1].content ===
-            context.payload.content;
-        if (!alreadyHasCurrentTurn) {
-          normalized.push({
-            role: "visitor",
-            content: context.payload.content,
-          });
-        }
-        conversationHistory = normalized.slice(-10);
-      }
+          (await chatService.getMessages(context.conversationId)));
+      // Prior turns only. The current visitor message travels separately as
+      // `currentMessage` everywhere downstream — see normalize-history.ts.
+      const conversationHistory = normalizeConversationHistory({
+        rawHistory,
+        currentMessage: context.payload.content,
+      });
       logInfo(
         "widget_turn.history_loaded",
         buildWidgetTurnLogContext(context, turnId, {
