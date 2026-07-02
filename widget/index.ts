@@ -4067,13 +4067,24 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
               await loadConversationHistory(false);
             }
 
+            // Reset the form so it stays usable if the visitor returns to it
+            // (the backend appends repeat submissions to the same conversation).
+            for (const fi of fieldInputs) {
+              fi.input.value = "";
+            }
+            formError.style.display = "none";
+            submitBtn2.disabled = false;
+            submitBtn2.textContent = "Send message";
+
             // Land the visitor in the conversation so follow-ups are just chat.
-            formView.removeChild(formBody);
             showChatScreen();
+            // Only one note at a time — repeat submissions shouldn't stack them.
+            messagesContainer.querySelector(".rm-chat-note")?.remove();
             const note = document.createElement("div");
             note.className = "rm-chat-note";
             note.textContent = "Sent — the team will reply here";
-            messagesContainer.appendChild(note);
+            // Insert before typing indicator (which is always last child)
+            messagesContainer.insertBefore(note, typingRow);
             scrollToBottom();
           } catch {
             formError.textContent =
