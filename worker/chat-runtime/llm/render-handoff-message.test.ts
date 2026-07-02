@@ -22,7 +22,7 @@ describe("fallbackRenderHandoffMessage - byte-identical legacy parity", () => {
         agentLabel: "the team",
       }),
     ).toBe(
-      "I can forward this to the team. Before I do, could you share your name and email so they can follow up directly? If you'd rather keep it in chat, just say that.",
+      "I can pass this along to our team. Before I do, could you share your name and email so they can follow up directly? If you'd rather keep it in chat, just say that.",
     );
   });
 
@@ -34,7 +34,7 @@ describe("fallbackRenderHandoffMessage - byte-identical legacy parity", () => {
         agentLabel: "the team",
       }),
     ).toBe(
-      "I can forward this to the team. Before I do, could you share your name so they know who to follow up with? If you'd rather keep it in chat, just say that.",
+      "I can pass this along to our team. Before I do, could you share your name so they know who to follow up with? If you'd rather keep it in chat, just say that.",
     );
   });
 
@@ -46,7 +46,7 @@ describe("fallbackRenderHandoffMessage - byte-identical legacy parity", () => {
         agentLabel: "the team",
       }),
     ).toBe(
-      "I can forward this to the team. Before I do, could you share your email so they can follow up directly? If you'd rather keep it in chat, just say that.",
+      "I can pass this along to our team. Before I do, could you share your email so they can follow up directly? If you'd rather keep it in chat, just say that.",
     );
   });
 
@@ -58,7 +58,7 @@ describe("fallbackRenderHandoffMessage - byte-identical legacy parity", () => {
         agentLabel: "the team",
       }),
     ).toBe(
-      "Sure — I can help get this to the team. Before I forward it, could you tell me a bit about what you need help with so the team gets the right context?",
+      "Sure, I can get this to the team. Before I pass it along, could you tell me a bit about what you need help with so we have the right context?",
     );
   });
 
@@ -70,7 +70,7 @@ describe("fallbackRenderHandoffMessage - byte-identical legacy parity", () => {
         agentLabel: "the team",
       }),
     ).toBe(
-      "I can forward this to the team for a deeper look. If you'd like me to do that, reply yes and I'll collect anything still missing before sending it over.",
+      "I can pass this to the team for a deeper look. If you'd like me to do that, reply yes and I'll collect anything still missing before sending it over.",
     );
   });
 
@@ -81,7 +81,7 @@ describe("fallbackRenderHandoffMessage - byte-identical legacy parity", () => {
         variant: "created",
         agentLabel: "a team member",
       }),
-    ).toBe("I've forwarded this to the team. a team member will follow up shortly!");
+    ).toBe("I've passed this along and a team member will follow up with you shortly.");
     expect(
       fallbackRenderHandoffMessage({
         kind: "escalated",
@@ -89,7 +89,7 @@ describe("fallbackRenderHandoffMessage - byte-identical legacy parity", () => {
         agentLabel: "a team member",
       }),
     ).toBe(
-      "I've already forwarded this conversation to the team. a team member will continue the follow-up there.",
+      "This is already with a team member and they'll continue the follow-up there.",
     );
   });
 });

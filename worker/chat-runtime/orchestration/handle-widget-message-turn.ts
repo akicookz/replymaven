@@ -811,11 +811,11 @@ export async function handleWidgetMessageTurn(
           context.conversationId,
           "bot_resolved",
         );
-        const resolvedMessage =
+        // The model writes its own goodbye (visitor's language, configured
+        // voice); the English string is only the empty-output fallback.
+        fullResponse =
+          fullResponse.trim() ||
           "Glad I could help! Feel free to reach out anytime if you have more questions.";
-        fullResponse = fullResponse.trim()
-          ? `${fullResponse.trim()}\n\n${resolvedMessage}`
-          : resolvedMessage;
         emitSseEvent(controller, encoder, { resolved: true });
         emitSseEvent(controller, encoder, { finalText: fullResponse });
         logInfo(

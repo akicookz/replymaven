@@ -221,8 +221,8 @@ function describeHandoffDirective(directive: HandoffRenderDirective): {
   }
 
   const variantIntent: Record<typeof directive.variant, string> = {
-    created: `Tell the visitor you've forwarded this to the team and that ${directive.agentLabel} will follow up shortly.`,
-    already_forwarded: `Tell the visitor this conversation was already forwarded to the team and that ${directive.agentLabel} will continue the follow-up there.`,
+    created: `Tell the visitor you've passed this along and that ${directive.agentLabel} will follow up with them shortly. Speak as part of the company — "we", never "the team" as if you were outside it.`,
+    already_forwarded: `Tell the visitor this conversation is already with ${directive.agentLabel} and the follow-up will continue there. Speak as part of the company.`,
   };
   return {
     intent: variantIntent[directive.variant],

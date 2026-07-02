@@ -1137,7 +1137,7 @@ export async function runPlannerLoop(
             options.conversationHistory,
             options.currentMessage,
           ),
-          agentLabel: options.settings.agentName ?? "the team",
+          agentLabel: options.settings.agentName ?? "our team",
         },
         settings: options.settings,
         projectName: options.project.name,
@@ -1180,7 +1180,7 @@ export async function runPlannerLoop(
         directive: {
           kind: "collect_contact",
           missingFields: nextAction.missingFields,
-          agentLabel: options.settings.agentName ?? "the team",
+          agentLabel: options.settings.agentName ?? "our team",
         },
         settings: options.settings,
         projectName: options.project.name,
@@ -1362,7 +1362,7 @@ export async function runPlannerLoop(
         );
       }
 
-      const agentLabel = options.settings.agentName ?? "a team member";
+      const agentLabel = options.settings.agentName ?? "our team";
       const fullResponse = await buildRenderedHandoffMessage({
         modelRuntime: options.modelRuntime,
         directive: {

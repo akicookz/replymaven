@@ -33,25 +33,25 @@ export function fallbackRenderHandoffMessage(
     const wantsName = directive.missingFields.includes("name");
     const wantsEmail = directive.missingFields.includes("email");
     if (wantsName && wantsEmail) {
-      return "I can forward this to the team. Before I do, could you share your name and email so they can follow up directly? If you'd rather keep it in chat, just say that.";
+      return "I can pass this along to our team. Before I do, could you share your name and email so they can follow up directly? If you'd rather keep it in chat, just say that.";
     }
     if (wantsName) {
-      return "I can forward this to the team. Before I do, could you share your name so they know who to follow up with? If you'd rather keep it in chat, just say that.";
+      return "I can pass this along to our team. Before I do, could you share your name so they know who to follow up with? If you'd rather keep it in chat, just say that.";
     }
-    return "I can forward this to the team. Before I do, could you share your email so they can follow up directly? If you'd rather keep it in chat, just say that.";
+    return "I can pass this along to our team. Before I do, could you share your email so they can follow up directly? If you'd rather keep it in chat, just say that.";
   }
 
   if (directive.kind === "offer_handoff") {
     if (!directive.hasIssueContext) {
-      return `Sure — I can help get this to ${directive.agentLabel}. Before I forward it, could you tell me a bit about what you need help with so the team gets the right context?`;
+      return `Sure, I can get this to ${directive.agentLabel}. Before I pass it along, could you tell me a bit about what you need help with so we have the right context?`;
     }
-    return `I can forward this to ${directive.agentLabel} for a deeper look. If you'd like me to do that, reply yes and I'll collect anything still missing before sending it over.`;
+    return `I can pass this to ${directive.agentLabel} for a deeper look. If you'd like me to do that, reply yes and I'll collect anything still missing before sending it over.`;
   }
 
   if (directive.variant === "created") {
-    return `I've forwarded this to the team. ${directive.agentLabel} will follow up shortly!`;
+    return `I've passed this along and ${directive.agentLabel} will follow up with you shortly.`;
   }
-  return `I've already forwarded this conversation to the team. ${directive.agentLabel} will continue the follow-up there.`;
+  return `This is already with ${directive.agentLabel} and they'll continue the follow-up there.`;
 }
 
 // The model writes the message AND self-reports these language-agnostic facts

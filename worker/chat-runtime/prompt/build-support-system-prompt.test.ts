@@ -58,7 +58,7 @@ describe("buildSupportSystemPrompt", () => {
   test("instructs the model to emit [RESOLVED] when not escalated", () => {
     const prompt = buildSupportSystemPrompt(BASE_SETTINGS, "ReplyMaven", "", "");
 
-    expect(prompt).toContain('respond with ONLY the exact text "[RESOLVED]"');
+    expect(prompt).toContain('end that reply with the exact token "[RESOLVED]"');
     expect(prompt).not.toContain("Never output [RESOLVED]");
   });
 
@@ -67,7 +67,7 @@ describe("buildSupportSystemPrompt", () => {
       escalated: true,
     });
 
-    expect(prompt).not.toContain('respond with ONLY the exact text "[RESOLVED]"');
+    expect(prompt).not.toContain('end that reply with the exact token "[RESOLVED]"');
     expect(prompt).toContain(
       "This conversation has been escalated to the human team. Never output [RESOLVED]; keep helping until a teammate takes over.",
     );
