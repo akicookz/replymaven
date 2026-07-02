@@ -79,6 +79,10 @@ function dateDividerLabel(isoStr: string): string {
   return new Date(isoStr).toLocaleDateString([], { weekday: "long" });
 }
 
+// Consecutive same-sender messages within this window collapse into one
+// group: the name + timestamp header renders once, on the first message.
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
+
 export default function ChatThread({
   messages,
   conversation,
@@ -98,6 +102,17 @@ export default function ChatThread({
         {messages.map((message, i) => {
           const prev = messages[i - 1];
           const showDivider = !prev || !isSameDay(prev.createdAt, message.createdAt);
+          // Back-to-back messages from the same sender (no reply or date break
+          // in between) share one header — name + timestamp shown once.
+          const groupedWithPrev =
+            !showDivider &&
+            !!prev &&
+            message.role !== "system" &&
+            prev.role === message.role &&
+            (prev.senderName ?? null) === (message.senderName ?? null) &&
+            new Date(message.createdAt).getTime() -
+              new Date(prev.createdAt).getTime() <=
+              GROUP_WINDOW_MS;
           const isMatch =
             q.length > 0 &&
             message.role !== "system" &&
@@ -129,6 +144,7 @@ export default function ChatThread({
                   onDelete={onDeleteMessage}
                   isMatch={isMatch}
                   isActiveMatch={isActiveMatch}
+                  showHeader={!groupedWithPrev}
                 />
               )}
             </div>

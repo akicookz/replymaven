@@ -11,6 +11,9 @@ interface MessageBubbleProps {
   isMatch?: boolean;
   /** This message is the currently-focused search match. */
   isActiveMatch?: boolean;
+  /** False when this message is grouped with the previous one from the same
+   *  sender — the name + timestamp header renders once per group. */
+  showHeader?: boolean;
 }
 
 function formatTime(isoStr: string): string {
@@ -26,6 +29,7 @@ export default function MessageBubble({
   onDelete,
   isMatch,
   isActiveMatch,
+  showHeader = true,
 }: MessageBubbleProps) {
   const isReceived = message.role === "visitor";
   const isBot = message.role === "bot";
@@ -52,13 +56,18 @@ export default function MessageBubble({
 
   const html = renderMarkdown(message.content);
 
+  // Grouped messages tuck up under the previous bubble (net ~4px gap).
+  const rootSpacing = showHeader ? "mb-3" : "-mt-2 mb-3";
+
   if (isReceived) {
     return (
-      <div className="flex flex-col items-start mb-3">
-        <div className={`flex items-baseline gap-2 mb-1 ${labelColorClass}`}>
-          <span className="text-[12px] font-semibold">{senderLabel}</span>
-          <span className="text-[11px] text-ink-8">{formatTime(message.createdAt)}</span>
-        </div>
+      <div className={cn("flex flex-col items-start", rootSpacing)}>
+        {showHeader && (
+          <div className={`flex items-baseline gap-2 mb-1 ${labelColorClass}`}>
+            <span className="text-[12px] font-semibold">{senderLabel}</span>
+            <span className="text-[11px] text-ink-8">{formatTime(message.createdAt)}</span>
+          </div>
+        )}
         <div className={cn("max-w-[74%] px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-received text-ink-2 rounded-[20px_20px_20px_6px]", matchClass)}>
           {message.imageUrl && (
             <img
@@ -87,13 +96,45 @@ export default function MessageBubble({
     .filter(Boolean)
     .join(" · ");
 
+  // Delivery status — rendered inline in the header row (name · time · Seen);
+  // falls back to a row under the bubble for grouped messages that have no
+  // header of their own.
+  const renderStatus = (withLeadingDot: boolean) =>
+    status && (
+      <span
+        className="text-[11px] text-ink-8 flex items-baseline gap-1"
+        title={statusTooltip || undefined}
+      >
+        {withLeadingDot && <span aria-hidden="true">·</span>}
+        <span
+          className={
+            status.status === "seen"
+              ? "text-brand-label-human font-medium"
+              : undefined
+          }
+        >
+          {status.label}
+        </span>
+        {status.emailed && (
+          <>
+            <span aria-hidden="true">·</span>
+            <Mail size={11} className="self-center" />
+            <span>Emailed</span>
+          </>
+        )}
+      </span>
+    );
+
   // Sent bubble (bot or agent)
   return (
-    <div className="flex flex-col items-end mb-3">
-      <div className={`flex items-baseline gap-2 mb-1 ${labelColorClass}`}>
-        <span className="text-[12px] font-semibold">{senderLabel}</span>
-        <span className="text-[11px] text-ink-8">{formatTime(message.createdAt)}</span>
-      </div>
+    <div className={cn("flex flex-col items-end", rootSpacing)}>
+      {showHeader && (
+        <div className={`flex items-baseline gap-2 mb-1 ${labelColorClass}`}>
+          <span className="text-[12px] font-semibold">{senderLabel}</span>
+          <span className="text-[11px] text-ink-8">{formatTime(message.createdAt)}</span>
+          {renderStatus(true)}
+        </div>
+      )}
       <div className="relative group max-w-[74%]">
         <div className={cn("px-[14px] py-[10px] text-[14.5px] leading-[1.5] bg-bubble-sent text-white rounded-[20px_20px_6px_20px]", matchClass)}>
           {message.imageUrl && (
@@ -120,28 +161,8 @@ export default function MessageBubble({
           </button>
         )}
       </div>
-      {status && (
-        <div
-          className="mt-1 text-[11px] text-ink-8 flex items-center gap-1"
-          title={statusTooltip || undefined}
-        >
-          <span
-            className={
-              status.status === "seen"
-                ? "text-brand-label-human font-medium"
-                : undefined
-            }
-          >
-            {status.label}
-          </span>
-          {status.emailed && (
-            <>
-              <span aria-hidden="true">·</span>
-              <Mail size={11} />
-              <span>Emailed</span>
-            </>
-          )}
-        </div>
+      {!showHeader && status && (
+        <div className="mt-1 flex items-center">{renderStatus(false)}</div>
       )}
     </div>
   );

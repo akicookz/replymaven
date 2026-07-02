@@ -11,9 +11,11 @@ import {
 } from "lucide-react";
 import type { Conversation } from "@/lib/inbox/types";
 import { countryFlag } from "@/lib/inbox/country-flag";
+import { getVisitorPresenceState } from "@/lib/conversation-presence";
 import { cn } from "@/lib/utils";
 import PriorityMenu from "./PriorityMenu";
 import AssigneeMenu from "./AssigneeMenu";
+import PresenceDot from "./PresenceDot";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -137,6 +139,11 @@ export default function ReadingHeader({
   const state = conversationState(conversation);
   const duration = chatDuration(conversation.createdAt);
   const flag = countryFlag(country);
+  // Heartbeat-driven visitor presence (online / background / offline).
+  const presence = getVisitorPresenceState({
+    visitorLastSeenAt: conversation.visitorLastSeenAt,
+    visitorPresence: conversation.visitorPresence,
+  });
 
   // Active states reflected on the toolbar icons.
   const isResolved =
@@ -372,6 +379,23 @@ export default function ReadingHeader({
                 <span className={`size-2 rounded-full shrink-0 ${state.dotClass}`} />
                 <span className="text-[12px] text-ink-7">{state.label}</span>
               </div>
+
+              {/* Live presence (heartbeat) — pulsing dot while the visitor is
+                  in the chat, amber when their tab is backgrounded. */}
+              {presence !== "offline" && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[12px] text-ink-7" aria-hidden="true">
+                    ·
+                  </span>
+                  <PresenceDot
+                    visitorLastSeenAt={conversation.visitorLastSeenAt}
+                    visitorPresence={conversation.visitorPresence}
+                  />
+                  <span className="text-[12px] text-ink-7">
+                    {presence === "online" ? "Online" : "Away"}
+                  </span>
+                </div>
+              )}
 
               {metaItems.map((item, i) => (
                 <span

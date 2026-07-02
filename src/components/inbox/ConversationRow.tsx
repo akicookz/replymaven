@@ -2,6 +2,7 @@ import { Check, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { countryFlag } from "@/lib/inbox/country-flag";
 import type { Conversation } from "@/lib/inbox/types";
+import PresenceDot from "./PresenceDot";
 
 interface ConversationRowProps {
   conversation: Conversation;
@@ -53,13 +54,27 @@ export default function ConversationRow({
     conversation.visitorEmail?.split("@")[0] ??
     "Visitor";
 
-  // Line 2: use visitorEmail as the subject-style identifier; fall back to a
-  // short conversation ID when no email is known.
-  const subject =
-    conversation.visitorEmail ?? `#${conversation.id.slice(0, 8)}`;
+  // Preview line: "<sender>: <content>" so it's clear who spoke last —
+  // the visitor by first name, the bot by its configured name, you as "You".
+  const last = conversation.lastMessage;
+  let senderPrefix: string | null = null;
+  if (last) {
+    if (last.role === "visitor") {
+      senderPrefix = name.split(/\s+/)[0];
+    } else if (last.role === "bot") {
+      senderPrefix = last.senderName ?? "Maven";
+    } else if (last.role === "agent") {
+      senderPrefix = "You";
+    }
+  }
+  const preview = last
+    ? senderPrefix
+      ? `${senderPrefix}: ${last.content}`
+      : last.content
+    : "";
 
-  // Line 3: the actual last message content.
-  const preview = conversation.lastMessage?.content ?? "";
+  const isResolved =
+    conversation.status === "closed" && conversation.closeReason !== "spam";
 
   const timeStr = formatTime(
     conversation.lastMessage?.createdAt ??
@@ -98,42 +113,47 @@ export default function ConversationRow({
 
       {/* Main content */}
       <div className="flex-1 min-w-0">
-        {/* Line 1: flag + name + right-aligned time */}
-        <div className="flex items-baseline justify-between gap-2">
-          <span
-            className={cn(
-              "text-[15px] font-semibold tracking-[-0.2px] truncate",
-              isSelected ? "text-white" : "text-ink-2",
+        {/* Line 1: flag + name + presence + right-aligned resolved/time */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span
+              className={cn(
+                "text-[15px] font-semibold tracking-[-0.2px] truncate",
+                isSelected ? "text-white" : "text-ink-2",
+              )}
+            >
+              {flag ? `${flag} ` : ""}
+              {name}
+            </span>
+            <PresenceDot
+              visitorLastSeenAt={conversation.visitorLastSeenAt}
+              visitorPresence={conversation.visitorPresence}
+            />
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {isResolved && (
+              <Check
+                size={13}
+                className={isSelected ? "text-white/80" : "text-emerald-400/90"}
+                aria-label="Resolved"
+              />
             )}
-          >
-            {flag ? `${flag} ` : ""}
-            {name}
-          </span>
-          <span
-            className={cn(
-              "text-[12px] shrink-0",
-              isSelected ? "text-white/70" : "text-ink-5",
-            )}
-          >
-            {timeStr}
-          </span>
+            <span
+              className={cn(
+                "text-[12px]",
+                isSelected ? "text-white/70" : "text-ink-5",
+              )}
+            >
+              {timeStr}
+            </span>
+          </div>
         </div>
 
-        {/* Line 2: subject (single line, truncated) */}
-        <div
-          className={cn(
-            "text-[13.5px] truncate mt-[2px]",
-            isSelected ? "text-white/95" : "text-ink-3",
-          )}
-        >
-          {subject}
-        </div>
-
-        {/* Line 3: preview (up to 2 lines) */}
+        {/* Line 2: last-message preview with sender prefix (up to 2 lines) */}
         {preview && (
           <div
             className={cn(
-              "text-[13px] line-clamp-2 mt-[1px] leading-[1.4]",
+              "text-[13px] line-clamp-2 mt-[3px] leading-[1.4]",
               isSelected ? "text-white/80" : "text-ink-6",
             )}
           >

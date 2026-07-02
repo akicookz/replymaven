@@ -77,7 +77,6 @@ function ConversationRowSkeleton({ index }: { index: number }) {
           <Skeleton className="h-3.5 rounded" style={{ width: nameW }} />
           <Skeleton className="h-2.5 w-7 rounded shrink-0" />
         </div>
-        <Skeleton className="h-3 w-2/5 rounded mt-[5px]" />
         <Skeleton className="h-2.5 rounded mt-[6px]" style={{ width: previewW }} />
       </div>
     </div>

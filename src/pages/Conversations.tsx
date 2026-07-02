@@ -912,6 +912,29 @@ function Conversations() {
     [readMarks],
   );
 
+  // Opening a conversation marks it read: watermark it at its current
+  // activity. Re-runs when activity bumps while the thread is open (a new
+  // visitor message arrives in view), so the open thread never flips back to
+  // unread under the agent. Persisted like handleMarkAllRead.
+  useEffect(() => {
+    if (!selectedConvo) return;
+    const conv = loadedConversations.find((c) => c.id === selectedConvo);
+    if (!conv || conv.lastMessage?.role !== "visitor") return;
+    const activity = getActivityMs(conv);
+    setReadMarks((prev) => {
+      if ((prev[selectedConvo] ?? 0) >= activity) return prev;
+      const next = { ...prev, [selectedConvo]: activity };
+      if (projectId) {
+        try {
+          localStorage.setItem(readKey(projectId), JSON.stringify(next));
+        } catch {
+          // storage disabled / over quota — overlay stays in-memory only.
+        }
+      }
+      return next;
+    });
+  }, [selectedConvo, loadedConversations, projectId]);
+
   // Apply the "unread only" filter and the chosen sort over the loaded page.
   const conversations = useMemo(() => {
     const list = unreadOnly
