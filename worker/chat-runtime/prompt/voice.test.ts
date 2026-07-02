@@ -22,10 +22,12 @@ describe("buildVoiceContract", () => {
     expect(contract).toContain("Match the visitor's language");
   });
 
-  test("anchors register to product support, not hospitality", () => {
+  test("anchors register between hospitality script and curtness", () => {
     const contract = buildVoiceContract(settings, "Acme");
-    expect(contract).toContain("not front-of-house hospitality");
+    expect(contract).toContain("no service-counter script");
     expect(contract).toContain("How can we help you today?");
+    expect(contract).toContain("no curtness");
+    expect(contract).toContain("What can I help you with?");
   });
 
   test("includes the configured tone", () => {
