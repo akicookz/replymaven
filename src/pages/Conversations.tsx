@@ -139,6 +139,27 @@ function Conversations() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConvo]);
 
+  // One-shot deep-link target from ?msg= (Telegram/email/ping links). Captured
+  // once on mount and cleared from the URL immediately so refreshes don't
+  // re-pulse. highlightConvRef snapshots the ?id= this ?msg= targeted so the
+  // highlight survives that conversation's first render (the ?id= sync effect
+  // above can race it) and is only cleared once the agent navigates AWAY from
+  // that conversation — not on the mount render that opens it.
+  const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
+  const highlightConvRef = useRef<string | null>(searchParams.get("id"));
+  useEffect(() => {
+    const msg = searchParams.get("msg");
+    if (!msg) return;
+    setHighlightMsgId(msg);
+    const next = new URLSearchParams(searchParams);
+    next.delete("msg");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (selectedConvo !== highlightConvRef.current) setHighlightMsgId(null);
+  }, [selectedConvo]);
+
   // ── Search & pagination state ──────────────────────────────────────────
   // searchQuery is the raw input value (controlled); debouncedSearch is what
   // the query key and fetch URL use, updated after a 300ms idle window.
@@ -1143,8 +1164,8 @@ function Conversations() {
           onBack={() => setSelectedConvo(null)}
           onCompose={handleCompose}
           composing={composeDraft.isPending}
-          // `?msg=` deep-link scroll+pulse target — wired up in Task 13.
-          highlightMessageId={null}
+          // `?msg=` deep-link scroll+pulse target.
+          highlightMessageId={highlightMsgId}
         />
       ) : (
         <div className="glass-reading flex-1 hidden md:grid place-items-center text-ink-7 text-sm">

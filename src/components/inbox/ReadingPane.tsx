@@ -139,6 +139,18 @@ export default function ReadingPane({
     prevLenRef.current = messages.length;
   }, [conversation.id, messages.length, query]);
 
+  // Deep-link (?msg=): scroll the target message into view once it's
+  // rendered. Placed after the auto-pin effect above (and keyed on
+  // messages.length, not just highlightMessageId) so this scroll wins once
+  // the target conversation's messages have actually landed.
+  useEffect(() => {
+    if (!highlightMessageId) return;
+    const el = scrollRef.current?.querySelector(
+      `[data-msg-id="${highlightMessageId}"]`,
+    );
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [highlightMessageId, messages.length]);
+
   // Desktop inline search: cycle through matches.
   function stepMatch(delta: number) {
     if (matchIds.length === 0) return;
