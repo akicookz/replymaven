@@ -46,41 +46,39 @@ export class TelegramService {
     };
   }
 
-  // ─── Notify New Ticket with Dashboard Link ──────────────────────────────────
+  // ─── Notify Escalation with Conversation Deep-Link ──────────────────────────
 
-  async notifyNewTicket(
+  async notifyEscalation(
     botToken: string,
     chatId: string,
-    fields: Record<string, string>,
-    dashboardBaseUrl: string,
-    projectId: string,
-    options?: {
-      isUpdate?: boolean;
+    params: {
+      visitorName: string | null;
+      visitorEmail: string | null;
+      summary: string;
+      conversationUrl: string;
+      isUpdate: boolean;
       replyToMessageId?: number;
     },
   ): Promise<number | null> {
-    const fieldLines = Object.entries(fields)
-      .map(([key, val]) => `<b>${escapeHtml(key)}:</b> ${escapeHtml(val)}`)
-      .join("\n");
-
-    const projectLink = `${dashboardBaseUrl}/app/projects/${projectId}/tickets`;
-    const headline = options?.isUpdate
-      ? `<b>Ticket updated</b>`
-      : `<b>New ticket submitted</b>`;
-
+    const headline = params.isUpdate
+      ? `<b>Conversation updated — needs human review</b>`
+      : `<b>Needs human review</b>`;
+    const who =
+      [params.visitorName, params.visitorEmail].filter(Boolean).join(" · ") ||
+      "Visitor";
     const text = [
       headline,
       ``,
-      fieldLines,
+      `<b>${escapeHtml(who)}</b>`,
+      escapeHtml(params.summary),
       ``,
-      `<a href="${projectLink}">View on dashboard</a>`,
+      `<a href="${params.conversationUrl}">Open conversation</a>`,
     ].join("\n");
-
     const result = await this.sendMessage(
       botToken,
       chatId,
       text,
-      options?.replyToMessageId,
+      params.replyToMessageId,
     );
     return result.message_id ?? null;
   }

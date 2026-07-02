@@ -47,9 +47,6 @@ export function fallbackRenderHandoffMessage(
     return `I can forward this to ${directive.agentLabel} for a deeper look. If you'd like me to do that, reply yes and I'll collect anything still missing before sending it over.`;
   }
 
-  if (directive.variant === "appended") {
-    return `I've added those details to your existing request. ${directive.agentLabel} will follow up shortly!`;
-  }
   if (directive.variant === "created") {
     return `I've forwarded this to the team. ${directive.agentLabel} will follow up shortly!`;
   }
@@ -118,7 +115,7 @@ export function isRenderedHandoffMessageValid(
     return true;
   }
 
-  // ticket_created: the forward really happened, so claiming it is correct; it
+  // escalated: the forward really happened, so claiming it is correct; it
   // just must not re-ask for contact details.
   if (assessment.asksForName || assessment.asksForEmail) return false;
   return true;

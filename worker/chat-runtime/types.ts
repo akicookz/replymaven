@@ -357,8 +357,8 @@ export type HandoffRenderDirective =
       agentLabel: string;
     }
   | {
-      kind: "ticket_created";
-      variant: "appended" | "created" | "already_forwarded";
+      kind: "escalated";
+      variant: "created" | "already_forwarded";
       agentLabel: string;
     };
 

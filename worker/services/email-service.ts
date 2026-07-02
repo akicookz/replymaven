@@ -217,74 +217,43 @@ export class EmailService {
     console.log("Team invite email sent:", result);
   }
 
-  // ─── Ticket Notification (to project owner) ────────────────────────────────
+  // ─── Escalation Notification (to project owner) ────────────────────────────
 
-  async sendTicketNotification(details: {
+  async sendEscalationNotification(details: {
     ownerEmail: string;
     projectName: string;
-    formData: Record<string, string>;
-    dashboardUrl: string;
-    isUpdate?: boolean;
-    actionLabel?: string | null;
     visitorName?: string | null;
     visitorEmail?: string | null;
     visitorId?: string | null;
+    summary: string;
+    conversationUrl: string;
     accentColor?: string | null;
   }): Promise<void> {
     try {
-      const {
-        ownerEmail,
-        projectName,
-        formData,
-        dashboardUrl,
-        isUpdate,
-        actionLabel,
-        visitorName,
-        visitorEmail,
-        visitorId,
-        accentColor,
-      } = details;
-
-      const entries = Object.entries(formData);
-      const fieldsHtml = entries
-        .map(
-          ([key, value], i) =>
-            `<p class="email-muted" style="font-size: 13px; ${MUTED_TEXT} margin: 0 0 2px;">${escapeHtml(key)}</p>
-<p class="email-value" style="font-size: 15px; color: #1f2937; margin: 0 0 ${i < entries.length - 1 ? "12px" : "0"};">${escapeHtml(String(value))}</p>`,
-        )
-        .join("");
-
-      const rawLabel = actionLabel?.trim() || "New ticket";
-      const labelText =
-        rawLabel.length > 40 ? `${rawLabel.slice(0, 37)}...` : rawLabel;
       const visitor = buildVisitorSubjectIdentifier({
-        name: visitorName,
-        email: visitorEmail,
-        id: visitorId,
+        name: details.visitorName,
+        email: details.visitorEmail,
+        id: details.visitorId,
       });
-      const subject = isUpdate
-        ? `Re: ${labelText} - ${visitor}`
-        : `${labelText} - ${visitor}`;
-      const heading = isUpdate ? "Ticket Updated" : labelText;
-      const styles = buildAccentStyles(accentColor);
-
+      const styles = buildAccentStyles(details.accentColor);
+      const summaryHtml = escapeHtml(details.summary).replace(/\n/g, "<br/>");
       await this.resend.emails.send({
-        from: `${projectName} <noreply@updates.replymaven.com>`,
-        to: ownerEmail,
-        subject,
+        from: `${details.projectName} <noreply@updates.replymaven.com>`,
+        to: details.ownerEmail,
+        subject: `Needs human review - ${visitor}`,
         html: wrapEmail(
           `
-<p class="email-heading" style="${styles.heading} margin: 0 0 20px;">${escapeHtml(heading)}</p>
+<p class="email-heading" style="${styles.heading} margin: 0 0 20px;">Conversation needs your review</p>
 <div class="email-card" style="${CARD_STYLE} margin: 0 0 24px;">
-${fieldsHtml}
+<p class="email-value" style="font-size: 15px; color: #1f2937; margin: 0;">${summaryHtml}</p>
 </div>
-<a href="${dashboardUrl}" class="email-button" style="${styles.button}">View in Dashboard</a>
+<a href="${details.conversationUrl}" class="email-button" style="${styles.button}">Open conversation</a>
         `,
-          accentColor,
+          details.accentColor,
         ),
       });
     } catch (error) {
-      console.error("[EmailService] Ticket notification email failed:", error);
+      console.error("[EmailService] Escalation notification email failed:", error);
     }
   }
 

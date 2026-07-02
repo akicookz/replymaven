@@ -5,10 +5,11 @@ import { type ChatService } from "../../services/chat-service";
 import { type ProjectService } from "../../services/project-service";
 import { TelegramService } from "../../services/telegram-service";
 import { type ToolService } from "../../services/tool-service";
-import { WidgetService } from "../../services/widget-service";
-import { TicketService } from "../../services/ticket-service";
 import { type AppEnv } from "../../types";
-import { broadcastStatusChange } from "../../realtime/broadcast";
+import {
+  broadcastMessageNew,
+  broadcastStatusChange,
+} from "../../realtime/broadcast";
 import { buildSupportSystemPrompt } from "../prompt/build-support-system-prompt";
 import {
   createLanguageModel,
@@ -27,7 +28,7 @@ import {
   fallbackRenderHandoffMessage,
   renderHandoffMessage,
 } from "../llm/render-handoff-message";
-import { createTeamRequestSubmission } from "../post-turn/team-request";
+import { createEscalation } from "../post-turn/escalation";
 import {
   planNextAction,
   fallbackPlanNextAction,
@@ -1176,10 +1177,8 @@ export async function runPlannerLoop(
             ? new TelegramService(options.db)
             : undefined;
 
-        submission = await createTeamRequestSubmission({
+        submission = await createEscalation({
           chatService: options.chatService,
-          widgetService: new WidgetService(options.db),
-          ticketService: new TicketService(options.db),
           projectService: options.projectService,
           telegramService,
           project: options.project,
@@ -1189,21 +1188,23 @@ export async function runPlannerLoop(
             visitorName: loopState.knownVisitorName,
             visitorEmail: loopState.knownVisitorEmail,
             telegramThreadId: options.conversation.telegramThreadId ?? null,
+            status: options.conversation.status,
+            metadata: options.conversation.metadata ?? null,
           },
-          conversationHistory: options.conversationHistory,
           summary,
-          email: loopState.knownVisitorEmail ?? "not provided",
-          ticketFields: options.ticketFields,
-          existingTicket: options.existingTicket,
-          extractedRefinementData:
-            options.ticketRefinementDecision?.extracted ?? null,
-          appendMode: Boolean(options.existingTicket),
           settings: options.settings,
           env: {
             BETTER_AUTH_URL: options.env.BETTER_AUTH_URL,
             RESEND_API_KEY: options.env.RESEND_API_KEY,
           },
           executionCtx: options.executionCtx,
+          broadcast: (row) =>
+            broadcastMessageNew(
+              options.env,
+              options.executionCtx,
+              options.conversation.id,
+              row,
+            ),
         });
       } catch (error) {
         logError(
@@ -1260,14 +1261,6 @@ export async function runPlannerLoop(
           options.conversation.id,
           "waiting_agent",
         );
-        // Emit "flagged" once — only on first transition to waiting_agent
-        if (options.conversation.status !== "waiting_agent") {
-          options.chatService.addSystemMessage(
-            options.conversation.id,
-            "flagged",
-            "Maven flagged this for human review",
-          ).catch(() => {});
-        }
       } catch (error) {
         logError(
           "widget_turn.team_request_status_update_failed",
@@ -1288,12 +1281,8 @@ export async function runPlannerLoop(
       const fullResponse = await buildRenderedHandoffMessage({
         modelRuntime: options.modelRuntime,
         directive: {
-          kind: "ticket_created",
-          variant: submission.appended
-            ? "appended"
-            : submission.created
-              ? "created"
-              : "already_forwarded",
+          kind: "escalated",
+          variant: submission.created ? "created" : "already_forwarded",
           agentLabel,
         },
         settings: options.settings,

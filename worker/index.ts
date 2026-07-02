@@ -1140,12 +1140,16 @@ const app = new Hono<HonoAppContext>()
                 ? parseInt(conversation.telegramThreadId, 10)
                 : undefined,
             )
-          : telegramService.notifyNewTicket(
+          : telegramService.notifyEscalation(
               settings.telegramBotToken,
               settings.telegramChatId,
-              ticketData,
-              c.env.BETTER_AUTH_URL,
-              project.id,
+              {
+                visitorName: conversation.visitorName,
+                visitorEmail: conversation.visitorEmail,
+                summary: ticketMessage,
+                conversationUrl: `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations?filter=needs-you&id=${conversation.id}`,
+                isUpdate: false,
+              },
             )
         ).catch(() => {
           // Silently ignore Telegram errors
@@ -1159,28 +1163,22 @@ const app = new Hono<HonoAppContext>()
       const ownerEmail = await projectService.getOwnerEmail(project.id);
       if (ownerEmail) {
         const projectName = settings?.companyName ?? project.name;
-        const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/tickets`;
-        // Quick-action stored enum value "inquiry" kept for back-compat with widgets.
-        const [ticketActions, widgetCfg] = await Promise.all([
-          widgetService.getQuickActionsByType(project.id, "inquiry"),
-          widgetService.getWidgetConfig(project.id),
-        ]);
-        const actionLabel = ticketActions[0]?.label ?? null;
+        const conversationUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations?filter=needs-you&id=${conversation.id}`;
+        const widgetCfg = await widgetService.getWidgetConfig(project.id);
         c.executionCtx.waitUntil(
           emailService
-            .sendTicketNotification({
+            .sendEscalationNotification({
               ownerEmail,
               projectName,
-              formData: ticketData,
-              dashboardUrl,
-              actionLabel,
               visitorName,
               visitorEmail,
               visitorId,
+              summary: ticketMessage,
+              conversationUrl,
               accentColor: widgetCfg?.primaryColor ?? null,
             })
             .catch((err) => {
-              console.error("Ticket notification email failed:", err);
+              console.error("Escalation notification email failed:", err);
             }),
         );
       }

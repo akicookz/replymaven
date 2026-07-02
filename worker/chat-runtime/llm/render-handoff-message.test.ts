@@ -74,26 +74,17 @@ describe("fallbackRenderHandoffMessage - byte-identical legacy parity", () => {
     );
   });
 
-  test("ticket_created variants", () => {
+  test("escalated variants", () => {
     expect(
       fallbackRenderHandoffMessage({
-        kind: "ticket_created",
-        variant: "appended",
-        agentLabel: "a team member",
-      }),
-    ).toBe(
-      "I've added those details to your existing request. a team member will follow up shortly!",
-    );
-    expect(
-      fallbackRenderHandoffMessage({
-        kind: "ticket_created",
+        kind: "escalated",
         variant: "created",
         agentLabel: "a team member",
       }),
     ).toBe("I've forwarded this to the team. a team member will follow up shortly!");
     expect(
       fallbackRenderHandoffMessage({
-        kind: "ticket_created",
+        kind: "escalated",
         variant: "already_forwarded",
         agentLabel: "a team member",
       }),
@@ -208,9 +199,9 @@ describe("isRenderedHandoffMessageValid - guardrails (language-agnostic)", () =>
     ).toBe(true);
   });
 
-  test("ticket_created allows the forward claim but rejects re-asking for contact", () => {
+  test("escalated allows the forward claim but rejects re-asking for contact", () => {
     const created: HandoffRenderDirective = {
-      kind: "ticket_created",
+      kind: "escalated",
       variant: "created",
       agentLabel: "a team member",
     };

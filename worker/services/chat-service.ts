@@ -14,7 +14,7 @@ import {
   parseChatState,
 } from "../chat-runtime/types";
 
-export type SystemEventKind = "flagged" | "joined" | "snoozed" | "snooze_ended" | "drafted";
+export type SystemEventKind = "flagged" | "joined" | "snoozed" | "snooze_ended" | "drafted" | "review_summary";
 export type InboxFilter = "needs-you" | "all" | "snoozed" | "resolved" | "flagged";
 
 export class ChatService {
