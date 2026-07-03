@@ -34,9 +34,31 @@ describe("support prompt builders", () => {
     expect(prompt).toContain("Details:");
     expect(prompt).toContain("Already tried:");
     expect(prompt).toContain("Contact:");
-    expect(prompt).toContain("otherwise \"not provided\"");
+    expect(prompt).toContain('write "not provided" only when neither is known');
+    expect(prompt).toContain("do NOT use markdown");
     expect(prompt).toContain("Maximum 120 words.");
     expect(prompt).toContain("never invent details not present in the transcript");
     expect(prompt).toContain("visitor: my order #1234 hasn't arrived");
+    expect(prompt).not.toContain("VISITOR CONTACT ON FILE");
+  });
+
+  test("team request summary prompt includes contact details on file", () => {
+    const prompt = buildSummarizeTeamRequestPrompt({
+      transcript: "visitor: my order #1234 hasn't arrived",
+      knownContact: { name: "Jackson Mitchell", email: "jackson@example.com" },
+    });
+
+    expect(prompt).toContain("VISITOR CONTACT ON FILE");
+    expect(prompt).toContain("Name: Jackson Mitchell");
+    expect(prompt).toContain("Email: jackson@example.com");
+  });
+
+  test("team request summary prompt omits contact block for blank values", () => {
+    const prompt = buildSummarizeTeamRequestPrompt({
+      transcript: "visitor: hello",
+      knownContact: { name: "  ", email: null },
+    });
+
+    expect(prompt).not.toContain("VISITOR CONTACT ON FILE");
   });
 });

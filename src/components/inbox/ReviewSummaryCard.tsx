@@ -1,6 +1,6 @@
 import { UserRoundSearch } from "lucide-react";
 import type { Message } from "@/lib/inbox/types";
-import { cn } from "@/lib/utils";
+import { cn, renderMarkdown } from "@/lib/utils";
 
 // Full-width agent-facing callout for the escalation summary. Accent-tinted
 // card (no divider borders); `highlight` pulses it when a deep link lands.
@@ -25,9 +25,10 @@ export default function ReviewSummaryCard({
             Needs human review
           </span>
         </div>
-        <p className="text-[13px] leading-relaxed text-ink-3 whitespace-pre-line">
-          {message.content}
-        </p>
+        <div
+          className="prose-chat text-[13px] leading-relaxed text-ink-3"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+        />
       </div>
     </div>
   );

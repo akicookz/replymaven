@@ -81,20 +81,38 @@ ${options.transcript}
 SUMMARY:`;
 }
 
+interface SummarizeTeamRequestPromptOptions extends PromptBlockOptions {
+  /** Contact details already on file (widget `identify` call, contact form) —
+   *  the transcript alone may never mention them. */
+  knownContact?: { name: string | null; email: string | null };
+}
+
 export function buildSummarizeTeamRequestPrompt(
-  options: PromptBlockOptions,
+  options: SummarizeTeamRequestPromptOptions,
 ): string {
+  const knownName = options.knownContact?.name?.trim();
+  const knownEmail = options.knownContact?.email?.trim();
+  const knownContactBlock =
+    knownName || knownEmail
+      ? `\nVISITOR CONTACT ON FILE (already collected outside the transcript):\n${[
+          knownName ? `Name: ${knownName}` : null,
+          knownEmail ? `Email: ${knownEmail}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n")}\n`
+      : "";
+
   return `You are preparing a human support agent to take over a conversation.
 ${options.currentTime ? `\nCurrent date and time: ${options.currentTime}\n` : ""}
 CONVERSATION:
 ${options.transcript}
-
+${knownContactBlock}
 From the transcript, write a detailed brief with these sections (plain text, one line each, omit a line only if truly unknown):
 Inquiry: what the visitor wants, in one or two sentences.
 Details: key specifics they provided — account/order/product identifiers, URLs, error messages, plan names, amounts.
 Already tried: what the assistant already answered or attempted, and why it wasn't enough.
-Contact: the visitor's name and email if given, otherwise "not provided".
-Write in English. Be factual — never invent details not present in the transcript. Maximum 120 words.`;
+Contact: the visitor's name and email, from the contact on file and anything shared in the transcript; write "not provided" only when neither is known.
+Write in English. Plain text only — do NOT use markdown (no asterisks, underscores, backticks, or headings). Be factual — never invent details not present in the transcript or the contact on file. Maximum 120 words.`;
 }
 
 export function buildExtractContactInfoPrompt(

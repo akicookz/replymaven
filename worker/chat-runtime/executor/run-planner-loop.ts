@@ -412,6 +412,7 @@ async function populateKnownVisitorInfo(options: {
 async function buildTeamRequestSummary(options: {
   modelRuntime: ModelRuntimeState;
   conversationHistory: ConversationTurnMessage[];
+  knownContact: { name: string | null; email: string | null };
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
 }): Promise<string> {
   try {
@@ -423,6 +424,7 @@ async function buildTeamRequestSummary(options: {
         return summarizeTeamRequest(
           createLanguageModel(activeConfig),
           options.conversationHistory,
+          options.knownContact,
           { throwOnModelError: true },
         );
       },
@@ -1234,6 +1236,10 @@ export async function runPlannerLoop(
             options.conversationHistory,
             options.currentMessage,
           ),
+          knownContact: {
+            name: loopState.knownVisitorName,
+            email: loopState.knownVisitorEmail,
+          },
           buildLogContext: options.buildLogContext,
         }));
       loopState.handoffSummary = summary;

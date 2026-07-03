@@ -290,6 +290,7 @@ export function fallbackSummarizeTeamRequest(
 export async function summarizeTeamRequest(
   model: LanguageModel,
   conversationHistory: Array<{ role: string; content: string }>,
+  knownContact?: { name: string | null; email: string | null },
   options?: AuxiliaryCallOptions,
 ): Promise<string> {
   const transcript = formatTranscript(conversationHistory.slice(-16));
@@ -300,6 +301,7 @@ export async function summarizeTeamRequest(
       prompt: buildSummarizeTeamRequestPrompt({
         transcript,
         currentTime: formatCurrentTime(Date.now()),
+        knownContact,
       }),
       temperature: 0.2,
       maxOutputTokens: 320,
