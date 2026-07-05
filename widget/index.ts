@@ -273,13 +273,15 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
   function setStoredSeenResponseId(id: string): void {
     localStorage.setItem(getStorageKey("last_seen_response_id"), id);
   }
-  // The newest response id we've already popped the intro card for, so a waiting
-  // response pops the card once but keeps badging the launcher until opened.
-  function getStoredPoppedIntroId(): string | null {
-    return localStorage.getItem(getStorageKey("last_popped_intro_id"));
+  // The response id whose preview card the visitor explicitly dismissed (✕).
+  // A dismissed response keeps badging the launcher but stops popping the
+  // card; any newer response pops it again. Replaces the old pop-once marker
+  // (`last_popped_intro_id`) — the card now stays out until seen or dismissed.
+  function getDismissedIntroId(): string | null {
+    return localStorage.getItem(getStorageKey("dismissed_intro_id"));
   }
-  function setStoredPoppedIntroId(id: string): void {
-    localStorage.setItem(getStorageKey("last_popped_intro_id"), id);
+  function setDismissedIntroId(id: string): void {
+    localStorage.setItem(getStorageKey("dismissed_intro_id"), id);
   }
 
   // ─── SVG Icons ──────────────────────────────────────────────────────────────
@@ -462,142 +464,29 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       opacity: 1;
       transform: scale(1) rotate(0deg);
     }
+    /* Sibling of the trigger, not a child: the trigger clips children to its
+       circle (overflow: hidden + border-radius: 50%), which swallowed a
+       corner-positioned dot entirely. The container shrink-wraps the trigger,
+       so container-relative coordinates land on the launcher's corner. */
     .rm-trigger-badge {
       position: absolute;
       top: -2px;
       right: -2px;
-      width: 8px;
-      height: 8px;
+      width: 10px;
+      height: 10px;
       border-radius: 50%;
       background: #ef4444;
+      border: 2px solid var(--rm-bg, #ffffff);
       display: none;
-      z-index: 1;
+      z-index: 2;
+      pointer-events: none;
       box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
     .rm-trigger-badge.visible {
       display: block;
     }
-
-    /* ─── Intro Pill (corner positions) ──────────────────────────────────── */
-    @keyframes rm-pill-glow {
-      0%, 100% { box-shadow: 0 0 6px 0px color-mix(in srgb, var(--rm-primary, #2563eb), transparent 90%); }
-      50% { box-shadow: 0 0 10px 0px color-mix(in srgb, var(--rm-primary, #2563eb), transparent 82%); }
-    }
-    .rm-intro-pill {
-      position: absolute;
-      bottom: 12px;
-      width: 300px;
-      max-width: 300px;
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      padding: 10px 16px 10px 10px;
-      border: 0.5px solid var(--rm-glow-border, rgba(37,99,235,0.2));
-      border-radius: calc(var(--rm-chat-radius, 16px) * 1.5);
-      background: var(--rm-bg, #ffffff);
-      animation: rm-pill-glow 4s ease-in-out infinite;
-      box-shadow: 0 0 6px 0px color-mix(in srgb, var(--rm-primary, #2563eb), transparent 90%);
-      cursor: pointer;
-      opacity: 0;
-      transform: translateX(10px);
-      transition: opacity 0.4s ease, transform 0.4s ease;
-      pointer-events: none;
-      font-family: inherit;
-    }
-    .rm-widget-container.bottom-right .rm-intro-pill {
-      right: 64px;
-      border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 12px calc(var(--rm-chat-radius, 16px) * 1.5);
-    }
-    .rm-widget-container.bottom-left .rm-intro-pill {
-      left: 64px;
-      transform: translateX(-10px);
-      border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 12px;
-    }
-    .rm-intro-pill[data-bg-style="blurred"] {
-      background: rgba(0,0,0,0.18);
-      backdrop-filter: blur(24px) saturate(1.4);
-      -webkit-backdrop-filter: blur(24px) saturate(1.4);
-    }
-    .rm-intro-pill.visible {
-      opacity: 1;
-      transform: translateX(0);
-      pointer-events: auto;
-    }
-    .rm-intro-pill.rm-intro-hidden {
-      opacity: 0;
-      transform: translateX(10px);
-      pointer-events: none;
-      transition: opacity 0.4s ease, transform 0.4s ease;
-    }
-    .rm-widget-container.bottom-left .rm-intro-pill.rm-intro-hidden {
-      transform: translateX(-10px);
-    }
-    .rm-intro-pill:hover {
-      box-shadow: 0 6px 20px rgba(0,0,0,0.18);
-    }
-    .rm-trigger.active ~ .rm-intro-pill {
-      opacity: 0 !important;
-      pointer-events: none !important;
-      transition: opacity 0.2s ease !important;
-    }
-    .rm-intro-pill-avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      object-fit: cover;
-      flex-shrink: 0;
-    }
-    .rm-intro-pill-icon {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--rm-accent-bg);
-      color: var(--rm-accent-text);
-    }
-    .rm-intro-pill-icon svg {
-      height: 26px;
-      width: auto;
-    }
-    .rm-intro-pill-text {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-      min-width: 0;
-    }
-    .rm-intro-pill-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--rm-text, #18181b);
-      line-height: 1.3;
-      white-space: nowrap;
-    }
-    .rm-intro-pill-desc {
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--rm-text-secondary, #52525b);
-      line-height: 1.4;
-      display: -webkit-box;
-      -webkit-line-clamp: 3;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
-    .rm-widget-container.center-inline .rm-intro-pill {
+    .rm-widget-container.center-inline .rm-trigger-badge {
       display: none;
-    }
-    @media (max-width: 480px) {
-      .rm-intro-pill {
-        max-width: calc(100vw - 90px);
-      }
-      .rm-widget-container.bottom-right .rm-intro-pill {
-        border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 12px calc(var(--rm-chat-radius, 16px) * 1.5);
-      }
-      .rm-widget-container.bottom-left .rm-intro-pill {
-        border-radius: calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) calc(var(--rm-chat-radius, 16px) * 1.5) 12px;
-      }
     }
 
     /* ─── Greetings Stack (welcome + news cards) ───────────────────────── */
@@ -2160,6 +2049,10 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       from { opacity: 0; transform: translateY(8px); }
       to { opacity: 1; transform: translateY(0); }
     }
+    @keyframes rm-pill-glow {
+      0%, 100% { box-shadow: 0 0 6px 0px color-mix(in srgb, var(--rm-primary, #2563eb), transparent 90%); }
+      50% { box-shadow: 0 0 10px 0px color-mix(in srgb, var(--rm-primary, #2563eb), transparent 82%); }
+    }
 
     .rm-inline-bar {
       position: fixed;
@@ -2856,40 +2749,15 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
   triggerBadge.textContent = "";
   trigger.appendChild(triggerChatIcon);
   trigger.appendChild(triggerCloseIcon);
-  trigger.appendChild(triggerBadge);
   trigger.onclick = () => toggleChatWidget();
 
-  // ─── Intro Pill (corner positions) ──────────────────────────────────────────
-  const introPill = document.createElement("div");
-  introPill.className = "rm-intro-pill";
-
-  const introPillAvatar = document.createElement("img");
-  introPillAvatar.className = "rm-intro-pill-avatar";
-  introPillAvatar.alt = "Avatar";
-  introPillAvatar.style.display = "none";
-
-  const introPillIcon = document.createElement("div");
-  introPillIcon.className = "rm-intro-pill-icon";
-  introPillIcon.innerHTML = ICONS.chat;
-
-  const introPillTextWrap = document.createElement("div");
-  introPillTextWrap.className = "rm-intro-pill-text";
-
-  const introPillTitle = document.createElement("div");
-  introPillTitle.className = "rm-intro-pill-title";
-
-  const introPillDesc = document.createElement("div");
-  introPillDesc.className = "rm-intro-pill-desc";
-
-  introPillTextWrap.appendChild(introPillTitle);
-  introPillTextWrap.appendChild(introPillDesc);
-  introPill.appendChild(introPillAvatar);
-  introPill.appendChild(introPillIcon);
-  introPill.appendChild(introPillTextWrap);
-  introPill.onclick = () => toggleChatWidget();
-
-  let introPillTimer: ReturnType<typeof setTimeout> | null = null;
-  let introPillDelayTimer: ReturnType<typeof setTimeout> | null = null;
+  // ─── Message Preview Stack (unseen replies) ─────────────────────────────────
+  // The unseen-message preview reuses the greeting-card component so both
+  // bubbles look and behave identically. It gets its own stack node because
+  // renderGreetings() wipes the greeting stack's contents; the two are never
+  // visible together — greetings require no conversation, the preview needs one.
+  const previewStack = document.createElement("div");
+  previewStack.className = "rm-greeting-stack";
 
   // ─── Greeting Stack (welcome + news cards) ──────────────────────────────────
   const greetingStack = document.createElement("div");
@@ -2897,7 +2765,8 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
 
   container.appendChild(chatWindow);
   container.appendChild(trigger);
-  container.appendChild(introPill);
+  container.appendChild(triggerBadge);
+  container.appendChild(previewStack);
   container.appendChild(greetingStack);
   document.body.appendChild(container);
 
@@ -3694,7 +3563,6 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
         // ─── Background style + theme tokens ──────────────────────────────────
         const bgStyle = w.backgroundStyle || "solid";
         chatWindow.dataset.bgStyle = bgStyle;
-        introPill.dataset.bgStyle = bgStyle;
 
         const pRgb = hexToRgb(primary);
 
@@ -5547,7 +5415,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
           if (!isOpen) {
             incrementUnreadBadge();
             showBrowserNotification(parsed.message.content ?? "New message");
-            popIntroPillForIncomingMessage(parsed.message);
+            popMessagePreviewForIncomingMessage(parsed.message);
           } else if (!isTabActive) {
             incrementUnreadBadge();
             showBrowserNotification(parsed.message.content ?? "New message");
@@ -5612,17 +5480,49 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     }
   }
 
-  // Pop the intro pill with a preview of the latest bot/agent message when the
-  // widget is closed. Shared by polling and WS paths so behavior stays consistent.
-  function popIntroPillForIncomingMessage(msg: {
+  // Messages older than this never pop the preview — a stale reply shouldn't
+  // greet a visitor returning weeks later. The launcher badge still marks it.
+  const MAX_PREVIEW_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+  // createdAt arrives as a Date (rare), epoch seconds (WS/API), or an ISO
+  // string depending on the path — mirror the normalization used by the
+  // polling timestamp bookkeeping. Returns null when unparseable.
+  function messageTimeMs(createdAt: unknown): number | null {
+    if (createdAt instanceof Date) return createdAt.getTime();
+    if (typeof createdAt === "number") return createdAt * 1000;
+    if (typeof createdAt === "string") {
+      const t = new Date(createdAt).getTime();
+      return Number.isNaN(t) ? null : t;
+    }
+    return null;
+  }
+
+  // Show the unseen-message preview when the widget is closed. Shared by the
+  // polling, WS, and page-load paths so behavior stays consistent. Renders a
+  // compact greeting-style card (same component as proactive greetings) that
+  // stays out until the visitor opens the chat or dismisses it via ✕ —
+  // auto-hiding meant unseen replies went unnoticed.
+  // Callers must only pass the conversation's actual latest message — a reply
+  // the visitor has since responded to shouldn't resurface as a popup.
+  function popMessagePreviewForIncomingMessage(msg: {
+    id: string;
     role: string;
     content: string;
     senderName?: string | null;
     senderAvatar?: string | null;
+    createdAt?: unknown;
   }) {
-    // Only human agent replies pop the card. AI/bot answers still badge the
-    // launcher (handled by the callers) but don't interrupt with the pill.
-    if (msg.role !== "agent") return;
+    if (msg.role === "visitor") return;
+    // Without an id we can't record a dismissal, which would make the card
+    // un-dismissable — skip rather than trap the visitor.
+    if (!msg.id) return;
+    // Never re-pop a preview the visitor explicitly dismissed. The launcher
+    // badge (handled by the callers) still shows until the chat is opened.
+    if (msg.id === getDismissedIntroId()) return;
+    // Skip stale replies (unparseable timestamps count as fresh — the live
+    // WS/poll paths only ever deliver current messages).
+    const timeMs = messageTimeMs(msg.createdAt);
+    if (timeMs !== null && Date.now() - timeMs > MAX_PREVIEW_AGE_MS) return;
 
     const senderName =
       msg.senderName ||
@@ -5631,25 +5531,86 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
         : config?.botName ||
           config?.widget?.headerText ||
           "New message");
-    introPillTitle.textContent = senderName;
     const text = msg.content ?? "";
-    introPillDesc.textContent =
+    const preview =
       text.length > 120 ? text.substring(0, 120) + "..." : text;
 
-    const msgAvatarUrl = msg.senderAvatar
+    const card = document.createElement("div");
+    card.className = "rm-greeting-card compact";
+    card.dataset.bgStyle = config?.widget?.backgroundStyle || "solid";
+
+    const body = document.createElement("div");
+    body.className = "rm-greeting-body";
+
+    const avatarUrl = msg.senderAvatar
       ? resolveUrl(msg.senderAvatar)
       : config?.widget?.avatarUrl
         ? resolveUrl(config.widget.avatarUrl)
         : null;
-    updatePillAvatar(msgAvatarUrl);
+    if (avatarUrl) {
+      const avatar = document.createElement("img");
+      avatar.className = "rm-greeting-avatar";
+      avatar.src = avatarUrl;
+      avatar.alt = "";
+      body.appendChild(avatar);
+    } else {
+      const fallback = document.createElement("div");
+      fallback.className = "rm-greeting-avatar-fallback";
+      fallback.innerHTML = ICONS.chat;
+      body.appendChild(fallback);
+    }
 
-    introPill.classList.remove("rm-intro-hidden");
-    introPill.classList.add("visible");
-    if (introPillTimer) clearTimeout(introPillTimer);
-    introPillTimer = setTimeout(() => {
-      introPill.classList.add("rm-intro-hidden");
-      introPillTimer = null;
-    }, 8000);
+    const textWrap = document.createElement("div");
+    textWrap.className = "rm-greeting-text";
+    const title = document.createElement("div");
+    title.className = "rm-greeting-title";
+    title.textContent = senderName;
+    const desc = document.createElement("div");
+    desc.className = "rm-greeting-desc";
+    desc.textContent = preview;
+    textWrap.appendChild(title);
+    textWrap.appendChild(desc);
+    body.appendChild(textWrap);
+    card.appendChild(body);
+
+    const close = document.createElement("button");
+    close.className = "rm-greeting-close";
+    close.type = "button";
+    close.setAttribute("aria-label", "Dismiss message preview");
+    close.innerHTML = ICONS.x;
+    close.onclick = (e) => {
+      e.stopPropagation();
+      setDismissedIntroId(msg.id);
+      card.classList.add("dismissed");
+      setTimeout(() => card.remove(), 350);
+    };
+    card.appendChild(close);
+
+    card.onclick = () => toggleChatWidget();
+    card.setAttribute("role", "button");
+    card.tabIndex = 0;
+    card.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggleChatWidget();
+      }
+    };
+
+    // Greetings shouldn't normally be up while a conversation exists, but the
+    // forced showGreetings() API can put them there — the preview wins.
+    hideGreetingStack();
+    previewStack.innerHTML = "";
+    previewStack.appendChild(card);
+    // setTimeout rather than requestAnimationFrame: rAF stalls in background
+    // tabs, leaving the card permanently invisible on background page loads.
+    setTimeout(() => card.classList.add("visible"), 20);
+  }
+
+  // Hide (without persisting a dismissal) — used when the chat opens, which
+  // marks the previewed response seen via markConversationSeen().
+  function hideMessagePreview(): void {
+    const cards = previewStack.querySelectorAll(".rm-greeting-card");
+    cards.forEach((c) => c.classList.add("dismissed"));
   }
 
   // ─── Heartbeat ──────────────────────────────────────────────────────────────
@@ -5799,11 +5760,11 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
             msgs[msgs.length - 1]?.content ?? "New message",
           );
 
-          const latestMsg = [...msgs]
-            .reverse()
-            .find((m: { role: string }) => m.role !== "visitor");
-          if (latestMsg) {
-            popIntroPillForIncomingMessage(latestMsg);
+          // Only pop when the batch actually ends with an agent/bot message —
+          // if the visitor's own reply is newest, nothing is awaiting them.
+          const lastMsg = msgs[msgs.length - 1];
+          if (lastMsg) {
+            popMessagePreviewForIncomingMessage(lastMsg);
           }
         } else if (!isTabActive) {
           // Widget is open but tab is inactive -- flash document title
@@ -5979,8 +5940,12 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
         ensureLatestMessageVisible();
 
         // Surface an unseen response on load. Find the newest bot/agent message;
-        // if it hasn't been seen on this device, badge the launcher and pop the
-        // intro card once. Runs for active and recently-closed threads alike.
+        // if it hasn't been seen on this device, badge the launcher — and pop
+        // the preview card on every page view until it's seen or dismissed,
+        // but only when it's the conversation's LAST message (a reply the
+        // visitor already responded to isn't awaiting them) and recent enough
+        // (the age gate lives in the pop function). Runs for active and
+        // recently-closed threads alike.
         const latestResponse = [...msgs]
           .reverse()
           .find((m: { role: string }) => m.role !== "visitor");
@@ -5991,9 +5956,9 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
             markConversationSeen();
           } else if (latestResponse.id !== getStoredSeenResponseId()) {
             incrementUnreadBadge();
-            if (latestResponse.id !== getStoredPoppedIntroId()) {
-              popIntroPillForIncomingMessage(latestResponse);
-              setStoredPoppedIntroId(latestResponse.id);
+            const lastMessage = msgs[msgs.length - 1];
+            if (lastMessage && lastMessage.id === latestResponse.id) {
+              popMessagePreviewForIncomingMessage(latestResponse);
             }
           }
         }
@@ -6049,19 +6014,6 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     // No active conversation found — show greetings stack
     if (!conversationId && !isOpen) {
       renderGreetings();
-    }
-  }
-
-  // ─── Intro/New-Message Pill Helpers ─────────────────────────────────────────
-
-  function updatePillAvatar(avatarUrl: string | null) {
-    if (avatarUrl) {
-      introPillAvatar.src = resolveUrl(avatarUrl);
-      introPillAvatar.style.display = "block";
-      introPillIcon.style.display = "none";
-    } else {
-      introPillAvatar.style.display = "none";
-      introPillIcon.style.display = "flex";
     }
   }
 
@@ -6204,6 +6156,14 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
 
     if (!isRich) {
       card.onclick = () => toggleChatWidget();
+      card.setAttribute("role", "button");
+      card.tabIndex = 0;
+      card.onkeydown = (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggleChatWidget();
+        }
+      };
     }
 
     return card;
@@ -6239,6 +6199,14 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     if (isOpen) return;
     if (hiddenByPageTargeting) return;
     if (isBanned) return;
+    // An unseen-reply preview outranks marketing greetings — both stacks
+    // occupy the same coordinates, and a support reply is the more urgent
+    // card. Applies to the forced showGreetings() API path too. Matches any
+    // non-dismissed card (not just .visible) so a preview still inside its
+    // reveal delay can't be covered.
+    if (previewStack.querySelector(".rm-greeting-card:not(.dismissed)")) {
+      return;
+    }
 
     const visible = greetingsList.filter((g) => {
       if (!g.enabled) return false;
@@ -6335,16 +6303,8 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     trigger.classList.add("active");
     reportDelivered();
     markConversationSeen();
-    // Hide intro pill permanently
-    if (introPillDelayTimer) {
-      clearTimeout(introPillDelayTimer);
-      introPillDelayTimer = null;
-    }
-    if (introPillTimer) {
-      clearTimeout(introPillTimer);
-      introPillTimer = null;
-    }
-    introPill.classList.add("rm-intro-hidden");
+    // Hide message preview — opening the chat marks the previewed response seen.
+    hideMessagePreview();
     // Hide greeting stack without dismissing — re-shows when chat closes.
     hideGreetingStack();
     // Lock body scroll on mobile to prevent background scrolling
