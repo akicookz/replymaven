@@ -6,9 +6,8 @@ import {
 } from "better-auth-cloudflare";
 import { drizzle } from "drizzle-orm/d1";
 import { schema } from "./db";
-import { Resend } from "resend";
 import { type AppEnv } from "./types";
-import { buildOtpEmailHtml } from "./services/email-service";
+import { EmailService } from "./services/email-service";
 
 export function createAuth(
   env: AppEnv,
@@ -47,13 +46,8 @@ export function createAuth(
             expiresIn: 600,
             allowedAttempts: 5,
             sendVerificationOTP: async ({ email, otp }) => {
-              const resend = new Resend(env.RESEND_API_KEY);
-              await resend.emails.send({
-                from: "ReplyMaven <noreply@updates.replymaven.com>",
-                to: email,
-                subject: `${otp} is your ReplyMaven verification code`,
-                html: buildOtpEmailHtml(otp),
-              });
+              const emailService = new EmailService(env.RESEND_API_KEY);
+              await emailService.sendOtpEmail(email, otp);
             },
           }),
         ],

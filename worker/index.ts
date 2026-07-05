@@ -25,7 +25,11 @@ import { TelegramService } from "./services/telegram-service";
 import { KnowledgeSuggestionService } from "./services/knowledge-suggestion-service";
 import { DashboardService } from "./services/dashboard-service";
 import { CrawlService, type CrawlMessage } from "./services/crawl-service";
-import { EmailService, parseEmailMessageId } from "./services/email-service";
+import {
+  EmailService,
+  parseEmailMessageId,
+  RESERVED_INBOUND_LOCAL_PARTS,
+} from "./services/email-service";
 import { ToolService } from "./services/tool-service";
 import { GuidelineService } from "./services/guideline-service";
 import { HelpdeskService } from "./services/helpdesk-service";
@@ -1974,17 +1978,18 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    // Extract project slug from to address ({slug}@updates.replymaven.com)
+    // Extract project slug from to address ({slug}@updates.replymaven.com).
+    // Slugs are stored lowercase, so normalize the local part up front.
     let projectSlug: string | null = null;
     for (const addr of toAddresses) {
       const match = addr.match(/^([^@]+)@updates\.replymaven\.com$/i);
       if (match) {
-        projectSlug = match[1];
+        projectSlug = match[1].toLowerCase();
         break;
       }
     }
 
-    if (!projectSlug || projectSlug === "noreply") {
+    if (!projectSlug || RESERVED_INBOUND_LOCAL_PARTS.has(projectSlug)) {
       return c.json({ ok: true });
     }
 
@@ -3147,15 +3152,16 @@ const app = new Hono<HonoAppContext>()
     );
 
     // Send OTP email manually (since sendVerificationOTP requires existing user)
-    const { buildOtpEmailHtml } = await import("./services/email-service");
-    const { Resend } = await import("resend");
-    const resend = new Resend(c.env.RESEND_API_KEY);
-    await resend.emails.send({
-      from: "ReplyMaven <noreply@updates.replymaven.com>",
-      to: normalizedEmail,
-      subject: `${otp} is your ReplyMaven verification code`,
-      html: buildOtpEmailHtml(otp),
-    });
+    try {
+      const emailService = new EmailService(c.env.RESEND_API_KEY);
+      await emailService.sendOtpEmail(normalizedEmail, otp);
+    } catch (err) {
+      console.error("[EmailChange] OTP email failed:", err);
+      return c.json(
+        { error: "Failed to send verification code. Try again." },
+        500,
+      );
+    }
 
     return c.json({ success: true });
   })
@@ -6504,18 +6510,24 @@ const app = new Hono<HonoAppContext>()
     const widgetCfg = await widgetService.getWidgetConfig(project.id);
 
     const emailService = new EmailService(c.env.RESEND_API_KEY);
-    await emailService.sendAgentMessageEmail({
-      to: conversation.visitorEmail,
-      projectSlug: project.slug,
-      projectName: project.name,
-      conversationId: conversation.id,
-      messageId: message.id,
-      agentName: message.senderName ?? user.name ?? "Support",
-      agentAvatar: message.senderAvatar ?? null,
-      messageContent: message.content,
-      dashboardUrl: `https://replymaven.com/app/projects/${project.id}/conversations/${conversation.id}`,
-      accentColor: widgetCfg?.primaryColor ?? null,
-    });
+    try {
+      await emailService.sendAgentMessageEmail({
+        to: conversation.visitorEmail,
+        projectSlug: project.slug,
+        projectName: project.name,
+        conversationId: conversation.id,
+        messageId: message.id,
+        agentName: message.senderName ?? user.name ?? "Support",
+        agentAvatar: message.senderAvatar ?? null,
+        messageContent: message.content,
+        dashboardUrl: `https://replymaven.com/app/projects/${project.id}/conversations/${conversation.id}`,
+        accentColor: widgetCfg?.primaryColor ?? null,
+      });
+    } catch (err) {
+      // Leave emailedAt unset so the message can be re-sent after a failure.
+      console.error("[SendAsEmail] Send failed:", err);
+      return c.json({ error: "Failed to send email" }, 500);
+    }
 
     await chatService.markMessageAsEmailed(message.id);
 

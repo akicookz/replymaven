@@ -9,6 +9,7 @@ import {
   type NewProjectRow,
   type ProjectSettingsRow,
 } from "../db";
+import { RESERVED_INBOUND_LOCAL_PARTS } from "./email-service";
 
 export class ProjectService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
@@ -50,7 +51,13 @@ export class ProjectService {
   async generateUniqueSlug(_userId: string, baseSlug: string): Promise<string> {
     let slug = baseSlug;
     let suffix = 1;
-    while (await this.getProjectBySlugPublic(slug)) {
+    // The slug doubles as the local part of the project's inbound email
+    // address ({slug}@updates.replymaven.com), so platform sender aliases are
+    // off-limits — the inbound webhook drops mail addressed to them.
+    while (
+      RESERVED_INBOUND_LOCAL_PARTS.has(slug) ||
+      (await this.getProjectBySlugPublic(slug))
+    ) {
       suffix++;
       slug = `${baseSlug.slice(0, 45)}-${suffix}`;
     }

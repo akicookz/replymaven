@@ -118,16 +118,62 @@ ${body}
 </body></html>`;
 }
 
+// Derive the text/plain alternative from a rendered HTML email. Multipart
+// messages with a matching plain-text part score notably better with spam
+// filters than HTML-only mail. Only handles the markup our own templates emit.
+export function htmlToText(html: string): string {
+  const stripped = html
+    .replace(/<head[\s\S]*?<\/head>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:p|div|h[1-6]|tr|li)>/gi, "\n")
+    .replace(
+      /<a\b[^>]*\bhref="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi,
+      (_match, href: string, label: string) => {
+        const labelText = label.replace(/<[^>]+>/g, "").trim();
+        return labelText && labelText !== href
+          ? `${labelText} (${href})`
+          : href;
+      },
+    )
+    .replace(/<[^>]+>/g, "");
+  return stripped
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&mdash;/g, "—")
+    .replace(/&amp;/g, "&")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// ─── Sending domain & platform sender ─────────────────────────────────────────
+
+const EMAIL_DOMAIN = "updates.replymaven.com";
+
+// Platform emails come from a monitored, replyable alias — "noreply" senders
+// depress engagement signals and are a weak spam heuristic at mailbox
+// providers. Every local part we send from (or historically sent from) is
+// reserved so the inbound-mail webhook never treats it as a project slug.
+export const PLATFORM_SENDER_LOCAL_PART = "support";
+export const RESERVED_INBOUND_LOCAL_PARTS: ReadonlySet<string> = new Set([
+  PLATFORM_SENDER_LOCAL_PART,
+  "noreply",
+]);
+const PLATFORM_FROM = `ReplyMaven <${PLATFORM_SENDER_LOCAL_PART}@${EMAIL_DOMAIN}>`;
+
 // ─── Message-ID helpers ───────────────────────────────────────────────────────
 
-const MESSAGE_ID_DOMAIN = "updates.replymaven.com";
 const MESSAGE_ID_PATTERN = new RegExp(
-  `<msg-([0-9a-f-]{36})@${MESSAGE_ID_DOMAIN.replace(/\./g, "\\.")}>`,
+  `<msg-([0-9a-f-]{36})@${EMAIL_DOMAIN.replace(/\./g, "\\.")}>`,
   "gi",
 );
 
 export function buildEmailMessageId(messageId: string): string {
-  return `<msg-${messageId}@${MESSAGE_ID_DOMAIN}>`;
+  return `<msg-${messageId}@${EMAIL_DOMAIN}>`;
 }
 
 // Extract a ReplyMaven message id from an `In-Reply-To` or `References` header.
@@ -180,10 +226,42 @@ export class EmailService {
     this.resend = new Resend(apiKey);
   }
 
+  // All sends funnel through here: injects the platform sender, derives the
+  // text/plain part, and surfaces failures — the Resend SDK reports errors via
+  // its return value instead of throwing, so an unchecked send fails silently.
+  private async send(email: {
+    from?: string;
+    to: string;
+    subject: string;
+    html: string;
+    replyTo?: string;
+    headers?: Record<string, string>;
+  }): Promise<void> {
+    const { error } = await this.resend.emails.send({
+      from: email.from ?? PLATFORM_FROM,
+      to: email.to,
+      subject: email.subject,
+      html: email.html,
+      text: htmlToText(email.html),
+      ...(email.replyTo ? { replyTo: email.replyTo } : {}),
+      ...(email.headers ? { headers: email.headers } : {}),
+    });
+    if (error) {
+      throw new Error(`Resend send failed: ${error.name}: ${error.message}`);
+    }
+  }
+
+  async sendOtpEmail(to: string, otp: string): Promise<void> {
+    await this.send({
+      to,
+      subject: `${otp} is your ReplyMaven verification code`,
+      html: buildOtpEmailHtml(otp),
+    });
+  }
+
   async sendWelcomeEmail(to: string, name: string): Promise<void> {
     const styles = buildAccentStyles();
-    await this.resend.emails.send({
-      from: "ReplyMaven <noreply@updates.replymaven.com>",
+    await this.send({
       to,
       subject: "Welcome to ReplyMaven",
       html: wrapEmail(`
@@ -202,8 +280,7 @@ export class EmailService {
     acceptUrl: string,
   ): Promise<void> {
     const styles = buildAccentStyles();
-    const result = await this.resend.emails.send({
-      from: "ReplyMaven <noreply@updates.replymaven.com>",
+    await this.send({
       to,
       subject: `${inviterName} invited you to join their ReplyMaven team`,
       html: wrapEmail(`
@@ -214,7 +291,6 @@ export class EmailService {
 <p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">This invitation will expire in 7 days. If you didn't expect this invitation, you can safely ignore this email.</p>
       `),
     });
-    console.log("Team invite email sent:", result);
   }
 
   // ─── Escalation Notification (to project owner) ────────────────────────────
@@ -237,8 +313,8 @@ export class EmailService {
       });
       const styles = buildAccentStyles(details.accentColor);
       const summaryHtml = escapeHtml(details.summary).replace(/\n/g, "<br/>");
-      await this.resend.emails.send({
-        from: `${details.projectName} <noreply@updates.replymaven.com>`,
+      await this.send({
+        from: `${details.projectName} <${PLATFORM_SENDER_LOCAL_PART}@${EMAIL_DOMAIN}>`,
         to: details.ownerEmail,
         subject: `Needs human review - ${visitor}`,
         html: wrapEmail(
@@ -268,8 +344,7 @@ export class EmailService {
   ): Promise<void> {
     try {
       const styles = buildAccentStyles();
-      await this.resend.emails.send({
-        from: "ReplyMaven <noreply@updates.replymaven.com>",
+      await this.send({
         to,
         subject: "You've used 80% of your monthly messages",
         html: wrapEmail(`
@@ -292,8 +367,7 @@ export class EmailService {
   ): Promise<void> {
     try {
       const styles = buildAccentStyles();
-      await this.resend.emails.send({
-        from: "ReplyMaven <noreply@updates.replymaven.com>",
+      await this.send({
         to,
         subject: "You've reached your message limit",
         html: wrapEmail(`
@@ -340,8 +414,7 @@ export class EmailService {
 
       const msg = reasonMessages[reason];
 
-      await this.resend.emails.send({
-        from: "ReplyMaven <noreply@updates.replymaven.com>",
+      await this.send({
         to,
         subject: msg.subject,
         html: wrapEmail(`
@@ -406,9 +479,9 @@ ${msg.body}
       headers["Precedence"] = "bulk";
     }
 
-    await this.resend.emails.send({
-      from: `${projectName} <${projectSlug}@updates.replymaven.com>`,
-      replyTo: `${projectSlug}@updates.replymaven.com`,
+    await this.send({
+      from: `${projectName} <${projectSlug}@${EMAIL_DOMAIN}>`,
+      replyTo: `${projectSlug}@${EMAIL_DOMAIN}`,
       to,
       subject: `New reply from ${agentName} - ${projectName}`,
       headers,
@@ -459,9 +532,9 @@ ${msg.body}
     const styles = buildAccentStyles(accentColor);
     const ref = buildEmailMessageId(inReplyToMessageId);
 
-    await this.resend.emails.send({
-      from: `${projectName} <${projectSlug}@updates.replymaven.com>`,
-      replyTo: `${projectSlug}@updates.replymaven.com`,
+    await this.send({
+      from: `${projectName} <${projectSlug}@${EMAIL_DOMAIN}>`,
+      replyTo: `${projectSlug}@${EMAIL_DOMAIN}`,
       to,
       subject: `Re: ${visitorDisplayName} replied - ${projectName}`,
       headers: {
@@ -493,8 +566,7 @@ ${msg.body}
   ): Promise<void> {
     try {
       const styles = buildAccentStyles();
-      await this.resend.emails.send({
-        from: "ReplyMaven <noreply@updates.replymaven.com>",
+      await this.send({
         to,
         subject: "Your chatbot is back online",
         html: wrapEmail(`
