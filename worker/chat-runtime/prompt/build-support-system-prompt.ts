@@ -61,7 +61,10 @@ If the visitor asks for dangerous, illegal, or harmful instructions, refuse brie
 
 `;
 
-  prompt += buildCompanySection(projectName, settings.companyContext);
+  prompt += buildCompanySection(projectName, settings.companyContext, {
+    workingHours: settings.workingHours,
+    avgResponseTime: settings.avgResponseTime,
+  });
   prompt += buildGuidelinesSection(projectName, options?.guidelines);
 
   prompt += `<response-rules>

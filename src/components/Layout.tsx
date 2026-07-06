@@ -3,7 +3,8 @@ import { Outlet, Link, useLocation, useNavigate, useParams, useSearchParams } fr
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard,
-  FolderOpen,
+  Settings as SettingsIcon,
+  Zap,
   Palette,
   LogOut,
   ChevronDown,
@@ -16,9 +17,7 @@ import {
   Users,
   Building2,
   CreditCard,
-  Zap,
   BookOpen,
-  Home,
   Inbox,
   Mail,
   Flag,
@@ -121,19 +120,6 @@ function Layout() {
   const openMobile = useCallback(() => setMobileOpen(true), []);
   const sidebarCtx = { openSidebar: openMobile };
 
-  const { data: suggestionCountsData } = useQuery<{ total: number }>({
-    queryKey: ["knowledge-suggestion-counts", currentProject?.id],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/projects/${currentProject!.id}/knowledge-suggestions/counts`,
-      );
-      if (!res.ok) return { total: 0 };
-      return res.json();
-    },
-    enabled: !!currentProject,
-    staleTime: 60_000,
-  });
-
   const { data: inboxCounts } = useQuery<Record<string, number>>({
     queryKey: ["inbox-counts", currentProject?.id],
     queryFn: async () => {
@@ -169,15 +155,14 @@ function Layout() {
   ].map((i) => ({ ...i, href: `/app/projects/${currentProject.id}/conversations?filter=${i.filter}` })) : [];
 
   const workspaceNav = currentProject ? [
-    { label: "Dashboard",     href: `/app/projects/${currentProject.id}`,              icon: LayoutDashboard, exact: true },
-    { label: "Knowledgebase", href: `/app/projects/${currentProject.id}/knowledgebase`, icon: FolderOpen, badge: suggestionCountsData?.total ?? 0 },
-    { label: "Help Center",   href: `/app/projects/${currentProject.id}/help`,          icon: BookOpen },
+    { label: "Dashboard", href: `/app/projects/${currentProject.id}`,           icon: LayoutDashboard, exact: true },
+    { label: "Knowledge", href: `/app/projects/${currentProject.id}/knowledge`, icon: BookOpen },
   ] : [];
 
-  const widgetNav = currentProject ? [
-    { label: "Configuration", href: `/app/projects/${currentProject.id}/configuration`, icon: Palette },
-    { label: "Home Screen",   href: `/app/projects/${currentProject.id}/widget/home`,   icon: Home },
-    { label: "Quick Actions", href: `/app/projects/${currentProject.id}/quick-actions`,  icon: Zap },
+  const configureNav = currentProject ? [
+    { label: "Settings", href: `/app/projects/${currentProject.id}/settings`,      icon: SettingsIcon },
+    { label: "Widget",   href: `/app/projects/${currentProject.id}/configuration`, icon: Palette },
+    { label: "Actions",  href: `/app/projects/${currentProject.id}/quick-actions`, icon: Zap },
   ] : [];
 
   function switchProject(project: Project) {
@@ -498,12 +483,12 @@ function Layout() {
             </div>
           )}
 
-          {/* Widget */}
-          {widgetNav.length > 0 && (
+          {/* Configure */}
+          {configureNav.length > 0 && (
             <div>
-              <SectionHeader label="Widget" />
+              <SectionHeader label="Configure" />
               <div className="space-y-0.5">
-                {widgetNav.map((item) => (
+                {configureNav.map((item) => (
                   <NavLink key={item.href} item={item} />
                 ))}
               </div>
@@ -525,7 +510,7 @@ function Layout() {
         {subData?.subscription && !collapsed && (
           <div className="px-3 pb-1">
             <Link
-              to="/app/account"
+              to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=billing` : "/app/account/billing"}
               className="block px-3 py-2 rounded-lg bg-glass-button hover:bg-glass-raised transition-colors"
             >
               <div className="flex items-center justify-between mb-1">
@@ -533,12 +518,12 @@ function Layout() {
                   {formatPlanName(subData.subscription.plan)}
                 </span>
                 {subData.subscription.status === "trialing" && (
-                  <span className="text-[10px] font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">
+                  <span className="text-[10px] font-medium text-blue-400 bg-blue-500/15 px-1.5 py-0.5 rounded-full">
                     {getTrialDaysRemaining(subData.subscription.trialEndsAt)}d trial
                   </span>
                 )}
                 {subData.subscription.status === "past_due" && (
-                  <span className="text-[10px] font-medium text-yellow-600 bg-yellow-50 px-1.5 py-0.5 rounded-full">
+                  <span className="text-[10px] font-medium text-yellow-500 bg-yellow-500/15 px-1.5 py-0.5 rounded-full">
                     Past due
                   </span>
                 )}
@@ -591,21 +576,21 @@ function Layout() {
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-52 p-1">
               <Link
-                to="/app/account"
+                to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=profile` : "/app/account"}
                 className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
               >
                 <User className="w-4 h-4 shrink-0" />
                 My Profile
               </Link>
               <Link
-                to="/app/account/team"
+                to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=team` : "/app/account/team"}
                 className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
               >
                 <Users className="w-4 h-4 shrink-0" />
                 Team
               </Link>
               <Link
-                to="/app/account/billing"
+                to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=billing` : "/app/account/billing"}
                 className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
               >
                 <CreditCard className="w-4 h-4 shrink-0" />

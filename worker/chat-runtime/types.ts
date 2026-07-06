@@ -113,6 +113,8 @@ export type SupportPromptSettings = Pick<
   | "companyContext"
   | "botName"
   | "agentName"
+  | "workingHours"
+  | "avgResponseTime"
 >;
 
 export interface RetrievedSearchChunk {

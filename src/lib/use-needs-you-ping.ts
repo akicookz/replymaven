@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { showNeedsReviewToast } from "@/components/needs-review-toast";
 import { playChime } from "./ping-sound";
 
 export interface PingItem {
@@ -42,14 +42,13 @@ export function isFirstPollFor(raw: string | null): boolean {
   return (parseInt(raw ?? "0", 10) || 0) === 0;
 }
 
-// Pure: identity key for a ping item — dedupes on (id, updatedAt) so an item
-// that re-enters Needs You later (new updatedAt) can ping again.
-export function pingKey(item: { id: string; updatedAt: number }): string {
-  return `${item.id}:${item.updatedAt}`;
+// Id alone, not id:updatedAt — activity bumps must not re-fire the chime.
+export function pingKey(item: { id: string }): string {
+  return item.id;
 }
 
 // Pure: items not already pinged this session, given the seen-key set.
-export function selectFreshItems<T extends { id: string; updatedAt: number }>(
+export function selectFreshItems<T extends { id: string }>(
   items: T[],
   seen: ReadonlySet<string>,
 ): T[] {
@@ -103,18 +102,14 @@ export function useNeedsYouPing(projectId: string | undefined): void {
       const url =
         `/app/projects/${projectId}/conversations?filter=needs-you&id=${item.id}` +
         (item.summaryMessageId ? `&msg=${item.summaryMessageId}` : "");
-      toast(`${who} needs your review`, {
-        description: item.summary ? item.summary.slice(0, 140) : undefined,
-        action: { label: "View", onClick: () => navigate(url) },
-        duration: 10_000,
-      });
+      showNeedsReviewToast({ who, summary: item.summary });
       if (
         "Notification" in window &&
         Notification.permission === "granted" &&
         document.visibilityState === "hidden"
       ) {
         const n = new Notification(`${who} needs your review`, {
-          body: item.summary?.slice(0, 140) ?? "Open the inbox to reply.",
+          body: item.summary?.slice(0, 140) || "Open the inbox to reply.",
           tag: pingKey(item),
         });
         n.onclick = () => { window.focus(); navigate(url); n.close(); };

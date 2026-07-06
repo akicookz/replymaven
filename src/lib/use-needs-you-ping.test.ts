@@ -20,14 +20,13 @@ describe("isFirstPollFor", () => {
 });
 
 describe("pingKey", () => {
-  test("combines id and updatedAt", () => {
-    expect(pingKey({ id: "conv1", updatedAt: 123 })).toBe("conv1:123");
+  test("is the conversation id — one ping per conversation per session", () => {
+    expect(pingKey({ id: "conv1" })).toBe("conv1");
   });
 
-  test("distinguishes ids that could collide under naive concatenation", () => {
-    // "abc1" + 23 and "abc" + 123 would both be "abc123" without a separator.
-    expect(pingKey({ id: "abc1", updatedAt: 23 })).not.toBe(
-      pingKey({ id: "abc", updatedAt: 123 }),
+  test("ignores updatedAt so later activity cannot re-ping", () => {
+    expect(pingKey({ id: "conv1", updatedAt: 123 })).toBe(
+      pingKey({ id: "conv1", updatedAt: 999 }),
     );
   });
 });
@@ -47,10 +46,10 @@ describe("selectFreshItems", () => {
     expect(selectFreshItems(items, seen)).toEqual([items[1]]);
   });
 
-  test("an item re-entering with a new updatedAt pings again", () => {
+  test("an item re-entering with a new updatedAt does NOT ping again", () => {
     const bumped = { id: "a", updatedAt: 99 };
     const seen = new Set([pingKey(items[0])]);
-    expect(selectFreshItems([bumped], seen)).toEqual([bumped]);
+    expect(selectFreshItems([bumped], seen)).toEqual([]);
   });
 
   test("returns empty when everything has been seen", () => {

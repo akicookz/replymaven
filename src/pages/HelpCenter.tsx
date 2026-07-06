@@ -50,6 +50,7 @@ interface ArticleResponse {
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  indexing: { status: string; lastIndexedAt: string | null } | null;
 }
 
 interface CategoryFormState {
@@ -459,6 +460,7 @@ function HelpCenter() {
     status: a.status,
     sortOrder: a.sortOrder,
     thumbnail: firstImageFromMarkdown(a.content),
+    indexing: a.indexing,
   }));
 
   const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
@@ -470,10 +472,11 @@ function HelpCenter() {
           <MobileMenuButton />
           <div>
             <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
-              Help Center
+              Articles
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Author and organize the articles that power your knowledge base.
+              Write help center articles. Published articles are indexed for
+              the AI automatically.
             </p>
           </div>
         </div>
@@ -481,7 +484,7 @@ function HelpCenter() {
           <Button asChild variant="outline" size="sm">
             <Link to={`/app/projects/${projectId}/help/settings`}>
               <Settings className="w-4 h-4" />
-              Settings
+              Site settings
             </Link>
           </Button>
           <Button

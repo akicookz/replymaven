@@ -16,10 +16,16 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, ImageIcon, Pencil, Trash2 } from "lucide-react";
+import { GripVertical, Pencil, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { formatTimeAgo } from "@/lib/time-ago";
+
+export interface ArticleIndexing {
+  status: string;
+  lastIndexedAt: string | null;
+}
 
 export interface HelpArticleItem {
   id: string;
@@ -29,6 +35,7 @@ export interface HelpArticleItem {
   status: "draft" | "published";
   sortOrder: number;
   thumbnail: string | null;
+  indexing: ArticleIndexing | null;
 }
 
 interface HelpArticleListProps {
@@ -67,20 +74,16 @@ function SortableArticleCard({
       className="group relative flex flex-col overflow-hidden rounded-xl bg-muted/40 hover:bg-muted/60 transition-colors"
     >
       <Link to={editHref} className="flex flex-col">
-        <div className="aspect-[16/9] w-full bg-muted/60 overflow-hidden">
-          {article.thumbnail ? (
+        {article.thumbnail && (
+          <div className="aspect-[16/9] w-full bg-muted/60 overflow-hidden">
             <img
               src={article.thumbnail}
               alt=""
               className="h-full w-full object-cover"
               loading="lazy"
             />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-muted-foreground/50">
-              <ImageIcon className="h-8 w-8" />
-            </div>
-          )}
-        </div>
+          </div>
+        )}
         <div className="flex flex-col gap-1.5 p-3">
           <div className="flex items-start justify-between gap-2">
             <span className="text-sm font-medium line-clamp-1">
@@ -100,6 +103,13 @@ function SortableArticleCard({
           {article.excerpt && (
             <p className="text-xs text-muted-foreground line-clamp-2">
               {article.excerpt}
+            </p>
+          )}
+          {article.status === "published" && (
+            <p className="text-[10px] text-muted-foreground">
+              {article.indexing?.status === "indexed"
+                ? `AI indexed${article.indexing.lastIndexedAt ? ` · ${formatTimeAgo(article.indexing.lastIndexedAt)}` : ""}`
+                : "AI indexing pending"}
             </p>
           )}
         </div>

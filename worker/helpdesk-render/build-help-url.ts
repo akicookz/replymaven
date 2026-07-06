@@ -71,3 +71,24 @@ export function rewriteHelpUrlIfNeeded(
   const suffix = storedUrl.slice(canonicalBase.length);
   return `${normalizeHelpCustomUrl(customUrl)}${suffix}`;
 }
+
+// True when a URL points inside this project's own help center (canonical
+// path or custom domain) — such pages are indexed automatically on publish.
+export function isOwnHelpCenterUrl(
+  rawUrl: string,
+  projectSlug: string,
+  customUrl: string | null | undefined,
+): boolean {
+  let candidate: URL;
+  try {
+    candidate = new URL(rawUrl.trim());
+  } catch {
+    return false;
+  }
+  const normalized = `${candidate.protocol}//${candidate.host}${candidate.pathname.replace(/\/+$/, "")}`;
+  const prefixes = [`${CANONICAL_BASE}/help/${projectSlug}`];
+  if (customUrl) prefixes.push(normalizeHelpCustomUrl(customUrl));
+  return prefixes.some(
+    (prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`),
+  );
+}

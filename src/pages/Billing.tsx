@@ -87,12 +87,12 @@ function UsageBar({
 
 function StatusBadge({ status }: { status: string }) {
   const config: Record<string, { label: string; icon: typeof CheckCircle2; className: string }> = {
-    active: { label: "Active", icon: CheckCircle2, className: "text-green-600 bg-green-50" },
-    trialing: { label: "Trial", icon: Clock, className: "text-blue-600 bg-blue-50" },
-    past_due: { label: "Past Due", icon: AlertTriangle, className: "text-yellow-600 bg-yellow-50" },
-    canceled: { label: "Canceled", icon: XCircle, className: "text-red-600 bg-red-50" },
-    unpaid: { label: "Unpaid", icon: AlertTriangle, className: "text-red-600 bg-red-50" },
-    incomplete: { label: "Incomplete", icon: Clock, className: "text-gray-600 bg-gray-50" },
+    active: { label: "Active", icon: CheckCircle2, className: "text-green-500 bg-green-500/15" },
+    trialing: { label: "Trial", icon: Clock, className: "text-blue-400 bg-blue-500/15" },
+    past_due: { label: "Past Due", icon: AlertTriangle, className: "text-yellow-500 bg-yellow-500/15" },
+    canceled: { label: "Canceled", icon: XCircle, className: "text-red-500 bg-red-500/15" },
+    unpaid: { label: "Unpaid", icon: AlertTriangle, className: "text-red-500 bg-red-500/15" },
+    incomplete: { label: "Incomplete", icon: Clock, className: "text-muted-foreground bg-muted" },
   };
 
   const c = config[status] ?? config.incomplete;
@@ -256,7 +256,7 @@ function UsageLog() {
 
   if (isError) {
     return (
-      <div className="rounded-xl bg-card p-6 text-center space-y-2">
+      <div className="rounded-2xl bg-card p-6 text-center space-y-2">
         <AlertTriangle className="w-6 h-6 text-muted-foreground mx-auto" />
         <p className="text-sm text-muted-foreground">Failed to load usage log.</p>
       </div>
@@ -264,69 +264,29 @@ function UsageLog() {
   }
 
   return (
-    <div className="rounded-xl bg-card p-6 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-          <MessageSquare className="w-5 h-5" />
-          Usage Log
-        </h2>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          AI messages by conversation this billing period.
-        </p>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="space-y-1">
-          <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
-            Status
-          </label>
-          <Select
-            value={statusFilter || "all"}
-            onValueChange={(v) => {
-              setStatusFilter(v === "all" ? "" : v);
-              setPage(0);
-            }}
-          >
-            <SelectTrigger className="w-[140px] h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="waiting_agent">Waiting</SelectItem>
-              <SelectItem value="agent_replied">Agent</SelectItem>
-              <SelectItem value="closed">Closed</SelectItem>
-            </SelectContent>
-          </Select>
+    <div className="rounded-2xl bg-card p-6 space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Usage Log</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            AI messages by conversation this billing period.
+          </p>
         </div>
-
-        {metaKeys.length > 0 && (
-          <>
-            <div className="space-y-1">
-              <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
-                Metadata
-              </label>
-              <Select value={metaKey || "none"} onValueChange={(v) => setMetaKey(v === "none" ? "" : v)}>
-                <SelectTrigger className="w-[140px] h-8 text-xs">
-                  <SelectValue placeholder="Key" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Key...</SelectItem>
-                  {metaKeys.map((k) => (
-                    <SelectItem key={k} value={k}>
-                      {k}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {metaKey && (
-              <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
-                  Contains
-                </label>
+        <div className="flex flex-wrap items-center gap-2">
+          {appliedMetaKey && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 text-xs gap-1 text-muted-foreground"
+              onClick={handleClearMeta}
+            >
+              <X className="w-3 h-3" />
+              {appliedMetaKey}={appliedMetaValue}
+            </Button>
+          )}
+          {metaKeys.length > 0 && (
+            <>
+              {metaKey && (
                 <Input
                   value={metaValue}
                   onChange={(e) => setMetaValue(e.target.value)}
@@ -336,28 +296,46 @@ function UsageLog() {
                     if (e.key === "Enter") handleApplyMeta();
                   }}
                 />
-              </div>
-            )}
-
-            {metaKey && metaValue && (
-              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={handleApplyMeta}>
-                Apply
-              </Button>
-            )}
-
-            {appliedMetaKey && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 text-xs gap-1 text-muted-foreground"
-                onClick={handleClearMeta}
-              >
-                <X className="w-3 h-3" />
-                {appliedMetaKey}={appliedMetaValue}
-              </Button>
-            )}
-          </>
-        )}
+              )}
+              {metaKey && metaValue && (
+                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={handleApplyMeta}>
+                  Apply
+                </Button>
+              )}
+              <Select value={metaKey || "none"} onValueChange={(v) => setMetaKey(v === "none" ? "" : v)}>
+                <SelectTrigger className="w-[130px] h-8 text-xs">
+                  <SelectValue placeholder="Metadata" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Metadata</SelectItem>
+                  {metaKeys.map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {k}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          )}
+          <Select
+            value={statusFilter || "all"}
+            onValueChange={(v) => {
+              setStatusFilter(v === "all" ? "" : v);
+              setPage(0);
+            }}
+          >
+            <SelectTrigger className="w-[130px] h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="waiting_agent">Waiting</SelectItem>
+              <SelectItem value="agent_replied">Agent</SelectItem>
+              <SelectItem value="closed">Closed</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Table */}
@@ -493,7 +471,7 @@ function Billing() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          returnUrl: `${window.location.origin}/app/account`,
+          returnUrl: `${window.location.origin}/app/account/billing`,
         }),
       });
       if (!res.ok) throw new Error("Failed to create portal session");
@@ -531,7 +509,7 @@ function Billing() {
           </div>
         </div>
 
-        <div className="rounded-xl bg-card p-8 text-center space-y-4">
+        <div className="rounded-2xl bg-card p-8 text-center space-y-4">
           <CreditCard className="w-10 h-10 text-muted-foreground mx-auto" />
           <div className="space-y-1">
             <p className="font-medium text-foreground">No active subscription</p>
@@ -551,25 +529,40 @@ function Billing() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-3">
-        <MobileMenuButton />
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground">Billing</h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Manage your subscription and billing details.
-          </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <MobileMenuButton />
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-foreground">Billing</h1>
+            <p className="text-xs md:text-sm text-muted-foreground mt-1">
+              Manage your subscription and billing details.
+            </p>
+          </div>
         </div>
+        <Button
+          onClick={() => portalMutation.mutate()}
+          disabled={portalMutation.isPending}
+          variant="outline"
+          className="shrink-0"
+        >
+          {portalMutation.isPending ? (
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          ) : (
+            <ExternalLink className="w-4 h-4 mr-2" />
+          )}
+          Manage Subscription
+        </Button>
       </div>
 
       {/* Trial Banner */}
       {sub.status === "trialing" && trialDays > 0 && (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50">
-          <Clock className="w-5 h-5 text-blue-600 shrink-0" />
+        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-blue-500/10">
+          <Clock className="w-5 h-5 text-blue-400 shrink-0" />
           <div>
-            <p className="text-sm font-medium text-blue-900">
+            <p className="text-sm font-medium text-foreground">
               {trialDays} day{trialDays !== 1 ? "s" : ""} left in your trial
             </p>
-            <p className="text-xs text-blue-700">
+            <p className="text-xs text-muted-foreground">
               Your card will be charged when the trial ends.
             </p>
           </div>
@@ -578,14 +571,14 @@ function Billing() {
 
       {/* Past Due Banner */}
       {sub.status === "past_due" && (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center px-4 py-3 rounded-xl bg-yellow-50">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center px-4 py-3 rounded-2xl bg-yellow-500/10">
           <div className="flex items-start gap-3 flex-1">
-            <AlertTriangle className="w-5 h-5 text-yellow-600 shrink-0 mt-0.5" />
+            <AlertTriangle className="w-5 h-5 text-yellow-500 shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-medium text-yellow-900">
+              <p className="text-sm font-medium text-foreground">
                 Payment failed
               </p>
-              <p className="text-xs text-yellow-700">
+              <p className="text-xs text-muted-foreground">
                 Please update your payment method to keep your subscription active.
               </p>
             </div>
@@ -603,7 +596,7 @@ function Billing() {
       )}
 
       {/* Current Plan */}
-      <div className="rounded-xl bg-card p-6 space-y-4">
+      <div className="rounded-2xl bg-card p-6 space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground">
@@ -617,27 +610,15 @@ function Billing() {
           <StatusBadge status={sub.status} />
         </div>
 
-        <Button
-          onClick={() => portalMutation.mutate()}
-          disabled={portalMutation.isPending}
-          variant="outline"
-          className="w-full sm:w-auto"
-        >
-          {portalMutation.isPending ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <ExternalLink className="w-4 h-4 mr-2" />
-          )}
-          Manage Subscription
-        </Button>
         <p className="text-xs text-muted-foreground">
-          Change plan, update payment method, view invoices, or cancel.
+          Use Manage Subscription to change plan, update payment method, view
+          invoices, or cancel.
         </p>
       </div>
 
       {/* Usage */}
       {limits && (
-        <div className="rounded-xl bg-card p-6 space-y-4">
+        <div className="rounded-2xl bg-card p-6 space-y-4">
           <div className="flex items-baseline justify-between">
             <h2 className="text-lg font-semibold text-foreground">Usage</h2>
             {data?.usagePeriodStart && data?.usagePeriodEnd && (

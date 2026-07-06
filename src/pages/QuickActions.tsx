@@ -119,6 +119,7 @@ function QuickActions() {
   const [activeTab, setActiveTab] = useState<"actions" | "tools">(
     searchTab === "tools" ? "tools" : "actions",
   );
+  const [showAddForm, setShowAddForm] = useState(false);
 
   useEffect(() => {
     setActiveTab(searchTab === "tools" ? "tools" : "actions");
@@ -126,33 +127,43 @@ function QuickActions() {
 
   function handleTabChange(tab: "actions" | "tools") {
     setActiveTab(tab);
-    if (tab === "tools") {
-      setSearchParams({ tab: "tools" }, { replace: true });
-      return;
-    }
-
-    setSearchParams({}, { replace: true });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (tab === "tools") next.set("tab", "tools");
+        else next.delete("tab");
+        return next;
+      },
+      { replace: true },
+    );
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start gap-3 mb-6">
-        <MobileMenuButton />
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground flex items-center gap-2">
-            <Zap className="w-5 h-5 md:w-6 md:h-6" />
-            Quick Actions and Tools
-          </h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Manage widget shortcuts, contact form, and bot tools from one
-            place.
-          </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <MobileMenuButton />
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-foreground">
+              Actions &amp; Tools
+            </h1>
+            <p className="text-xs md:text-sm text-muted-foreground mt-1">
+              Manage widget shortcuts, contact form, and bot tools from one
+              place.
+            </p>
+          </div>
         </div>
+        {activeTab === "actions" && (
+          <Button onClick={() => setShowAddForm((v) => !v)} className="shrink-0">
+            <Plus className="w-4 h-4 mr-2" />
+            Add Action
+          </Button>
+        )}
       </div>
 
       {/* Segment Control */}
-      <div className="inline-flex rounded-lg bg-muted p-1 mb-6">
+      <div className="inline-flex rounded-lg bg-muted p-1">
         {(
           [
             { key: "actions", label: "Actions" },
@@ -175,7 +186,12 @@ function QuickActions() {
       </div>
 
       <div className={activeTab !== "actions" ? "hidden" : ""}>
-        <ActionsTab projectId={projectId!} queryClient={queryClient} />
+        <ActionsTab
+          projectId={projectId!}
+          queryClient={queryClient}
+          showAddForm={showAddForm}
+          onCloseAddForm={() => setShowAddForm(false)}
+        />
       </div>
       <div className={activeTab !== "tools" ? "hidden" : ""}>
         <ToolsPanel projectId={projectId!} embedded />
@@ -189,9 +205,13 @@ function QuickActions() {
 function ActionsTab({
   projectId,
   queryClient,
+  showAddForm,
+  onCloseAddForm,
 }: {
   projectId: string;
   queryClient: ReturnType<typeof useQueryClient>;
+  showAddForm: boolean;
+  onCloseAddForm: () => void;
 }) {
   const [newType, setNewType] = useState<ActionType>("prompt");
   const [newLabel, setNewLabel] = useState("");
@@ -267,6 +287,7 @@ function ActionsTab({
       setNewLabel("");
       setNewAction("");
       setNewShowOnHome(false);
+      onCloseAddForm();
     },
   });
 
@@ -408,6 +429,7 @@ function ActionsTab({
   return (
     <div className="space-y-6">
       {/* Add Action Form */}
+      {showAddForm && (
       <div className="bg-card rounded-2xl p-5 space-y-4">
         <h3 className="text-sm font-semibold text-foreground">Add action</h3>
 
@@ -526,6 +548,7 @@ function ActionsTab({
           </div>
         )}
       </div>
+      )}
 
       {/* Actions List */}
       {isLoading ? (

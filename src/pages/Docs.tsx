@@ -122,7 +122,6 @@ const navItems: NavItem[] = [
       { id: "telegram", label: "Telegram" },
       { id: "tickets", label: "Contact Form" },
       { id: "tone-of-voice", label: "Tone of Voice" },
-      { id: "knowledge-refinement", label: "Knowledge Refinement" },
     ],
   },
   {
@@ -1483,26 +1482,6 @@ window.ReplyMaven.setMetadata({
               </table>
             </div>
 
-            <SectionHeading id="knowledge-refinement" level={3}>
-              Knowledge Refinement
-            </SectionHeading>
-            <p className="text-muted-foreground leading-relaxed mb-4">
-              After conversations close, the AI analyzes them and suggests
-              improvements to your knowledgebase. Suggestions can include
-              new FAQ entries, SOP updates, or company context enrichments.
-            </p>
-            <ul className="list-disc list-inside text-muted-foreground space-y-1 mb-4 ml-1">
-              <li>
-                <strong>Automatic</strong> -- Enable auto-refinement in your
-                knowledgebase settings. The AI will analyze closed
-                conversations and create suggestions.
-              </li>
-              <li>
-                <strong>Review</strong> -- Pending suggestions appear as
-                badges on your Knowledgebase page. Approve to auto-apply
-                changes, or reject to dismiss.
-              </li>
-            </ul>
 
             {/* ── Advanced ────────────────────────────────────────────── */}
             <SectionHeading id="spa-integration">

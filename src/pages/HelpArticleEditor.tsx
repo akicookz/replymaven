@@ -396,9 +396,9 @@ function HelpArticleEditorPage() {
         <div className="flex items-center gap-2 min-w-0">
           <MobileMenuButton />
           <Button asChild variant="ghost" size="sm" className="-ml-1">
-            <Link to={`/app/projects/${projectId}/help`}>
+            <Link to={`/app/projects/${projectId}/knowledge?tab=articles`}>
               <ArrowLeft className="w-4 h-4" />
-              <span className="hidden sm:inline">Help Center</span>
+              <span className="hidden sm:inline">Articles</span>
             </Link>
           </Button>
           <span className="text-muted-foreground hidden md:inline">/</span>

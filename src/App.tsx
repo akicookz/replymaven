@@ -5,7 +5,6 @@ import { Toaster } from "sonner";
 import { ThemeContext } from "@/lib/theme";
 
 import Layout from "./components/Layout";
-import AccountLayout from "./components/AccountLayout";
 import AuthGuard from "./components/AuthGuard";
 import OnboardingGuard from "./components/OnboardingGuard";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -15,19 +14,13 @@ import { useSubscription } from "./hooks/use-subscription";
 import Dashboard from "./pages/Dashboard";
 import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
-import Resources from "./pages/Resources";
+import Knowledge from "./pages/Knowledge";
 import QuickActions from "./pages/QuickActions";
 import Configuration from "./pages/Configuration";
-import WidgetHome from "./pages/WidgetHome";
-import CompanyInfo from "./pages/CompanyInfo";
-import Sops from "./pages/Sops";
-import Profile from "./pages/Profile";
-import Team from "./pages/Team";
-import Billing from "./pages/Billing";
+import Settings from "./pages/Settings";
 import AuthCallback from "./pages/AuthCallback";
 import Docs from "./pages/Docs";
 import TeamAccept from "./pages/TeamAccept";
-import HelpCenter from "./pages/HelpCenter";
 import HelpCenterSettings from "./pages/HelpCenterSettings";
 import HelpArticleEditor from "./pages/HelpArticleEditor";
 
@@ -84,29 +77,36 @@ function DashboardRedirect() {
   return <Navigate to="/app/onboarding" replace />;
 }
 
-function ProjectPageRedirect({
-  target,
-}: {
-  target: "widget" | "quick-actions" | "tools";
-}) {
+function AccountRedirect({ tab }: { tab: string }) {
+  const { data: projects, isPending } = useQuery<{ id: string }[]>({
+    queryKey: ["projects"],
+    queryFn: async () => {
+      const res = await fetch("/api/projects");
+      if (!res.ok) throw new Error("Failed to fetch projects");
+      return res.json();
+    },
+  });
+
+  if (isPending) return null;
+  if (projects && projects.length > 0) {
+    return (
+      <Navigate
+        to={`/app/projects/${projects[0].id}/settings?tab=${tab}`}
+        replace
+      />
+    );
+  }
+  return <Navigate to="/app" replace />;
+}
+
+function ProjectPageRedirect({ target }: { target: string }) {
   const { projectId } = useParams<{ projectId: string }>();
 
   if (!projectId) {
     return <Navigate to="/app" replace />;
   }
 
-  if (target === "tools") {
-    return (
-      <Navigate
-        to={`/app/projects/${projectId}/quick-actions?tab=tools`}
-        replace
-      />
-    );
-  }
-
-  return (
-    <Navigate to={`/app/projects/${projectId}/${target}`} replace />
-  );
+  return <Navigate to={`/app/projects/${projectId}/${target}`} replace />;
 }
 
 function App() {
@@ -157,25 +157,41 @@ function App() {
         }
       />
 
-      {/* Account pages -- separate layout */}
+      {/* Legacy account URLs -- now tabs in project Settings */}
       <Route
         path="/app/account"
         element={
           <ErrorBoundary>
             <AuthGuard>
-              <AccountLayout />
+              <AccountRedirect tab="profile" />
             </AuthGuard>
           </ErrorBoundary>
         }
-      >
-        <Route index element={<Profile />} />
-        <Route path="team" element={<Team />} />
-        <Route path="billing" element={<Billing />} />
-        <Route
-          path="members"
-          element={<Navigate to="/app/account/team" replace />}
-        />
-      </Route>
+      />
+      <Route
+        path="/app/account/team"
+        element={
+          <ErrorBoundary>
+            <AuthGuard>
+              <AccountRedirect tab="team" />
+            </AuthGuard>
+          </ErrorBoundary>
+        }
+      />
+      <Route
+        path="/app/account/billing"
+        element={
+          <ErrorBoundary>
+            <AuthGuard>
+              <AccountRedirect tab="billing" />
+            </AuthGuard>
+          </ErrorBoundary>
+        }
+      />
+      <Route
+        path="/app/account/members"
+        element={<Navigate to="/app/account/team" replace />}
+      />
 
       {/* /app index -- redirect to first project dashboard */}
       <Route
@@ -201,24 +217,32 @@ function App() {
           element={<Conversations />}
         />
         <Route
+          path="projects/:projectId/knowledge"
+          element={<Knowledge />}
+        />
+        <Route
+          path="projects/:projectId/company"
+          element={<ProjectPageRedirect target="settings?tab=general" />}
+        />
+        <Route
           path="projects/:projectId/knowledgebase"
-          element={<Resources />}
+          element={<ProjectPageRedirect target="knowledge?tab=sources" />}
         />
         <Route
           path="projects/:projectId/knowledgebase/company-info"
-          element={<CompanyInfo />}
+          element={<ProjectPageRedirect target="company" />}
         />
         <Route
           path="projects/:projectId/knowledgebase/sops"
-          element={<Sops />}
+          element={<ProjectPageRedirect target="knowledge?tab=sops" />}
         />
         <Route
           path="projects/:projectId/resources"
-          element={<Navigate to="../knowledgebase" replace />}
+          element={<ProjectPageRedirect target="knowledge?tab=sources" />}
         />
         <Route
           path="projects/:projectId/settings"
-          element={<Navigate to="../knowledgebase" replace />}
+          element={<Settings />}
         />
         <Route
           path="projects/:projectId/configuration"
@@ -226,19 +250,19 @@ function App() {
         />
         <Route
           path="projects/:projectId/widget"
-          element={<Navigate to="../configuration?tab=appearance" replace />}
+          element={<ProjectPageRedirect target="configuration?section=appearance" />}
         />
         <Route
           path="projects/:projectId/widget/home"
-          element={<WidgetHome />}
+          element={<ProjectPageRedirect target="configuration?section=appearance" />}
         />
         <Route
           path="projects/:projectId/widget/greetings"
-          element={<Navigate to="../../configuration?tab=greetings" replace />}
+          element={<ProjectPageRedirect target="configuration?section=greetings" />}
         />
         <Route
           path="projects/:projectId/widget/installation"
-          element={<Navigate to="../../configuration?tab=installation" replace />}
+          element={<ProjectPageRedirect target="configuration?section=installation" />}
         />
         <Route
           path="projects/:projectId/widget/quick-actions"
@@ -246,7 +270,7 @@ function App() {
         />
         <Route
           path="projects/:projectId/widget/tools"
-          element={<ProjectPageRedirect target="tools" />}
+          element={<ProjectPageRedirect target="quick-actions?tab=tools" />}
         />
         <Route
           path="projects/:projectId/widget/*"
@@ -266,11 +290,11 @@ function App() {
         />
         <Route
           path="projects/:projectId/tools"
-          element={<ProjectPageRedirect target="tools" />}
+          element={<ProjectPageRedirect target="quick-actions?tab=tools" />}
         />
         <Route
           path="projects/:projectId/help"
-          element={<HelpCenter />}
+          element={<ProjectPageRedirect target="knowledge?tab=articles" />}
         />
         <Route
           path="projects/:projectId/help/settings"

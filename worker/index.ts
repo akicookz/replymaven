@@ -2,11 +2,10 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { users } from "./db/auth.schema";
 import {
-  helpArticles,
-  helpCategories,
+  resources as resourcesTable,
   type HelpArticleRow,
   type HelpCategoryRow,
 } from "./db/schema";
@@ -22,7 +21,6 @@ import { triggerAutoRagSync } from "./services/autorag-sync";
 import { FAQ_SET_MAX_CHARS } from "../shared/faq-limits";
 import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
-import { KnowledgeSuggestionService } from "./services/knowledge-suggestion-service";
 import { DashboardService } from "./services/dashboard-service";
 import { CrawlService, type CrawlMessage } from "./services/crawl-service";
 import {
@@ -46,7 +44,7 @@ import {
   renderMarkdown,
   ensureArticleTitle,
 } from "./helpdesk-render/render-markdown";
-import { normalizeHelpCustomUrl } from "./helpdesk-render/build-help-url";
+import { isOwnHelpCenterUrl, normalizeHelpCustomUrl } from "./helpdesk-render/build-help-url";
 import { groupArticlesByCategory } from "./helpdesk-render/group-articles";
 import {
   encryptHeaders,
@@ -62,7 +60,6 @@ import {
 } from "./services/team-context";
 import { VisitorBanService } from "./services/visitor-ban-service";
 import { handleWidgetMessageTurn } from "./chat-runtime/orchestration/handle-widget-message-turn";
-import { triggerAutoRefinementIfEnabled } from "./chat-runtime/post-turn/auto-refine";
 import { buildToolRegistry } from "./chat-runtime/tools/build-tool-registry";
 import { toToolDefinition } from "./chat-runtime/types";
 import {
@@ -71,7 +68,7 @@ import {
   runWithModelFallback,
 } from "./chat-runtime/llm/create-language-model";
 import { composeAgentDraft } from "./chat-runtime/llm/compose-agent-draft";
-import { logError, logInfo, logWarn } from "./observability";
+import { logError, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
 import { buildConversationDeepLink } from "./lib/deep-links";
@@ -728,16 +725,6 @@ const app = new Hono<HonoAppContext>()
         );
         if (result.closed && result.conversation) {
           conversation = result.conversation;
-          c.executionCtx.waitUntil(
-            triggerAutoRefinementIfEnabled({
-              projectId: project.id,
-              conversationId,
-              db,
-              env: c.env,
-              kv: c.env.CONVERSATIONS_CACHE,
-              source: "stale_auto_close",
-            }),
-          );
         }
       }
     }
@@ -1390,18 +1377,6 @@ const app = new Hono<HonoAppContext>()
           );
           broadcastStatusChange(c.env, c.executionCtx, conversationId, "closed");
           broadcastClosed(c.env, c.executionCtx, conversationId, "resolved");
-
-          // Auto-draft canned response in background
-          c.executionCtx.waitUntil(
-            triggerAutoRefinementIfEnabled({
-              projectId,
-              conversationId,
-              db,
-              env: c.env,
-              kv: c.env.CONVERSATIONS_CACHE,
-              source: "telegram_agent_close",
-            }),
-          );
 
           await telegramService.sendMessage(
             tgSettings.telegramBotToken,
@@ -4521,22 +4496,9 @@ const app = new Hono<HonoAppContext>()
 
     const resourceService = new ResourceService(db, c.env.UPLOADS);
     // eslint-disable-next-line prefer-const -- resources is re-fetched after stale-crawl recovery
-    let [resources, counts, articleBridge] = await Promise.all([
+    let [resources, counts] = await Promise.all([
       resourceService.getResourcesByProject(project.id),
       resourceService.getCrawledPageCountsByResource(project.id),
-      db
-        .select({
-          articleId: helpArticles.id,
-          title: helpArticles.title,
-          articleSlug: helpArticles.slug,
-          categorySlug: helpCategories.slug,
-        })
-        .from(helpArticles)
-        .innerJoin(
-          helpCategories,
-          eq(helpArticles.categoryId, helpCategories.id),
-        )
-        .where(eq(helpArticles.projectId, project.id)),
     ]);
 
     // Self-heal crawls stuck on abandoned pending pages (lost queue messages)
@@ -4556,31 +4518,12 @@ const app = new Hono<HonoAppContext>()
       resources = await resourceService.getResourcesByProject(project.id);
     }
 
-    const articleById = new Map(
-      articleBridge.map((a) => [a.articleId, a]),
-    );
-
-    const enriched = resources.map((r) => {
-      const base =
-        r.type === "webpage"
-          ? { ...r, pageCount: counts.get(r.id) ?? 0 }
-          : r;
-      if (r.sourceArticleId) {
-        const article = articleById.get(r.sourceArticleId);
-        if (article) {
-          return {
-            ...base,
-            sourceArticle: {
-              id: article.articleId,
-              title: article.title,
-              categorySlug: article.categorySlug,
-              articleSlug: article.articleSlug,
-            },
-          };
-        }
-      }
-      return base;
-    });
+    // Article mirrors are managed from the Articles tab, not listed as sources.
+    const enriched = resources
+      .filter((r) => !r.sourceArticleId)
+      .map((r) =>
+        r.type === "webpage" ? { ...r, pageCount: counts.get(r.id) ?? 0 } : r,
+      );
     return c.json(enriched);
   })
   .post("/api/projects/:id/resources", async (c) => {
@@ -4690,6 +4633,26 @@ const app = new Hono<HonoAppContext>()
     // Handle webpage and legacy faq
     const parsed = validate(createResourceSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    if (parsed.data.type === "webpage" && parsed.data.url) {
+      const settings = await projectService.getSettings(project.id);
+      if (
+        isOwnHelpCenterUrl(
+          parsed.data.url,
+          project.slug,
+          settings?.helpCustomUrl,
+        )
+      ) {
+        return c.json(
+          {
+            error:
+              "This page is part of your help center. Published articles are indexed for the AI automatically \u2014 no need to add them here.",
+            code: "own_help_center_url",
+          },
+          400,
+        );
+      }
+    }
 
     const resource = await resourceService.createResource({
       projectId: project.id,
@@ -5109,10 +5072,22 @@ const app = new Hono<HonoAppContext>()
     }
 
     const resourceService = new ResourceService(db, c.env.UPLOADS);
-    const deleted = await resourceService.deleteResource(
+    const target = await resourceService.getResourceById(
       c.req.param("resourceId"),
       project.id,
     );
+    if (!target) return c.json({ error: "Not found" }, 404);
+    if (target.sourceArticleId) {
+      return c.json(
+        {
+          error:
+            "This entry mirrors a published help article. Unpublish the article to remove it from the AI index.",
+          code: "article_mirror",
+        },
+        403,
+      );
+    }
+    const deleted = await resourceService.deleteResource(target.id, project.id);
     if (!deleted) return c.json({ error: "Not found" }, 404);
     c.executionCtx.waitUntil(triggerAutoRagSync(c.env, "resource.delete"));
     return c.json({ ok: true });
@@ -5135,6 +5110,16 @@ const app = new Hono<HonoAppContext>()
     );
     if (!resource) {
       return c.json({ error: "Not found" }, 404);
+    }
+    if (resource.sourceArticleId) {
+      return c.json(
+        {
+          error:
+            "This entry mirrors a published help article. Re-save the article to refresh its index.",
+          code: "article_mirror",
+        },
+        403,
+      );
     }
 
     // Reset status to pending before re-ingestion
@@ -5616,11 +5601,34 @@ const app = new Hono<HonoAppContext>()
         : undefined;
 
     const service = new HelpdeskService(db, c.env.UPLOADS);
-    const articles = await service.listArticles(project.id, {
-      categoryId,
-      status,
-    });
-    return c.json(articles);
+    const [articles, mirrors] = await Promise.all([
+      service.listArticles(project.id, { categoryId, status }),
+      db
+        .select({
+          articleId: resourcesTable.sourceArticleId,
+          status: resourcesTable.status,
+          lastIndexedAt: resourcesTable.lastIndexedAt,
+        })
+        .from(resourcesTable)
+        .where(
+          and(
+            eq(resourcesTable.projectId, project.id),
+            isNotNull(resourcesTable.sourceArticleId),
+          ),
+        ),
+    ]);
+    const mirrorByArticle = new Map(mirrors.map((m) => [m.articleId, m]));
+    return c.json(
+      articles.map((a) => {
+        const mirror = mirrorByArticle.get(a.id);
+        return {
+          ...a,
+          indexing: mirror
+            ? { status: mirror.status, lastIndexedAt: mirror.lastIndexedAt }
+            : null,
+        };
+      }),
+    );
   })
   .post("/api/projects/:id/help/articles/reorder", async (c) => {
     const user = c.get("user");
@@ -6163,14 +6171,6 @@ const app = new Hono<HonoAppContext>()
               conversation.id,
               "ended",
             );
-            await triggerAutoRefinementIfEnabled({
-              projectId: project.id,
-              conversationId: conversation.id,
-              db,
-              env: c.env,
-              kv: c.env.CONVERSATIONS_CACHE,
-              source: "stale_auto_close",
-            });
           } catch {
             // best-effort
           }
@@ -6624,21 +6624,6 @@ const app = new Hono<HonoAppContext>()
     broadcastStatusChange(c.env, c.executionCtx, conversation.id, "closed");
     broadcastClosed(c.env, c.executionCtx, conversation.id, closeReason ?? null);
 
-    // Auto-draft canned response in background — but never for spam: a spam
-    // close is a silent triage action, not a real resolution to learn from.
-    if (closeReason !== "spam") {
-      c.executionCtx.waitUntil(
-        triggerAutoRefinementIfEnabled({
-          projectId: project.id,
-          conversationId: conversation.id,
-          db,
-          env: c.env,
-          kv: c.env.CONVERSATIONS_CACHE,
-          source: "manual_close",
-        }),
-      );
-    }
-
     return c.json({ ok: true });
   })
   .post("/api/projects/:id/conversations/:convId/reopen", async (c) => {
@@ -6877,196 +6862,6 @@ const app = new Hono<HonoAppContext>()
     if (!deleted) return c.json({ error: "Ban not found" }, 404);
 
     return c.json({ ok: true });
-  })
-
-  // ─── Knowledge Suggestions ──────────────────────────────────────────────────
-  .get("/api/projects/:id/knowledge-suggestions", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    // Support both single type and multiple types (comma-separated)
-    const typeParam = c.req.query("type");
-    let typeFilter:
-      | Array<
-          | "new_faq"
-          | "add_faq_pair"
-          | "refine_faq_pair"
-          | "new_sop"
-          | "add_sop"
-          | "refine_sop"
-          | "update_pdf"
-          | "update_webpage"
-          | "update_context"
-        >
-      | undefined;
-
-    if (typeParam) {
-      typeFilter = typeParam.split(",") as typeof typeFilter;
-    }
-
-    const service = new KnowledgeSuggestionService(db);
-    const suggestions = await service.getPendingByProject(
-      project.id,
-      typeFilter,
-    );
-    return c.json(suggestions);
-  })
-  .get("/api/projects/:id/knowledge-suggestions/counts", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const service = new KnowledgeSuggestionService(db);
-    const counts = await service.getPendingCountsByProject(project.id);
-    return c.json(counts);
-  })
-  .post("/api/projects/:id/knowledge-suggestions/:sugId/approve", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const service = new KnowledgeSuggestionService(db);
-    try {
-      const result = await service.approve(
-        c.req.param("sugId"),
-        project.id,
-        c.env.UPLOADS,
-      );
-      if (!result.success) {
-        return c.json(
-          { error: result.error },
-          result.error === "Not found" ? 404 : 400,
-        );
-      }
-      logInfo("knowledge_suggestion.approved", {
-        projectId: project.id,
-        suggestionId: c.req.param("sugId"),
-      });
-      return c.json({ ok: true });
-    } catch (error) {
-      logError("knowledge_suggestion.approve_failed", error, {
-        projectId: project.id,
-        suggestionId: c.req.param("sugId"),
-      });
-      throw error;
-    }
-  })
-  .post("/api/projects/:id/knowledge-suggestions/:sugId/reject", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const service = new KnowledgeSuggestionService(db);
-    try {
-      const rejected = await service.reject(c.req.param("sugId"), project.id);
-      if (!rejected) return c.json({ error: "Not found" }, 404);
-      logInfo("knowledge_suggestion.rejected", {
-        projectId: project.id,
-        suggestionId: c.req.param("sugId"),
-      });
-      return c.json({ ok: true });
-    } catch (error) {
-      logError("knowledge_suggestion.reject_failed", error, {
-        projectId: project.id,
-        suggestionId: c.req.param("sugId"),
-      });
-      throw error;
-    }
-  })
-  .post("/api/projects/:id/knowledge-suggestions/bulk-approve", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const body = await c.req.json();
-    if (!body.ids || !Array.isArray(body.ids) || body.ids.length === 0) {
-      return c.json({ error: "Invalid ids array" }, 400);
-    }
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const service = new KnowledgeSuggestionService(db);
-    try {
-      const result = await service.bulkApprove(
-        body.ids,
-        project.id,
-        c.env.UPLOADS,
-      );
-      logInfo("knowledge_suggestion.bulk_approved", {
-        projectId: project.id,
-        succeeded: result.succeeded.length,
-        failed: result.failed.length,
-      });
-      return c.json(result);
-    } catch (error) {
-      logError("knowledge_suggestion.bulk_approve_failed", error, {
-        projectId: project.id,
-        ids: body.ids,
-      });
-      throw error;
-    }
-  })
-  .post("/api/projects/:id/knowledge-suggestions/bulk-reject", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const body = await c.req.json();
-    if (!body.ids || !Array.isArray(body.ids) || body.ids.length === 0) {
-      return c.json({ error: "Invalid ids array" }, 400);
-    }
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const service = new KnowledgeSuggestionService(db);
-    try {
-      const result = await service.bulkReject(body.ids, project.id);
-      logInfo("knowledge_suggestion.bulk_rejected", {
-        projectId: project.id,
-        succeeded: result.succeeded.length,
-        failed: result.failed.length,
-      });
-      return c.json(result);
-    } catch (error) {
-      logError("knowledge_suggestion.bulk_reject_failed", error, {
-        projectId: project.id,
-        ids: body.ids,
-      });
-      throw error;
-    }
   })
 
   // ─── Guidelines (SOPs) ──────────────────────────────────────────────────────

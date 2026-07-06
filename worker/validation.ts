@@ -104,7 +104,8 @@ export const updateProjectSettingsSchema = z.object({
   introMessageDelay: z.number().int().min(0).max(30).optional(),
   introMessageDuration: z.number().int().min(0).max(120).optional(),
   autoCannedDraft: z.boolean().optional(),
-  autoRefinement: z.boolean().optional(),
+  workingHours: z.string().max(200).nullable().optional(),
+  avgResponseTime: z.string().max(200).nullable().optional(),
   companyName: z.string().max(200).nullable().optional(),
   companyUrl: z
     .string()

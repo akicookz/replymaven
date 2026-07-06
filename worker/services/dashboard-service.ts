@@ -1,11 +1,11 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, count, and, sql, desc } from "drizzle-orm";
+import { eq, count, and, sql, desc, isNull } from "drizzle-orm";
 import {
   projects,
   conversations,
   messages,
   resources,
-  knowledgeSuggestions,
+  helpArticles,
 } from "../db";
 
 export class DashboardService {
@@ -30,7 +30,7 @@ export class DashboardService {
         activeConversations: 0,
         totalMessages: 0,
         totalResources: 0,
-        pendingCannedDrafts: 0,
+        publishedArticles: 0,
         conversationsByDay: [],
         conversationsByStatus: [],
         recentConversations: [],
@@ -67,28 +67,30 @@ export class DashboardService {
         )})`,
       );
 
-    // Get resource count
+    // External sources only — article mirrors are counted as articles below
     const resourceCounts = await this.db
       .select({ total: count() })
       .from(resources)
       .where(
-        sql`${resources.projectId} IN (${sql.join(
-          projectIds.map((id) => sql`${id}`),
-          sql`, `,
-        )})`,
-      );
-
-    // Get pending knowledge suggestions
-    const pendingSuggestionCounts = await this.db
-      .select({ total: count() })
-      .from(knowledgeSuggestions)
-      .where(
         and(
-          sql`${knowledgeSuggestions.projectId} IN (${sql.join(
+          sql`${resources.projectId} IN (${sql.join(
             projectIds.map((id) => sql`${id}`),
             sql`, `,
           )})`,
-          eq(knowledgeSuggestions.status, "pending"),
+          isNull(resources.sourceArticleId),
+        ),
+      );
+
+    const articleCounts = await this.db
+      .select({ total: count() })
+      .from(helpArticles)
+      .where(
+        and(
+          sql`${helpArticles.projectId} IN (${sql.join(
+            projectIds.map((id) => sql`${id}`),
+            sql`, `,
+          )})`,
+          eq(helpArticles.status, "published"),
         ),
       );
 
@@ -158,7 +160,7 @@ export class DashboardService {
       activeConversations: conversationCounts[0]?.active ?? 0,
       totalMessages: messageCounts[0]?.total ?? 0,
       totalResources: resourceCounts[0]?.total ?? 0,
-      pendingCannedDrafts: pendingSuggestionCounts[0]?.total ?? 0,
+      publishedArticles: articleCounts[0]?.total ?? 0,
       conversationsByDay,
       conversationsByStatus,
       recentConversations,

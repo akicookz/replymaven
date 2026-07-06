@@ -80,10 +80,9 @@ export const projectSettings = sqliteTable(
     autoCannedDraft: integer("auto_canned_draft", { mode: "boolean" })
       .notNull()
       .default(true),
-    autoRefinement: integer("auto_refinement", { mode: "boolean" })
-      .notNull()
-      .default(true),
     autoCloseMinutes: integer("auto_close_minutes").default(30), // null = disabled
+    workingHours: text("working_hours"),
+    avgResponseTime: text("avg_response_time"),
     helpCustomUrl: text("help_custom_url"),
     helpTopNav: text("help_top_nav"),
     createdAt: integer("created_at", { mode: "timestamp" })
@@ -461,66 +460,6 @@ export const messages = sqliteTable(
 
 export type MessageRow = typeof messages.$inferSelect;
 export type NewMessageRow = typeof messages.$inferInsert;
-
-// ─── Knowledge Suggestions ────────────────────────────────────────────────────
-
-export const knowledgeSuggestions = sqliteTable(
-  "knowledge_suggestions",
-  {
-    id: text("id").primaryKey(),
-    projectId: text("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    type: text("type", {
-      enum: [
-        "new_faq",
-        "add_faq_pair",
-        "refine_faq_pair",
-        "new_sop",
-        "add_sop",
-        "refine_sop",
-        "update_pdf",
-        "update_webpage",
-        "update_context",
-      ],
-    }).notNull(),
-    status: text("status", { enum: ["pending", "approved", "rejected"] })
-      .notNull()
-      .default("pending"),
-    targetResourceId: text("target_resource_id").references(
-      () => resources.id,
-      { onDelete: "set null" },
-    ),
-    targetGuidelineId: text("target_guideline_id").references(
-      () => guidelines.id,
-      { onDelete: "set null" },
-    ),
-    targetPageId: text("target_page_id").references(() => crawledPages.id, {
-      onDelete: "set null",
-    }),
-    sourceConversationId: text("source_conversation_id").references(
-      () => conversations.id,
-      { onDelete: "set null" },
-    ),
-    suggestion: text("suggestion").notNull(), // JSON payload
-    reasoning: text("reasoning"),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .$onUpdate(() => new Date())
-      .notNull(),
-  },
-  (table) => [
-    index("idx_knowledge_suggestions_project").on(table.projectId),
-    index("idx_knowledge_suggestions_status").on(table.status),
-  ],
-);
-
-export type KnowledgeSuggestionRow = typeof knowledgeSuggestions.$inferSelect;
-export type NewKnowledgeSuggestionRow =
-  typeof knowledgeSuggestions.$inferInsert;
 
 // ─── Ticket Config ────────────────────────────────────────────────────────
 
@@ -1042,7 +981,6 @@ export const schema = {
   crawledPages,
   conversations,
   messages,
-  knowledgeSuggestions,
   ticketConfig,
   subscriptions,
   teamMembers,

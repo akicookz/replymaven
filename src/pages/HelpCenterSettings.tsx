@@ -220,9 +220,9 @@ function HelpCenterSettings() {
         <MobileMenuButton />
         <div className="flex-1">
           <Button asChild variant="ghost" size="sm" className="-ml-2 mb-2">
-            <Link to={`/app/projects/${projectId}/help`}>
+            <Link to={`/app/projects/${projectId}/knowledge?tab=articles`}>
               <ArrowLeft className="w-4 h-4" />
-              Back to Help Center
+              Back to Articles
             </Link>
           </Button>
           <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">

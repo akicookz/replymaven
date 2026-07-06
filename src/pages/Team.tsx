@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Users,
   UserPlus,
   Loader2,
   Mail,
@@ -436,47 +435,52 @@ function MemberRow({
   };
 
   return (
-    <div className="flex items-center gap-4 px-4 py-3 rounded-xl bg-card">
-      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
-        {member.email.charAt(0).toUpperCase()}
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground truncate">
-          {member.email}
-        </p>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground capitalize flex items-center gap-1">
-            {member.role === "admin" ? (
-              <Shield className="w-3 h-3" />
-            ) : (
-              <User className="w-3 h-3" />
-            )}
-            {member.role}
-          </span>
-          {isPending ? (
-            <span className="flex items-center gap-1 text-xs text-yellow-600">
-              <Clock className="w-3 h-3" />
-              Pending
-            </span>
-          ) : (
-            <span className="flex items-center gap-1 text-xs text-green-600">
-              <CheckCircle2 className="w-3 h-3" />
-              Accepted
-            </span>
-          )}
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            {member.role === "admin" || member.accessAllProjects ? (
-              <Layers className="w-3 h-3" />
-            ) : (
-              <Folder className="w-3 h-3" />
-            )}
-            {accessLabel(member)}
+    <tr className="hover:bg-muted/20 transition-colors">
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
+            {member.email.charAt(0).toUpperCase()}
+          </div>
+          <span className="text-sm font-medium text-foreground truncate">
+            {member.email}
           </span>
         </div>
-      </div>
-
-      <div className="flex items-center gap-2">
+      </td>
+      <td className="px-4 py-3">
+        <span className="text-sm text-muted-foreground capitalize flex items-center gap-1.5">
+          {member.role === "admin" ? (
+            <Shield className="w-3.5 h-3.5" />
+          ) : (
+            <User className="w-3.5 h-3.5" />
+          )}
+          {member.role}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        {isPending ? (
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium text-yellow-500 bg-yellow-500/15">
+            <Clock className="w-3 h-3" />
+            Pending
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium text-green-500 bg-green-500/15">
+            <CheckCircle2 className="w-3 h-3" />
+            Accepted
+          </span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          {member.role === "admin" || member.accessAllProjects ? (
+            <Layers className="w-3.5 h-3.5" />
+          ) : (
+            <Folder className="w-3.5 h-3.5" />
+          )}
+          {accessLabel(member)}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex items-center justify-end gap-2">
         {isPending && (
           <button
             onClick={copyInviteLink}
@@ -503,9 +507,9 @@ function MemberRow({
                 <>
                   <button
                     onClick={copyInviteLink}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                   >
-                    <Link className="w-4 h-4" />
+                    <Link className="w-4 h-4 shrink-0" />
                     Copy Invite Link
                   </button>
                   <div className="h-px bg-muted my-1" />
@@ -519,33 +523,33 @@ function MemberRow({
                     )
                   }
                   disabled={roleMutation.isPending}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                 >
-                  <Shield className="w-4 h-4" />
+                  <Shield className="w-4 h-4 shrink-0" />
                   {member.role === "admin" ? "Demote to Member" : "Promote to Admin"}
                 </button>
               )}
               {canScope && (
                 <button
                   onClick={openAccessDialog}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                 >
-                  <Settings2 className="w-4 h-4" />
+                  <Settings2 className="w-4 h-4 shrink-0" />
                   Manage Project Access
                 </button>
               )}
               <button
                 onClick={() => removeMutation.mutate()}
                 disabled={removeMutation.isPending}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left text-destructive hover:bg-destructive/10 transition-colors"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="w-4 h-4 shrink-0" />
                 {isPending ? "Cancel Invite" : "Remove"}
               </button>
             </PopoverContent>
           </Popover>
         )}
-      </div>
+        </div>
 
       <Dialog open={accessOpen} onOpenChange={setAccessOpen}>
         <DialogContent className="sm:max-w-md">
@@ -587,7 +591,8 @@ function MemberRow({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </td>
+    </tr>
   );
 }
 
@@ -641,7 +646,7 @@ function Team() {
 
       {/* Invite Form */}
       {showInvite && (
-        <div className="rounded-xl bg-card p-6">
+        <div className="rounded-2xl bg-card p-6">
           <h3 className="text-sm font-semibold text-foreground mb-4">
             Invite a team member
           </h3>
@@ -652,32 +657,50 @@ function Team() {
         </div>
       )}
 
-      {/* Owner Row */}
-      <div className="space-y-2">
-        <p className="text-sm font-medium text-muted-foreground px-1">Owner</p>
-        <div className="flex items-center gap-4 px-4 py-3 rounded-xl bg-muted/30">
-          <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
-            {(session?.user?.name ?? session?.user?.email ?? "O").charAt(0).toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-foreground truncate">
-              {isOwner ? "You" : session?.user?.email ?? "Owner"}
-            </p>
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <Shield className="w-3 h-3" />
-              Owner
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Team Members */}
-      {members.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-muted-foreground px-1">
-            Members
-          </p>
-          <div className="space-y-2">
+      {/* Members Table */}
+      <div className="rounded-2xl bg-card overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+              <th className="px-4 pt-4 pb-2 font-medium">Member</th>
+              <th className="px-4 pt-4 pb-2 font-medium">Role</th>
+              <th className="px-4 pt-4 pb-2 font-medium">Status</th>
+              <th className="px-4 pt-4 pb-2 font-medium">Access</th>
+              <th className="px-4 pt-4 pb-2" />
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="px-4 py-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
+                    {(session?.user?.name ?? session?.user?.email ?? "O").charAt(0).toUpperCase()}
+                  </div>
+                  <span className="text-sm font-medium text-foreground truncate">
+                    {isOwner ? "You" : session?.user?.email ?? "Owner"}
+                  </span>
+                </div>
+              </td>
+              <td className="px-4 py-3">
+                <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5" />
+                  Owner
+                </span>
+              </td>
+              <td className="px-4 py-3">
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium text-green-500 bg-green-500/15">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Active
+                </span>
+              </td>
+              <td className="px-4 py-3">
+                <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <Layers className="w-3.5 h-3.5" />
+                  All projects
+                </span>
+              </td>
+              <td className="px-4 py-3" />
+            </tr>
             {members.map((member) => (
               <MemberRow
                 key={member.id}
@@ -686,24 +709,17 @@ function Team() {
                 projects={projectList}
               />
             ))}
-          </div>
-        </div>
-      )}
-
-      {members.length === 0 && !showInvite && (
-        <div className="rounded-xl bg-card p-8 text-center space-y-3">
-          <Users className="w-10 h-10 text-muted-foreground mx-auto" />
-          <div className="space-y-1">
-            <p className="font-medium text-foreground">No team members yet</p>
-            <p className="text-sm text-muted-foreground">
-              Invite your team to collaborate on projects.
-            </p>
-          </div>
-        </div>
-      )}
+          </tbody>
+        </table>
+        {members.length === 0 && !showInvite && (
+          <p className="px-4 pb-4 text-sm text-muted-foreground">
+            No team members yet. Invite your team to collaborate on projects.
+          </p>
+        )}
+      </div>
 
       {seatCurrent >= seatMax && (
-        <div className="flex items-center gap-3 rounded-xl bg-primary/5 px-4 py-3">
+        <div className="flex items-center gap-3 rounded-2xl bg-primary/5 px-4 py-3">
           <Lock className="w-4 h-4 text-primary shrink-0" />
           <div className="flex-1">
             <p className="text-sm font-medium text-foreground">Seat limit reached</p>

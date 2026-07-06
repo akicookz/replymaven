@@ -35,15 +35,27 @@ export function trimToCharBudget(text: string, budget: number): string {
 export function buildCompanySection(
   projectName: string,
   companyContext: string | null | undefined,
+  availability?: {
+    workingHours?: string | null;
+    avgResponseTime?: string | null;
+  },
 ): string {
-  if (!companyContext) return "";
-  return `<about-the-company>
+  const workingHours = availability?.workingHours?.trim();
+  const avgResponseTime = availability?.avgResponseTime?.trim();
+  if (!companyContext && !workingHours && !avgResponseTime) return "";
+
+  let section = `<about-the-company>
 This is general background about ${projectName}. Use it to understand what the business does, what products or services it offers, and who its customers are. This helps you give informed answers when the knowledge base doesn't cover a specific topic.
-
-${trimToCharBudget(companyContext, MAX_COMPANY_CONTEXT_CHARS)}
-</about-the-company>
-
 `;
+  if (companyContext) {
+    section += `\n${trimToCharBudget(companyContext, MAX_COMPANY_CONTEXT_CHARS)}\n`;
+  }
+  if (workingHours || avgResponseTime) {
+    section += "\nSupport availability — set directly by the team and authoritative: if the documentation states different hours or response times, these values win. Share them when visitors ask about hours or when to expect a reply.\n";
+    if (workingHours) section += `- Working hours: ${workingHours}\n`;
+    if (avgResponseTime) section += `- Typical response time: ${avgResponseTime}\n`;
+  }
+  return section + `</about-the-company>\n\n`;
 }
 
 // ─── Guidelines (SOPs) ──────────────────────────────────────────────────────

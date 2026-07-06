@@ -2,7 +2,6 @@ import { createModelRuntimeState } from "../llm/create-language-model";
 import { runAgenticTurn } from "./run-agentic-pipeline";
 import { prepareTurnRouting } from "./prepare-turn-routing";
 import { normalizeConversationHistory } from "./normalize-history";
-import { triggerAutoRefinementIfEnabled } from "../post-turn/auto-refine";
 import {
   type RetrievalResult,
 } from "../retrieval/run-ai-search";
@@ -674,6 +673,8 @@ export async function handleWidgetMessageTurn(
           companyContext: null,
           botName: null,
           agentName: null,
+          workingHours: null,
+          avgResponseTime: null,
         },
         guidelines: enabledGuidelines.map((guideline) => ({
           condition: guideline.condition,
@@ -821,16 +822,6 @@ export async function handleWidgetMessageTurn(
         logInfo(
           "widget_turn.conversation_resolved",
           buildWidgetTurnLogContext(context, turnId),
-        );
-        context.executionCtx.waitUntil(
-          triggerAutoRefinementIfEnabled({
-            projectId: context.project.id,
-            conversationId: context.conversationId,
-            db: context.db,
-            env: context.env,
-            kv: context.env.CONVERSATIONS_CACHE,
-            source: "bot_resolved",
-          }),
         );
       }
 

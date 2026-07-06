@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Camera, Loader2, User, CheckCircle2, Pencil } from "lucide-react";
+import { Camera, Loader2, User, CheckCircle2 } from "lucide-react";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth-client";
@@ -23,6 +23,10 @@ function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
   const { refetch: refetchSession } = useSession();
   const [state, setState] = useState<EmailChangeState>("idle");
   const [newEmail, setNewEmail] = useState("");
+
+  useEffect(() => {
+    setNewEmail(currentEmail);
+  }, [currentEmail]);
   const [otp, setOtp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -30,7 +34,7 @@ function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
 
   function reset() {
     setState("idle");
-    setNewEmail("");
+    setNewEmail(currentEmail);
     setOtp("");
     setError(null);
     setResendCooldown(0);
@@ -198,85 +202,55 @@ function EmailChangeSection({ currentEmail }: { currentEmail: string }) {
     );
   }
 
-  if (state === "editing") {
-    return (
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-foreground">New Email</label>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (newEmail.trim() && newEmail !== currentEmail && !requestMutation.isPending) {
-              requestMutation.mutate();
-            }
-          }}
-        >
-          <div className="flex gap-2">
-            <input
-              type="email"
-              value={newEmail}
-              onChange={(e) => {
-                setNewEmail(e.target.value);
-                setError(null);
-              }}
-              placeholder="new@example.com"
-              className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              autoFocus
-            />
-            <Button
-              type="submit"
-              disabled={
-                !newEmail.trim() ||
-                newEmail === currentEmail ||
-                requestMutation.isPending
-              }
-              size="default"
-            >
-              {requestMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                "Send code"
-              )}
-            </Button>
-          </div>
-        </form>
-        {error && (
-          <p className="text-xs text-destructive">{error}</p>
-        )}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={reset}
-            className="text-xs text-muted-foreground hover:text-foreground"
-          >
-            Cancel
-          </button>
-          <span className="text-xs text-muted-foreground">
-            Currently: {currentEmail}
-          </span>
-        </div>
-      </div>
-    );
-  }
+  const trimmedEmail = newEmail.trim();
+  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail);
+  const isChanged =
+    trimmedEmail.toLowerCase() !== currentEmail.toLowerCase();
+  const canVerify = isValidEmail && isChanged;
 
   return (
     <div className="space-y-2">
       <label className="text-sm font-medium text-foreground">Email</label>
-      <div className="flex items-center gap-2">
-        <input
-          type="email"
-          value={currentEmail}
-          disabled
-          className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-muted text-muted-foreground cursor-not-allowed"
-        />
-        <Button
-          variant="outline"
-          size="default"
-          onClick={() => setState("editing")}
-        >
-          <Pencil className="w-3.5 h-3.5 mr-1.5" />
-          Edit
-        </Button>
-      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (canVerify && !requestMutation.isPending) {
+            requestMutation.mutate();
+          }
+        }}
+      >
+        <div className="flex items-stretch gap-2">
+          <input
+            type="email"
+            value={newEmail}
+            onChange={(e) => {
+              setNewEmail(e.target.value);
+              setError(null);
+            }}
+            placeholder="you@example.com"
+            className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          {canVerify && (
+            <Button
+              type="submit"
+              disabled={requestMutation.isPending}
+              className="h-auto rounded-xl px-4"
+            >
+              {requestMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                "Verify"
+              )}
+            </Button>
+          )}
+        </div>
+      </form>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      {isChanged && (
+        <p className="text-xs text-muted-foreground">
+          We&apos;ll send a verification code to the new address.
+        </p>
+      )}
     </div>
   );
 }
@@ -364,13 +338,32 @@ function Profile() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-3">
-        <MobileMenuButton />
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground">My Profile</h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Manage your personal information and profile picture.
-          </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <MobileMenuButton />
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-foreground">Profile</h1>
+            <p className="text-xs md:text-sm text-muted-foreground mt-1">
+              Manage your personal information and profile picture.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          {saveMutation.isSuccess && (
+            <span className="flex items-center gap-1.5 text-sm text-green-600">
+              <CheckCircle2 className="w-4 h-4" />
+              Saved
+            </span>
+          )}
+          <Button
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending || uploading || !name.trim()}
+          >
+            {saveMutation.isPending ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : null}
+            Save Changes
+          </Button>
         </div>
       </div>
 
@@ -444,25 +437,6 @@ function Profile() {
 
         {/* Email */}
         <EmailChangeSection currentEmail={profile?.email ?? ""} />
-
-        {/* Save */}
-        <div className="flex items-center gap-3">
-          <Button
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending || uploading || !name.trim()}
-          >
-            {saveMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : null}
-            Save Changes
-          </Button>
-          {saveMutation.isSuccess && (
-            <span className="flex items-center gap-1.5 text-sm text-green-600">
-              <CheckCircle2 className="w-4 h-4" />
-              Saved
-            </span>
-          )}
-        </div>
       </div>
     </div>
   );

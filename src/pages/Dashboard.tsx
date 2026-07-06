@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   MessageSquare,
+  BookOpen,
   FolderOpen,
   Users,
-  Bot,
   Plus,
   ArrowUpRight,
   ArrowDownRight,
@@ -86,7 +86,7 @@ interface DashboardData {
   activeConversations: number;
   totalMessages: number;
   totalResources: number;
-  pendingCannedDrafts: number;
+  publishedArticles: number;
   conversationsByDay: ConversationsByDay[];
   recentConversations: RecentConversation[];
 }
@@ -294,7 +294,7 @@ function Dashboard() {
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3">
-          <Link to={`/app/projects/${projectId}/knowledgebase`}>
+          <Link to={`/app/projects/${projectId}/knowledge`}>
             <Button variant="outline" className="gap-2">
               <FolderOpen className="w-4 h-4" />
               Add Knowledge
@@ -345,14 +345,14 @@ function Dashboard() {
           icon={Users}
         />
         <StatCard
-          label="Knowledge Resources"
-          value={data.totalResources}
-          icon={FolderOpen}
+          label="Help Articles"
+          value={data.publishedArticles}
+          icon={BookOpen}
         />
         <StatCard
-          label="Pending Drafts"
-          value={data.pendingCannedDrafts}
-          icon={Bot}
+          label="External Sources"
+          value={data.totalResources}
+          icon={FolderOpen}
         />
       </div>
 

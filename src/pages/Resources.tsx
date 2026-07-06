@@ -1,30 +1,21 @@
-import { useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useMemo, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertCircle,
-  Building2,
-  Check,
   ChevronDown,
   ChevronRight,
-  ChevronRightIcon,
-  ClipboardList,
-  ExternalLink,
   FileText,
   Globe,
   HelpCircle,
-  Lightbulb,
-  Loader2,
   Plus,
   RefreshCw,
   Sparkles,
   Trash2,
   Upload,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import FaqEditor from "@/components/faq-editor";
 import FaqGenerateModal, { type FaqDraft } from "@/components/faq-generate-modal";
@@ -42,193 +33,9 @@ interface Resource {
   createdAt: string;
 }
 
-interface Guideline {
-  id: string;
-  condition: string;
-  instruction: string;
-  enabled: boolean;
-}
-
-interface CompanySettings {
-  companyName: string | null;
-  toneOfVoice: string;
-}
-
-interface SuggestionCounts {
-  total: number;
-  newFaq: number;
-  updateFaq: number;
-  newSop: number;
-  updateSop: number;
-  updatePdf: number;
-  updateWebpage: number;
-  updateContext: number;
-}
-
-interface KnowledgeSuggestion {
-  id: string;
-  projectId: string;
-  type:
-    | "new_faq"
-    | "add_faq_pair"
-    | "refine_faq_pair"
-    | "new_sop"
-    | "add_sop"
-    | "refine_sop"
-    | "update_pdf"
-    | "update_webpage"
-    | "update_context";
-  status: "pending" | "approved" | "rejected";
-  targetResourceId: string | null;
-  targetGuidelineId: string | null;
-  targetPageId: string | null;
-  sourceConversationId: string | null;
-  suggestion: string;
-  reasoning: string | null;
-  createdAt: string;
-}
-
 function Resources() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
-  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
-
-  // ─── Entry Card Queries ─────────────────────────────────────────────────────
-
-  const { data: guidelinesData } = useQuery<Guideline[]>({
-    queryKey: ["guidelines", projectId],
-    queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/guidelines`);
-      if (!res.ok) throw new Error("Failed to fetch guidelines");
-      return res.json();
-    },
-  });
-
-  const { data: companySettings } = useQuery<CompanySettings>({
-    queryKey: ["project-settings", projectId],
-    queryFn: async () => {
-      const res = await fetch(`/api/projects/${projectId}/settings`);
-      if (!res.ok) throw new Error("Failed to fetch settings");
-      return res.json();
-    },
-  });
-
-  const activeGuidelineCount = guidelinesData?.filter((g) => g.enabled).length ?? 0;
-
-  // ─── Knowledge Suggestions ──────────────────────────────────────────────────
-
-  const { data: suggestionCounts } = useQuery<SuggestionCounts>({
-    queryKey: ["knowledge-suggestion-counts", projectId],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/projects/${projectId}/knowledge-suggestions/counts`,
-      );
-      if (!res.ok) throw new Error("Failed to fetch suggestion counts");
-      return res.json();
-    },
-    staleTime: 60_000,
-  });
-
-  const { data: faqSuggestions } = useQuery<KnowledgeSuggestion[]>({
-    queryKey: ["knowledge-suggestions-faq", projectId],
-    queryFn: async () => {
-      // Just fetch all pending suggestions - no type filter needed
-      const res = await fetch(`/api/projects/${projectId}/knowledge-suggestions`);
-      if (!res.ok) throw new Error("Failed to fetch suggestions");
-      const allSuggestions = await res.json();
-      // Filter to only resource-related suggestions (exclude SOPs and context)
-      return allSuggestions.filter((s: KnowledgeSuggestion) =>
-        ["new_faq", "add_faq_pair", "refine_faq_pair", "update_pdf", "update_webpage"].includes(s.type)
-      );
-    },
-    staleTime: 60_000,
-  });
-
-  const approveSuggestion = useMutation({
-    mutationFn: async (sugId: string) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/knowledge-suggestions/${sugId}/approve`,
-        { method: "POST" },
-      );
-      if (!res.ok) throw new Error("Failed to approve suggestion");
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
-      toast.success("Suggestion approved");
-    },
-    onError: () => toast.error("Failed to approve suggestion"),
-  });
-
-  const rejectSuggestion = useMutation({
-    mutationFn: async (sugId: string) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/knowledge-suggestions/${sugId}/reject`,
-        { method: "POST" },
-      );
-      if (!res.ok) throw new Error("Failed to reject suggestion");
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
-      toast.success("Suggestion dismissed");
-    },
-    onError: () => toast.error("Failed to dismiss suggestion"),
-  });
-
-  const bulkApproveSuggestions = useMutation({
-    mutationFn: async (ids: string[]) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/knowledge-suggestions/bulk-approve`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids }),
-        },
-      );
-      if (!res.ok) throw new Error("Failed to bulk approve suggestions");
-      return res.json();
-    },
-    onSuccess: () => {
-      setSelectedSuggestions(new Set());
-      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
-      toast.success("Suggestions approved");
-    },
-    onError: () => toast.error("Failed to approve suggestions"),
-  });
-
-  const bulkRejectSuggestions = useMutation({
-    mutationFn: async (ids: string[]) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/knowledge-suggestions/bulk-reject`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids }),
-        },
-      );
-      if (!res.ok) throw new Error("Failed to bulk reject suggestions");
-      return res.json();
-    },
-    onSuccess: () => {
-      setSelectedSuggestions(new Set());
-      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestion-counts", projectId] });
-      queryClient.invalidateQueries({ queryKey: ["knowledge-suggestions-faq", projectId] });
-      toast.success("Suggestions dismissed");
-    },
-    onError: () => toast.error("Failed to dismiss suggestions"),
-  });
-
-  const resourceSuggestionCount =
-    (suggestionCounts?.newFaq ?? 0) +
-    (suggestionCounts?.updateFaq ?? 0) +
-    (suggestionCounts?.updatePdf ?? 0) +
-    (suggestionCounts?.updateWebpage ?? 0);
-  const sopSuggestionCount = (suggestionCounts?.newSop ?? 0) + (suggestionCounts?.updateSop ?? 0);
-  const contextSuggestionCount = suggestionCounts?.updateContext ?? 0;
 
   // ─── Resource State ─────────────────────────────────────────────────────────
   const [showForm, setShowForm] = useState(false);
@@ -254,6 +61,56 @@ function Resources() {
       },
     },
   );
+
+  const { data: projectData } = useQuery<{ slug: string }>({
+    queryKey: ["project", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}`);
+      if (!res.ok) throw new Error("Failed to fetch project");
+      return res.json();
+    },
+  });
+
+  const { data: settingsData } = useQuery<{ helpCustomUrl: string | null }>({
+    queryKey: ["project-settings", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/settings`);
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json();
+    },
+  });
+
+  const helpCenterDuplicates = useMemo(() => {
+    const prefixes: string[] = [];
+    if (projectData?.slug) {
+      prefixes.push(`https://replymaven.com/help/${projectData.slug}`);
+    }
+    const customUrl = settingsData?.helpCustomUrl?.trim();
+    if (customUrl) prefixes.push(customUrl.replace(/\/+$/, ""));
+    if (prefixes.length === 0) return [];
+    return (resources ?? []).filter(
+      (r) =>
+        r.type === "webpage" &&
+        r.url &&
+        prefixes.some((p) => r.url === p || r.url!.startsWith(`${p}/`)),
+    );
+  }, [resources, projectData, settingsData]);
+
+  const removeDuplicates = useMutation({
+    mutationFn: async () => {
+      for (const dupe of helpCenterDuplicates) {
+        await fetch(`/api/projects/${projectId}/resources/${dupe.id}`, {
+          method: "DELETE",
+        });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["resources", projectId] });
+      toast.success("Duplicate sources removed");
+    },
+    onError: () => toast.error("Failed to remove duplicates"),
+  });
+
   const addResource = useMutation({
     mutationFn: async () => {
       setError(null);
@@ -398,410 +255,43 @@ function Resources() {
     setExpandedId(expandedId === resourceId ? null : resourceId);
   }
 
-  function toggleSuggestionSelection(id: string) {
-    const newSelection = new Set(selectedSuggestions);
-    if (newSelection.has(id)) {
-      newSelection.delete(id);
-    } else {
-      newSelection.add(id);
-    }
-    setSelectedSuggestions(newSelection);
-  }
-
-  function toggleAllSuggestions() {
-    if (!faqSuggestions) return;
-
-    if (selectedSuggestions.size === faqSuggestions.length) {
-      setSelectedSuggestions(new Set());
-    } else {
-      setSelectedSuggestions(new Set(faqSuggestions.map(s => s.id)));
-    }
-  }
-
-  const hasSelectedSuggestions = selectedSuggestions.size > 0;
-  const allSuggestionsSelected = faqSuggestions && selectedSuggestions.size === faqSuggestions.length;
-
-  function getSuggestionTitle(
-    suggestion: KnowledgeSuggestion,
-    payload: Record<string, unknown>,
-    targetResource: Resource | null,
-  ) {
-    switch (suggestion.type) {
-      case "new_faq":
-        // Check if this is a legacy suggestion when FAQs already exist
-        const hasFAQs = resources?.some(r => r.type === "faq");
-        const title = typeof payload.title === "string" ? payload.title : "Untitled FAQ";
-        return hasFAQs ? `⚠️ New FAQ (Legacy): ${title}` : `New FAQ: ${title}`;
-      case "add_faq_pair":
-        return `Add FAQ Q&A: ${targetResource?.title ?? "FAQ resource"}`;
-      case "refine_faq_pair":
-        return `Refine FAQ Q&A: ${targetResource?.title ?? "FAQ resource"}`;
-      case "new_sop":
-        return `New Guideline`;
-      case "add_sop":
-        return `Add Guideline`;
-      case "refine_sop":
-        return `Refine Guideline`;
-      case "update_pdf":
-        return `Refine PDF: ${targetResource?.title ?? "PDF resource"}`;
-      case "update_webpage":
-        return `Refine Web Page: ${
-          typeof payload.pageUrl === "string"
-            ? payload.pageUrl
-            : targetResource?.title ?? "Crawled page"
-        }`;
-      default:
-        return "AI Suggestion";
-    }
-  }
-
-  function renderSuggestionPreview(
-    suggestion: KnowledgeSuggestion,
-    payload: Record<string, unknown>,
-  ) {
-    if (suggestion.type === "new_faq") {
-      const pairs = Array.isArray(payload.pairs) ? payload.pairs : [];
-      if (pairs.length === 0) return null;
-
-      return (
-        <div className="space-y-2">
-          {pairs.slice(0, 4).map((pair, index) => {
-            if (!pair || typeof pair !== "object") return null;
-
-            return (
-              <div key={index} className="bg-muted/30 rounded-xl p-3 space-y-1">
-                <p className="text-xs font-medium text-foreground">
-                  Q: {typeof pair.question === "string" ? pair.question : ""}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  A: {typeof pair.answer === "string" ? pair.answer : ""}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-
-    if (suggestion.type === "add_faq_pair") {
-      const pair = payload.pair as Record<string, unknown> | undefined;
-      if (!pair || typeof pair !== "object") return null;
-
-      return (
-        <div className="bg-emerald-500/10 rounded-xl p-3 space-y-1">
-          <p className="text-xs font-medium text-emerald-500">New Q&A to add:</p>
-          <p className="text-xs font-medium text-foreground">
-            Q: {typeof pair.question === "string" ? pair.question : ""}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            A: {typeof pair.answer === "string" ? pair.answer : ""}
-          </p>
-        </div>
-      );
-    }
-
-    if (suggestion.type === "refine_faq_pair") {
-      const originalPair = payload.originalPair as Record<string, unknown> | undefined;
-      const refinedPair = payload.refinedPair as Record<string, unknown> | undefined;
-
-      return (
-        <div className="space-y-2">
-          {originalPair && typeof originalPair === "object" && (
-            <div className="bg-red-500/10 rounded-xl p-3 space-y-1">
-              <p className="text-xs font-medium text-red-500">Original:</p>
-              <p className="text-xs font-medium text-foreground line-through">
-                Q: {typeof originalPair.question === "string" ? originalPair.question : ""}
-              </p>
-              <p className="text-xs text-muted-foreground line-through">
-                A: {typeof originalPair.answer === "string" ? originalPair.answer : ""}
-              </p>
-            </div>
-          )}
-          {refinedPair && typeof refinedPair === "object" && (
-            <div className="bg-emerald-500/10 rounded-xl p-3 space-y-1">
-              <p className="text-xs font-medium text-emerald-500">Refined:</p>
-              <p className="text-xs font-medium text-foreground">
-                Q: {typeof refinedPair.question === "string" ? refinedPair.question : ""}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                A: {typeof refinedPair.answer === "string" ? refinedPair.answer : ""}
-              </p>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    if (suggestion.type === "new_sop" || suggestion.type === "add_sop") {
-      return (
-        <div className="bg-muted/30 rounded-xl p-3 space-y-1">
-          <p className="text-xs font-medium text-foreground">
-            When: {typeof payload.condition === "string" ? payload.condition : ""}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Then: {typeof payload.instruction === "string" ? payload.instruction : ""}
-          </p>
-        </div>
-      );
-    }
-
-    if (suggestion.type === "refine_sop") {
-      return (
-        <div className="space-y-2">
-          <div className="bg-red-500/10 rounded-xl p-3 space-y-1">
-            <p className="text-xs font-medium text-red-500">Original:</p>
-            <p className="text-xs font-medium text-foreground line-through">
-              When: {typeof payload.originalCondition === "string" ? payload.originalCondition : ""}
-            </p>
-            <p className="text-xs text-muted-foreground line-through">
-              Then: {typeof payload.originalInstruction === "string" ? payload.originalInstruction : ""}
-            </p>
-          </div>
-          <div className="bg-emerald-500/10 rounded-xl p-3 space-y-1">
-            <p className="text-xs font-medium text-emerald-500">Refined:</p>
-            <p className="text-xs font-medium text-foreground">
-              When: {typeof payload.refinedCondition === "string" ? payload.refinedCondition : ""}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Then: {typeof payload.refinedInstruction === "string" ? payload.refinedInstruction : ""}
-            </p>
-          </div>
-        </div>
-      );
-    }
-
-    if (suggestion.type === "update_pdf" || suggestion.type === "update_webpage") {
-      if (payload.mode === "append" && typeof payload.appendText === "string") {
-        return (
-          <div className="bg-muted/30 rounded-xl p-3 space-y-1">
-            <p className="text-xs font-medium text-foreground">Append</p>
-            <p className="text-xs text-muted-foreground whitespace-pre-wrap">
-              {payload.appendText}
-            </p>
-          </div>
-        );
-      }
-
-      if (
-        payload.mode === "replace" &&
-        typeof payload.currentText === "string" &&
-        typeof payload.updatedText === "string"
-      ) {
-        return (
-          <div className="space-y-2">
-            <div className="bg-muted/30 rounded-xl p-3 space-y-1">
-              <p className="text-xs font-medium text-foreground">Current excerpt</p>
-              <p className="text-xs text-muted-foreground whitespace-pre-wrap">
-                {payload.currentText}
-              </p>
-            </div>
-            <div className="bg-muted/30 rounded-xl p-3 space-y-1">
-              <p className="text-xs font-medium text-foreground">Suggested excerpt</p>
-              <p className="text-xs text-muted-foreground whitespace-pre-wrap">
-                {payload.updatedText}
-              </p>
-            </div>
-          </div>
-        );
-      }
-    }
-
-    return null;
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-3">
         <MobileMenuButton />
         <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground">Knowledgebase</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-foreground">External Sources</h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Manage your company context and source knowledge for AI replies.
+            Webpages, PDFs, and FAQ sets the AI can draw on. Your help center
+            articles are indexed automatically and managed in the Articles tab.
           </p>
         </div>
       </div>
 
-      {/* ─── Entry Cards ──────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Link
-          to={`/app/projects/${projectId}/knowledgebase/sops`}
-          className="bg-card rounded-2xl p-5 hover:bg-muted/20 transition-all group"
-        >
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-              <ClipboardList className="w-5 h-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-semibold text-foreground">SOPs</p>
-                {sopSuggestionCount > 0 && (
-                  <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
-                    {sopSuggestionCount}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {activeGuidelineCount > 0
-                  ? `${activeGuidelineCount} active guideline${activeGuidelineCount !== 1 ? "s" : ""}`
-                  : "Define how your bot handles specific scenarios"}
-              </p>
-            </div>
-            <ChevronRightIcon className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
+      {helpCenterDuplicates.length > 0 && (
+        <div className="flex items-start gap-3 rounded-2xl bg-amber-500/10 p-4">
+          <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              {helpCenterDuplicates.length} source
+              {helpCenterDuplicates.length === 1 ? "" : "s"} duplicate
+              {helpCenterDuplicates.length === 1 ? "s" : ""} your help center
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Published articles are already indexed for the AI. These crawled
+              copies are redundant and can drift out of date.
+            </p>
           </div>
-        </Link>
-
-        <Link
-          to={`/app/projects/${projectId}/knowledgebase/company-info`}
-          className="bg-card rounded-2xl p-5 hover:bg-muted/20 transition-all group"
-        >
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-              <Building2 className="w-5 h-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-semibold text-foreground">Company Information</p>
-                {contextSuggestionCount > 0 && (
-                  <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
-                    {contextSuggestionCount}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {companySettings?.companyName
-                  ? `${companySettings.companyName} \u2014 ${companySettings.toneOfVoice} tone`
-                  : "Set up your company context and tone of voice"}
-              </p>
-            </div>
-            <ChevronRightIcon className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
-          </div>
-        </Link>
-      </div>
-
-      {/* ─── Resource Suggestions ─────────────────────────────────────────── */}
-      {faqSuggestions && faqSuggestions.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={allSuggestionsSelected ?? false}
-                onCheckedChange={() => toggleAllSuggestions()}
-              />
-              <Lightbulb className="w-4 h-4 text-primary" />
-              <h2 className="text-sm font-semibold text-foreground">
-                AI Suggestions
-              </h2>
-              <span className="inline-flex items-center justify-center px-1.5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
-                {faqSuggestions.length}
-              </span>
-              {hasSelectedSuggestions && (
-                <span className="text-xs text-muted-foreground">
-                  ({selectedSuggestions.size} selected)
-                </span>
-              )}
-            </div>
-            {hasSelectedSuggestions && (
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="default"
-                  onClick={() => bulkApproveSuggestions.mutate(Array.from(selectedSuggestions))}
-                  disabled={bulkApproveSuggestions.isPending || bulkRejectSuggestions.isPending}
-                >
-                  {bulkApproveSuggestions.isPending ? (
-                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                  ) : (
-                    <Check className="w-3.5 h-3.5 mr-1.5" />
-                  )}
-                  Approve {selectedSuggestions.size}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => bulkRejectSuggestions.mutate(Array.from(selectedSuggestions))}
-                  disabled={bulkRejectSuggestions.isPending || bulkApproveSuggestions.isPending}
-                >
-                  {bulkRejectSuggestions.isPending ? (
-                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                  ) : (
-                    <X className="w-3.5 h-3.5 mr-1.5" />
-                  )}
-                  Reject {selectedSuggestions.size}
-                </Button>
-              </div>
-            )}
-          </div>
-          {faqSuggestions.map((s) => {
-            const payload = JSON.parse(s.suggestion) as Record<string, unknown>;
-            const targetResource = s.targetResourceId
-              ? (resources?.find((r) => r.id === s.targetResourceId) ?? null)
-              : null;
-
-            return (
-              <div
-                key={s.id}
-                className="bg-card rounded-2xl bg-primary/5 p-4 space-y-3"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3 flex-1 min-w-0">
-                    <Checkbox
-                      checked={selectedSuggestions.has(s.id)}
-                      onCheckedChange={() => toggleSuggestionSelection(s.id)}
-                      className="mt-0.5"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-primary">
-                        {getSuggestionTitle(s, payload, targetResource)}
-                      </p>
-                      {s.reasoning && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {s.reasoning}
-                        </p>
-                      )}
-                      {s.sourceConversationId && (
-                        <Link
-                          to={`/app/projects/${projectId}/conversations?id=${s.sourceConversationId}`}
-                          className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground mt-1"
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                          View conversation
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => approveSuggestion.mutate(s.id)}
-                      disabled={approveSuggestion.isPending}
-                      className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
-                      title="Approve and apply"
-                    >
-                      {approveSuggestion.isPending && approveSuggestion.variables === s.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Check className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => rejectSuggestion.mutate(s.id)}
-                      disabled={rejectSuggestion.isPending}
-                      className="p-1.5 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50"
-                      title="Dismiss"
-                    >
-                      {rejectSuggestion.isPending && rejectSuggestion.variables === s.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <X className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-                {renderSuggestionPreview(s, payload)}
-              </div>
-            );
-          })}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => removeDuplicates.mutate()}
+            disabled={removeDuplicates.isPending}
+          >
+            {removeDuplicates.isPending
+              ? "Removing..."
+              : `Remove ${helpCenterDuplicates.length}`}
+          </Button>
         </div>
       )}
 
@@ -810,11 +300,6 @@ function Resources() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold text-foreground">Resources</h2>
-            {resourceSuggestionCount > 0 && (
-              <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full">
-                {resourceSuggestionCount}
-              </span>
-            )}
           </div>
           <div className="flex items-center gap-2">
             <Button

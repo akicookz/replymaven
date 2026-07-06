@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,12 +13,24 @@ import {
   X,
   Loader2,
   History,
+  Github,
+  Globe,
+  MessageCircle,
+  Slack,
+  Webhook,
   CheckCircle2,
   XCircle,
   Clock,
   Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -96,6 +108,508 @@ const emptyForm: ToolFormData = {
   timeout: 10000,
 };
 
+// ─── Tool Presets ─────────────────────────────────────────────────────────────
+
+interface PresetField {
+  key: string;
+  label: string;
+  placeholder: string;
+  type?: "text" | "password";
+  help?: string;
+  optional?: boolean;
+  multiline?: boolean;
+}
+
+interface ToolPreset {
+  name: string;
+  label: string;
+  blurb: string;
+  icon: typeof Slack;
+  iconBg: string;
+  iconColor: string;
+  fields: PresetField[];
+  build: (values: Record<string, string>, existing: Tool | undefined) => Omit<ToolFormPayload, "enabled">;
+  extract: (tool: Tool) => Record<string, string>;
+}
+
+interface ToolFormPayload {
+  name: string;
+  displayName: string;
+  description: string;
+  endpoint: string;
+  method: "GET" | "POST";
+  headers: Record<string, string> | null;
+  parameters: ToolParameter[];
+  responseMapping: ResponseMapping | null;
+  enabled: boolean;
+  timeout: number;
+}
+
+function webhookPreset(input: {
+  name: string;
+  label: string;
+  blurb: string;
+  icon: typeof Slack;
+  iconBg: string;
+  iconColor: string;
+  urlLabel: string;
+  urlPlaceholder: string;
+  help?: string;
+  description: string;
+  parameters: ToolParameter[];
+  method?: "GET" | "POST";
+}): ToolPreset {
+  return {
+    name: input.name,
+    label: input.label,
+    blurb: input.blurb,
+    icon: input.icon,
+    iconBg: input.iconBg,
+    iconColor: input.iconColor,
+    fields: [
+      {
+        key: "endpoint",
+        label: input.urlLabel,
+        placeholder: input.urlPlaceholder,
+        help: input.help,
+      },
+    ],
+    build: (values) => ({
+      name: input.name,
+      displayName: input.label,
+      description: input.description,
+      endpoint: values.endpoint.trim(),
+      method: input.method ?? "POST",
+      headers: null,
+      parameters: input.parameters,
+      responseMapping: null,
+      timeout: 10000,
+    }),
+    extract: (tool) => ({ endpoint: tool.endpoint }),
+  };
+}
+
+const TOOL_PRESETS: ToolPreset[] = [
+  webhookPreset({
+    name: "send_to_slack",
+    label: "Send to Slack",
+    blurb: "Post a message to a channel via incoming webhook.",
+    icon: Slack,
+    iconBg: "bg-[#611f69]/20",
+    iconColor: "text-[#e0a8e6]",
+    urlLabel: "Webhook URL",
+    urlPlaceholder: "https://hooks.slack.com/services/...",
+    help: "Slack \u2192 Apps \u2192 Incoming Webhooks \u2192 Add to a channel, then paste the URL.",
+    description:
+      "Post a short notification to the team's Slack channel. Use when the visitor reports something urgent or asks for the team to be notified.",
+    parameters: [
+      {
+        name: "text",
+        type: "string",
+        description:
+          "The message to post. Include the visitor's name or email and a one-sentence summary of what they need.",
+        required: true,
+      },
+    ],
+  }),
+  webhookPreset({
+    name: "send_to_discord",
+    label: "Send to Discord",
+    blurb: "Post a message to a channel via webhook.",
+    icon: MessageCircle,
+    iconBg: "bg-[#5865F2]/15",
+    iconColor: "text-[#7f8bf5]",
+    urlLabel: "Webhook URL",
+    urlPlaceholder: "https://discord.com/api/webhooks/...",
+    help: "Channel settings \u2192 Integrations \u2192 Webhooks \u2192 New Webhook, then copy the URL.",
+    description:
+      "Post a short notification to the team's Discord channel. Use when the visitor reports something urgent or asks for the team to be notified.",
+    parameters: [
+      {
+        name: "content",
+        type: "string",
+        description:
+          "The message to post. Include the visitor's name or email and a one-sentence summary of what they need.",
+        required: true,
+      },
+    ],
+  }),
+  webhookPreset({
+    name: "trigger_automation",
+    label: "Automation Webhook",
+    blurb: "Trigger a Zapier or Make scenario with context.",
+    icon: Webhook,
+    iconBg: "bg-orange-500/15",
+    iconColor: "text-orange-400",
+    urlLabel: "Webhook URL",
+    urlPlaceholder: "https://hooks.zapier.com/hooks/catch/...",
+    help: "Create a Zapier Zap or Make scenario with a webhook trigger, then paste its catch URL.",
+    description:
+      "Trigger the team's automation workflow with conversation context. Use when the visitor's request should kick off an internal process.",
+    parameters: [
+      {
+        name: "summary",
+        type: "string",
+        description: "One-sentence summary of the visitor's request.",
+        required: true,
+      },
+      {
+        name: "visitor_email",
+        type: "string",
+        description: "The visitor's email address, if known.",
+        required: false,
+      },
+    ],
+  }),
+  {
+    name: "check_order_status",
+    label: "HTTP Lookup",
+    blurb: "GET request with a parameter, e.g. order status.",
+    icon: Globe,
+    iconBg: "bg-sky-500/15",
+    iconColor: "text-sky-400",
+    fields: [
+      {
+        key: "endpoint",
+        label: "Endpoint URL",
+        placeholder: "https://api.example.com/orders",
+        help: "The bot appends ?order_id=... to this URL. Edit the tool afterwards to rename the parameter.",
+      },
+      {
+        key: "headers",
+        label: "Headers",
+        placeholder: "Authorization: Bearer sk-...\nX-API-Key: ...",
+        help: "One per line as Name: Value.",
+        optional: true,
+        multiline: true,
+      },
+    ],
+    build: (values) => {
+      const headers: Record<string, string> = {};
+      for (const line of (values.headers ?? "").split("\n")) {
+        const idx = line.indexOf(":");
+        if (idx <= 0) continue;
+        const name = line.slice(0, idx).trim();
+        const value = line.slice(idx + 1).trim();
+        if (name && value) headers[name] = value;
+      }
+      return {
+        name: "check_order_status",
+        displayName: "Check Order Status",
+        description:
+          "Look up the current status of an order by its ID. Use when a visitor asks where their order is or whether it shipped.",
+        endpoint: values.endpoint.trim(),
+        method: "GET",
+        headers: Object.keys(headers).length > 0 ? headers : null,
+        parameters: [
+          {
+            name: "order_id",
+            type: "string",
+            description: "The order ID the visitor provided.",
+            required: true,
+          },
+        ],
+        responseMapping: null,
+        timeout: 10000,
+      };
+    },
+    extract: (tool) => ({
+      endpoint: tool.endpoint,
+      headers: Object.entries(tool.headers ?? {})
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("\n"),
+    }),
+  },
+  {
+    name: "create_github_issue",
+    label: "Create GitHub Issue",
+    blurb: "File a bug report in your repository.",
+    icon: Github,
+    iconBg: "bg-muted",
+    iconColor: "text-foreground",
+    fields: [
+      {
+        key: "repo",
+        label: "Repository",
+        placeholder: "owner/repo",
+      },
+      {
+        key: "token",
+        label: "GitHub Token",
+        placeholder: "ghp_... (fine-grained token with Issues write)",
+        type: "password",
+      },
+    ],
+    build: (values, existing) => {
+      const token =
+        values.token.trim() ||
+        existing?.headers?.["Authorization"]?.replace(/^Bearer\s+/, "") ||
+        "";
+      return {
+        name: "create_github_issue",
+        displayName: "Create GitHub Issue",
+        description:
+          "Create a GitHub issue for a confirmed bug report. Use only when the visitor has described a reproducible problem the team should fix.",
+        endpoint: `https://api.github.com/repos/${values.repo.trim()}/issues`,
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "ReplyMaven-Bot",
+        },
+        parameters: [
+          {
+            name: "title",
+            type: "string",
+            description: "Short issue title summarizing the bug.",
+            required: true,
+          },
+          {
+            name: "body",
+            type: "string",
+            description:
+              "Issue body: steps to reproduce, expected vs actual behavior, and the visitor's environment if mentioned.",
+            required: true,
+          },
+        ],
+        responseMapping: null,
+        timeout: 10000,
+      };
+    },
+    extract: (tool) => {
+      const match = tool.endpoint.match(/repos\/(.+?)\/issues/);
+      return { repo: match?.[1] ?? "", token: "" };
+    },
+  },
+];
+
+const PRESET_NAMES = new Set(TOOL_PRESETS.map((p) => p.name));
+
+const TIMEOUT_OPTIONS = [5000, 10000, 15000, 20000, 30000];
+
+// ─── Preset Tool Row ──────────────────────────────────────────────────────────
+
+function PresetToolRow({
+  preset,
+  tool,
+  projectId,
+}: {
+  preset: ToolPreset;
+  tool: Tool | undefined;
+  projectId: string;
+}) {
+  const queryClient = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const configured = !!tool;
+
+  useEffect(() => {
+    if (tool) setValues(preset.extract(tool));
+    else setValues({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool?.id, tool?.updatedAt]);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const payload = { ...preset.build(values, tool), enabled: tool?.enabled ?? true };
+      const res = await fetch(
+        tool
+          ? `/api/projects/${projectId}/tools/${tool.id}`
+          : `/api/projects/${projectId}/tools`,
+        {
+          method: tool ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed to save" }));
+        throw new Error((err as { error?: string }).error ?? "Failed to save");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tools", projectId] });
+    },
+  });
+
+  const toggle = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const res = await fetch(`/api/projects/${projectId}/tools/${tool!.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["tools", projectId] }),
+  });
+
+  const remove = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/tools/${tool!.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to remove");
+    },
+    onSuccess: () => {
+      setExpanded(false);
+      queryClient.invalidateQueries({ queryKey: ["tools", projectId] });
+    },
+  });
+
+  const requiredFilled = preset.fields.every((f) => {
+    if (f.optional) return true;
+    if (f.type === "password" && configured) return true;
+    return (values[f.key] ?? "").trim().length > 0;
+  });
+
+  const Icon = preset.icon;
+
+  return (
+    <div
+      className={cn(
+        "bg-card rounded-xl overflow-hidden",
+        configured ? "" : "border-2 border-dashed border-muted",
+      )}
+    >
+      <div
+        className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-2 shrink-0">
+          {expanded ? (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          )}
+          <div
+            className={cn(
+              "w-8 h-8 rounded-lg flex items-center justify-center",
+              configured ? preset.iconBg : "bg-muted",
+            )}
+          >
+            <Icon
+              className={cn(
+                "w-4 h-4",
+                configured ? preset.iconColor : "text-muted-foreground",
+              )}
+            />
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-foreground truncate">
+              {preset.label}
+            </p>
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+              Preset
+            </Badge>
+            {!configured && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1.5 py-0 text-warning border-warning/30"
+              >
+                Not configured
+              </Badge>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground truncate">{preset.blurb}</p>
+        </div>
+        <div className="flex items-center gap-1 sm:gap-3 shrink-0">
+          {configured && (
+            <>
+              <Switch
+                checked={tool!.enabled}
+                onCheckedChange={(checked) => toggle.mutate(checked)}
+                onClick={(e) => e.stopPropagation()}
+                size="sm"
+              />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  remove.mutate();
+                }}
+                disabled={remove.isPending}
+                className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive disabled:opacity-50"
+                title="Remove"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="px-4 py-4 space-y-3 bg-muted/20">
+          {preset.fields.map((field) => (
+            <div key={field.key} className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                {field.label}{" "}
+                {field.optional ? (
+                  <span className="font-normal">(optional)</span>
+                ) : (
+                  <span className="text-destructive">*</span>
+                )}
+              </label>
+              {field.multiline ? (
+                <textarea
+                  value={values[field.key] ?? ""}
+                  onChange={(e) =>
+                    setValues((prev) => ({ ...prev, [field.key]: e.target.value }))
+                  }
+                  rows={2}
+                  placeholder={field.placeholder}
+                  className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              ) : (
+                <input
+                  type={field.type ?? "text"}
+                  value={values[field.key] ?? ""}
+                  onChange={(e) =>
+                    setValues((prev) => ({ ...prev, [field.key]: e.target.value }))
+                  }
+                  placeholder={
+                    field.type === "password" && configured
+                      ? "Leave blank to keep the current value"
+                      : field.placeholder
+                  }
+                  className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              )}
+              {field.help && (
+                <p className="text-xs text-muted-foreground">{field.help}</p>
+              )}
+            </div>
+          ))}
+          {save.isError && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {save.error.message}
+            </div>
+          )}
+          {save.isSuccess && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-success/10 text-success text-sm">
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              Saved.
+            </div>
+          )}
+          <Button
+            size="sm"
+            onClick={() => save.mutate()}
+            disabled={save.isPending || !requiredFilled}
+          >
+            {save.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+            {configured ? "Update" : "Save"}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Telegram Preset Types ────────────────────────────────────────────────────
 
 interface TelegramData {
@@ -130,8 +644,6 @@ export function ToolsPanel({
 
   // Telegram preset state
   const [telegramExpanded, setTelegramExpanded] = useState(false);
-  const [telegramEditing, setTelegramEditing] = useState(false);
-  const [telegramTesting, setTelegramTesting] = useState(false);
   const [telegramBotToken, setTelegramBotToken] = useState("");
   const [telegramChatId, setTelegramChatId] = useState("");
   const [telegramSaveStatus, setTelegramSaveStatus] = useState<"idle" | "success" | "error">("idle");
@@ -312,7 +824,6 @@ export function ToolsPanel({
     onSuccess: () => {
       setTelegramSaveStatus("success");
       setTelegramBotToken("");
-      setTelegramEditing(false);
       queryClient.invalidateQueries({ queryKey: ["telegram-config", projectId] });
       setTimeout(() => setTelegramSaveStatus("idle"), 3000);
     },
@@ -349,6 +860,7 @@ export function ToolsPanel({
     setForm(emptyForm);
     setFormError(null);
   }
+
 
   function startEdit(tool: Tool) {
     setEditingId(tool.id);
@@ -615,21 +1127,29 @@ export function ToolsPanel({
                     required
                     className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Timeout</label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="range"
-                    value={form.timeout}
-                    onChange={(e) => setForm((f) => ({ ...f, timeout: Number(e.target.value) }))}
-                    min={1000}
-                    max={30000}
-                    step={1000}
-                    className="flex-1 accent-primary h-1.5 cursor-pointer"
-                  />
-                  <span className="text-sm tabular-nums text-muted-foreground w-14 text-right">{(form.timeout / 1000).toFixed(0)}s</span>
+                  <Select
+                    value={String(form.timeout)}
+                    onValueChange={(v) => setForm((f) => ({ ...f, timeout: Number(v) }))}
+                  >
+                    <SelectTrigger
+                      className="w-28 h-[42px] shrink-0 rounded-xl"
+                      title="Request timeout"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIMEOUT_OPTIONS.map((ms) => (
+                        <SelectItem key={ms} value={String(ms)}>
+                          {ms / 1000}s timeout
+                        </SelectItem>
+                      ))}
+                      {!TIMEOUT_OPTIONS.includes(form.timeout) && (
+                        <SelectItem value={String(form.timeout)}>
+                          {form.timeout / 1000}s timeout
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </div>
@@ -771,7 +1291,7 @@ export function ToolsPanel({
                       }))
                     }
                     placeholder="data.result"
-                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono text-xs"
+                    className="w-full h-9 px-3 rounded-lg border border-input bg-background focus:outline-none focus:ring-2 focus:ring-ring font-mono text-xs"
                   />
                   <p className="text-xs text-muted-foreground">Dot-notation path to extract from the response.</p>
                 </div>
@@ -787,7 +1307,7 @@ export function ToolsPanel({
                       }))
                     }
                     placeholder="Order {{order_id}} is {{status}}"
-                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                   <p className="text-xs text-muted-foreground">Template for the AI to summarize the result.</p>
                 </div>
@@ -831,6 +1351,8 @@ export function ToolsPanel({
           {/* Tool List */}
           {!isLoading && !isError && (
             <div className="space-y-2">
+              {/* ─── Presets (2-col grid) ──────────────────────────────────── */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 items-start">
               {/* ─── Telegram Preset Tool ──────────────────────────────────── */}
               <div
                 className={cn(
@@ -841,14 +1363,7 @@ export function ToolsPanel({
                 {/* Telegram Row */}
                 <div
                   className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
-                  onClick={() => {
-                    if (!telegramConfigured && !telegramEditing) {
-                      setTelegramEditing(true);
-                      setTelegramExpanded(true);
-                    } else {
-                      setTelegramExpanded(!telegramExpanded);
-                    }
-                  }}
+                  onClick={() => setTelegramExpanded(!telegramExpanded)}
                 >
                   <div className="flex items-center gap-2 shrink-0">
                     {telegramExpanded ? (
@@ -886,82 +1401,11 @@ export function ToolsPanel({
                         : "Set up Telegram to receive live handoff notifications"}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-                    {telegramConfigured && (
-                      <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setTelegramEditing(true);
-                            setTelegramExpanded(true);
-                          }}
-                          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
-                          title="Edit"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setTelegramTesting(true);
-                            setTelegramExpanded(true);
-                            setTelegramTestResult(null);
-                          }}
-                          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground"
-                          title="Test"
-                        >
-                          <Play className="w-4 h-4" />
-                        </button>
-                      </>
-                    )}
-                  </div>
                 </div>
 
-                {/* Telegram Expanded Details (configured, not editing) */}
-                {telegramExpanded && telegramConfigured && !telegramEditing && !telegramTesting && (
-                  <div className="px-4 py-4 space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1">Bot Token</p>
-                        <code className="text-xs bg-muted px-2 py-1 rounded">
-                          {telegramData?.telegramBotToken ?? "Not set"}
-                        </code>
-                      </div>
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-1">Chat ID</p>
-                        <code className="text-xs bg-muted px-2 py-1 rounded">
-                          {telegramData?.telegramChatId ?? "Not set"}
-                        </code>
-                      </div>
-                    </div>
-                    {telegramSaveStatus === "success" && (
-                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-success/10 text-success text-sm">
-                        <CheckCircle2 className="w-4 h-4 shrink-0" />
-                        Settings saved successfully.
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Telegram Edit Form */}
-                {telegramExpanded && telegramEditing && (
+                {/* Telegram Config */}
+                {telegramExpanded && (
                   <div className="px-4 py-4 space-y-4 bg-muted/20">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-foreground">
-                        {telegramConfigured ? "Edit Telegram Configuration" : "Set Up Telegram Handoff"}
-                      </h4>
-                      <button
-                        onClick={() => {
-                          setTelegramEditing(false);
-                          if (!telegramConfigured) setTelegramExpanded(false);
-                          setTelegramBotToken("");
-                          setTelegramChatId("");
-                        }}
-                        className="p-1 rounded-lg hover:bg-muted text-muted-foreground"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
                     <p className="text-xs text-muted-foreground">
                       When the bot cannot answer a question or the visitor requests a human, the conversation will be forwarded to your Telegram.
                     </p>
@@ -1074,7 +1518,13 @@ export function ToolsPanel({
                         Failed to save Telegram settings.
                       </div>
                     )}
-                    <div className="flex gap-2">
+                    {telegramSaveStatus === "success" && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-success/10 text-success text-sm">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        Settings saved.
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
                       <Button
                         size="sm"
                         onClick={() => saveTelegram.mutate()}
@@ -1083,52 +1533,25 @@ export function ToolsPanel({
                         {saveTelegram.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
                         {telegramConfigured ? "Update" : "Save"}
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setTelegramEditing(false);
-                          if (!telegramConfigured) setTelegramExpanded(false);
-                          setTelegramBotToken("");
-                          setTelegramChatId("");
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Telegram Test Panel */}
-                {telegramExpanded && telegramTesting && telegramConfigured && (
-                  <div className="px-4 py-4 space-y-3 bg-muted/20">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-foreground">Test Connection</h4>
-                      <button
-                        onClick={() => {
-                          setTelegramTesting(false);
-                          setTelegramTestResult(null);
-                        }}
-                        className="p-1 rounded-lg hover:bg-muted text-muted-foreground"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Send a test message to your configured Telegram chat to verify the connection.
-                    </p>
-                    <Button
-                      size="sm"
-                      onClick={() => testTelegram.mutate()}
-                      disabled={testTelegram.isPending}
-                    >
-                      {testTelegram.isPending ? (
-                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                      ) : (
-                        <Play className="w-3.5 h-3.5 mr-1.5" />
+                      {telegramConfigured && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setTelegramTestResult(null);
+                            testTelegram.mutate();
+                          }}
+                          disabled={testTelegram.isPending}
+                        >
+                          {testTelegram.isPending ? (
+                            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                          ) : (
+                            <Play className="w-3.5 h-3.5 mr-1.5" />
+                          )}
+                          Send Test Message
+                        </Button>
                       )}
-                      Send Test Message
-                    </Button>
+                    </div>
                     {telegramTestResult && (
                       <div
                         className={cn(
@@ -1145,8 +1568,19 @@ export function ToolsPanel({
                 )}
               </div>
 
+              {/* ─── Preset Tools ──────────────────────────────────────────── */}
+              {TOOL_PRESETS.map((preset) => (
+                <PresetToolRow
+                  key={preset.name}
+                  preset={preset}
+                  tool={tools?.find((t) => t.name === preset.name)}
+                  projectId={projectId}
+                />
+              ))}
+              </div>
+
               {/* ─── Custom Tools ──────────────────────────────────────────── */}
-              {tools?.map((tool) => (
+              {tools?.filter((tool) => !PRESET_NAMES.has(tool.name)).map((tool) => (
                 <div
                   key={tool.id}
                   className="bg-card rounded-xl overflow-hidden"
@@ -1352,14 +1786,6 @@ export function ToolsPanel({
                 </div>
               ))}
 
-              {(!tools || tools.length === 0) && (
-                <div className="text-center py-12">
-                  <Wrench className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">
-                    No tools configured yet. Add external API tools for your bot to call during conversations.
-                  </p>
-                </div>
-              )}
             </div>
           )}
         </>
