@@ -1405,6 +1405,18 @@ const app = new Hono<HonoAppContext>()
           broadcastStatusChange(c.env, c.executionCtx, conversationId, "closed");
           broadcastClosed(c.env, c.executionCtx, conversationId, "spam");
 
+          // Sweep the visitor's other open conversations too — the ban 403s
+          // them, so anything left open would sit in Needs You forever.
+          const sweptIds = await chatService.closeOpenConversationsAsSpam(
+            projectId,
+            conversation.visitorId,
+            conversation.visitorEmail ?? null,
+          );
+          for (const sweptId of sweptIds) {
+            broadcastStatusChange(c.env, c.executionCtx, sweptId, "closed");
+            broadcastClosed(c.env, c.executionCtx, sweptId, "spam");
+          }
+
           await telegramService.sendMessage(
             tgSettings.telegramBotToken,
             tgSettings.telegramChatId,
@@ -6784,7 +6796,12 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Visitor is already banned" }, 409);
     }
 
+    // Close the named conversation as spam (even if it was already closed —
+    // the Flagged tab is where a blocked visitor's thread belongs), then sweep
+    // ALL of the visitor's other open conversations too: the ban 403s the
+    // visitor, so any leftovers would sit in Needs You forever.
     const chatService = new ChatService(db);
+    const closedIds = new Set<string>();
     if (parsed.data.conversationId) {
       await chatService.updateConversationStatus(
         parsed.data.conversationId,
@@ -6792,18 +6809,17 @@ const app = new Hono<HonoAppContext>()
         "closed",
         "spam",
       );
-      broadcastStatusChange(
-        c.env,
-        c.executionCtx,
-        parsed.data.conversationId,
-        "closed",
-      );
-      broadcastClosed(
-        c.env,
-        c.executionCtx,
-        parsed.data.conversationId,
-        "spam",
-      );
+      closedIds.add(parsed.data.conversationId);
+    }
+    const sweptIds = await chatService.closeOpenConversationsAsSpam(
+      project.id,
+      parsed.data.visitorId,
+      parsed.data.visitorEmail ?? null,
+    );
+    for (const id of sweptIds) closedIds.add(id);
+    for (const id of closedIds) {
+      broadcastStatusChange(c.env, c.executionCtx, id, "closed");
+      broadcastClosed(c.env, c.executionCtx, id, "spam");
     }
 
     const ban = await banService.banVisitor({

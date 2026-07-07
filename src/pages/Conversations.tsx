@@ -9,7 +9,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useConversationWs } from "@/lib/use-conversation-ws";
-import type { InboxFilter, InboxSort } from "@/lib/inbox/filters";
+import { passesInboxFilter, type InboxFilter, type InboxSort } from "@/lib/inbox/filters";
 import type {
   Conversation,
   Message,
@@ -321,14 +321,14 @@ function Conversations() {
     if (updatesData.serverTime) updatesSinceRef.current = updatesData.serverTime;
     if (updatesData.updates.length === 0) return;
 
-    // Only the broad inbox views surface brand-new conversations live; the
-    // narrow filters (snoozed/resolved/flagged) can't be evaluated from the
-    // delta row alone, so they wait for the next full refetch.
-    const passesFilter = (status: string): boolean => {
-      if (filter === "all") return true;
-      if (filter === "needs-you") return status !== "closed";
-      return false;
-    };
+    // The delta is updatedAt-gated server-side (every mutation, including a
+    // peer's snooze/flag/block, lands here) and each row carries the full
+    // filterable shape (status, closeReason, snoozedUntil). So every tab can
+    // evaluate the real predicate: brand-new matches are admitted live, and
+    // patched rows whose new state no longer belongs (snoozed away, flagged,
+    // blocked) are evicted — otherwise they'd haunt Needs You / All until the
+    // next full refetch. Rows NOT in the delta are left alone.
+    const nowMs = Date.now();
 
     const updateMap = new Map(updatesData.updates.map((u) => [u.id, u]));
 
@@ -336,17 +336,22 @@ function Conversations() {
       const seen = new Set(prev.map((c) => c.id));
       let changed = false;
 
-      const next: Conversation[] = prev.map((c) => {
+      const next: Conversation[] = [];
+      for (const c of prev) {
         const u = updateMap.get(c.id);
-        if (!u) return c;
+        if (!u) {
+          next.push(c);
+          continue;
+        }
         changed = true;
         updateMap.delete(c.id);
-        return { ...c, ...u };
-      });
+        const merged = { ...c, ...u };
+        if (passesInboxFilter(filter, merged, nowMs)) next.push(merged);
+      }
 
       for (const u of updateMap.values()) {
         if (seen.has(u.id)) continue;
-        if (!passesFilter(u.status)) continue;
+        if (!passesInboxFilter(filter, u, nowMs)) continue;
         changed = true;
         next.push(u as Conversation);
       }
@@ -365,13 +370,19 @@ function Conversations() {
       (old) => {
         if (!old) return old;
         const seen = new Set(old.conversations.map((c) => c.id));
-        const patched = old.conversations.map((c) => {
+        const patched: Conversation[] = [];
+        for (const c of old.conversations) {
           const u = updatesData.updates.find((x) => x.id === c.id);
-          return u ? { ...c, ...u } : c;
-        });
+          if (!u) {
+            patched.push(c);
+            continue;
+          }
+          const merged = { ...c, ...u };
+          if (passesInboxFilter(filter, merged, nowMs)) patched.push(merged);
+        }
         for (const u of updatesData.updates) {
           if (seen.has(u.id)) continue;
-          if (!passesFilter(u.status)) continue;
+          if (!passesInboxFilter(filter, u, nowMs)) continue;
           patched.push(u as Conversation);
         }
         patched.sort((a, b) => getActivityMs(b) - getActivityMs(a));

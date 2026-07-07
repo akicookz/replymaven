@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, desc, and, gt, lt, lte, ne, isNull, inArray, isNotNull, or, like, sql } from "drizzle-orm";
+import { eq, desc, and, gt, lt, lte, ne, isNull, inArray, isNotNull, or, like, sql, type SQL } from "drizzle-orm";
 import {
   conversations,
   messages,
@@ -26,6 +26,7 @@ export function buildNeedsReviewQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   projectId: string,
   since: number,
+  now: Date = new Date(),
 ) {
   return db
     .select()
@@ -35,10 +36,100 @@ export function buildNeedsReviewQuery(
         eq(conversations.projectId, projectId),
         eq(conversations.status, "waiting_agent"),
         gt(conversations.updatedAt, new Date(since)),
+        // Snoozing bumps updatedAt; without this guard the ping would
+        // re-surface the very conversation the user just snoozed.
+        notSnoozedCondition(now),
       ),
     )
     .orderBy(desc(conversations.updatedAt))
     .limit(20);
+}
+
+// ─── Inbox tab predicates ────────────────────────────────────────────────────
+// Snoozed and flagged (spam) conversations live ONLY in their own tabs: they
+// are excluded from Needs You, All, and Resolved. "Blocked" visitors'
+// conversations are closed with closeReason "spam" at ban time, so the spam
+// exclusion covers them too. Exported so the tab semantics are testable via
+// .toSQL() introspection (see chat-service.test.ts).
+
+function notSnoozedCondition(now: Date): SQL {
+  return or(
+    isNull(conversations.snoozedUntil),
+    lte(conversations.snoozedUntil, now),
+  )!;
+}
+
+function notSpamCondition(): SQL {
+  return or(
+    isNull(conversations.closeReason),
+    ne(conversations.closeReason, "spam"),
+  )!;
+}
+
+export function inboxFilterConditions(filter: InboxFilter, now: Date): SQL[] {
+  switch (filter) {
+    case "needs-you":
+      return [eq(conversations.status, "waiting_agent"), notSnoozedCondition(now)];
+    case "all":
+      return [notSnoozedCondition(now), notSpamCondition()];
+    case "snoozed":
+      return [gt(conversations.snoozedUntil, now)];
+    case "resolved":
+      return [eq(conversations.status, "closed"), notSpamCondition()];
+    case "flagged":
+      return [eq(conversations.closeReason, "spam")];
+  }
+}
+
+// Single-pass conditional counts derived from the SAME predicate builders as
+// the tab lists, so a sidebar badge can never disagree with what its tab
+// shows. Exported for .toSQL() introspection tests.
+export function buildInboxCountsQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  projectId: string,
+  now: Date,
+) {
+  const bucket = (filter: InboxFilter) =>
+    sql<number>`coalesce(sum(case when ${and(...inboxFilterConditions(filter, now))} then 1 else 0 end), 0)`;
+  return db
+    .select({
+      needsYou: bucket("needs-you"),
+      all: bucket("all"),
+      snoozed: bucket("snoozed"),
+      resolved: bucket("resolved"),
+      flagged: bucket("flagged"),
+    })
+    .from(conversations)
+    .where(eq(conversations.projectId, projectId));
+}
+
+// Close every open conversation a banned visitor has in the project (spam) in
+// one guarded UPDATE … RETURNING — no select/update race, and already-closed
+// rows are never relabelled. Matches by id OR email, mirroring
+// VisitorBanService.isVisitorBanned. Exported for .toSQL() introspection tests.
+export function buildBanSweepQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  projectId: string,
+  visitorId: string,
+  visitorEmail?: string | null,
+) {
+  const visitorMatch = visitorEmail
+    ? or(
+        eq(conversations.visitorId, visitorId),
+        eq(conversations.visitorEmail, visitorEmail),
+      )!
+    : eq(conversations.visitorId, visitorId);
+  return db
+    .update(conversations)
+    .set({ status: "closed", closeReason: "spam" })
+    .where(
+      and(
+        eq(conversations.projectId, projectId),
+        ne(conversations.status, "closed"),
+        visitorMatch,
+      ),
+    )
+    .returning({ id: conversations.id });
 }
 
 export class ChatService {
@@ -71,16 +162,7 @@ export class ChatService {
     const now = new Date();
     const conditions = [eq(conversations.projectId, projectId)];
     if (inboxFilter) {
-      switch (inboxFilter) {
-        case "needs-you":
-          conditions.push(eq(conversations.status, "waiting_agent"));
-          conditions.push(or(isNull(conversations.snoozedUntil), lte(conversations.snoozedUntil, now))!);
-          break;
-        case "snoozed": conditions.push(gt(conversations.snoozedUntil, now)); break;
-        case "resolved": conditions.push(eq(conversations.status, "closed")); break;
-        case "flagged": conditions.push(eq(conversations.closeReason, "spam")); break;
-        case "all": break; // All Conversations = every conversation (no status filter)
-      }
+      conditions.push(...inboxFilterConditions(inboxFilter, now));
     } else if (statusFilter === "open") {
       conditions.push(ne(conversations.status, "closed"));
     } else if (statusFilter === "closed") {
@@ -168,6 +250,11 @@ export class ChatService {
     // payload per poll is typically small. Letting the client see the full
     // row means brand-new conversations or off-page conversations can be
     // prepended into the loaded list, instead of being silently dropped.
+    //
+    // Gate on updatedAt, not lastActivityAt: every mutation bumps updatedAt
+    // ($onUpdate), so a peer's snooze/flag/block reaches other dashboards'
+    // polls too — those don't touch lastActivityAt and used to stay invisible
+    // until a full refetch. Strict superset: activity bumps both columns.
     const rows = await this.db
       .select({
         id: conversations.id,
@@ -192,17 +279,17 @@ export class ChatService {
       .where(
         and(
           eq(conversations.projectId, projectId),
-          gt(conversations.lastActivityAt, since),
+          gt(conversations.updatedAt, since),
         ),
       )
-      .orderBy(desc(conversations.lastActivityAt))
+      .orderBy(desc(conversations.updatedAt))
       .limit(limit);
     return rows;
   }
 
   // See buildNeedsReviewQuery for the query semantics and why it's extracted.
   async getNeedsReviewSince(projectId: string, since: number): Promise<ConversationRow[]> {
-    return buildNeedsReviewQuery(this.db, projectId, since);
+    return buildNeedsReviewQuery(this.db, projectId, since, new Date());
   }
 
   async createConversation(
@@ -236,6 +323,24 @@ export class ChatService {
       .where(
         and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
       );
+  }
+
+  // Close every open conversation this visitor has in the project as spam, so
+  // blocking clears them all out of the inbox views — not just the one the ban
+  // was issued from (a banned visitor is 403'd, so leftovers would sit in
+  // Needs You forever). Returns the closed ids so callers can broadcast each.
+  async closeOpenConversationsAsSpam(
+    projectId: string,
+    visitorId: string,
+    visitorEmail?: string | null,
+  ): Promise<string[]> {
+    const rows = await buildBanSweepQuery(
+      this.db,
+      projectId,
+      visitorId,
+      visitorEmail,
+    );
+    return rows.map((r) => r.id);
   }
 
   async updateConversationEmail(
@@ -794,28 +899,16 @@ export class ChatService {
     return this.markMessagesRead(conversationId, m.createdAt);
   }
 
+  // See buildInboxCountsQuery for the bucket semantics and why it's extracted.
   async getInboxCounts(projectId: string): Promise<Record<InboxFilter, number>> {
-    const now = new Date();
-    const [statusRows, snoozed, flagged] = await Promise.all([
-      this.db.select({ status: conversations.status, count: sql<number>`count(*)` })
-        .from(conversations).where(eq(conversations.projectId, projectId))
-        .groupBy(conversations.status),
-      this.db.select({ count: sql<number>`count(*)` }).from(conversations)
-        .where(and(eq(conversations.projectId, projectId), gt(conversations.snoozedUntil, now))),
-      this.db.select({ count: sql<number>`count(*)` }).from(conversations)
-        .where(and(eq(conversations.projectId, projectId), eq(conversations.closeReason, "spam"))),
-    ]);
-    let waiting = 0, open = 0, closed = 0;
-    for (const r of statusRows) {
-      if (r.status === "waiting_agent") waiting = r.count;
-      if (r.status !== "closed") open += r.count;
-      if (r.status === "closed") closed = r.count;
-    }
+    const rows = await buildInboxCountsQuery(this.db, projectId, new Date());
+    const r = rows[0];
     return {
-      // "All Conversations" is the total bucket (open + closed), matching the
-      // handoff's "All Conversations" count — not open-only.
-      "needs-you": waiting, all: open + closed, snoozed: snoozed[0]?.count ?? 0,
-      resolved: closed, flagged: flagged[0]?.count ?? 0,
+      "needs-you": r?.needsYou ?? 0,
+      all: r?.all ?? 0,
+      snoozed: r?.snoozed ?? 0,
+      resolved: r?.resolved ?? 0,
+      flagged: r?.flagged ?? 0,
     };
   }
 
