@@ -19,6 +19,10 @@ import { ChatService, type InboxFilter } from "./services/chat-service";
 import { ResourceService, type FaqPair } from "./services/resource-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
 import { FAQ_SET_MAX_CHARS } from "../shared/faq-limits";
+import {
+  parseMessageImageUrls,
+  serializeMessageImageUrls,
+} from "../shared/message-images";
 import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
 import { DashboardService } from "./services/dashboard-service";
@@ -68,6 +72,9 @@ import {
   runWithModelFallback,
 } from "./chat-runtime/llm/create-language-model";
 import { composeAgentDraft } from "./chat-runtime/llm/compose-agent-draft";
+import { runAiSearch } from "./chat-runtime/retrieval/run-ai-search";
+import { buildRetrievalQueries } from "./chat-runtime/retrieval/build-retrieval-queries";
+import { trimToCharBudget } from "./chat-runtime/prompt/sections";
 import { logError, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
@@ -6349,11 +6356,23 @@ const app = new Hono<HonoAppContext>()
       await chatService.reopenConversation(conversation.id, project.id);
     }
 
+    const replyImageUrls = parsed.data.imageUrls?.length
+      ? parsed.data.imageUrls
+      : parsed.data.imageUrl
+        ? [parsed.data.imageUrl]
+        : [];
+
     const message = await chatService.addMessage({
       conversationId: conversation.id,
       role: "agent",
-      content: parsed.data.content?.trim() || (parsed.data.imageUrl ? "Sent an image" : ""),
-      imageUrl: parsed.data.imageUrl ?? null,
+      content:
+        parsed.data.content?.trim() ||
+        (replyImageUrls.length > 1
+          ? "Sent images"
+          : replyImageUrls.length
+            ? "Sent an image"
+            : ""),
+      imageUrl: serializeMessageImageUrls(replyImageUrls),
       userId: user.id,
       senderName: user.name,
       senderAvatar: avatar,
@@ -6387,7 +6406,8 @@ const app = new Hono<HonoAppContext>()
     return c.json(message, 201);
   })
   // ─── Compose draft: turn an agent's shorthand instruction into a
-  // tone-matched, visitor-language chat reply (no persistence, no RAG) ───────
+  // tone-matched, visitor-language chat reply grounded in the project's
+  // knowledge base (no persistence) ──────────────────────────────────────────
   .post("/api/projects/:id/conversations/:convId/compose-draft", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
@@ -6433,6 +6453,63 @@ const app = new Hono<HonoAppContext>()
     ]);
     const msgs = recentMessages.filter((m) => m.role !== "system");
 
+    // Ground the reply in the knowledge base: search with the agent's
+    // instruction plus the visitor's latest message. Best-effort — a
+    // retrieval failure or empty result composes ungrounded, never 502s.
+    // faq/knowledgeBase contexts are used (not ragContext) because the
+    // latter prepends a low-confidence NOTE addressed to the support bot,
+    // which could bleed into the composed reply.
+    const lastVisitorMessage =
+      [...msgs].reverse().find((m) => m.role === "visitor")?.content ?? "";
+    let knowledgeContext = "";
+    // 15s cap: a slow/hung AI Search call must not pin the request — past it,
+    // compose proceeds ungrounded. (Measured: warm dev-proxy searches take
+    // 7-12s per query; prod native binding is faster.) The timer is cleared in
+    // finally so it doesn't dangle after retrieval wins the race.
+    let retrievalTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const retrieval = await Promise.race([
+        runAiSearch({
+          env: c.env,
+          db,
+          projectId: project.id,
+          queries: buildRetrievalQueries(
+            parsed.data.instruction,
+            lastVisitorMessage,
+          ),
+          // Single pass — the low-threshold broadening retry doubles latency
+          // for marginal gain, and compose keeps the agent waiting.
+          allowBroaderRetry: false,
+        }),
+        new Promise<null>((resolve) => {
+          retrievalTimer = setTimeout(() => resolve(null), 15_000);
+        }),
+      ]);
+      if (retrieval) {
+        // 12k budget: compose is a single scoped call, tighter than the full
+        // support prompt's MAX_RAG_CONTEXT_CHARS.
+        knowledgeContext = trimToCharBudget(
+          [retrieval.faqContext, retrieval.knowledgeBaseContext]
+            .filter(Boolean)
+            .join("\n\n"),
+          12_000,
+        );
+      } else {
+        logWarn("compose_draft.retrieval_timeout", {
+          projectId: project.id,
+          conversationId: conversation.id,
+        });
+      }
+    } catch (error) {
+      logWarn("compose_draft.retrieval_failed", {
+        projectId: project.id,
+        conversationId: conversation.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      if (retrievalTimer) clearTimeout(retrievalTimer);
+    }
+
     const runtime = createModelRuntimeState({
       model: c.env.AI_MODEL,
       geminiApiKey: c.env.GEMINI_API_KEY,
@@ -6458,6 +6535,7 @@ const app = new Hono<HonoAppContext>()
                     : undefined,
               })),
               settings,
+              knowledgeContext,
             },
             { throwOnModelError: true },
           ),
@@ -6532,6 +6610,7 @@ const app = new Hono<HonoAppContext>()
         agentName: message.senderName ?? user.name ?? "Support",
         agentAvatar: message.senderAvatar ?? null,
         messageContent: message.content,
+        imageUrls: parseMessageImageUrls(message.imageUrl),
         dashboardUrl: `https://replymaven.com/app/projects/${project.id}/conversations/${conversation.id}`,
         accentColor: widgetCfg?.primaryColor ?? null,
       });
@@ -7119,7 +7198,11 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "File too large (max 10MB)" }, 400);
     }
 
-    const ext = fileObj.name.split(".").pop() ?? "bin";
+    // Sanitize the extension to ASCII alphanumerics — the returned URL is
+    // later validated against a strict same-origin path regex, and raw
+    // filename extensions can contain spaces/quotes that would fail it.
+    const rawExt = fileObj.name.split(".").pop() ?? "";
+    const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
     const uploadKey = `${user.id}/${crypto.randomUUID()}.${ext}`;
     const buffer = await fileObj.arrayBuffer();
 

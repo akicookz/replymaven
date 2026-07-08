@@ -344,16 +344,34 @@ export const updateConversationPublicSchema = z.object({
 });
 
 // ─── Agent Reply ──────────────────────────────────────────────────────────────
+// Attachment URLs land in img.src for visitors, so they are constrained to
+// same-origin upload paths — external/tracking URLs are rejected. Applied to
+// BOTH imageUrls and the legacy imageUrl so the constraint can't be bypassed
+// via the fallback field. Upload keys are ASCII-sanitized (see /api/upload), so
+// this character class never rejects a legitimately-uploaded URL.
+const uploadPathSchema = z
+  .string()
+  .max(500)
+  .regex(/^\/api\/uploads\/[^\s"'<>\\]+$/, "Invalid image URL");
+
 export const agentReplySchema = z
   .object({
     content: z.string().max(5000).optional().default(""),
     // Client sends `imageUrl: null` for text-only replies, so accept null as
     // well as undefined/string — `.optional()` alone rejects null and 400s.
-    imageUrl: z.string().max(500).nullish(),
+    imageUrl: uploadPathSchema.nullish(),
+    // Multi-attachment replies; single-image `imageUrl` kept for older clients.
+    imageUrls: z.array(uploadPathSchema).max(6).optional(),
   })
-  .refine((data) => data.content.trim().length > 0 || !!data.imageUrl, {
-    message: "Reply must include text or an image",
-  });
+  .refine(
+    (data) =>
+      data.content.trim().length > 0 ||
+      !!data.imageUrl ||
+      (data.imageUrls?.length ?? 0) > 0,
+    {
+      message: "Reply must include text or an image",
+    },
+  );
 
 // ─── Send Message as Email ────────────────────────────────────────────────────
 export const sendMessageAsEmailSchema = z.object({

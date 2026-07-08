@@ -5,6 +5,7 @@ import {
   type MessagePayload,
   type ServerEvent,
 } from "../../shared/ws-events";
+import { isImagePlaceholderContent } from "../../shared/message-images";
 
 interface ConversationDetailMessage extends MessagePayload {
   toolExecutions?: unknown[];
@@ -83,7 +84,11 @@ export function useConversationWs(
                 (m as ConversationDetailMessage & { _optimistic?: boolean })
                   ._optimistic &&
                 m.role === incoming.role &&
-                m.content === incoming.content &&
+                // Image-only sends go up with empty content; the server
+                // stores a "Sent an image"/"Sent images" placeholder.
+                (m.content === incoming.content ||
+                  (!m.content &&
+                    isImagePlaceholderContent(incoming.content))) &&
                 Boolean(m.imageUrl) === Boolean(incoming.imageUrl),
             );
             const dedupeIdx = old.messages.findIndex(

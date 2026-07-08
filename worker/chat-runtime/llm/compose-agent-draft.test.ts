@@ -123,6 +123,38 @@ describe("compose agent draft prompt", () => {
     expect(prompt).not.toContain("Be concise, clear, and solution-oriented.");
   });
 
+  test("includes knowledge base excerpts and usage guidance when retrieval found context", () => {
+    const prompt = buildComposeAgentDraftPrompt({
+      instruction: "explain how to reset their password",
+      conversationHistory: [
+        { role: "visitor", content: "how do I reset my password?" },
+      ],
+      settings: BASE_SETTINGS,
+      knowledgeContext:
+        '<source file="proj/help.md" relevance="82%">\nGo to Settings → Security → Reset password.\n</source>',
+    });
+
+    expect(prompt).toContain("Knowledge base excerpts");
+    expect(prompt).toContain("Go to Settings → Security → Reset password.");
+    expect(prompt).toContain(
+      "use them to make the reply accurate and specific",
+    );
+  });
+
+  test("omits the knowledge base section when retrieval found nothing", () => {
+    for (const knowledgeContext of [undefined, null, ""]) {
+      const prompt = buildComposeAgentDraftPrompt({
+        instruction: "tell them we are on it",
+        conversationHistory: [],
+        settings: BASE_SETTINGS,
+        knowledgeContext,
+      });
+
+      expect(prompt).not.toContain("Knowledge base excerpts");
+      expect(prompt).not.toContain("use them to make the reply accurate");
+    }
+  });
+
   test("instructs the model to output only the message, matching the visitor's language, without inventing facts", () => {
     const prompt = buildComposeAgentDraftPrompt({
       instruction: "tell them shipping takes 5-7 days",

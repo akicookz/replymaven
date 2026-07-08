@@ -154,6 +154,11 @@ export function htmlToText(html: string): string {
 
 const EMAIL_DOMAIN = "updates.replymaven.com";
 
+// Absolute origin for links/images embedded in emails. Uploaded attachments
+// are stored as app-relative paths (/api/uploads/...) but email clients need
+// absolute URLs to load them.
+const APP_ORIGIN = "https://replymaven.com";
+
 // Platform emails come from a monitored, replyable alias — "noreply" senders
 // depress engagement signals and are a weak spam heuristic at mailbox
 // providers. Every local part we send from (or historically sent from) is
@@ -439,6 +444,7 @@ ${msg.body}
     agentName: string;
     agentAvatar: string | null;
     messageContent: string;
+    imageUrls?: string[];
     dashboardUrl: string;
     accentColor?: string | null;
     inReplyToMessageId?: string | null;
@@ -452,16 +458,38 @@ ${msg.body}
       messageId,
       agentName,
       messageContent,
+      imageUrls = [],
       dashboardUrl,
       accentColor,
       inReplyToMessageId,
       autoSubmitted,
     } = details;
 
-    const lines = escapeHtml(messageContent)
-      .split("\n")
-      .map((line) => (line.trim() === "" ? "<br/>" : `<p style="margin: 0 0 4px;">${line}</p>`))
+    // Image-only replies carry a synthetic "Sent an image"/"Sent images"
+    // placeholder as content — the attached images below convey it, so the
+    // placeholder text is dropped from the email body.
+    const isPlaceholderOnly =
+      imageUrls.length > 0 &&
+      (messageContent === "Sent an image" || messageContent === "Sent images");
+    const bodyText = isPlaceholderOnly ? "" : messageContent;
+
+    const textLines = bodyText
+      ? escapeHtml(bodyText)
+          .split("\n")
+          .map((line) =>
+            line.trim() === ""
+              ? "<br/>"
+              : `<p style="margin: 0 0 4px;">${line}</p>`,
+          )
+          .join("")
+      : "";
+    const imagesHtml = imageUrls
+      .map((url) => {
+        const abs = url.startsWith("/") ? `${APP_ORIGIN}${url}` : url;
+        return `<img src="${escapeHtml(abs)}" alt="Attachment" style="max-width: 100%; border-radius: 8px; margin: 8px 0 0;" />`;
+      })
       .join("");
+    const lines = textLines + imagesHtml;
 
     const styles = buildAccentStyles(accentColor);
     const headers: Record<string, string> = {

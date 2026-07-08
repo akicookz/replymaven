@@ -9,5 +9,10 @@
     "jsxImportSource": "hono/jsx"
   },
   "include": ["./worker-configuration.d.ts", "./worker", "./shared"],
-  "exclude": ["./worker/**/*.test.ts", "./worker/**/*.spec.ts"]
+  "exclude": [
+    "./worker/**/*.test.ts",
+    "./worker/**/*.spec.ts",
+    "./shared/**/*.test.ts",
+    "./shared/**/*.spec.ts"
+  ]
 }

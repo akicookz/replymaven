@@ -2,8 +2,13 @@ import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import Composer from "@/components/inbox/Composer";
+import MessageImages from "@/components/inbox/MessageImages";
 import { countryFlag } from "@/lib/inbox/country-flag";
 import { renderMarkdown } from "@/lib/utils";
+import {
+  parseMessageImageUrls,
+  shouldShowMessageContent,
+} from "../../../shared/message-images";
 
 interface FocusViewProps {
   conversation: Conversation;
@@ -13,7 +18,7 @@ interface FocusViewProps {
   onExit: () => void;
   onSend: (
     content?: string,
-    opts?: { imageUrl?: string | null; asEmail?: boolean },
+    opts?: { imageUrls?: string[]; asEmail?: boolean },
   ) => void;
   onResolve: (convId: string) => void;
   draft: string;
@@ -56,6 +61,8 @@ function FocusBubble({ message }: { message: Message }) {
       : (message.senderName ?? "Agent");
 
   const html = renderMarkdown(message.content);
+  const imageCount = parseMessageImageUrls(message.imageUrl).length;
+  const showContent = shouldShowMessageContent(message.content);
 
   return (
     <div className={`flex flex-col mb-3 ${isReceived ? "items-start" : "items-end"}`}>
@@ -69,16 +76,10 @@ function FocusBubble({ message }: { message: Message }) {
             : "bg-bubble-sent text-white rounded-[18px_18px_6px_18px]"
         }`}
       >
-        {message.imageUrl && (
-          <img
-            src={message.imageUrl}
-            alt="attachment"
-            className="block max-w-full max-h-70 rounded-lg object-contain"
-          />
-        )}
-        {message.content && (
+        <MessageImages imageUrl={message.imageUrl} />
+        {showContent && (
           <div
-            className={`prose-chat${message.imageUrl ? " mt-1.5" : ""}`}
+            className={`prose-chat${imageCount ? " mt-1.5" : ""}`}
             dangerouslySetInnerHTML={{ __html: html }}
           />
         )}

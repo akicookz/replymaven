@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { serializeMessageImageUrls } from "../../shared/message-images";
 import { useConversationWs } from "@/lib/use-conversation-ws";
 import { passesInboxFilter, type InboxFilter, type InboxSort } from "@/lib/inbox/filters";
 import type {
@@ -423,11 +424,11 @@ function Conversations() {
   const sendReply = useMutation({
     mutationFn: async ({
       content,
-      imageUrl,
+      imageUrls,
       asEmail,
     }: {
       content: string;
-      imageUrl?: string | null;
+      imageUrls?: string[];
       asEmail?: boolean;
     }) => {
       const res = await fetch(
@@ -435,7 +436,7 @@ function Conversations() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content, imageUrl: imageUrl ?? null }),
+          body: JSON.stringify({ content, imageUrls: imageUrls ?? [] }),
         },
       );
       if (!res.ok) throw new Error("Failed to send reply");
@@ -462,7 +463,7 @@ function Conversations() {
       }
       return data;
     },
-    onMutate: async ({ content, imageUrl }) => {
+    onMutate: async ({ content, imageUrls }) => {
       await queryClient.cancelQueries({
         queryKey: ["conversation-detail", selectedConvo],
       });
@@ -474,17 +475,20 @@ function Conversations() {
         ["conversation-detail", selectedConvo],
         (old) => {
           if (!old) return old;
-          const optimistic: Message = {
+          // _optimistic lets the WS hook swap this row for the server's copy
+          // (message:new) instead of appending a duplicate.
+          const optimistic = {
             id: `optimistic-${Date.now()}`,
             role: "agent",
             content,
-            imageUrl: imageUrl ?? null,
+            imageUrl: serializeMessageImageUrls(imageUrls ?? []),
             createdAt: new Date().toISOString(),
             senderName: null,
             emailedAt: null,
             deliveredAt: null,
             readAt: null,
-          };
+            _optimistic: true,
+          } as Message;
           return {
             ...old,
             conversation: { ...old.conversation, status: "agent_replied" },
@@ -527,6 +531,8 @@ function Conversations() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ instruction }),
+          // A hung request must not pin the composer in "Composing…" forever.
+          signal: AbortSignal.timeout(30_000),
         },
       );
       if (!res.ok) throw new Error("Failed to compose");
@@ -995,10 +1001,11 @@ function Conversations() {
 
   function handleSend(
     content?: string,
-    opts?: { imageUrl?: string | null; asEmail?: boolean },
+    opts?: { imageUrls?: string[]; asEmail?: boolean },
   ) {
     const text = (content ?? draft).trim();
-    if (!text && !opts?.imageUrl) return;
+    const imageUrls = opts?.imageUrls ?? [];
+    if (!text && imageUrls.length === 0) return;
     if (!selectedConvo) return;
     // The composer no longer has a "send as email" toggle. Decide automatically:
     // if the visitor has an email on file and isn't live in the widget right now
@@ -1009,7 +1016,7 @@ function Conversations() {
       !!selected?.visitorEmail && selected?.visitorPresence !== "active";
     sendReply.mutate({
       content: text,
-      imageUrl: opts?.imageUrl ?? null,
+      imageUrls,
       asEmail: opts?.asEmail ?? autoEmail,
     });
   }

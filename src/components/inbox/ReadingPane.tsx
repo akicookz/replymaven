@@ -17,7 +17,7 @@ interface ReadingPaneProps {
   setDraft: Dispatch<SetStateAction<string>>;
   onSend: (
     content?: string,
-    opts?: { imageUrl?: string | null; asEmail?: boolean },
+    opts?: { imageUrls?: string[]; asEmail?: boolean },
   ) => void;
   onResolve: (convId: string) => void;
   onSnooze: (convId: string, until: number | null) => void;

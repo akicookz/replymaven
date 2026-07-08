@@ -2,6 +2,11 @@ import { Mail, Trash2 } from "lucide-react";
 import { deriveMessageStatus } from "@/lib/inbox/message-status";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import { cn, renderMarkdown } from "@/lib/utils";
+import {
+  parseMessageImageUrls,
+  shouldShowMessageContent,
+} from "../../../shared/message-images";
+import MessageImages from "./MessageImages";
 
 interface MessageBubbleProps {
   message: Message;
@@ -55,6 +60,8 @@ export default function MessageBubble({
       : "text-brand-label-human";
 
   const html = renderMarkdown(message.content);
+  const imageCount = parseMessageImageUrls(message.imageUrl).length;
+  const showContent = shouldShowMessageContent(message.content);
 
   // Grouped messages tuck up under the previous bubble (net ~4px gap).
   const rootSpacing = showHeader ? "mb-3" : "-mt-2 mb-3";
@@ -69,16 +76,10 @@ export default function MessageBubble({
           </div>
         )}
         <div className={cn("max-w-9/10 sm:max-w-3/4 px-3.5 py-2.5 text-[14.5px] leading-normal bg-bubble-received text-ink-2 rounded-bubble rounded-bl-[6px]", matchClass)}>
-          {message.imageUrl && (
-            <img
-              src={message.imageUrl}
-              alt="attachment"
-              className="block max-w-full max-h-70 rounded-lg object-contain"
-            />
-          )}
-          {message.content && (
+          <MessageImages imageUrl={message.imageUrl} />
+          {showContent && (
             <div
-              className={`prose-chat${message.imageUrl ? " mt-1.5" : ""}`}
+              className={`prose-chat${imageCount ? " mt-1.5" : ""}`}
               dangerouslySetInnerHTML={{ __html: html }}
             />
           )}
@@ -137,16 +138,10 @@ export default function MessageBubble({
       )}
       <div className="relative group max-w-9/10 sm:max-w-3/4">
         <div className={cn("px-3.5 py-2.5 text-[14.5px] leading-normal bg-bubble-sent text-white rounded-bubble rounded-br-[6px]", matchClass)}>
-          {message.imageUrl && (
-            <img
-              src={message.imageUrl}
-              alt="attachment"
-              className="block max-w-full max-h-70 rounded-lg object-contain"
-            />
-          )}
-          {message.content && (
+          <MessageImages imageUrl={message.imageUrl} />
+          {showContent && (
             <div
-              className={`prose-chat${message.imageUrl ? " mt-1.5" : ""}`}
+              className={`prose-chat${imageCount ? " mt-1.5" : ""}`}
               dangerouslySetInnerHTML={{ __html: html }}
             />
           )}

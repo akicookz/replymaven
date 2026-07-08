@@ -14,6 +14,10 @@
 
 import { WebSocket as ReconnectingWebSocket } from "partysocket";
 import { WIDGET_FONTS } from "../shared/widget-fonts";
+import {
+  parseMessageImageUrls,
+  shouldShowMessageContent,
+} from "../shared/message-images";
 
 (function () {
   // Find the script tag to get config
@@ -1267,7 +1271,7 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
 
     /* ─── Input Area ──────────────────────────────────────────────────────── */
     .rm-input-area {
-      padding: 0 16px 12px;
+      padding: 0 16px 6px;
       display: flex;
       align-items: flex-end;
       gap: 8px;
@@ -1328,6 +1332,9 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       display: flex;
       align-items: center;
       justify-content: center;
+      /* Fallback so the button is branded even before (or without) the
+         config fetch — JS overrides with the exact tenant color once loaded. */
+      background: var(--rm-primary, #2563eb);
       color: var(--rm-brand-text, #ffffff);
       transition: opacity 0.2s, transform 0.15s;
     }
@@ -1375,11 +1382,11 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       width: 17px;
       height: 17px;
     }
+    /* Staged-attachment chip — thumbnail with the remove button badged on
+       its corner (matches the dashboard composer). */
     .rm-image-preview {
-      padding: 8px 16px 0;
+      padding: 10px 16px 8px;
       display: none;
-      align-items: center;
-      gap: 8px;
       background: transparent;
       position: relative;
       z-index: 2;
@@ -1387,28 +1394,27 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     .rm-image-preview.visible {
       display: flex;
     }
+    .rm-image-preview-chip {
+      position: relative;
+      display: inline-flex;
+    }
     .rm-image-preview img {
-      width: 48px;
-      height: 48px;
+      width: 56px;
+      height: 56px;
       object-fit: cover;
-      border-radius: 8px;
+      border-radius: 10px;
       border: 1px solid var(--rm-border);
     }
-    .rm-image-preview-name {
-      flex: 1;
-      font-size: 12px;
-      color: var(--rm-text-secondary);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
     .rm-image-preview-remove {
-      width: 24px;
-      height: 24px;
-      min-width: 24px;
+      position: absolute;
+      top: -7px;
+      right: -7px;
+      width: 20px;
+      height: 20px;
       border-radius: 50%;
-      border: none;
-      background: var(--rm-bg-secondary);
+      border: 1px solid var(--rm-border);
+      background: var(--rm-bg);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -1417,26 +1423,143 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       padding: 0;
     }
     .rm-image-preview-remove:hover {
-      background: var(--rm-bg-tertiary);
+      background: var(--rm-bg-secondary);
+      color: var(--rm-text);
     }
     .rm-image-preview-remove svg {
-      width: 12px;
-      height: 12px;
+      width: 11px;
+      height: 11px;
+    }
+    /* Drag-and-drop hint — covers the chat view while an image file is over it */
+    .rm-drop-hint {
+      position: absolute;
+      inset: 8px;
+      z-index: 5;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 2px dashed var(--rm-primary, #2563eb);
+      border-radius: 14px;
+      background: var(--rm-bg);
+      opacity: 0.96;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--rm-text-secondary);
+      pointer-events: none;
+    }
+    .rm-drop-hint.visible {
+      display: flex;
+    }
+    .rm-drop-hint svg {
+      width: 16px;
+      height: 16px;
+    }
+    /* Transient attachment rejection notice (wrong type / too large) */
+    .rm-attach-error {
+      display: none;
+      padding: 6px 16px 0;
+      font-size: 12px;
+      color: #dc2626;
+    }
+    .rm-attach-error.visible {
+      display: block;
     }
     .rm-message-image {
       max-width: 100%;
       border-radius: 10px;
       margin-bottom: 4px;
-      cursor: pointer;
+      cursor: zoom-in;
     }
     .rm-message-image:hover {
       opacity: 0.9;
+    }
+    /* Multi-image messages render as a uniform 2-up tile grid */
+    .rm-message-images {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      width: 300px;
+      max-width: 100%;
+      margin-bottom: 4px;
+    }
+    .rm-message-images .rm-message-image {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+      margin-bottom: 0;
+    }
+
+    /* ─── Image lightbox (appended to body, above the widget) ─────────────── */
+    .rm-lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 1000000;
+      background: rgba(0, 0, 0, 0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+    .rm-lightbox > img {
+      max-width: 92vw;
+      max-height: 88vh;
+      object-fit: contain;
+      border-radius: 10px;
+    }
+    .rm-lightbox-close,
+    .rm-lightbox-nav {
+      position: absolute;
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255, 255, 255, 0.14);
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+    .rm-lightbox-close:hover,
+    .rm-lightbox-nav:hover {
+      background: rgba(255, 255, 255, 0.28);
+    }
+    .rm-lightbox-close svg,
+    .rm-lightbox-nav svg {
+      width: 17px;
+      height: 17px;
+    }
+    .rm-lightbox-close {
+      top: 16px;
+      right: 16px;
+    }
+    .rm-lightbox-nav.prev {
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+    .rm-lightbox-nav.next {
+      right: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+    .rm-lightbox-counter {
+      position: absolute;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 12.5px;
+      font-weight: 500;
     }
 
     /* ─── Powered By ──────────────────────────────────────────────────────── */
     .rm-powered {
       text-align: center;
-      padding: 6px 16px 8px;
+      padding: 2px 16px 8px;
       font-size: 11px;
       color: var(--rm-text-muted);
       background: transparent;
@@ -1468,6 +1591,8 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       display: none;
       flex-direction: column;
       min-height: 0;
+      /* Anchors the drag-and-drop overlay (.rm-drop-hint). */
+      position: relative;
     }
     .rm-chat-view.active {
       display: flex;
@@ -2660,19 +2785,31 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
   const quickTopicsContainer = document.createElement("div");
   quickTopicsContainer.className = "rm-quick-topics";
 
-  // Image preview bar (shown above input when an image is selected)
+  // Staged-attachment chip (shown above input when an image is selected):
+  // thumbnail with the remove button badged on its corner. The filename shows
+  // as the thumbnail's tooltip (imagePreviewImg.title).
   const imagePreview = document.createElement("div");
   imagePreview.className = "rm-image-preview";
+  const imagePreviewChip = document.createElement("div");
+  imagePreviewChip.className = "rm-image-preview-chip";
   const imagePreviewImg = document.createElement("img");
   imagePreviewImg.alt = "Preview";
-  const imagePreviewName = document.createElement("span");
-  imagePreviewName.className = "rm-image-preview-name";
   const imagePreviewRemove = document.createElement("button");
   imagePreviewRemove.className = "rm-image-preview-remove";
+  imagePreviewRemove.setAttribute("aria-label", "Remove attachment");
   imagePreviewRemove.innerHTML = ICONS.x;
-  imagePreview.appendChild(imagePreviewImg);
-  imagePreview.appendChild(imagePreviewName);
-  imagePreview.appendChild(imagePreviewRemove);
+  imagePreviewChip.appendChild(imagePreviewImg);
+  imagePreviewChip.appendChild(imagePreviewRemove);
+  imagePreview.appendChild(imagePreviewChip);
+
+  // Transient attachment rejection notice (wrong type / too large)
+  const attachError = document.createElement("div");
+  attachError.className = "rm-attach-error";
+
+  // Drag-and-drop overlay shown while an image file is dragged over the chat
+  const dropHint = document.createElement("div");
+  dropHint.className = "rm-drop-hint";
+  dropHint.innerHTML = `${ICONS.image}<span>Drop an image to attach</span>`;
 
   // Input area
   const inputArea = document.createElement("div");
@@ -2721,7 +2858,9 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
   chatView.appendChild(messagesContainer);
   chatView.appendChild(quickTopicsContainer);
   chatView.appendChild(imagePreview);
+  chatView.appendChild(attachError);
   chatView.appendChild(inputArea);
+  chatView.appendChild(dropHint);
 
   // Powered by
   const powered = document.createElement("div");
@@ -3238,20 +3377,30 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
 
   // ─── Image Upload Handlers ──────────────────────────────────────────────────
 
-  attachBtn.addEventListener("click", () => {
-    fileInput.click();
-  });
+  // Mirrors the widget upload endpoint's allowlist and 5MB cap.
+  const ATTACH_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+  const ATTACH_MAX_BYTES = 5 * 1024 * 1024;
 
-  fileInput.addEventListener("change", () => {
-    const file = fileInput.files?.[0];
+  let attachErrorTimer: ReturnType<typeof setTimeout> | null = null;
+  function showAttachError(message: string): void {
+    attachError.textContent = message;
+    attachError.classList.add("visible");
+    if (attachErrorTimer) clearTimeout(attachErrorTimer);
+    attachErrorTimer = setTimeout(() => {
+      attachError.classList.remove("visible");
+    }, 3000);
+  }
+
+  // Validate and stage a picked/dropped image. Single slot — a new image
+  // replaces the previous one; rejections show a transient notice.
+  function stageImageFile(file: File | null | undefined): void {
     if (!file) return;
-
-    // Validate file type and size
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
-    if (!allowedTypes.includes(file.type)) {
+    if (!ATTACH_IMAGE_TYPES.includes(file.type)) {
+      showAttachError("Only JPEG, PNG, or WebP images can be attached");
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
+    if (file.size > ATTACH_MAX_BYTES) {
+      showAttachError("Image too large (max 5MB)");
       return;
     }
 
@@ -3261,20 +3410,62 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
     const reader = new FileReader();
     reader.onload = () => {
       imagePreviewImg.src = reader.result as string;
-      imagePreviewName.textContent = file.name;
+      imagePreviewImg.title = file.name;
       imagePreview.classList.add("visible");
     };
     reader.readAsDataURL(file);
+  }
 
+  attachBtn.addEventListener("click", () => {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener("change", () => {
+    stageImageFile(fileInput.files?.[0]);
     // Reset file input so the same file can be re-selected
     fileInput.value = "";
+  });
+
+  // Drag-and-drop onto the chat view. dragenter/dragleave fire for every
+  // child crossed — depth-count so the overlay doesn't flicker.
+  let attachDragDepth = 0;
+  function dragHasFiles(e: DragEvent): boolean {
+    return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files");
+  }
+  chatView.addEventListener("dragenter", (e) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    attachDragDepth += 1;
+    dropHint.classList.add("visible");
+  });
+  chatView.addEventListener("dragover", (e) => {
+    if (!dragHasFiles(e)) return;
+    // preventDefault marks the chat view as a valid drop target.
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  });
+  chatView.addEventListener("dragleave", (e) => {
+    if (!dragHasFiles(e)) return;
+    attachDragDepth = Math.max(0, attachDragDepth - 1);
+    if (attachDragDepth === 0) dropHint.classList.remove("visible");
+  });
+  chatView.addEventListener("drop", (e) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    attachDragDepth = 0;
+    dropHint.classList.remove("visible");
+    // Single-image slot: stage the first image file (or the first file, so a
+    // non-image drop still surfaces the type notice).
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    stageImageFile(
+      files.find((f) => ATTACH_IMAGE_TYPES.includes(f.type)) ?? files[0],
+    );
   });
 
   imagePreviewRemove.addEventListener("click", () => {
     pendingImageFile = null;
     imagePreview.classList.remove("visible");
     imagePreviewImg.src = "";
-    imagePreviewName.textContent = "";
   });
 
   // ─── Functions ──────────────────────────────────────────────────────────────
@@ -4308,7 +4499,6 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
         pendingImageFile = null;
         imagePreview.classList.remove("visible");
         imagePreviewImg.src = "";
-        imagePreviewName.textContent = "";
       }
 
       // Use a default message if only an image was sent
@@ -4325,22 +4515,43 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       lastMessageTimestamp = Date.now();
       lastNewMessageAt = Date.now();
 
-      // Upload image to R2 if present
+      // Upload image to R2 if present — one retry for transient failures,
+      // and visible feedback when both attempts fail (previously the
+      // attachment was dropped silently while the text still sent).
       if (imageFile) {
-        try {
+        const tryUpload = async (): Promise<string> => {
           const formData = new FormData();
           formData.append("file", imageFile);
           const uploadRes = await fetch(
             `${baseUrl}/api/widget/${projectSlug}/upload`,
             { method: "POST", body: formData },
           );
-          if (uploadRes.ok) {
-            const uploadData = await uploadRes.json();
-            uploadedImageUrl = uploadData.url;
+          if (!uploadRes.ok) throw new Error(`upload ${uploadRes.status}`);
+          const uploadData = await uploadRes.json();
+          return uploadData.url;
+        };
+        try {
+          uploadedImageUrl = await tryUpload();
+        } catch {
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 600));
+            uploadedImageUrl = await tryUpload();
+          } catch (err) {
+            console.error("[ReplyMaven] Image upload failed:", err);
+            if (lastVisitorStatusEl) {
+              lastVisitorStatusEl.textContent = "Image failed to upload";
+              lastVisitorStatusEl.classList.add("failed");
+              // Detach so the later "Sent" write can't overwrite the notice.
+              lastVisitorStatusEl = null;
+            }
           }
-        } catch (err) {
-          console.error("[ReplyMaven] Image upload failed:", err);
         }
+
+        // Image-only send whose upload failed: there is nothing real to send.
+        // Don't POST the synthetic "Sent an image" placeholder — that would be
+        // a phantom text turn the bot answers, with the image lost. The
+        // optimistic bubble already shows the local preview + failure status.
+        if (!uploadedImageUrl && !text) return;
       }
 
       // Pause polling during SSE streaming to prevent duplicate messages
@@ -4684,6 +4895,101 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
   // Track the latest visitor message status element for iMessage-style delivery status
   let lastVisitorStatusEl: HTMLElement | null = null;
 
+  // Full-screen viewer for message images: backdrop/image click or Esc
+  // closes, ←/→ and arrow buttons navigate multi-image messages. Appended to
+  // body (not the widget container) so ancestor transforms can't trap the
+  // fixed overlay.
+  function openImageLightbox(urls: string[], startIndex: number): void {
+    let index = startIndex;
+
+    const overlay = document.createElement("div");
+    overlay.className = "rm-lightbox";
+    const img = document.createElement("img");
+    overlay.appendChild(img);
+
+    let counter: HTMLElement | null = null;
+    const show = () => {
+      img.src = urls[index];
+      img.alt = `Attachment ${index + 1} of ${urls.length}`;
+      if (counter) counter.textContent = `${index + 1} / ${urls.length}`;
+    };
+    const step = (delta: number) => {
+      index = (index + delta + urls.length) % urls.length;
+      show();
+    };
+    const close = () => {
+      document.removeEventListener("keydown", onKey);
+      overlay.remove();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+      if (urls.length > 1 && e.key === "ArrowLeft") step(-1);
+      if (urls.length > 1 && e.key === "ArrowRight") step(1);
+    };
+
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "rm-lightbox-close";
+    closeBtn.setAttribute("aria-label", "Close");
+    closeBtn.innerHTML = ICONS.x;
+    closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      close();
+    };
+    overlay.appendChild(closeBtn);
+
+    if (urls.length > 1) {
+      const prev = document.createElement("button");
+      prev.className = "rm-lightbox-nav prev";
+      prev.setAttribute("aria-label", "Previous image");
+      prev.innerHTML = ICONS.chevronLeft;
+      prev.onclick = (e) => {
+        e.stopPropagation();
+        step(-1);
+      };
+      const next = document.createElement("button");
+      next.className = "rm-lightbox-nav next";
+      next.setAttribute("aria-label", "Next image");
+      next.innerHTML = ICONS.chevronRight;
+      next.onclick = (e) => {
+        e.stopPropagation();
+        step(1);
+      };
+      counter = document.createElement("div");
+      counter.className = "rm-lightbox-counter";
+      overlay.appendChild(prev);
+      overlay.appendChild(next);
+      overlay.appendChild(counter);
+    }
+
+    overlay.onclick = close;
+    document.addEventListener("keydown", onKey);
+    show();
+    document.body.appendChild(overlay);
+  }
+
+  // Renders a message's attached image(s) into its bubble: one image at its
+  // natural size, several as a 2-up tile grid. Click opens the lightbox at
+  // that image.
+  function appendMessageImages(msgEl: HTMLElement, rawImageUrl: string): void {
+    const urls = parseMessageImageUrls(rawImageUrl).map((url) =>
+      url.startsWith("data:") ? url : resolveUrl(url),
+    );
+    if (urls.length === 0) return;
+
+    const host = urls.length > 1 ? document.createElement("div") : msgEl;
+    if (host !== msgEl) host.className = "rm-message-images";
+    urls.forEach((src, i) => {
+      const img = document.createElement("img");
+      img.className = "rm-message-image";
+      img.src = src;
+      img.alt =
+        urls.length > 1 ? `Attached image ${i + 1}` : "Attached image";
+      img.onclick = () => openImageLightbox(urls, i);
+      host.appendChild(img);
+    });
+    if (host !== msgEl) msgEl.appendChild(host);
+  }
+
   function addMessageToUI(
     role: string,
     content: string,
@@ -4770,19 +5076,12 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       msgEl = document.createElement("div");
       msgEl.className = "rm-message";
 
-      if (imageUrl) {
-        const img = document.createElement("img");
-        img.className = "rm-message-image";
-        img.src = imageUrl.startsWith("data:")
-          ? imageUrl
-          : resolveUrl(imageUrl);
-        img.alt = "Attached image";
-        img.onclick = () => window.open(img.src, "_blank");
-        msgEl.appendChild(img);
-      }
+      if (imageUrl) appendMessageImages(msgEl, imageUrl);
 
       const textContainer = document.createElement("div");
-      textContainer.innerHTML = renderMarkdown(content);
+      textContainer.innerHTML = shouldShowMessageContent(content)
+        ? renderMarkdown(content)
+        : "";
       msgEl.appendChild(textContainer);
 
       col.appendChild(msgEl);
@@ -4819,19 +5118,10 @@ import { WIDGET_FONTS } from "../shared/widget-fonts";
       msgEl = document.createElement("div");
       msgEl.className = "rm-message";
 
-      // Render image inside bubble if present
-      if (imageUrl) {
-        const img = document.createElement("img");
-        img.className = "rm-message-image";
-        img.src = imageUrl.startsWith("data:")
-          ? imageUrl
-          : resolveUrl(imageUrl);
-        img.alt = "Attached image";
-        img.onclick = () => window.open(img.src, "_blank");
-        msgEl.appendChild(img);
-      }
+      // Render image(s) inside bubble if present
+      if (imageUrl) appendMessageImages(msgEl, imageUrl);
 
-      if (content && content !== "Sent an image") {
+      if (shouldShowMessageContent(content)) {
         const textNode = document.createElement("span");
         textNode.textContent = content;
         msgEl.appendChild(textNode);

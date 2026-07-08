@@ -914,3 +914,18 @@ input[type="color"]::-moz-color-swatch {
 /* One-shot pulse for the review-summary callout when a deep link scrolls it into view. */
 @keyframes rm-pulse-once { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 .animate-pulse-once { animation: rm-pulse-once 0.9s ease-in-out 2; }
+
+/* Shimmering loading label ("Composing…") — a highlight band sweeps across
+   the text left-to-right. */
+@keyframes rm-text-shimmer {
+  0% { background-position: 175% 0; }
+  100% { background-position: -75% 0; }
+}
+.text-shimmer {
+  background: linear-gradient(90deg, var(--ink-6) 40%, var(--ink-1) 50%, var(--ink-6) 60%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: rm-text-shimmer 1.6s linear infinite;
+}
