@@ -13,6 +13,7 @@ import { emitSseEvent } from "../streaming/map-agent-events-to-sse";
 import { type InternalToken } from "../streaming/internal-tokens";
 import {
   type ConversationTurnMessage,
+  type FastPathDecision,
   type SupportIntent,
   type SupportPromptSettings,
   type SupportToolDefinition,
@@ -53,6 +54,8 @@ export interface AgenticTurnInput {
   conversationSummary: string | null;
   compiledFaqContext: string;
   faqMatchHint?: { question: string; answer: string; score: number } | null;
+  fastPathDecision?: FastPathDecision | null;
+  streamProtocolVersion: 1 | 2;
   availableTools: SupportToolDefinition[];
   enabledToolRows: ToolRow[];
   toolService: ToolService;
@@ -160,6 +163,8 @@ export async function runAgenticTurn(
     agentHandbackInstructions: input.agentHandbackInstructions,
     image: input.image,
     faqMatchHint: input.faqMatchHint,
+    fastPathDecision: input.fastPathDecision,
+    streamProtocolVersion: input.streamProtocolVersion,
     emitStatus: input.emitStatus,
     shouldAllowEscalation: input.shouldAllowEscalation,
     closeSafeAiReplayWindow: input.closeSafeAiReplayWindow,
@@ -176,9 +181,11 @@ export async function runAgenticTurn(
     if (capabilityFallback !== fullResponse.trim()) {
       fullResponse = capabilityFallback;
       capabilityFallbackApplied = true;
-      emitSseEvent(input.controller, input.encoder, {
-        finalText: fullResponse,
-      });
+      if (input.streamProtocolVersion === 1) {
+        emitSseEvent(input.controller, input.encoder, {
+          finalText: fullResponse,
+        });
+      }
     }
   }
 

@@ -60,6 +60,18 @@ describe("normalizeConversationHistory", () => {
     expect(result).toHaveLength(10);
     expect(result[0].content).toBe("m4");
   });
+
+  test("drops system messages from model history", () => {
+    const result = normalizeConversationHistory({
+      rawHistory: [
+        { role: "system", content: "internal note" },
+        { role: "visitor", content: "hello" },
+      ],
+      currentMessage: "next question",
+    });
+
+    expect(result).toEqual([{ role: "visitor", content: "hello" }]);
+  });
 });
 
 describe("withCurrentTurn", () => {

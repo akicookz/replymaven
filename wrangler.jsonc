@@ -92,6 +92,7 @@
     "BETTER_AUTH_URL": "https://replymaven.com",
     "CF_ACCOUNT_ID": "35bc7a4522237728214ba9d54c36002e",
     "AI_MODEL": "gpt-5-chat-latest",
+    "CHAT_FAST_PATH_MODE": "on",
     "STRIPE_STARTER_MONTHLY_PRICE_ID": "price_1T6BKmR3FrLxl9TOBoGEMvvA",
     "STRIPE_STARTER_ANNUAL_PRICE_ID": "price_1T6E7yR3FrLxl9TOvPWqvcPV",
     "STRIPE_STANDARD_MONTHLY_PRICE_ID": "price_1T6BNHR3FrLxl9TOPqOKQytI",

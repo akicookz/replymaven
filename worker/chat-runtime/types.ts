@@ -15,6 +15,31 @@ export type SupportIntent =
   | "clarify"
   | "handoff"
   | "smalltalk";
+export type FastPathKind =
+  | "scope_blocked"
+  | "small_talk"
+  | "authoritative_faq";
+
+export type FastPathDecision =
+  | {
+      kind: "scope_blocked";
+      reason: string;
+      response: string;
+    }
+  | {
+      kind: "small_talk";
+      reason: "pure_greeting" | "pure_resolution";
+      composeKind: "greeting" | "resolution";
+    }
+  | {
+      kind: "authoritative_faq";
+      reason: "exact_faq" | "high_coverage_faq";
+      faq: {
+        question: string;
+        answer: string;
+        score: number;
+      };
+    };
 export type AgentToolChoice =
   | "auto"
   | "none"
@@ -448,6 +473,8 @@ export interface WidgetMessageTurnContext {
   db: DrizzleD1Database<Record<string, unknown>>;
   env: AppEnv;
   executionCtx: ExecutionContext;
+  routeStartedAt: number;
+  streamProtocolVersion: 1 | 2;
   checkRateLimit: (key: string, maxRequests: number, windowMs: number) => boolean;
   project: {
     id: string;
@@ -477,6 +504,7 @@ export interface AgentTurnArtifacts {
 
 export interface TurnTelemetry {
   startedAt: number;
+  routeStartedAt: number;
   firstStatusAt?: number;
   firstTextAt?: number;
   verifierRan?: boolean;
@@ -488,6 +516,11 @@ export interface TurnTelemetry {
   plannerStepMs?: number[];
   retrievalMs?: number[];
   toolCallMs?: number[];
+  fastPathMode?: "off" | "shadow" | "on";
+  fastPathCandidate?: FastPathKind | null;
+  fastPathSelected?: FastPathKind | null;
+  modelCallCount?: number;
+  modelCallsByStage?: Record<string, number>;
 }
 
 export function toToolDefinition(tool: ToolRow): SupportToolDefinition {

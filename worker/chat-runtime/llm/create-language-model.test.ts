@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { isProviderLikeError } from "./create-language-model";
+import {
+  createModelRuntimeState,
+  isProviderLikeError,
+  runWithModelFallback,
+} from "./create-language-model";
 
 describe("isProviderLikeError", () => {
   test("returns true for AI_NoObjectGeneratedError so fallback is attempted", () => {
@@ -64,5 +68,46 @@ describe("isProviderLikeError", () => {
     const error = new Error("API timeout while generating object");
     error.name = "AI_NoObjectGeneratedError";
     expect(isProviderLikeError(error)).toBe(true);
+  });
+});
+
+describe("model attempt telemetry", () => {
+  test("counts a successful primary attempt by stage", async () => {
+    const runtime = createModelRuntimeState({
+      model: "gpt-5-chat-latest",
+      openaiApiKey: "openai-test",
+      geminiApiKey: null,
+    });
+
+    await runWithModelFallback({
+      runtime,
+      stage: "compose",
+      operation: async () => "ok",
+    });
+
+    expect(runtime.modelCallCount).toBe(1);
+    expect(runtime.modelCallsByStage).toEqual({ compose: 1 });
+  });
+
+  test("counts both attempts when provider fallback runs", async () => {
+    const runtime = createModelRuntimeState({
+      model: "gpt-5-chat-latest",
+      openaiApiKey: "openai-test",
+      geminiApiKey: "gemini-test",
+    });
+    let attempts = 0;
+
+    await runWithModelFallback({
+      runtime,
+      stage: "plan_next_action",
+      operation: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("503 Service Unavailable");
+        return "ok";
+      },
+    });
+
+    expect(runtime.modelCallCount).toBe(2);
+    expect(runtime.modelCallsByStage).toEqual({ plan_next_action: 2 });
   });
 });

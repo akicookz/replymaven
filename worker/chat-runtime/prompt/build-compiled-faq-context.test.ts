@@ -108,13 +108,102 @@ describe("findBestFaqMatch", () => {
     expect(match?.score).toBeGreaterThanOrEqual(0.35);
   });
 
-  test("matches wording that only shares content tokens", () => {
+  test("does not treat a short contained FAQ as authoritative", () => {
     const match = findBestFaqMatch(
       resources,
-      "can I invite a team member and give access to a single domain?",
+      "Can I invite a team member, restrict them to one domain, and what will it cost?",
     );
-    expect(match?.question).toBe("How can I invite a team member?");
-    expect(match?.score).toBe(1);
+
+    expect(match).not.toBeNull();
+    expect(match?.authoritative).toBe(false);
+    expect(match?.precision).toBeLessThan(0.8);
+  });
+
+  test("marks an exact normalized FAQ question authoritative", () => {
+    const match = findBestFaqMatch(
+      resources,
+      "  HOW CAN I INVITE A TEAM MEMBER?! ",
+    );
+
+    expect(match).toMatchObject({
+      question: "How can I invite a team member?",
+      authoritative: true,
+      matchKind: "exact",
+      score: 1,
+    });
+  });
+
+  test("rejects an otherwise strong match when the runner-up is too close", () => {
+    const ambiguousResources = [
+      {
+        title: "Team FAQ",
+        content: JSON.stringify([
+          { question: "How do I invite a team member?", answer: "Open Team." },
+          { question: "How do I remove a team member?", answer: "Open Team." },
+        ]),
+      },
+    ];
+
+    const match = findBestFaqMatch(
+      ambiguousResources,
+      "How do I manage a team member?",
+    );
+    expect(match?.authoritative).toBe(false);
+    expect(match?.margin).toBeLessThan(0.15);
+  });
+
+  test("does not fast-path multi-intent wording", () => {
+    const match = findBestFaqMatch(
+      resources,
+      "How can I invite a team member and cancel my subscription?",
+    );
+
+    expect(match?.authoritative).toBe(false);
+  });
+
+  test("does not fast-path duplicate questions with conflicting answers", () => {
+    const conflictingResources = [
+      {
+        title: "Old FAQ",
+        content: JSON.stringify([
+          {
+            question: "How long is the trial?",
+            answer: "The trial is 7 days.",
+          },
+        ]),
+      },
+      {
+        title: "New FAQ",
+        content: JSON.stringify([
+          {
+            question: "How long is the trial?",
+            answer: "The trial is 14 days.",
+          },
+        ]),
+      },
+    ];
+
+    const match = findBestFaqMatch(
+      conflictingResources,
+      "How long is the trial?",
+    );
+    expect(match?.authoritative).toBe(false);
+  });
+
+  test("does not treat different non-Latin questions as an exact match", () => {
+    expect(
+      findBestFaqMatch(
+        [
+          {
+            title: "Localized FAQ",
+            content: JSON.stringify([
+              { question: "料金はいくらですか", answer: "月額です。" },
+            ]),
+          },
+        ],
+        "비밀번호를 어떻게 변경하나요",
+      ),
+    ).toBeNull();
   });
 
   test("returns null when the message has too few content tokens", () => {

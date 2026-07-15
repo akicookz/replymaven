@@ -25,7 +25,12 @@ export function normalizeConversationHistory(options: {
   currentMessage: string;
 }): ConversationTurnMessage[] {
   const normalized = options.rawHistory
-    .filter((message) => message.role !== "bot" || message.content)
+    .filter(
+      (message) =>
+        message.role === "visitor" ||
+        message.role === "agent" ||
+        (message.role === "bot" && Boolean(message.content)),
+    )
     .map((message) => ({
       role: message.role as "visitor" | "bot" | "agent",
       content: message.content,

@@ -145,9 +145,20 @@ export interface FaqMatchResult {
   question: string;
   answer: string;
   score: number;
+  precision: number;
+  recall: number;
+  margin: number;
+  authoritative: boolean;
+  matchKind: "exact" | "lexical";
 }
 
-const FAQ_MATCH_THRESHOLD = 0.35;
+type ScoredFaqPair = Omit<FaqMatchResult, "margin" | "authoritative">;
+
+const FAQ_HINT_THRESHOLD = 0.35;
+const FAQ_AUTHORITATIVE_F1 = 0.82;
+const FAQ_AUTHORITATIVE_COVERAGE = 0.8;
+const FAQ_AUTHORITATIVE_MARGIN = 0.15;
+const MULTI_INTENT_RE = /\b(and|also|plus|another|as well as|but)\b|[?][^?]+[?]/i;
 
 const FAQ_STOPWORDS = new Set([
   "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
@@ -160,48 +171,104 @@ const FAQ_STOPWORDS = new Set([
   "and", "or", "but", "if", "so", "than", "then",
 ]);
 
+function normalizeFaqText(text: string): string {
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function tokenize(text: string): Set<string> {
   return new Set(
-    text
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, "")
-      .split(/\s+/)
+    normalizeFaqText(text)
+      .split(" ")
       .filter((token) => token.length > 1 && !FAQ_STOPWORDS.has(token)),
   );
 }
 
-function overlapSimilarity(a: Set<string>, b: Set<string>): number {
-  if (a.size === 0 || b.size === 0) return 0;
-  let intersection = 0;
-  for (const token of a) {
-    if (b.has(token)) intersection++;
+function scoreFaqPair(
+  userMessage: string,
+  question: string,
+): ScoredFaqPair | null {
+  const normalizedUser = normalizeFaqText(userMessage);
+  const normalizedQuestion = normalizeFaqText(question);
+  if (normalizedUser === normalizedQuestion) {
+    return {
+      question,
+      answer: "",
+      score: 1,
+      precision: 1,
+      recall: 1,
+      matchKind: "exact",
+    };
   }
-  // Normalize by the smaller set so short visitor questions still score high
-  // when most of their content tokens match a longer FAQ question.
-  return intersection / Math.min(a.size, b.size);
+
+  const userTokens = tokenize(userMessage);
+  const questionTokens = tokenize(question);
+  if (userTokens.size < 2 || questionTokens.size < 2) return null;
+
+  let overlap = 0;
+  for (const token of userTokens) {
+    if (questionTokens.has(token)) overlap += 1;
+  }
+
+  const precision = overlap / userTokens.size;
+  const recall = overlap / questionTokens.size;
+  const score =
+    precision + recall === 0
+      ? 0
+      : (2 * precision * recall) / (precision + recall);
+
+  return {
+    question,
+    answer: "",
+    score,
+    precision,
+    recall,
+    matchKind: "lexical",
+  };
 }
 
 export function findBestFaqMatch(
   faqResources: FaqLikeResource[],
   userMessage: string,
 ): FaqMatchResult | null {
-  const userTokens = tokenize(userMessage);
-  if (userTokens.size < 2) return null;
-
-  let bestMatch: FaqMatchResult | null = null;
+  const candidates: ScoredFaqPair[] = [];
 
   for (const resource of faqResources) {
     const pairs = parseFaqPairs(resource.content);
     for (const pair of pairs) {
-      const questionTokens = tokenize(pair.question);
-      const score = overlapSimilarity(userTokens, questionTokens);
-      if (score >= FAQ_MATCH_THRESHOLD && (bestMatch === null || score > bestMatch.score)) {
-        bestMatch = { question: pair.question, answer: pair.answer, score };
+      const scored = scoreFaqPair(userMessage, pair.question);
+      if (scored && scored.score >= FAQ_HINT_THRESHOLD) {
+        candidates.push({ ...scored, answer: pair.answer });
       }
     }
   }
 
-  return bestMatch;
+  candidates.sort((left, right) => right.score - left.score);
+  const best = candidates[0];
+  if (!best) return null;
+
+  const runnerUp = candidates[1];
+  const margin = runnerUp ? best.score - runnerUp.score : best.score;
+  const hasConflictingExactAnswer =
+    best.matchKind === "exact" &&
+    candidates.slice(1).some(
+      (candidate) =>
+        candidate.matchKind === "exact" &&
+        normalizeFaqText(candidate.answer) !== normalizeFaqText(best.answer),
+    );
+  const authoritative =
+    (best.matchKind === "exact" && !hasConflictingExactAnswer) ||
+    (!MULTI_INTENT_RE.test(userMessage) &&
+      best.score >= FAQ_AUTHORITATIVE_F1 &&
+      best.precision >= FAQ_AUTHORITATIVE_COVERAGE &&
+      best.recall >= FAQ_AUTHORITATIVE_COVERAGE &&
+      margin >= FAQ_AUTHORITATIVE_MARGIN);
+
+  return { ...best, margin, authoritative };
 }
 
 function computeFaqFingerprint(

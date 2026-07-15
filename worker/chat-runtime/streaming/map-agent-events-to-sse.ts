@@ -1,4 +1,5 @@
 import { type WidgetStatusPayload } from "../types";
+import { type SourceReference } from "../../services/resource-service";
 import {
   createStreamingStripState,
   flushStreamingStripState,
@@ -15,6 +16,18 @@ export interface AgentEventState {
   stepCount: number;
   stripState: StreamingStripState;
   detectedInternalTokens: InternalToken[];
+}
+
+export interface WidgetCompletedPayload {
+  protocolVersion: 2;
+  messageId: string | null;
+  finalText: string;
+  conversationStatus:
+    | "active"
+    | "waiting_agent"
+    | "agent_replied"
+    | "closed";
+  sources?: SourceReference[];
 }
 
 export function createInitialAgentEventState(): AgentEventState {
@@ -63,6 +76,14 @@ export function emitStatusEvent(
   status: WidgetStatusPayload,
 ): void {
   emitSseEvent(controller, encoder, { status });
+}
+
+export function emitCompletedEvent(
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  payload: WidgetCompletedPayload,
+): void {
+  emitSseEvent(controller, encoder, { completed: payload });
 }
 
 export function mapAgentStreamPartToSse(options: {

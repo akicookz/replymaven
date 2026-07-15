@@ -861,6 +861,7 @@ const app = new Hono<HonoAppContext>()
 
   // ─── Send Message (SSE streaming response) ─────────────────────────────────
   .post("/api/widget/:projectSlug/conversations/:id/messages", async (c) => {
+    const routeStartedAt = Date.now();
     const ip = getClientIp(c);
     if (!checkRateLimit(`msg:${ip}`, 30, 60_000)) {
       return c.json({ error: "Rate limit exceeded" }, 429);
@@ -898,6 +899,8 @@ const app = new Hono<HonoAppContext>()
       db,
       env: c.env,
       executionCtx: c.executionCtx,
+      routeStartedAt,
+      streamProtocolVersion: parsed.data.streamProtocolVersion ?? 1,
       checkRateLimit,
       project: {
         id: project.id,

@@ -30,6 +30,7 @@ interface Env {
   GEMINI_API_KEY: string;
   OPENAI_API_KEY: string;
   AI_MODEL: string;
+  CHAT_FAST_PATH_MODE: string;
   BROWSER_RENDERING_API_TOKEN: string;
   CF_ACCOUNT_ID: string;
   STRIPE_SECRET_KEY: string;

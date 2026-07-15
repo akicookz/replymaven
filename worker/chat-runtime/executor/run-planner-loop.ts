@@ -55,7 +55,9 @@ import { executeHttpTool } from "../tools/http-tool-executor";
 import { withCurrentTurn } from "../orchestration/normalize-history";
 import {
   type HandoffRenderDirective,
+  type FastPathDecision,
   type PlannerActionHistoryEntry,
+  type PlannerDecision,
   type PlannerDocsEvidence,
   type PlannerLoopResult,
   type PlannerLoopState,
@@ -143,6 +145,8 @@ interface RunPlannerLoopOptions {
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
   faqMatchHint?: { question: string; answer: string; score: number } | null;
+  fastPathDecision?: FastPathDecision | null;
+  streamProtocolVersion: 1 | 2;
   emitStatus: (
     message: string,
     phase: "thinking" | "retrieval" | "tool" | "verify" | "compose",
@@ -153,6 +157,33 @@ interface RunPlannerLoopOptions {
   // Optional override for the compose-stage system prompt. When omitted the
   // visitor-facing prompt is used.
   buildSystemPrompt?: BuildSystemPromptFn;
+}
+
+export function buildFastPathPlannerDecision(input: {
+  goal: string;
+  decision: FastPathDecision;
+}): PlannerDecision | null {
+  if (input.decision.kind === "scope_blocked") return null;
+  if (input.decision.kind === "small_talk") {
+    return {
+      goal: input.goal,
+      intent: "smalltalk",
+      nextAction: {
+        type: "compose",
+        reason: input.decision.reason,
+        composeKind: input.decision.composeKind,
+      },
+    };
+  }
+
+  return {
+    goal: input.goal,
+    nextAction: {
+      type: "compose",
+      reason: input.decision.reason,
+      composeKind: "grounded",
+    },
+  };
 }
 
 function createEmptyPlannerDocsEvidence(): PlannerDocsEvidence {
@@ -185,6 +216,16 @@ function mergeRagContextBlocks(...contexts: string[]): string {
   }
 
   return [...merged].join("\n\n");
+}
+
+export function buildComposerFaqEvidence(input: {
+  compiledFaqContext: string;
+  retrievedFaqContext: string;
+}): string {
+  return mergeRagContextBlocks(
+    input.compiledFaqContext,
+    input.retrievedFaqContext,
+  );
 }
 
 function mergeDocsEvidence(
@@ -552,12 +593,16 @@ async function executeCompose(options: {
   lastToolError: string | null;
   detectedInternalTokens: InternalToken[];
 }> {
+  const composerFaqContext = buildComposerFaqEvidence({
+    compiledFaqContext: options.compiledFaqContext,
+    retrievedFaqContext: options.state.docsEvidence.faqContext,
+  });
   const promptContext: ComposeSystemPromptContext = {
     state: options.state,
     settings: options.settings,
     projectName: options.projectName,
     guidelines: options.guidelines,
-    compiledFaqContext: options.compiledFaqContext,
+    compiledFaqContext: composerFaqContext,
     faqMatchHint: options.faqMatchHint,
     pageContext: options.pageContext,
     visitorInfo: options.visitorInfo,
@@ -575,7 +620,7 @@ async function executeCompose(options: {
           agentHandbackInstructions: options.agentHandbackInstructions,
           pageContext: options.pageContext,
           visitorInfo: options.visitorInfo,
-          faqContext: options.compiledFaqContext,
+          faqContext: composerFaqContext,
           faqMatchHint: options.faqMatchHint ?? null,
           groundingConfidence: options.state.docsEvidence.groundingConfidence,
           topScore: options.state.docsEvidence.topScore,
@@ -695,16 +740,6 @@ export async function runPlannerLoop(
   let lastToolError: string | null = null;
   let hadToolCalls = false;
 
-  await populateKnownVisitorInfo({
-    modelRuntime: options.modelRuntime,
-    conversationHistory: withCurrentTurn(
-      options.conversationHistory,
-      options.currentMessage,
-    ),
-    state: loopState,
-    buildLogContext: options.buildLogContext,
-  });
-
   // Resume an in-progress contact request. The persisted signal (seeded into
   // loopState above) is the source of truth; the legacy regex over the bot's
   // own prior wording is only a fallback for conversations whose chat_state
@@ -714,6 +749,29 @@ export async function runPlannerLoop(
   const legacyContactRequest =
     !hasPersistedContactRequest &&
     lastAssistantRequestedStructuredContact(options.conversationHistory);
+  const requestedFastPathDecision = options.fastPathDecision
+    ? buildFastPathPlannerDecision({
+        goal: loopState.goal,
+        decision: options.fastPathDecision,
+      })
+    : null;
+  const injectedFastPathDecision =
+    hasPersistedContactRequest || legacyContactRequest
+      ? null
+      : requestedFastPathDecision;
+
+  if (!injectedFastPathDecision) {
+    await populateKnownVisitorInfo({
+      modelRuntime: options.modelRuntime,
+      conversationHistory: withCurrentTurn(
+        options.conversationHistory,
+        options.currentMessage,
+      ),
+      state: loopState,
+      buildLogContext: options.buildLogContext,
+    });
+  }
+
   if (hasPersistedContactRequest || legacyContactRequest) {
     loopState.awaitingContactFields = getMissingContactFields(loopState);
     loopState.contactDeclined =
@@ -742,24 +800,25 @@ export async function runPlannerLoop(
     // ("thanks" while awaiting contact fields must reach the planner).
     const smallTalkKind =
       loopState.stepCount === 0 &&
+      !injectedFastPathDecision &&
+      !options.image &&
       !loopState.handoffRequested &&
       !loopState.awaitingHandoffConfirmation &&
       loopState.awaitingContactFields.length === 0
         ? detectSmallTalk(options.currentMessage)
         : null;
 
-    // High-confidence FAQ match → skip planner + retrieval entirely on the
-    // first step. The answer is already in hand and any further search just
-    // adds noise and latency.
-    const shouldFaqFastPath =
-      loopState.stepCount === 0 &&
-      !loopState.handoffRequested &&
-      !!options.faqMatchHint &&
-      options.faqMatchHint.score >= 0.9;
-
-    let plannerDecision;
+    let plannerDecision: PlannerDecision;
     const plannerStepStart = Date.now();
-    if (smallTalkKind) {
+    if (loopState.stepCount === 0 && injectedFastPathDecision) {
+      plannerDecision = injectedFastPathDecision;
+      logInfo(
+        "widget_turn.plan_next_action_injected_fast_path",
+        options.buildLogContext({
+          fastPathKind: options.fastPathDecision?.kind ?? null,
+        }),
+      );
+    } else if (smallTalkKind) {
       plannerDecision = {
         goal: loopState.goal,
         intent: "smalltalk" as const,
@@ -775,22 +834,6 @@ export async function runPlannerLoop(
       logInfo(
         "widget_turn.plan_next_action_small_talk_fast_path",
         options.buildLogContext({ smallTalkKind }),
-      );
-    } else if (shouldFaqFastPath) {
-      plannerDecision = {
-        goal: loopState.goal,
-        nextAction: {
-          type: "compose" as const,
-          reason:
-            "High-confidence FAQ match; compose directly from the curated answer.",
-        },
-      };
-      logInfo(
-        "widget_turn.plan_next_action_faq_fast_path",
-        options.buildLogContext({
-          faqHintScore: options.faqMatchHint?.score ?? null,
-          faqHintQuestion: options.faqMatchHint?.question ?? null,
-        }),
       );
     } else if (shouldForceCompose) {
       plannerDecision = {
@@ -1151,9 +1194,11 @@ export async function runPlannerLoop(
       });
       loopState.finalDraft = fullResponse;
       loopState.terminationReason = nextAction.reason;
-      emitSseEvent(options.controller, options.encoder, {
-        finalText: fullResponse,
-      });
+      if (options.streamProtocolVersion === 1) {
+        emitSseEvent(options.controller, options.encoder, {
+          finalText: fullResponse,
+        });
+      }
       return {
         fullResponse,
         retrieval: loopState.docsEvidence,
@@ -1197,9 +1242,11 @@ export async function runPlannerLoop(
       });
       loopState.finalDraft = fullResponse;
       loopState.terminationReason = nextAction.reason;
-      emitSseEvent(options.controller, options.encoder, {
-        finalText: fullResponse,
-      });
+      if (options.streamProtocolVersion === 1) {
+        emitSseEvent(options.controller, options.encoder, {
+          finalText: fullResponse,
+        });
+      }
       return {
         fullResponse,
         retrieval: loopState.docsEvidence,
@@ -1300,9 +1347,11 @@ export async function runPlannerLoop(
         });
         loopState.finalDraft = fullResponse;
         loopState.terminationReason = "team_request_submission_failed";
-        emitSseEvent(options.controller, options.encoder, {
-          finalText: fullResponse,
-        });
+        if (options.streamProtocolVersion === 1) {
+          emitSseEvent(options.controller, options.encoder, {
+            finalText: fullResponse,
+          });
+        }
         return {
           fullResponse,
           retrieval: loopState.docsEvidence,
@@ -1380,9 +1429,11 @@ export async function runPlannerLoop(
       loopState.finalDraft = fullResponse;
       loopState.terminationReason = nextAction.reason;
       emitSseEvent(options.controller, options.encoder, { inquiry: true });
-      emitSseEvent(options.controller, options.encoder, {
-        finalText: fullResponse,
-      });
+      if (options.streamProtocolVersion === 1) {
+        emitSseEvent(options.controller, options.encoder, {
+          finalText: fullResponse,
+        });
+      }
       return {
         fullResponse,
         retrieval: loopState.docsEvidence,
@@ -1421,9 +1472,11 @@ export async function runPlannerLoop(
       });
       loopState.finalDraft = renderedQuestion;
       loopState.terminationReason = nextAction.reason;
-      emitSseEvent(options.controller, options.encoder, {
-        finalText: renderedQuestion,
-      });
+      if (options.streamProtocolVersion === 1) {
+        emitSseEvent(options.controller, options.encoder, {
+          finalText: renderedQuestion,
+        });
+      }
       return {
         fullResponse: renderedQuestion,
         retrieval: loopState.docsEvidence,
@@ -1538,9 +1591,11 @@ export async function runPlannerLoop(
         options.buildLogContext(),
       );
       const fallback = "I'm sorry, something went wrong on my end. Please try again or reach out to the team for help.";
-      emitSseEvent(options.controller, options.encoder, {
-        finalText: fallback,
-      });
+      if (options.streamProtocolVersion === 1) {
+        emitSseEvent(options.controller, options.encoder, {
+          finalText: fallback,
+        });
+      }
       loopState.finalDraft = fallback;
       return {
         fullResponse: fallback,
@@ -1608,9 +1663,11 @@ export async function runPlannerLoop(
       options.buildLogContext(),
     );
     const fallback = "I'm sorry, something went wrong on my end. Please try again or reach out to the team for help.";
-    emitSseEvent(options.controller, options.encoder, {
-      finalText: fallback,
-    });
+    if (options.streamProtocolVersion === 1) {
+      emitSseEvent(options.controller, options.encoder, {
+        finalText: fallback,
+      });
+    }
     loopState.finalDraft = fallback;
     return {
       fullResponse: fallback,

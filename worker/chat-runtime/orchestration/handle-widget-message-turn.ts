@@ -9,8 +9,10 @@ import { classifyTaskScope } from "../workflows/classify-task-scope";
 import { createWidgetSseResponse } from "../streaming/create-widget-sse-response";
 import {
   createInitialAgentEventState,
+  emitCompletedEvent,
   emitSseEvent,
   emitStatusEvent,
+  type WidgetCompletedPayload,
 } from "../streaming/map-agent-events-to-sse";
 import { stripInternalTokens } from "../streaming/internal-tokens";
 import {
@@ -33,8 +35,13 @@ import { ProjectService } from "../../services/project-service";
 import { ResourceService } from "../../services/resource-service";
 import { TelegramService } from "../../services/telegram-service";
 import { ToolService } from "../../services/tool-service";
-import { type MessageRow } from "../../db";
 import { decryptEnabledToolHeaders } from "../../services/encryption-service";
+import {
+  identifyFastPath,
+  identifyHardGate,
+  parseFastPathMode,
+} from "../routing/identify-fast-path";
+import { findBestFaqMatch } from "../prompt/build-compiled-faq-context";
 
 function parseConversationMetadata(
   rawMetadata: string | null | undefined,
@@ -101,19 +108,6 @@ function isAgentRequestedStatus(status: string): boolean {
   return status === "waiting_agent" || status === "agent_replied";
 }
 
-function getLastTeamMessageRole(
-  history: Array<{ role: string }>,
-): "bot" | "agent" | null {
-  for (let index = history.length - 1; index >= 0; index--) {
-    const role = history[index]?.role;
-    if (role === "bot" || role === "agent") {
-      return role;
-    }
-  }
-
-  return null;
-}
-
 function shouldAllowEscalation(options: {
   conversation: {
     status: string;
@@ -154,7 +148,7 @@ export async function handleWidgetMessageTurn(
   const guidelineService = new GuidelineService(context.db);
   const resourceService = new ResourceService(context.db, context.env.UPLOADS);
 
-  const startedAt = Date.now();
+  const startedAt = context.routeStartedAt;
   const stageTimings: Record<string, number> = {};
   function markStage(name: string): void {
     stageTimings[name] = Date.now() - startedAt;
@@ -169,35 +163,15 @@ export async function handleWidgetMessageTurn(
     }),
   );
 
-  const clientSuppliedHistory =
-    Array.isArray(context.payload.history) &&
-    context.payload.history.length > 0;
-
-  // Fire every independent read in a single parallel wave so we only pay one
-  // D1/KV round-trip for all setup data. Subscription gating still runs first
-  // conceptually via the `ownerSub`/`messageCheck` results; denied requests
-  // pay for a few extra reads, which is fine — those branches are rare.
-  const [
-    ownerSub,
-    conversationLookup,
-    settings,
-    enabledTools,
-    enabledGuidelines,
-    allResources,
-    parallelPrefetchedHistory,
-  ] = await Promise.all([
+  // Keep the first read wave minimal. AI-only configuration, resources, and
+  // history are loaded only after muted and human-agent turns have exited.
+  const [ownerSub, conversationLookup, settings] = await Promise.all([
     billingService.getSubscriptionByUserId(context.project.userId),
     chatService.getConversationById(
       context.conversationId,
       context.project.id,
     ),
     projectService.getSettings(context.project.id),
-    toolService.getEnabledTools(context.project.id),
-    guidelineService.getEnabledByProject(context.project.id),
-    resourceService.getResourcesByProject(context.project.id),
-    clientSuppliedHistory
-      ? Promise.resolve<MessageRow[] | null>(null)
-      : chatService.getMessages(context.conversationId),
   ]);
   markStage("parallel_prefetch_done");
 
@@ -258,38 +232,6 @@ export async function handleWidgetMessageTurn(
     conversation.chatState,
   );
 
-  if (enabledTools.length > 0) {
-    if (!context.checkRateLimit(`toolmsg:${context.project.id}`, 100, 60_000)) {
-      logWarn(
-        "widget_turn.blocked",
-        buildWidgetTurnLogContext(context, turnId, {
-          reason: "tool_rate_limit_exceeded",
-        }),
-      );
-      return Response.json(
-        {
-          error: "Tool execution rate limit exceeded. Please try again shortly.",
-        },
-        { status: 429 },
-      );
-    }
-
-    await decryptEnabledToolHeaders(
-      enabledTools,
-      context.env.ENCRYPTION_KEY,
-      (row) => {
-        logWarn(
-          "widget_turn.tool_headers_decrypt_failed",
-          buildWidgetTurnLogContext(context, turnId, {
-            toolId: row.id,
-            toolName: row.name,
-          }),
-        );
-      },
-    );
-  }
-  const availableTools = enabledTools.map(toToolDefinition);
-
   // Spam-flagged conversations are "muted": never reopen them (reopening would
   // clear the spam flag and pull the thread back into the active inbox). They
   // stay closed/spam under the Flagged view; the visitor's message is still
@@ -330,9 +272,14 @@ export async function handleWidgetMessageTurn(
     { excludeSubjectId: conversation.visitorId },
   );
 
+  const hardGate = identifyHardGate({
+    status: conversation.status,
+    closeReason: conversation.closeReason,
+  });
+
   // Muted (spam) thread: the message is now recorded and broadcast, but we stop
   // here — no Telegram forward, no agent escalation, no bot reply. Silent.
-  if (isSpam) {
+  if (hardGate === "muted") {
     logInfo(
       "widget_turn.spam_muted",
       buildWidgetTurnLogContext(context, turnId),
@@ -340,62 +287,157 @@ export async function handleWidgetMessageTurn(
     return Response.json({ ok: true, muted: true });
   }
 
-  const requestedAgent = isAgentRequestedStatus(conversation.status);
-  // This is a pre-visitor-insert snapshot of the conversation — sufficient
-  // for agent-mode silence detection because we only inspect the last
-  // bot/agent role via `getLastTeamMessageRole`. Reuse the parallel prefetch
-  // when populated; otherwise fetch now for the client-supplied-history +
-  // requestedAgent edge case.
-  const prefetchedHistory = requestedAgent
-    ? (parallelPrefetchedHistory ??
-      (await chatService.getMessages(context.conversationId)))
-    : null;
-  const shouldSilenceForAgent =
-    requestedAgent && getLastTeamMessageRole(prefetchedHistory ?? []) === "agent";
-
-  if (requestedAgent && settings?.telegramBotToken && settings?.telegramChatId) {
-    const telegramService = new TelegramService(context.db);
-    context.executionCtx.waitUntil(
-      telegramService
-        .forwardVisitorMessage(
+  if (hardGate === "agent_mode") {
+    if (settings?.telegramBotToken && settings.telegramChatId) {
+      const telegramService = new TelegramService(context.db);
+      context.executionCtx.waitUntil(
+        telegramService.forwardVisitorMessage(
           settings.telegramBotToken,
           settings.telegramChatId,
           conversation.visitorName,
           context.payload.content,
           conversation.id,
           conversation.telegramThreadId
-            ? parseInt(conversation.telegramThreadId, 10)
+            ? Number.parseInt(conversation.telegramThreadId, 10)
             : undefined,
-        )
-        .catch((err) => {
+        ).catch((error) => {
           logError(
             "widget_turn.telegram_forward_failed",
-            err,
+            error,
             buildWidgetTurnLogContext(context, turnId),
           );
         }),
-    );
-  }
+      );
+    }
 
-  if (shouldSilenceForAgent) {
     logInfo(
       "widget_turn.agent_mode_bypassed",
       buildWidgetTurnLogContext(context, turnId, {
         conversationStatus: conversation.status,
+        modelCallCount: 0,
       }),
     );
     return Response.json({ ok: true, agentMode: true });
   }
 
-  return createWidgetSseResponse(async (controller, encoder) => {
-    const telemetry: TurnTelemetry = { startedAt: Date.now() };
+  const [enabledTools, enabledGuidelines, allResources, recentHistory] =
+    await Promise.all([
+      toolService.getEnabledTools(context.project.id),
+      guidelineService.getEnabledByProject(context.project.id),
+      resourceService.getResourcesByProject(context.project.id),
+      chatService.getRecentMessages(context.conversationId, 11),
+    ]);
+  const parallelPrefetchedHistory = recentHistory.messages;
+  markStage("ai_prefetch_done");
 
-    // Emit the first status event before any other work so the widget can
-    // replace its optimistic local typing indicator with the real backend
-    // phase immediately after the SSE connection opens. Status events are
-    // cheap (one SSE frame) and function declarations below are hoisted,
-    // so calling emitStatus here is safe.
-    emitStatus("Thinking", "thinking");
+  const conversationHistory = normalizeConversationHistory({
+    rawHistory: parallelPrefetchedHistory,
+    currentMessage: context.payload.content,
+  });
+  const scopeDecision = classifyTaskScope({
+    message: context.payload.content,
+    pageContext: context.payload.pageContext,
+  });
+  const sortedFaqResources = allResources
+    .filter((resource) => resource.type === "faq")
+    .sort((left, right) => left.title.localeCompare(right.title));
+  const faqMatch = findBestFaqMatch(
+    sortedFaqResources.map((resource) => ({
+      title: resource.title,
+      content: resource.content,
+    })),
+    context.payload.content,
+  );
+  const fastPathMode = parseFastPathMode(context.env.CHAT_FAST_PATH_MODE);
+  const conversationMetadata = parseConversationMetadata(conversation.metadata);
+  const agentHandbackInstructions =
+    typeof conversationMetadata.agentHandbackInstructions === "string"
+      ? conversationMetadata.agentHandbackInstructions
+      : null;
+  const fastPathCandidate =
+    fastPathMode === "off"
+      ? null
+      : identifyFastPath({
+          message: context.payload.content,
+          scopeDecision,
+          faqMatch,
+          hasPendingWorkflow:
+            chatState.awaitingHandoffConfirmation ||
+            chatState.awaitingContactFields.length > 0,
+          hasImage: Boolean(context.payload.imageUrl),
+          hasPriorityInstructions:
+            enabledGuidelines.length > 0 || Boolean(agentHandbackInstructions),
+        });
+  const fastPathDecision = fastPathMode === "on" ? fastPathCandidate : null;
+  const hasIndexedResources = allResources.some(
+    (resource) => resource.status === "indexed",
+  );
+
+  logInfo(
+    "widget_turn.fast_path_evaluated",
+    buildWidgetTurnLogContext(context, turnId, {
+      mode: fastPathMode,
+      candidate: fastPathCandidate?.kind ?? null,
+      selected: fastPathDecision?.kind ?? null,
+      reason: fastPathCandidate?.reason ?? null,
+      faqScore: faqMatch?.score ?? null,
+      faqPrecision: faqMatch?.precision ?? null,
+      faqRecall: faqMatch?.recall ?? null,
+      faqMargin: faqMatch?.margin ?? null,
+    }),
+  );
+
+  if (!fastPathDecision && enabledTools.length > 0) {
+    if (!context.checkRateLimit(`toolmsg:${context.project.id}`, 100, 60_000)) {
+      logWarn(
+        "widget_turn.blocked",
+        buildWidgetTurnLogContext(context, turnId, {
+          reason: "tool_rate_limit_exceeded",
+        }),
+      );
+      return Response.json(
+        {
+          error: "Tool execution rate limit exceeded. Please try again shortly.",
+        },
+        { status: 429 },
+      );
+    }
+
+    await decryptEnabledToolHeaders(
+      enabledTools,
+      context.env.ENCRYPTION_KEY,
+      (row) => {
+        logWarn(
+          "widget_turn.tool_headers_decrypt_failed",
+          buildWidgetTurnLogContext(context, turnId, {
+            toolId: row.id,
+            toolName: row.name,
+          }),
+        );
+      },
+    );
+  }
+  const availableTools = fastPathDecision
+    ? []
+    : enabledTools.map(toToolDefinition);
+
+  return createWidgetSseResponse(async (controller, encoder) => {
+    const telemetry: TurnTelemetry = {
+      startedAt,
+      routeStartedAt: startedAt,
+      fastPathMode,
+      fastPathCandidate: fastPathCandidate?.kind ?? null,
+      fastPathSelected: fastPathDecision?.kind ?? null,
+    };
+
+    // Deterministic routes have already been selected before the SSE stream
+    // opens, so describe the remaining composer work accurately instead of
+    // showing a misleading reasoning phase.
+    if (fastPathDecision) {
+      emitStatus("Writing the reply...", "compose");
+    } else {
+      emitStatus("Thinking", "thinking");
+    }
 
     let currentStage = "load_message_image";
     let retrieval = createEmptyRetrievalResult();
@@ -433,9 +475,13 @@ export async function handleWidgetMessageTurn(
       );
     }
 
-    async function emitAndSaveImmediateResponse(fullResponse: string): Promise<void> {
+    async function emitAndSaveImmediateResponse(
+      fullResponse: string,
+    ): Promise<void> {
       const cleanResponse = stripInternalTokens(fullResponse);
-      emitSseEvent(controller, encoder, { finalText: cleanResponse });
+      if (context.streamProtocolVersion === 1) {
+        emitSseEvent(controller, encoder, { finalText: cleanResponse });
+      }
 
       currentStage = "save_bot_message";
       const botMessage = await chatService.addMessage({
@@ -455,10 +501,19 @@ export async function handleWidgetMessageTurn(
         { excludeSubjectId: visitorIdForBroadcast },
       );
 
-      emitSseEvent(controller, encoder, {
-        done: true,
-        messageId: botMessage.id,
-      });
+      if (context.streamProtocolVersion === 2) {
+        emitCompletedEvent(controller, encoder, {
+          protocolVersion: 2,
+          messageId: botMessage.id,
+          finalText: cleanResponse,
+          conversationStatus: "active",
+        });
+      } else {
+        emitSseEvent(controller, encoder, {
+          done: true,
+          messageId: botMessage.id,
+        });
+      }
 
       context.executionCtx.waitUntil(
         chatService
@@ -508,6 +563,8 @@ export async function handleWidgetMessageTurn(
           plannerStepMs: telemetry.plannerStepMs ?? null,
           retrievalMs: telemetry.retrievalMs ?? null,
           toolCallMs: telemetry.toolCallMs ?? null,
+          modelCallCount: modelRuntime.modelCallCount,
+          modelCallsByStage: modelRuntime.modelCallsByStage,
         }),
       );
     }
@@ -529,27 +586,11 @@ export async function handleWidgetMessageTurn(
         uploads: context.env.UPLOADS,
       });
 
-      currentStage = "load_history";
-      const clientHistory = context.payload.history;
-      const usedClientHistory =
-        Array.isArray(clientHistory) && clientHistory.length > 0;
-      const rawHistory = usedClientHistory
-        ? clientHistory
-        : (parallelPrefetchedHistory ??
-          prefetchedHistory ??
-          (await chatService.getMessages(context.conversationId)));
-      // Prior turns only. The current visitor message travels separately as
-      // `currentMessage` everywhere downstream — see normalize-history.ts.
-      const conversationHistory = normalizeConversationHistory({
-        rawHistory,
-        currentMessage: context.payload.content,
-      });
       logInfo(
         "widget_turn.history_loaded",
         buildWidgetTurnLogContext(context, turnId, {
           historyCount: conversationHistory.length,
-          requestedAgent,
-          source: usedClientHistory ? "client" : "server",
+          source: "server",
         }),
       );
 
@@ -577,30 +618,50 @@ export async function handleWidgetMessageTurn(
       }
 
       currentStage = "classify_turn";
-      emitStatus("Understanding your message...", "thinking");
-      const routing = await prepareTurnRouting({
-        modelRuntime,
-        conversationHistory,
-        currentMessage: context.payload.content,
-        pageContext: context.payload.pageContext,
-        resources: allResources,
-        kv: context.env.CONVERSATIONS_CACHE,
-        projectId: context.project.id,
-        executionCtx: context.executionCtx,
-        onRouterFinished: (ms) => {
-          telemetry.routerMs = ms;
-        },
-        buildLogContext: (extra = {}) =>
-          buildWidgetTurnLogContext(context, turnId, extra),
-      });
+      if (!fastPathDecision) {
+        emitStatus("Understanding your message...", "thinking");
+      }
+      const routing =
+        fastPathDecision?.kind === "small_talk" ||
+        fastPathDecision?.kind === "authoritative_faq"
+          ? {
+              conversationSummary: null,
+              compiledFaqContext:
+                fastPathDecision.kind === "authoritative_faq"
+                  ? `<source type="faq-match" score="${fastPathDecision.faq.score.toFixed(2)}">\nQ: ${fastPathDecision.faq.question}\nA: ${fastPathDecision.faq.answer}\n</source>`
+                  : "",
+              faqMatchHint:
+                fastPathDecision.kind === "authoritative_faq"
+                  ? faqMatch
+                  : null,
+              selectedFaqSetIds: [],
+              selectorOutcome: "fast_path" as const,
+              sortedFaqResources,
+              hasIndexedResources,
+            }
+          : await prepareTurnRouting({
+              modelRuntime,
+              conversationHistory,
+              currentMessage: context.payload.content,
+              pageContext: context.payload.pageContext,
+              sortedFaqResources,
+              faqMatchHint: faqMatch,
+              hasIndexedResources,
+              kv: context.env.CONVERSATIONS_CACHE,
+              projectId: context.project.id,
+              executionCtx: context.executionCtx,
+              onRouterFinished: (ms) => {
+                telemetry.routerMs = ms;
+              },
+              buildLogContext: (extra = {}) =>
+                buildWidgetTurnLogContext(context, turnId, extra),
+            });
       const {
         conversationSummary,
         compiledFaqContext,
         faqMatchHint,
         selectedFaqSetIds,
         selectorOutcome,
-        sortedFaqResources,
-        hasIndexedResources,
       } = routing;
       const selectedTitles = sortedFaqResources
         .filter((r) => selectedFaqSetIds.includes(r.id))
@@ -619,18 +680,15 @@ export async function handleWidgetMessageTurn(
         }),
       );
 
-      executionPath = "agentic_loop";
+      executionPath = fastPathDecision
+        ? `fast_path:${fastPathDecision.kind}`
+        : "agentic_loop";
 
       chatState = {
         ...chatState,
         state: "answering",
       };
 
-      const conversationMetadata = parseConversationMetadata(conversation.metadata);
-      const agentHandbackInstructions =
-        typeof conversationMetadata.agentHandbackInstructions === "string"
-          ? conversationMetadata.agentHandbackInstructions
-          : null;
       currentStage = "planner_loop";
       logInfo(
         "widget_turn.loop_started",
@@ -698,6 +756,8 @@ export async function handleWidgetMessageTurn(
         agentHandbackInstructions,
         image,
         faqMatchHint,
+        fastPathDecision,
+        streamProtocolVersion: context.streamProtocolVersion,
         emitStatus,
         shouldAllowEscalation: () => shouldAllowEscalation({ conversation }),
         closeSafeAiReplayWindow,
@@ -792,7 +852,12 @@ export async function handleWidgetMessageTurn(
       const flaggedForReview =
         conversation.status === "waiting_agent" ||
         loopResult.terminationAction === "escalate";
-      if (loopResult.detectedInternalTokens.includes("[RESOLVED]") && !flaggedForReview) {
+      let finalConversationStatus: WidgetCompletedPayload["conversationStatus"] =
+        loopResult.terminationAction === "escalate" ? "waiting_agent" : "active";
+      if (
+        loopResult.detectedInternalTokens.includes("[RESOLVED]") &&
+        !flaggedForReview
+      ) {
         currentStage = "close_conversation";
         await chatService.updateConversationStatus(
           context.conversationId,
@@ -817,8 +882,11 @@ export async function handleWidgetMessageTurn(
         fullResponse =
           fullResponse.trim() ||
           "Glad I could help! Feel free to reach out anytime if you have more questions.";
-        emitSseEvent(controller, encoder, { resolved: true });
-        emitSseEvent(controller, encoder, { finalText: fullResponse });
+        finalConversationStatus = "closed";
+        if (context.streamProtocolVersion === 1) {
+          emitSseEvent(controller, encoder, { resolved: true });
+          emitSseEvent(controller, encoder, { finalText: fullResponse });
+        }
         logInfo(
           "widget_turn.conversation_resolved",
           buildWidgetTurnLogContext(context, turnId),
@@ -838,7 +906,16 @@ export async function handleWidgetMessageTurn(
           "widget_turn.empty_bot_message_skipped",
           buildWidgetTurnLogContext(context, turnId, { flaggedForReview }),
         );
-        emitSseEvent(controller, encoder, { done: true });
+        if (context.streamProtocolVersion === 2) {
+          emitCompletedEvent(controller, encoder, {
+            protocolVersion: 2,
+            messageId: null,
+            finalText: "",
+            conversationStatus: finalConversationStatus,
+          });
+        } else {
+          emitSseEvent(controller, encoder, { done: true });
+        }
         context.executionCtx.waitUntil(
           chatService
             .saveChatState(context.conversationId, context.project.id, chatState)
@@ -877,11 +954,21 @@ export async function handleWidgetMessageTurn(
       const MAX_SOURCES = 3;
       const cappedSources = retrieval.sourceReferences.slice(0, MAX_SOURCES);
 
-      emitSseEvent(controller, encoder, {
-        done: true,
-        messageId: botMessage.id,
-        sources: cappedSources.length > 0 ? cappedSources : undefined,
-      });
+      if (context.streamProtocolVersion === 2) {
+        emitCompletedEvent(controller, encoder, {
+          protocolVersion: 2,
+          messageId: botMessage.id,
+          finalText: fullResponse,
+          conversationStatus: finalConversationStatus,
+          sources: cappedSources.length > 0 ? cappedSources : undefined,
+        });
+      } else {
+        emitSseEvent(controller, encoder, {
+          done: true,
+          messageId: botMessage.id,
+          sources: cappedSources.length > 0 ? cappedSources : undefined,
+        });
+      }
 
       context.executionCtx.waitUntil(
         chatService
@@ -947,6 +1034,8 @@ export async function handleWidgetMessageTurn(
           plannerStepMs: telemetry.plannerStepMs ?? null,
           retrievalMs: telemetry.retrievalMs ?? null,
           toolCallMs: telemetry.toolCallMs ?? null,
+          modelCallCount: modelRuntime.modelCallCount,
+          modelCallsByStage: modelRuntime.modelCallsByStage,
         }),
       );
     } catch (err) {

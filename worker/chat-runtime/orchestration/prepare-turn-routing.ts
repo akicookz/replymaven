@@ -15,8 +15,8 @@ import {
   summarizeConversation,
 } from "../llm/auxiliary-calls";
 import {
-  findBestFaqMatch,
   getOrBuildCompiledFaqContext,
+  type FaqMatchResult,
 } from "../prompt/build-compiled-faq-context";
 import { withCurrentTurn } from "./normalize-history";
 
@@ -35,8 +35,9 @@ export interface TurnRoutingInput {
   conversationHistory: ConversationTurnMessage[];
   currentMessage: string;
   pageContext?: Record<string, string>;
-  // FAQ resources for the project (all types). Filtered/sorted internally.
-  resources: FaqLikeResource[];
+  sortedFaqResources: FaqLikeResource[];
+  faqMatchHint: FaqMatchResult | null;
+  hasIndexedResources: boolean;
   kv: KVNamespace;
   projectId: string;
   executionCtx: ExecutionContext;
@@ -49,9 +50,14 @@ export interface TurnRoutingInput {
 export interface TurnRoutingResult {
   conversationSummary: string | null;
   compiledFaqContext: string;
-  faqMatchHint: { question: string; answer: string; score: number } | null;
+  faqMatchHint: FaqMatchResult | null;
   selectedFaqSetIds: string[];
-  selectorOutcome: "none_available" | "single" | "selected" | "failed";
+  selectorOutcome:
+    | "none_available"
+    | "single"
+    | "selected"
+    | "failed"
+    | "fast_path";
   sortedFaqResources: FaqLikeResource[];
   hasIndexedResources: boolean;
 }
@@ -65,17 +71,8 @@ type FaqSelection =
 export async function prepareTurnRouting(
   input: TurnRoutingInput,
 ): Promise<TurnRoutingResult> {
-  const sortedFaqResources = input.resources
-    .filter((r) => r.type === "faq")
-    .sort((left, right) => left.title.localeCompare(right.title));
-  const hasIndexedResources = input.resources.some(
-    (r) => r.status === "indexed",
-  );
-
-  const faqMatchHint = findBestFaqMatch(
-    sortedFaqResources.map((r) => ({ title: r.title, content: r.content })),
-    input.currentMessage,
-  );
+  const sortedFaqResources = input.sortedFaqResources;
+  const faqMatchHint = input.faqMatchHint;
 
   const routingStartedAt = Date.now();
   const [conversationSummary, faqSelection] = await Promise.all([
@@ -162,6 +159,6 @@ export async function prepareTurnRouting(
     selectedFaqSetIds,
     selectorOutcome: faqSelection.outcome,
     sortedFaqResources,
-    hasIndexedResources,
+    hasIndexedResources: input.hasIndexedResources,
   };
 }

@@ -83,8 +83,7 @@ export function classifyTaskScope(options: {
     }
   }
 
-  const pageContextSignals = Object.keys(options.pageContext ?? {}).length > 0;
-  const supportSignals = hasSupportSignals(message) || pageContextSignals;
+  const supportSignals = hasSupportSignals(message);
 
   for (const entry of OUT_OF_SCOPE_PATTERNS) {
     if (entry.pattern.test(message) && !supportSignals) {

@@ -13,6 +13,8 @@ export interface ModelRuntimeState {
   activeConfig: ChatRuntimeAiConfig;
   fallbackConfig: ChatRuntimeAiConfig | null;
   hasUsedFallback: boolean;
+  modelCallCount: number;
+  modelCallsByStage: Record<string, number>;
 }
 
 interface RunWithModelFallbackOptions<T> {
@@ -55,6 +57,12 @@ function buildLogContext(
     ...(options.getRetryContext?.() ?? {}),
     ...extra,
   };
+}
+
+function recordModelAttempt(runtime: ModelRuntimeState, stage: string): void {
+  runtime.modelCallCount += 1;
+  runtime.modelCallsByStage[stage] =
+    (runtime.modelCallsByStage[stage] ?? 0) + 1;
 }
 
 function summarizeError(error: unknown): Record<string, unknown> {
@@ -192,6 +200,8 @@ export function createModelRuntimeState(
     activeConfig: primaryConfig,
     fallbackConfig: resolveFallbackModelConfig(primaryConfig),
     hasUsedFallback: false,
+    modelCallCount: 0,
+    modelCallsByStage: {},
   };
 }
 
@@ -199,6 +209,7 @@ export async function runWithModelFallback<T>(
   options: RunWithModelFallbackOptions<T>,
 ): Promise<T> {
   try {
+    recordModelAttempt(options.runtime, options.stage);
     return await options.operation(options.runtime.activeConfig);
   } catch (error) {
     const errorSummary = summarizeError(error);
@@ -266,6 +277,7 @@ export async function runWithModelFallback<T>(
     );
 
     try {
+      recordModelAttempt(options.runtime, options.stage);
       const result = await options.operation(fallbackConfig);
       options.runtime.activeConfig = fallbackConfig;
       options.runtime.hasUsedFallback = true;

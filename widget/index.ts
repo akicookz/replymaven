@@ -157,14 +157,6 @@ import {
     pushHistoryEntry("bot", content);
   }
 
-  function getHistoryPayload(): Array<{
-    role: "visitor" | "bot" | "agent";
-    content: string;
-    createdAt: string;
-  }> {
-    return conversationHistoryBuffer.slice(-HISTORY_BUFFER_LIMIT);
-  }
-
   // Send guard -- prevents duplicate message sends
   let isSending = false;
 
@@ -4559,7 +4551,10 @@ import {
       stopPolling();
 
       try {
-        const body: Record<string, unknown> = { content: messageText };
+        const body: Record<string, unknown> = {
+          content: messageText,
+          streamProtocolVersion: 2,
+        };
         if (uploadedImageUrl) body.imageUrl = uploadedImageUrl;
         const ctx: Record<string, string> = {
           currentPageUrl: window.location.href,
@@ -4567,23 +4562,6 @@ import {
           ...pageContext,
         };
         body.pageContext = ctx;
-
-        // Ship the last N turns so the server can skip its D1/KV history
-        // fetch on the happy path. addMessageToUI already pushed the current
-        // visitor message into the buffer, so we drop the trailing visitor
-        // entry to avoid duplicating it with `content` (the backend appends
-        // content as a synthetic visitor entry when client history is used).
-        const historyPayload = getHistoryPayload();
-        const trailing = historyPayload[historyPayload.length - 1];
-        const historyForServer =
-          trailing &&
-          trailing.role === "visitor" &&
-          trailing.content === messageText
-            ? historyPayload.slice(0, -1)
-            : historyPayload;
-        if (historyForServer.length > 0) {
-          body.history = historyForServer;
-        }
 
         const res = await fetch(
           `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`,
@@ -4669,6 +4647,54 @@ import {
               try {
                 const data = JSON.parse(line.slice(6));
 
+                if (data.completed?.protocolVersion === 2) {
+                  const completed = data.completed;
+                  botMessage = String(completed.finalText ?? "");
+                  hideTyping();
+
+                  if (markdownRenderTimer) {
+                    clearTimeout(markdownRenderTimer);
+                    markdownRenderTimer = null;
+                  }
+
+                  if (botMessage) {
+                    if (!botMessageEl) {
+                      botMessageEl = addMessageToUI("bot", botMessage);
+                    } else {
+                      botMessageEl.innerHTML = renderMarkdown(botMessage);
+                    }
+                    updateLastBotHistoryEntry(botMessage);
+                  }
+
+                  if (completed.sources?.length > 0 && botMessageEl) {
+                    addSourcesToMessage(botMessageEl, completed.sources);
+                  }
+
+                  if (completed.messageId) {
+                    renderedMessageIds.add(completed.messageId);
+                    lastSeenMessageId = completed.messageId;
+                    newestResponseId = completed.messageId;
+                    reportDelivered();
+                    reportRead();
+                  }
+
+                  lastMessageTimestamp = Date.now();
+                  conversationStatus = completed.conversationStatus;
+                  syncConversationModeUi();
+
+                  if (conversationStatus === "waiting_agent") {
+                    requestNotificationPermission();
+                  }
+                  if (conversationStatus === "closed") {
+                    stopPolling();
+                    stopHeartbeat();
+                    disconnectWebSocket();
+                  }
+
+                  scrollToBottom();
+                  continue;
+                }
+
                 if (data.inquiry) {
                   inquiryDetected = true;
                   continue;
@@ -4676,11 +4702,6 @@ import {
 
                 if (data.resolved) {
                   resolvedDetected = true;
-                  // Remove any bot bubble that was showing the [RESOLVED] token
-                  if (botMessageEl) {
-                    botMessageEl.closest(".rm-message-row")?.remove();
-                    botMessageEl = null;
-                  }
                   hideTyping();
                   continue;
                 }
@@ -4813,11 +4834,6 @@ import {
                   if (resolvedDetected) {
                     conversationStatus = "closed";
                     syncConversationModeUi();
-                    // Show the closing message as a final bot message
-                    addMessageToUI(
-                      "bot",
-                      "Glad I could help! Feel free to reach out anytime if you have more questions.",
-                    );
                     scrollToBottom();
                     stopPolling();
                     stopHeartbeat();
@@ -4849,13 +4865,10 @@ import {
         if (resolvedDetected && conversationStatus !== "closed") {
           conversationStatus = "closed";
           syncConversationModeUi();
-          addMessageToUI(
-            "bot",
-            "Glad I could help! Feel free to reach out anytime if you have more questions.",
-          );
           scrollToBottom();
           stopPolling();
           stopHeartbeat();
+          disconnectWebSocket();
         }
         clearTimeout(streamTimeout);
       } catch {
@@ -4872,7 +4885,9 @@ import {
     } finally {
       isStreaming = false;
       lastNewMessageAt = Date.now();
-      startPolling();
+      if (conversationStatus !== "closed") {
+        startPolling();
+      }
       isSending = false;
       sendBtn.disabled = false;
       input.disabled = false;
@@ -5008,11 +5023,10 @@ import {
       renderedMessageIds.add(messageId);
     }
 
-    // Record in the in-memory history buffer so we can ship the last N turns
-    // with subsequent POSTs and skip the server-side D1/KV history fetch.
-    // The id (when present) lets us prune the buffer on message:deleted.
-    // createdAt (when present, e.g. restored history) keeps real timestamps;
-    // live messages default to now.
+    // Record in the in-memory history buffer for optimistic rendering and
+    // realtime reconciliation. The id (when present) lets us prune the buffer
+    // on message:deleted. Restored history keeps its real timestamp; live
+    // messages default to now.
     pushHistoryEntry(role, content, messageId, createdAt);
 
     const primaryColor = getPrimaryColor();
@@ -5105,7 +5119,8 @@ import {
       const label = document.createElement("div");
       label.className = `rm-sender-label ${role}`;
       if (role === "bot") {
-        label.textContent = senderName || config?.botName || "AI Assistant";
+        const botDisplayName = senderName || config?.botName || "Assistant";
+        label.textContent = `${botDisplayName} · AI`;
       } else {
         label.textContent = senderName || config?.agentName || "Support Agent";
       }

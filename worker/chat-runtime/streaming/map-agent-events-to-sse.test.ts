@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createInitialAgentEventState,
+  emitCompletedEvent,
   emitSseEvent,
   emitStatusEvent,
   finalizeAgentEventState,
@@ -75,6 +76,39 @@ describe("map-agent-events-to-sse", () => {
       expect(chunks[0].type).toBe("status");
       expect(chunks[0].payload).toEqual({
         status: { phase: "thinking", message: "Looking that up..." },
+      });
+    });
+  });
+
+  describe("emitCompletedEvent", () => {
+    test("emits one versioned persisted completion envelope", () => {
+      const { controller, encoder, chunks } = createTestController();
+
+      emitCompletedEvent(controller, encoder, {
+        protocolVersion: 2,
+        messageId: "message-1",
+        finalText: "Glad I could help.",
+        conversationStatus: "closed",
+        sources: [
+          { title: "Closing an issue", url: "/help/close", type: "webpage" },
+        ],
+      });
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0].payload).toEqual({
+        completed: {
+          protocolVersion: 2,
+          messageId: "message-1",
+          finalText: "Glad I could help.",
+          conversationStatus: "closed",
+          sources: [
+            {
+              title: "Closing an issue",
+              url: "/help/close",
+              type: "webpage",
+            },
+          ],
+        },
       });
     });
   });
@@ -243,7 +277,7 @@ describe("map-agent-events-to-sse", () => {
         toolCall: { name: "tool_input_only", args: { only: "input" } },
       });
 
-      state = mapAgentStreamPartToSse({
+      mapAgentStreamPartToSse({
         part: {
           type: "tool-call",
           toolCallId: "call-3",
