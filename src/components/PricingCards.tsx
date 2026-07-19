@@ -34,7 +34,7 @@ const pricingPlans = [
     name: "ReplyMaven Standard",
     monthlyPrice: 49,
     annualPrice: 490,
-    description: "For growing teams that need more power.",
+    description: "For small teams handling growing ticket volume.",
     highlighted: true,
     badge: "Most Popular",
     features: [
@@ -53,7 +53,7 @@ const pricingPlans = [
     name: "ReplyMaven Business",
     monthlyPrice: 99,
     annualPrice: 990,
-    description: "For teams that run on customer experience.",
+    description: "For teams looking to retain support quality at scale.",
     highlighted: false,
     features: [
       "Everything in Standard",

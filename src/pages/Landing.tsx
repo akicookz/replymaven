@@ -50,17 +50,17 @@ const faqItems = [
   {
     question: "How does the AI agent resolve tickets?",
     answer:
-      "Maven answers from your actual knowledge base using retrieval-augmented generation, so every reply is grounded and cites its source. Connect your tools and it takes real actions — looking up an order, checking status, triggering a workflow — then resolves the ticket. When it isn't confident, it hands off to a human with full context.",
-  },
-  {
-    question: "What does 'keeps itself up to date' mean?",
-    answer:
-      "Every resolved conversation is a signal. Maven detects gaps in your help center and drafts new articles from real tickets, so your documentation stays current without anyone maintaining it. You review and publish in one click.",
+      "Maven answers from your docs, FAQs, and SOPs using retrieval-augmented generation, so every reply is grounded and cites its source. It triages the queue, and with your tools connected it takes real actions — looking up an order, checking status, triggering a workflow — then resolves the ticket. When it isn't confident, it hands off to a human with full context.",
   },
   {
     question: "What is MCP support?",
     answer:
-      "Your support stack is exposed over the Model Context Protocol, so any AI agent — yours or your customers' — can read tickets, look up orders, and resolve issues programmatically, with scoped, secure access. It's support built for an AI-native workflow.",
+      "Your support stack is exposed over the Model Context Protocol, so any AI agent — yours or your customers' — can read tickets, look up orders, resolve issues, and update your docs programmatically, with scoped, secure access. It's support built for an AI-native workflow.",
+  },
+  {
+    question: "Do you host our help center?",
+    answer:
+      "Yes. Publish a hosted help center from the same knowledge base Maven answers from — write once, and your articles power both the AI agent and your public docs site.",
   },
   {
     question: "Is my data secure?",
@@ -364,95 +364,6 @@ function FocusMock() {
   );
 }
 
-// ─── Section mock: Auto article generation ────────────────────────────────────
-
-const ARTICLE_DIFF: { type: "ctx" | "del" | "add"; text: string }[] = [
-  { type: "ctx", text: "Your invoice is generated at the start of each billing cycle." },
-  { type: "del", text: "You're charged the same flat amount every month." },
-  { type: "add", text: "If you change plans mid-cycle, your next invoice includes a one-time prorated charge for the days left on your old plan, plus your new plan's base price." },
-  { type: "add", text: "Every invoice after that is the flat monthly rate." },
-  { type: "ctx", text: "See the full breakdown under Settings → Billing → Invoices." },
-];
-
-function ArticleGenMock() {
-  return (
-    <Window className="p-4 sm:p-5 min-h-[360px] bg-[#0d0e12]">
-      {/* header */}
-      <div className="flex items-center gap-3 mb-4">
-        <span className="w-8 h-8 rounded-lg bg-brand/15 inline-flex items-center justify-center shrink-0">
-          <FileText className="w-4 h-4 text-brand" />
-        </span>
-        <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-ink-1">Maven updated a help article</p>
-          <p className="text-[10.5px] text-ink-7 flex items-center gap-1 truncate">
-            <span className="text-ink-5">Billing</span>
-            <ChevronRight className="w-2.5 h-2.5 shrink-0" />
-            Understanding your invoice
-            <span className="text-ink-8">· just now</span>
-          </p>
-        </div>
-        <span className="ml-auto shrink-0 text-[11px] px-2.5 py-1 rounded-full bg-brand text-white font-medium">
-          Publish update
-        </span>
-      </div>
-
-      {/* diff */}
-      <div className="rounded-[12px] border border-hairline bg-black/20 overflow-hidden">
-        <div className="flex items-center justify-between px-3.5 py-2 border-b border-hairline">
-          <Mono className="text-ink-7">Suggested revision</Mono>
-          <span className="font-mono text-[10.5px]">
-            <span className="text-dot-green">+2</span> <span className="text-destructive">−1</span>
-          </span>
-        </div>
-        <div className="py-1.5 text-[12.5px] leading-[1.55]">
-          {ARTICLE_DIFF.map((l, i) => (
-            <div
-              key={i}
-              className={cn(
-                "flex gap-2.5 px-3.5 py-1",
-                l.type === "add" && "bg-dot-green/[0.08]",
-                l.type === "del" && "bg-destructive/[0.08]",
-              )}
-            >
-              <span
-                className={cn(
-                  "w-2.5 shrink-0 text-center font-mono select-none",
-                  l.type === "add" ? "text-dot-green" : l.type === "del" ? "text-destructive" : "text-ink-8",
-                )}
-              >
-                {l.type === "add" ? "+" : l.type === "del" ? "–" : ""}
-              </span>
-              <span
-                className={cn(
-                  l.type === "add"
-                    ? "text-ink-2"
-                    : l.type === "del"
-                      ? "text-ink-6 line-through decoration-destructive/40"
-                      : "text-ink-5",
-                )}
-              >
-                {l.text}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* footer */}
-      <div className="flex items-center gap-2 mt-3.5">
-        <span className="text-[10.5px] text-ink-6">
-          Spotted in <span className="text-ink-3">9 conversations</span> about unexpected charges this week
-        </span>
-        <span className="ml-auto flex items-center gap-1">
-          {["Marcus B.", "Anna L.", "+7"].map((n) => (
-            <span key={n} className="text-[10px] px-2 py-0.5 rounded-full bg-white/[0.05] text-ink-6">{n}</span>
-          ))}
-        </span>
-      </div>
-    </Window>
-  );
-}
-
 // ─── Section mock: MCP / AI-native workflow ───────────────────────────────────
 
 const MCP_TOOLS = [
@@ -460,6 +371,7 @@ const MCP_TOOLS = [
   { name: "get_subscription", desc: "Plan, seats & billing status" },
   { name: "resolve_ticket", desc: "Reply and close with a source" },
   { name: "search_kb", desc: "Grounded answer from your docs" },
+  { name: "update_article", desc: "Edit a help article in place" },
 ];
 
 function MCPMock() {
@@ -827,14 +739,14 @@ function Landing() {
         <div className="relative max-w-6xl mx-auto px-6">
           <a href="#platform" className="inline-flex items-center gap-2 rounded-full border border-hairline-strong bg-white/[0.03] pl-1.5 pr-3 py-1 text-[12px] text-ink-4 hover:text-ink-1 transition-colors mb-7 animate-in fade-in slide-in-from-bottom-2 duration-500">
             <span className="px-2 py-0.5 rounded-full bg-brand/15 text-brand font-medium text-[11px]">New</span>
-            MCP support for AI-native workflows
+            Pull conversations & update docs over MCP
             <ChevronRight className="w-3.5 h-3.5" />
           </a>
           <h1 className="font-heading text-[2.75rem] sm:text-[4rem] lg:text-[4.5rem] font-medium text-ink-1 tracking-[-0.03em] leading-[1.0] max-w-4xl animate-in fade-in slide-in-from-bottom-3 duration-700">
-            The support platform for founding teams
+            The support platform for teams who see support as a growth channel
           </h1>
           <p className="mt-6 text-[1.15rem] text-ink-5 leading-relaxed max-w-2xl animate-in fade-in slide-in-from-bottom-3 duration-700 delay-100 fill-mode-both">
-            Delightful software for human support, an AI agent that actually resolves tickets, and a help desk that keeps itself up to date. Built for teams who'd rather ship.
+            Delightful software for the humans on support, and an AI agent that actually resolves tickets — trained on your docs, FAQs, and SOPs, fitted with actions.
           </p>
           <div className="mt-9 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 duration-700 delay-200 fill-mode-both">
             <Cta variant="primary" size="lg" onClick={handleGenericCta}>
@@ -878,9 +790,9 @@ function Landing() {
       <section className="py-20 md:py-28 px-6 border-t border-hairline">
         <div className="max-w-5xl mx-auto">
           <p className="font-heading text-[1.9rem] sm:text-[2.6rem] font-medium tracking-[-0.02em] leading-[1.12]">
-            <span className="text-ink-1">A new shape of support.</span>{" "}
+            <span className="text-ink-1">Support is a growth channel.</span>{" "}
             <span className="text-ink-6">
-              ReplyMaven gives founding teams a help desk their customers love and their AI agents can run — resolving tickets, writing docs, and staying current on its own.
+              ReplyMaven helps founding teams answer fast, resolve completely, and take care of customers so well they tell other people — with an AI agent doing the heavy lifting.
             </span>
           </p>
         </div>
@@ -890,12 +802,12 @@ function Landing() {
       <div id="platform">
         <ValueSection
           num="1.0 — Human support"
-          title={<>Delightful software<br className="hidden sm:block" /> for human support</>}
-          body="A keyboard-first, three-pane inbox with a focus mode for deep triage. Reply, snooze, prioritize, and resolve at the speed of thought — no clutter, no busywork."
+          title={<>Clear your queue in<br className="hidden sm:block" /> ten minutes a day</>}
+          body="A keyboard-first inbox with a focus mode built for flow. Hit Shift+Tab and Maven drafts the reply from your own docs — review, make it yours, send. Every customer gets a fast, personal answer; you get your morning back."
           index={[
             { n: "1.1", label: "Unified inbox" },
             { n: "1.2", label: "Focus mode" },
-            { n: "1.3", label: "Keyboard-first" },
+            { n: "1.3", label: "Shift+Tab AI drafts" },
             { n: "1.4", label: "Snooze & priority" },
           ]}
         >
@@ -915,12 +827,12 @@ function Landing() {
 
         <ValueSection
           num="2.0 — AI agent"
-          title={<>An AI support agent<br className="hidden sm:block" /> that resolves tickets</>}
-          body="Trained on your docs and connected to your tools, Maven answers with sources, takes real actions like looking up an order, and hands off to a human the moment it's unsure."
+          title="Your first CS hire"
+          body="Maven learns from your docs, FAQs, and SOPs. It answers with cited sources, triages the queue, looks up orders and subscriptions, and takes real actions — then hands off to a human the moment it's unsure."
           index={[
-            { n: "2.1", label: "Cites every source" },
-            { n: "2.2", label: "Executes actions" },
-            { n: "2.3", label: "Auto-draft replies" },
+            { n: "2.1", label: "Learns docs, FAQs & SOPs" },
+            { n: "2.2", label: "Cites every source" },
+            { n: "2.3", label: "Takes real actions" },
             { n: "2.4", label: "Confidence handoff" },
           ]}
         >
@@ -928,28 +840,14 @@ function Landing() {
         </ValueSection>
 
         <ValueSection
-          num="3.0 — Self-updating"
-          title={<>A help desk that<br className="hidden sm:block" /> keeps itself up to date</>}
-          body="Every resolved ticket is a signal. Maven spots gaps and drafts new help articles from real conversations, so your knowledge base stays current without anyone maintaining it."
+          num="3.0 — AI-native"
+          title={<>Run your help desk<br className="hidden sm:block" /> from any AI agent</>}
+          body="A native MCP server exposes your support stack to any agent. Pull open conversations into Claude or Cursor, look up orders, resolve tickets, and update your docs — with scoped, secure access."
           index={[
-            { n: "3.1", label: "Auto-drafted articles" },
-            { n: "3.2", label: "Gap detection" },
-            { n: "3.3", label: "One-click publish" },
-            { n: "3.4", label: "Always current" },
-          ]}
-        >
-          <ArticleGenMock />
-        </ValueSection>
-
-        <ValueSection
-          num="4.0 — AI-native"
-          title={<>MCP support for a<br className="hidden sm:block" /> true AI-native workflow</>}
-          body="Expose your support stack over the Model Context Protocol so any agent — yours or your customers' — can read tickets, look up orders, and resolve issues programmatically, with scoped, secure access."
-          index={[
-            { n: "4.1", label: "Native MCP server" },
-            { n: "4.2", label: "Typed tool calls" },
-            { n: "4.3", label: "Scoped access" },
-            { n: "4.4", label: "Agent-to-agent" },
+            { n: "3.1", label: "Native MCP server" },
+            { n: "3.2", label: "Pull conversations" },
+            { n: "3.3", label: "Update docs" },
+            { n: "3.4", label: "Scoped access" },
           ]}
         >
           <MCPMock />
@@ -962,10 +860,10 @@ function Landing() {
           <div className="max-w-2xl mb-14">
             <Mono className="text-ink-7">Pricing</Mono>
             <h2 className="font-heading text-[2.2rem] sm:text-[3rem] font-medium tracking-[-0.02em] leading-[1.04] text-ink-1 mt-3">
-              Founder-friendly pricing
+              A fraction of your first support hire
             </h2>
             <p className="mt-4 text-[1.05rem] text-ink-5 leading-relaxed">
-              Start free for 7 days. Scale as your team and ticket volume grow.
+              Start free for 7 days. From $19/mo — scale as your ticket volume grows.
             </p>
           </div>
           <LandingPricing
@@ -1025,7 +923,7 @@ function Landing() {
         <div aria-hidden className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] rounded-full opacity-[0.16] blur-[120px]" style={{ background: "radial-gradient(closest-side, #2563eb, transparent)" }} />
         <div className="relative max-w-3xl mx-auto text-center">
           <h2 className="font-heading text-[2.4rem] sm:text-[3.4rem] font-medium tracking-[-0.025em] leading-[1.04] text-ink-1">
-            Support, handled.<br />Available today.
+            Support worth<br />talking about.
           </h2>
           <div className="mt-9 flex items-center justify-center gap-3">
             <Cta variant="primary" size="lg" onClick={handleGenericCta}>
@@ -1048,7 +946,7 @@ function Landing() {
                 <LogoIcon className="h-5 w-auto text-foreground shrink-0" />
                 <span className="font-medium tracking-tight text-[15px] text-ink-1">ReplyMaven</span>
               </div>
-              <p className="text-sm text-ink-6 leading-relaxed max-w-xs">The support platform for founding teams.</p>
+              <p className="text-sm text-ink-6 leading-relaxed max-w-xs">The support platform for teams who see support as a growth channel.</p>
             </div>
             {[
               { h: "Platform", links: [{ label: "Human support", href: "#platform" }, { label: "AI agent", href: "#platform" }, { label: "MCP", href: "#platform" }, { label: "Pricing", href: "#pricing" }] },
