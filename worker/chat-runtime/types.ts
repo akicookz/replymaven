@@ -516,8 +516,6 @@ export interface TurnTelemetry {
   plannerStepMs?: number[];
   retrievalMs?: number[];
   toolCallMs?: number[];
-  fastPathMode?: "off" | "shadow" | "on";
-  fastPathCandidate?: FastPathKind | null;
   fastPathSelected?: FastPathKind | null;
   modelCallCount?: number;
   modelCallsByStage?: Record<string, number>;

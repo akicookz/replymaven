@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   identifyFastPath,
   identifyHardGate,
-  parseFastPathMode,
 } from "./identify-fast-path";
 
 describe("identifyFastPath", () => {
@@ -129,17 +128,6 @@ describe("identifyFastPath", () => {
       }),
     ).toBeNull();
   });
-});
-
-test.each([
-  ["off", "off"],
-  ["shadow", "shadow"],
-  ["on", "on"],
-  ["ON", "on"],
-  [undefined, "shadow"],
-  ["unexpected", "shadow"],
-] as const)("parses fast-path mode %s", (input, expected) => {
-  expect(parseFastPathMode(input)).toBe(expected);
 });
 
 test.each(["waiting_agent", "agent_replied"])(

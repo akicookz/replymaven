@@ -12,14 +12,7 @@ interface IdentifyFastPathInput {
   hasPriorityInstructions?: boolean;
 }
 
-export type FastPathMode = "off" | "shadow" | "on";
 export type HardGateDecision = "muted" | "agent_mode" | null;
-
-export function parseFastPathMode(value: string | undefined): FastPathMode {
-  const normalized = value?.trim().toLowerCase();
-  if (normalized === "off" || normalized === "on") return normalized;
-  return "shadow";
-}
 
 export function identifyHardGate(input: {
   status: string;

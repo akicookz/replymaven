@@ -39,7 +39,6 @@ import { decryptEnabledToolHeaders } from "../../services/encryption-service";
 import {
   identifyFastPath,
   identifyHardGate,
-  parseFastPathMode,
 } from "../routing/identify-fast-path";
 import { findBestFaqMatch } from "../prompt/build-compiled-faq-context";
 
@@ -348,27 +347,22 @@ export async function handleWidgetMessageTurn(
     })),
     context.payload.content,
   );
-  const fastPathMode = parseFastPathMode(context.env.CHAT_FAST_PATH_MODE);
   const conversationMetadata = parseConversationMetadata(conversation.metadata);
   const agentHandbackInstructions =
     typeof conversationMetadata.agentHandbackInstructions === "string"
       ? conversationMetadata.agentHandbackInstructions
       : null;
-  const fastPathCandidate =
-    fastPathMode === "off"
-      ? null
-      : identifyFastPath({
-          message: context.payload.content,
-          scopeDecision,
-          faqMatch,
-          hasPendingWorkflow:
-            chatState.awaitingHandoffConfirmation ||
-            chatState.awaitingContactFields.length > 0,
-          hasImage: Boolean(context.payload.imageUrl),
-          hasPriorityInstructions:
-            enabledGuidelines.length > 0 || Boolean(agentHandbackInstructions),
-        });
-  const fastPathDecision = fastPathMode === "on" ? fastPathCandidate : null;
+  const fastPathDecision = identifyFastPath({
+    message: context.payload.content,
+    scopeDecision,
+    faqMatch,
+    hasPendingWorkflow:
+      chatState.awaitingHandoffConfirmation ||
+      chatState.awaitingContactFields.length > 0,
+    hasImage: Boolean(context.payload.imageUrl),
+    hasPriorityInstructions:
+      enabledGuidelines.length > 0 || Boolean(agentHandbackInstructions),
+  });
   const hasIndexedResources = allResources.some(
     (resource) => resource.status === "indexed",
   );
@@ -376,10 +370,8 @@ export async function handleWidgetMessageTurn(
   logInfo(
     "widget_turn.fast_path_evaluated",
     buildWidgetTurnLogContext(context, turnId, {
-      mode: fastPathMode,
-      candidate: fastPathCandidate?.kind ?? null,
       selected: fastPathDecision?.kind ?? null,
-      reason: fastPathCandidate?.reason ?? null,
+      reason: fastPathDecision?.reason ?? null,
       faqScore: faqMatch?.score ?? null,
       faqPrecision: faqMatch?.precision ?? null,
       faqRecall: faqMatch?.recall ?? null,
@@ -425,8 +417,6 @@ export async function handleWidgetMessageTurn(
     const telemetry: TurnTelemetry = {
       startedAt,
       routeStartedAt: startedAt,
-      fastPathMode,
-      fastPathCandidate: fastPathCandidate?.kind ?? null,
       fastPathSelected: fastPathDecision?.kind ?? null,
     };
 
