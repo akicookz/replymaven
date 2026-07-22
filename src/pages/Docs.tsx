@@ -18,8 +18,20 @@ import {
   Terminal,
   Layers,
   Smartphone,
+  Plug,
 } from "lucide-react";
 import { Cta } from "@/components/ui/cta";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
+  MCP_TOOL_DOCS,
+  type McpToolDoc,
+  type McpToolScope,
+} from "@/lib/mcp-tool-docs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +53,16 @@ const navItems: NavItem[] = [
       { id: "installation", label: "Installation" },
       { id: "basic-setup", label: "Basic Setup" },
       { id: "how-it-works", label: "How It Works" },
+    ],
+  },
+  {
+    id: "mcp",
+    label: "MCP",
+    icon: <Plug className="w-4 h-4" />,
+    children: [
+      { id: "mcp-overview", label: "Connect a Client" },
+      { id: "mcp-tools", label: "Available Tools" },
+      { id: "mcp-permissions", label: "Permissions" },
     ],
   },
   {
@@ -222,7 +244,12 @@ function Callout({
 function PropTable({
   rows,
 }: {
-  rows: { name: string; type: string; required?: boolean; description: string }[];
+  rows: readonly {
+    name: string;
+    type: string;
+    required?: boolean;
+    description: string;
+  }[];
 }) {
   return (
     <div className="rounded-xl border border-border overflow-hidden my-4">
@@ -303,6 +330,61 @@ function IC({ children }: { children: React.ReactNode }) {
     <code className="bg-muted px-1.5 py-0.5 rounded-md text-[13px] font-mono text-foreground">
       {children}
     </code>
+  );
+}
+
+// ─── MCP Tool Reference ──────────────────────────────────────────────────────
+
+function getMcpScopeLabel(scope: McpToolScope): string {
+  switch (scope) {
+    case "projects:read":
+      return "Read projects, resources, and conversations";
+    case "conversations:reply":
+      return "Send agent replies";
+    case "resources:write":
+      return "Create and update knowledge resources";
+  }
+}
+
+function McpToolReference({ tool }: { tool: McpToolDoc }) {
+  return (
+    <AccordionItem
+      value={tool.name}
+      className="rounded-xl bg-muted/20 px-4 shadow-sm"
+    >
+      <AccordionTrigger className="py-4 hover:no-underline">
+        <div className="min-w-0 pr-3 text-left">
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="font-mono text-[13px] font-semibold text-primary">
+              {tool.name}
+            </code>
+            <span
+              className={
+                tool.readOnly
+                  ? "rounded-full bg-primary/[0.08] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary"
+                  : "rounded-full bg-warning/[0.10] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning"
+              }
+            >
+              {tool.readOnly ? "Read" : "Write"}
+            </span>
+          </div>
+          <p className="mt-1.5 text-sm font-normal leading-relaxed text-muted-foreground">
+            {tool.description}
+          </p>
+        </div>
+      </AccordionTrigger>
+      <AccordionContent className="pb-4">
+        <div className="rounded-lg bg-background/60 px-3 py-2.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Required permission
+          </p>
+          <p className="mt-1 text-sm text-foreground">
+            <IC>{tool.scope}</IC> — {getMcpScopeLabel(tool.scope)}
+          </p>
+        </div>
+        <PropTable rows={tool.inputs} />
+      </AccordionContent>
+    </AccordionItem>
   );
 }
 
@@ -476,6 +558,66 @@ function Docs() {
                 agent via Telegram
               </li>
             </ol>
+
+            {/* ── MCP ─────────────────────────────────────────────────── */}
+            <SectionHeading id="mcp-overview">
+              Model Context Protocol (MCP)
+            </SectionHeading>
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              Connect an MCP-compatible AI client to ReplyMaven to inspect
+              projects, read support conversations, reply as an agent, and
+              manage knowledge resources. ReplyMaven uses OAuth, so each client
+              only receives the permissions you approve.
+            </p>
+            <CodeBlock
+              title="Connect with Claude Code"
+              language="bash"
+              code="claude mcp add --transport http --scope user replymaven https://replymaven.com/api/mcp"
+            />
+            <Callout type="info">
+              The remote MCP endpoint is <IC>https://replymaven.com/api/mcp</IC>.
+              Your client opens ReplyMaven in the browser to authorize access.
+            </Callout>
+
+            <SectionHeading id="mcp-tools" level={3}>
+              Available Tools
+            </SectionHeading>
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              ReplyMaven currently exposes {MCP_TOOL_DOCS.length} tools. Expand
+              a tool to see its required permission and complete input schema.
+              Write tools require an explicit <IC>confirm: true</IC> value.
+            </p>
+            <Accordion type="multiple" className="space-y-2">
+              {MCP_TOOL_DOCS.map((tool) => (
+                <McpToolReference key={tool.name} tool={tool} />
+              ))}
+            </Accordion>
+
+            <SectionHeading id="mcp-permissions" level={3}>
+              Permissions
+            </SectionHeading>
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              Permissions are approved during OAuth authorization and can be
+              revoked at any time from the dashboard.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {(
+                [
+                  "projects:read",
+                  "conversations:reply",
+                  "resources:write",
+                ] as const
+              ).map((scope) => (
+                <div key={scope} className="rounded-xl bg-muted/20 p-4">
+                  <code className="font-mono text-xs font-semibold text-primary">
+                    {scope}
+                  </code>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                    {getMcpScopeLabel(scope)}
+                  </p>
+                </div>
+              ))}
+            </div>
 
             {/* ── Widget API ──────────────────────────────────────────── */}
             <SectionHeading id="open-close">

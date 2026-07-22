@@ -35,6 +35,7 @@ import {
 import { ToolService } from "./services/tool-service";
 import { GuidelineService } from "./services/guideline-service";
 import { HelpdeskService } from "./services/helpdesk-service";
+import { McpOAuthService } from "./services/mcp-oauth-service";
 import { renderHelpIndex } from "./helpdesk-render/render-help-index";
 import { renderHelpCategory } from "./helpdesk-render/render-help-category";
 import { renderHelpArticle } from "./helpdesk-render/render-help-article";
@@ -57,7 +58,10 @@ import {
   isEncrypted,
 } from "./services/encryption-service";
 import { BillingService } from "./services/billing-service";
-import { TeamService } from "./services/team-service";
+import {
+  addProjectAccessToMembers,
+  TeamService,
+} from "./services/team-service";
 import {
   getTeamContext,
   invalidateTeamContext,
@@ -2483,6 +2487,26 @@ const app = new Hono<HonoAppContext>()
   .post("/api/mcp/authorize", handleMcpAuthorizePost)
   .post("/api/mcp/token", handleMcpToken)
   .post("/api/mcp/revoke", handleMcpTokenRevocation)
+  .get("/api/mcp/connections", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const service = new McpOAuthService(c.get("db"));
+    const connections = await service.listConnections(user.id);
+    return c.json({ connections });
+  })
+  .delete("/api/mcp/connections/:authorizationId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const service = new McpOAuthService(c.get("db"));
+    const revoked = await service.revokeAuthorization(
+      c.req.param("authorizationId"),
+      user.id,
+    );
+    if (!revoked) return c.json({ error: "Connection not found" }, 404);
+    return c.json({ ok: true });
+  })
   .all("/api/mcp", async (c) => handleMcpRequest(c))
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -2493,6 +2517,12 @@ const app = new Hono<HonoAppContext>()
   .post("/api/onboarding", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
+    if (c.get("activeRole") === "member") {
+      return c.json(
+        { error: "Only owners and admins can create projects" },
+        403,
+      );
+    }
 
     const body = await c.req.json();
     const parsed = validate(onboardingStep1Schema, body);
@@ -2512,7 +2542,7 @@ const app = new Hono<HonoAppContext>()
     const displayDomain = domain.replace(/^www\./, "");
     const baseSlug = slugify(displayDomain);
 
-    // Resolve to owner's id so team members see/create projects on the owner's
+    // Resolve to the active owner's id so admins create projects on the team
     // account, not under their own user id (which would orphan the project).
     const effectiveUserId = c.get("effectiveUserId") ?? user.id;
 
@@ -3248,17 +3278,16 @@ const app = new Hono<HonoAppContext>()
 
     const members = await teamService.getAllMembers(effectiveUserId);
 
-    // Per-member project scope is only meaningful to (and only managed by)
-    // owners and admins of the active team — don't expose it to regular members.
+    // Everyone can see an accurate project count, but only owners and admins
+    // receive the project ids needed to manage another member's access.
     const activeRole = c.get("activeRole");
     const isPrivileged = activeRole === "owner" || activeRole === "admin";
-    const projectMap = isPrivileged
-      ? await teamService.getMemberProjectMap(effectiveUserId)
-      : {};
-    const membersWithProjects = members.map((m) => ({
-      ...m,
-      projectIds: projectMap[m.id] ?? [],
-    }));
+    const projectMap = await teamService.getMemberProjectMap(effectiveUserId);
+    const membersWithProjects = addProjectAccessToMembers(
+      members,
+      projectMap,
+      isPrivileged,
+    );
     return c.json({ members: membersWithProjects, ownerId: effectiveUserId });
   })
 

@@ -1,6 +1,9 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Building2,
+  ChevronsUpDown,
   UserPlus,
   Loader2,
   Mail,
@@ -35,12 +38,21 @@ import {
   DialogContent,
   DialogFooter,
   DialogHeader,
+  DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useTeam, type TeamMember } from "@/hooks/use-team";
+import { useTeams } from "@/hooks/use-teams";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useSession } from "@/lib/auth-client";
+import {
+  createProjectAccess,
+  getSelectedProjectIds,
+  type ProjectAccessSelection,
+} from "@/lib/project-access";
+import { formatProjectAccessLabel } from "@/lib/team-permissions";
+import { cn } from "@/lib/utils";
 import { MobileMenuButton } from "@/components/PageHeader";
 
 // ─── Project access types & helpers ─────────────────────────────────────────────
@@ -48,6 +60,7 @@ import { MobileMenuButton } from "@/components/PageHeader";
 interface ProjectLite {
   id: string;
   name: string;
+  domain: string | null;
 }
 
 function useProjectsList() {
@@ -61,21 +74,6 @@ function useProjectsList() {
   });
 }
 
-interface ProjectAccess {
-  accessAllProjects: boolean;
-  projectIds: string[];
-}
-
-/** Short human label for a member's project-access scope. */
-function accessLabel(
-  access: { accessAllProjects: boolean; projectIds: string[]; role: "admin" | "member" },
-): string {
-  if (access.role === "admin" || access.accessAllProjects) return "All projects";
-  const n = access.projectIds.length;
-  if (n === 0) return "No projects";
-  return n === 1 ? "1 project" : `${n} projects`;
-}
-
 // ─── Project Access Picker ──────────────────────────────────────────────────────
 
 function ProjectAccessPicker({
@@ -84,81 +82,59 @@ function ProjectAccessPicker({
   onChange,
 }: {
   projects: ProjectLite[];
-  value: ProjectAccess;
-  onChange: (next: ProjectAccess) => void;
+  value: ProjectAccessSelection;
+  onChange: (next: ProjectAccessSelection) => void;
 }) {
-  const selected = new Set(value.projectIds);
+  const allProjectIds = projects.map((project) => project.id);
+  const selected = new Set(
+    getSelectedProjectIds(value, allProjectIds),
+  );
 
-  const segBtn = (active: boolean) =>
-    `flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-      active
-        ? "bg-primary text-primary-foreground"
-        : "bg-muted/60 text-muted-foreground hover:bg-accent hover:text-foreground"
-    }`;
+  function toggleProject(projectId: string, checked: boolean): void {
+    const next = new Set(selected);
+    if (checked) next.add(projectId);
+    else next.delete(projectId);
+    onChange(createProjectAccess(allProjectIds, [...next]));
+  }
 
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium text-foreground">
-        Project access
-      </label>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => onChange({ accessAllProjects: true, projectIds: [] })}
-          className={segBtn(value.accessAllProjects)}
-        >
-          All projects
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            onChange({ accessAllProjects: false, projectIds: value.projectIds })
-          }
-          className={segBtn(!value.accessAllProjects)}
-        >
-          Specific projects
-        </button>
-      </div>
-
-      {!value.accessAllProjects && (
-        <div className="rounded-xl bg-muted/40 p-1 max-h-56 overflow-y-auto">
-          {projects.length === 0 ? (
-            <p className="text-sm text-muted-foreground px-3 py-2">
-              No projects yet.
-            </p>
-          ) : (
-            projects.map((p) => {
-              const checked = selected.has(p.id);
-              return (
-                <label
-                  key={p.id}
-                  className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent cursor-pointer"
-                >
-                  <Checkbox
-                    checked={checked}
-                    onCheckedChange={(v) => {
-                      const next = new Set(selected);
-                      if (v) next.add(p.id);
-                      else next.delete(p.id);
-                      onChange({
-                        accessAllProjects: false,
-                        projectIds: [...next],
-                      });
-                    }}
-                  />
-                  <span className="text-sm text-foreground truncate">
-                    {p.name}
-                  </span>
-                </label>
-              );
-            })
-          )}
-        </div>
-      )}
-      {!value.accessAllProjects && value.projectIds.length === 0 && (
-        <p className="text-xs text-muted-foreground">
-          Select at least one project.
+    <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+      {projects.length === 0 ? (
+        <p className="rounded-xl bg-muted/40 px-3 py-4 text-sm text-muted-foreground">
+          No projects yet.
         </p>
+      ) : (
+        projects.map((project) => {
+          const checked = selected.has(project.id);
+          return (
+            <label
+              key={project.id}
+              className={cn(
+                "flex min-h-16 cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 transition-[background-color,box-shadow]",
+                checked
+                  ? "bg-primary/10 shadow-[inset_0_0_0_1px_var(--primary)]"
+                  : "bg-muted/40 shadow-[inset_0_0_0_1px_transparent] hover:bg-muted/60",
+              )}
+            >
+              <Checkbox
+                checked={checked}
+                onCheckedChange={(nextChecked) =>
+                  toggleProject(project.id, nextChecked === true)
+                }
+                aria-label={`Select ${project.name}`}
+                className="size-5 rounded-md"
+              />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium text-foreground">
+                  {project.name}
+                </span>
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                  {project.domain ?? "Customer support project"}
+                </span>
+              </span>
+            </label>
+          );
+        })
       )}
     </div>
   );
@@ -175,7 +151,7 @@ function InviteForm({
 }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"admin" | "member">("member");
-  const [access, setAccess] = useState<ProjectAccess>({
+  const [access, setAccess] = useState<ProjectAccessSelection>({
     accessAllProjects: true,
     projectIds: [],
   });
@@ -368,7 +344,7 @@ function MemberRow({
   const queryClient = useQueryClient();
   const [copied, setCopied] = useState(false);
   const [accessOpen, setAccessOpen] = useState(false);
-  const [accessDraft, setAccessDraft] = useState<ProjectAccess>({
+  const [accessDraft, setAccessDraft] = useState<ProjectAccessSelection>({
     accessAllProjects: member.accessAllProjects,
     projectIds: member.projectIds,
   });
@@ -398,7 +374,7 @@ function MemberRow({
   });
 
   const accessMutation = useMutation({
-    mutationFn: async (next: ProjectAccess) => {
+    mutationFn: async (next: ProjectAccessSelection) => {
       const res = await fetch(`/api/team/${member.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -476,7 +452,7 @@ function MemberRow({
           ) : (
             <Folder className="w-3.5 h-3.5" />
           )}
-          {accessLabel(member)}
+          {formatProjectAccessLabel(member)}
         </span>
       </td>
       <td className="px-4 py-3">
@@ -535,7 +511,7 @@ function MemberRow({
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                 >
                   <Settings2 className="w-4 h-4 shrink-0" />
-                  Manage Project Access
+                  Manage Access
                 </button>
               )}
               <button
@@ -552,15 +528,15 @@ function MemberRow({
         </div>
 
       <Dialog open={accessOpen} onOpenChange={setAccessOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Project access</DialogTitle>
+        <DialogContent className="gap-4 rounded-2xl p-5 sm:max-w-[420px]">
+          <DialogHeader className="gap-1 pr-8">
+            <DialogTitle className="text-lg leading-tight">
+              Manage access
+            </DialogTitle>
+            <DialogDescription>
+              Select the projects {member.email} can access.
+            </DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground -mt-2">
-            Choose which projects{" "}
-            <span className="font-medium text-foreground">{member.email}</span>{" "}
-            can access.
-          </p>
           <ProjectAccessPicker
             projects={projects}
             value={accessDraft}
@@ -571,17 +547,24 @@ function MemberRow({
               {accessMutation.error.message}
             </p>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAccessOpen(false)}>
+          <DialogFooter className="mt-1 flex-row justify-end">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setAccessOpen(false)}
+              className="active:scale-[0.96]"
+            >
               Cancel
             </Button>
             <Button
+              size="sm"
               onClick={() => accessMutation.mutate(accessDraft)}
               disabled={
                 accessMutation.isPending ||
                 (!accessDraft.accessAllProjects &&
                   accessDraft.projectIds.length === 0)
               }
+              className="active:scale-[0.96]"
             >
               {accessMutation.isPending && (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -597,6 +580,87 @@ function MemberRow({
 }
 
 // ─── Team Page ────────────────────────────────────────────────────────────────
+
+function TeamSwitcher() {
+  const [open, setOpen] = useState(false);
+  const [isSwitching, setIsSwitching] = useState(false);
+  const { data } = useTeams();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const teams = data?.teams ?? [];
+  const activeTeam = teams.find((team) => team.isActive);
+
+  if (teams.length <= 1) return null;
+
+  async function switchTeam(teamId: string) {
+    setOpen(false);
+    if (isSwitching || teamId === data?.activeTeamId) return;
+
+    setIsSwitching(true);
+    try {
+      const response = await fetch("/api/teams/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teamId }),
+      });
+      if (!response.ok) throw new Error("Failed to switch team");
+
+      queryClient.clear();
+      navigate("/app");
+    } finally {
+      setIsSwitching(false);
+    }
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={isSwitching}
+          className="inline-flex h-8 min-w-0 max-w-56 items-center gap-2 rounded-lg bg-card/70 px-2.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-card disabled:opacity-60"
+        >
+          <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{activeTeam?.name ?? "Select team"}</span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-60 p-1">
+        <p className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          Teams
+        </p>
+        <div className="space-y-0.5">
+          {teams.map((team) => (
+            <button
+              key={team.id}
+              type="button"
+              onClick={() => switchTeam(team.id)}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors",
+                team.isActive
+                  ? "bg-accent font-medium text-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              <span className="flex-1 truncate">
+                {team.name}
+                {team.own && (
+                  <span className="text-muted-foreground"> (you)</span>
+                )}
+              </span>
+              <span className="shrink-0 text-[11px] capitalize text-muted-foreground">
+                {team.role}
+              </span>
+              {team.isActive && (
+                <Check className="h-4 w-4 shrink-0 text-primary" />
+              )}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 function Team() {
   const [showInvite, setShowInvite] = useState(false);
@@ -625,8 +689,13 @@ function Team() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
           <MobileMenuButton />
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-foreground">Team</h1>
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="shrink-0 text-xl font-bold text-foreground md:text-2xl">
+                Team
+              </h1>
+              <TeamSwitcher />
+            </div>
             <p className="text-xs md:text-sm text-muted-foreground mt-1">
               {seatCurrent} of {seatMax} seat{seatMax !== 1 ? "s" : ""} used
             </p>

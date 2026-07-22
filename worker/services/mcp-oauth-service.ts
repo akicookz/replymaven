@@ -1,4 +1,4 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import {
   mcpOAuthAuthCodes,
@@ -67,10 +67,80 @@ export interface ValidatedMcpToken {
   scopes: McpOAuthScope[];
 }
 
+export interface McpOAuthConnection {
+  id: string;
+  clientId: string;
+  clientName: string;
+  scopes: McpOAuthScope[];
+  connectedAt: Date;
+}
+
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 export class McpOAuthService {
   constructor(private db: AppDb) {}
+
+  async listConnections(userId: string): Promise<McpOAuthConnection[]> {
+    const rows = await this.db
+      .select({
+        id: mcpOAuthAuthorizations.id,
+        clientId: mcpOAuthAuthorizations.clientId,
+        clientName: mcpOAuthClients.clientName,
+        scope: mcpOAuthAuthorizations.scope,
+        connectedAt: mcpOAuthAuthorizations.createdAt,
+      })
+      .from(mcpOAuthAuthorizations)
+      .innerJoin(
+        mcpOAuthClients,
+        eq(mcpOAuthAuthorizations.clientId, mcpOAuthClients.id),
+      )
+      .where(
+        and(
+          eq(mcpOAuthAuthorizations.userId, userId),
+          isNull(mcpOAuthAuthorizations.revokedAt),
+        ),
+      )
+      .orderBy(desc(mcpOAuthAuthorizations.createdAt));
+
+    return rows.map((row) => ({
+      id: row.id,
+      clientId: row.clientId,
+      clientName: row.clientName,
+      scopes: parseScopeString(row.scope),
+      connectedAt: row.connectedAt,
+    }));
+  }
+
+  async revokeAuthorization(
+    authorizationId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: mcpOAuthAuthorizations.id })
+      .from(mcpOAuthAuthorizations)
+      .where(
+        and(
+          eq(mcpOAuthAuthorizations.id, authorizationId),
+          eq(mcpOAuthAuthorizations.userId, userId),
+          isNull(mcpOAuthAuthorizations.revokedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!rows[0]) return false;
+
+    const now = new Date();
+    await this.db
+      .update(mcpOAuthAuthorizations)
+      .set({ revokedAt: now })
+      .where(eq(mcpOAuthAuthorizations.id, authorizationId));
+    await this.db
+      .update(mcpOAuthTokens)
+      .set({ revokedAt: now })
+      .where(eq(mcpOAuthTokens.authorizationId, authorizationId));
+
+    return true;
+  }
 
   async registerClient(input: RegisterClientInput): Promise<McpOAuthClientRow> {
     const redirectUris = normalizeRedirectUris(input.redirectUris);

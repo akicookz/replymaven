@@ -10,6 +10,7 @@ interface TeamMember {
   // Account-wide access (always true for admins) vs. limited to `projectIds`.
   accessAllProjects: boolean;
   projectIds: string[];
+  projectCount: number;
   invitedAt: string;
   acceptedAt: string | null;
 }

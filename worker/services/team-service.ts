@@ -7,6 +7,26 @@ import {
   users,
   type TeamMemberRow,
 } from "../db";
+
+interface ProjectAccessMember {
+  id: string;
+}
+
+export function addProjectAccessToMembers<T extends ProjectAccessMember>(
+  members: T[],
+  projectMap: Record<string, string[]>,
+  exposeProjectIds: boolean,
+): Array<T & { projectIds: string[]; projectCount: number }> {
+  return members.map((member) => {
+    const projectIds = projectMap[member.id] ?? [];
+    return {
+      ...member,
+      projectIds: exposeProjectIds ? projectIds : [],
+      projectCount: projectIds.length,
+    };
+  });
+}
+
 // ─── Team Service ─────────────────────────────────────────────────────────────
 
 export class TeamService {
