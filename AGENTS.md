@@ -717,7 +717,7 @@ After a conversation closes:
 
 Defined in `wrangler.jsonc` vars:
 - `BETTER_AUTH_URL` -- auth base URL (`http://localhost:5173` in dev, `https://replymaven.com` in prod)
-- `AI_MODEL` -- AI model identifier (`gemini-3-flash-preview` or `gpt-5-chat-latest`, default `gemini-3-flash-preview`)
+- `AI_MODEL` -- AI model identifier (`gemini-3-flash-preview` or `gpt-5.6-terra`, default `gemini-3-flash-preview`)
 
 Secrets (via `.dev.vars` locally, `wrangler secret put` for production):
 - `BETTER_AUTH_SECRET`

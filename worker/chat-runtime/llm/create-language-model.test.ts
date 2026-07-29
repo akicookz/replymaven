@@ -74,7 +74,7 @@ describe("isProviderLikeError", () => {
 describe("model attempt telemetry", () => {
   test("counts a successful primary attempt by stage", async () => {
     const runtime = createModelRuntimeState({
-      model: "gpt-5-chat-latest",
+      model: "gpt-5.6-terra",
       openaiApiKey: "openai-test",
       geminiApiKey: null,
     });
@@ -91,7 +91,7 @@ describe("model attempt telemetry", () => {
 
   test("counts both attempts when provider fallback runs", async () => {
     const runtime = createModelRuntimeState({
-      model: "gpt-5-chat-latest",
+      model: "gpt-5.6-terra",
       openaiApiKey: "openai-test",
       geminiApiKey: "gemini-test",
     });

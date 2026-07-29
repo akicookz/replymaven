@@ -4,7 +4,7 @@ import { type LanguageModel } from "ai";
 import { type ChatRuntimeAiConfig } from "../types";
 import { logError, logInfo, logWarn } from "../../observability";
 
-const OPENAI_FALLBACK_MODEL = "gpt-5-chat-latest";
+const OPENAI_FALLBACK_MODEL = "gpt-5.6-terra";
 const GEMINI_FALLBACK_MODEL = "gemini-3-flash-preview";
 
 export type AiProvider = "openai" | "google";
