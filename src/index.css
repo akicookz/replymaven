@@ -163,12 +163,29 @@
 .prose-chat li {
   margin-bottom: 2px;
 }
-.prose-chat code {
-  background: var(--muted);
+.prose-chat :not(pre) > code {
+  background: color-mix(in srgb, currentColor 12%, transparent);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 0.9em;
   font-family: 'SF Mono', Monaco, Consolas, monospace;
+}
+.prose-chat pre {
+  max-width: 100%;
+  margin: 4px 0 6px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  padding: 9px 11px;
+}
+.prose-chat pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.9em;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  white-space: pre;
+  overflow-wrap: normal;
 }
 .prose-chat strong {
   font-weight: 600;

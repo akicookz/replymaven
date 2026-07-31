@@ -1831,12 +1831,29 @@ import {
     .rm-message a:hover {
       opacity: 0.7;
     }
-    .rm-message code {
-      background: var(--rm-bg-secondary);
+    .rm-message :not(pre) > code {
+      background: color-mix(in srgb, currentColor 12%, transparent);
       padding: 1px 5px;
       border-radius: 4px;
       font-size: 13px;
       font-family: 'SF Mono', Monaco, Consolas, monospace;
+    }
+    .rm-message pre {
+      max-width: 100%;
+      margin: 4px 0 8px;
+      overflow-x: auto;
+      border-radius: 8px;
+      background: color-mix(in srgb, currentColor 12%, transparent);
+      padding: 9px 11px;
+    }
+    .rm-message pre code {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+      font-size: 13px;
+      font-family: 'SF Mono', Monaco, Consolas, monospace;
+      white-space: pre;
+      overflow-wrap: normal;
     }
 
     /* ─── Source Links ────────────────────────────────────────────────────── */
