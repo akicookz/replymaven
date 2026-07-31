@@ -5028,9 +5028,9 @@ import {
       if (imageUrl) appendMessageImages(msgEl, imageUrl);
 
       if (shouldShowMessageContent(content)) {
-        const textNode = document.createElement("span");
-        textNode.textContent = content;
-        msgEl.appendChild(textNode);
+        const textContainer = document.createElement("div");
+        textContainer.innerHTML = renderMarkdown(content);
+        msgEl.appendChild(textContainer);
       }
       msgEl.style.backgroundColor = primaryColor;
       msgEl.style.color = getBrandTextColor();
