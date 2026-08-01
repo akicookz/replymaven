@@ -55,3 +55,12 @@ export interface Message {
 }
 
 export type InboxCounts = Record<InboxFilter, number>;
+
+export type BulkConversationAction =
+  | { action: "archive" }
+  | { action: "unarchive" }
+  | { action: "resolve" }
+  | { action: "snooze"; until: number | null }
+  | { action: "assign"; assigneeId: string | null }
+  | { action: "priority"; priority: "low" | "medium" | "high" }
+  | { action: "flag_spam" };

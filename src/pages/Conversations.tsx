@@ -11,7 +11,13 @@ import { cn } from "@/lib/utils";
 import { serializeMessageImageUrls } from "../../shared/message-images";
 import { useConversationWs } from "@/lib/use-conversation-ws";
 import { passesInboxFilter, type InboxFilter, type InboxSort } from "@/lib/inbox/filters";
+import {
+  moveRangeSelection,
+  selectInclusiveRange,
+  toggleSelection,
+} from "@/lib/inbox/selection";
 import type {
+  BulkConversationAction,
   Conversation,
   Message,
   InboxCounts,
@@ -69,6 +75,16 @@ interface ConversationDetail {
   agentName: string | null;
 }
 
+interface BulkConversationResult {
+  updatedIds: string[];
+  skippedIds: string[];
+}
+
+interface BulkConversationMutationInput {
+  conversationIds: string[];
+  action: BulkConversationAction;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const EMPTY_COUNTS: InboxCounts = {
@@ -95,6 +111,43 @@ function priorityRank(convo: Conversation): number {
       return 1;
     default:
       return 2;
+  }
+}
+
+function patchConversationForBulkAction(
+  conversation: Conversation,
+  action: BulkConversationAction,
+  actionAt: string,
+): Conversation {
+  switch (action.action) {
+    case "archive":
+      return { ...conversation, archivedAt: actionAt, updatedAt: actionAt };
+    case "unarchive":
+      return { ...conversation, archivedAt: null, updatedAt: actionAt };
+    case "resolve":
+      return {
+        ...conversation,
+        status: "closed",
+        closeReason: "resolved",
+        updatedAt: actionAt,
+      };
+    case "snooze":
+      return {
+        ...conversation,
+        snoozedUntil: action.until ? new Date(action.until).toISOString() : null,
+        updatedAt: actionAt,
+      };
+    case "assign":
+      return { ...conversation, assigneeId: action.assigneeId, updatedAt: actionAt };
+    case "priority":
+      return { ...conversation, priority: action.priority, updatedAt: actionAt };
+    case "flag_spam":
+      return {
+        ...conversation,
+        status: "closed",
+        closeReason: "spam",
+        updatedAt: actionAt,
+      };
   }
 }
 
@@ -126,6 +179,9 @@ function Conversations() {
   const [unreadOnly, setUnreadOnly] = useState(false);
   // Client-side read overlay (see readKey): convId -> activity ms marked read.
   const [readMarks, setReadMarks] = useState<Record<string, number>>({});
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
+  const [selectionFocusId, setSelectionFocusId] = useState<string | null>(null);
 
   // Sync selectedConvo <-> ?id= URL param so deep links work and shares are
   // stable. Other params (e.g. ?filter=) are preserved.
@@ -191,6 +247,12 @@ function Conversations() {
   // listLimit grows by 25 on each "Load more" click. We keep a flat response
   // shape (not useInfiniteQuery) so the /updates patch logic stays unchanged.
   const [listLimit, setListLimit] = useState(25);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setSelectionAnchorId(null);
+    setSelectionFocusId(null);
+  }, [projectId, filter, searchQuery, sort, unreadOnly]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery), 300);
@@ -923,6 +985,98 @@ function Conversations() {
     },
   });
 
+  const bulkConversationMutation = useMutation<
+    BulkConversationResult,
+    Error,
+    BulkConversationMutationInput
+  >({
+    mutationFn: async ({ conversationIds, action }) => {
+      const chunks: string[][] = [];
+      for (let index = 0; index < conversationIds.length; index += 100) {
+        chunks.push(conversationIds.slice(index, index + 100));
+      }
+
+      const results = await Promise.all(chunks.map(async (conversationIdsChunk) => {
+        const res = await fetch(
+          `/api/projects/${projectId}/conversations/bulk`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...action, conversationIds: conversationIdsChunk }),
+          },
+        );
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          throw new Error(body || "Failed to update conversations");
+        }
+        return res.json() as Promise<BulkConversationResult>;
+      }));
+
+      return results.reduce<BulkConversationResult>(
+        (combined, result) => ({
+          updatedIds: [...combined.updatedIds, ...result.updatedIds],
+          skippedIds: [...combined.skippedIds, ...result.skippedIds],
+        }),
+        { updatedIds: [], skippedIds: [] },
+      );
+    },
+    onSuccess: (result, { action }) => {
+      const updatedIds = new Set(result.updatedIds);
+      const actionAt = new Date().toISOString();
+      const nowMs = Date.now();
+
+      setLoadedConversations((prev) => prev
+        .map((conversation) => updatedIds.has(conversation.id)
+          ? patchConversationForBulkAction(conversation, action, actionAt)
+          : conversation
+        )
+        .filter((conversation) => passesInboxFilter(filter, conversation, nowMs))
+      );
+
+      for (const conversationId of result.updatedIds) {
+        queryClient.setQueryData<ConversationDetail | undefined>(
+          ["conversation-detail", conversationId],
+          (old) => old
+            ? {
+                ...old,
+                conversation: patchConversationForBulkAction(
+                  old.conversation,
+                  action,
+                  actionAt,
+                ),
+              }
+            : old,
+        );
+      }
+
+      if (selectedConvo && updatedIds.has(selectedConvo)) {
+        const current = convoDetail?.conversation;
+        if (current) {
+          const patched = patchConversationForBulkAction(current, action, actionAt);
+          if (!passesInboxFilter(filter, patched, nowMs)) {
+            setSelectedConvo(null);
+            setView("split");
+          }
+        }
+      }
+
+      setSelectedIds(new Set());
+      setSelectionAnchorId(null);
+      setSelectionFocusId(null);
+
+      const count = result.updatedIds.length;
+      if (count > 0) toast.success(`${count} conversation${count === 1 ? "" : "s"} updated`);
+      if (result.skippedIds.length > 0) {
+        toast.info(`${result.skippedIds.length} conversation${result.skippedIds.length === 1 ? " was" : "s were"} skipped`);
+      }
+    },
+    onError: (error) => toast.error(error.message || "Failed to update conversations"),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["inbox-counts", projectId] });
+    },
+  });
+
   // ── Derived view data ─────────────────────────────────────────────────────
   // Unread = visitor sent last AND that activity is newer than any read mark.
   const isUnread = useCallback(
@@ -968,6 +1122,20 @@ function Conversations() {
     });
     return list;
   }, [loadedConversations, unreadOnly, sort, isUnread]);
+
+  useEffect(() => {
+    const visibleIds = new Set(conversations.map((conversation) => conversation.id));
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+    if (selectionAnchorId && !visibleIds.has(selectionAnchorId)) {
+      setSelectionAnchorId(null);
+    }
+    if (selectionFocusId && !visibleIds.has(selectionFocusId)) {
+      setSelectionFocusId(null);
+    }
+  }, [conversations, selectionAnchorId, selectionFocusId]);
 
   const counts = convosPage?.counts ?? EMPTY_COUNTS;
   // Always render the thread in true chronological order. The server returns
@@ -1060,6 +1228,81 @@ function Conversations() {
     assignConversation.mutate({ convId, assigneeId });
   }
 
+  function clearBulkSelection() {
+    setSelectedIds(new Set());
+    setSelectionAnchorId(null);
+    setSelectionFocusId(null);
+  }
+
+  function handleConversationSelect(
+    convId: string,
+    options: { shiftKey: boolean },
+  ) {
+    const orderedIds = conversations.map((conversation) => conversation.id);
+
+    if (options.shiftKey) {
+      const anchorId = selectionAnchorId && orderedIds.includes(selectionAnchorId)
+        ? selectionAnchorId
+        : selectedConvo && orderedIds.includes(selectedConvo)
+          ? selectedConvo
+          : convId;
+      setSelectedIds(selectInclusiveRange(orderedIds, anchorId, convId));
+      setSelectionAnchorId(anchorId);
+      setSelectionFocusId(convId);
+      setSelectedConvo(convId);
+      return;
+    }
+
+    if (selectedIds.size > 0) {
+      const next = toggleSelection(selectedIds, convId);
+      setSelectedIds(next);
+      setSelectionAnchorId(next.size > 0 ? convId : null);
+      setSelectionFocusId(next.size > 0 ? convId : null);
+      setSelectedConvo(convId);
+      return;
+    }
+
+    setSelectedConvo(convId);
+    setSelectionAnchorId(convId);
+    setSelectionFocusId(convId);
+  }
+
+  function handleStartSelection() {
+    const seedId = selectedConvo && conversations.some((c) => c.id === selectedConvo)
+      ? selectedConvo
+      : conversations[0]?.id;
+    if (!seedId) return;
+    setSelectedIds(new Set([seedId]));
+    setSelectionAnchorId(seedId);
+    setSelectionFocusId(seedId);
+  }
+
+  function handleSelectAllLoaded() {
+    if (conversations.length === 0) return;
+    setSelectedIds(new Set(conversations.map((conversation) => conversation.id)));
+    setSelectionAnchorId(conversations[0].id);
+    setSelectionFocusId(conversations[conversations.length - 1].id);
+  }
+
+  function handleBulkAction(action: BulkConversationAction) {
+    if (bulkConversationMutation.isPending || selectedIds.size === 0) return;
+    bulkConversationMutation.mutate({
+      conversationIds: [...selectedIds],
+      action,
+    });
+  }
+
+  function handleArchive(
+    convId: string,
+    action: "archive" | "unarchive",
+  ) {
+    if (bulkConversationMutation.isPending) return;
+    bulkConversationMutation.mutate({
+      conversationIds: [convId],
+      action: { action },
+    });
+  }
+
   function handleLoadMore() {
     setListLimit((n) => n + 25);
   }
@@ -1082,6 +1325,30 @@ function Conversations() {
       }
       return next;
     });
+  }
+
+  function handleMarkSelectedRead() {
+    const selectedSnapshot = new Set(selectedIds);
+    setReadMarks((prev) => {
+      const next = { ...prev };
+      for (const conversation of conversations) {
+        if (
+          selectedSnapshot.has(conversation.id) &&
+          conversation.lastMessage?.role === "visitor"
+        ) {
+          next[conversation.id] = getActivityMs(conversation);
+        }
+      }
+      if (projectId) {
+        try {
+          localStorage.setItem(readKey(projectId), JSON.stringify(next));
+        } catch {
+          // storage disabled / over quota, overlay stays in memory only.
+        }
+      }
+      return next;
+    });
+    clearBulkSelection();
   }
 
   function handleRefresh() {
@@ -1138,24 +1405,50 @@ function Conversations() {
         0,
         Math.min(conversations.length - 1, selectedIndex + delta),
       );
+      clearBulkSelection();
       setSelectedConvo(conversations[newIndex].id);
     }
 
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement;
       if (t.matches?.("input, textarea, [contenteditable='true']")) return;
-      if (e.key === "j" || e.key === "ArrowDown") {
+      if (e.shiftKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        e.preventDefault();
+        const orderedIds = conversations.map((conversation) => conversation.id);
+        const fallbackId = selectedConvo && orderedIds.includes(selectedConvo)
+          ? selectedConvo
+          : orderedIds[0] ?? null;
+        const anchorId = selectionAnchorId && orderedIds.includes(selectionAnchorId)
+          ? selectionAnchorId
+          : fallbackId;
+        const focusId = selectionFocusId && orderedIds.includes(selectionFocusId)
+          ? selectionFocusId
+          : fallbackId;
+        const result = moveRangeSelection({
+          orderedIds,
+          anchorId,
+          focusId,
+          direction: e.key === "ArrowDown" ? 1 : -1,
+        });
+        setSelectedIds(result.selectedIds);
+        setSelectionAnchorId(anchorId);
+        setSelectionFocusId(result.focusId);
+        if (result.focusId) setSelectedConvo(result.focusId);
+      } else if (e.key === "j" || e.key === "ArrowDown") {
         e.preventDefault();
         selectRelative(1);
       } else if (e.key === "k" || e.key === "ArrowUp") {
         e.preventDefault();
         selectRelative(-1);
       } else if (e.key === "e" || e.key === "E") {
-        if (selected) handleResolve(selected.id);
+        if (selected && !selected.archivedAt) handleResolve(selected.id);
       } else if (e.key === "f" || e.key === "F") {
-        setView((v) => (v === "focus" ? "split" : "focus"));
+        if (selected && !selected.archivedAt) {
+          setView((v) => (v === "focus" ? "split" : "focus"));
+        }
       } else if (e.key === "Escape") {
-        setView("split");
+        if (selectedIds.size > 0) clearBulkSelection();
+        else setView("split");
       }
     }
 
@@ -1165,10 +1458,19 @@ function Conversations() {
     // reactive values already listed (conversations, selected, etc.), so it is
     // kept fresh by the existing deps without being listed here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, conversations, selectedIndex, view]);
+  }, [
+    selected,
+    selectedConvo,
+    selectedIds,
+    selectionAnchorId,
+    selectionFocusId,
+    conversations,
+    selectedIndex,
+    view,
+  ]);
 
   // ── Render ────────────────────────────────────────────────────────────────
-  if (view === "focus" && selected) {
+  if (view === "focus" && selected && !selected.archivedAt) {
     return (
       <FocusView
         conversation={selected}
@@ -1196,9 +1498,14 @@ function Conversations() {
         conversations={conversations}
         counts={counts}
         selectedId={selectedConvo}
-        onSelect={setSelectedConvo}
-        onResolve={handleResolve}
-        onSnooze={handleSnooze}
+        selectedIds={selectedIds}
+        onSelect={handleConversationSelect}
+        onStartSelection={handleStartSelection}
+        onClearSelection={clearBulkSelection}
+        onSelectAllLoaded={handleSelectAllLoaded}
+        onBulkAction={handleBulkAction}
+        onMarkSelectedRead={handleMarkSelectedRead}
+        bulkPending={bulkConversationMutation.isPending}
         search={searchQuery}
         onSearchChange={setSearchQuery}
         hasMore={convosPage?.hasMore ?? false}
@@ -1213,7 +1520,9 @@ function Conversations() {
         onRefresh={handleRefresh}
         // Mobile: collapse the list once a conversation is open so the chat +
         // composer take the full screen (desktop keeps the split).
-        className={cn(selectedConvo ? "hidden md:flex" : "flex")}
+        className={cn(
+          selectedConvo && selectedIds.size === 0 ? "hidden md:flex" : "flex",
+        )}
       />
       {selected ? (
         <ReadingPane
@@ -1230,6 +1539,7 @@ function Conversations() {
           onFocus={() => setView("focus")}
           onBlock={handleBlock}
           onAssign={handleAssign}
+          onArchive={handleArchive}
           onDeleteMessage={handleDeleteMessage}
           onBack={() => setSelectedConvo(null)}
           onCompose={handleCompose}

@@ -1,4 +1,6 @@
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   CheckIcon,
   ClockIcon,
   FlagIcon,
@@ -75,6 +77,7 @@ function isSnoozedNow(c: Conversation): boolean {
 // Single source of truth for "what state is this thread in" — drives the dot +
 // label shown once under the avatar.
 function conversationState(c: Conversation): { label: string; dotClass: string } {
+  if (c.archivedAt) return { label: "Archived", dotClass: "bg-dot-gray" };
   if (c.visitorBlocked) return { label: "Blocked", dotClass: "bg-red-400" };
   if (c.status === "closed") {
     if (c.closeReason === "spam") return { label: "Spam", dotClass: "bg-dot-orange" };
@@ -94,6 +97,7 @@ interface ReadingHeaderProps {
   onPriority: (convId: string, priority: "low" | "medium" | "high") => void;
   onBlock: (convId: string) => void;
   onAssign: (convId: string, assigneeId: string | null) => void;
+  onArchive: (convId: string, action: "archive" | "unarchive") => void;
   onFocus: () => void;
   /** Mobile: go back to the conversation list. */
   onBack?: () => void;
@@ -120,6 +124,7 @@ export default function ReadingHeader({
   onPriority,
   onBlock,
   onAssign,
+  onArchive,
   onFocus,
   onBack,
   search,
@@ -151,6 +156,7 @@ export default function ReadingHeader({
   const isSnoozed = isSnoozedNow(conversation);
   const isSpam = conversation.closeReason === "spam";
   const isBlocked = !!conversation.visitorBlocked;
+  const isArchived = !!conversation.archivedAt;
 
   const displayName =
     conversation.visitorName ?? conversation.visitorEmail ?? conversation.visitorId;
@@ -196,91 +202,116 @@ export default function ReadingHeader({
           </button>
         )}
 
-        {/* Action capsule: Resolve · Snooze · Flag-as-spam. Each icon lights up
-            when that state is active (status itself is also shown under avatar). */}
-        <div className="flex items-center rounded-glass glass-button overflow-hidden shrink-0">
+        {isArchived ? (
           <button
             type="button"
-            aria-label="Resolve"
-            aria-pressed={isResolved}
-            onClick={() => onResolve(conversation.id)}
-            className={cn(
-              "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
-              isResolved ? "text-emerald-300 bg-emerald-400/15" : "text-ink-3",
-            )}
-            title={isResolved ? "Resolved — click to reopen" : "Resolve"}
-          >
-            <CheckIcon className="size-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="Snooze"
-            aria-pressed={isSnoozed}
-            onClick={snoozeTomorrow}
-            className={cn(
-              "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
-              isSnoozed ? "text-amber-300 bg-amber-400/15" : "text-ink-3",
-            )}
-            title={isSnoozed ? "Snoozed — click to un-snooze" : "Snooze until tomorrow"}
-          >
-            <ClockIcon className="size-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="Flag as spam"
-            aria-pressed={isSpam}
-            onClick={() => onFlagSpam(conversation.id)}
-            className={cn(
-              "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
-              isSpam ? "text-dot-orange bg-dot-orange/15" : "text-ink-3",
-            )}
-            title={
-              isSpam
-                ? "Flagged as spam — click to un-flag"
-                : "Mark as spam (silent — stays under Flagged, no notify)"
+            aria-label="Unarchive conversation"
+            onClick={() => onArchive(conversation.id, "unarchive")}
+            disabled={!!conversation.purgeStartedAt}
+            className="glass-button rounded-glass flex items-center gap-1.5 px-2.5 h-8 text-[13px] text-ink-3 disabled:opacity-50"
+            title={conversation.purgeStartedAt
+              ? "Deletion has started and this conversation cannot be restored"
+              : "Unarchive"
             }
           >
-            <FlagIcon className="size-4" />
+            <ArchiveRestoreIcon className="size-4" />
+            Unarchive
           </button>
-        </div>
+        ) : (
+          <>
+            {/* Action capsule: resolve, snooze, flag, archive. */}
+            <div className="flex items-center rounded-glass glass-button overflow-hidden shrink-0">
+              <button
+                type="button"
+                aria-label="Resolve"
+                aria-pressed={isResolved}
+                onClick={() => onResolve(conversation.id)}
+                className={cn(
+                  "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
+                  isResolved ? "text-emerald-300 bg-emerald-400/15" : "text-ink-3",
+                )}
+                title={isResolved ? "Resolved, click to reopen" : "Resolve"}
+              >
+                <CheckIcon className="size-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Snooze"
+                aria-pressed={isSnoozed}
+                onClick={snoozeTomorrow}
+                className={cn(
+                  "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
+                  isSnoozed ? "text-amber-300 bg-amber-400/15" : "text-ink-3",
+                )}
+                title={isSnoozed ? "Snoozed, click to unsnooze" : "Snooze until tomorrow"}
+              >
+                <ClockIcon className="size-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Flag as spam"
+                aria-pressed={isSpam}
+                onClick={() => onFlagSpam(conversation.id)}
+                className={cn(
+                  "flex items-center justify-center size-8 transition-colors hover:bg-white/5",
+                  isSpam ? "text-dot-orange bg-dot-orange/15" : "text-ink-3",
+                )}
+                title={isSpam
+                  ? "Flagged as spam, click to unflag"
+                  : "Mark as spam"
+                }
+              >
+                <FlagIcon className="size-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Archive conversation"
+                onClick={() => onArchive(conversation.id, "archive")}
+                className="flex items-center justify-center size-8 text-ink-3 transition-colors hover:bg-white/5"
+                title="Archive"
+              >
+                <ArchiveIcon className="size-4" />
+              </button>
+            </div>
 
-        {/* Assign to a teammate (lights up when assigned) */}
-        <AssigneeMenu
-          value={conversation.assigneeId ?? null}
-          onChange={(id) => onAssign(conversation.id, id)}
-        />
+            <AssigneeMenu
+              value={conversation.assigneeId ?? null}
+              onChange={(id) => onAssign(conversation.id, id)}
+            />
 
-        {/* Block visitor — lights up red when the visitor is banned */}
-        <button
-          type="button"
-          aria-label="Block visitor"
-          aria-pressed={isBlocked}
-          onClick={() => onBlock(conversation.id)}
-          className={cn(
-            "glass-button rounded-glass flex items-center justify-center size-8 transition-colors shrink-0",
-            isBlocked ? "text-red-400 bg-red-400/15" : "text-ink-3 hover:text-red-400",
-          )}
-          title={
-            isBlocked
-              ? "Visitor blocked — click to unblock"
-              : "Block visitor (can't message again)"
-          }
-        >
-          <ShieldOffIcon className="size-4" />
-        </button>
+            <button
+              type="button"
+              aria-label="Block visitor"
+              aria-pressed={isBlocked}
+              onClick={() => onBlock(conversation.id)}
+              className={cn(
+                "glass-button rounded-glass flex items-center justify-center size-8 transition-colors shrink-0",
+                isBlocked ? "text-red-400 bg-red-400/15" : "text-ink-3 hover:text-red-400",
+              )}
+              title={isBlocked
+                ? "Visitor blocked, click to unblock"
+                : "Block visitor"
+              }
+            >
+              <ShieldOffIcon className="size-4" />
+            </button>
+          </>
+        )}
 
         {/* Spacer */}
         <div className="flex-1" />
 
         {/* Focus button (desktop) */}
-        <button
-          type="button"
-          onClick={onFocus}
-          className="glass-button rounded-glass hidden md:flex items-center gap-1.5 px-3 h-8 text-ink-3 text-[13px] shrink-0"
-        >
-          Focus
-          <span className="keycap">F</span>
-        </button>
+        {!isArchived && (
+          <button
+            type="button"
+            onClick={onFocus}
+            className="glass-button rounded-glass hidden md:flex items-center gap-1.5 px-3 h-8 text-ink-3 text-[13px] shrink-0"
+          >
+            Focus
+            <span className="keycap">F</span>
+          </button>
+        )}
 
         {/* Desktop: full inline search field — highlight + jump between matches */}
         <div className="hidden md:flex glass-button rounded-[8px] items-center gap-1.5 px-2.5 h-8 w-[210px] shrink-0">
@@ -410,12 +441,14 @@ export default function ReadingHeader({
         </div>
 
         {/* Right: Priority menu */}
-        <div className="shrink-0 mt-0.5">
-          <PriorityMenu
-            value={conversation.priority ?? "medium"}
-            onChange={(p) => onPriority(conversation.id, p)}
-          />
-        </div>
+        {!isArchived && (
+          <div className="shrink-0 mt-0.5">
+            <PriorityMenu
+              value={conversation.priority ?? "medium"}
+              onChange={(p) => onPriority(conversation.id, p)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

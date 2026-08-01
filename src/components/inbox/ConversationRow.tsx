@@ -1,4 +1,4 @@
-import { Check, Clock } from "lucide-react";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { countryFlag } from "@/lib/inbox/country-flag";
 import type { Conversation } from "@/lib/inbox/types";
@@ -9,9 +9,7 @@ interface ConversationRowProps {
   isSelected: boolean;
   /** Heuristic: lastMessage.role === "visitor" → visitor awaiting reply */
   isUnread: boolean;
-  onSelect: (id: string) => void;
-  onResolve: (convId: string) => void;
-  onSnooze: (convId: string, until: number | null) => void;
+  onSelect: (id: string, options: { shiftKey: boolean }) => void;
 }
 
 function formatTime(isoString: string): string {
@@ -33,8 +31,6 @@ export default function ConversationRow({
   isSelected,
   isUnread,
   onSelect,
-  onResolve,
-  onSnooze,
 }: ConversationRowProps) {
   // Derive country from metadata JSON — guard parse errors so a malformed
   // value doesn't crash the list.
@@ -82,14 +78,14 @@ export default function ConversationRow({
       conversation.updatedAt,
   );
 
-  function handleClick() {
-    onSelect(conversation.id);
+  function handleClick(e: React.MouseEvent) {
+    onSelect(conversation.id, { shiftKey: e.shiftKey });
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      onSelect(conversation.id);
+      onSelect(conversation.id, { shiftKey: e.shiftKey });
     }
   }
 
@@ -160,32 +156,6 @@ export default function ConversationRow({
             {preview}
           </div>
         )}
-      </div>
-
-      {/* Hover-reveal quick actions (top-right) */}
-      <div className="absolute top-[9px] right-[10px] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-100">
-        <button
-          className="glass-button w-[26px] h-[26px] rounded-[6px] flex items-center justify-center text-ink-4 hover:text-ink-1"
-          onClick={(e) => {
-            e.stopPropagation();
-            onResolve(conversation.id);
-          }}
-          title="Resolve"
-          tabIndex={-1}
-        >
-          <Check size={12} />
-        </button>
-        <button
-          className="glass-button w-[26px] h-[26px] rounded-[6px] flex items-center justify-center text-ink-4 hover:text-ink-1"
-          onClick={(e) => {
-            e.stopPropagation();
-            onSnooze(conversation.id, Date.now() + 24 * 60 * 60 * 1000);
-          }}
-          title="Snooze"
-          tabIndex={-1}
-        >
-          <Clock size={12} />
-        </button>
       </div>
 
       {/* Bottom hairline separator inset 28px — the ONLY divider; hidden on selected */}

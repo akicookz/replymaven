@@ -1,4 +1,4 @@
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronsUpIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,6 +9,7 @@ import {
 interface PriorityMenuProps {
   value: "low" | "medium" | "high";
   onChange: (priority: "low" | "medium" | "high") => void;
+  compact?: boolean;
 }
 
 const PRIORITIES: { value: "low" | "medium" | "high"; label: string }[] = [
@@ -17,7 +18,11 @@ const PRIORITIES: { value: "low" | "medium" | "high"; label: string }[] = [
   { value: "high", label: "High" },
 ];
 
-export default function PriorityMenu({ value, onChange }: PriorityMenuProps) {
+export default function PriorityMenu({
+  value,
+  onChange,
+  compact = false,
+}: PriorityMenuProps) {
   const label =
     PRIORITIES.find((p) => p.value === value)?.label ?? "Medium";
 
@@ -26,10 +31,21 @@ export default function PriorityMenu({ value, onChange }: PriorityMenuProps) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="glass-button rounded-[6px] flex items-center gap-1 px-2.5 py-1.5 text-[12px] text-ink-7 cursor-pointer select-none outline-none"
+          aria-label="Set priority"
+          title="Set priority"
+          className={compact
+            ? "glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 cursor-pointer select-none outline-none"
+            : "glass-button rounded-[6px] flex items-center gap-1 px-2.5 py-1.5 text-[12px] text-ink-7 cursor-pointer select-none outline-none"
+          }
         >
-          {label}
-          <ChevronDownIcon className="size-3" />
+          {compact ? (
+            <ChevronsUpIcon className="size-4" />
+          ) : (
+            <>
+              {label}
+              <ChevronDownIcon className="size-3" />
+            </>
+          )}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[120px]">

@@ -18,6 +18,7 @@ import {
   BookOpen,
   Inbox,
   Mail,
+  Archive,
   Flag,
   Clock,
   CheckCircle2,
@@ -145,6 +146,7 @@ function Layout() {
     { label: "All Conversations", filter: "all",       icon: Mail },
     { label: "Snoozed",           filter: "snoozed",   icon: Clock },
     { label: "Resolved",          filter: "resolved",  icon: CheckCircle2 },
+    { label: "Archived",          filter: "archived",  icon: Archive, nested: true },
     { label: "Flagged",           filter: "flagged",   icon: Flag },
   ].map((i) => ({ ...i, href: `/app/projects/${currentProject.id}/conversations?filter=${i.filter}` })) : [];
 
@@ -191,6 +193,7 @@ function Layout() {
     exact?: boolean;
     filter?: string;
     count?: number;
+    nested?: boolean;
   };
 
   function SectionHeader({ label }: { label: string }) {
@@ -212,6 +215,7 @@ function Layout() {
         to={item.href}
         className={cn(
           "flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors",
+          item.nested && !collapsed && "ml-3",
           active
             ? "bg-glass-raised text-ink-1"
             : "text-ink-4 hover:bg-glass-button hover:text-ink-1",

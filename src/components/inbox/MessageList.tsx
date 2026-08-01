@@ -1,16 +1,27 @@
 import { useState } from "react";
 import {
+  Archive,
+  ArchiveRestore,
+  CheckCircle2,
+  Clock,
+  Flag,
   Search,
   SlidersHorizontal,
   MoreHorizontal,
   Check,
   CheckCheck,
+  ListChecks,
   RefreshCw,
   PanelLeftOpen,
+  X,
 } from "lucide-react";
 import { filterTitle, INBOX_SORTS } from "@/lib/inbox/filters";
 import type { InboxFilter, InboxSort } from "@/lib/inbox/filters";
-import type { Conversation, InboxCounts } from "@/lib/inbox/types";
+import type {
+  BulkConversationAction,
+  Conversation,
+  InboxCounts,
+} from "@/lib/inbox/types";
 import { cn } from "@/lib/utils";
 import { useMobileSidebar } from "@/lib/mobile-sidebar";
 import {
@@ -19,7 +30,9 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import AssigneeMenu from "./AssigneeMenu";
 import ConversationRow from "./ConversationRow";
+import PriorityMenu from "./PriorityMenu";
 
 // Props from Task 7 orchestrator contract — keep these signatures.
 // Restorations (search / load-more) added in Task 8.
@@ -28,9 +41,14 @@ interface MessageListProps {
   conversations: Conversation[];
   counts: InboxCounts;
   selectedId: string | null;
-  onSelect: (id: string) => void;
-  onResolve: (convId: string) => void;
-  onSnooze: (convId: string, until: number | null) => void;
+  selectedIds: ReadonlySet<string>;
+  onSelect: (id: string, options: { shiftKey: boolean }) => void;
+  onStartSelection: () => void;
+  onClearSelection: () => void;
+  onSelectAllLoaded: () => void;
+  onBulkAction: (action: BulkConversationAction) => void;
+  onMarkSelectedRead: () => void;
+  bulkPending: boolean;
   // --- Restorations (Task 8) ---
   /** Current search input value (controlled by orchestrator). */
   search: string;
@@ -89,9 +107,14 @@ export default function MessageList({
   conversations,
   counts,
   selectedId,
+  selectedIds,
   onSelect,
-  onResolve,
-  onSnooze,
+  onStartSelection,
+  onClearSelection,
+  onSelectAllLoaded,
+  onBulkAction,
+  onMarkSelectedRead,
+  bulkPending,
   search,
   onSearchChange,
   hasMore,
@@ -108,6 +131,7 @@ export default function MessageList({
 }: MessageListProps) {
   // Controlled so the overflow actions can close the menu after firing.
   const [moreOpen, setMoreOpen] = useState(false);
+  const [selectionMoreOpen, setSelectionMoreOpen] = useState(false);
   // The inbox renders full-bleed (no PageHeader), so it has to surface its own
   // entry point to the app's dashboard sidebar on mobile.
   const { openSidebar } = useMobileSidebar();
@@ -117,6 +141,7 @@ export default function MessageList({
   const unreadCount = conversations.filter(isUnread).length;
 
   const openCount = counts[filter] ?? 0;
+  const selectionActive = selectedIds.size > 0;
 
   return (
     <div
@@ -226,23 +251,163 @@ export default function MessageList({
                   <RefreshCw size={14} className="shrink-0 text-ink-5" />
                   Refresh
                 </button>
+                {conversations.length > 0 && (
+                  <button
+                    onClick={() => {
+                      onStartSelection();
+                      setMoreOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[13px] text-ink-3 hover:bg-glass-button hover:text-ink-1 transition-colors"
+                  >
+                    <ListChecks size={14} className="shrink-0 text-ink-5" />
+                    Select conversations
+                  </button>
+                )}
               </PopoverContent>
             </Popover>
           </div>
         </div>
 
-        {/* Search field */}
-        <div className="mt-2 h-[30px] rounded-[8px] glass-button flex items-center gap-2 px-2">
-          <Search size={12} className="text-ink-6 shrink-0" />
-          <input
-            type="text"
-            placeholder="Search"
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="flex-1 min-w-0 bg-transparent text-[13px] text-ink-2 placeholder:text-ink-6 outline-none"
-          />
-          <span className="keycap shrink-0">⌘K</span>
-        </div>
+        {selectionActive ? (
+          <div className="mt-2 h-8 flex items-center gap-1">
+            <span className="min-w-[44px] text-[12px] tabular-nums text-ink-5">
+              {selectedIds.size} selected
+            </span>
+            <div className="flex-1" />
+            {filter === "archived" ? (
+              <button
+                type="button"
+                onClick={() => onBulkAction({ action: "unarchive" })}
+                disabled={bulkPending}
+                className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
+                aria-label="Unarchive selected conversations"
+                title="Unarchive"
+              >
+                <ArchiveRestore size={15} />
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onBulkAction({ action: "archive" })}
+                  disabled={bulkPending}
+                  className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
+                  aria-label="Archive selected conversations"
+                  title="Archive"
+                >
+                  <Archive size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onBulkAction({ action: "resolve" })}
+                  disabled={bulkPending}
+                  className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
+                  aria-label="Resolve selected conversations"
+                  title="Resolve"
+                >
+                  <CheckCircle2 size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onBulkAction({
+                    action: "snooze",
+                    until: Date.now() + 86_400_000,
+                  })}
+                  disabled={bulkPending}
+                  className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3 disabled:opacity-50"
+                  aria-label="Snooze selected conversations"
+                  title="Snooze until tomorrow"
+                >
+                  <Clock size={15} />
+                </button>
+                <AssigneeMenu
+                  compact
+                  value={null}
+                  onChange={(assigneeId) => onBulkAction({
+                    action: "assign",
+                    assigneeId,
+                  })}
+                />
+                <PriorityMenu
+                  compact
+                  value="medium"
+                  onChange={(priority) => onBulkAction({
+                    action: "priority",
+                    priority,
+                  })}
+                />
+              </>
+            )}
+            <Popover open={selectionMoreOpen} onOpenChange={setSelectionMoreOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="glass-button rounded-glass flex size-8 items-center justify-center text-ink-3"
+                  aria-label="More bulk actions"
+                  title="More actions"
+                >
+                  <MoreHorizontal size={15} />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-52 p-1.5">
+                <button
+                  onClick={() => {
+                    onMarkSelectedRead();
+                    setSelectionMoreOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[13px] text-ink-3 hover:bg-glass-button hover:text-ink-1 transition-colors"
+                >
+                  <CheckCheck size={14} className="shrink-0 text-ink-5" />
+                  Mark as read
+                </button>
+                {filter !== "archived" && (
+                  <button
+                    onClick={() => {
+                      onBulkAction({ action: "flag_spam" });
+                      setSelectionMoreOpen(false);
+                    }}
+                    disabled={bulkPending}
+                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[13px] text-ink-3 hover:bg-glass-button hover:text-ink-1 transition-colors disabled:opacity-50"
+                  >
+                    <Flag size={14} className="shrink-0 text-ink-5" />
+                    Flag as spam
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    onSelectAllLoaded();
+                    setSelectionMoreOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-[13px] text-ink-3 hover:bg-glass-button hover:text-ink-1 transition-colors"
+                >
+                  <ListChecks size={14} className="shrink-0 text-ink-5" />
+                  Select all loaded
+                </button>
+              </PopoverContent>
+            </Popover>
+            <button
+              type="button"
+              onClick={onClearSelection}
+              className="flex size-8 items-center justify-center rounded-glass text-ink-5 hover:text-ink-1 transition-colors"
+              aria-label="Clear selection"
+              title="Clear selection"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        ) : (
+          <div className="mt-2 h-[30px] rounded-[8px] glass-button flex items-center gap-2 px-2">
+            <Search size={12} className="text-ink-6 shrink-0" />
+            <input
+              type="text"
+              placeholder="Search"
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className="flex-1 min-w-0 bg-transparent text-[13px] text-ink-2 placeholder:text-ink-6 outline-none"
+            />
+            <span className="keycap shrink-0">⌘K</span>
+          </div>
+        )}
       </div>
 
       {/* ── Conversation rows ───────────────────────────────────────────── */}
@@ -251,11 +416,11 @@ export default function MessageList({
           <ConversationRow
             key={conv.id}
             conversation={conv}
-            isSelected={conv.id === selectedId}
+            isSelected={selectionActive
+              ? selectedIds.has(conv.id)
+              : conv.id === selectedId}
             isUnread={isUnread(conv)}
             onSelect={onSelect}
-            onResolve={onResolve}
-            onSnooze={onSnooze}
           />
         ))}
 

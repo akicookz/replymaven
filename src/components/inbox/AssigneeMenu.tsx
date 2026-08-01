@@ -22,6 +22,7 @@ interface AssignableUser {
 interface AssigneeMenuProps {
   value: string | null;
   onChange: (assigneeId: string | null) => void;
+  compact?: boolean;
 }
 
 function initials(name: string, email: string): string {
@@ -52,7 +53,11 @@ function Avatar({ user, size = 18 }: { user: AssignableUser; size?: number }) {
   );
 }
 
-export default function AssigneeMenu({ value, onChange }: AssigneeMenuProps) {
+export default function AssigneeMenu({
+  value,
+  onChange,
+  compact = false,
+}: AssigneeMenuProps) {
   const { projectId } = useParams<{ projectId: string }>();
   const { data: users } = useQuery<AssignableUser[]>({
     queryKey: ["assignable-users", projectId],
@@ -76,7 +81,10 @@ export default function AssigneeMenu({ value, onChange }: AssigneeMenuProps) {
           aria-label="Assign conversation"
           aria-pressed={!!current}
           className={cn(
-            "glass-button rounded-glass flex items-center gap-1.5 pl-1.5 pr-2 h-8 text-[12.5px] cursor-pointer select-none outline-none shrink-0 transition-colors",
+            "glass-button rounded-glass flex items-center h-8 text-[12.5px] cursor-pointer select-none outline-none shrink-0 transition-colors",
+            compact
+              ? "w-8 justify-center"
+              : "gap-1.5 pl-1.5 pr-2",
             current ? "text-brand bg-glass-raised" : "text-ink-3",
           )}
           title="Assign to a teammate"
@@ -86,10 +94,14 @@ export default function AssigneeMenu({ value, onChange }: AssigneeMenuProps) {
           ) : (
             <UserIcon className="size-4 text-ink-6" />
           )}
-          <span className="max-w-[96px] truncate">
-            {current ? current.name || current.email : "Assign"}
-          </span>
-          <ChevronDownIcon className="size-3 text-ink-6" />
+          {!compact && (
+            <>
+              <span className="max-w-[96px] truncate">
+                {current ? current.name || current.email : "Assign"}
+              </span>
+              <ChevronDownIcon className="size-3 text-ink-6" />
+            </>
+          )}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[210px]">

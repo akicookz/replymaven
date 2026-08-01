@@ -28,6 +28,8 @@ interface ReadingPaneProps {
   onBlock: (convId: string) => void;
   /** Assign (or unassign with null) this conversation to a teammate. */
   onAssign: (convId: string, assigneeId: string | null) => void;
+  /** Archive the conversation or restore it from the archive. */
+  onArchive: (convId: string, action: "archive" | "unarchive") => void;
   /** Delete a sent agent message by id. */
   onDeleteMessage: (messageId: string) => void;
   /** Mobile: return to the conversation list (clears the selection). */
@@ -54,6 +56,7 @@ export default function ReadingPane({
   onFocus,
   onBlock,
   onAssign,
+  onArchive,
   onDeleteMessage,
   onBack,
   onCompose,
@@ -187,6 +190,7 @@ export default function ReadingPane({
         onPriority={onPriority}
         onBlock={onBlock}
         onAssign={onAssign}
+        onArchive={onArchive}
         onFocus={onFocus}
         onBack={onBack}
         search={search}
@@ -213,15 +217,17 @@ export default function ReadingPane({
       </div>
 
       {/* Composer — flex sibling below the thread (no longer overlaps it) */}
-      <Composer
-        draft={draft}
-        setDraft={setDraft}
-        onSend={onSend}
-        onResolve={onResolve}
-        onCompose={onCompose}
-        composing={composing}
-        convId={conversation.id}
-      />
+      {!conversation.archivedAt && (
+        <Composer
+          draft={draft}
+          setDraft={setDraft}
+          onSend={onSend}
+          onResolve={onResolve}
+          onCompose={onCompose}
+          composing={composing}
+          convId={conversation.id}
+        />
+      )}
 
       {/* Search-conversation modal (opened from the toolbar search icon) */}
       <ConversationSearchDialog
