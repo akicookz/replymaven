@@ -564,6 +564,48 @@ export const snoozeSchema = z.object({ until: z.number().int().positive().nullab
 export const prioritySchema = z.object({ priority: z.enum(["low", "medium", "high"]) });
 export const assignSchema = z.object({ assigneeId: z.string().min(1).nullable() });
 
+const bulkConversationIdsSchema = z
+  .array(z.string().min(1))
+  .min(1)
+  .max(100)
+  .refine((ids) => new Set(ids).size === ids.length, {
+    message: "Conversation IDs must be unique",
+  });
+
+export const bulkConversationActionSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("archive"),
+    conversationIds: bulkConversationIdsSchema,
+  }),
+  z.object({
+    action: z.literal("unarchive"),
+    conversationIds: bulkConversationIdsSchema,
+  }),
+  z.object({
+    action: z.literal("resolve"),
+    conversationIds: bulkConversationIdsSchema,
+  }),
+  z.object({
+    action: z.literal("snooze"),
+    conversationIds: bulkConversationIdsSchema,
+    until: z.number().int().positive().nullable(),
+  }),
+  z.object({
+    action: z.literal("assign"),
+    conversationIds: bulkConversationIdsSchema,
+    assigneeId: z.string().min(1).nullable(),
+  }),
+  z.object({
+    action: z.literal("priority"),
+    conversationIds: bulkConversationIdsSchema,
+    priority: z.enum(["low", "medium", "high"]),
+  }),
+  z.object({
+    action: z.literal("flag_spam"),
+    conversationIds: bulkConversationIdsSchema,
+  }),
+]);
+
 // ─── Visitor Bans ────────────────────────────────────────────────────────────
 export const banVisitorSchema = z.object({
   visitorId: z.string().min(1).max(100),

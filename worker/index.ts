@@ -156,6 +156,7 @@ import {
   snoozeSchema,
   prioritySchema,
   assignSchema,
+  bulkConversationActionSchema,
   banVisitorSchema,
   createGreetingSchema,
   updateGreetingSchema,
@@ -6686,6 +6687,75 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     },
   )
+  .post("/api/projects/:id/conversations/bulk", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const parsed = validate(bulkConversationActionSchema, await c.req.json());
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    if (parsed.data.action === "assign" && parsed.data.assigneeId) {
+      const assigneeId = parsed.data.assigneeId;
+      const assignable = await getAssignableUsers(db, project.id);
+      if (!assignable.some((member) => member.id === assigneeId)) {
+        return c.json(
+          { error: "Assignee is not a member of this project's team" },
+          400,
+        );
+      }
+    }
+
+    const chatService = new ChatService(db);
+    const result = await chatService.bulkUpdateConversations(
+      project.id,
+      parsed.data.conversationIds,
+      parsed.data,
+    );
+
+    if (parsed.data.action === "snooze") {
+      const until = parsed.data.until ? new Date(parsed.data.until) : null;
+      const content = until
+        ? `Snoozed until ${until.toLocaleString("en-US", {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })}`
+        : "Snooze ended";
+      await Promise.all(result.updatedIds.map((conversationId) =>
+        chatService.addSystemMessage(
+          conversationId,
+          until ? "snoozed" : "snooze_ended",
+          content,
+        )
+      ));
+    }
+
+    if (
+      parsed.data.action === "resolve" ||
+      parsed.data.action === "flag_spam"
+    ) {
+      const reason = parsed.data.action === "resolve" ? "resolved" : "spam";
+      for (const conversationId of result.updatedIds) {
+        broadcastStatusChange(
+          c.env,
+          c.executionCtx,
+          conversationId,
+          "closed",
+        );
+        broadcastClosed(c.env, c.executionCtx, conversationId, reason);
+      }
+    }
+
+    return c.json(result);
+  })
   .post("/api/projects/:id/conversations/:convId/close", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);

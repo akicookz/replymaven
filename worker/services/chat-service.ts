@@ -27,6 +27,80 @@ export type InboxFilter =
   | "archived"
   | "flagged";
 
+export type BulkConversationAction =
+  | { action: "archive" }
+  | { action: "unarchive" }
+  | { action: "resolve" }
+  | { action: "snooze"; until: number | null }
+  | { action: "assign"; assigneeId: string | null }
+  | { action: "priority"; priority: "low" | "medium" | "high" }
+  | { action: "flag_spam" };
+
+export interface BulkConversationActionResult {
+  updatedIds: string[];
+  skippedIds: string[];
+}
+
+export function buildBulkConversationActionQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  projectId: string,
+  conversationIds: string[],
+  action: BulkConversationAction,
+  now: Date = new Date(),
+) {
+  const updates: Partial<ConversationRow> = { updatedAt: now };
+  const eligibility: SQL[] = [];
+
+  switch (action.action) {
+    case "archive":
+      updates.archivedAt = now;
+      updates.purgeStartedAt = null;
+      eligibility.push(isNull(conversations.archivedAt));
+      break;
+    case "unarchive":
+      updates.archivedAt = null;
+      eligibility.push(
+        isNotNull(conversations.archivedAt),
+        isNull(conversations.purgeStartedAt),
+      );
+      break;
+    case "resolve":
+      updates.status = "closed";
+      updates.closeReason = "resolved";
+      eligibility.push(isNull(conversations.archivedAt));
+      break;
+    case "snooze":
+      updates.snoozedUntil = action.until ? new Date(action.until) : null;
+      eligibility.push(isNull(conversations.archivedAt));
+      break;
+    case "assign":
+      updates.assigneeId = action.assigneeId;
+      eligibility.push(isNull(conversations.archivedAt));
+      break;
+    case "priority":
+      updates.priority = action.priority;
+      eligibility.push(isNull(conversations.archivedAt));
+      break;
+    case "flag_spam":
+      updates.status = "closed";
+      updates.closeReason = "spam";
+      eligibility.push(isNull(conversations.archivedAt));
+      break;
+  }
+
+  return db
+    .update(conversations)
+    .set(updates)
+    .where(
+      and(
+        eq(conversations.projectId, projectId),
+        inArray(conversations.id, conversationIds),
+        ...eligibility,
+      ),
+    )
+    .returning({ id: conversations.id });
+}
+
 // Query for conversations that entered (or re-entered) Needs You since
 // `since` (ms). Status changes bump updatedAt, so it doubles as the
 // escalation watermark. Exported so tests can enforce its tenant-scope contract.
@@ -391,6 +465,31 @@ export class ChatService {
       if (row.status === "closed") closed = row.count;
     }
     return { all, open: all - closed, closed };
+  }
+
+  async bulkUpdateConversations(
+    projectId: string,
+    conversationIds: string[],
+    action: BulkConversationAction,
+    now: Date = new Date(),
+  ): Promise<BulkConversationActionResult> {
+    if (conversationIds.length === 0) {
+      return { updatedIds: [], skippedIds: [] };
+    }
+
+    const rows = await buildBulkConversationActionQuery(
+      this.db,
+      projectId,
+      conversationIds,
+      action,
+      now,
+    );
+    const updated = new Set(rows.map((row) => row.id));
+
+    return {
+      updatedIds: conversationIds.filter((id) => updated.has(id)),
+      skippedIds: conversationIds.filter((id) => !updated.has(id)),
+    };
   }
 
   async setSnooze(conversationId: string, projectId: string, until: Date | null): Promise<void> {

@@ -6,6 +6,7 @@ import {
   buildConditionalBotMessageQuery,
   buildHumanTakeoverQuery,
   buildInboxCountsQuery,
+  buildBulkConversationActionQuery,
   buildNeedsReviewQuery,
   ChatService,
   type ConversationRow,
@@ -205,5 +206,108 @@ describe("ChatService tenant and AI ownership guards", () => {
 
     expect(sql).toContain('"conversations"."chat_state" = ?');
     expect(params).toEqual(expect.arrayContaining([expected, resolved]));
+  });
+});
+
+describe("ChatService bulk conversation actions", () => {
+  test("reports updated and skipped ids in request order", async () => {
+    const db = {
+      update: () => ({
+        set: () => ({
+          where: () => ({
+            returning: async () => [{ id: "conv-2" }],
+          }),
+        }),
+      }),
+    } as unknown as DrizzleD1Database<Record<string, unknown>>;
+
+    const result = await new ChatService(db).bulkUpdateConversations(
+      "project-1",
+      ["conv-1", "conv-2", "conv-3"],
+      { action: "archive" },
+      new Date("2026-08-01T10:00:00.000Z"),
+    );
+
+    expect(result).toEqual({
+      updatedIds: ["conv-2"],
+      skippedIds: ["conv-1", "conv-3"],
+    });
+  });
+
+  test("archives only requested conversations in the current project", () => {
+    const archivedAt = new Date("2026-08-01T10:00:00.000Z");
+    const { sql, params } = buildBulkConversationActionQuery(
+      drizzle({} as never),
+      "project-1",
+      ["conv-1", "conv-2"],
+      { action: "archive" },
+      archivedAt,
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."project_id" = ?');
+    expect(sql).toContain('"conversations"."id" in (?, ?)');
+    expect(sql).toContain('"conversations"."archived_at" is null');
+    expect(sql).toContain('returning "id"');
+    expect(params).toEqual(expect.arrayContaining([
+      archivedAt.getTime() / 1000,
+      "project-1",
+      "conv-1",
+      "conv-2",
+    ]));
+  });
+
+  test("unarchives only before retention has claimed the conversation", () => {
+    const { sql, params } = buildBulkConversationActionQuery(
+      drizzle({} as never),
+      "project-1",
+      ["conv-1"],
+      { action: "unarchive" },
+      new Date("2026-08-01T10:00:00.000Z"),
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."archived_at" is not null');
+    expect(sql).toContain('"conversations"."purge_started_at" is null');
+    expect(params).toEqual(expect.arrayContaining(["project-1", "conv-1"]));
+  });
+
+  test("keeps archived conversations immutable for non-unarchive actions", () => {
+    const { sql, params } = buildBulkConversationActionQuery(
+      drizzle({} as never),
+      "project-1",
+      ["conv-1"],
+      { action: "assign", assigneeId: "agent-1" },
+      new Date("2026-08-01T10:00:00.000Z"),
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."archived_at" is null');
+    expect(params).toEqual(expect.arrayContaining([
+      "agent-1",
+      "project-1",
+      "conv-1",
+    ]));
+  });
+
+  test("maps each state-changing action to its intended fields", () => {
+    const db = drizzle({} as never);
+    const now = new Date("2026-08-01T10:00:00.000Z");
+    const resolve = buildBulkConversationActionQuery(
+      db, "project-1", ["conv-1"], { action: "resolve" }, now,
+    ).toSQL();
+    const snooze = buildBulkConversationActionQuery(
+      db, "project-1", ["conv-1"], { action: "snooze", until: 1_786_000_000_000 }, now,
+    ).toSQL();
+    const priority = buildBulkConversationActionQuery(
+      db, "project-1", ["conv-1"], { action: "priority", priority: "high" }, now,
+    ).toSQL();
+    const spam = buildBulkConversationActionQuery(
+      db, "project-1", ["conv-1"], { action: "flag_spam" }, now,
+    ).toSQL();
+
+    expect(resolve.sql).toContain('"status" = ?, "close_reason" = ?');
+    expect(resolve.params).toEqual(expect.arrayContaining(["closed", "resolved"]));
+    expect(snooze.sql).toContain('"snoozed_until" = ?');
+    expect(priority.sql).toContain('"priority" = ?');
+    expect(priority.params).toContain("high");
+    expect(spam.params).toEqual(expect.arrayContaining(["closed", "spam"]));
   });
 });
