@@ -8,11 +8,6 @@ export const INTERNAL_TOKENS = [
 
 export type InternalToken = (typeof INTERNAL_TOKENS)[number];
 
-export interface TokenPresence {
-  cleaned: string;
-  tokens: InternalToken[];
-}
-
 const LONGEST_TOKEN_LENGTH = INTERNAL_TOKENS.reduce(
   (max, token) => Math.max(max, token.length),
   0,
@@ -27,19 +22,6 @@ export function stripInternalTokens(text: string): string {
     }
   }
   return result;
-}
-
-export function detectInternalTokens(text: string): TokenPresence {
-  if (!text) return { cleaned: text, tokens: [] };
-  const tokens: InternalToken[] = [];
-  let result = text;
-  for (const token of INTERNAL_TOKENS) {
-    if (result.includes(token)) {
-      tokens.push(token);
-      result = result.split(token).join("");
-    }
-  }
-  return { cleaned: result, tokens };
 }
 
 export interface StreamingStripState {

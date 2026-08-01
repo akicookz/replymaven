@@ -57,6 +57,7 @@ import {
 import { findBestFaqMatch } from "../prompt/build-compiled-faq-context";
 import { buildSupportTurnOpening } from "../prompt/sections";
 import { buildContactFallbackMessage } from "../contact-support/contact-support";
+import { persistGuardedAiOutput } from "../executor/run-planner-loop";
 
 function parseConversationMetadata(
   rawMetadata: string | null | undefined,
@@ -1165,47 +1166,42 @@ export async function handleWidgetMessageTurn(
       }
 
       currentStage = "save_bot_message";
-      const botMessage = await chatService.addBotMessageIfOwnershipMatches(
-        {
-          conversationId: context.conversationId,
-          content: fullResponse,
-          sources:
-            retrieval.sourceReferences.length > 0
-              ? JSON.stringify(retrieval.sourceReferences)
-              : null,
-          senderName: settings?.botName ?? null,
+      const botMessage = await persistGuardedAiOutput({
+        controller,
+        encoder,
+        streamProtocolVersion: context.streamProtocolVersion,
+        finalText: fullResponse,
+        persist: async () =>
+          chatService.addBotMessageIfOwnershipMatches(
+            {
+              conversationId: context.conversationId,
+              content: fullResponse,
+              sources:
+                retrieval.sourceReferences.length > 0
+                  ? JSON.stringify(retrieval.sourceReferences)
+                  : null,
+              senderName: settings?.botName ?? null,
+            },
+            context.project.id,
+            {
+              status: outputPermission.status,
+              chatState: outputPermission.chatState,
+            },
+          ),
+        getConversationStatusAfterFailure: async () =>
+          (await getAiOutputPermission()).status,
+        onPersisted: () => {
+          persistedAiMessage = true;
+          if (context.streamProtocolVersion !== 1) return;
+          if (loopResult.terminationAction === "escalate") {
+            emitSseEvent(controller, encoder, { inquiry: true });
+          }
+          if (resolvedByThisTurn) {
+            emitSseEvent(controller, encoder, { resolved: true });
+          }
         },
-        context.project.id,
-        {
-          status: outputPermission.status,
-          chatState: outputPermission.chatState,
-        },
-      );
-      if (!botMessage) {
-        const latestPermission = await getAiOutputPermission();
-        if (context.streamProtocolVersion === 2) {
-          emitCompletedEvent(controller, encoder, {
-            protocolVersion: 2,
-            messageId: null,
-            finalText: "",
-            conversationStatus: latestPermission.status,
-          });
-        } else {
-          emitSseEvent(controller, encoder, { done: true });
-        }
-        return;
-      }
-      persistedAiMessage = true;
-
-      if (context.streamProtocolVersion === 1) {
-        if (loopResult.terminationAction === "escalate") {
-          emitSseEvent(controller, encoder, { inquiry: true });
-        }
-        if (resolvedByThisTurn) {
-          emitSseEvent(controller, encoder, { resolved: true });
-        }
-        emitSseEvent(controller, encoder, { finalText: fullResponse });
-      }
+      });
+      if (!botMessage) return;
 
       if (resolvedByThisTurn) {
         broadcastStatusChange(

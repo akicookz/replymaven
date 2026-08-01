@@ -250,7 +250,7 @@ function formatLocation(location: ContactTimingLocation): string {
   return parts.length > 0 ? parts.join(", ") : "Not available";
 }
 
-export function buildRenderContactTimingPrompt(
+function buildRenderContactTimingPrompt(
   params: RenderContactTimingParams,
 ): string {
   const workingHours = params.workingHours?.trim() || "Not configured";

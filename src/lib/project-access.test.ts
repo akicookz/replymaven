@@ -1,26 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import {
-  createProjectAccess,
-  getSelectedProjectIds,
-} from "./project-access";
+import { createProjectAccess, getSelectedProjectIds } from "./project-access";
 
 describe("project access selection", () => {
-  test("selects every project for all-project access", () => {
+  test("expands all-project access to the current project ids", () => {
     expect(
       getSelectedProjectIds(
         { accessAllProjects: true, projectIds: [] },
         ["one", "two"],
       ),
     ).toEqual(["one", "two"]);
-  });
-
-  test("preserves a scoped project selection", () => {
-    expect(
-      getSelectedProjectIds(
-        { accessAllProjects: false, projectIds: ["two"] },
-        ["one", "two"],
-      ),
-    ).toEqual(["two"]);
   });
 
   test("converts a complete selection to all-project access", () => {

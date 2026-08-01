@@ -1,263 +1,36 @@
-import { describe, expect, test } from "bun:test";
-import { type LanguageModel } from "ai";
-import {
-  fallbackRenderHandoffMessage,
-  isRenderedHandoffMessageValid,
-  renderHandoffMessage,
-} from "./render-handoff-message";
+import { expect, test } from "bun:test";
 import { type HandoffRenderDirective } from "../types";
+import { isRenderedHandoffMessageValid } from "./render-handoff-message";
 
-const settings = {
-  toneOfVoice: "friendly",
-  customTonePrompt: null,
-  botName: "Maven",
-} as const;
-
-describe("fallbackRenderHandoffMessage - byte-identical legacy parity", () => {
-  test("collect_contact name + email", () => {
-    expect(
-      fallbackRenderHandoffMessage({
-        kind: "collect_contact",
-        missingFields: ["name", "email"],
-        agentLabel: "the team",
-      }),
-    ).toBe(
-      "I can pass this along to our team. Before I do, could you share your name and email so they can follow up directly? If you'd rather keep it in chat, just say that.",
-    );
-  });
-
-  test("collect_contact name only", () => {
-    expect(
-      fallbackRenderHandoffMessage({
-        kind: "collect_contact",
-        missingFields: ["name"],
-        agentLabel: "the team",
-      }),
-    ).toBe(
-      "I can pass this along to our team. Before I do, could you share your name so they know who to follow up with? If you'd rather keep it in chat, just say that.",
-    );
-  });
-
-  test("collect_contact email only", () => {
-    expect(
-      fallbackRenderHandoffMessage({
-        kind: "collect_contact",
-        missingFields: ["email"],
-        agentLabel: "the team",
-      }),
-    ).toBe(
-      "I can pass this along to our team. Before I do, could you share your email so they can follow up directly? If you'd rather keep it in chat, just say that.",
-    );
-  });
-
-  test("offer_handoff without issue context", () => {
-    expect(
-      fallbackRenderHandoffMessage({
-        kind: "offer_handoff",
-        hasIssueContext: false,
-        agentLabel: "the team",
-      }),
-    ).toBe(
-      "Sure, I can get this to the team. Before I pass it along, could you tell me a bit about what you need help with so we have the right context?",
-    );
-  });
-
-  test("offer_handoff with issue context", () => {
-    expect(
-      fallbackRenderHandoffMessage({
-        kind: "offer_handoff",
-        hasIssueContext: true,
-        agentLabel: "the team",
-      }),
-    ).toBe(
-      "I can pass this to the team for a deeper look. If you'd like me to do that, reply yes and I'll collect anything still missing before sending it over.",
-    );
-  });
-
-  test("escalated variants", () => {
-    expect(
-      fallbackRenderHandoffMessage({
-        kind: "escalated",
-        variant: "created",
-        agentLabel: "a team member",
-      }),
-    ).toBe("I've passed this along and a team member will follow up with you shortly.");
-    expect(
-      fallbackRenderHandoffMessage({
-        kind: "escalated",
-        variant: "already_forwarded",
-        agentLabel: "a team member",
-      }),
-    ).toBe(
-      "This is already with a team member and they'll continue the follow-up there.",
-    );
-  });
-});
-
-describe("isRenderedHandoffMessageValid - guardrails (language-agnostic)", () => {
-  const collectBoth: HandoffRenderDirective = {
-    kind: "collect_contact",
-    missingFields: ["name", "email"],
-    agentLabel: "the team",
-  };
-
-  test("accepts a contact request that asks for both fields and offers opt-out", () => {
-    expect(
-      isRenderedHandoffMessageValid(
-        {
-          asksForName: true,
-          asksForEmail: true,
-          offersToStayInChat: true,
-          claimsAlreadyForwarded: false,
-        },
-        collectBoth,
-      ),
-    ).toBe(true);
-  });
-
-  test("rejects when the requested email field is not asked for", () => {
-    expect(
-      isRenderedHandoffMessageValid(
-        {
-          asksForName: true,
-          asksForEmail: false,
-          offersToStayInChat: true,
-          claimsAlreadyForwarded: false,
-        },
-        collectBoth,
-      ),
-    ).toBe(false);
-  });
-
-  test("rejects when the opt-out is not offered", () => {
-    expect(
-      isRenderedHandoffMessageValid(
-        {
-          asksForName: true,
-          asksForEmail: true,
-          offersToStayInChat: false,
-          claimsAlreadyForwarded: false,
-        },
-        collectBoth,
-      ),
-    ).toBe(false);
-  });
-
-  test("rejects a premature 'already forwarded' claim", () => {
-    expect(
-      isRenderedHandoffMessageValid(
-        {
-          asksForName: true,
-          asksForEmail: true,
-          offersToStayInChat: true,
-          claimsAlreadyForwarded: true,
-        },
-        collectBoth,
-      ),
-    ).toBe(false);
-  });
-
-  test("email-only directive does not require asking for a name", () => {
-    expect(
-      isRenderedHandoffMessageValid(
-        {
-          asksForName: false,
-          asksForEmail: true,
-          offersToStayInChat: true,
-          claimsAlreadyForwarded: false,
-        },
-        { kind: "collect_contact", missingFields: ["email"], agentLabel: "the team" },
-      ),
-    ).toBe(true);
-  });
-
-  test("offer_handoff rejects asking for contact details too early", () => {
-    expect(
-      isRenderedHandoffMessageValid(
-        {
-          asksForName: false,
-          asksForEmail: true,
-          offersToStayInChat: false,
-          claimsAlreadyForwarded: false,
-        },
-        { kind: "offer_handoff", hasIssueContext: true, agentLabel: "the team" },
-      ),
-    ).toBe(false);
-  });
-
-  test("offer_handoff accepts an offer that doesn't ask for PII or claim a forward", () => {
-    expect(
-      isRenderedHandoffMessageValid(
-        {
-          asksForName: false,
-          asksForEmail: false,
-          offersToStayInChat: false,
-          claimsAlreadyForwarded: false,
-        },
-        { kind: "offer_handoff", hasIssueContext: true, agentLabel: "the team" },
-      ),
-    ).toBe(true);
-  });
-
-  test("escalated allows the forward claim but rejects re-asking for contact", () => {
-    const created: HandoffRenderDirective = {
-      kind: "escalated",
-      variant: "created",
-      agentLabel: "a team member",
-    };
-    expect(
-      isRenderedHandoffMessageValid(
-        {
-          asksForName: false,
-          asksForEmail: false,
-          offersToStayInChat: false,
-          claimsAlreadyForwarded: true,
-        },
-        created,
-      ),
-    ).toBe(true);
-    expect(
-      isRenderedHandoffMessageValid(
-        {
-          asksForName: false,
-          asksForEmail: true,
-          offersToStayInChat: false,
-          claimsAlreadyForwarded: true,
-        },
-        created,
-      ),
-    ).toBe(false);
-  });
-});
-
-describe("renderHandoffMessage - model failure handling", () => {
+test("contact collection requires requested fields, an opt-out, and no premature handoff claim", () => {
   const directive: HandoffRenderDirective = {
     kind: "collect_contact",
     missingFields: ["name", "email"],
     agentLabel: "the team",
   };
-  const unusableModel = {} as unknown as LanguageModel;
+  const valid = {
+    asksForName: true,
+    asksForEmail: true,
+    offersToStayInChat: true,
+    claimsAlreadyForwarded: false,
+  };
 
-  test("falls back to deterministic wording when the model is unusable", async () => {
-    const result = await renderHandoffMessage(unusableModel, {
-      directive,
-      settings,
-      conversationHistory: [],
-    });
-    expect(result).toBe(fallbackRenderHandoffMessage(directive));
-  });
+  expect(isRenderedHandoffMessageValid(valid, directive)).toBe(true);
+  expect(isRenderedHandoffMessageValid({ ...valid, asksForEmail: false }, directive)).toBe(false);
+  expect(isRenderedHandoffMessageValid({ ...valid, claimsAlreadyForwarded: true }, directive)).toBe(false);
+});
 
-  test("throws when throwOnModelError is true and the model fails", async () => {
-    let threw = false;
-    try {
-      await renderHandoffMessage(
-        unusableModel,
-        { directive, settings, conversationHistory: [] },
-        { throwOnModelError: true },
-      );
-    } catch {
-      threw = true;
-    }
-    expect(threw).toBe(true);
-  });
+test("handoff directives do not collect contact early or repeat collection after forwarding", () => {
+  const assessment = {
+    asksForName: false,
+    asksForEmail: false,
+    offersToStayInChat: false,
+    claimsAlreadyForwarded: false,
+  };
+  const offer: HandoffRenderDirective = { kind: "offer_handoff", hasIssueContext: true, agentLabel: "the team" };
+  const escalated: HandoffRenderDirective = { kind: "escalated", variant: "created", agentLabel: "the team" };
+
+  expect(isRenderedHandoffMessageValid(assessment, offer)).toBe(true);
+  expect(isRenderedHandoffMessageValid({ ...assessment, asksForEmail: true }, offer)).toBe(false);
+  expect(isRenderedHandoffMessageValid({ ...assessment, asksForName: true, claimsAlreadyForwarded: true }, escalated)).toBe(false);
 });

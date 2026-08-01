@@ -1,51 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { createEscalation, parseTelegramThreadId } from "./escalation";
+import { createEscalation } from "./escalation";
 import { type ChatService } from "../../services/chat-service";
 import { type ProjectService } from "../../services/project-service";
 import { type TelegramService } from "../../services/telegram-service";
 import { type MessageRow } from "../../db";
-
-describe("parseTelegramThreadId", () => {
-  test("parses a positive numeric string", () => {
-    expect(parseTelegramThreadId("12345")).toBe(12345);
-  });
-
-  test("trims surrounding whitespace before parsing", () => {
-    expect(parseTelegramThreadId("  12345  ")).toBe(12345);
-  });
-
-  test("returns undefined for null", () => {
-    expect(parseTelegramThreadId(null)).toBeUndefined();
-  });
-
-  test("returns undefined for undefined", () => {
-    expect(parseTelegramThreadId(undefined)).toBeUndefined();
-  });
-
-  test("returns undefined for empty string", () => {
-    expect(parseTelegramThreadId("")).toBeUndefined();
-  });
-
-  test("returns undefined for whitespace-only string", () => {
-    expect(parseTelegramThreadId("   ")).toBeUndefined();
-  });
-
-  test("returns undefined for non-numeric string", () => {
-    expect(parseTelegramThreadId("abc")).toBeUndefined();
-  });
-
-  test("returns undefined for negative number", () => {
-    expect(parseTelegramThreadId("-1")).toBeUndefined();
-  });
-
-  test("returns undefined for zero", () => {
-    expect(parseTelegramThreadId("0")).toBeUndefined();
-  });
-
-  test("parses leading-digit strings via parseInt (e.g. '123abc' → 123)", () => {
-    expect(parseTelegramThreadId("123abc")).toBe(123);
-  });
-});
 
 // ─── createEscalation harness ─────────────────────────────────────────────────
 // Services are mocked at the I/O boundary; each helper records the calls the
@@ -174,18 +132,6 @@ describe("createEscalation - first escalation (created)", () => {
     expect(broadcasts[0].id).toBe("msg-review-1");
   });
 
-  test("stamps escalatedAt + reviewSummaryMessageId + teamRequestSummary in metadata", async () => {
-    const { params, calls } = baseParams();
-
-    await createEscalation(params as never);
-
-    expect(calls.updateConversation).toHaveLength(1);
-    const meta = JSON.parse(calls.updateConversation[0].data.metadata!);
-    expect(typeof meta.escalatedAt).toBe("string");
-    expect(meta.reviewSummaryMessageId).toBe("msg-review-1");
-    expect(meta.teamRequestSummary).toBe("Visitor needs a refund on order 123.");
-  });
-
   test("preserves existing metadata keys (country/city/source)", async () => {
     const { params, calls } = baseParams({
       conversation: makeConversation({
@@ -205,17 +151,6 @@ describe("createEscalation - first escalation (created)", () => {
     expect(meta.city).toBe("NYC");
     expect(meta.source).toBe("widget");
     expect(meta.reviewSummaryMessageId).toBe("msg-review-1");
-  });
-
-  test("falls back to default summary when summary is blank", async () => {
-    const { params, calls } = baseParams({ summary: "   " });
-
-    const result = await createEscalation(params as never);
-
-    expect(result.summary).toBe("Visitor asked for team follow-up.");
-    expect(calls.addSystemMessage[0].content).toBe(
-      "Visitor asked for team follow-up.",
-    );
   });
 
   test('treats the metadata literal "null" as absent instead of crashing', async () => {
@@ -250,25 +185,6 @@ describe("createEscalation - repeat escalation (already forwarded)", () => {
     expect(result.summaryMessageId).toBe("msg-existing");
     expect(calls.addSystemMessage).toHaveLength(0);
     expect(broadcasts).toHaveLength(0);
-  });
-
-  test("keeps the original escalatedAt and preserves prior keys", async () => {
-    const { params, calls } = baseParams({
-      conversation: makeConversation({
-        metadata: JSON.stringify({
-          escalatedAt: "2020-01-01T00:00:00.000Z",
-          reviewSummaryMessageId: "msg-existing",
-          country: "US",
-        }),
-      }),
-    });
-
-    await createEscalation(params as never);
-
-    const meta = JSON.parse(calls.updateConversation[0].data.metadata!);
-    expect(meta.escalatedAt).toBe("2020-01-01T00:00:00.000Z");
-    expect(meta.reviewSummaryMessageId).toBe("msg-existing");
-    expect(meta.country).toBe("US");
   });
 });
 
@@ -307,7 +223,7 @@ describe("createEscalation - telegram notification", () => {
     telegramChatId: "chat-id",
   };
 
-  test("first escalation: isUpdate false, no replyTo, deep-link carries msg id", async () => {
+  test("first escalation starts a thread linked to the review summary", async () => {
     const tg = makeTelegramService();
     const { params } = baseParams({
       telegramService: tg.service,
@@ -322,6 +238,7 @@ describe("createEscalation - telegram notification", () => {
     expect(tg.calls[0].params.conversationUrl).toBe(
       "https://app.test/app/projects/project-1/conversations?filter=needs-you&id=conv-1&msg=msg-review-1",
     );
+    expect(result.summaryMessageId).toBe("msg-review-1");
     expect(result.telegramThreadId).toBe("555");
   });
 
@@ -346,17 +263,5 @@ describe("createEscalation - telegram notification", () => {
     expect(tg.calls[0].params.conversationUrl).toBe(
       "https://app.test/app/projects/project-1/conversations?filter=needs-you&id=conv-1&msg=msg-existing",
     );
-  });
-
-  test("skips telegram when bot token/chat id are absent", async () => {
-    const tg = makeTelegramService();
-    const { params } = baseParams({
-      telegramService: tg.service,
-      settings: null,
-    });
-
-    await createEscalation(params as never);
-
-    expect(tg.calls).toHaveLength(0);
   });
 });

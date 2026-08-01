@@ -21,10 +21,10 @@ import {
 } from "./format-transcript";
 
 export const MAX_RAG_CONTEXT_CHARS = 30_000;
-export const MAX_COMPANY_CONTEXT_CHARS = 4_000;
-export const MAX_FAQ_CONTEXT_CHARS = 22_000;
-export const MAX_TOOL_EVIDENCE_CHARS = 4_000;
-export const MAX_CONVERSATION_SUMMARY_CHARS = 2_000;
+const MAX_COMPANY_CONTEXT_CHARS = 4_000;
+const MAX_FAQ_CONTEXT_CHARS = 22_000;
+const MAX_TOOL_EVIDENCE_CHARS = 4_000;
+const MAX_CONVERSATION_SUMMARY_CHARS = 2_000;
 
 export function trimToCharBudget(text: string, budget: number): string {
   if (text.length <= budget) return text;

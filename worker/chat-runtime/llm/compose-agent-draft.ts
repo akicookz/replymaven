@@ -28,11 +28,9 @@ export interface ComposeAgentDraftParams {
   knowledgeContext?: string | null;
 }
 
-// Pure prompt construction — takes the raw params (full history + settings)
-// and does the transcript truncation and tone resolution itself, so every
-// prompt-shaping behavior is unit-testable without invoking generateText
-// (mirrors the builder-vs-call split in support-prompt-builders.ts).
-export function buildComposeAgentDraftPrompt(
+// Pure prompt construction keeps transcript truncation and tone resolution
+// separate from the model call.
+function buildComposeAgentDraftPrompt(
   params: ComposeAgentDraftParams,
 ): string {
   const transcript = formatTranscript(params.conversationHistory.slice(-20));

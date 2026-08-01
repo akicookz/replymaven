@@ -292,7 +292,7 @@ function computeFaqFingerprint(
   return parts.join("|");
 }
 
-export function buildCompiledFaqCacheKey(
+function buildCompiledFaqCacheKey(
   projectId: string,
   fingerprintResources: FaqCacheFingerprintResource[],
 ): string {

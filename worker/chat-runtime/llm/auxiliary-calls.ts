@@ -223,7 +223,7 @@ function recoverStructuredOutput<T extends z.ZodTypeAny>(
   return null;
 }
 
-export function dedupeReformulatedQueries(
+function dedupeReformulatedQueries(
   candidates: string[],
   failedQueries: string[],
 ): string[] {

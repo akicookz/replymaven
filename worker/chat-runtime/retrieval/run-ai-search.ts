@@ -36,15 +36,7 @@ interface NormalizedSearchResponse {
   rawDataCount: number;
 }
 
-export const hybridUnavailableProjects = new Set<string>();
-
-/**
- * Clear the in-memory hybrid-unavailable cache. Intended for tests; calling
- * in production defeats the point of the cache.
- */
-export function clearHybridUnavailableCache(): void {
-  hybridUnavailableProjects.clear();
-}
+const hybridUnavailableProjects = new Set<string>();
 
 const HYBRID_UNAVAILABLE_KV_TTL_SECONDS = 24 * 60 * 60;
 
@@ -52,7 +44,7 @@ function hybridUnavailableKvKey(projectId: string): string {
   return `hybrid_unavailable:${projectId}`;
 }
 
-export function isHybridRetrievalUnavailableError(error: unknown): boolean {
+function isHybridRetrievalUnavailableError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
 
   return (
@@ -61,7 +53,7 @@ export function isHybridRetrievalUnavailableError(error: unknown): boolean {
   );
 }
 
-export async function resolveRetrievalType(
+async function resolveRetrievalType(
   projectId: string,
   kv?: KVNamespace,
 ): Promise<SearchRetrievalType> {

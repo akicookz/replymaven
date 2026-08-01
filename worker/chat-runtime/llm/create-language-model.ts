@@ -127,7 +127,7 @@ function getRecordValue(
   return key in record ? record[key] : undefined;
 }
 
-export function isProviderLikeError(error: unknown): boolean {
+function isProviderLikeError(error: unknown): boolean {
   if (error instanceof Error) {
     if (
       error.name === "AI_NoObjectGeneratedError" ||
@@ -175,7 +175,7 @@ export function createLanguageModel(
   return provider(config.model);
 }
 
-export function resolveFallbackModelConfig(
+function resolveFallbackModelConfig(
   config: ChatRuntimeAiConfig,
 ): ChatRuntimeAiConfig | null {
   if (isOpenAiModel(config.model)) {

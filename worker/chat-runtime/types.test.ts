@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import {
   applyChatOwnershipEvent,
   canPersistAiOutput,
@@ -9,64 +9,53 @@ import {
   parseChatState,
 } from "./types";
 
-describe("conversation AI participation", () => {
-  test("starts new conversations with continuous AI participation", () => {
-    expect(createInitialChatState().aiParticipation).toBe("continuous");
+test("parse compatibility regression: legacy rows lose their fallback ownership or explicit AI mode", () => {
+  const explicit = parseChatState(
+    JSON.stringify({ aiParticipation: "assist_until_agent" }),
+  );
+  const legacy = parseChatState(JSON.stringify({ state: "agent_mode" }), {
+    fallbackAiParticipation: "human_only",
   });
 
-  test("preserves an explicit assist-until-agent mode", () => {
-    const parsed = parseChatState(
-      JSON.stringify({ aiParticipation: "assist_until_agent" }),
-    );
+  expect(explicit.aiParticipation).toBe("assist_until_agent");
+  expect(legacy.aiParticipation).toBe("human_only");
+});
 
-    expect(parsed.aiParticipation).toBe("assist_until_agent");
+test("ownership initialization regression: new threads skip continuous AI or team requests skip escalation", () => {
+  const initial = createInitialChatState();
+  const escalating = applyChatOwnershipEvent(initial, "team_requested");
+
+  expect(initial).toMatchObject({
+    state: "active",
+    aiParticipation: "continuous",
+    ownershipRevision: 0,
   });
-
-  test("uses human-only fallback for legacy agent conversations", () => {
-    const parsed = parseChatState(JSON.stringify({ state: "agent_mode" }), {
-      fallbackAiParticipation: "human_only",
-    });
-
-    expect(parsed.aiParticipation).toBe("human_only");
+  expect(escalating).toMatchObject({
+    state: "escalating",
+    aiParticipation: "assist_until_agent",
+    ownershipRevision: initial.ownershipRevision + 1,
   });
 });
 
-describe("applyChatOwnershipEvent", () => {
-  test("moves an AI-owned thread into assist mode when the team is requested", () => {
-    const next = applyChatOwnershipEvent(
-      createInitialChatState(),
-      "team_requested",
-    );
+test("ownership transition regression: AI resumes after a human takeover before explicit handback", () => {
+  const initial = createInitialChatState();
+  const humanOwned = applyChatOwnershipEvent(initial, "human_joined");
+  const stillHumanOwned = applyChatOwnershipEvent(
+    humanOwned,
+    "team_requested",
+  );
+  const handedBack = applyChatOwnershipEvent(humanOwned, "ai_handed_back");
 
-    expect(next.aiParticipation).toBe("assist_until_agent");
+  expect(humanOwned).toMatchObject({
+    state: "agent_mode",
+    aiParticipation: "human_only",
+    ownershipRevision: initial.ownershipRevision + 1,
   });
-
-  test("does not reactivate AI when a team request is submitted after a human joined", () => {
-    const humanState = applyChatOwnershipEvent(
-      createInitialChatState(),
-      "human_joined",
-    );
-
-    expect(
-      applyChatOwnershipEvent(humanState, "team_requested").aiParticipation,
-    ).toBe("human_only");
-  });
-
-  test("human reply silences AI until an explicit handback", () => {
-    const humanState = applyChatOwnershipEvent(
-      createInitialChatState(),
-      "human_joined",
-    );
-    const handedBack = applyChatOwnershipEvent(humanState, "ai_handed_back");
-
-    expect(humanState).toMatchObject({
-      state: "agent_mode",
-      aiParticipation: "human_only",
-    });
-    expect(handedBack).toMatchObject({
-      state: "active",
-      aiParticipation: "continuous",
-    });
+  expect(stillHumanOwned.aiParticipation).toBe("human_only");
+  expect(handedBack).toMatchObject({
+    state: "active",
+    aiParticipation: "continuous",
+    ownershipRevision: humanOwned.ownershipRevision + 1,
   });
 });
 
@@ -76,112 +65,74 @@ test.each([
   ["waiting_agent", "assist_until_agent"],
   ["agent_replied", "human_only"],
 ] as const)(
-  "legacy %s conversations default to %s AI participation",
+  "legacy status compatibility regression: %s receives the wrong AI participation (%s expected)",
   (status, expected) => {
     expect(fallbackAiParticipationForStatus(status)).toBe(expected);
   },
 );
 
-test("an in-flight AI turn cannot overwrite a human takeover", () => {
-  const humanState = applyChatOwnershipEvent(
-    createInitialChatState(),
-    "human_joined",
-  );
-  const staleAiState = applyChatOwnershipEvent(
-    createInitialChatState(),
-    "team_requested",
-  );
-
-  expect(
-    mergeChatStateForPersistence(humanState, staleAiState),
-  ).toMatchObject({
-    state: "agent_mode",
-    aiParticipation: "human_only",
-  });
-});
-
-test("a one-shot AI turn leaves the conversation in human-owned agent mode", () => {
-  const humanState = applyChatOwnershipEvent(
-    createInitialChatState(),
-    "human_joined",
-  );
+test("persistence race regression: stale AI state overwrites a newer takeover or handback and drops one-shot metadata", () => {
+  const initial = createInitialChatState();
+  const humanOwned = applyChatOwnershipEvent(initial, "human_joined");
+  const staleAi = {
+    ...initial,
+    state: "answering" as const,
+  };
+  const handedBack = applyChatOwnershipEvent(humanOwned, "ai_handed_back");
   const oneShotResult = {
-    ...humanState,
+    ...humanOwned,
     state: "answering" as const,
     lastIntent: "troubleshoot",
   };
 
-  expect(mergeChatStateForPersistence(humanState, oneShotResult)).toMatchObject({
+  expect(mergeChatStateForPersistence(humanOwned, staleAi)).toMatchObject({
+    state: "agent_mode",
+    aiParticipation: "human_only",
+    ownershipRevision: humanOwned.ownershipRevision,
+  });
+  expect(mergeChatStateForPersistence(handedBack, humanOwned)).toMatchObject({
+    state: "active",
+    aiParticipation: "continuous",
+    ownershipRevision: handedBack.ownershipRevision,
+  });
+  expect(mergeChatStateForPersistence(humanOwned, oneShotResult)).toMatchObject({
     state: "agent_mode",
     aiParticipation: "human_only",
     lastIntent: "troubleshoot",
   });
 });
 
-test("a completed handback cannot be overwritten by stale one-shot AI state", () => {
-  const handedBackState = applyChatOwnershipEvent(
-    applyChatOwnershipEvent(createInitialChatState(), "human_joined"),
-    "ai_handed_back",
-  );
-  const staleOneShotState = applyChatOwnershipEvent(
-    createInitialChatState(),
-    "human_joined",
-  );
-
+test("AI output persistence regression: ordinary output overwrites human or closed conversations", () => {
   expect(
-    mergeChatStateForPersistence(handedBackState, staleOneShotState),
-  ).toMatchObject({
-    state: "active",
-    aiParticipation: "continuous",
-  });
+    canPersistAiOutput({
+      participationAtTurnStart: "assist_until_agent",
+      currentParticipation: "human_only",
+      currentStatus: "agent_replied",
+      aiInvoked: false,
+      resolvedByThisTurn: false,
+    }),
+  ).toBe(false);
+  expect(
+    canPersistAiOutput({
+      participationAtTurnStart: "continuous",
+      currentParticipation: "continuous",
+      currentStatus: "closed",
+      aiInvoked: false,
+      resolvedByThisTurn: false,
+    }),
+  ).toBe(false);
+  expect(
+    canPersistAiOutput({
+      participationAtTurnStart: "human_only",
+      currentParticipation: "human_only",
+      currentStatus: "agent_replied",
+      aiInvoked: true,
+      resolvedByThisTurn: false,
+    }),
+  ).toBe(true);
 });
 
-describe("canPersistAiOutput", () => {
-  test("suppresses an assist-mode reply when a human joined during the turn", () => {
-    expect(
-      canPersistAiOutput({
-        participationAtTurnStart: "assist_until_agent",
-        currentParticipation: "human_only",
-        currentStatus: "agent_replied",
-        aiInvoked: false,
-        resolvedByThisTurn: false,
-      }),
-    ).toBe(false);
-  });
-
-  test("allows the explicitly invoked one-shot reply to finish", () => {
-    expect(
-      canPersistAiOutput({
-        participationAtTurnStart: "human_only",
-        currentParticipation: "human_only",
-        currentStatus: "agent_replied",
-        aiInvoked: true,
-        resolvedByThisTurn: false,
-      }),
-    ).toBe(true);
-  });
-
-  test("denies ordinary AI output after the conversation was closed", () => {
-    expect(
-      canPersistAiOutput({
-        participationAtTurnStart: "continuous",
-        currentParticipation: "continuous",
-        currentStatus: "closed",
-        aiInvoked: false,
-        resolvedByThisTurn: false,
-      }),
-    ).toBe(false);
-  });
-});
-
-test("ownership events advance the ownership revision", () => {
-  const initial = createInitialChatState();
-  const next = applyChatOwnershipEvent(initial, "human_joined");
-
-  expect(next.ownershipRevision).toBe(initial.ownershipRevision + 1);
-});
-
-test("an invoked AI turn cannot adopt a newer human ownership revision", () => {
+test("concurrency regression: an AI snapshot remains current after ownership revision advances", () => {
   expect(
     isChatOwnershipSnapshotCurrent(
       { status: "agent_replied", chatState: '{"ownershipRevision":2}' },

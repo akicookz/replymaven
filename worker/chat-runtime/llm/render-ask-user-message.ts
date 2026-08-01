@@ -25,7 +25,7 @@ const renderAskUserSchema = z.object({
     ),
 });
 
-export function isRenderedAskUserMessageValid(assessment: {
+function isRenderedAskUserMessageValid(assessment: {
   asksExactlyOneQuestion: boolean;
   introducesNewTopics: boolean;
 }): boolean {

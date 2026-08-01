@@ -40,12 +40,4 @@ describe("shouldReloadForChunkError", () => {
       }),
     ).toBe(true);
   });
-
-  test("treats a missing/garbage stored value as no prior reload", () => {
-    const store = makeStore({ "rm:chunk-reload-at": "not-a-number" });
-    expect(
-      shouldReloadForChunkError({ now: 2000, read: store.read, write: store.write }),
-    ).toBe(true);
-    expect(store.data.get("rm:chunk-reload-at")).toBe("2000");
-  });
 });

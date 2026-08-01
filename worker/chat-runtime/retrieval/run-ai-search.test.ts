@@ -1,82 +1,159 @@
-import { describe, expect, test, beforeEach } from "bun:test";
-import {
-  clearHybridUnavailableCache,
-  hybridUnavailableProjects,
-  isHybridRetrievalUnavailableError,
-  resolveRetrievalType,
-} from "./run-ai-search";
+import { describe, expect, test } from "bun:test";
+import { type AppEnv } from "../../types";
+import { runAiSearch } from "./run-ai-search";
 
-beforeEach(() => {
-  clearHybridUnavailableCache();
-});
+type RetrievalType = "hybrid" | "vector";
 
-describe("isHybridRetrievalUnavailableError", () => {
-  test("returns true for hybrid unavailable error with both keywords", () => {
-    const error = new Error(
-      "retrieval_type 'hybrid' is not available because keyword indexing is disabled for this project",
-    );
-    expect(isHybridRetrievalUnavailableError(error)).toBe(true);
+interface SearchRequest {
+  ai_search_options: {
+    retrieval: {
+      retrieval_type: RetrievalType;
+      filters: {
+        folder: {
+          $gte: string;
+        };
+      };
+    };
+  };
+}
+
+interface RecordedSearch {
+  projectPrefix: string;
+  retrievalType: RetrievalType;
+}
+
+interface FakeAiSearch {
+  binding: AppEnv["AI"];
+  searches: RecordedSearch[];
+}
+
+interface MemoryKv {
+  namespace: KVNamespace;
+  values: Map<string, string>;
+}
+
+function createFakeAiSearch(
+  hybridUnavailableProjectPrefixes: Set<string> = new Set(),
+): FakeAiSearch {
+  const searches: RecordedSearch[] = [];
+  const binding = {
+    aiSearch() {
+      return {
+        get() {
+          return {
+            async search(request: SearchRequest) {
+              const retrieval = request.ai_search_options.retrieval;
+              const projectPrefix = retrieval.filters.folder.$gte;
+              searches.push({
+                projectPrefix,
+                retrievalType: retrieval.retrieval_type,
+              });
+              if (
+                retrieval.retrieval_type === "hybrid" &&
+                hybridUnavailableProjectPrefixes.has(projectPrefix)
+              ) {
+                throw new Error(
+                  "retrieval_type 'hybrid' is not available because keyword indexing is disabled",
+                );
+              }
+              return { success: true, result: { chunks: [] } };
+            },
+          };
+        },
+      };
+    },
+  } as unknown as AppEnv["AI"];
+
+  return { binding, searches };
+}
+
+function createMemoryKv(initialValues: Record<string, string> = {}): MemoryKv {
+  const values = new Map(Object.entries(initialValues));
+  const namespace = {
+    async get(key: string) {
+      return values.get(key) ?? null;
+    },
+    async put(key: string, value: string) {
+      values.set(key, value);
+    },
+  } as unknown as KVNamespace;
+
+  return { namespace, values };
+}
+
+async function searchProject(options: {
+  ai: AppEnv["AI"];
+  kv: KVNamespace;
+  projectId: string;
+}): Promise<void> {
+  await runAiSearch({
+    env: {
+      AI: options.ai,
+      UPLOADS: {} as R2Bucket,
+      CONVERSATIONS_CACHE: options.kv,
+    },
+    db: {} as never,
+    projectId: options.projectId,
+    queries: ["pricing"],
+    allowBroaderRetry: false,
+  });
+}
+
+describe("runAiSearch hybrid fallback", () => {
+  test("an unavailable hybrid search retries vector, persists the marker, and leaves another project on hybrid", async () => {
+    const unavailableProjectId = "project-boundary-unavailable";
+    const unaffectedProjectId = "project-boundary-unaffected";
+    const ai = createFakeAiSearch(new Set([`${unavailableProjectId}/`]));
+    const kv = createMemoryKv();
+
+    await searchProject({
+      ai: ai.binding,
+      kv: kv.namespace,
+      projectId: unavailableProjectId,
+    });
+    await searchProject({
+      ai: ai.binding,
+      kv: kv.namespace,
+      projectId: unaffectedProjectId,
+    });
+
+    expect(ai.searches).toEqual([
+      {
+        projectPrefix: `${unavailableProjectId}/`,
+        retrievalType: "hybrid",
+      },
+      {
+        projectPrefix: `${unavailableProjectId}/`,
+        retrievalType: "vector",
+      },
+      {
+        projectPrefix: `${unaffectedProjectId}/`,
+        retrievalType: "hybrid",
+      },
+    ]);
+    expect(
+      kv.values.get(`hybrid_unavailable:${unavailableProjectId}`),
+    ).toBe("1");
+    expect(
+      kv.values.has(`hybrid_unavailable:${unaffectedProjectId}`),
+    ).toBe(false);
   });
 
-  test("returns false when only one keyword is present", () => {
-    const error = new Error("retrieval_type 'hybrid' is not available");
-    expect(isHybridRetrievalUnavailableError(error)).toBe(false);
-  });
+  test("a cold project marker starts the search with vector retrieval", async () => {
+    const projectId = "project-boundary-cold-marker";
+    const ai = createFakeAiSearch();
+    const kv = createMemoryKv({
+      [`hybrid_unavailable:${projectId}`]: "1",
+    });
 
-  test("returns false for unrelated errors", () => {
-    const error = new Error("Network timeout");
-    expect(isHybridRetrievalUnavailableError(error)).toBe(false);
-  });
+    await searchProject({
+      ai: ai.binding,
+      kv: kv.namespace,
+      projectId,
+    });
 
-  test("returns false for non-Error values", () => {
-    expect(isHybridRetrievalUnavailableError("string error")).toBe(false);
-    expect(isHybridRetrievalUnavailableError(null)).toBe(false);
-    expect(isHybridRetrievalUnavailableError(42)).toBe(false);
-  });
-});
-
-describe("resolveRetrievalType", () => {
-  test("returns hybrid by default for unknown projects", async () => {
-    expect(await resolveRetrievalType("project-abc")).toBe("hybrid");
-  });
-
-  test("returns vector after project is marked as hybrid-unavailable", async () => {
-    hybridUnavailableProjects.add("project-abc");
-    expect(await resolveRetrievalType("project-abc")).toBe("vector");
-  });
-
-  test("does not affect other projects", async () => {
-    hybridUnavailableProjects.add("project-abc");
-    expect(await resolveRetrievalType("project-xyz")).toBe("hybrid");
-  });
-
-  test("returns hybrid again after cache is cleared", async () => {
-    hybridUnavailableProjects.add("project-abc");
-    expect(await resolveRetrievalType("project-abc")).toBe("vector");
-
-    hybridUnavailableProjects.clear();
-    expect(await resolveRetrievalType("project-abc")).toBe("hybrid");
-  });
-
-  test("uses KV cache to prime in-memory set on cold isolates", async () => {
-    const kvStore = new Map<string, string>();
-    kvStore.set("hybrid_unavailable:project-cold", "1");
-    const kv = {
-      get: async (key: string) => kvStore.get(key) ?? null,
-      put: async () => {},
-    } as unknown as KVNamespace;
-
-    expect(await resolveRetrievalType("project-cold", kv)).toBe("vector");
-    expect(hybridUnavailableProjects.has("project-cold")).toBe(true);
-  });
-
-  test("falls back to hybrid when KV has no entry", async () => {
-    const kv = {
-      get: async () => null,
-      put: async () => {},
-    } as unknown as KVNamespace;
-
-    expect(await resolveRetrievalType("project-fresh", kv)).toBe("hybrid");
-    expect(hybridUnavailableProjects.has("project-fresh")).toBe(false);
+    expect(ai.searches).toEqual([
+      { projectPrefix: `${projectId}/`, retrievalType: "vector" },
+    ]);
   });
 });

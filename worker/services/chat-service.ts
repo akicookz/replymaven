@@ -23,9 +23,7 @@ export type InboxFilter = "needs-you" | "all" | "snoozed" | "resolved" | "flagge
 
 // Query for conversations that entered (or re-entered) Needs You since
 // `since` (ms). Status changes bump updatedAt, so it doubles as the
-// escalation watermark. Exported as a standalone builder (not executed here)
-// so tests can introspect the generated SQL via .toSQL() — the method below
-// has zero JS-side logic, so the built query IS the behavior under test.
+// escalation watermark. Exported so tests can enforce its tenant-scope contract.
 export function buildNeedsReviewQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   projectId: string,
@@ -49,7 +47,7 @@ export function buildNeedsReviewQuery(
     .limit(20);
 }
 
-export function buildHasVisitorMessagesQuery(
+function buildHasVisitorMessagesQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   conversationId: string,
 ) {
@@ -65,7 +63,7 @@ export function buildHasVisitorMessagesQuery(
     .limit(1);
 }
 
-export function buildVisitorMessageCountQuery(
+function buildVisitorMessageCountQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   conversationId: string,
 ) {
@@ -168,8 +166,7 @@ export function buildHumanTakeoverQuery(
 // Snoozed and flagged (spam) conversations live ONLY in their own tabs: they
 // are excluded from Needs You, All, and Resolved. "Blocked" visitors'
 // conversations are closed with closeReason "spam" at ban time, so the spam
-// exclusion covers them too. Exported so the tab semantics are testable via
-// .toSQL() introspection (see chat-service.test.ts).
+// exclusion covers them too.
 
 function notSnoozedCondition(now: Date): SQL {
   return or(
@@ -185,7 +182,7 @@ function notSpamCondition(): SQL {
   )!;
 }
 
-export function inboxFilterConditions(filter: InboxFilter, now: Date): SQL[] {
+function inboxFilterConditions(filter: InboxFilter, now: Date): SQL[] {
   switch (filter) {
     case "needs-you":
       return [eq(conversations.status, "waiting_agent"), notSnoozedCondition(now)];
@@ -202,7 +199,7 @@ export function inboxFilterConditions(filter: InboxFilter, now: Date): SQL[] {
 
 // Single-pass conditional counts derived from the SAME predicate builders as
 // the tab lists, so a sidebar badge can never disagree with what its tab
-// shows. Exported for .toSQL() introspection tests.
+// shows. Exported so tests can enforce its tenant-scope contract.
 export function buildInboxCountsQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   projectId: string,
@@ -225,7 +222,7 @@ export function buildInboxCountsQuery(
 // Close every open conversation a banned visitor has in the project (spam) in
 // one guarded UPDATE … RETURNING — no select/update race, and already-closed
 // rows are never relabelled. Matches by id OR email, mirroring
-// VisitorBanService.isVisitorBanned. Exported for .toSQL() introspection tests.
+// VisitorBanService.isVisitorBanned.
 export function buildBanSweepQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   projectId: string,

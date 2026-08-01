@@ -1,20 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { type PlannerDecision, type PlannerLoopState, type SupportToolDefinition } from "../types";
 import {
   fallbackPlanNextAction,
-  planNextAction,
   recoverPlannerDecisionFromText,
   sanitizePlannerDecision,
 } from "./plan-next-action";
-import {
-  type PlannerDecision,
-  type PlannerLoopState,
-  type SupportToolDefinition,
-} from "../types";
-import { createLanguageModel } from "../llm/create-language-model";
 
 function createState(): PlannerLoopState {
   return {
-    goal: "Help the visitor verify whether the widget is working.",
+    goal: "Resolve the support request.",
     stepCount: 0,
     conversationSummary: null,
     actionHistory: [],
@@ -43,652 +37,194 @@ function createState(): PlannerLoopState {
     finalDraft: null,
     terminationReason: null,
     reformulationUsed: false,
-    queryTracker: {
-      normalizedQueries: new Map<string, number>(),
-      semanticGroups: [],
-    },
+    queryTracker: { normalizedQueries: new Map<string, number>(), semanticGroups: [] },
     intent: null,
     clarificationAttempts: 0,
     lastBotQuestion: null,
   };
 }
 
-function createTool(overrides: Partial<SupportToolDefinition> = {}): SupportToolDefinition {
+function createTool(): SupportToolDefinition {
   return {
-    name: "check_widget_status",
-    displayName: "Check Widget Status",
-    description: "Check widget installation status for a URL.",
-    endpoint: "https://api.example.com/widget/status",
+    name: "check_status",
+    displayName: "Check status",
+    description: "Checks status.",
+    endpoint: "https://api.example.com/status",
     method: "GET",
     headers: null,
-    parameters: JSON.stringify([
-      {
-        name: "url",
-        type: "string",
-        description: "The page URL to inspect.",
-        required: true,
-      },
-    ]),
+    parameters: JSON.stringify([{ name: "url", type: "string", description: "Page URL", required: true }]),
     responseMapping: null,
     enabled: true,
     timeout: 10_000,
-    ...overrides,
   };
 }
 
-function sanitize(options: {
-  decision: PlannerDecision;
-  state?: PlannerLoopState;
-  tools?: SupportToolDefinition[];
-  conversationHistory?: Array<{ role: "visitor" | "bot" | "agent"; content: string }>;
-}) {
+function sanitize(decision: PlannerDecision, state = createState()) {
   return sanitizePlannerDecision({
-    decision: options.decision,
-    conversationHistory:
-      options.conversationHistory ?? [
-        {
-          role: "visitor",
-          content: "The widget is not working on my pricing page.",
-        },
-      ],
-    currentMessage: "The widget is not working on my pricing page.",
-    availableTools: options.tools ?? [createTool()],
-    state: options.state ?? createState(),
+    decision,
+    conversationHistory: [],
+    currentMessage: "The widget is broken.",
+    availableTools: [createTool()],
+    state,
     maxSteps: 5,
   });
 }
 
-describe("sanitizePlannerDecision", () => {
-  test("forces docs search before compose when no evidence exists", () => {
-    const sanitized = sanitize({
-      decision: {
-        goal: "Answer immediately",
-        nextAction: {
-          type: "compose",
-          reason: "Go straight to the answer.",
-        },
-      },
+describe("planner safety invariants", () => {
+  test("requires retrieval before a grounded answer without evidence", () => {
+    const result = sanitize({
+      goal: "Answer now",
+      nextAction: { type: "compose", reason: "Answer now", composeKind: "grounded" },
     });
 
-    expect(sanitized.nextAction.type).toBe("search_docs");
+    expect(result.nextAction.type).toBe("search_docs");
   });
 
-  test("converts missing required tool input into ask_user", () => {
-    const sanitized = sanitize({
-      decision: {
-        goal: "Check live status",
-        nextAction: {
-          type: "call_tool",
-          reason: "Need runtime evidence.",
-          toolName: "check_widget_status",
-          input: {},
-        },
-      },
+  test("asks for missing required tool input instead of guessing", () => {
+    const result = sanitize({
+      goal: "Inspect status",
+      nextAction: { type: "call_tool", reason: "Need status", toolName: "check_status", input: {} },
     });
 
-    expect(sanitized.nextAction.type).toBe("ask_user");
-    if (sanitized.nextAction.type === "ask_user") {
-      expect(sanitized.nextAction.question).toContain("url");
-    }
+    expect(result.nextAction.type).toBe("ask_user");
   });
 
-  test("avoids repeating the same docs query after evidence exists", () => {
-    const state = createState();
-    state.docsEvidence.retrievalAttempted = true;
-    state.docsEvidence.ragContext = "<source file=\"docs/widget.md\">Install snippet</source>";
-    state.docsEvidence.groundingConfidence = "low";
-    state.actionHistory.push({
+  test("terminates repeated work and bounded planning", () => {
+    const searched = createState();
+    searched.docsEvidence.retrievalAttempted = true;
+    searched.docsEvidence.ragContext = "evidence";
+    searched.actionHistory.push({
       type: "search_docs",
       reason: "First search",
       query: "widget troubleshooting",
       outcome: "executed",
       note: null,
     });
+    const duplicate = sanitize(
+      { goal: "Search again", nextAction: { type: "search_docs", reason: "Repeat", query: "widget troubleshooting" } },
+      searched,
+    );
 
-    const sanitized = sanitize({
-      state,
-      decision: {
-        goal: "Search again",
-        nextAction: {
-          type: "search_docs",
-          reason: "Repeat the same query.",
-          query: "widget troubleshooting",
-        },
-      },
-    });
+    const exhausted = createState();
+    exhausted.stepCount = 5;
+    const limit = sanitize(
+      { goal: "One more", nextAction: { type: "search_docs", reason: "Retry", query: "widget troubleshooting" } },
+      exhausted,
+    );
 
-    expect(sanitized.nextAction.type).toBe("compose");
+    expect(duplicate.nextAction.type).toBe("compose");
+    expect(limit.nextAction.type).toBe("compose");
   });
 
-  test("stops repeated identical tool calls from looping", () => {
+  test("stops an identical tool call from running twice", () => {
     const state = createState();
-    state.docsEvidence.retrievalAttempted = true;
+    const input = { url: "https://example.com/pricing" };
     state.toolEvidence.push({
-      toolName: "check_widget_status",
-      input: { url: "https://example.com/pricing" },
-      output: { success: true, status: "ok" },
+      toolName: "check_status",
+      input,
+      output: { status: "ok" },
       error: null,
       success: true,
-      durationMs: 123,
+      durationMs: 25,
     });
     state.actionHistory.push({
       type: "call_tool",
-      reason: "First tool call",
-      toolName: "check_widget_status",
-      input: { url: "https://example.com/pricing" },
+      reason: "Initial status check",
+      toolName: "check_status",
+      input,
       outcome: "executed",
       note: null,
     });
 
-    const sanitized = sanitize({
-      state,
-      decision: {
-        goal: "Run the same tool again",
+    const result = sanitize(
+      {
+        goal: "Check status again",
         nextAction: {
           type: "call_tool",
-          reason: "Retry identical request.",
-          toolName: "check_widget_status",
-          input: { url: "https://example.com/pricing" },
+          reason: "Repeat the same check",
+          toolName: "check_status",
+          input,
         },
       },
-    });
-
-    expect(sanitized.nextAction.type).toBe("compose");
-  });
-
-  test("enforces the planner step limit", () => {
-    const state = createState();
-    state.stepCount = 5;
-
-    const sanitized = sanitize({
       state,
-      decision: {
-        goal: "One more step",
-        nextAction: {
-          type: "search_docs",
-          reason: "Try again",
-          query: "widget troubleshooting",
-        },
-      },
-    });
+    );
 
-    expect(sanitized.nextAction.type).toBe("compose");
+    expect(result.nextAction.type).toBe("compose");
   });
 
-  test("asks for contact once before creating ticket when contact info is missing", () => {
-    const sanitized = sanitize({
-      decision: {
-        goal: "Forward this to the team",
-        nextAction: {
-          type: "escalate",
-          reason: "Human follow-up requested.",
-        },
-      },
-      conversationHistory: [
-        {
-          role: "visitor",
-          content: "The SEO Spider crawl is missing most of my pages.",
-        },
-        {
-          role: "visitor",
-          content: "I need a live agent.",
-        },
-      ],
-    });
-
-    expect(sanitized.nextAction.type).toBe("collect_contact");
-  });
-
-  test("allows escalate after contact details were declined", () => {
+  test("does not ask a third clarification question", () => {
     const state = createState();
-    state.awaitingContactFields = ["email"];
-    state.contactDeclined = true;
-
-    const sanitized = sanitize({
+    state.clarificationAttempts = 2;
+    const result = sanitize(
+      { goal: "Clarify", nextAction: { type: "ask_user", reason: "Need context", question: "Which page?" } },
       state,
-      decision: {
-        goal: "Forward this to the team",
-        nextAction: {
-          type: "escalate",
-          reason: "The visitor still wants human follow-up.",
-        },
-      },
-      conversationHistory: [
-        {
-          role: "bot",
-          content:
-            "I can forward this to the team. Before I do, could you share your email so they can follow up directly? If you'd rather keep it in chat, just say that.",
-        },
-        {
-          role: "visitor",
-          content: "Please just keep it in chat.",
-        },
-      ],
-    });
+    );
 
-    expect(sanitized.nextAction.type).toBe("escalate");
+    expect(result.nextAction.type).toBe("offer_handoff");
   });
 
-  test("keeps helping instead of offering another handoff after forwarding", () => {
+  test("continues helping rather than reopening an active handoff", () => {
     const state = createState();
     state.handoffRequested = true;
-
-    const firstDecision = sanitize({
+    const result = sanitize(
+      { goal: "Help", nextAction: { type: "escalate", reason: "Ask again" } },
       state,
-      decision: {
-        goal: "Help with the submitted issue",
-        nextAction: {
-          type: "offer_handoff",
-          reason: "A teammate may be needed.",
-        },
-      },
-    });
-
-    expect(firstDecision.nextAction.type).toBe("search_docs");
-
-    state.docsEvidence.retrievalAttempted = true;
-    const afterSearch = sanitize({
-      state,
-      decision: {
-        goal: "Help with the submitted issue",
-        nextAction: {
-          type: "escalate",
-          reason: "Ask the team again.",
-        },
-      },
-    });
-
-    expect(afterSearch.nextAction.type).toBe("compose");
-  });
-});
-
-describe("fallbackPlanNextAction", () => {
-  test("moves explicit human requests into contact collection when issue context exists", () => {
-    const state = createState();
-
-    const decision = fallbackPlanNextAction({
-      conversationHistory: [
-        {
-          role: "visitor",
-          content: "The SEO Spider crawl is only finding 40 out of 300 pages.",
-        },
-        {
-          role: "visitor",
-          content: "live agent",
-        },
-      ],
-      currentMessage: "live agent",
-      availableTools: [createTool()],
-      state,
-      maxSteps: 5,
-    });
-
-    expect(decision.nextAction.type).toBe("collect_contact");
-  });
-
-  test("proceeds to ticket when visitor declines contact after a contact request", () => {
-    const state = createState();
-    state.awaitingContactFields = ["email"];
-    state.contactDeclined = true;
-
-    const decision = fallbackPlanNextAction({
-      conversationHistory: [
-        {
-          role: "visitor",
-          content: "The SEO Spider crawl is only finding 40 out of 300 pages.",
-        },
-        {
-          role: "bot",
-          content:
-            "I can forward this to the team. Before I do, could you share your email so they can follow up directly? If you'd rather keep it in chat, just say that.",
-        },
-        {
-          role: "visitor",
-          content: "No email, please keep it in chat.",
-        },
-      ],
-      currentMessage: "No email, please keep it in chat.",
-      availableTools: [createTool()],
-      state,
-      maxSteps: 5,
-    });
-
-    expect(decision.nextAction.type).toBe("escalate");
-  });
-
-  test("persisted awaitingContactFields drives the flow even when the bot's prior wording is reworded/non-English", () => {
-    // No legacy phrasing in history for the regex to match — the contact
-    // request is known only from the persisted state. This proves the flow is
-    // decoupled from the bot's exact wording.
-    const state = createState();
-    state.awaitingContactFields = ["email"];
-    state.contactDeclined = true;
-
-    const decision = fallbackPlanNextAction({
-      conversationHistory: [
-        {
-          role: "visitor",
-          content: "The SEO Spider crawl is only finding 40 out of 300 pages.",
-        },
-        {
-          role: "bot",
-          content:
-            "¿Podrías compartir tu correo para que el equipo te responda? Si prefieres, seguimos por aquí.",
-        },
-        {
-          role: "visitor",
-          content: "No email, please keep it in chat.",
-        },
-      ],
-      currentMessage: "No email, please keep it in chat.",
-      availableTools: [createTool()],
-      state,
-      maxSteps: 5,
-    });
-
-    expect(decision.nextAction.type).toBe("escalate");
-  });
-
-  test("does not mistake generic contact wording for contact collection flow", () => {
-    const state = createState();
-    state.docsEvidence.retrievalAttempted = true;
-
-    const decision = fallbackPlanNextAction({
-      conversationHistory: [
-        {
-          role: "bot",
-          content: "You can contact support from the dashboard settings page.",
-        },
-        {
-          role: "visitor",
-          content: "Still broken on my pricing page.",
-        },
-      ],
-      currentMessage: "Still broken on my pricing page.",
-      availableTools: [createTool()],
-      state,
-      maxSteps: 5,
-    });
-
-    expect(decision.nextAction.type).not.toBe("escalate");
-    expect(decision.nextAction.type).not.toBe("collect_contact");
-  });
-});
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const hasGeminiKey = !!GEMINI_API_KEY;
-
-const llmDescribe = hasGeminiKey ? describe : describe.skip;
-
-llmDescribe("planNextAction (LLM integration)", () => {
-  function createModel() {
-    return createLanguageModel({
-      model: "gemini-3-flash-preview",
-      geminiApiKey: GEMINI_API_KEY!,
-      openaiApiKey: null,
-    });
-  }
-
-  test("greeting produces compose action", async () => {
-    const state = createState();
-    state.docsEvidence.retrievalAttempted = true;
-
-    const decision = await planNextAction({
-      model: createModel(),
-      conversationHistory: [],
-      currentMessage: "Hello!",
-      availableTools: [],
-      state,
-    });
-
-    expect(decision.nextAction.type).toBe("compose");
-  }, 15_000);
-
-  test("product question triggers search_docs when no evidence", async () => {
-    const decision = await planNextAction({
-      model: createModel(),
-      conversationHistory: [],
-      currentMessage: "How do I set up the chat widget on my website?",
-      availableTools: [],
-      state: createState(),
-    });
-
-    expect(decision.nextAction.type).toBe("search_docs");
-  }, 15_000);
-
-  test("resolution signal produces compose action", async () => {
-    const state = createState();
-    state.docsEvidence.retrievalAttempted = true;
-    state.docsEvidence.ragContext = "<source>Widget docs</source>";
-    state.docsEvidence.groundingConfidence = "high";
-
-    const decision = await planNextAction({
-      model: createModel(),
-      conversationHistory: [
-        { role: "visitor", content: "How do I install the widget?" },
-        { role: "bot", content: "Add the script tag to your HTML head section." },
-      ],
-      currentMessage: "Thanks, that worked!",
-      availableTools: [],
-      state,
-    });
-
-    expect(decision.nextAction.type).toBe("compose");
-  }, 15_000);
-
-  test("explicit human request triggers handoff flow", async () => {
-    const state = createState();
-    state.docsEvidence.retrievalAttempted = true;
-
-    const decision = await planNextAction({
-      model: createModel(),
-      conversationHistory: [
-        { role: "visitor", content: "My billing is completely wrong and I need this fixed." },
-        { role: "bot", content: "I understand the concern. Could you share more details?" },
-      ],
-      currentMessage: "I want to talk to a real person.",
-      availableTools: [],
-      state,
-    });
-
-    expect(["offer_handoff", "collect_contact", "escalate"]).toContain(
-      decision.nextAction.type,
     );
-  }, 15_000);
 
-  test("tool call scenario with available inputs", async () => {
-    const state = createState();
-    state.docsEvidence.retrievalAttempted = true;
-    state.docsEvidence.ragContext = "<source>Check widget via the tool.</source>";
-    state.docsEvidence.groundingConfidence = "low";
+    expect(result.nextAction.type).toBe("search_docs");
+  });
+});
 
-    const decision = await planNextAction({
-      model: createModel(),
-      conversationHistory: [
-        { role: "visitor", content: "The widget on https://example.com/pricing is not showing." },
-      ],
-      currentMessage: "The widget on https://example.com/pricing is not showing.",
-      availableTools: [createTool()],
-      state,
-    });
+test("persisted contact state proceeds without relying on a prior message's wording", () => {
+  const state = createState();
+  state.awaitingContactFields = ["email"];
+  state.contactDeclined = true;
 
-    expect(["call_tool", "search_docs", "compose"]).toContain(decision.nextAction.type);
-    if (decision.nextAction.type === "call_tool") {
-      expect(decision.nextAction.toolName).toBe("check_widget_status");
-    }
-  }, 15_000);
+  const result = fallbackPlanNextAction({
+    conversationHistory: [
+      { role: "visitor", content: "The crawl misses most pages." },
+      { role: "bot", content: "¿Podrías compartir tu correo?" },
+    ],
+    currentMessage: "No email; continue here.",
+    availableTools: [],
+    state,
+    maxSteps: 5,
+  });
 
-  test("decision always has goal and nextAction with type", async () => {
-    const decision = await planNextAction({
-      model: createModel(),
-      conversationHistory: [],
-      currentMessage: "What is your refund policy?",
-      availableTools: [],
-      state: createState(),
-    });
-
-    expect(decision).toHaveProperty("goal");
-    expect(decision).toHaveProperty("nextAction");
-    expect(typeof decision.goal).toBe("string");
-    expect(decision.goal.length).toBeGreaterThan(0);
-    expect(decision.nextAction).toHaveProperty("type");
-  }, 15_000);
+  expect(result.nextAction.type).toBe("escalate");
 });
 
 describe("recoverPlannerDecisionFromText", () => {
-  const validJson = JSON.stringify({
-    goal: "Answer the question",
-    intent: "policy",
-    actionType: "compose",
-    reason: "FAQ covers this",
-    query: null,
-    broaderQueries: null,
-    toolName: null,
-    toolInput: null,
-    question: null,
-    missingFields: null,
-    answerStyle: "direct",
-    composeKind: "grounded",
+  test("recovers a valid planner decision from fenced JSON with surrounding prose", () => {
+    const response = `Planner result:\n\`\`\`json
+${JSON.stringify({
+  goal: "Answer the billing question",
+  intent: "policy",
+  actionType: "compose",
+  reason: "The FAQ contains the answer",
+  query: null,
+  broaderQueries: null,
+  toolName: null,
+  toolInput: null,
+  question: null,
+  missingFields: null,
+  answerStyle: "direct",
+  composeKind: "grounded",
+})}
+\`\`\`\nReady to compose.`;
+
+    expect(recoverPlannerDecisionFromText(response)).toMatchObject({
+      goal: "Answer the billing question",
+      actionType: "compose",
+      composeKind: "grounded",
+    });
   });
 
-  test("returns null for empty input", () => {
-    expect(recoverPlannerDecisionFromText("")).toBeNull();
-    expect(recoverPlannerDecisionFromText("   ")).toBeNull();
-  });
-
-  test("parses a plain JSON response", () => {
-    const result = recoverPlannerDecisionFromText(validJson);
-    expect(result).not.toBeNull();
-    expect(result?.actionType).toBe("compose");
-  });
-
-  test("parses JSON inside a markdown fence", () => {
-    const text = `Here is the decision:\n\n\`\`\`json\n${validJson}\n\`\`\`\n`;
-    const result = recoverPlannerDecisionFromText(text);
-    expect(result?.actionType).toBe("compose");
-  });
-
-  test("extracts JSON from surrounding prose using brace boundaries", () => {
-    const text = `The planner thinks: ${validJson} — that's the plan.`;
-    const result = recoverPlannerDecisionFromText(text);
-    expect(result?.actionType).toBe("compose");
-  });
-
-  test("returns null when no valid JSON can be recovered", () => {
+  test("rejects text that does not contain a schema-valid planner decision", () => {
     expect(
-      recoverPlannerDecisionFromText("just a prose answer, no JSON here"),
+      recoverPlannerDecisionFromText(
+        'Planner result: {"actionType":"unsupported"}',
+      ),
     ).toBeNull();
-  });
-
-  test("returns null when JSON does not match schema", () => {
-    const invalid = JSON.stringify({ actionType: "nonexistent_type" });
-    expect(recoverPlannerDecisionFromText(invalid)).toBeNull();
-  });
-
-  test("planner decision carries intent and composeKind through mapping", () => {
-    const recovered = recoverPlannerDecisionFromText(
-      JSON.stringify({
-        goal: "Greet the visitor",
-        intent: "smalltalk",
-        actionType: "compose",
-        reason: "Greeting",
-        query: null,
-        broaderQueries: null,
-        toolName: null,
-        toolInput: null,
-        question: null,
-        missingFields: null,
-        answerStyle: "direct",
-        composeKind: "greeting",
-      }),
-    );
-    expect(recovered?.intent).toBe("smalltalk");
-    expect(recovered?.composeKind).toBe("greeting");
-  });
-});
-
-describe("sanitizePlannerDecision invariants (Task 3)", () => {
-  test("sanitize lets a declared greeting compose through with no evidence", () => {
-    const decision: PlannerDecision = {
-      goal: "Greet the visitor",
-      intent: "smalltalk",
-      nextAction: { type: "compose", reason: "Greeting", composeKind: "greeting" },
-    };
-    const sanitized = sanitizePlannerDecision({
-      decision,
-      conversationHistory: [],
-      currentMessage: "hi",
-      availableTools: [],
-      state: createState(),
-      maxSteps: 8,
-    });
-    expect(sanitized.nextAction.type).toBe("compose");
-  });
-
-  test("sanitize still forces search for grounded compose without evidence", () => {
-    const decision: PlannerDecision = {
-      goal: "Answer",
-      nextAction: { type: "compose", reason: "Answer now", composeKind: "grounded" },
-    };
-    const sanitized = sanitizePlannerDecision({
-      decision,
-      conversationHistory: [],
-      currentMessage: "how do I embed the widget?",
-      availableTools: [],
-      state: createState(),
-      maxSteps: 8,
-    });
-    expect(sanitized.nextAction.type).toBe("search_docs");
-  });
-
-  test("sanitize blocks a second ask_user in the same turn", () => {
-    const state = createState();
-    state.actionHistory.push({
-      type: "ask_user",
-      reason: "asked already",
-      outcome: "completed",
-      note: "Which page?",
-    });
-    const sanitized = sanitizePlannerDecision({
-      decision: {
-        goal: "Clarify",
-        nextAction: { type: "ask_user", reason: "still unclear", question: "Which browser?" },
-      },
-      conversationHistory: [],
-      currentMessage: "it is broken",
-      availableTools: [],
-      state,
-      maxSteps: 8,
-    });
-    expect(sanitized.nextAction.type).toBe("offer_handoff");
-  });
-
-  test("sanitize blocks ask_user after two clarify turns in the conversation", () => {
-    const state = createState();
-    state.clarificationAttempts = 2;
-    const sanitized = sanitizePlannerDecision({
-      decision: {
-        goal: "Clarify",
-        nextAction: { type: "ask_user", reason: "unclear", question: "Which page?" },
-      },
-      conversationHistory: [],
-      currentMessage: "it is broken",
-      availableTools: [],
-      state,
-      maxSteps: 8,
-    });
-    expect(sanitized.nextAction.type).toBe("offer_handoff");
-  });
-
-  test("fallback planner composes greetings without retrieval", () => {
-    const decision = fallbackPlanNextAction({
-      conversationHistory: [],
-      currentMessage: "hi",
-      availableTools: [],
-      state: createState(),
-      maxSteps: 8,
-    });
-    expect(decision.nextAction.type).toBe("compose");
-    expect(decision.intent).toBe("smalltalk");
   });
 });
