@@ -19,6 +19,7 @@ function makeConversation(overrides: Partial<ConversationRow>): ConversationRow 
     telegramThreadId: null, metadata: null, chatState: null, lastActivityAt: now,
     visitorLastSeenAt: null, visitorPresence: "active", visitorLastOnlineAt: null,
     snoozedUntil: null, priority: "medium", assigneeId: null,
+    archivedAt: null, purgeStartedAt: null,
     createdAt: now, updatedAt: now, ...overrides,
   };
 }
@@ -140,6 +141,22 @@ describe("ChatService tenant and AI ownership guards", () => {
     expect(needsReview.params).toContain("project-1");
     expect(inboxCounts.sql).toContain('"conversations"."project_id" = ?');
     expect(inboxCounts.params).toContain("project-1");
+  });
+
+  test("excludes archived rows from operational inbox queries", () => {
+    const db = drizzle({} as never);
+    const now = new Date("2026-08-01T00:00:00.000Z");
+    const needsReview = buildNeedsReviewQuery(
+      db,
+      "project-1",
+      Date.parse("2026-07-31T00:00:00.000Z"),
+      now,
+    ).toSQL();
+    const inboxCounts = buildInboxCountsQuery(db, "project-1", now).toSQL();
+
+    expect(needsReview.sql).toContain('"conversations"."archived_at" is null');
+    expect(inboxCounts.sql).toContain('"conversations"."archived_at" is null');
+    expect(inboxCounts.sql).toContain('"conversations"."archived_at" is not null');
   });
 
   test("closes only this project's OPEN conversations, as spam, returning ids", () => {

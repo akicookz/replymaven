@@ -60,6 +60,7 @@ const FILTER_NOUN: Record<InboxFilter, string> = {
   all: "total",
   snoozed: "snoozed",
   resolved: "resolved",
+  archived: "archived",
   flagged: "flagged",
 };
 

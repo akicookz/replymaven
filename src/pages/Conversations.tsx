@@ -44,6 +44,8 @@ interface ConversationUpdate {
   visitorPresence: string | null;
   visitorLastOnlineAt: string | null;
   snoozedUntil?: string | null;
+  archivedAt?: string | null;
+  purgeStartedAt?: string | null;
   priority?: "low" | "medium" | "high" | null;
   assigneeId?: string | null;
   createdAt: string;
@@ -74,6 +76,7 @@ const EMPTY_COUNTS: InboxCounts = {
   all: 0,
   snoozed: 0,
   resolved: 0,
+  archived: 0,
   flagged: 0,
 };
 

@@ -1,9 +1,16 @@
-export type InboxFilter = "needs-you" | "all" | "snoozed" | "resolved" | "flagged";
+export type InboxFilter =
+  | "needs-you"
+  | "all"
+  | "snoozed"
+  | "resolved"
+  | "archived"
+  | "flagged";
 export const INBOX_FILTERS: { id: InboxFilter; title: string }[] = [
   { id: "needs-you", title: "Needs You" },
   { id: "all", title: "All Conversations" },
   { id: "snoozed", title: "Snoozed" },
   { id: "resolved", title: "Resolved" },
+  { id: "archived", title: "Archived" },
   { id: "flagged", title: "Flagged" },
 ];
 export function filterTitle(f: InboxFilter): string {
@@ -18,6 +25,7 @@ export interface InboxFilterableRow {
   status: string;
   closeReason?: string | null;
   snoozedUntil?: string | null;
+  archivedAt?: string | null;
 }
 
 export function passesInboxFilter(
@@ -28,17 +36,20 @@ export function passesInboxFilter(
   const snoozeMs = row.snoozedUntil ? new Date(row.snoozedUntil).getTime() : NaN;
   const snoozed = Number.isFinite(snoozeMs) && snoozeMs > nowMs;
   const spam = row.closeReason === "spam";
+  const archived = row.archivedAt != null;
   switch (filter) {
     case "needs-you":
-      return row.status === "waiting_agent" && !snoozed;
+      return row.status === "waiting_agent" && !snoozed && !archived;
     case "all":
-      return !snoozed && !spam;
+      return !snoozed && !spam && !archived;
     case "snoozed":
-      return snoozed;
+      return snoozed && !archived;
     case "resolved":
-      return row.status === "closed" && !spam;
+      return row.status === "closed" && !spam && !archived;
+    case "archived":
+      return archived;
     case "flagged":
-      return spam;
+      return spam && !archived;
   }
 }
 

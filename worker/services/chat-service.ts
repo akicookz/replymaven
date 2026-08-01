@@ -19,7 +19,13 @@ import {
 } from "../chat-runtime/types";
 
 export type SystemEventKind = "flagged" | "joined" | "snoozed" | "snooze_ended" | "drafted" | "review_summary";
-export type InboxFilter = "needs-you" | "all" | "snoozed" | "resolved" | "flagged";
+export type InboxFilter =
+  | "needs-you"
+  | "all"
+  | "snoozed"
+  | "resolved"
+  | "archived"
+  | "flagged";
 
 // Query for conversations that entered (or re-entered) Needs You since
 // `since` (ms). Status changes bump updatedAt, so it doubles as the
@@ -37,6 +43,7 @@ export function buildNeedsReviewQuery(
       and(
         eq(conversations.projectId, projectId),
         eq(conversations.status, "waiting_agent"),
+        isNull(conversations.archivedAt),
         gt(conversations.updatedAt, new Date(since)),
         // Snoozing bumps updatedAt; without this guard the ping would
         // re-surface the very conversation the user just snoozed.
@@ -182,18 +189,36 @@ function notSpamCondition(): SQL {
   )!;
 }
 
+function notArchivedCondition(): SQL {
+  return isNull(conversations.archivedAt);
+}
+
 function inboxFilterConditions(filter: InboxFilter, now: Date): SQL[] {
   switch (filter) {
     case "needs-you":
-      return [eq(conversations.status, "waiting_agent"), notSnoozedCondition(now)];
+      return [
+        eq(conversations.status, "waiting_agent"),
+        notSnoozedCondition(now),
+        notArchivedCondition(),
+      ];
     case "all":
-      return [notSnoozedCondition(now), notSpamCondition()];
+      return [
+        notSnoozedCondition(now),
+        notSpamCondition(),
+        notArchivedCondition(),
+      ];
     case "snoozed":
-      return [gt(conversations.snoozedUntil, now)];
+      return [gt(conversations.snoozedUntil, now), notArchivedCondition()];
     case "resolved":
-      return [eq(conversations.status, "closed"), notSpamCondition()];
+      return [
+        eq(conversations.status, "closed"),
+        notSpamCondition(),
+        notArchivedCondition(),
+      ];
+    case "archived":
+      return [isNotNull(conversations.archivedAt)];
     case "flagged":
-      return [eq(conversations.closeReason, "spam")];
+      return [eq(conversations.closeReason, "spam"), notArchivedCondition()];
   }
 }
 
@@ -213,6 +238,7 @@ export function buildInboxCountsQuery(
       all: bucket("all"),
       snoozed: bucket("snoozed"),
       resolved: bucket("resolved"),
+      archived: bucket("archived"),
       flagged: bucket("flagged"),
     })
     .from(conversations)
@@ -309,10 +335,13 @@ export class ChatService {
     const conditions = [eq(conversations.projectId, projectId)];
     if (inboxFilter) {
       conditions.push(...inboxFilterConditions(inboxFilter, now));
-    } else if (statusFilter === "open") {
-      conditions.push(ne(conversations.status, "closed"));
-    } else if (statusFilter === "closed") {
-      conditions.push(eq(conversations.status, "closed"));
+    } else {
+      conditions.push(notArchivedCondition());
+      if (statusFilter === "open") {
+        conditions.push(ne(conversations.status, "closed"));
+      } else if (statusFilter === "closed") {
+        conditions.push(eq(conversations.status, "closed"));
+      }
     }
     const trimmedQuery = searchQuery?.trim();
     if (trimmedQuery) {
@@ -347,7 +376,12 @@ export class ChatService {
         count: sql<number>`count(*)`,
       })
       .from(conversations)
-      .where(eq(conversations.projectId, projectId))
+      .where(
+        and(
+          eq(conversations.projectId, projectId),
+          notArchivedCondition(),
+        ),
+      )
       .groupBy(conversations.status);
 
     let all = 0;
@@ -416,6 +450,8 @@ export class ChatService {
         visitorPresence: conversations.visitorPresence,
         visitorLastOnlineAt: conversations.visitorLastOnlineAt,
         snoozedUntil: conversations.snoozedUntil,
+        archivedAt: conversations.archivedAt,
+        purgeStartedAt: conversations.purgeStartedAt,
         priority: conversations.priority,
         assigneeId: conversations.assigneeId,
         createdAt: conversations.createdAt,
@@ -1364,6 +1400,7 @@ export class ChatService {
       all: r?.all ?? 0,
       snoozed: r?.snoozed ?? 0,
       resolved: r?.resolved ?? 0,
+      archived: r?.archived ?? 0,
       flagged: r?.flagged ?? 0,
     };
   }

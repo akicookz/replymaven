@@ -390,6 +390,10 @@ export const conversations = sqliteTable(
     visitorPresence: text("visitor_presence", { enum: ["active", "background"] }).default("active"),
     visitorLastOnlineAt: integer("visitor_last_online_at", { mode: "timestamp" }),
     snoozedUntil: integer("snoozed_until", { mode: "timestamp" }),
+    archivedAt: integer("archived_at", { mode: "timestamp" }),
+    // Set by the retention worker before it removes attachments and the row.
+    // While present, unarchive is no longer allowed.
+    purgeStartedAt: integer("purge_started_at", { mode: "timestamp" }),
     priority: text("priority", { enum: ["low", "medium", "high"] })
       .notNull()
       .default("medium"),
@@ -413,6 +417,10 @@ export const conversations = sqliteTable(
     index("idx_conversations_visitor").on(table.visitorId),
     index("idx_conversations_status").on(table.status),
     index("idx_conversations_assignee").on(table.assigneeId),
+    index("idx_conversations_project_archived").on(
+      table.projectId,
+      table.archivedAt,
+    ),
     index("idx_conversations_visitor_name_lower").on(
       table.projectId,
       sql`LOWER(${table.visitorName})`,

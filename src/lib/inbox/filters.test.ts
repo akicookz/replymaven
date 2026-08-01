@@ -10,6 +10,7 @@ describe("passesInboxFilter", () => {
       status: "active",
       closeReason: null,
       snoozedUntil: null,
+      archivedAt: null,
       ...overrides,
     };
   }
@@ -62,5 +63,21 @@ describe("passesInboxFilter", () => {
       passesInboxFilter("flagged", row({ status: "closed", closeReason: "spam" }), now),
     ).toBe(true);
     expect(passesInboxFilter("flagged", row({ status: "waiting_agent" }), now)).toBe(false);
+  });
+
+  test("admits an archived conversation only in the archived bucket", () => {
+    const archived = row({
+      status: "waiting_agent",
+      closeReason: "spam",
+      snoozedUntil: future,
+      archivedAt: "2026-07-01T00:00:00.000Z",
+    });
+
+    expect(passesInboxFilter("archived", archived, now)).toBe(true);
+    expect(passesInboxFilter("needs-you", archived, now)).toBe(false);
+    expect(passesInboxFilter("all", archived, now)).toBe(false);
+    expect(passesInboxFilter("snoozed", archived, now)).toBe(false);
+    expect(passesInboxFilter("resolved", archived, now)).toBe(false);
+    expect(passesInboxFilter("flagged", archived, now)).toBe(false);
   });
 });
