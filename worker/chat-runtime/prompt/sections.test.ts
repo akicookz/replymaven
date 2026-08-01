@@ -8,6 +8,8 @@ import {
   buildGuidelinesSection,
   buildKnowledgeBaseSection,
   buildPageContextSection,
+  buildSupportTurnOpening,
+  buildSupportTurnSection,
   buildPlannerLoopSection,
   buildTimeContextSection,
   buildToolEvidenceSection,
@@ -58,6 +60,81 @@ describe("section builders return empty string when input is missing", () => {
   ])("%s", (_label, build) => {
     expect(build()).toBe("");
   });
+});
+
+describe("buildSupportTurnOpening", () => {
+  test("uses the visitor name with an email-style comma on the first turn", () => {
+    expect(
+      buildSupportTurnOpening(
+        { kind: "standard", isFirstVisitorTurn: true },
+        { name: "Akbar", email: null },
+      ),
+    ).toBe("Hi Akbar,\n\n");
+  });
+
+  test("uses a name-free comma greeting when the visitor name is unavailable", () => {
+    expect(
+      buildSupportTurnOpening(
+        { kind: "standard", isFirstVisitorTurn: true },
+        { name: null, email: null },
+      ),
+    ).toBe("Hi,\n\n");
+  });
+
+  test("does not greet again on a later standard turn", () => {
+    expect(
+      buildSupportTurnOpening(
+        { kind: "standard", isFirstVisitorTurn: false },
+        { name: "Akbar", email: null },
+      ),
+    ).toBe("");
+  });
+
+  test("greets a named visitor without dumping the configured response schedule", () => {
+    const opening = buildSupportTurnOpening(
+      { kind: "contact_support", isFirstVisitorTurn: true },
+      { name: "Akbar", email: "akbar@example.com" },
+    );
+
+    expect(opening).toBe(
+      "Hi Akbar,\n\nI've flagged this for the team. ",
+    );
+    expect(opening).not.toContain("within 4 business hours");
+    expect(opening).not.toContain("Monday to Friday");
+    expect(opening).not.toContain("—");
+  });
+
+  test("leaves response timing to the AI when only working hours are configured", () => {
+    expect(
+      buildSupportTurnOpening(
+        { kind: "contact_support", isFirstVisitorTurn: false },
+        { name: "Akbar", email: null },
+      ),
+    ).toBe("I've flagged this for the team. ");
+  });
+
+  test("does not invent an ETA when contact availability is not configured", () => {
+    expect(
+      buildSupportTurnOpening(
+        { kind: "contact_support", isFirstVisitorTurn: false },
+        { name: "Akbar", email: null },
+      ),
+    ).toBe("I've flagged this for the team. ");
+  });
+});
+
+test("buildSupportTurnSection asks for evidence-first diagnosis without a static review phrase", () => {
+  const section = buildSupportTurnSection({
+    kind: "contact_support",
+    isFirstVisitorTurn: true,
+  });
+
+  expect(section).toContain("strongest evidence-backed explanation");
+  expect(section).toContain("one focused question");
+  expect(section).toContain("runtime has already added the complete administrative opener");
+  expect(section).toContain("Do not repeat the greeting, human-review notice, or reply expectation");
+  expect(section).toContain("Never ask whether the visitor wants the issue forwarded");
+  expect(section).not.toContain("I have reviewed what you have shared");
 });
 
 describe("buildCompanySection", () => {

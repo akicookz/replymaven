@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   buildComposerFaqEvidence,
   buildFastPathPlannerDecision,
+  claimTeamRequest,
+  shouldEmitProvisionalAiText,
 } from "./run-planner-loop";
 
 describe("buildComposerFaqEvidence", () => {
@@ -82,4 +84,31 @@ describe("buildFastPathPlannerDecision", () => {
       }),
     ).toBeNull();
   });
+});
+
+describe("claimTeamRequest", () => {
+  test("claims escalation only while the conversation is still waiting for AI or a teammate", async () => {
+    const claimed = await claimTeamRequest(
+      {
+        claimTeamRequest: async () => true,
+      } as never,
+      "conv-1",
+      "project-1",
+    );
+    const humanOwned = await claimTeamRequest(
+      {
+        claimTeamRequest: async () => false,
+      } as never,
+      "conv-1",
+      "project-1",
+    );
+
+    expect(claimed).toBe(true);
+    expect(humanOwned).toBe(false);
+  });
+});
+
+test("legacy streams buffer AI text until guarded persistence succeeds", () => {
+  expect(shouldEmitProvisionalAiText(1)).toBe(false);
+  expect(shouldEmitProvisionalAiText(2)).toBe(true);
 });

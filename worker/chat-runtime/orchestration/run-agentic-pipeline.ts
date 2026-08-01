@@ -5,28 +5,29 @@
 // close) stay in the outer handler because they depend on handler-specific
 // state and ordering.
 
-import { runPlannerLoop } from "../executor/run-planner-loop";
-import {
-  type BuildSystemPromptFn,
-} from "../executor/run-planner-loop";
-import { emitSseEvent } from "../streaming/map-agent-events-to-sse";
-import { type InternalToken } from "../streaming/internal-tokens";
-import {
-  type ConversationTurnMessage,
-  type FastPathDecision,
-  type SupportIntent,
-  type SupportPromptSettings,
-  type SupportToolDefinition,
-  type TurnTelemetry,
-} from "../types";
-import { type RetrievalResult } from "../retrieval/run-ai-search";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
+import { type ToolRow } from "../../db";
 import { ChatService } from "../../services/chat-service";
 import { ProjectService } from "../../services/project-service";
 import { ToolService } from "../../services/tool-service";
 import { type AppEnv } from "../../types";
-import { type ToolRow } from "../../db";
+import {
+  runPlannerLoop,
+  type BuildSystemPromptFn,
+} from "../executor/run-planner-loop";
 import { type ModelRuntimeState } from "../llm/create-language-model";
+import { type RetrievalResult } from "../retrieval/run-ai-search";
+import { type InternalToken } from "../streaming/internal-tokens";
+import {
+  type AiParticipation,
+  type ConversationTurnMessage,
+  type FastPathDecision,
+  type SupportIntent,
+  type SupportPromptSettings,
+  type SupportTurnContext,
+  type SupportToolDefinition,
+  type TurnTelemetry,
+} from "../types";
 
 // Final post-filter: if the model claims it browsed the web / used unassigned
 // tools, replace the response with a canned safety string — the visitor bot
@@ -82,6 +83,9 @@ export interface AgenticTurnInput {
   guidelines: Array<{ condition: string; instruction: string }>;
   hasIndexedResources: boolean;
   visitorInfo: { name: string | null; email: string | null };
+  turnContext: SupportTurnContext;
+  aiParticipation: AiParticipation;
+  responseOpening: string;
   // Escalation continuity from the prior turn's persisted chat_state.
   persistedContactState?: {
     awaitingContactFields: Array<"name" | "email">;
@@ -158,6 +162,9 @@ export async function runAgenticTurn(
     compiledFaqContext: input.compiledFaqContext,
     hasIndexedResources: input.hasIndexedResources,
     visitorInfo: input.visitorInfo,
+    turnContext: input.turnContext,
+    aiParticipation: input.aiParticipation,
+    responseOpening: input.responseOpening,
     persistedContactState: input.persistedContactState,
     persistedClarifyState: input.persistedClarifyState,
     agentHandbackInstructions: input.agentHandbackInstructions,
@@ -176,16 +183,10 @@ export async function runAgenticTurn(
   let fullResponse = loopResult.fullResponse;
   let capabilityFallbackApplied = false;
   if (claimsUnavailableCapabilities(fullResponse)) {
-    const capabilityFallback =
-      "I can't browse the web or use unassigned tools here. I can only help with this product or website using the provided documentation and any assigned support tools.";
+    const capabilityFallback = `${input.responseOpening}I can't browse the web or use unassigned tools here. I can only help with this product or website using the provided documentation and any assigned support tools.`;
     if (capabilityFallback !== fullResponse.trim()) {
       fullResponse = capabilityFallback;
       capabilityFallbackApplied = true;
-      if (input.streamProtocolVersion === 1) {
-        emitSseEvent(input.controller, input.encoder, {
-          finalText: fullResponse,
-        });
-      }
     }
   }
 

@@ -11,6 +11,7 @@ import {
   type ConversationTurnMessage,
   type GroundingConfidence,
   type PlannerActionHistoryEntry,
+  type SupportTurnContext,
 } from "../types";
 import {
   formatCurrentTime,
@@ -28,6 +29,50 @@ export const MAX_CONVERSATION_SUMMARY_CHARS = 2_000;
 export function trimToCharBudget(text: string, budget: number): string {
   if (text.length <= budget) return text;
   return text.slice(0, budget) + "\n[...truncated]";
+}
+
+export function buildSupportTurnOpening(
+  turnContext: SupportTurnContext,
+  visitorInfo: { name: string | null; email: string | null },
+): string {
+  let opening = "";
+  if (turnContext.isFirstVisitorTurn) {
+    const visitorName = visitorInfo.name?.replace(/\s+/g, " ").trim();
+    opening += visitorName ? `Hi ${visitorName},\n\n` : "Hi,\n\n";
+  }
+
+  if (turnContext.kind !== "contact_support") return opening;
+
+  return `${opening}I've flagged this for the team. `;
+}
+
+export function buildSupportTurnSection(
+  turnContext: SupportTurnContext | null | undefined,
+): string {
+  if (!turnContext) return "";
+
+  const openingRule =
+    turnContext.kind === "contact_support"
+      ? `The runtime has already added the complete administrative opener: the greeting when needed, the human-review notice, today's applicable reply expectation, and a blank line. Do not repeat the greeting, human-review notice, or reply expectation. Start immediately with the diagnosis, next step, or required question.`
+      : turnContext.isFirstVisitorTurn
+        ? "The runtime has already added the visitor greeting. Do not add another greeting or a generic acknowledgement. Start your contribution with the substance of the support response."
+        : "Continue the support conversation directly without a fresh greeting or generic acknowledgement.";
+
+  return `<support-turn>
+${openingRule}
+
+Work collaboratively toward a resolution now, even when a human follow-up is pending:
+- Use the conversation, page context, documentation, FAQs, guidelines, and assigned tools before requesting more information.
+- When the evidence is sufficient, lead with the strongest evidence-backed explanation of the likely cause and give concrete steps.
+- When the evidence is partial, state the strongest supported hypothesis and ask one focused question that distinguishes it from the next plausible cause.
+- When essential context is missing, ask for the exact screenshot, value, error text, URL, account state, or reproduction step needed to continue. Ask no more than one focused question in a turn.
+- Treat a contact-support submission as unresolved unless the visitor explicitly says the issue is solved. Never say that no further details are needed or otherwise close the investigation. Give a concrete diagnostic step or ask the one focused question needed to continue.
+- A contact-support submission is already with the team. Never ask whether the visitor wants the issue forwarded, passed along, escalated, or sent for investigation. Continue helping while the team review is pending.
+- Do not use a static review preamble. Do not say that you reviewed or analyzed what the visitor shared. Move directly into the diagnosis, next step, or required question.
+- Do not use em dashes.
+</support-turn>
+
+`;
 }
 
 // ─── Company background ─────────────────────────────────────────────────────

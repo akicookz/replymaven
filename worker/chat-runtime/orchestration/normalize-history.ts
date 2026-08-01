@@ -23,6 +23,7 @@ function toIsoTimestamp(value: unknown): string | undefined {
 export function normalizeConversationHistory(options: {
   rawHistory: Array<{ role: string; content: string; createdAt?: unknown }>;
   currentMessage: string;
+  persistedCurrentMessage?: string;
 }): ConversationTurnMessage[] {
   const normalized = options.rawHistory
     .filter(
@@ -44,7 +45,8 @@ export function normalizeConversationHistory(options: {
   if (
     last &&
     last.role === "visitor" &&
-    last.content === options.currentMessage
+    last.content ===
+      (options.persistedCurrentMessage ?? options.currentMessage)
   ) {
     normalized.pop();
   }

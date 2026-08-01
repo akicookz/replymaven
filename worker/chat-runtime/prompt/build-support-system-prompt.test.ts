@@ -62,14 +62,36 @@ describe("buildSupportSystemPrompt", () => {
     expect(prompt).not.toContain("Never output [RESOLVED]");
   });
 
-  test("never instructs [RESOLVED] once the conversation is escalated", () => {
+  test("allows AI to resolve while it is assisting before a human joins", () => {
     const prompt = buildSupportSystemPrompt(BASE_SETTINGS, "ReplyMaven", "", "", {
-      escalated: true,
+      aiParticipation: "assist_until_agent",
     });
 
-    expect(prompt).not.toContain('end that reply with the exact token "[RESOLVED]"');
     expect(prompt).toContain(
-      "This conversation has been escalated to the human team. Never output [RESOLVED]; keep helping until a teammate takes over.",
+      'end that reply with the exact token "[RESOLVED]"',
     );
+  });
+
+  test("does not let an invoked one-shot AI close a human-owned thread", () => {
+    const prompt = buildSupportSystemPrompt(BASE_SETTINGS, "ReplyMaven", "", "", {
+      aiParticipation: "human_only",
+    });
+
+    expect(prompt).not.toContain(
+      'end that reply with the exact token "[RESOLVED]"',
+    );
+    expect(prompt).toContain(
+      "A human is handling this conversation. Never output [RESOLVED].",
+    );
+  });
+
+  test("adds first-turn diagnostic instructions to the composer", () => {
+    const prompt = buildSupportSystemPrompt(BASE_SETTINGS, "ReplyMaven", "", "", {
+      turnContext: { kind: "contact_support", isFirstVisitorTurn: true },
+    });
+
+    expect(prompt).toContain("<support-turn>");
+    expect(prompt).toContain("strongest evidence-backed explanation");
+    expect(prompt).toContain("one focused question");
   });
 });

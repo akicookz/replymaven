@@ -500,6 +500,8 @@ Current planner state:
 - clarificationAttemptsThisConversation: ${options.state.clarificationAttempts}
 - lastClarifyingQuestionAsked: ${options.state.lastBotQuestion ?? "none"}
 
+When handoffRequested is true, the conversation has already been forwarded or a human already owns it. Do not choose offer_handoff, collect_contact, or escalate again. Keep helping with documentation, tools, a focused diagnostic question, or a substantive reply.
+
 Action history:
 ${buildActionHistorySummary(options.state.actionHistory)}
 
@@ -813,6 +815,38 @@ export function sanitizePlannerDecision(
 
   const nextGoal = options.decision.goal.trim() || options.state.goal;
   const nextAction = options.decision.nextAction;
+
+  if (
+    options.state.handoffRequested &&
+    (nextAction.type === "offer_handoff" ||
+      nextAction.type === "collect_contact" ||
+      nextAction.type === "escalate")
+  ) {
+    if (
+      !options.state.docsEvidence.retrievalAttempted &&
+      !hasGatheredEvidence(options.state)
+    ) {
+      return {
+        goal: nextGoal,
+        nextAction: {
+          type: "search_docs",
+          reason:
+            "The team request is already active; search the documentation and keep helping instead of requesting another handoff.",
+          query: options.currentMessage,
+          broaderQueries: [],
+        },
+      };
+    }
+
+    return {
+      goal: nextGoal,
+      nextAction: {
+        type: "compose",
+        reason:
+          "The team request is already active; provide the best supported help available without repeating the handoff flow.",
+      },
+    };
+  }
 
   if (nextAction.type === "search_docs") {
     // Check for exact duplicate

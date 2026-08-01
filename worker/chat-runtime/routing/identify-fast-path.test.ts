@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   identifyFastPath,
   identifyHardGate,
+  parseVisitorAiInvocation,
 } from "./identify-fast-path";
 
 describe("identifyFastPath", () => {
@@ -130,15 +131,86 @@ describe("identifyFastPath", () => {
   });
 });
 
+test("lets AI keep helping while a team request is pending", () => {
+  expect(
+    identifyHardGate({
+      status: "waiting_agent",
+      closeReason: null,
+      aiParticipation: "assist_until_agent",
+      aiInvoked: false,
+    }),
+  ).toBeNull();
+});
+
 test.each(["waiting_agent", "agent_replied"])(
-  "always identifies %s as agent mode",
+  "keeps AI silent in a human-owned %s conversation",
   (status) => {
-    expect(identifyHardGate({ status, closeReason: null })).toBe("agent_mode");
+    expect(
+      identifyHardGate({
+        status,
+        closeReason: null,
+        aiParticipation: "human_only",
+        aiInvoked: false,
+      }),
+    ).toBe("agent_mode");
   },
 );
+
+test("allows one invoked AI turn in a human-owned conversation", () => {
+  expect(
+    identifyHardGate({
+      status: "agent_replied",
+      closeReason: null,
+      aiParticipation: "human_only",
+      aiInvoked: true,
+    }),
+  ).toBeNull();
+});
+
+test("keeps ordinary messages AI-silent when a human-owned thread was reopened", () => {
+  expect(
+    identifyHardGate({
+      status: "active",
+      closeReason: null,
+      aiParticipation: "human_only",
+      aiInvoked: false,
+    }),
+  ).toBe("agent_mode");
+});
 
 test("identifies spam as muted before agent mode", () => {
   expect(identifyHardGate({ status: "closed", closeReason: "spam" })).toBe(
     "muted",
   );
+});
+
+describe("parseVisitorAiInvocation", () => {
+  test("strips a case-insensitive bot mention and returns the AI question", () => {
+    expect(
+      parseVisitorAiInvocation("@mAvEn why is checkout failing?", "Maven"),
+    ).toEqual({ invoked: true, content: "why is checkout failing?" });
+  });
+
+  test.each(["@Maven, why is checkout failing?", "@Maven: why is checkout failing?"])(
+    "accepts natural punctuation in %s",
+    (message) => {
+      expect(parseVisitorAiInvocation(message, "Maven")).toEqual({
+        invoked: true,
+        content: "why is checkout failing?",
+      });
+    },
+  );
+
+  test("does not invoke AI for an ordinary human conversation message", () => {
+    expect(
+      parseVisitorAiInvocation("why is checkout failing?", "Maven"),
+    ).toEqual({ invoked: false, content: "why is checkout failing?" });
+  });
+
+  test("does not treat a bare mention as a usable AI turn", () => {
+    expect(parseVisitorAiInvocation("@Maven", "Maven")).toEqual({
+      invoked: false,
+      content: "@Maven",
+    });
+  });
 });

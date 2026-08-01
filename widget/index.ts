@@ -19,6 +19,7 @@ import {
   parseMessageImageUrls,
   shouldShowMessageContent,
 } from "../shared/message-images";
+import { claimWidgetInstance } from "./instance-guard";
 
 (function () {
   // Find the script tag to get config
@@ -29,6 +30,8 @@ import {
     console.error("[ReplyMaven] Missing data-project attribute");
     return;
   }
+
+  if (!claimWidgetInstance(document.documentElement, projectSlug)) return;
 
   const scriptOrigin = new URL(script.src).origin;
   const baseUrl = scriptOrigin.replace(/^(https?:\/\/)widget\./, "$1");
@@ -156,6 +159,15 @@ import {
       }
     }
     pushHistoryEntry("bot", content);
+  }
+
+  function removeLastBotHistoryEntry(): void {
+    for (let i = conversationHistoryBuffer.length - 1; i >= 0; i--) {
+      if (conversationHistoryBuffer[i].role === "bot") {
+        conversationHistoryBuffer.splice(i, 1);
+        return;
+      }
+    }
   }
 
   // Send guard -- prevents duplicate message sends
@@ -4023,6 +4035,7 @@ import {
                   visitorName: visitorInfo.name,
                   visitorEmail: visitorInfo.email,
                   data,
+                  streamAi: true,
                 }),
               },
             );
@@ -4038,30 +4051,17 @@ import {
               return;
             }
 
-            const result = await res.json().catch(() => null);
+            const formDisplayMessage = [
+              "Contact form submission",
+              ...Object.entries(data).map(([key, value]) => `${key}: ${value}`),
+            ].join("\n");
 
-            if ((result as { visitorEmail?: string | null })?.visitorEmail) {
-              visitorInfo.email = (
-                result as { visitorEmail: string }
-              ).visitorEmail;
-            }
-            if ((result as { visitorName?: string | null })?.visitorName) {
-              visitorInfo.name = (
-                result as { visitorName: string }
-              ).visitorName;
-            }
-            if ((result as { conversationId?: string })?.conversationId) {
-              conversationId = (result as { conversationId: string })
-                .conversationId;
-              conversationStatus =
-                (result as { conversationStatus?: string | null })
-                  .conversationStatus ?? conversationStatus;
-              syncConversationModeUi();
-              persistConversationId(conversationId);
-              startPolling();
-              inlineBarActions.classList.remove("has-actions");
-              await loadConversationHistory(false);
-            }
+            // Land in chat immediately. The accepted SSE event supplies the
+            // conversation id before AI status/tool/text events arrive.
+            showChatScreen();
+            await handleSendMessage(formDisplayMessage, {
+              acceptedResponse: res,
+            });
 
             // Reset the form so it stays usable if the visitor returns to it
             // (the backend appends repeat submissions to the same conversation).
@@ -4072,16 +4072,6 @@ import {
             submitBtn2.disabled = false;
             submitBtn2.textContent = "Send message";
 
-            // Land the visitor in the conversation so follow-ups are just chat.
-            showChatScreen();
-            // Only one note at a time — repeat submissions shouldn't stack them.
-            messagesContainer.querySelector(".rm-chat-note")?.remove();
-            const note = document.createElement("div");
-            note.className = "rm-chat-note";
-            note.textContent = "Sent — the team will reply here";
-            // Insert before typing indicator (which is always last child)
-            messagesContainer.insertBefore(note, typingRow);
-            scrollToBottom();
           } catch {
             formError.textContent =
               "Couldn't send message. Please check your connection.";
@@ -4344,11 +4334,54 @@ import {
     }
   }
 
-  async function handleSendMessage(text: string) {
+  interface SendMessageOptions {
+    acceptedResponse?: Response;
+    contactFallbackMessage?: string;
+  }
+
+  interface ContactAcceptedClientPayload {
+    conversationId: string;
+    visitorMessageId: string;
+    conversationStatus: string;
+    aiWillRespond: boolean;
+    visitorName: string | null;
+    visitorEmail: string | null;
+    assistantName: string;
+    fallbackMessage: string;
+  }
+
+  function applyContactAccepted(payload: ContactAcceptedClientPayload): void {
+    conversationId = payload.conversationId;
+    conversationStatus = payload.conversationStatus;
+    if (payload.visitorName) visitorInfo.name = payload.visitorName;
+    if (payload.visitorEmail) visitorInfo.email = payload.visitorEmail;
+    persistConversationId(payload.conversationId);
+    renderedMessageIds.add(payload.visitorMessageId);
+    syncConversationModeUi();
+    startPolling();
+    startHeartbeat();
+    inlineBarActions.classList.remove("has-actions");
+
+    messagesContainer.querySelector(".rm-chat-note")?.remove();
+    const note = document.createElement("div");
+    note.className = "rm-chat-note";
+    note.textContent = payload.aiWillRespond
+      ? `Sent to the team. ${payload.assistantName} is looking into it now.`
+      : "Sent to the team. They'll reply here.";
+    messagesContainer.insertBefore(note, typingRow);
+    scrollToBottom();
+  }
+
+  async function handleSendMessage(
+    text: string,
+    options: SendMessageOptions = {},
+  ) {
     if (isBanned) return;
     // Prevent duplicate sends
     if (isSending) return;
     isSending = true;
+    let activeContactFallbackMessage =
+      options.contactFallbackMessage ?? null;
     sendBtn.disabled = true;
     input.disabled = true;
     // Also disable inline bar input if in center-inline mode
@@ -4363,8 +4396,10 @@ import {
       }
 
       // Create conversation if needed
-      if (!conversationId) await createConversation();
-      if (!conversationId) return;
+      if (!conversationId && !options.acceptedResponse) {
+        await createConversation();
+      }
+      if (!conversationId && !options.acceptedResponse) return;
 
       // Reopen closed conversation — server handles status update
       if (conversationStatus === "closed") {
@@ -4373,7 +4408,7 @@ import {
       }
 
       // Capture and clear any pending image
-      const imageFile = pendingImageFile;
+      const imageFile = options.acceptedResponse ? null : pendingImageFile;
       let uploadedImageUrl: string | null = null;
       let localPreviewUrl: string | null = null;
 
@@ -4440,6 +4475,19 @@ import {
       // Pause polling during SSE streaming to prevent duplicate messages
       isStreaming = true;
       stopPolling();
+      let botMessage = "";
+      let botMessageEl: HTMLElement | null = null;
+
+      function showStreamFallback(message: string): void {
+        botMessage = message;
+        if (!botMessageEl) {
+          botMessageEl = addMessageToUI("bot", message);
+        } else {
+          botMessageEl.innerHTML = renderMarkdown(message);
+          updateLastBotHistoryEntry(message);
+        }
+        scrollToBottom();
+      }
 
       try {
         const body: Record<string, unknown> = {
@@ -4454,14 +4502,16 @@ import {
         };
         body.pageContext = ctx;
 
-        const res = await fetch(
-          `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          },
-        );
+        const res =
+          options.acceptedResponse ??
+          (await fetch(
+            `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            },
+          ));
 
         if (!res.ok) {
           hideTyping();
@@ -4499,7 +4549,22 @@ import {
         const contentType = res.headers.get("content-type") || "";
         if (contentType.includes("application/json")) {
           hideTyping();
-          // Message stored server-side, agent will reply via polling.
+          const data = await res.json().catch(() => null);
+          const accepted =
+            (data as { contactAccepted?: ContactAcceptedClientPayload } | null)
+              ?.contactAccepted ??
+            ((data as ContactAcceptedClientPayload | null)?.conversationId
+              ? (data as ContactAcceptedClientPayload)
+              : null);
+          if (accepted) {
+            applyContactAccepted(accepted);
+            activeContactFallbackMessage = accepted.fallbackMessage;
+            if (accepted.aiWillRespond) {
+              addMessageToUI("bot", accepted.fallbackMessage);
+            }
+          }
+          // Ordinary human-owned messages are stored server-side and reach the
+          // agent through realtime/polling without an AI response.
           return;
         }
 
@@ -4508,10 +4573,11 @@ import {
         if (!reader) return;
 
         const decoder = new TextDecoder();
-        let botMessage = "";
-        let botMessageEl: HTMLElement | null = null;
         let inquiryDetected = false;
         let resolvedDetected = false;
+        let contactTurnAccepted = false;
+        let contactResponseCompleted = false;
+        let contactFallbackShown = false;
         let sseBuffer = "";
         let markdownRenderTimer: number | null = null;
 
@@ -4538,14 +4604,30 @@ import {
               try {
                 const data = JSON.parse(line.slice(6));
 
+                if (data.contactAccepted) {
+                  const accepted =
+                    data.contactAccepted as ContactAcceptedClientPayload;
+                  applyContactAccepted(accepted);
+                  activeContactFallbackMessage = accepted.fallbackMessage;
+                  contactTurnAccepted = true;
+                  continue;
+                }
+
                 if (data.completed?.protocolVersion === 2) {
                   const completed = data.completed;
+                  contactResponseCompleted = true;
                   botMessage = String(completed.finalText ?? "");
                   hideTyping();
 
                   if (markdownRenderTimer) {
                     clearTimeout(markdownRenderTimer);
                     markdownRenderTimer = null;
+                  }
+
+                  if (!completed.messageId && !botMessage && botMessageEl) {
+                    botMessageEl.closest(".rm-message-row")?.remove();
+                    botMessageEl = null;
+                    removeLastBotHistoryEntry();
                   }
 
                   if (botMessage) {
@@ -4686,6 +4768,7 @@ import {
                 }
 
                 if (data.done) {
+                  contactResponseCompleted = true;
                   hideTyping();
                   // Stream complete -- clear debounce timer and render final markdown
                   if (markdownRenderTimer) {
@@ -4734,10 +4817,11 @@ import {
 
                 if (data.error) {
                   hideTyping();
-                  addMessageToUI(
-                    "bot",
-                    "Sorry, an error occurred. Please try again.",
+                  showStreamFallback(
+                    activeContactFallbackMessage ??
+                      "Sorry, an error occurred. Please try again.",
                   );
+                  contactFallbackShown = Boolean(activeContactFallbackMessage);
                 }
               } catch {
                 // Skip malformed JSON
@@ -4761,6 +4845,15 @@ import {
           stopHeartbeat();
           disconnectWebSocket();
         }
+        if (
+          contactTurnAccepted &&
+          !contactResponseCompleted &&
+          activeContactFallbackMessage &&
+          !contactFallbackShown
+        ) {
+          hideTyping();
+          showStreamFallback(activeContactFallbackMessage);
+        }
         clearTimeout(streamTimeout);
       } catch {
         hideTyping();
@@ -4768,9 +4861,9 @@ import {
           lastVisitorStatusEl.textContent = "Failed to send";
           lastVisitorStatusEl.classList.add("failed");
         }
-        addMessageToUI(
-          "bot",
-          "Sorry, I couldn't connect. Please check your internet connection.",
+        showStreamFallback(
+          activeContactFallbackMessage ??
+            "Sorry, I couldn't connect. Please check your internet connection.",
         );
       }
     } finally {

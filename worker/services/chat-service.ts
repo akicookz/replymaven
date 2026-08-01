@@ -9,8 +9,12 @@ import {
   type NewMessageRow,
 } from "../db";
 import {
+  applyChatOwnershipEvent,
+  type ChatOwnershipEvent,
   type ConversationChatState,
   createInitialChatState,
+  fallbackAiParticipationForStatus,
+  mergeChatStateForPersistence,
   parseChatState,
 } from "../chat-runtime/types";
 
@@ -43,6 +47,121 @@ export function buildNeedsReviewQuery(
     )
     .orderBy(desc(conversations.updatedAt))
     .limit(20);
+}
+
+export function buildHasVisitorMessagesQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+) {
+  return db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.role, "visitor"),
+      ),
+    )
+    .limit(1);
+}
+
+export function buildVisitorMessageCountQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+) {
+  return db
+    .select({ count: sql<number>`count(*)`.mapWith(Number) })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.role, "visitor"),
+      ),
+    );
+}
+
+interface ConditionalBotMessageInput {
+  id: string;
+  conversationId: string;
+  projectId: string;
+  content: string;
+  sources: string | null;
+  senderName: string | null;
+  createdAt: Date;
+  expectedStatus: ConversationRow["status"];
+  expectedChatState: string | null;
+}
+
+export function buildConditionalBotMessageQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  input: ConditionalBotMessageInput,
+) {
+  const chatStateCondition =
+    input.expectedChatState === null
+      ? isNull(conversations.chatState)
+      : eq(conversations.chatState, input.expectedChatState);
+  const selectQuery = db
+    .select({
+      id: sql<string>`${input.id}`.as("id"),
+      conversationId: conversations.id,
+      role: sql<"bot">`${"bot"}`.as("role"),
+      content: sql<string>`${input.content}`.as("content"),
+      imageUrl: sql<null>`null`.as("image_url"),
+      sources: sql<string | null>`${input.sources}`.as("sources"),
+      senderName: sql<string | null>`${input.senderName}`.as("sender_name"),
+      senderAvatar: sql<null>`null`.as("sender_avatar"),
+      userId: sql<null>`null`.as("user_id"),
+      createdAt: sql<Date>`${Math.floor(input.createdAt.getTime() / 1000)}`.as(
+        "created_at",
+      ),
+      emailedAt: sql<null>`null`.as("emailed_at"),
+      deliveredAt: sql<null>`null`.as("delivered_at"),
+      readAt: sql<null>`null`.as("read_at"),
+    })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.id, input.conversationId),
+        eq(conversations.projectId, input.projectId),
+        eq(conversations.status, input.expectedStatus),
+        chatStateCondition,
+      ),
+    );
+
+  return db.insert(messages).select(selectQuery).returning();
+}
+
+export function buildHumanTakeoverQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+  projectId: string,
+  activityAt?: Date,
+) {
+  const validChatState = sql`case when json_valid(${conversations.chatState}) then ${conversations.chatState} else '{}' end`;
+  const nextChatState = sql`json_set(
+    ${validChatState},
+    '$.state', 'agent_mode',
+    '$.aiParticipation', 'human_only',
+    '$.ownershipRevision', coalesce(json_extract(${validChatState}, '$.ownershipRevision'), 0) + 1
+  )`;
+  return db
+    .update(conversations)
+    .set({
+      status: "agent_replied",
+      closeReason: null,
+      chatState: nextChatState,
+      ...(activityAt ? { lastActivityAt: activityAt } : {}),
+    })
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+      ),
+    )
+    .returning({
+      status: conversations.status,
+      chatState: conversations.chatState,
+    });
 }
 
 // ─── Inbox tab predicates ────────────────────────────────────────────────────
@@ -129,6 +248,36 @@ export function buildBanSweepQuery(
         visitorMatch,
       ),
     )
+    .returning({ id: conversations.id });
+}
+
+export function buildAiResolutionQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+  projectId: string,
+  expectedChatState?: string | null,
+  resolvedChatState?: string,
+) {
+  const conditions = [
+    eq(conversations.id, conversationId),
+    eq(conversations.projectId, projectId),
+    inArray(conversations.status, ["active", "waiting_agent"]),
+  ];
+  if (expectedChatState !== undefined) {
+    conditions.push(
+      expectedChatState === null
+        ? isNull(conversations.chatState)
+        : eq(conversations.chatState, expectedChatState),
+    );
+  }
+  return db
+    .update(conversations)
+    .set({
+      status: "closed",
+      closeReason: "bot_resolved",
+      ...(resolvedChatState ? { chatState: resolvedChatState } : {}),
+    })
+    .where(and(...conditions))
     .returning({ id: conversations.id });
 }
 
@@ -325,6 +474,161 @@ export class ChatService {
       );
   }
 
+  async resolveConversationByAi(
+    id: string,
+    projectId: string,
+  ): Promise<boolean> {
+    const conversation = await this.getConversationById(id, projectId);
+    if (!conversation) return false;
+    const currentState = parseChatState(conversation.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    });
+    if (currentState.aiParticipation === "human_only") return false;
+    const resolvedState = applyChatOwnershipEvent(
+      currentState,
+      "ai_handed_back",
+    );
+    const rows = await buildAiResolutionQuery(
+      this.db,
+      id,
+      projectId,
+      conversation.chatState,
+      JSON.stringify(resolvedState),
+    );
+    return rows.length > 0;
+  }
+
+  async transitionChatOwnership(
+    id: string,
+    projectId: string,
+    event: ChatOwnershipEvent,
+  ): Promise<ConversationRow["status"] | null> {
+    if (event === "team_requested") {
+      await this.claimTeamRequest(id, projectId);
+      const latest = await this.getConversationById(id, projectId);
+      return latest?.status ?? null;
+    }
+
+    if (event === "human_joined") {
+      const ownership = await this.takeHumanOwnership(id, projectId);
+      return ownership?.status ?? null;
+    }
+
+    const conversation = await this.getConversationById(id, projectId);
+    if (!conversation) return null;
+
+    const currentState = parseChatState(conversation.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    });
+    const nextState = applyChatOwnershipEvent(currentState, event);
+    const status = "active";
+    const ownershipConditions = [
+      eq(conversations.id, id),
+      eq(conversations.projectId, projectId),
+      eq(conversations.status, conversation.status),
+      conversation.chatState === null
+        ? isNull(conversations.chatState)
+        : eq(conversations.chatState, conversation.chatState),
+    ];
+    const updated = await this.db
+      .update(conversations)
+      .set({
+        status,
+        chatState: JSON.stringify(nextState),
+        ...(event === "ai_handed_back" ? { closeReason: null } : {}),
+      })
+      .where(and(...ownershipConditions))
+      .returning({ status: conversations.status });
+
+    if (updated[0]) return updated[0].status;
+    const latest = await this.getConversationById(id, projectId);
+    return latest?.status ?? null;
+  }
+
+  async claimTeamRequest(id: string, projectId: string): Promise<boolean> {
+    const conversation = await this.getConversationById(id, projectId);
+    if (!conversation) return false;
+
+    const currentState = parseChatState(conversation.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    });
+    if (currentState.aiParticipation === "human_only") return false;
+
+    const nextState = applyChatOwnershipEvent(currentState, "team_requested");
+    const updated = await this.db
+      .update(conversations)
+      .set({
+        status: "waiting_agent",
+        chatState: JSON.stringify(nextState),
+      })
+      .where(
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          inArray(conversations.status, ["active", "waiting_agent"]),
+          conversation.chatState === null
+            ? isNull(conversations.chatState)
+            : eq(conversations.chatState, conversation.chatState),
+        ),
+      )
+      .returning({ id: conversations.id });
+
+    return updated.length > 0;
+  }
+
+  async takeHumanOwnership(
+    id: string,
+    projectId: string,
+  ): Promise<{
+    status: ConversationRow["status"];
+    chatState: string | null;
+  } | null> {
+    const rows = await buildHumanTakeoverQuery(this.db, id, projectId);
+    return rows[0] ?? null;
+  }
+
+  async prepareContactSupportOwnership(
+    id: string,
+    projectId: string,
+  ): Promise<"waiting_agent" | "agent_replied" | null> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const conversation = await this.getConversationById(id, projectId);
+      if (!conversation) return null;
+      const currentState = parseChatState(conversation.chatState, {
+        fallbackAiParticipation: fallbackAiParticipationForStatus(
+          conversation.status,
+        ),
+      });
+
+      if (currentState.aiParticipation === "human_only") {
+        const ownership = await this.takeHumanOwnership(id, projectId);
+        return ownership ? "agent_replied" : null;
+      }
+      if (conversation.status === "closed") {
+        await this.reopenConversation(id, projectId, "active");
+        continue;
+      }
+      if (
+        conversation.status === "active" ||
+        conversation.status === "waiting_agent"
+      ) {
+        if (await this.claimTeamRequest(id, projectId)) {
+          return "waiting_agent";
+        }
+        continue;
+      }
+      return null;
+    }
+
+    return null;
+  }
+
   // Close every open conversation this visitor has in the project as spam, so
   // blocking clears them all out of the inbox views — not just the one the ban
   // was issued from (a banned visitor is 403'd, so leftovers would sit in
@@ -499,12 +803,13 @@ export class ChatService {
   async reopenConversation(
     id: string,
     projectId: string,
+    status: "active" | "agent_replied" = "active",
   ): Promise<ConversationRow | null> {
     const now = new Date();
     await this.db
       .update(conversations)
       .set({
-        status: "active",
+        status,
         closeReason: null,
         lastActivityAt: now,
       })
@@ -582,7 +887,11 @@ export class ChatService {
       conversationId,
       projectId,
     );
-    return parseChatState(conversation?.chatState ?? null);
+    return parseChatState(conversation?.chatState ?? null, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation?.status ?? "active",
+      ),
+    });
   }
 
   async saveChatState(
@@ -590,13 +899,33 @@ export class ChatService {
     projectId: string,
     chatState: ConversationChatState,
   ): Promise<void> {
+    const conversation = await this.getConversationById(
+      conversationId,
+      projectId,
+    );
+    if (!conversation) return;
+    const currentState = parseChatState(conversation.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    });
+    const stateToSave = mergeChatStateForPersistence(currentState, chatState);
+    const chatStateCondition =
+      conversation.chatState === null
+        ? isNull(conversations.chatState)
+        : eq(conversations.chatState, conversation.chatState);
     await this.db
       .update(conversations)
-      .set({ chatState: JSON.stringify(chatState) })
+      .set({ chatState: JSON.stringify(stateToSave) })
       .where(
         and(
           eq(conversations.id, conversationId),
           eq(conversations.projectId, projectId),
+          // Ownership transitions always change status. Comparing the status
+          // we read makes this an optimistic write, so an in-flight AI turn
+          // cannot overwrite a human takeover or a later explicit handback.
+          eq(conversations.status, conversation.status),
+          chatStateCondition,
         ),
       );
   }
@@ -676,6 +1005,11 @@ export class ChatService {
       .from(messages)
       .where(and(eq(messages.conversationId, conversationId), ne(messages.role, "system")))
       .orderBy(messages.createdAt);
+  }
+
+  async hasVisitorMessages(conversationId: string): Promise<boolean> {
+    const rows = await buildHasVisitorMessagesQuery(this.db, conversationId);
+    return rows.length > 0;
   }
 
   // Paginated reads — used by the dashboard detail endpoint to avoid
@@ -783,6 +1117,131 @@ export class ChatService {
       deliveredAt: null,
       readAt: null,
     };
+  }
+
+  async addVisitorMessageWithFirstTurn(
+    data: Omit<NewMessageRow, "id" | "createdAt" | "role">,
+  ): Promise<{ message: MessageRow; isFirstVisitorTurn: boolean }> {
+    const id = crypto.randomUUID();
+    const now = new Date();
+    const insertQuery = this.db.insert(messages).values({
+      id,
+      createdAt: now,
+      role: "visitor",
+      ...data,
+    });
+    const activityQuery = this.db
+      .update(conversations)
+      .set({ updatedAt: now, lastActivityAt: now })
+      .where(eq(conversations.id, data.conversationId));
+    const countQuery = buildVisitorMessageCountQuery(
+      this.db,
+      data.conversationId,
+    );
+    const [, , countRows] = await this.db.batch([
+      insertQuery,
+      activityQuery,
+      countQuery,
+    ]);
+    const visitorMessageCount = countRows[0]?.count ?? 0;
+    const message: MessageRow = {
+      id,
+      conversationId: data.conversationId,
+      role: "visitor",
+      content: data.content,
+      imageUrl: data.imageUrl ?? null,
+      sources: data.sources ?? null,
+      senderName: data.senderName ?? null,
+      senderAvatar: data.senderAvatar ?? null,
+      userId: data.userId ?? null,
+      createdAt: now,
+      emailedAt: null,
+      deliveredAt: null,
+      readAt: null,
+    };
+    return {
+      message,
+      isFirstVisitorTurn: visitorMessageCount === 1,
+    };
+  }
+
+  async addAgentMessageAndTakeOwnership(
+    data: Omit<NewMessageRow, "id" | "createdAt" | "role">,
+    projectId: string,
+  ): Promise<MessageRow | null> {
+    const conversation = await this.getConversationById(
+      data.conversationId,
+      projectId,
+    );
+    if (!conversation) return null;
+
+    const id = crypto.randomUUID();
+    const now = new Date();
+    const takeoverQuery = buildHumanTakeoverQuery(
+      this.db,
+      data.conversationId,
+      projectId,
+      now,
+    );
+    const insertQuery = this.db.insert(messages).values({
+      id,
+      createdAt: now,
+      role: "agent",
+      ...data,
+    });
+    await this.db.batch([takeoverQuery, insertQuery]);
+
+    return {
+      id,
+      conversationId: data.conversationId,
+      role: "agent",
+      content: data.content,
+      imageUrl: data.imageUrl ?? null,
+      sources: data.sources ?? null,
+      senderName: data.senderName ?? null,
+      senderAvatar: data.senderAvatar ?? null,
+      userId: data.userId ?? null,
+      createdAt: now,
+      emailedAt: null,
+      deliveredAt: null,
+      readAt: null,
+    };
+  }
+
+  async addBotMessageIfOwnershipMatches(
+    data: Omit<NewMessageRow, "id" | "createdAt" | "role">,
+    projectId: string,
+    expected: {
+      status: ConversationRow["status"];
+      chatState: string | null;
+    },
+  ): Promise<MessageRow | null> {
+    const id = crypto.randomUUID();
+    const now = new Date();
+    const rows = await buildConditionalBotMessageQuery(this.db, {
+      id,
+      conversationId: data.conversationId,
+      projectId,
+      content: data.content,
+      sources: data.sources ?? null,
+      senderName: data.senderName ?? null,
+      createdAt: now,
+      expectedStatus: expected.status,
+      expectedChatState: expected.chatState,
+    });
+    const botMessage = rows[0] ?? null;
+    if (!botMessage) return null;
+
+    await this.db
+      .update(conversations)
+      .set({ lastActivityAt: now })
+      .where(
+        and(
+          eq(conversations.id, data.conversationId),
+          eq(conversations.projectId, projectId),
+        ),
+      );
+    return botMessage;
   }
 
   async getMessageById(messageId: string): Promise<MessageRow | null> {

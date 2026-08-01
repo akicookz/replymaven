@@ -441,6 +441,7 @@ export const submitContactFormSchema = z.object({
   visitorName: z.string().max(100).optional(),
   visitorEmail: z.string().email().optional(),
   data: z.record(z.string(), z.string().max(5000)),
+  streamAi: z.boolean().optional(),
 });
 
 // ─── Tools ────────────────────────────────────────────────────────────────────

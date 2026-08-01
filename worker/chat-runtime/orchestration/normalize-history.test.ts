@@ -45,6 +45,21 @@ describe("normalizeConversationHistory", () => {
     expect(result).toHaveLength(2);
   });
 
+  test("drops the persisted mention form when AI receives stripped invocation text", () => {
+    const result = normalizeConversationHistory({
+      rawHistory: [
+        { role: "agent", content: "I am checking that now." },
+        { role: "visitor", content: "@Maven explain the error" },
+      ],
+      currentMessage: "explain the error",
+      persistedCurrentMessage: "@Maven explain the error",
+    });
+
+    expect(result).toEqual([
+      { role: "agent", content: "I am checking that now." },
+    ]);
+  });
+
   test("filters empty bot messages and caps at 10 entries", () => {
     const rawHistory = [
       { role: "bot", content: "" },

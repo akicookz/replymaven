@@ -68,6 +68,14 @@ import {
 } from "./services/team-context";
 import { VisitorBanService } from "./services/visitor-ban-service";
 import { handleWidgetMessageTurn } from "./chat-runtime/orchestration/handle-widget-message-turn";
+import {
+  buildContactAcceptedPayload,
+  buildContactFormMessage,
+  extractFormEmail,
+  extractFormName,
+  markContactAiUnavailable,
+} from "./chat-runtime/contact-support/contact-support";
+import { createEscalation } from "./chat-runtime/post-turn/escalation";
 import { buildToolRegistry } from "./chat-runtime/tools/build-tool-registry";
 import { toToolDefinition } from "./chat-runtime/types";
 import {
@@ -82,7 +90,6 @@ import { trimToCharBudget } from "./chat-runtime/prompt/sections";
 import { logError, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
-import { buildConversationDeepLink } from "./lib/deep-links";
 import {
   broadcastClosed,
   broadcastMessageDeleted,
@@ -344,63 +351,6 @@ function isConversationStale(
     conv.lastActivityAt?.getTime() ?? conv.createdAt.getTime();
   return last < Date.now() - autoCloseMinutes * 60_000;
 }
-
-function isLikelyEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function extractFormEmail(formData: Record<string, string>): string | null {
-  for (const [key, value] of Object.entries(formData)) {
-    if (!/email/i.test(key)) continue;
-    if (isLikelyEmail(value)) return value.trim();
-  }
-
-  return null;
-}
-
-function extractFormName(formData: Record<string, string>): string | null {
-  for (const [key, value] of Object.entries(formData)) {
-    const normalizedKey = key.trim().toLowerCase();
-    if (normalizedKey.includes("company")) continue;
-    if (!normalizedKey.includes("name")) continue;
-
-    const trimmedValue = value.trim();
-    if (!trimmedValue) continue;
-    return trimmedValue.slice(0, 100);
-  }
-
-  return null;
-}
-
-// Contact-form submissions become the visitor's first message in the
-// conversation thread — enrich with name/email lines (mirrors what
-// buildTicketRecord used to persist onto the now-removed ticket row) so the
-// team still sees them even when the form itself didn't collect them.
-function buildContactFormMessage(
-  formData: Record<string, string>,
-  visitorName: string | null,
-  visitorEmail: string | null,
-): string {
-  const enrichedData = { ...formData };
-
-  if (visitorName && !extractFormName(enrichedData)) {
-    enrichedData["Visitor name"] = visitorName;
-  }
-
-  if (visitorEmail && !extractFormEmail(enrichedData)) {
-    enrichedData["Visitor email"] = visitorEmail;
-  }
-
-  const lines = ["Contact form submission"];
-  for (const [key, value] of Object.entries(enrichedData)) {
-    const trimmedValue = value.trim();
-    if (!trimmedValue) continue;
-    lines.push(`${key}: ${trimmedValue}`);
-  }
-
-  return lines.join("\n");
-}
-
 
 interface BrowserRenderingMarkdownResponse {
   success: boolean;
@@ -1013,6 +963,7 @@ const app = new Hono<HonoAppContext>()
       "/api/widget/:projectSlug/tickets",
     ],
     async (c) => {
+    const routeStartedAt = Date.now();
     const ip = getClientIp(c);
     if (!checkRateLimit(`cform:${ip}`, 5, 60_000)) {
       return c.json({ error: "Rate limit exceeded" }, 429);
@@ -1044,10 +995,20 @@ const app = new Hono<HonoAppContext>()
     const visitorName =
       parsed.data.visitorName ?? extractFormName(parsed.data.data);
 
+    const ban = await new VisitorBanService(db).isVisitorBanned(
+      project.id,
+      visitorId,
+      visitorEmail,
+    );
+    if (ban) {
+      return c.json({ banned: true, reason: ban.reason }, 403);
+    }
+
     let conversation = await chatService.getActiveConversationByVisitor(
       project.id,
       visitorId,
     );
+    const created = !conversation;
 
     if (conversation) {
       const updatedConversation = await chatService.updateConversation(
@@ -1088,127 +1049,140 @@ const app = new Hono<HonoAppContext>()
       visitorName,
       visitorEmail,
     );
-
-    // Stamp a short preview of this submission so needs-review pings (which read
-    // `teamRequestSummary` from conversation metadata) render context, mirroring
-    // escalation.ts. `updateConversation` merges against the stored row, so
-    // existing keys (source/country/…) are preserved. We deliberately do NOT set
-    // `escalatedAt`: that key drives escalation.ts's emit-once dedupe, so setting
-    // it here would suppress the review_summary post + first-escalation Telegram/
-    // email if the bot later escalates this same conversation.
-    conversation =
-      (await chatService.updateConversation(conversation.id, project.id, {
-        metadata: JSON.stringify({
-          teamRequestSummary: formMessage.slice(0, 300),
-        }),
-      })) ?? conversation;
-
-    const formVisitorMessage = await chatService.addMessage({
+    const formVisitorResult = await chatService.addVisitorMessageWithFirstTurn({
       conversationId: conversation.id,
-      role: "visitor",
       content: formMessage,
       imageUrl: null,
       sources: null,
     });
+    const formVisitorMessage = formVisitorResult.message;
+    const isFirstVisitorTurn = formVisitorResult.isFirstVisitorTurn;
     broadcastMessageNew(
       c.env,
       c.executionCtx,
       conversation.id,
       formVisitorMessage,
+      { excludeSubjectId: conversation.visitorId },
     );
 
-    // Contact-form submissions are a direct line to the team → Needs You.
-    const wasAlreadyWithTeam =
-      conversation.status === "waiting_agent" ||
-      conversation.status === "agent_replied";
-    if (conversation.status !== "waiting_agent") {
-      await chatService.updateConversationStatus(
+    const settings = await projectService.getSettings(project.id);
+    const statusAfterTeamRequest = await chatService.prepareContactSupportOwnership(
+      conversation.id,
+      project.id,
+    );
+    if (!statusAfterTeamRequest) {
+      return c.json({ error: "Conversation ownership changed. Try again." }, 409);
+    }
+    conversation =
+      (await chatService.getConversationById(conversation.id, project.id)) ??
+      conversation;
+    broadcastStatusChange(
+      c.env,
+      c.executionCtx,
+      conversation.id,
+      statusAfterTeamRequest,
+    );
+
+    const telegramService =
+      settings?.telegramBotToken && settings.telegramChatId
+        ? new TelegramService(db)
+        : undefined;
+    const escalation = await createEscalation({
+      chatService,
+      projectService,
+      telegramService,
+      project: { id: project.id, name: project.name },
+      conversation: {
+        id: conversation.id,
+        visitorId: conversation.visitorId,
+        visitorName: conversation.visitorName,
+        visitorEmail: conversation.visitorEmail,
+        telegramThreadId: conversation.telegramThreadId,
+        status: conversation.status,
+        metadata: conversation.metadata,
+      },
+      summary: formMessage,
+      settings,
+      env: {
+        BETTER_AUTH_URL: c.env.BETTER_AUTH_URL,
+        RESEND_API_KEY: c.env.RESEND_API_KEY,
+      },
+      executionCtx: c.executionCtx,
+      broadcast: (message) =>
+        broadcastMessageNew(
+          c.env,
+          c.executionCtx,
+          conversation.id,
+          message,
+          { audience: "agents" },
+        ),
+    });
+    if (escalation.telegramThreadId) {
+      await chatService.updateTelegramThreadId(
         conversation.id,
         project.id,
-        "waiting_agent",
-      );
-      broadcastStatusChange(c.env, c.executionCtx, conversation.id, "waiting_agent");
-    }
-
-    // Notify via Telegram if configured
-    const settings = await projectService.getSettings(project.id);
-    if (settings?.telegramBotToken && settings?.telegramChatId) {
-      const telegramService = new TelegramService(db);
-      c.executionCtx.waitUntil(
-        (wasAlreadyWithTeam
-          ? telegramService.forwardVisitorMessage(
-              settings.telegramBotToken,
-              settings.telegramChatId,
-              conversation.visitorName,
-              formMessage,
-              conversation.id,
-              conversation.telegramThreadId
-                ? parseInt(conversation.telegramThreadId, 10)
-                : undefined,
-            )
-          : telegramService.notifyEscalation(
-              settings.telegramBotToken,
-              settings.telegramChatId,
-              {
-                visitorName: conversation.visitorName,
-                visitorEmail: conversation.visitorEmail,
-                summary: formMessage,
-                conversationUrl: buildConversationDeepLink(
-                  c.env.BETTER_AUTH_URL,
-                  project.id,
-                  conversation.id,
-                ),
-                isUpdate: false,
-              },
-            )
-        ).catch(() => {
-          // Silently ignore Telegram errors
-        }),
+        escalation.telegramThreadId,
       );
     }
 
-    // Notify project owner via email — first touch only. A repeat submission on
-    // a conversation already with the team reaches them via the Telegram forward
-    // above and shows up in the inbox, so re-sending the full "Needs human
-    // review" escalation email on every submission would just be noise. Mirrors
-    // the Telegram branch's wasAlreadyWithTeam fork.
-    if (!wasAlreadyWithTeam && c.env.RESEND_API_KEY) {
-      const emailService = new EmailService(c.env.RESEND_API_KEY);
-      const ownerEmail = await projectService.getOwnerEmail(project.id);
-      if (ownerEmail) {
-        const projectName = settings?.companyName ?? project.name;
-        const conversationUrl = buildConversationDeepLink(
-          c.env.BETTER_AUTH_URL,
-          project.id,
-          conversation.id,
-        );
+    const contactAccepted = buildContactAcceptedPayload({
+      conversationId: conversation.id,
+      visitorMessageId: formVisitorMessage.id,
+      conversationStatus: statusAfterTeamRequest,
+      visitorName: conversation.visitorName,
+      visitorEmail: conversation.visitorEmail,
+      botName: settings?.botName ?? null,
+      isFirstVisitorTurn,
+    });
+    const aiResponse = await handleWidgetMessageTurn({
+      db,
+      env: c.env,
+      executionCtx: c.executionCtx,
+      routeStartedAt,
+      streamProtocolVersion: 2,
+      checkRateLimit,
+      project: {
+        id: project.id,
+        userId: project.userId,
+        name: project.name,
+      },
+      conversationId: conversation.id,
+      turnKind: "contact_support",
+      visitorMessageAlreadySaved: true,
+      isFirstVisitorTurn,
+      suppressAgentForward: true,
+      contactAccepted,
+      payload: { content: formMessage },
+    });
+    const aiContentType = aiResponse.headers.get("content-type") ?? "";
+
+    if (!parsed.data.streamAi) {
+      if (aiContentType.includes("text/event-stream") && aiResponse.body) {
         c.executionCtx.waitUntil(
-          emailService
-            .sendEscalationNotification({
-              ownerEmail,
-              projectName,
-              visitorName,
-              visitorEmail,
-              visitorId,
-              summary: formMessage,
-              conversationUrl,
-              accentColor: null,
-            })
-            .catch((err) => {
-              console.error("Escalation notification email failed:", err);
-            }),
+          aiResponse.body.pipeTo(new WritableStream<Uint8Array>()),
         );
       }
+      const acceptedPayload = aiContentType.includes("text/event-stream")
+        ? contactAccepted
+        : markContactAiUnavailable(contactAccepted);
+      return c.json(
+        {
+          id: conversation.id,
+          created,
+          ...acceptedPayload,
+        },
+        201,
+      );
     }
 
+    if (aiContentType.includes("text/event-stream")) return aiResponse;
+
+    const aiResult = await aiResponse.json().catch(() => ({}));
     return c.json(
       {
-        id: conversation.id,
-        created: true,
-        conversationId: conversation.id,
-        conversationStatus: "waiting_agent",
-        visitorEmail: visitorEmail ?? null,
-        visitorName: visitorName ?? null,
+        contactAccepted: markContactAiUnavailable(contactAccepted),
+        aiUnavailable: true,
+        ...(typeof aiResult === "object" && aiResult ? aiResult : {}),
       },
       201,
     );
@@ -1354,10 +1328,10 @@ const app = new Hono<HonoAppContext>()
 
         if (!commandText) {
           // Simple handback — @BotName with no text
-          await chatService.updateConversationStatus(
+          await chatService.transitionChatOwnership(
             conversationId,
             projectId,
-            "active",
+            "ai_handed_back",
           );
           // Clear any existing handback instructions
           await chatService.updateConversation(conversationId, projectId, {
@@ -1438,19 +1412,14 @@ const app = new Hono<HonoAppContext>()
             message.message_id,
           );
         } else if (result.action === "respond") {
-          // Bot should immediately respond to the visitor
-          await chatService.updateConversationStatus(
+          // One-shot AI response. Human ownership remains after it is sent.
+          const directedResponseSnapshot = await chatService.takeHumanOwnership(
             conversationId,
             projectId,
-            "active",
           );
-
-          // Store instructions in metadata (persist for future messages too)
-          await chatService.updateConversation(conversationId, projectId, {
-            metadata: JSON.stringify({
-              agentHandbackInstructions: result.instructions,
-            }),
-          });
+          if (!directedResponseSnapshot) {
+            return c.json({ ok: true });
+          }
 
           // Generate a bot response using the agent's instruction
           const msgs = await chatService.getMessages(conversationId);
@@ -1475,13 +1444,33 @@ const app = new Hono<HonoAppContext>()
           );
 
           // Store the bot response as a message
-          const botMessage = await chatService.addMessage({
+          const botMessage = await chatService.addBotMessageIfOwnershipMatches(
+            {
+              conversationId,
+              content: responseText,
+              senderName: projectSettings?.botName ?? null,
+            },
+            projectId,
+            {
+              status: directedResponseSnapshot.status,
+              chatState: directedResponseSnapshot.chatState,
+            },
+          );
+          if (!botMessage) {
+            await telegramService.sendMessage(
+              tgSettings.telegramBotToken,
+              tgSettings.telegramChatId,
+              "Bot response canceled because the conversation changed.",
+              message.message_id,
+            );
+            return c.json({ ok: true });
+          }
+          broadcastStatusChange(
+            c.env,
+            c.executionCtx,
             conversationId,
-            role: "bot",
-            content: responseText,
-            senderName: projectSettings?.botName ?? null,
-          });
-          broadcastStatusChange(c.env, c.executionCtx, conversationId, "active");
+            "agent_replied",
+          );
           broadcastMessageNew(c.env, c.executionCtx, conversationId, botMessage);
 
           await telegramService.sendMessage(
@@ -1492,10 +1481,10 @@ const app = new Hono<HonoAppContext>()
           );
         } else {
           // Handback — silent instructions for future messages
-          await chatService.updateConversationStatus(
+          await chatService.transitionChatOwnership(
             conversationId,
             projectId,
-            "active",
+            "ai_handed_back",
           );
           broadcastStatusChange(c.env, c.executionCtx, conversationId, "active");
 
@@ -1527,18 +1516,15 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Normal agent reply — store and forward to visitor
-    const agentMessage = await chatService.addMessage({
-      conversationId,
-      role: "agent",
-      content: message.text,
-      senderName: message.from?.first_name ?? null,
-    });
-
-    await chatService.updateConversationStatus(
-      conversationId,
+    const agentMessage = await chatService.addAgentMessageAndTakeOwnership(
+      {
+        conversationId,
+        content: message.text,
+        senderName: message.from?.first_name ?? null,
+      },
       projectId,
-      "agent_replied",
     );
+    if (!agentMessage) return c.json({ ok: true });
 
     broadcastMessageNew(c.env, c.executionCtx, conversationId, agentMessage);
     broadcastStatusChange(
@@ -2340,21 +2326,21 @@ const app = new Hono<HonoAppContext>()
       }
     } else if (agentUser) {
       // ─── Agent reply branch (round-trip from agent's inbox) ───────────
-      const agentMessage = await chatService.addMessage({
-        conversationId: conversation.id,
-        role: "agent",
-        content: cleanedText,
-        userId: agentUser.id,
-        senderName: agentUser.name,
-        senderAvatar: agentUser.avatar,
-        sources: null,
-      });
-      await chatService.markMessageAsEmailed(agentMessage.id);
-      await chatService.updateConversationStatus(
-        conversation.id,
+      const agentMessage = await chatService.addAgentMessageAndTakeOwnership(
+        {
+          conversationId: conversation.id,
+          content: cleanedText,
+          userId: agentUser.id,
+          senderName: agentUser.name,
+          senderAvatar: agentUser.avatar,
+          sources: null,
+        },
         project.id,
-        "agent_replied",
       );
+      if (!agentMessage) {
+        return new Response("Conversation not found", { status: 404 });
+      }
+      await chatService.markMessageAsEmailed(agentMessage.id);
       broadcastMessageNew(c.env, c.executionCtx, conversation.id, agentMessage);
       broadcastStatusChange(
         c.env,
@@ -6394,21 +6380,24 @@ const app = new Hono<HonoAppContext>()
         ? [parsed.data.imageUrl]
         : [];
 
-    const message = await chatService.addMessage({
-      conversationId: conversation.id,
-      role: "agent",
-      content:
-        parsed.data.content?.trim() ||
-        (replyImageUrls.length > 1
-          ? "Sent images"
-          : replyImageUrls.length
-            ? "Sent an image"
-            : ""),
-      imageUrl: serializeMessageImageUrls(replyImageUrls),
-      userId: user.id,
-      senderName: user.name,
-      senderAvatar: avatar,
-    });
+    const message = await chatService.addAgentMessageAndTakeOwnership(
+      {
+        conversationId: conversation.id,
+        content:
+          parsed.data.content?.trim() ||
+          (replyImageUrls.length > 1
+            ? "Sent images"
+            : replyImageUrls.length
+              ? "Sent an image"
+              : ""),
+        imageUrl: serializeMessageImageUrls(replyImageUrls),
+        userId: user.id,
+        senderName: user.name,
+        senderAvatar: avatar,
+      },
+      project.id,
+    );
+    if (!message) return c.json({ error: "Conversation not found" }, 404);
 
     // Emit "joined" once — only when picking up an escalated conversation for the first time
     if (conversation.status === "waiting_agent") {
@@ -6418,12 +6407,6 @@ const app = new Hono<HonoAppContext>()
         `${user.name} joined the conversation`,
       ).catch(() => {});
     }
-
-    await chatService.updateConversationStatus(
-      conversation.id,
-      project.id,
-      "agent_replied",
-    );
 
     broadcastMessageNew(c.env, c.executionCtx, conversation.id, message, {
       excludeSubjectId: user.id,

@@ -54,6 +54,7 @@ import { streamSupportAgent } from "../agents/support-agent";
 import { executeHttpTool } from "../tools/http-tool-executor";
 import { withCurrentTurn } from "../orchestration/normalize-history";
 import {
+  type AiParticipation,
   type HandoffRenderDirective,
   type FastPathDecision,
   type PlannerActionHistoryEntry,
@@ -63,12 +64,19 @@ import {
   type PlannerLoopState,
   type PlannerToolEvidence,
   type SupportPromptSettings,
+  type SupportTurnContext,
   type SupportToolDefinition,
   type TurnTelemetry,
   type ConversationTurnMessage,
 } from "../types";
 
 const MAX_PLANNER_STEPS = 8; // Increased to allow more search attempts for thorough documentation checking
+
+export function shouldEmitProvisionalAiText(
+  streamProtocolVersion: 1 | 2,
+): boolean {
+  return streamProtocolVersion === 2;
+}
 
 // Callback signature for the system prompt builder. The visitor flow leaves
 // this undefined and falls back to `buildSupportSystemPrompt`; other callers
@@ -82,6 +90,8 @@ export interface ComposeSystemPromptContext {
   faqMatchHint?: { question: string; answer: string; score: number } | null;
   pageContext?: Record<string, string>;
   visitorInfo: { name: string | null; email: string | null };
+  turnContext: SupportTurnContext;
+  aiParticipation: AiParticipation;
   agentHandbackInstructions?: string | null;
 }
 
@@ -128,6 +138,9 @@ interface RunPlannerLoopOptions {
   compiledFaqContext: string;
   hasIndexedResources: boolean;
   visitorInfo: { name: string | null; email: string | null };
+  turnContext: SupportTurnContext;
+  aiParticipation: AiParticipation;
+  responseOpening: string;
   // Escalation continuity carried over from the prior turn's persisted
   // `chat_state` (see ConversationChatState). Lets the loop resume an
   // in-progress handoff without regex-matching its own prior wording.
@@ -184,6 +197,14 @@ export function buildFastPathPlannerDecision(input: {
       composeKind: "grounded",
     },
   };
+}
+
+export async function claimTeamRequest(
+  chatService: ChatService,
+  conversationId: string,
+  projectId: string,
+): Promise<boolean> {
+  return chatService.claimTeamRequest(conversationId, projectId);
 }
 
 function createEmptyPlannerDocsEvidence(): PlannerDocsEvidence {
@@ -574,6 +595,10 @@ async function executeCompose(options: {
   faqMatchHint?: { question: string; answer: string; score: number } | null;
   pageContext?: Record<string, string>;
   visitorInfo: { name: string | null; email: string | null };
+  turnContext: SupportTurnContext;
+  aiParticipation: AiParticipation;
+  streamProtocolVersion: 1 | 2;
+  responseOpening: string;
   agentHandbackInstructions?: string | null;
   image?: { base64: string; mimeType: string } | null;
   emitStatus: (
@@ -583,10 +608,6 @@ async function executeCompose(options: {
   buildLogContext: (extra?: Record<string, unknown>) => Record<string, unknown>;
   closeSafeAiReplayWindow: (reason: string) => void;
   buildSystemPrompt?: BuildSystemPromptFn;
-  // Conversation has been flagged for human review (status === "waiting_agent").
-  // Suppresses the model's own [RESOLVED] instruction so it never self-closes
-  // while a teammate is expected to act.
-  escalated?: boolean;
 }): Promise<{
   fullResponse: string;
   lastToolOutput: unknown;
@@ -606,6 +627,8 @@ async function executeCompose(options: {
     faqMatchHint: options.faqMatchHint,
     pageContext: options.pageContext,
     visitorInfo: options.visitorInfo,
+    turnContext: options.turnContext,
+    aiParticipation: options.aiParticipation,
     agentHandbackInstructions: options.agentHandbackInstructions,
   };
   const systemPrompt = options.buildSystemPrompt
@@ -620,6 +643,8 @@ async function executeCompose(options: {
           agentHandbackInstructions: options.agentHandbackInstructions,
           pageContext: options.pageContext,
           visitorInfo: options.visitorInfo,
+          turnContext: options.turnContext,
+          aiParticipation: options.aiParticipation,
           faqContext: composerFaqContext,
           faqMatchHint: options.faqMatchHint ?? null,
           groundingConfidence: options.state.docsEvidence.groundingConfidence,
@@ -634,7 +659,6 @@ async function executeCompose(options: {
           toolEvidenceSummary: summarizeToolEvidence(options.state.toolEvidence),
           retrievalAttempted: options.state.docsEvidence.retrievalAttempted,
           broaderSearchAttempted: options.state.docsEvidence.broaderSearchAttempted,
-          escalated: options.escalated,
         },
       );
 
@@ -663,7 +687,15 @@ async function executeCompose(options: {
     },
   });
 
-  let fullResponse = "";
+  let fullResponse = options.responseOpening;
+  if (
+    options.responseOpening &&
+    shouldEmitProvisionalAiText(options.streamProtocolVersion)
+  ) {
+    emitSseEvent(options.controller, options.encoder, {
+      text: options.responseOpening,
+    });
+  }
   const stripState = createStreamingStripState();
   const detectedInternalTokens: InternalToken[] = [];
   for await (const part of supportAgent.fullStream) {
@@ -686,9 +718,11 @@ async function executeCompose(options: {
     }
     if (stripResult.emit) {
       fullResponse += stripResult.emit;
-      emitSseEvent(options.controller, options.encoder, {
-        text: stripResult.emit,
-      });
+      if (shouldEmitProvisionalAiText(options.streamProtocolVersion)) {
+        emitSseEvent(options.controller, options.encoder, {
+          text: stripResult.emit,
+        });
+      }
     }
   }
 
@@ -698,9 +732,11 @@ async function executeCompose(options: {
   }
   if (flushed.emit) {
     fullResponse += flushed.emit;
-    emitSseEvent(options.controller, options.encoder, {
-      text: flushed.emit,
-    });
+    if (shouldEmitProvisionalAiText(options.streamProtocolVersion)) {
+      emitSseEvent(options.controller, options.encoder, {
+        text: flushed.emit,
+      });
+    }
   }
 
 
@@ -715,12 +751,20 @@ async function executeCompose(options: {
 export async function runPlannerLoop(
   options: RunPlannerLoopOptions,
 ): Promise<PlannerLoopResult> {
+  function withResponseOpening(message: string): string {
+    return `${options.responseOpening}${message}`;
+  }
+
   const loopState = createInitialLoopState(
     options.conversationSummary,
     options.visitorInfo,
     options.persistedContactState,
     options.persistedClarifyState,
   );
+  // Contact submissions and pending/human-owned conversations have already
+  // reached the team. This keeps the planner focused on troubleshooting and
+  // prevents a second handoff offer or another contact-details request.
+  loopState.handoffRequested = options.aiParticipation !== "continuous";
 
   if (options.faqMatchHint) {
     // Wrap the seed in a <source> block so `mergeRagContextBlocks` (which
@@ -1165,7 +1209,7 @@ export async function runPlannerLoop(
     }
 
     if (nextAction.type === "offer_handoff") {
-      const fullResponse = await buildRenderedHandoffMessage({
+      const renderedMessage = await buildRenderedHandoffMessage({
         modelRuntime: options.modelRuntime,
         directive: {
           kind: "offer_handoff",
@@ -1183,6 +1227,7 @@ export async function runPlannerLoop(
         ),
         buildLogContext: options.buildLogContext,
       });
+      const fullResponse = withResponseOpening(renderedMessage);
 
       loopState.handoffRequested = true;
       loopState.awaitingHandoffConfirmation = true;
@@ -1194,11 +1239,6 @@ export async function runPlannerLoop(
       });
       loopState.finalDraft = fullResponse;
       loopState.terminationReason = nextAction.reason;
-      if (options.streamProtocolVersion === 1) {
-        emitSseEvent(options.controller, options.encoder, {
-          finalText: fullResponse,
-        });
-      }
       return {
         fullResponse,
         retrieval: loopState.docsEvidence,
@@ -1213,7 +1253,7 @@ export async function runPlannerLoop(
     }
 
     if (nextAction.type === "collect_contact") {
-      const fullResponse = await buildRenderedHandoffMessage({
+      const renderedMessage = await buildRenderedHandoffMessage({
         modelRuntime: options.modelRuntime,
         directive: {
           kind: "collect_contact",
@@ -1228,6 +1268,7 @@ export async function runPlannerLoop(
         ),
         buildLogContext: options.buildLogContext,
       });
+      const fullResponse = withResponseOpening(renderedMessage);
       loopState.handoffRequested = true;
       loopState.contactDeclined = false;
       // Past the yes/no handoff offer now — we're collecting contact details.
@@ -1242,11 +1283,6 @@ export async function runPlannerLoop(
       });
       loopState.finalDraft = fullResponse;
       loopState.terminationReason = nextAction.reason;
-      if (options.streamProtocolVersion === 1) {
-        emitSseEvent(options.controller, options.encoder, {
-          finalText: fullResponse,
-        });
-      }
       return {
         fullResponse,
         retrieval: loopState.docsEvidence,
@@ -1283,6 +1319,38 @@ export async function runPlannerLoop(
           ),
           buildLogContext: options.buildLogContext,
         }));
+
+      const escalationClaimed = await claimTeamRequest(
+        options.chatService,
+        options.conversation.id,
+        options.project.id,
+      );
+      if (!escalationClaimed) {
+        pushActionHistory(loopState, {
+          type: "escalate",
+          reason: `${nextAction.reason} Superseded by a newer ownership change.`,
+          outcome: "rejected",
+          note: "The conversation is no longer available for AI escalation.",
+        });
+        return {
+          fullResponse: "",
+          retrieval: loopState.docsEvidence,
+          hadToolCalls,
+          lastToolOutput,
+          lastToolError,
+          stepCount: loopState.stepCount,
+          terminationAction: "escalate",
+          loopState,
+          detectedInternalTokens: [],
+        };
+      }
+      broadcastStatusChange(
+        options.env,
+        options.executionCtx,
+        options.conversation.id,
+        "waiting_agent",
+      );
+
       loopState.handoffSummary = summary;
       loopState.handoffRequested = true;
       loopState.awaitingContactFields = [];
@@ -1337,8 +1405,9 @@ export async function runPlannerLoop(
           error,
           options.buildLogContext(),
         );
-        const fullResponse =
-          "I couldn't forward that to the team just now. I can keep helping here, or you can try again in a moment.";
+        const fullResponse = withResponseOpening(
+          "I couldn't forward that to the team just now. I can keep helping here, or you can try again in a moment.",
+        );
         pushActionHistory(loopState, {
           type: "escalate",
           reason: `${nextAction.reason} Submission failed.`,
@@ -1347,11 +1416,6 @@ export async function runPlannerLoop(
         });
         loopState.finalDraft = fullResponse;
         loopState.terminationReason = "team_request_submission_failed";
-        if (options.streamProtocolVersion === 1) {
-          emitSseEvent(options.controller, options.encoder, {
-            finalText: fullResponse,
-          });
-        }
         return {
           fullResponse,
           retrieval: loopState.docsEvidence,
@@ -1376,26 +1440,6 @@ export async function runPlannerLoop(
         );
       }
 
-      try {
-        await options.chatService.updateConversationStatus(
-          options.conversation.id,
-          options.project.id,
-          "waiting_agent",
-        );
-        broadcastStatusChange(
-          options.env,
-          options.executionCtx,
-          options.conversation.id,
-          "waiting_agent",
-        );
-      } catch (error) {
-        logError(
-          "widget_turn.team_request_status_update_failed",
-          error,
-          options.buildLogContext(),
-        );
-      }
-
       if (submission.telegramThreadId) {
         await options.chatService.updateTelegramThreadId(
           options.conversation.id,
@@ -1405,7 +1449,7 @@ export async function runPlannerLoop(
       }
 
       const agentLabel = options.settings.agentName ?? "our team";
-      const fullResponse = await buildRenderedHandoffMessage({
+      const renderedMessage = await buildRenderedHandoffMessage({
         modelRuntime: options.modelRuntime,
         directive: {
           kind: "escalated",
@@ -1420,6 +1464,7 @@ export async function runPlannerLoop(
         ),
         buildLogContext: options.buildLogContext,
       });
+      const fullResponse = withResponseOpening(renderedMessage);
       pushActionHistory(loopState, {
         type: "escalate",
         reason: nextAction.reason,
@@ -1428,11 +1473,8 @@ export async function runPlannerLoop(
       });
       loopState.finalDraft = fullResponse;
       loopState.terminationReason = nextAction.reason;
-      emitSseEvent(options.controller, options.encoder, { inquiry: true });
-      if (options.streamProtocolVersion === 1) {
-        emitSseEvent(options.controller, options.encoder, {
-          finalText: fullResponse,
-        });
+      if (options.streamProtocolVersion === 2) {
+        emitSseEvent(options.controller, options.encoder, { inquiry: true });
       }
       return {
         fullResponse,
@@ -1470,15 +1512,11 @@ export async function runPlannerLoop(
         ),
         buildLogContext: options.buildLogContext,
       });
-      loopState.finalDraft = renderedQuestion;
+      const fullResponse = withResponseOpening(renderedQuestion);
+      loopState.finalDraft = fullResponse;
       loopState.terminationReason = nextAction.reason;
-      if (options.streamProtocolVersion === 1) {
-        emitSseEvent(options.controller, options.encoder, {
-          finalText: renderedQuestion,
-        });
-      }
       return {
-        fullResponse: renderedQuestion,
+        fullResponse,
         retrieval: loopState.docsEvidence,
         hadToolCalls,
         lastToolOutput,
@@ -1514,13 +1552,16 @@ export async function runPlannerLoop(
         faqMatchHint: options.faqMatchHint ?? null,
         pageContext: options.pageContext,
         visitorInfo: options.visitorInfo,
+        turnContext: options.turnContext,
+        aiParticipation: options.aiParticipation,
+        streamProtocolVersion: options.streamProtocolVersion,
+        responseOpening: options.responseOpening,
         agentHandbackInstructions: options.agentHandbackInstructions,
         image: options.image,
         emitStatus: options.emitStatus,
         buildLogContext: options.buildLogContext,
         closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
         buildSystemPrompt: options.buildSystemPrompt,
-        escalated: options.conversation.status === "waiting_agent",
       });
       options.telemetry.composeMs = Date.now() - composeStart;
 
@@ -1563,13 +1604,16 @@ export async function runPlannerLoop(
         faqMatchHint: options.faqMatchHint ?? null,
         pageContext: options.pageContext,
         visitorInfo: options.visitorInfo,
+        turnContext: options.turnContext,
+        aiParticipation: options.aiParticipation,
+        streamProtocolVersion: options.streamProtocolVersion,
+        responseOpening: options.responseOpening,
         agentHandbackInstructions: options.agentHandbackInstructions,
         image: options.image,
         emitStatus: options.emitStatus,
         buildLogContext: options.buildLogContext,
         closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
         buildSystemPrompt: options.buildSystemPrompt,
-        escalated: options.conversation.status === "waiting_agent",
       });
 
       loopState.finalDraft = stopComposeResult.fullResponse;
@@ -1590,12 +1634,9 @@ export async function runPlannerLoop(
         error,
         options.buildLogContext(),
       );
-      const fallback = "I'm sorry, something went wrong on my end. Please try again or reach out to the team for help.";
-      if (options.streamProtocolVersion === 1) {
-        emitSseEvent(options.controller, options.encoder, {
-          finalText: fallback,
-        });
-      }
+      const fallback = withResponseOpening(
+        "I'm sorry, something went wrong on my end. Please try again or reach out to the team for help.",
+      );
       loopState.finalDraft = fallback;
       return {
         fullResponse: fallback,
@@ -1635,13 +1676,16 @@ export async function runPlannerLoop(
       faqMatchHint: options.faqMatchHint ?? null,
       pageContext: options.pageContext,
       visitorInfo: options.visitorInfo,
+      turnContext: options.turnContext,
+      aiParticipation: options.aiParticipation,
+      streamProtocolVersion: options.streamProtocolVersion,
+      responseOpening: options.responseOpening,
       agentHandbackInstructions: options.agentHandbackInstructions,
       image: options.image,
       emitStatus: options.emitStatus,
       buildLogContext: options.buildLogContext,
       closeSafeAiReplayWindow: options.closeSafeAiReplayWindow,
       buildSystemPrompt: options.buildSystemPrompt,
-      escalated: options.conversation.status === "waiting_agent",
     });
 
     loopState.finalDraft = limitComposeResult.fullResponse;
@@ -1662,12 +1706,9 @@ export async function runPlannerLoop(
       error,
       options.buildLogContext(),
     );
-    const fallback = "I'm sorry, something went wrong on my end. Please try again or reach out to the team for help.";
-    if (options.streamProtocolVersion === 1) {
-      emitSseEvent(options.controller, options.encoder, {
-        finalText: fallback,
-      });
-    }
+    const fallback = withResponseOpening(
+      "I'm sorry, something went wrong on my end. Please try again or reach out to the team for help.",
+    );
     loopState.finalDraft = fallback;
     return {
       fullResponse: fallback,

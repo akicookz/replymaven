@@ -9,6 +9,43 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
+export function buildEscalationNotificationText(params: {
+  visitorName: string | null;
+  visitorEmail: string | null;
+  summary: string;
+  conversationUrl: string;
+  conversationId: string;
+  isUpdate: boolean;
+}): string {
+  const headline = params.isUpdate
+    ? `<b>Conversation updated, needs human review</b>`
+    : `<b>Needs human review</b>`;
+  const who =
+    [params.visitorName, params.visitorEmail].filter(Boolean).join(" · ") ||
+    "Visitor";
+  return [
+    headline,
+    "",
+    `<b>${escapeHtml(who)}</b>`,
+    escapeHtml(params.summary),
+    "",
+    `<b>Conversation:</b> <code>${escapeHtml(params.conversationId)}</code>`,
+    `<a href="${params.conversationUrl}">Open conversation</a>`,
+  ].join("\n");
+}
+
+export function buildBotResolvedNotificationText(
+  botName: string | null,
+  conversationId: string,
+): string {
+  const resolvedBy = escapeHtml(botName?.trim() || "The AI assistant");
+  return [
+    `<b>${resolvedBy} resolved this before a teammate joined.</b>`,
+    "",
+    `<b>Conversation:</b> <code>${escapeHtml(conversationId)}</code>`,
+  ].join("\n");
+}
+
 export class TelegramService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
 
@@ -56,24 +93,12 @@ export class TelegramService {
       visitorEmail: string | null;
       summary: string;
       conversationUrl: string;
+      conversationId: string;
       isUpdate: boolean;
       replyToMessageId?: number;
     },
   ): Promise<number | null> {
-    const headline = params.isUpdate
-      ? `<b>Conversation updated — needs human review</b>`
-      : `<b>Needs human review</b>`;
-    const who =
-      [params.visitorName, params.visitorEmail].filter(Boolean).join(" · ") ||
-      "Visitor";
-    const text = [
-      headline,
-      ``,
-      `<b>${escapeHtml(who)}</b>`,
-      escapeHtml(params.summary),
-      ``,
-      `<a href="${params.conversationUrl}">Open conversation</a>`,
-    ].join("\n");
+    const text = buildEscalationNotificationText(params);
     const result = await this.sendMessage(
       botToken,
       chatId,
@@ -81,6 +106,21 @@ export class TelegramService {
       params.replyToMessageId,
     );
     return result.message_id ?? null;
+  }
+
+  async notifyBotResolved(
+    botToken: string,
+    chatId: string,
+    botName: string | null,
+    conversationId: string,
+    replyToMessageId?: number,
+  ): Promise<void> {
+    await this.sendMessage(
+      botToken,
+      chatId,
+      buildBotResolvedNotificationText(botName, conversationId),
+      replyToMessageId,
+    );
   }
 
   // ─── Forward Visitor Message to Agent ─────────────────────────────────────

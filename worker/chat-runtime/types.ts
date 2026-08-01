@@ -125,6 +125,8 @@ export interface SupportPromptOptions {
   toolEvidenceSummary?: string | null;
   retrievalAttempted?: boolean;
   broaderSearchAttempted?: boolean;
+  turnContext?: SupportTurnContext;
+  aiParticipation?: AiParticipation;
   // True when the conversation has been flagged for human review
   // (status === "waiting_agent"). Suppresses the [RESOLVED] instruction so
   // the model never self-closes a conversation waiting on a teammate.
@@ -197,8 +199,67 @@ export type ConversationChatStateName =
   | "escalating"
   | "agent_mode";
 
+export type AiParticipation =
+  | "continuous"
+  | "assist_until_agent"
+  | "human_only";
+
+export type ChatOwnershipEvent =
+  | "team_requested"
+  | "human_joined"
+  | "ai_handed_back";
+
+export interface ChatOwnershipSnapshot {
+  status: string;
+  chatState: string | null;
+}
+
+export function isChatOwnershipSnapshotCurrent(
+  expected: ChatOwnershipSnapshot,
+  current: ChatOwnershipSnapshot,
+): boolean {
+  return (
+    expected.status === current.status &&
+    expected.chatState === current.chatState
+  );
+}
+
+export function canPersistAiOutput(options: {
+  participationAtTurnStart: AiParticipation;
+  currentParticipation: AiParticipation;
+  currentStatus: string;
+  aiInvoked: boolean;
+  resolvedByThisTurn: boolean;
+}): boolean {
+  if (options.currentStatus === "closed" && !options.resolvedByThisTurn) {
+    return false;
+  }
+  if (options.currentParticipation !== "human_only") return true;
+  return (
+    options.participationAtTurnStart === "human_only" && options.aiInvoked
+  );
+}
+
+export interface SupportTurnContext {
+  kind: "standard" | "contact_support";
+  isFirstVisitorTurn: boolean;
+}
+
+export interface ContactAcceptedPayload {
+  conversationId: string;
+  visitorMessageId: string;
+  conversationStatus: "waiting_agent" | "agent_replied";
+  aiWillRespond: boolean;
+  visitorName: string | null;
+  visitorEmail: string | null;
+  assistantName: string;
+  fallbackMessage: string;
+}
+
 export interface ConversationChatState {
   state: ConversationChatStateName;
+  aiParticipation: AiParticipation;
+  ownershipRevision: number;
   askedClarifications: string[];
   clarificationAttempts: number;
   lastBotQuestion: string | null;
@@ -216,6 +277,8 @@ export interface ConversationChatState {
 export function createInitialChatState(): ConversationChatState {
   return {
     state: "active",
+    aiParticipation: "continuous",
+    ownershipRevision: 0,
     askedClarifications: [],
     clarificationAttempts: 0,
     lastBotQuestion: null,
@@ -228,18 +291,107 @@ export function createInitialChatState(): ConversationChatState {
   };
 }
 
+export function fallbackAiParticipationForStatus(
+  status: string,
+): AiParticipation {
+  if (status === "waiting_agent") return "assist_until_agent";
+  if (status === "agent_replied") return "human_only";
+  return "continuous";
+}
+
+export function applyChatOwnershipEvent(
+  chatState: ConversationChatState,
+  event: ChatOwnershipEvent,
+): ConversationChatState {
+  if (event === "human_joined") {
+    return {
+      ...chatState,
+      state: "agent_mode",
+      aiParticipation: "human_only",
+      ownershipRevision: chatState.ownershipRevision + 1,
+    };
+  }
+
+  if (event === "ai_handed_back") {
+    return {
+      ...chatState,
+      state: "active",
+      aiParticipation: "continuous",
+      ownershipRevision: chatState.ownershipRevision + 1,
+    };
+  }
+
+  if (chatState.aiParticipation === "human_only") return chatState;
+  return {
+    ...chatState,
+    state: "escalating",
+    aiParticipation: "assist_until_agent",
+    ownershipRevision: chatState.ownershipRevision + 1,
+  };
+}
+
+export function mergeChatStateForPersistence(
+  currentState: ConversationChatState,
+  incomingState: ConversationChatState,
+): ConversationChatState {
+  if (currentState.aiParticipation === "human_only") {
+    return {
+      ...incomingState,
+      state: "agent_mode",
+      aiParticipation: "human_only",
+      ownershipRevision: currentState.ownershipRevision,
+    };
+  }
+  if (currentState.aiParticipation !== incomingState.aiParticipation) {
+    return {
+      ...incomingState,
+      state: currentState.state,
+      aiParticipation: currentState.aiParticipation,
+      ownershipRevision: currentState.ownershipRevision,
+    };
+  }
+  return {
+    ...incomingState,
+    ownershipRevision: currentState.ownershipRevision,
+  };
+}
+
 export function parseChatState(
   raw: string | null,
+  options?: { fallbackAiParticipation?: AiParticipation },
 ): ConversationChatState {
-  if (!raw) return createInitialChatState();
+  const fallbackAiParticipation =
+    options?.fallbackAiParticipation ?? "continuous";
+  if (!raw) {
+    return {
+      ...createInitialChatState(),
+      aiParticipation: fallbackAiParticipation,
+    };
+  }
   try {
     const chat = JSON.parse(raw) as Partial<ConversationChatState>;
-    if (!chat || typeof chat !== "object") return createInitialChatState();
+    if (!chat || typeof chat !== "object") {
+      return {
+        ...createInitialChatState(),
+        aiParticipation: fallbackAiParticipation,
+      };
+    }
     return {
       state:
         typeof chat.state === "string"
           ? (chat.state as ConversationChatStateName)
           : "active",
+      aiParticipation:
+        chat.aiParticipation === "continuous" ||
+        chat.aiParticipation === "assist_until_agent" ||
+        chat.aiParticipation === "human_only"
+          ? chat.aiParticipation
+          : fallbackAiParticipation,
+      ownershipRevision:
+        typeof chat.ownershipRevision === "number" &&
+        Number.isFinite(chat.ownershipRevision)
+          ? Math.max(0, Math.floor(chat.ownershipRevision))
+          : 0,
       askedClarifications: Array.isArray(chat.askedClarifications)
         ? chat.askedClarifications.filter((q): q is string => typeof q === "string")
         : [],
@@ -276,7 +428,10 @@ export function parseChatState(
           : false,
     };
   } catch {
-    return createInitialChatState();
+    return {
+      ...createInitialChatState(),
+      aiParticipation: fallbackAiParticipation,
+    };
   }
 }
 
@@ -482,6 +637,11 @@ export interface WidgetMessageTurnContext {
     name: string;
   };
   conversationId: string;
+  turnKind?: SupportTurnContext["kind"];
+  visitorMessageAlreadySaved?: boolean;
+  isFirstVisitorTurn?: boolean;
+  suppressAgentForward?: boolean;
+  contactAccepted?: ContactAcceptedPayload;
   payload: {
     content: string;
     imageUrl?: string | null;

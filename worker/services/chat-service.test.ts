@@ -3,6 +3,11 @@ import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { and } from "drizzle-orm";
 import {
   buildBanSweepQuery,
+  buildAiResolutionQuery,
+  buildHasVisitorMessagesQuery,
+  buildConditionalBotMessageQuery,
+  buildHumanTakeoverQuery,
+  buildVisitorMessageCountQuery,
   buildInboxCountsQuery,
   buildNeedsReviewQuery,
   inboxFilterConditions,
@@ -74,6 +79,60 @@ function makeSelectDb(
       }),
     }),
   } as unknown as DrizzleD1Database<Record<string, unknown>>;
+}
+
+function makeOwnershipDb(row: ConversationRow): {
+  db: DrizzleD1Database<Record<string, unknown>>;
+  getUpdateCount: () => number;
+} {
+  let updateCount = 0;
+  return {
+    db: {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [row],
+          }),
+        }),
+      }),
+      update: () => {
+        updateCount += 1;
+        return {
+          set: () => ({
+            where: () => ({
+              returning: async () => [{ status: "agent_replied" }],
+            }),
+          }),
+        };
+      },
+    } as unknown as DrizzleD1Database<Record<string, unknown>>,
+    getUpdateCount: () => updateCount,
+  };
+}
+
+function makeReopenDb(row: ConversationRow): {
+  db: DrizzleD1Database<Record<string, unknown>>;
+  getStatusWrite: () => unknown;
+} {
+  let statusWrite: unknown;
+  return {
+    db: {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [row],
+          }),
+        }),
+      }),
+      update: () => ({
+        set: (values: { status?: unknown }) => {
+          statusWrite = values.status;
+          return { where: async () => undefined };
+        },
+      }),
+    } as unknown as DrizzleD1Database<Record<string, unknown>>,
+    getStatusWrite: () => statusWrite,
+  };
 }
 
 describe("ChatService.checkAndCloseStaleForProject", () => {
@@ -150,6 +209,111 @@ describe("ChatService.checkAndCloseStale", () => {
 
     expect(result.closed).toBe(false);
     expect(result.conversation?.status).toBe("waiting_agent");
+  });
+});
+
+describe("ChatService ownership transitions", () => {
+  test("a delayed team request cannot reopen a closed human-owned conversation", async () => {
+    const closedHuman = makeConversation({
+      status: "closed",
+      closeReason: "resolved",
+      chatState: JSON.stringify({
+        state: "agent_mode",
+        aiParticipation: "human_only",
+      }),
+    });
+    const { db, getUpdateCount } = makeOwnershipDb(closedHuman);
+    const service = new ChatService(db);
+
+    const status = await service.transitionChatOwnership(
+      closedHuman.id,
+      closedHuman.projectId,
+      "team_requested",
+    );
+
+    expect(status).toBe("closed");
+    expect(getUpdateCount()).toBe(0);
+  });
+
+  test("reopens a closed human-owned conversation in agent mode", async () => {
+    const closedHuman = makeConversation({ status: "closed" });
+    const { db, getStatusWrite } = makeReopenDb(closedHuman);
+    const service = new ChatService(db);
+
+    await service.reopenConversation(
+      closedHuman.id,
+      closedHuman.projectId,
+      "agent_replied",
+    );
+
+    expect(getStatusWrite()).toBe("agent_replied");
+  });
+});
+
+describe("buildHasVisitorMessagesQuery", () => {
+  test("checks the complete conversation instead of a recent-message window", () => {
+    const db = drizzle({} as never);
+    const { sql, params } = buildHasVisitorMessagesQuery(db, "conv-1").toSQL();
+
+    expect(sql).toContain('"messages"."conversation_id" = ?');
+    expect(sql).toContain('"messages"."role" = ?');
+    expect(sql).toMatch(/limit \?$/);
+    expect(params).toEqual(["conv-1", "visitor", 1]);
+  });
+});
+
+describe("buildConditionalBotMessageQuery", () => {
+  test("inserts bot output only from the exact ownership snapshot", () => {
+    const db = drizzle({} as never);
+    const { sql, params } = buildConditionalBotMessageQuery(db, {
+      id: "bot-1",
+      conversationId: "conv-1",
+      projectId: "project-1",
+      content: "Try reconnecting the integration.",
+      sources: null,
+      senderName: "Maven",
+      createdAt: new Date("2026-08-01T00:00:00.000Z"),
+      expectedStatus: "waiting_agent",
+      expectedChatState: '{"ownershipRevision":2}',
+    }).toSQL();
+
+    expect(sql).toContain('insert into "messages"');
+    expect(sql).toContain('select');
+    expect(sql).toContain('"conversations"."status" = ?');
+    expect(sql).toContain('"conversations"."chat_state" = ?');
+    expect(params).toContain("waiting_agent");
+    expect(params).toContain('{"ownershipRevision":2}');
+  });
+});
+
+describe("buildHumanTakeoverQuery", () => {
+  test("takes ownership and advances the JSON revision in one update", () => {
+    const db = drizzle({} as never);
+    const { sql, params } = buildHumanTakeoverQuery(
+      db,
+      "conv-1",
+      "project-1",
+      new Date("2026-08-01T00:00:00.000Z"),
+    ).toSQL();
+
+    expect(sql).toContain("json_set");
+    expect(sql).toContain("$.ownershipRevision");
+    expect(sql).toContain('"status" = ?');
+    expect(params).toContain("agent_replied");
+    expect(params).toContain("conv-1");
+    expect(params).toContain("project-1");
+  });
+});
+
+describe("buildVisitorMessageCountQuery", () => {
+  test("counts all visitor turns inside the message-insert batch", () => {
+    const db = drizzle({} as never);
+    const { sql, params } = buildVisitorMessageCountQuery(db, "conv-1").toSQL();
+
+    expect(sql).toContain("count(");
+    expect(sql).toContain('"messages"."conversation_id" = ?');
+    expect(sql).toContain('"messages"."role" = ?');
+    expect(params).toEqual(["conv-1", "visitor"]);
   });
 });
 
@@ -358,5 +522,54 @@ describe("buildBanSweepQuery (closeOpenConversationsAsSpam)", () => {
     expect(params).toEqual(
       expect.arrayContaining(["visitor-1", "spam@example.com"]),
     );
+  });
+});
+
+describe("buildAiResolutionQuery", () => {
+  const db = drizzle({} as never);
+
+  test("cannot close a conversation after a human has joined", () => {
+    const { sql, params } = buildAiResolutionQuery(
+      db,
+      "conv-1",
+      "project-1",
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."status" in (?, ?)');
+    expect(params).not.toContain("agent_replied");
+    expect(params).toContain("bot_resolved");
+  });
+
+  test("only resolves currently AI-owned active or waiting conversations", () => {
+    const { sql, params } = buildAiResolutionQuery(
+      db,
+      "conv-1",
+      "project-1",
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."status" in (?, ?)');
+    expect(params).toEqual(expect.arrayContaining(["active", "waiting_agent"]));
+  });
+
+  test("uses the ownership snapshot as a compare-and-swap guard", () => {
+    const expectedChatState = JSON.stringify({
+      state: "escalating",
+      aiParticipation: "assist_until_agent",
+    });
+    const resolvedChatState = JSON.stringify({
+      state: "active",
+      aiParticipation: "continuous",
+    });
+    const { sql, params } = buildAiResolutionQuery(
+      db,
+      "conv-1",
+      "project-1",
+      expectedChatState,
+      resolvedChatState,
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."chat_state" = ?');
+    expect(params).toContain(expectedChatState);
+    expect(params).toContain(resolvedChatState);
   });
 });

@@ -151,6 +151,7 @@ export async function createEscalation(params: {
           visitorEmail: params.conversation.visitorEmail,
           summary,
           conversationUrl,
+          conversationId: params.conversation.id,
           isUpdate,
           replyToMessageId,
         },

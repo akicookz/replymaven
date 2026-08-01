@@ -268,6 +268,38 @@ describe("sanitizePlannerDecision", () => {
 
     expect(sanitized.nextAction.type).toBe("escalate");
   });
+
+  test("keeps helping instead of offering another handoff after forwarding", () => {
+    const state = createState();
+    state.handoffRequested = true;
+
+    const firstDecision = sanitize({
+      state,
+      decision: {
+        goal: "Help with the submitted issue",
+        nextAction: {
+          type: "offer_handoff",
+          reason: "A teammate may be needed.",
+        },
+      },
+    });
+
+    expect(firstDecision.nextAction.type).toBe("search_docs");
+
+    state.docsEvidence.retrievalAttempted = true;
+    const afterSearch = sanitize({
+      state,
+      decision: {
+        goal: "Help with the submitted issue",
+        nextAction: {
+          type: "escalate",
+          reason: "Ask the team again.",
+        },
+      },
+    });
+
+    expect(afterSearch.nextAction.type).toBe("compose");
+  });
 });
 
 describe("fallbackPlanNextAction", () => {

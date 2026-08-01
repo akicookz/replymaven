@@ -1,4 +1,13 @@
-import { createModelRuntimeState } from "../llm/create-language-model";
+import {
+  createLanguageModel,
+  createModelRuntimeState,
+  runWithModelFallback,
+  type ModelRuntimeState,
+} from "../llm/create-language-model";
+import {
+  fallbackRenderContactTimingMessage,
+  renderContactTimingMessage,
+} from "../llm/render-contact-timing-message";
 import { runAgenticTurn } from "./run-agentic-pipeline";
 import { prepareTurnRouting } from "./prepare-turn-routing";
 import { normalizeConversationHistory } from "./normalize-history";
@@ -24,6 +33,10 @@ import {
   type ConversationChatState,
   type TurnTelemetry,
   type WidgetMessageTurnContext,
+  applyChatOwnershipEvent,
+  canPersistAiOutput,
+  fallbackAiParticipationForStatus,
+  isChatOwnershipSnapshotCurrent,
   parseChatState,
   toToolDefinition,
 } from "../types";
@@ -39,8 +52,11 @@ import { decryptEnabledToolHeaders } from "../../services/encryption-service";
 import {
   identifyFastPath,
   identifyHardGate,
+  parseVisitorAiInvocation,
 } from "../routing/identify-fast-path";
 import { findBestFaqMatch } from "../prompt/build-compiled-faq-context";
+import { buildSupportTurnOpening } from "../prompt/sections";
+import { buildContactFallbackMessage } from "../contact-support/contact-support";
 
 function parseConversationMetadata(
   rawMetadata: string | null | undefined,
@@ -57,6 +73,79 @@ function parseConversationMetadata(
   }
 
   return {};
+}
+
+function getMetadataString(
+  metadata: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+async function resolveSupportTurnOpening(options: {
+  turnContext: { kind: "standard" | "contact_support"; isFirstVisitorTurn: boolean };
+  visitorInfo: { name: string | null; email: string | null };
+  settings: {
+    workingHours: string | null;
+    avgResponseTime: string | null;
+    companyContext: string | null;
+  };
+  conversationMetadata: Record<string, unknown>;
+  currentMessage: string;
+  modelRuntime: ModelRuntimeState;
+  logContext: Record<string, unknown>;
+}): Promise<string> {
+  const baseOpening = buildSupportTurnOpening(
+    options.turnContext,
+    options.visitorInfo,
+  );
+  if (options.turnContext.kind !== "contact_support") return baseOpening;
+
+  let timingMessage = fallbackRenderContactTimingMessage();
+  if (options.settings.avgResponseTime?.trim()) {
+    try {
+      timingMessage = await runWithModelFallback({
+        runtime: options.modelRuntime,
+        stage: "render_contact_timing",
+        operation: async (config) =>
+          renderContactTimingMessage(
+            createLanguageModel(config),
+            {
+              nowMs: Date.now(),
+              currentMessage: options.currentMessage,
+              workingHours: options.settings.workingHours,
+              avgResponseTime: options.settings.avgResponseTime,
+              companyContext: options.settings.companyContext,
+              visitorLocation: {
+                timezone: getMetadataString(
+                  options.conversationMetadata,
+                  "timezone",
+                ),
+                city: getMetadataString(options.conversationMetadata, "city"),
+                region: getMetadataString(
+                  options.conversationMetadata,
+                  "region",
+                ),
+                country: getMetadataString(
+                  options.conversationMetadata,
+                  "country",
+                ),
+              },
+            },
+            { throwOnModelError: true },
+          ),
+        logContext: options.logContext,
+      });
+    } catch (error) {
+      logWarn("widget_turn.contact_timing_fallback", {
+        ...options.logContext,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return `${baseOpening}${timingMessage}\n\n`;
 }
 
 async function loadMessageImage(options: {
@@ -226,10 +315,17 @@ export async function handleWidgetMessageTurn(
   // Capture for use inside SSE closures where TS loses narrowing on the
   // mutable `conversation` reassignments.
   const visitorIdForBroadcast = conversation.visitorId;
+  let conversationStatusForTurn = conversation.status;
 
   let chatState: ConversationChatState = parseChatState(
     conversation.chatState,
+    {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    },
   );
+  const participationAtTurnStart = chatState.aiParticipation;
 
   // Spam-flagged conversations are "muted": never reopen them (reopening would
   // clear the spam flag and pull the thread back into the active inbox). They
@@ -241,39 +337,134 @@ export async function handleWidgetMessageTurn(
     const reopened = await chatService.reopenConversation(
       context.conversationId,
       context.project.id,
+      chatState.aiParticipation === "human_only"
+        ? "agent_replied"
+        : "active",
     );
     if (reopened) {
       conversation = reopened;
+      conversationStatusForTurn = reopened.status;
       logInfo(
         "widget_turn.reopened_conversation",
         buildWidgetTurnLogContext(context, turnId),
       );
     }
   }
+  const ownershipSnapshotAtTurnStart = {
+    status: conversation.status,
+    chatState: conversation.chatState,
+  };
 
   const imageUrl = context.payload.imageUrl ?? null;
-  const visitorMessage = await chatService.addMessage({
-    conversationId: context.conversationId,
-    role: "visitor",
-    content: context.payload.content,
-    imageUrl,
-  });
-  markStage("visitor_message_saved");
+  let isFirstVisitorTurn = context.isFirstVisitorTurn ?? false;
+  if (!context.visitorMessageAlreadySaved) {
+    const visitorResult = await chatService.addVisitorMessageWithFirstTurn({
+      conversationId: context.conversationId,
+      content: context.payload.content,
+      imageUrl,
+    });
+    const visitorMessage = visitorResult.message;
+    isFirstVisitorTurn = visitorResult.isFirstVisitorTurn;
+    markStage("visitor_message_saved");
 
-  // Broadcast visitor message to dashboard agents watching this conversation.
-  // Exclude the originating visitor (they already see it locally). This still
-  // fires for spam so the message reaches the agent under the Flagged view.
-  broadcastMessageNew(
-    context.env,
-    context.executionCtx,
-    context.conversationId,
-    visitorMessage,
-    { excludeSubjectId: conversation.visitorId },
+    // Broadcast visitor message to dashboard agents watching this conversation.
+    // Exclude the originating visitor (they already see it locally). This still
+    // fires for spam so the message reaches the agent under the Flagged view.
+    broadcastMessageNew(
+      context.env,
+      context.executionCtx,
+      context.conversationId,
+      visitorMessage,
+      { excludeSubjectId: conversation.visitorId },
+    );
+  } else {
+    markStage("visitor_message_previously_saved");
+  }
+
+  const aiInvocation = parseVisitorAiInvocation(
+    context.payload.content,
+    settings?.botName,
   );
+  const aiMessageContent = aiInvocation.invoked
+    ? aiInvocation.content
+    : context.payload.content;
+
+  async function getAiOutputPermission(
+    resolvedByThisTurn = false,
+  ): Promise<{
+    allowed: boolean;
+    status: WidgetCompletedPayload["conversationStatus"];
+    chatState: string | null;
+  }> {
+    const latestConversation = await chatService.getConversationById(
+      context.conversationId,
+      context.project.id,
+    );
+    if (!latestConversation) {
+      return { allowed: false, status: "closed", chatState: null };
+    }
+    const latestState = parseChatState(latestConversation.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        latestConversation.status,
+      ),
+    });
+    const isInvokedHumanOnlyTurn =
+      participationAtTurnStart === "human_only" && aiInvocation.invoked;
+    const startingOwnershipStillCurrent =
+      !isInvokedHumanOnlyTurn ||
+      isChatOwnershipSnapshotCurrent(ownershipSnapshotAtTurnStart, {
+        status: latestConversation.status,
+        chatState: latestConversation.chatState,
+      });
+    return {
+      allowed:
+        startingOwnershipStillCurrent &&
+        canPersistAiOutput({
+          participationAtTurnStart,
+          currentParticipation: latestState.aiParticipation,
+          currentStatus: latestConversation.status,
+          aiInvoked: aiInvocation.invoked,
+          resolvedByThisTurn,
+        }),
+      status: latestConversation.status,
+      chatState: isInvokedHumanOnlyTurn
+        ? ownershipSnapshotAtTurnStart.chatState
+        : latestConversation.chatState,
+    };
+  }
+
+  if (
+    isAgentRequestedStatus(conversation.status) &&
+    !context.suppressAgentForward &&
+    settings?.telegramBotToken &&
+    settings.telegramChatId
+  ) {
+    const telegramService = new TelegramService(context.db);
+    context.executionCtx.waitUntil(
+      telegramService.forwardVisitorMessage(
+        settings.telegramBotToken,
+        settings.telegramChatId,
+        conversation.visitorName,
+        context.payload.content,
+        conversation.id,
+        conversation.telegramThreadId
+          ? Number.parseInt(conversation.telegramThreadId, 10)
+          : undefined,
+      ).catch((error) => {
+        logError(
+          "widget_turn.telegram_forward_failed",
+          error,
+          buildWidgetTurnLogContext(context, turnId),
+        );
+      }),
+    );
+  }
 
   const hardGate = identifyHardGate({
     status: conversation.status,
     closeReason: conversation.closeReason,
+    aiParticipation: chatState.aiParticipation,
+    aiInvoked: aiInvocation.invoked,
   });
 
   // Muted (spam) thread: the message is now recorded and broadcast, but we stop
@@ -287,28 +478,6 @@ export async function handleWidgetMessageTurn(
   }
 
   if (hardGate === "agent_mode") {
-    if (settings?.telegramBotToken && settings.telegramChatId) {
-      const telegramService = new TelegramService(context.db);
-      context.executionCtx.waitUntil(
-        telegramService.forwardVisitorMessage(
-          settings.telegramBotToken,
-          settings.telegramChatId,
-          conversation.visitorName,
-          context.payload.content,
-          conversation.id,
-          conversation.telegramThreadId
-            ? Number.parseInt(conversation.telegramThreadId, 10)
-            : undefined,
-        ).catch((error) => {
-          logError(
-            "widget_turn.telegram_forward_failed",
-            error,
-            buildWidgetTurnLogContext(context, turnId),
-          );
-        }),
-      );
-    }
-
     logInfo(
       "widget_turn.agent_mode_bypassed",
       buildWidgetTurnLogContext(context, turnId, {
@@ -331,10 +500,15 @@ export async function handleWidgetMessageTurn(
 
   const conversationHistory = normalizeConversationHistory({
     rawHistory: parallelPrefetchedHistory,
-    currentMessage: context.payload.content,
+    currentMessage: aiMessageContent,
+    persistedCurrentMessage: context.payload.content,
   });
+  const turnContext = {
+    kind: context.turnKind ?? "standard",
+    isFirstVisitorTurn,
+  } as const;
   const scopeDecision = classifyTaskScope({
-    message: context.payload.content,
+    message: aiMessageContent,
     pageContext: context.payload.pageContext,
   });
   const sortedFaqResources = allResources
@@ -345,7 +519,7 @@ export async function handleWidgetMessageTurn(
       title: resource.title,
       content: resource.content,
     })),
-    context.payload.content,
+    aiMessageContent,
   );
   const conversationMetadata = parseConversationMetadata(conversation.metadata);
   const agentHandbackInstructions =
@@ -353,7 +527,7 @@ export async function handleWidgetMessageTurn(
       ? conversationMetadata.agentHandbackInstructions
       : null;
   const fastPathDecision = identifyFastPath({
-    message: context.payload.content,
+    message: aiMessageContent,
     scopeDecision,
     faqMatch,
     hasPendingWorkflow:
@@ -412,6 +586,32 @@ export async function handleWidgetMessageTurn(
   const availableTools = fastPathDecision
     ? []
     : enabledTools.map(toToolDefinition);
+  const modelConfig = {
+    model: context.env.AI_MODEL,
+    geminiApiKey: context.env.GEMINI_API_KEY,
+    openaiApiKey: context.env.OPENAI_API_KEY,
+  };
+  const modelRuntime = createModelRuntimeState(modelConfig);
+  const responseOpening = await resolveSupportTurnOpening({
+    turnContext,
+    visitorInfo: {
+      name: conversation.visitorName,
+      email: conversation.visitorEmail,
+    },
+    settings: settings ?? {
+      workingHours: null,
+      avgResponseTime: null,
+      companyContext: null,
+    },
+    conversationMetadata,
+    currentMessage: aiMessageContent,
+    modelRuntime,
+    logContext: buildWidgetTurnLogContext(context, turnId),
+  });
+  if (context.contactAccepted) {
+    context.contactAccepted.fallbackMessage =
+      buildContactFallbackMessage(responseOpening);
+  }
 
   return createWidgetSseResponse(async (controller, encoder) => {
     const telemetry: TurnTelemetry = {
@@ -419,6 +619,12 @@ export async function handleWidgetMessageTurn(
       routeStartedAt: startedAt,
       fastPathSelected: fastPathDecision?.kind ?? null,
     };
+
+    if (context.contactAccepted) {
+      emitSseEvent(controller, encoder, {
+        contactAccepted: context.contactAccepted,
+      });
+    }
 
     // Deterministic routes have already been selected before the SSE stream
     // opens, so describe the remaining composer work accurately instead of
@@ -435,13 +641,8 @@ export async function handleWidgetMessageTurn(
     let turnIntent: string | null = null;
     let executionPath: string | null = null;
     let retrievalMode: string | null = null;
-    const modelConfig = {
-      model: context.env.AI_MODEL,
-      geminiApiKey: context.env.GEMINI_API_KEY,
-      openaiApiKey: context.env.OPENAI_API_KEY,
-    };
-    const modelRuntime = createModelRuntimeState(modelConfig);
     let safeAiReplayWindowClosed = false;
+    let persistedAiMessage = false;
 
     function emitStatus(
       message: string,
@@ -468,19 +669,53 @@ export async function handleWidgetMessageTurn(
     async function emitAndSaveImmediateResponse(
       fullResponse: string,
     ): Promise<void> {
-      const cleanResponse = stripInternalTokens(fullResponse);
+      const cleanResponse = `${responseOpening}${stripInternalTokens(fullResponse)}`;
+      const outputPermission = await getAiOutputPermission();
+      if (!outputPermission.allowed) {
+        if (context.streamProtocolVersion === 2) {
+          emitCompletedEvent(controller, encoder, {
+            protocolVersion: 2,
+            messageId: null,
+            finalText: "",
+            conversationStatus: outputPermission.status,
+          });
+        } else {
+          emitSseEvent(controller, encoder, { done: true });
+        }
+        return;
+      }
+      currentStage = "save_bot_message";
+      const botMessage = await chatService.addBotMessageIfOwnershipMatches(
+        {
+          conversationId: context.conversationId,
+          content: cleanResponse,
+          sources: null,
+          senderName: settings?.botName ?? null,
+        },
+        context.project.id,
+        {
+          status: outputPermission.status,
+          chatState: outputPermission.chatState,
+        },
+      );
+      if (!botMessage) {
+        const latestPermission = await getAiOutputPermission();
+        if (context.streamProtocolVersion === 2) {
+          emitCompletedEvent(controller, encoder, {
+            protocolVersion: 2,
+            messageId: null,
+            finalText: "",
+            conversationStatus: latestPermission.status,
+          });
+        } else {
+          emitSseEvent(controller, encoder, { done: true });
+        }
+        return;
+      }
+      persistedAiMessage = true;
       if (context.streamProtocolVersion === 1) {
         emitSseEvent(controller, encoder, { finalText: cleanResponse });
       }
-
-      currentStage = "save_bot_message";
-      const botMessage = await chatService.addMessage({
-        conversationId: context.conversationId,
-        role: "bot",
-        content: cleanResponse,
-        sources: null,
-        senderName: settings?.botName ?? null,
-      });
 
       // Broadcast to dashboard subscribers; exclude originator (gets it via SSE).
       broadcastMessageNew(
@@ -496,7 +731,11 @@ export async function handleWidgetMessageTurn(
           protocolVersion: 2,
           messageId: botMessage.id,
           finalText: cleanResponse,
-          conversationStatus: "active",
+          conversationStatus:
+            conversationStatusForTurn === "waiting_agent" ||
+            conversationStatusForTurn === "agent_replied"
+              ? conversationStatusForTurn
+              : "active",
         });
       } else {
         emitSseEvent(controller, encoder, {
@@ -585,7 +824,7 @@ export async function handleWidgetMessageTurn(
       );
 
       const scopeDecision = classifyTaskScope({
-        message: context.payload.content,
+        message: aiMessageContent,
         pageContext: context.payload.pageContext,
       });
       if (scopeDecision.kind !== "in_scope_support") {
@@ -632,7 +871,7 @@ export async function handleWidgetMessageTurn(
           : await prepareTurnRouting({
               modelRuntime,
               conversationHistory,
-              currentMessage: context.payload.content,
+              currentMessage: aiMessageContent,
               pageContext: context.payload.pageContext,
               sortedFaqResources,
               faqMatchHint: faqMatch,
@@ -693,7 +932,7 @@ export async function handleWidgetMessageTurn(
         encoder,
         modelRuntime,
         telemetry,
-        currentMessage: context.payload.content,
+        currentMessage: aiMessageContent,
         pageContext: context.payload.pageContext,
         conversationHistory,
         conversationSummary,
@@ -734,6 +973,9 @@ export async function handleWidgetMessageTurn(
           name: conversation.visitorName,
           email: conversation.visitorEmail,
         },
+        turnContext,
+        aiParticipation: chatState.aiParticipation,
+        responseOpening,
         persistedContactState: {
           awaitingContactFields: chatState.awaitingContactFields,
           awaitingHandoffConfirmation: chatState.awaitingHandoffConfirmation,
@@ -789,6 +1031,9 @@ export async function handleWidgetMessageTurn(
             ? loopResult.fullResponse
             : null,
       };
+      if (loopResult.terminationAction === "escalate") {
+        chatState = applyChatOwnershipEvent(chatState, "team_requested");
+      }
 
       logInfo(
         "widget_turn.loop_completed",
@@ -839,48 +1084,47 @@ export async function handleWidgetMessageTurn(
         );
       }
 
-      const flaggedForReview =
-        conversation.status === "waiting_agent" ||
-        loopResult.terminationAction === "escalate";
+      const flaggedForReview = chatState.aiParticipation === "human_only";
       let finalConversationStatus: WidgetCompletedPayload["conversationStatus"] =
-        loopResult.terminationAction === "escalate" ? "waiting_agent" : "active";
+        loopResult.terminationAction === "escalate"
+          ? "waiting_agent"
+          : conversation.status === "waiting_agent" ||
+              conversation.status === "agent_replied"
+            ? conversation.status
+            : "active";
+      let resolvedByThisTurn = false;
       if (
         loopResult.detectedInternalTokens.includes("[RESOLVED]") &&
         !flaggedForReview
       ) {
         currentStage = "close_conversation";
-        await chatService.updateConversationStatus(
+        resolvedByThisTurn = await chatService.resolveConversationByAi(
           context.conversationId,
           context.project.id,
-          "closed",
-          "bot_resolved",
         );
-        broadcastStatusChange(
-          context.env,
-          context.executionCtx,
-          context.conversationId,
-          "closed",
-        );
-        broadcastClosed(
-          context.env,
-          context.executionCtx,
-          context.conversationId,
-          "bot_resolved",
-        );
+        if (resolvedByThisTurn) {
+          chatState = applyChatOwnershipEvent(chatState, "ai_handed_back");
+        }
         // The model writes its own goodbye (visitor's language, configured
         // voice); the English string is only the empty-output fallback.
         fullResponse =
-          fullResponse.trim() ||
-          "Glad I could help! Feel free to reach out anytime if you have more questions.";
-        finalConversationStatus = "closed";
-        if (context.streamProtocolVersion === 1) {
-          emitSseEvent(controller, encoder, { resolved: true });
-          emitSseEvent(controller, encoder, { finalText: fullResponse });
-        }
+          resolvedByThisTurn
+            ? fullResponse.trim() ||
+              "Glad I could help! Feel free to reach out anytime if you have more questions."
+            : "";
+        finalConversationStatus = resolvedByThisTurn ? "closed" : "agent_replied";
         logInfo(
-          "widget_turn.conversation_resolved",
+          resolvedByThisTurn
+            ? "widget_turn.conversation_resolved"
+            : "widget_turn.ai_resolution_blocked_by_human_takeover",
           buildWidgetTurnLogContext(context, turnId),
         );
+      }
+
+      const outputPermission = await getAiOutputPermission(resolvedByThisTurn);
+      if (!outputPermission.allowed) {
+        fullResponse = "";
+        finalConversationStatus = outputPermission.status;
       }
 
       // Task 3 guard fallout: on an escalated / waiting_agent conversation the
@@ -921,16 +1165,84 @@ export async function handleWidgetMessageTurn(
       }
 
       currentStage = "save_bot_message";
-      const botMessage = await chatService.addMessage({
-        conversationId: context.conversationId,
-        role: "bot",
-        content: fullResponse,
-        sources:
-          retrieval.sourceReferences.length > 0
-            ? JSON.stringify(retrieval.sourceReferences)
-            : null,
-        senderName: settings?.botName ?? null,
-      });
+      const botMessage = await chatService.addBotMessageIfOwnershipMatches(
+        {
+          conversationId: context.conversationId,
+          content: fullResponse,
+          sources:
+            retrieval.sourceReferences.length > 0
+              ? JSON.stringify(retrieval.sourceReferences)
+              : null,
+          senderName: settings?.botName ?? null,
+        },
+        context.project.id,
+        {
+          status: outputPermission.status,
+          chatState: outputPermission.chatState,
+        },
+      );
+      if (!botMessage) {
+        const latestPermission = await getAiOutputPermission();
+        if (context.streamProtocolVersion === 2) {
+          emitCompletedEvent(controller, encoder, {
+            protocolVersion: 2,
+            messageId: null,
+            finalText: "",
+            conversationStatus: latestPermission.status,
+          });
+        } else {
+          emitSseEvent(controller, encoder, { done: true });
+        }
+        return;
+      }
+      persistedAiMessage = true;
+
+      if (context.streamProtocolVersion === 1) {
+        if (loopResult.terminationAction === "escalate") {
+          emitSseEvent(controller, encoder, { inquiry: true });
+        }
+        if (resolvedByThisTurn) {
+          emitSseEvent(controller, encoder, { resolved: true });
+        }
+        emitSseEvent(controller, encoder, { finalText: fullResponse });
+      }
+
+      if (resolvedByThisTurn) {
+        broadcastStatusChange(
+          context.env,
+          context.executionCtx,
+          context.conversationId,
+          "closed",
+        );
+        broadcastClosed(
+          context.env,
+          context.executionCtx,
+          context.conversationId,
+          "bot_resolved",
+        );
+        if (settings?.telegramBotToken && settings.telegramChatId) {
+          const telegramService = new TelegramService(context.db);
+          context.executionCtx.waitUntil(
+            telegramService
+              .notifyBotResolved(
+                settings.telegramBotToken,
+                settings.telegramChatId,
+                settings.botName,
+                context.conversationId,
+                conversation.telegramThreadId
+                  ? Number.parseInt(conversation.telegramThreadId, 10)
+                  : undefined,
+              )
+              .catch((error) => {
+                logError(
+                  "widget_turn.telegram_resolution_update_failed",
+                  error,
+                  buildWidgetTurnLogContext(context, turnId),
+                );
+              }),
+          );
+        }
+      }
 
       // Broadcast to dashboard subscribers; exclude originator (gets it via SSE).
       broadcastMessageNew(
@@ -1052,6 +1364,75 @@ export async function handleWidgetMessageTurn(
       );
       const errorMessage =
         err instanceof Error ? err.message : "Unknown error";
+
+      if (context.contactAccepted && !persistedAiMessage) {
+        try {
+          const outputPermission = await getAiOutputPermission();
+          if (outputPermission.allowed) {
+            const fallbackMessage = context.contactAccepted.fallbackMessage;
+            const botMessage = await chatService.addBotMessageIfOwnershipMatches(
+              {
+                conversationId: context.conversationId,
+                content: fallbackMessage,
+                sources: null,
+                senderName: settings?.botName ?? null,
+              },
+              context.project.id,
+              {
+                status: outputPermission.status,
+                chatState: outputPermission.chatState,
+              },
+            );
+            if (!botMessage) {
+              const latestPermission = await getAiOutputPermission();
+              if (context.streamProtocolVersion === 2) {
+                emitCompletedEvent(controller, encoder, {
+                  protocolVersion: 2,
+                  messageId: null,
+                  finalText: "",
+                  conversationStatus: latestPermission.status,
+                });
+              } else {
+                emitSseEvent(controller, encoder, { done: true });
+              }
+              return;
+            }
+            persistedAiMessage = true;
+            broadcastMessageNew(
+              context.env,
+              context.executionCtx,
+              context.conversationId,
+              botMessage,
+              { excludeSubjectId: visitorIdForBroadcast },
+            );
+
+            if (context.streamProtocolVersion === 2) {
+              emitCompletedEvent(controller, encoder, {
+                protocolVersion: 2,
+                messageId: botMessage.id,
+                finalText: fallbackMessage,
+                conversationStatus: outputPermission.status,
+              });
+            } else {
+              emitSseEvent(controller, encoder, {
+                finalText: fallbackMessage,
+              });
+              emitSseEvent(controller, encoder, {
+                done: true,
+                messageId: botMessage.id,
+              });
+            }
+            return;
+          }
+        } catch (fallbackError) {
+          logError(
+            "widget_turn.contact_fallback_failed",
+            fallbackError,
+            buildWidgetTurnLogContext(context, turnId),
+          );
+        }
+      }
+
       emitSseEvent(controller, encoder, { error: errorMessage });
     }
   });

@@ -531,24 +531,17 @@ function registerSendAgentReplyTool(
 
       const avatar = await getCurrentUserAvatar(context);
 
-      if (conversation.status === "closed") {
-        await chatService.reopenConversation(conversation.id, projectId);
-      }
-
-      const message = await chatService.addMessage({
-        conversationId: conversation.id,
-        role: "agent",
-        content: content.trim(),
-        userId: context.userId,
-        senderName: context.userName,
-        senderAvatar: avatar,
-      });
-
-      await chatService.updateConversationStatus(
-        conversation.id,
+      const message = await chatService.addAgentMessageAndTakeOwnership(
+        {
+          conversationId: conversation.id,
+          content: content.trim(),
+          userId: context.userId,
+          senderName: context.userName,
+          senderAvatar: avatar,
+        },
         projectId,
-        "agent_replied",
       );
+      if (!message) throw new Error("Conversation not found");
 
       broadcastMessageNew(context.env, context.executionCtx, conversation.id, message, {
         excludeSubjectId: context.userId,
