@@ -6719,26 +6719,34 @@ const app = new Hono<HonoAppContext>()
 
     const emailService = new EmailService(c.env.RESEND_API_KEY);
     try {
-      await emailService.sendAgentMessageEmail({
-        to: conversation.visitorEmail,
-        projectSlug: project.slug,
-        projectName: project.name,
-        conversationId: conversation.id,
-        messageId: message.id,
-        agentName: message.senderName ?? user.name ?? "Support",
-        agentAvatar: message.senderAvatar ?? null,
-        messageContent: message.content,
-        imageUrls: parseMessageImageUrls(message.imageUrl),
-        dashboardUrl: `https://replymaven.com/app/projects/${project.id}/conversations/${conversation.id}`,
-        accentColor: widgetCfg?.primaryColor ?? null,
-      });
+      const delivery = await chatService.runExternalActionIfOperational(
+        conversation.id,
+        project.id,
+        async () => {
+          await emailService.sendAgentMessageEmail({
+            to: conversation.visitorEmail!,
+            projectSlug: project.slug,
+            projectName: project.name,
+            conversationId: conversation.id,
+            messageId: message.id,
+            agentName: message.senderName ?? user.name ?? "Support",
+            agentAvatar: message.senderAvatar ?? null,
+            messageContent: message.content,
+            imageUrls: parseMessageImageUrls(message.imageUrl),
+            dashboardUrl: `https://replymaven.com/app/projects/${project.id}/conversations/${conversation.id}`,
+            accentColor: widgetCfg?.primaryColor ?? null,
+          });
+          await chatService.markMessageAsEmailed(message.id);
+        },
+      );
+      if (!delivery.executed) {
+        return c.json({ error: "Conversation changed. Try again." }, 409);
+      }
     } catch (err) {
       // Leave emailedAt unset so the message can be re-sent after a failure.
       console.error("[SendAsEmail] Send failed:", err);
       return c.json({ error: "Failed to send email" }, 500);
     }
-
-    await chatService.markMessageAsEmailed(message.id);
 
     return c.json({ ok: true, emailedAt: new Date().toISOString() });
   })

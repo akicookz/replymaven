@@ -32,7 +32,7 @@ describe("archived conversation retention", () => {
     ]));
   });
 
-  test("collects only attachment keys owned by the message sender or project", () => {
+  test("collects only conversation-scoped attachment keys", () => {
     expect(collectOwnedUploadKeys("project-1", "conv-1", [
       {
         role: "visitor",
@@ -60,7 +60,6 @@ describe("archived conversation retention", () => {
         imageUrl: "/api/uploads/project-1/chat-images/not-owned-by-bot.png",
       },
     ])).toEqual([
-      "project-1/chat-images/a.png",
       "project-1/conversation-attachments/conv-1/a.png",
       "project-1/conversation-attachments/conv-1/b.jpg",
     ]);

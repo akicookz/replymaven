@@ -95,18 +95,13 @@ export function collectOwnedUploadKeys(
   for (const source of attachmentSources) {
     const conversationPrefix =
       `${projectId}/conversation-attachments/${conversationId}/`;
-    const legacyVisitorPrefix = source.role === "visitor"
-      ? `${projectId}/chat-images/`
-      : null;
 
     for (const imageUrl of parseMessageImageUrls(source.imageUrl)) {
       const key = getLocalUploadKey(imageUrl);
-      if (
-        !key?.startsWith(conversationPrefix) &&
-        !(legacyVisitorPrefix && key?.startsWith(legacyVisitorPrefix))
-      ) {
-        continue;
-      }
+      // Legacy widget and dashboard uploads were not conversation-scoped.
+      // Their ownership cannot be proven during retention, so leave them in
+      // R2 rather than risk deleting an object reused by another entity.
+      if (!key?.startsWith(conversationPrefix)) continue;
       keys.add(key);
     }
   }
