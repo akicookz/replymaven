@@ -36,22 +36,21 @@ function writeSince(projectId: string, value: string): void {
   }
 }
 
-// Pure: whether a raw localStorage read represents "no prior watermark for
-// this project" (first-ever poll). Exported for unit testing without a DOM.
-export function isFirstPollFor(raw: string | null): boolean {
+function isFirstPollFor(raw: string | null): boolean {
   return (parseInt(raw ?? "0", 10) || 0) === 0;
 }
 
 // Id alone, not id:updatedAt — activity bumps must not re-fire the chime.
-export function pingKey(item: { id: string }): string {
+function pingKey(item: { id: string }): string {
   return item.id;
 }
 
-// Pure: items not already pinged this session, given the seen-key set.
-export function selectFreshItems<T extends { id: string }>(
+export function selectItemsToPing<T extends { id: string }>(
+  previousWatermark: string | null,
   items: T[],
   seen: ReadonlySet<string>,
 ): T[] {
+  if (isFirstPollFor(previousWatermark)) return [];
   return items.filter((i) => !seen.has(pingKey(i)));
 }
 
@@ -88,11 +87,13 @@ export function useNeedsYouPing(projectId: string | undefined): void {
 
   useEffect(() => {
     if (!data || !projectId) return;
-    const isFirstPoll = isFirstPollFor(readSince(projectId));
+    const previousWatermark = readSince(projectId);
+    const fresh = selectItemsToPing(
+      previousWatermark,
+      data.items,
+      seenRef.current,
+    );
     writeSince(projectId, String(data.serverTime));
-    if (isFirstPoll) return; // baseline poll: watermark only, never ping the backlog
-
-    const fresh = selectFreshItems(data.items, seenRef.current);
     fresh.forEach((i) => seenRef.current.add(pingKey(i)));
     if (fresh.length === 0) return;
 

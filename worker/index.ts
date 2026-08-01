@@ -2390,20 +2390,24 @@ const app = new Hono<HonoAppContext>()
             "Visitor";
           const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`;
           c.executionCtx.waitUntil(
-            emailService
-              .sendVisitorReplyToAgentEmail({
-                to: agentEmail,
-                projectSlug: project.slug,
-                projectName: project.name,
-                conversationId: conversation.id,
-                messageId: inboundEmailMessage.id,
-                inReplyToMessageId:
-                  referencedMessageId ?? inboundEmailMessage.id,
-                visitorDisplayName,
-                messageContent: cleanedText,
-                dashboardUrl,
-                accentColor: widgetCfgForReply?.primaryColor ?? null,
-              })
+            chatService
+              .runExternalActionIfOperational(
+                conversation.id,
+                project.id,
+                () => emailService.sendVisitorReplyToAgentEmail({
+                  to: agentEmail,
+                  projectSlug: project.slug,
+                  projectName: project.name,
+                  conversationId: conversation.id,
+                  messageId: inboundEmailMessage.id,
+                  inReplyToMessageId:
+                    referencedMessageId ?? inboundEmailMessage.id,
+                  visitorDisplayName,
+                  messageContent: cleanedText,
+                  dashboardUrl,
+                  accentColor: widgetCfgForReply?.primaryColor ?? null,
+                }),
+              )
               .catch((err) => {
                 console.error(
                   "[InboundEmail] Visitor-reply notification failed:",
@@ -2446,27 +2450,26 @@ const app = new Hono<HonoAppContext>()
         const visitorEmail = conversation.visitorEmail;
         const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`;
         c.executionCtx.waitUntil(
-          (async () => {
-            const operational = await chatService.getOperationalConversationById(
+          chatService
+            .runExternalActionIfOperational(
               conversation.id,
               project.id,
-            );
-            if (!operational) return;
-            await emailService.sendAgentMessageEmail({
-              to: visitorEmail,
-              projectSlug: project.slug,
-              projectName: project.name,
-              conversationId: conversation.id,
-              messageId: agentMessage.id,
-              agentName: agentUser.name,
-              agentAvatar: agentUser.avatar,
-              messageContent: cleanedText,
-              dashboardUrl,
-              accentColor: widgetCfgForReply?.primaryColor ?? null,
-              inReplyToMessageId: referencedMessageId ?? null,
-              autoSubmitted: true,
-            });
-          })().catch((err) => {
+              () => emailService.sendAgentMessageEmail({
+                to: visitorEmail,
+                projectSlug: project.slug,
+                projectName: project.name,
+                conversationId: conversation.id,
+                messageId: agentMessage.id,
+                agentName: agentUser.name,
+                agentAvatar: agentUser.avatar,
+                messageContent: cleanedText,
+                dashboardUrl,
+                accentColor: widgetCfgForReply?.primaryColor ?? null,
+                inReplyToMessageId: referencedMessageId ?? null,
+                autoSubmitted: true,
+              }),
+            )
+            .catch((err) => {
               console.error(
                 "[InboundEmail] Agent-reply outbound to visitor failed:",
                 err,

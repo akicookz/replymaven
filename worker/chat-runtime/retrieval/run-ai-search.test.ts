@@ -85,6 +85,7 @@ async function searchProject(options: {
   ai: AppEnv["AI"];
   kv: KVNamespace;
   projectId: string;
+  runtimeState: { hybridUnavailableProjects: Set<string> };
 }): Promise<void> {
   await runAiSearch({
     env: {
@@ -96,6 +97,7 @@ async function searchProject(options: {
     projectId: options.projectId,
     queries: ["pricing"],
     allowBroaderRetry: false,
+    runtimeState: options.runtimeState,
   });
 }
 
@@ -105,16 +107,19 @@ describe("runAiSearch hybrid fallback", () => {
     const unaffectedProjectId = "project-boundary-unaffected";
     const ai = createFakeAiSearch(new Set([`${unavailableProjectId}/`]));
     const kv = createMemoryKv();
+    const runtimeState = { hybridUnavailableProjects: new Set<string>() };
 
     await searchProject({
       ai: ai.binding,
       kv: kv.namespace,
       projectId: unavailableProjectId,
+      runtimeState,
     });
     await searchProject({
       ai: ai.binding,
       kv: kv.namespace,
       projectId: unaffectedProjectId,
+      runtimeState,
     });
 
     expect(ai.searches).toEqual([
@@ -145,11 +150,13 @@ describe("runAiSearch hybrid fallback", () => {
     const kv = createMemoryKv({
       [`hybrid_unavailable:${projectId}`]: "1",
     });
+    const runtimeState = { hybridUnavailableProjects: new Set<string>() };
 
     await searchProject({
       ai: ai.binding,
       kv: kv.namespace,
       projectId,
+      runtimeState,
     });
 
     expect(ai.searches).toEqual([

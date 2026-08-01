@@ -36,7 +36,13 @@ interface NormalizedSearchResponse {
   rawDataCount: number;
 }
 
-const hybridUnavailableProjects = new Set<string>();
+export interface AiSearchRuntimeState {
+  hybridUnavailableProjects: Set<string>;
+}
+
+const defaultRuntimeState: AiSearchRuntimeState = {
+  hybridUnavailableProjects: new Set<string>(),
+};
 
 const HYBRID_UNAVAILABLE_KV_TTL_SECONDS = 24 * 60 * 60;
 
@@ -55,9 +61,10 @@ function isHybridRetrievalUnavailableError(error: unknown): boolean {
 
 async function resolveRetrievalType(
   projectId: string,
+  runtimeState: AiSearchRuntimeState,
   kv?: KVNamespace,
 ): Promise<SearchRetrievalType> {
-  if (hybridUnavailableProjects.has(projectId)) {
+  if (runtimeState.hybridUnavailableProjects.has(projectId)) {
     return "vector";
   }
 
@@ -65,7 +72,7 @@ async function resolveRetrievalType(
     try {
       const cached = await kv.get(hybridUnavailableKvKey(projectId));
       if (cached) {
-        hybridUnavailableProjects.add(projectId);
+        runtimeState.hybridUnavailableProjects.add(projectId);
         return "vector";
       }
     } catch {
@@ -78,9 +85,10 @@ async function resolveRetrievalType(
 
 async function markHybridUnavailable(
   projectId: string,
+  runtimeState: AiSearchRuntimeState,
   kv?: KVNamespace,
 ): Promise<void> {
-  hybridUnavailableProjects.add(projectId);
+  runtimeState.hybridUnavailableProjects.add(projectId);
   if (!kv) return;
   try {
     await kv.put(hybridUnavailableKvKey(projectId), "1", {
@@ -299,6 +307,7 @@ async function executeSearchPass(options: {
   matchThreshold: number;
   maxResults: number;
   retrievalType: SearchRetrievalType;
+  runtimeState: AiSearchRuntimeState;
   kv?: KVNamespace;
 }): Promise<SearchPassResult> {
   try {
@@ -311,7 +320,11 @@ async function executeSearchPass(options: {
       options.retrievalType === "hybrid" &&
       isHybridRetrievalUnavailableError(error)
     ) {
-      await markHybridUnavailable(options.projectId, options.kv);
+      await markHybridUnavailable(
+        options.projectId,
+        options.runtimeState,
+        options.kv,
+      );
 
       logWarn("ai_search.retrieval_type_fallback", {
         projectId: options.projectId,
@@ -351,6 +364,7 @@ export async function runAiSearch(options: {
   queries: string[];
   broaderQueries?: string[];
   allowBroaderRetry?: boolean;
+  runtimeState?: AiSearchRuntimeState;
 }): Promise<RetrievalResult> {
   if (options.queries.length === 0) {
     return {
@@ -368,9 +382,11 @@ export async function runAiSearch(options: {
   }
 
   const kv = options.env.CONVERSATIONS_CACHE;
+  const runtimeState = options.runtimeState ?? defaultRuntimeState;
   let broaderSearchAttempted = false;
   let activeRetrievalType: SearchRetrievalType = await resolveRetrievalType(
     options.projectId,
+    runtimeState,
     kv,
   );
   let searchPass = await executeSearchPass({
@@ -380,6 +396,7 @@ export async function runAiSearch(options: {
     matchThreshold: 0.2,
     maxResults: 12,
     retrievalType: activeRetrievalType,
+    runtimeState,
     kv,
   });
   let searchResults = searchPass.results;
@@ -416,6 +433,7 @@ export async function runAiSearch(options: {
       matchThreshold: 0.1,
       maxResults: 18,
       retrievalType: activeRetrievalType,
+      runtimeState,
       kv,
     });
     searchResults = searchPass.results;

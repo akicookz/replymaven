@@ -94,8 +94,10 @@ export default function ConversationRow({
       role="button"
       tabIndex={0}
       className={cn(
-        "group relative rounded-row px-[10px] pt-[9px] pb-[11px] cursor-pointer flex items-start transition-colors",
-        isSelected ? "bg-bubble-sent" : "hover:bg-glass-button",
+        "group relative rounded-row px-[10px] pt-[9px] pb-[11px] cursor-pointer flex items-start outline-none transition-colors",
+        isSelected
+          ? "bg-bubble-sent"
+          : "hover:bg-glass-button focus-visible:bg-glass-button",
       )}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
