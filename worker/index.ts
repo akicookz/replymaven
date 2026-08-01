@@ -27,6 +27,7 @@ import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
 import { DashboardService } from "./services/dashboard-service";
 import { CrawlService, type CrawlMessage } from "./services/crawl-service";
+import { purgeExpiredArchivedConversations } from "./services/conversation-retention-service";
 import {
   EmailService,
   parseEmailMessageId,
@@ -7424,8 +7425,48 @@ async function handleQueue(
   }
 }
 
+// ─── Scheduled Retention ─────────────────────────────────────────────────────
+
+async function runArchivedConversationRetention(env: Env): Promise<void> {
+  const db = drizzle(env.DB);
+  const now = new Date();
+  const batchSize = 50;
+  const maxBatches = 10;
+  let claimed = 0;
+  let deleted = 0;
+  let failed = 0;
+
+  for (let batch = 0; batch < maxBatches; batch += 1) {
+    const result = await purgeExpiredArchivedConversations(
+      db,
+      env.UPLOADS,
+      now,
+      batchSize,
+    );
+    claimed += result.claimed;
+    deleted += result.deleted;
+    failed += result.failed;
+    if (result.claimed < batchSize) break;
+  }
+
+  console.log("Archived conversation retention completed", {
+    claimed,
+    deleted,
+    failed,
+  });
+}
+
+function handleScheduled(
+  _controller: ScheduledController,
+  env: Env,
+  ctx: ExecutionContext,
+): void {
+  ctx.waitUntil(runArchivedConversationRetention(env));
+}
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 export default {
   fetch: app.fetch,
   queue: handleQueue,
+  scheduled: handleScheduled,
 };

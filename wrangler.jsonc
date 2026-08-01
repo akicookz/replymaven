@@ -21,6 +21,9 @@
   "placement": {
     "mode": "smart",
   },
+  "triggers": {
+    "crons": ["17 3 * * *"],
+  },
   "d1_databases": [
     {
       "binding": "DB",
