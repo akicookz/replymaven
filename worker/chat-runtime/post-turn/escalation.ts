@@ -148,19 +148,28 @@ export async function createEscalation(params: {
       const replyToMessageId = isUpdate
         ? parseTelegramThreadId(params.conversation.telegramThreadId)
         : undefined;
-      const messageId = await params.telegramService.notifyEscalation(
-        params.settings.telegramBotToken,
-        params.settings.telegramChatId,
-        {
-          visitorName: params.conversation.visitorName,
-          visitorEmail: params.conversation.visitorEmail,
-          summary,
-          conversationUrl,
-          conversationId: params.conversation.id,
-          isUpdate,
-          replyToMessageId,
-        },
-      );
+      const notification = await params.chatService
+        .runExternalActionIfOperational(
+          params.conversation.id,
+          params.project.id,
+          () => params.telegramService!.notifyEscalation(
+            params.settings!.telegramBotToken!,
+            params.settings!.telegramChatId!,
+            {
+              visitorName: params.conversation.visitorName,
+              visitorEmail: params.conversation.visitorEmail,
+              summary,
+              conversationUrl,
+              conversationId: params.conversation.id,
+              isUpdate,
+              replyToMessageId,
+            },
+          ),
+        );
+      const messageId = notification.value ?? null;
+      if (!notification.executed) {
+        return { summary, summaryMessageId, created };
+      }
       if (messageId) {
         telegramThreadId = String(messageId);
       }
@@ -192,17 +201,21 @@ export async function createEscalation(params: {
         isUpdate,
       });
       params.executionCtx.waitUntil(
-        emailService
-          .sendEscalationNotification({
-            ownerEmail,
-            projectName,
-            visitorName: params.conversation.visitorName,
-            visitorEmail: params.conversation.visitorEmail,
-            visitorId: params.conversation.visitorId,
-            summary,
-            conversationUrl,
-            accentColor: null,
-          })
+        params.chatService
+          .runExternalActionIfOperational(
+            params.conversation.id,
+            params.project.id,
+            () => emailService.sendEscalationNotification({
+              ownerEmail,
+              projectName,
+              visitorName: params.conversation.visitorName,
+              visitorEmail: params.conversation.visitorEmail,
+              visitorId: params.conversation.visitorId,
+              summary,
+              conversationUrl,
+              accentColor: null,
+            }),
+          )
           .catch((err) => {
             logError("escalation.email_failed", err, {
               projectId: params.project.id,

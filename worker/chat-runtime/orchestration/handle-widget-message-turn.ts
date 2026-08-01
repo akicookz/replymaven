@@ -454,20 +454,19 @@ export async function handleWidgetMessageTurn(
     const telegramChatId = settings.telegramChatId;
     context.executionCtx.waitUntil(
       (async () => {
-        const operational = await chatService.getOperationalConversationById(
+        await chatService.runExternalActionIfOperational(
           conversation.id,
           context.project.id,
-        );
-        if (!operational) return;
-        await telegramService.forwardVisitorMessage(
-          telegramBotToken,
-          telegramChatId,
-          conversation.visitorName,
-          context.payload.content,
-          conversation.id,
-          conversation.telegramThreadId
-            ? Number.parseInt(conversation.telegramThreadId, 10)
-            : undefined,
+          () => telegramService.forwardVisitorMessage(
+            telegramBotToken,
+            telegramChatId,
+            conversation.visitorName,
+            context.payload.content,
+            conversation.id,
+            conversation.telegramThreadId
+              ? Number.parseInt(conversation.telegramThreadId, 10)
+              : undefined,
+          ),
         );
       })().catch((error) => {
         logError(
@@ -1240,19 +1239,18 @@ export async function handleWidgetMessageTurn(
           const telegramChatId = settings.telegramChatId;
           context.executionCtx.waitUntil(
             (async () => {
-              const operational = await chatService.getOperationalConversationById(
+              await chatService.runExternalActionIfOperational(
                 context.conversationId,
                 context.project.id,
-              );
-              if (!operational) return;
-              await telegramService.notifyBotResolved(
-                telegramBotToken,
-                telegramChatId,
-                settings.botName,
-                context.conversationId,
-                conversation.telegramThreadId
-                  ? Number.parseInt(conversation.telegramThreadId, 10)
-                  : undefined,
+                () => telegramService.notifyBotResolved(
+                  telegramBotToken,
+                  telegramChatId,
+                  settings.botName,
+                  context.conversationId,
+                  conversation.telegramThreadId
+                    ? Number.parseInt(conversation.telegramThreadId, 10)
+                    : undefined,
+                ),
               );
             })().catch((error) => {
               logError(

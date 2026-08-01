@@ -4464,6 +4464,8 @@ import { claimWidgetInstance } from "./instance-guard";
         const tryUpload = async (): Promise<string> => {
           const formData = new FormData();
           formData.append("file", imageFile);
+          formData.append("conversationId", conversationId!);
+          formData.append("visitorId", visitorId);
           const uploadRes = await fetch(
             `${baseUrl}/api/widget/${projectSlug}/upload`,
             { method: "POST", body: formData },

@@ -1170,32 +1170,69 @@ export async function runPlannerLoop(
     }
 
     if (nextAction.type === "call_tool") {
+      const toolStartedAt = Date.now();
+      const toolDef = options.availableTools.find(
+        (tool) => tool.name === nextAction.toolName,
+      );
+      let output: Record<string, unknown>;
+      if (toolDef) {
+        const leasedExecution = await options.chatService
+          .runExternalActionIfOperational(
+            options.conversation.id,
+            options.project.id,
+            async () => {
+              hadToolCalls = true;
+              options.emitStatus("Checking connected systems...", "tool");
+              options.closeSafeAiReplayWindow("tool_started");
+              emitSseEvent(options.controller, options.encoder, {
+                toolCall: {
+                  name: nextAction.toolName,
+                  args: nextAction.input,
+                },
+              });
+              return executeHttpTool(toolDef, nextAction.input);
+            },
+          );
+
+        if (!leasedExecution.executed) {
+          pushActionHistory(loopState, {
+            type: "call_tool",
+            reason: nextAction.reason,
+            toolName: nextAction.toolName,
+            input: nextAction.input,
+            outcome: "rejected",
+            note: "Conversation is no longer operational.",
+          });
+          loopState.terminationReason = "Conversation is no longer operational.";
+          return {
+            fullResponse: "",
+            retrieval: loopState.docsEvidence,
+            hadToolCalls,
+            lastToolOutput,
+            lastToolError,
+            stepCount: loopState.stepCount,
+            terminationAction: "stop",
+            loopState,
+            detectedInternalTokens: [],
+          };
+        }
+
+        output = leasedExecution.value ?? {
+          error: "Tool execution returned no result.",
+        };
+      } else {
+        output = { error: "Tool definition missing." };
+      }
+
       pushActionHistory(loopState, {
         type: "call_tool",
         reason: nextAction.reason,
         toolName: nextAction.toolName,
         input: nextAction.input,
-        outcome: "executed",
-        note: null,
+        outcome: toolDef ? "executed" : "rejected",
+        note: toolDef ? null : "Tool definition missing.",
       });
 
-      hadToolCalls = true;
-      options.emitStatus("Checking connected systems...", "tool");
-      options.closeSafeAiReplayWindow("tool_started");
-      emitSseEvent(options.controller, options.encoder, {
-        toolCall: {
-          name: nextAction.toolName,
-          args: nextAction.input,
-        },
-      });
-
-      const toolStartedAt = Date.now();
-      const toolDef = options.availableTools.find(
-        (tool) => tool.name === nextAction.toolName,
-      );
-      const output = toolDef
-        ? await executeHttpTool(toolDef, nextAction.input)
-        : { error: "Tool definition missing." };
       const durationMs = Date.now() - toolStartedAt;
       if (!options.telemetry.toolCallMs) options.telemetry.toolCallMs = [];
       options.telemetry.toolCallMs.push(durationMs);

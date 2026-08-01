@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Paperclip, ArrowUp, X, Loader2, ImagePlus } from "lucide-react";
 
@@ -34,6 +35,7 @@ export default function Composer({
   composing,
   convId,
 }: ComposerProps) {
+  const { projectId = "" } = useParams<{ projectId: string }>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
@@ -79,6 +81,8 @@ export default function Composer({
     const attempt = async () => {
       const fd = new FormData();
       fd.append("file", file);
+      fd.append("projectId", projectId);
+      fd.append("conversationId", convId);
       const res = await fetch("/api/upload", { method: "POST", body: fd });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as {

@@ -10,6 +10,7 @@ interface PriorityMenuProps {
   value: "low" | "medium" | "high";
   onChange: (priority: "low" | "medium" | "high") => void;
   compact?: boolean;
+  mixed?: boolean;
 }
 
 const PRIORITIES: { value: "low" | "medium" | "high"; label: string }[] = [
@@ -22,9 +23,11 @@ export default function PriorityMenu({
   value,
   onChange,
   compact = false,
+  mixed = false,
 }: PriorityMenuProps) {
-  const label =
-    PRIORITIES.find((p) => p.value === value)?.label ?? "Medium";
+  const label = mixed
+    ? "Priority"
+    : PRIORITIES.find((p) => p.value === value)?.label ?? "Medium";
 
   return (
     <DropdownMenu>
@@ -53,7 +56,7 @@ export default function PriorityMenu({
           <DropdownMenuItem
             key={p.value}
             onSelect={() => onChange(p.value)}
-            className={p.value === value ? "font-medium" : ""}
+            className={!mixed && p.value === value ? "font-medium" : ""}
           >
             {p.label}
           </DropdownMenuItem>

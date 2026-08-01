@@ -394,6 +394,12 @@ export const conversations = sqliteTable(
     // Set by the retention worker before it removes attachments and the row.
     // While present, unarchive is no longer allowed.
     purgeStartedAt: integer("purge_started_at", { mode: "timestamp" }),
+    // Short lease around outbound side effects. Archival and lease acquisition
+    // are mutually exclusive DB updates, so a successfully archived thread
+    // cannot start an HTTP tool or Telegram send afterward.
+    externalActionStartedAt: integer("external_action_started_at", {
+      mode: "timestamp",
+    }),
     priority: text("priority", { enum: ["low", "medium", "high"] })
       .notNull()
       .default("medium"),
@@ -421,6 +427,7 @@ export const conversations = sqliteTable(
       table.projectId,
       table.archivedAt,
     ),
+    index("idx_conversations_archived").on(table.archivedAt),
     index("idx_conversations_visitor_name_lower").on(
       table.projectId,
       sql`LOWER(${table.visitorName})`,

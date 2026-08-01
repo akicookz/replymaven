@@ -57,6 +57,11 @@ function makeChatService() {
       calls.updateConversation.push({ id, projectId, data });
       return { id };
     },
+    runExternalActionIfOperational: async (
+      _conversationId: string,
+      _projectId: string,
+      action: () => Promise<unknown>,
+    ) => ({ executed: true, value: await action() }),
   } as unknown as ChatService;
   return { service, calls };
 }

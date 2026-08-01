@@ -23,6 +23,10 @@ import {
   parseMessageImageUrls,
   serializeMessageImageUrls,
 } from "../shared/message-images";
+import {
+  isConversationUploadUrl,
+  isProjectChatUploadUrl,
+} from "../shared/upload-ownership";
 import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
 import { DashboardService } from "./services/dashboard-service";
@@ -808,12 +812,47 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Image too large (max 5MB)" }, 400);
     }
 
-    const ext = fileObj.name.split(".").pop() ?? "jpg";
-    const uploadKey = `${project.id}/chat-images/${crypto.randomUUID()}.${ext}`;
+    const rawExt = fileObj.name.split(".").pop() ?? "";
+    const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+    const requestedConversationId = formData["conversationId"];
+    const requestedVisitorId = formData["visitorId"];
+    let uploadKey: string;
+    let customMetadata: Record<string, string>;
+    if (
+      typeof requestedConversationId === "string" &&
+      requestedConversationId
+    ) {
+      if (
+        typeof requestedVisitorId !== "string" ||
+        !requestedVisitorId
+      ) {
+        return c.json({ error: "Visitor identity is required" }, 400);
+      }
+      const chatService = new ChatService(db);
+      const conversation = await chatService.getOperationalConversationById(
+        requestedConversationId,
+        project.id,
+      );
+      if (!conversation || conversation.visitorId !== requestedVisitorId) {
+        return c.json({ error: "Conversation not found" }, 404);
+      }
+      uploadKey = `${project.id}/conversation-attachments/${conversation.id}/${crypto.randomUUID()}.${ext}`;
+      customMetadata = {
+        ownerType: "conversation",
+        ownerId: conversation.id,
+        projectId: project.id,
+      };
+    } else {
+      // Backward compatibility for older widget bundles. These uploads remain
+      // in the widget-only namespace and are reference-checked before purge.
+      uploadKey = `${project.id}/chat-images/${crypto.randomUUID()}.${ext}`;
+      customMetadata = { ownerType: "project", ownerId: project.id };
+    }
     const buffer = await fileObj.arrayBuffer();
 
     await c.env.UPLOADS.put(uploadKey, buffer, {
       httpMetadata: { contentType: fileObj.type },
+      customMetadata,
     });
 
     return c.json({ url: `/api/uploads/${uploadKey}` }, 201);
@@ -858,6 +897,17 @@ const app = new Hono<HonoAppContext>()
     const body = await c.req.json();
     const parsed = validate(sendMessageSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
+    if (
+      parsed.data.imageUrl &&
+      !isConversationUploadUrl(
+        parsed.data.imageUrl,
+        project.id,
+        conversationId,
+      ) &&
+      !isProjectChatUploadUrl(parsed.data.imageUrl, project.id)
+    ) {
+      return c.json({ error: "Invalid image URL" }, 400);
+    }
     return handleWidgetMessageTurn({
       db,
       env: c.env,
@@ -1337,6 +1387,23 @@ const app = new Hono<HonoAppContext>()
     if (!conversation) {
       return c.json({ ok: true });
     }
+    const operationalConversationId = conversation.id;
+
+    async function sendConversationTelegramMessage(
+      text: string,
+      replyToMessageId: number,
+    ): Promise<void> {
+      await chatService.runExternalActionIfOperational(
+        operationalConversationId,
+        projectId,
+        () => telegramService.sendMessage(
+          tgSettings.telegramBotToken!,
+          tgSettings.telegramChatId!,
+          text,
+          replyToMessageId,
+        ),
+      );
+    }
 
     // Check if message is an @botName command
     if (botName) {
@@ -1356,9 +1423,7 @@ const app = new Hono<HonoAppContext>()
             metadata: JSON.stringify({ agentHandbackInstructions: null }),
           });
           broadcastStatusChange(c.env, c.executionCtx, conversationId, "active");
-          await telegramService.sendMessage(
-            tgSettings.telegramBotToken,
-            tgSettings.telegramChatId,
+          await sendConversationTelegramMessage(
             "Bot resumed.",
             message.message_id,
           );
@@ -1384,9 +1449,7 @@ const app = new Hono<HonoAppContext>()
           broadcastStatusChange(c.env, c.executionCtx, conversationId, "closed");
           broadcastClosed(c.env, c.executionCtx, conversationId, "resolved");
 
-          await telegramService.sendMessage(
-            tgSettings.telegramBotToken,
-            tgSettings.telegramChatId,
+          await sendConversationTelegramMessage(
             "Conversation closed.",
             message.message_id,
           );
@@ -1423,9 +1486,7 @@ const app = new Hono<HonoAppContext>()
             broadcastClosed(c.env, c.executionCtx, sweptId, "spam");
           }
 
-          await telegramService.sendMessage(
-            tgSettings.telegramBotToken,
-            tgSettings.telegramChatId,
+          await sendConversationTelegramMessage(
             `Visitor banned and conversation closed.${result.reason ? ` Reason: ${result.reason}` : ""}`,
             message.message_id,
           );
@@ -1475,9 +1536,7 @@ const app = new Hono<HonoAppContext>()
             },
           );
           if (!botMessage) {
-            await telegramService.sendMessage(
-              tgSettings.telegramBotToken,
-              tgSettings.telegramChatId,
+            await sendConversationTelegramMessage(
               "Bot response canceled because the conversation changed.",
               message.message_id,
             );
@@ -1491,9 +1550,7 @@ const app = new Hono<HonoAppContext>()
           );
           broadcastMessageNew(c.env, c.executionCtx, conversationId, botMessage);
 
-          await telegramService.sendMessage(
-            tgSettings.telegramBotToken,
-            tgSettings.telegramChatId,
+          await sendConversationTelegramMessage(
             "Bot responded.",
             message.message_id,
           );
@@ -1521,9 +1578,7 @@ const app = new Hono<HonoAppContext>()
           const confirmText = result.instructions
             ? "Bot resumed with instructions."
             : "Bot resumed.";
-          await telegramService.sendMessage(
-            tgSettings.telegramBotToken,
-            tgSettings.telegramChatId,
+          await sendConversationTelegramMessage(
             confirmText,
             message.message_id,
           );
@@ -2290,16 +2345,22 @@ const app = new Hono<HonoAppContext>()
             project.id,
           );
           if (tgSettings?.telegramBotToken && tgSettings?.telegramChatId) {
+            const telegramBotToken = tgSettings.telegramBotToken;
+            const telegramChatId = tgSettings.telegramChatId;
             const replyTo = conversation.telegramThreadId
               ? parseInt(conversation.telegramThreadId, 10)
               : undefined;
-            await telegramService.forwardVisitorMessage(
-              tgSettings.telegramBotToken,
-              tgSettings.telegramChatId,
-              conversation.visitorName ?? senderEmail,
-              `[via email] ${cleanedText}`,
+            await chatService.runExternalActionIfOperational(
               conversation.id,
-              replyTo,
+              project.id,
+              () => telegramService.forwardVisitorMessage(
+                telegramBotToken,
+                telegramChatId,
+                conversation.visitorName ?? senderEmail,
+                `[via email] ${cleanedText}`,
+                conversation.id,
+                replyTo,
+              ),
             );
           }
         } catch (err) {
@@ -6392,6 +6453,19 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
+    const replyImageUrls = parsed.data.imageUrls?.length
+      ? parsed.data.imageUrls
+      : parsed.data.imageUrl
+        ? [parsed.data.imageUrl]
+        : [];
+    if (replyImageUrls.some((imageUrl) => !isConversationUploadUrl(
+      imageUrl,
+      project.id,
+      conversation.id,
+    ))) {
+      return c.json({ error: "Invalid image URL" }, 400);
+    }
+
     // Fetch full user profile for sender info
     const userProfile = await db
       .select({
@@ -6408,12 +6482,6 @@ const app = new Hono<HonoAppContext>()
     if (conversation.status === "closed") {
       await chatService.reopenConversation(conversation.id, project.id);
     }
-
-    const replyImageUrls = parsed.data.imageUrls?.length
-      ? parsed.data.imageUrls
-      : parsed.data.imageUrl
-        ? [parsed.data.imageUrl]
-        : [];
 
     const message = await chatService.addAgentMessageAndTakeOwnership(
       {
@@ -7349,11 +7417,49 @@ const app = new Hono<HonoAppContext>()
     // filename extensions can contain spaces/quotes that would fail it.
     const rawExt = fileObj.name.split(".").pop() ?? "";
     const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
-    const uploadKey = `${user.id}/${crypto.randomUUID()}.${ext}`;
+    const requestedProjectId = formData["projectId"];
+    const requestedConversationId = formData["conversationId"];
+    let uploadKey: string;
+    let customMetadata: Record<string, string>;
+    if (
+      typeof requestedProjectId === "string" &&
+      requestedProjectId &&
+      typeof requestedConversationId === "string" &&
+      requestedConversationId
+    ) {
+      const db = c.get("db");
+      const projectService = new ProjectService(db);
+      const project = await projectService.getProjectById(requestedProjectId);
+      if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+        return c.json({ error: "Not found" }, 404);
+      }
+      const chatService = new ChatService(db);
+      const conversation = await chatService.getOperationalConversationById(
+        requestedConversationId,
+        project.id,
+      );
+      if (!conversation) return c.json({ error: "Not found" }, 404);
+
+      uploadKey = `${project.id}/conversation-attachments/${conversation.id}/${crypto.randomUUID()}.${ext}`;
+      customMetadata = {
+        ownerType: "conversation",
+        ownerId: conversation.id,
+        projectId: project.id,
+      };
+    } else if (
+      requestedProjectId !== undefined ||
+      requestedConversationId !== undefined
+    ) {
+      return c.json({ error: "Project and conversation are required" }, 400);
+    } else {
+      uploadKey = `${user.id}/${crypto.randomUUID()}.${ext}`;
+      customMetadata = { ownerType: "user", ownerId: user.id };
+    }
     const buffer = await fileObj.arrayBuffer();
 
     await c.env.UPLOADS.put(uploadKey, buffer, {
       httpMetadata: { contentType: fileObj.type },
+      customMetadata,
     });
 
     return c.json({ key: uploadKey, url: `/api/uploads/${uploadKey}` }, 201);

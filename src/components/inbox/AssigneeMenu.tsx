@@ -23,6 +23,7 @@ interface AssigneeMenuProps {
   value: string | null;
   onChange: (assigneeId: string | null) => void;
   compact?: boolean;
+  mixed?: boolean;
 }
 
 function initials(name: string, email: string): string {
@@ -57,6 +58,7 @@ export default function AssigneeMenu({
   value,
   onChange,
   compact = false,
+  mixed = false,
 }: AssigneeMenuProps) {
   const { projectId } = useParams<{ projectId: string }>();
   const { data: users } = useQuery<AssignableUser[]>({
@@ -71,7 +73,9 @@ export default function AssigneeMenu({
   });
 
   const list = users ?? [];
-  const current = value ? (list.find((u) => u.id === value) ?? null) : null;
+  const current = !mixed && value
+    ? (list.find((u) => u.id === value) ?? null)
+    : null;
 
   return (
     <DropdownMenu>
@@ -79,7 +83,7 @@ export default function AssigneeMenu({
         <button
           type="button"
           aria-label="Assign conversation"
-          aria-pressed={!!current}
+          aria-pressed={!mixed && !!current}
           className={cn(
             "glass-button rounded-glass flex items-center h-8 text-[12.5px] cursor-pointer select-none outline-none shrink-0 transition-colors",
             compact
@@ -108,13 +112,15 @@ export default function AssigneeMenu({
         <DropdownMenuItem onSelect={() => onChange(null)}>
           <UserIcon className="size-4 text-ink-6" />
           <span className="flex-1">Unassigned</span>
-          {value == null && <Check className="size-4 text-brand" />}
+          {!mixed && value == null && <Check className="size-4 text-brand" />}
         </DropdownMenuItem>
         {list.map((u) => (
           <DropdownMenuItem key={u.id} onSelect={() => onChange(u.id)}>
             <Avatar user={u} size={20} />
             <span className="flex-1 min-w-0 truncate">{u.name || u.email}</span>
-            {value === u.id && <Check className="size-4 text-brand shrink-0" />}
+            {!mixed && value === u.id && (
+              <Check className="size-4 text-brand shrink-0" />
+            )}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Conversation, Message } from "@/lib/inbox/types";
+import { cn } from "@/lib/utils";
 import ReadingHeader from "./ReadingHeader";
 import ChatThread from "./ChatThread";
 import Composer from "./Composer";
@@ -40,6 +41,8 @@ interface ReadingPaneProps {
   composing: boolean;
   /** The message id targeted by a `?msg=` deep link — pulses the review-summary card. */
   highlightMessageId?: string | null;
+  /** Responsive visibility overrides owned by the inbox orchestrator. */
+  className?: string;
 }
 
 export default function ReadingPane({
@@ -62,6 +65,7 @@ export default function ReadingPane({
   onCompose,
   composing,
   highlightMessageId,
+  className,
 }: ReadingPaneProps) {
   // The thread is its own scroll container now (header above / composer below
   // are flex siblings, never overlapping the thread). This both fixes messages
@@ -180,7 +184,10 @@ export default function ReadingPane({
   }
 
   return (
-    <div className="glass-reading flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+    <div className={cn(
+      "glass-reading flex-1 min-w-0 flex flex-col h-full overflow-hidden",
+      className,
+    )}>
       {/* Header: toolbar row + user bar (fixed; thread scrolls below it) */}
       <ReadingHeader
         conversation={conversation}
@@ -210,6 +217,7 @@ export default function ReadingPane({
           conversation={conversation}
           loading={messagesLoading}
           onDeleteMessage={onDeleteMessage}
+          readOnly={Boolean(conversation.archivedAt)}
           searchQuery={query}
           activeMatchId={activeMatchId}
           highlightMessageId={highlightMessageId}

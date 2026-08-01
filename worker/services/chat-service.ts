@@ -41,6 +41,30 @@ export interface BulkConversationActionResult {
   skippedIds: string[];
 }
 
+export interface ExternalActionResult<T> {
+  executed: boolean;
+  value?: T;
+}
+
+const EXTERNAL_ACTION_LEASE_MS = 2 * 60 * 1000;
+
+export function buildConversationByIdQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+  projectId: string,
+) {
+  return db
+    .select()
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+      ),
+    )
+    .limit(1);
+}
+
 export function buildOperationalConversationQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   conversationId: string,
@@ -57,6 +81,54 @@ export function buildOperationalConversationQuery(
       ),
     )
     .limit(1);
+}
+
+export function buildExternalActionLeaseQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+  projectId: string,
+  leaseAt: Date,
+  staleBefore: Date,
+) {
+  return db
+    .update(conversations)
+    .set({
+      externalActionStartedAt: leaseAt,
+      updatedAt: sql`${conversations.updatedAt}`,
+    })
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+        isNull(conversations.archivedAt),
+        or(
+          isNull(conversations.externalActionStartedAt),
+          lte(conversations.externalActionStartedAt, staleBefore),
+        ),
+      ),
+    )
+    .returning({ id: conversations.id });
+}
+
+export function buildExternalActionLeaseReleaseQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+  projectId: string,
+  leaseAt: Date,
+) {
+  return db
+    .update(conversations)
+    .set({
+      externalActionStartedAt: null,
+      updatedAt: sql`${conversations.updatedAt}`,
+    })
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+        eq(conversations.externalActionStartedAt, leaseAt),
+      ),
+    );
 }
 
 export function buildActiveConversationByVisitorQuery(
@@ -92,7 +164,16 @@ export function buildBulkConversationActionQuery(
     case "archive":
       updates.archivedAt = now;
       updates.purgeStartedAt = null;
-      eligibility.push(isNull(conversations.archivedAt));
+      eligibility.push(
+        isNull(conversations.archivedAt),
+        or(
+          isNull(conversations.externalActionStartedAt),
+          lte(
+            conversations.externalActionStartedAt,
+            new Date(now.getTime() - EXTERNAL_ACTION_LEASE_MS),
+          ),
+        )!,
+      );
       break;
     case "unarchive":
       updates.archivedAt = null;
@@ -531,17 +612,7 @@ export class ChatService {
     id: string,
     projectId: string,
   ): Promise<ConversationRow | null> {
-    const rows = await this.db
-      .select()
-      .from(conversations)
-      .where(
-        and(
-          eq(conversations.id, id),
-          eq(conversations.projectId, projectId),
-          isNull(conversations.archivedAt),
-        ),
-      )
-      .limit(1);
+    const rows = await buildConversationByIdQuery(this.db, id, projectId);
     return rows[0] ?? null;
   }
 
@@ -551,6 +622,34 @@ export class ChatService {
   ): Promise<ConversationRow | null> {
     const rows = await buildOperationalConversationQuery(this.db, id, projectId);
     return rows[0] ?? null;
+  }
+
+  async runExternalActionIfOperational<T>(
+    conversationId: string,
+    projectId: string,
+    action: () => Promise<T>,
+    now: Date = new Date(),
+  ): Promise<ExternalActionResult<T>> {
+    const staleBefore = new Date(now.getTime() - EXTERNAL_ACTION_LEASE_MS);
+    const leaseRows = await buildExternalActionLeaseQuery(
+      this.db,
+      conversationId,
+      projectId,
+      now,
+      staleBefore,
+    );
+    if (leaseRows.length === 0) return { executed: false };
+
+    try {
+      return { executed: true, value: await action() };
+    } finally {
+      await buildExternalActionLeaseReleaseQuery(
+        this.db,
+        conversationId,
+        projectId,
+        now,
+      );
+    }
   }
 
   async getConversationsByProject(
@@ -719,6 +818,7 @@ export class ChatService {
         snoozedUntil: conversations.snoozedUntil,
         archivedAt: conversations.archivedAt,
         purgeStartedAt: conversations.purgeStartedAt,
+        externalActionStartedAt: conversations.externalActionStartedAt,
         priority: conversations.priority,
         assigneeId: conversations.assigneeId,
         createdAt: conversations.createdAt,

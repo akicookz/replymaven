@@ -142,6 +142,18 @@ export default function MessageList({
 
   const openCount = counts[filter] ?? 0;
   const selectionActive = selectedIds.size > 0;
+  const selectedConversations = conversations.filter((conversation) =>
+    selectedIds.has(conversation.id)
+  );
+  const firstSelected = selectedConversations[0];
+  const selectedAssignee = firstSelected?.assigneeId ?? null;
+  const assigneeMixed = selectedConversations.some(
+    (conversation) => conversation.assigneeId !== selectedAssignee,
+  );
+  const selectedPriority = firstSelected?.priority ?? "medium";
+  const priorityMixed = selectedConversations.some(
+    (conversation) => conversation.priority !== selectedPriority,
+  );
 
   return (
     <div
@@ -322,7 +334,8 @@ export default function MessageList({
                 </button>
                 <AssigneeMenu
                   compact
-                  value={null}
+                  value={selectedAssignee}
+                  mixed={assigneeMixed}
                   onChange={(assigneeId) => onBulkAction({
                     action: "assign",
                     assigneeId,
@@ -330,7 +343,8 @@ export default function MessageList({
                 />
                 <PriorityMenu
                   compact
-                  value="medium"
+                  value={selectedPriority}
+                  mixed={priorityMixed}
                   onChange={(priority) => onBulkAction({
                     action: "priority",
                     priority,

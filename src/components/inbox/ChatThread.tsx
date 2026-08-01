@@ -10,6 +10,8 @@ interface ChatThreadProps {
   /** True while the thread is loading for the first time → show bubble skeletons. */
   loading?: boolean;
   onDeleteMessage: (messageId: string) => void;
+  /** Archived threads are view-only, including historical agent messages. */
+  readOnly?: boolean;
   /** Lowercased in-conversation search query (empty when not searching). */
   searchQuery?: string;
   /** The id of the currently-focused search match (scrolled into view). */
@@ -86,6 +88,7 @@ export default function ChatThread({
   conversation,
   loading,
   onDeleteMessage,
+  readOnly = false,
   searchQuery,
   activeMatchId,
 }: ChatThreadProps) {
@@ -132,6 +135,7 @@ export default function ChatThread({
                   message={message}
                   conversation={conversation}
                   onDelete={onDeleteMessage}
+                  readOnly={readOnly}
                   isMatch={isMatch}
                   isActiveMatch={isActiveMatch}
                   showHeader={!groupedWithPrev}

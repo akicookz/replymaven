@@ -5,10 +5,13 @@ import {
   inArray,
   isNull,
   lte,
+  ne,
   or,
+  sql,
 } from "drizzle-orm";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { parseMessageImageUrls } from "../../shared/message-images";
+import { getLocalUploadKey } from "../../shared/upload-ownership";
 import {
   conversations,
   messages,
@@ -22,7 +25,14 @@ const R2_DELETE_BATCH_SIZE = 1000;
 
 export interface ClaimedConversation {
   id: string;
+  projectId: string;
   purgeStartedAt: Date;
+}
+
+export interface MessageAttachmentSource {
+  role: "visitor" | "bot" | "agent" | "system";
+  userId: string | null;
+  imageUrl: string | null;
 }
 
 export interface ConversationRetentionStore {
@@ -32,7 +42,13 @@ export interface ConversationRetentionStore {
     claimAt: Date,
     limit: number,
   ): Promise<ClaimedConversation[]>;
-  listMessageImageUrls(conversationId: string): Promise<Array<string | null>>;
+  listMessageAttachments(
+    conversationId: string,
+  ): Promise<MessageAttachmentSource[]>;
+  isUploadKeyReferencedElsewhere(
+    key: string,
+    conversationId: string,
+  ): Promise<boolean>;
   deleteClaimedConversation(
     conversationId: string,
     purgeStartedAt: Date,
@@ -65,21 +81,32 @@ export function buildClaimExpiredArchivesQuery(
     ))
     .returning({
       id: conversations.id,
+      projectId: conversations.projectId,
       purgeStartedAt: conversations.purgeStartedAt,
     });
 }
 
-export function collectUploadKeys(
-  imageUrlValues: Array<string | null>,
+export function collectOwnedUploadKeys(
+  projectId: string,
+  conversationId: string,
+  attachmentSources: MessageAttachmentSource[],
 ): string[] {
   const keys = new Set<string>();
-  for (const imageUrlValue of imageUrlValues) {
-    for (const imageUrl of parseMessageImageUrls(imageUrlValue)) {
-      const path = imageUrl.split(/[?#]/, 1)[0];
-      const prefix = "/api/uploads/";
-      if (!path.startsWith(prefix)) continue;
-      const key = path.slice(prefix.length);
-      if (!key || key.startsWith("/") || key.includes("..")) continue;
+  for (const source of attachmentSources) {
+    const conversationPrefix =
+      `${projectId}/conversation-attachments/${conversationId}/`;
+    const legacyVisitorPrefix = source.role === "visitor"
+      ? `${projectId}/chat-images/`
+      : null;
+
+    for (const imageUrl of parseMessageImageUrls(source.imageUrl)) {
+      const key = getLocalUploadKey(imageUrl);
+      if (
+        !key?.startsWith(conversationPrefix) &&
+        !(legacyVisitorPrefix && key?.startsWith(legacyVisitorPrefix))
+      ) {
+        continue;
+      }
       keys.add(key);
     }
   }
@@ -98,7 +125,10 @@ class D1ConversationRetentionStore implements ConversationRetentionStore {
     limit: number,
   ): Promise<ClaimedConversation[]> {
     const candidates = await this.db
-      .select({ id: conversations.id })
+      .select({
+        id: conversations.id,
+        projectId: conversations.projectId,
+      })
       .from(conversations)
       .where(and(
         lte(conversations.archivedAt, retentionCutoff),
@@ -121,19 +151,46 @@ class D1ConversationRetentionStore implements ConversationRetentionStore {
     );
 
     return rows.flatMap((row) => row.purgeStartedAt
-      ? [{ id: row.id, purgeStartedAt: row.purgeStartedAt }]
+      ? [{
+          id: row.id,
+          projectId: row.projectId,
+          purgeStartedAt: row.purgeStartedAt,
+        }]
       : []
     );
   }
 
-  async listMessageImageUrls(
+  async listMessageAttachments(
     conversationId: string,
-  ): Promise<Array<string | null>> {
+  ): Promise<MessageAttachmentSource[]> {
+    const rows = await this.db
+      .select({
+        role: messages.role,
+        userId: messages.userId,
+        imageUrl: messages.imageUrl,
+      })
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId));
+    return rows;
+  }
+
+  async isUploadKeyReferencedElsewhere(
+    key: string,
+    conversationId: string,
+  ): Promise<boolean> {
     const rows = await this.db
       .select({ imageUrl: messages.imageUrl })
       .from(messages)
-      .where(eq(messages.conversationId, conversationId));
-    return rows.map((row) => row.imageUrl);
+      .where(and(
+        ne(messages.conversationId, conversationId),
+        sql`instr(${messages.imageUrl}, ${key}) > 0`,
+      ));
+
+    return rows.some((row) =>
+      parseMessageImageUrls(row.imageUrl).some(
+        (imageUrl) => getLocalUploadKey(imageUrl) === key,
+      )
+    );
   }
 
   async deleteClaimedConversation(
@@ -169,8 +226,19 @@ export async function purgeOneClaimedConversation(
   uploads: R2Bucket,
   claimed: ClaimedConversation,
 ): Promise<boolean> {
-  const imageUrlValues = await store.listMessageImageUrls(claimed.id);
-  await deleteUploadKeys(uploads, collectUploadKeys(imageUrlValues));
+  const attachmentSources = await store.listMessageAttachments(claimed.id);
+  const ownedKeys = collectOwnedUploadKeys(
+    claimed.projectId,
+    claimed.id,
+    attachmentSources,
+  );
+  const unreferencedKeys: string[] = [];
+  for (const key of ownedKeys) {
+    if (!await store.isUploadKeyReferencedElsewhere(key, claimed.id)) {
+      unreferencedKeys.push(key);
+    }
+  }
+  await deleteUploadKeys(uploads, unreferencedKeys);
   return store.deleteClaimedConversation(claimed.id, claimed.purgeStartedAt);
 }
 

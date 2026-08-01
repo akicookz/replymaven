@@ -16,6 +16,11 @@ import {
   selectInclusiveRange,
   toggleSelection,
 } from "@/lib/inbox/selection";
+import {
+  executeBulkConversationAction,
+  type BulkConversationExecutionResult,
+  type BulkConversationResult,
+} from "@/lib/inbox/bulk-actions";
 import type {
   BulkConversationAction,
   Conversation,
@@ -73,11 +78,6 @@ interface ConversationDetail {
   hasMore: boolean;
   botName: string | null;
   agentName: string | null;
-}
-
-interface BulkConversationResult {
-  updatedIds: string[];
-  skippedIds: string[];
 }
 
 interface BulkConversationMutationInput {
@@ -986,41 +986,35 @@ function Conversations() {
   });
 
   const bulkConversationMutation = useMutation<
-    BulkConversationResult,
+    BulkConversationExecutionResult,
     Error,
     BulkConversationMutationInput
   >({
     mutationFn: async ({ conversationIds, action }) => {
-      const chunks: string[][] = [];
-      for (let index = 0; index < conversationIds.length; index += 100) {
-        chunks.push(conversationIds.slice(index, index + 100));
-      }
-
-      const results = await Promise.all(chunks.map(async (conversationIdsChunk) => {
-        const res = await fetch(
-          `/api/projects/${projectId}/conversations/bulk`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...action, conversationIds: conversationIdsChunk }),
-          },
-        );
-        if (!res.ok) {
-          const body = await res.text().catch(() => "");
-          throw new Error(body || "Failed to update conversations");
-        }
-        return res.json() as Promise<BulkConversationResult>;
-      }));
-
-      return results.reduce<BulkConversationResult>(
-        (combined, result) => ({
-          updatedIds: [...combined.updatedIds, ...result.updatedIds],
-          skippedIds: [...combined.skippedIds, ...result.skippedIds],
-        }),
-        { updatedIds: [], skippedIds: [] },
-      );
+      return executeBulkConversationAction({
+        conversationIds,
+        action,
+        request: async (conversationIdsChunk, chunkAction) => {
+          const res = await fetch(
+            `/api/projects/${projectId}/conversations/bulk`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ...chunkAction,
+                conversationIds: conversationIdsChunk,
+              }),
+            },
+          );
+          if (!res.ok) {
+            const body = await res.text().catch(() => "");
+            throw new Error(body || "Failed to update conversations");
+          }
+          return res.json() as Promise<BulkConversationResult>;
+        },
+      });
     },
-    onSuccess: (result, { action }) => {
+    onSuccess: (result, { action, conversationIds }) => {
       const updatedIds = new Set(result.updatedIds);
       const actionAt = new Date().toISOString();
       const nowMs = Date.now();
@@ -1050,7 +1044,8 @@ function Conversations() {
       }
 
       if (selectedConvo && updatedIds.has(selectedConvo)) {
-        const current = convoDetail?.conversation;
+        const current = convoDetail?.conversation ??
+          loadedConversations.find((conversation) => conversation.id === selectedConvo);
         if (current) {
           const patched = patchConversationForBulkAction(current, action, actionAt);
           if (!passesInboxFilter(filter, patched, nowMs)) {
@@ -1060,14 +1055,20 @@ function Conversations() {
         }
       }
 
-      setSelectedIds(new Set());
-      setSelectionAnchorId(null);
-      setSelectionFocusId(null);
+      const failedIds = conversationIds.filter((id) =>
+        result.failedIds.includes(id)
+      );
+      setSelectedIds(new Set(failedIds));
+      setSelectionAnchorId(failedIds[0] ?? null);
+      setSelectionFocusId(failedIds.at(-1) ?? null);
 
       const count = result.updatedIds.length;
       if (count > 0) toast.success(`${count} conversation${count === 1 ? "" : "s"} updated`);
       if (result.skippedIds.length > 0) {
         toast.info(`${result.skippedIds.length} conversation${result.skippedIds.length === 1 ? " was" : "s were"} skipped`);
+      }
+      if (result.failedIds.length > 0) {
+        toast.error(`${result.failedIds.length} conversation${result.failedIds.length === 1 ? "" : "s"} failed to update`);
       }
     },
     onError: (error) => toast.error(error.message || "Failed to update conversations"),
@@ -1544,6 +1545,7 @@ function Conversations() {
           onBack={() => setSelectedConvo(null)}
           onCompose={handleCompose}
           composing={composeDraft.isPending}
+          className={cn(selectedIds.size > 0 && "hidden md:flex")}
           // `?msg=` deep-link scroll+pulse target.
           highlightMessageId={highlightMsgId}
         />

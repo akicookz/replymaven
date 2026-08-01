@@ -11,6 +11,8 @@ import {
   buildHumanTakeoverQuery,
   buildInboxCountsQuery,
   buildBulkConversationActionQuery,
+  buildConversationByIdQuery,
+  buildExternalActionLeaseQuery,
   buildNeedsReviewQuery,
   buildOperationalConversationQuery,
   ChatService,
@@ -25,7 +27,7 @@ function makeConversation(overrides: Partial<ConversationRow>): ConversationRow 
     telegramThreadId: null, metadata: null, chatState: null, lastActivityAt: now,
     visitorLastSeenAt: null, visitorPresence: "active", visitorLastOnlineAt: null,
     snoozedUntil: null, priority: "medium", assigneeId: null,
-    archivedAt: null, purgeStartedAt: null,
+    archivedAt: null, purgeStartedAt: null, externalActionStartedAt: null,
     createdAt: now, updatedAt: now, ...overrides,
   };
 }
@@ -70,6 +72,101 @@ function makeReopenDb(row: ConversationRow): {
 }
 
 describe("ChatService ownership and atomic writes", () => {
+  test("reads archived conversation detail without making it operational", () => {
+    const readable = buildConversationByIdQuery(
+      drizzle({} as never),
+      "conv-1",
+      "project-1",
+    ).toSQL();
+    const operational = buildOperationalConversationQuery(
+      drizzle({} as never),
+      "conv-1",
+      "project-1",
+    ).toSQL();
+
+    expect(readable.sql).toContain('"conversations"."project_id" = ?');
+    expect(readable.sql).not.toContain('"conversations"."archived_at" is null');
+    expect(operational.sql).toContain('"conversations"."archived_at" is null');
+  });
+
+  test("acquires an external-action lease only for an operational conversation", () => {
+    const leaseAt = new Date("2026-08-01T10:00:00.000Z");
+    const staleBefore = new Date("2026-08-01T09:58:00.000Z");
+    const { sql, params } = buildExternalActionLeaseQuery(
+      drizzle({} as never),
+      "conv-1",
+      "project-1",
+      leaseAt,
+      staleBefore,
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."archived_at" is null');
+    expect(sql).toContain('"conversations"."external_action_started_at" is null');
+    expect(sql).toContain('"conversations"."external_action_started_at" <= ?');
+    expect(sql).toContain('returning "id"');
+    expect(params).toEqual(expect.arrayContaining([
+      "conv-1",
+      "project-1",
+      Math.floor(leaseAt.getTime() / 1000),
+      Math.floor(staleBefore.getTime() / 1000),
+    ]));
+  });
+
+  test("does not run an external action when its conversation cannot be leased", async () => {
+    let actionCalled = false;
+    const db = {
+      update: () => ({
+        set: () => ({
+          where: () => ({ returning: async () => [] }),
+        }),
+      }),
+    } as unknown as DrizzleD1Database<Record<string, unknown>>;
+
+    const result = await new ChatService(db).runExternalActionIfOperational(
+      "conv-1",
+      "project-1",
+      async () => {
+        actionCalled = true;
+        return "sent";
+      },
+      new Date("2026-08-01T10:00:00.000Z"),
+    );
+
+    expect(result).toEqual({ executed: false });
+    expect(actionCalled).toBe(false);
+  });
+
+  test("releases the external-action lease after the action finishes", async () => {
+    const events: string[] = [];
+    let updateCall = 0;
+    const db = {
+      update: () => {
+        updateCall += 1;
+        const currentCall = updateCall;
+        return {
+          set: () => ({
+            where: () => currentCall === 1
+              ? { returning: async () => [{ id: "conv-1" }] }
+              : Promise.resolve(events.push("released")),
+          }),
+        };
+      },
+    } as unknown as DrizzleD1Database<Record<string, unknown>>;
+
+    const result = await new ChatService(db).runExternalActionIfOperational(
+      "conv-1",
+      "project-1",
+      async () => {
+        events.push("action");
+        return "sent";
+      },
+      new Date("2026-08-01T10:00:00.000Z"),
+    );
+
+    expect(result).toEqual({ executed: true, value: "sent" });
+    expect(events).toEqual(["action", "released"]);
+  });
+
   test("only skips the waiting_agent row in a mixed batch", async () => {
     const service = new ChatService(makeUpdatingDb());
     const stale = new Date(Date.now() - 60 * 60 * 1000);
@@ -325,6 +422,7 @@ describe("ChatService bulk conversation actions", () => {
     expect(sql).toContain('"conversations"."project_id" = ?');
     expect(sql).toContain('"conversations"."id" in (?, ?)');
     expect(sql).toContain('"conversations"."archived_at" is null');
+    expect(sql).toContain('"conversations"."external_action_started_at" is null');
     expect(sql).toContain('returning "id"');
     expect(params).toEqual(expect.arrayContaining([
       archivedAt.getTime() / 1000,

@@ -12,6 +12,7 @@ interface MessageBubbleProps {
   message: Message;
   conversation: Conversation;
   onDelete: (messageId: string) => void;
+  readOnly?: boolean;
   /** This message matches the active in-conversation search query. */
   isMatch?: boolean;
   /** This message is the currently-focused search match. */
@@ -32,6 +33,7 @@ export default function MessageBubble({
   message,
   conversation,
   onDelete,
+  readOnly = false,
   isMatch,
   isActiveMatch,
   showHeader = true,
@@ -146,7 +148,7 @@ export default function MessageBubble({
             />
           )}
         </div>
-        {isAgent && (
+        {isAgent && !readOnly && (
           <button
             onClick={() => onDelete(message.id)}
             className="absolute -left-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-ink-7 hover:text-red-400"
