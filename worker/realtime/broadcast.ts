@@ -120,6 +120,19 @@ export function broadcastClosed(
   });
 }
 
+export function broadcastArchived(
+  env: AppEnv,
+  ctx: ExecutionContext,
+  conversationId: string,
+  archivedAt: Date = new Date(),
+): void {
+  dispatch(env, ctx, conversationId, {
+    type: "conversation:archived",
+    conversationId,
+    archivedAt: archivedAt.getTime(),
+  });
+}
+
 export function broadcastMessageStatus(
   env: AppEnv,
   ctx: ExecutionContext,

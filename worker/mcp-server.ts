@@ -474,7 +474,7 @@ function registerGetConversationTool(
       await getAccessibleProject(context, projectId);
 
       const chatService = new ChatService(context.db);
-      const conversation = await chatService.getConversationById(
+      const conversation = await chatService.getOperationalConversationById(
         conversationId,
         projectId,
       );
@@ -523,7 +523,7 @@ function registerSendAgentReplyTool(
       await getAccessibleProject(context, projectId);
 
       const chatService = new ChatService(context.db);
-      const conversation = await chatService.getConversationById(
+      const conversation = await chatService.getOperationalConversationById(
         conversationId,
         projectId,
       );

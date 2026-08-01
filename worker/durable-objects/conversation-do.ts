@@ -59,7 +59,7 @@ export class ConversationDO implements DurableObject {
     return new Response("Not found", { status: 404 });
   }
 
-  private handleConnect(req: Request): Response {
+  private async handleConnect(req: Request): Promise<Response> {
     if (req.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected WebSocket", { status: 426 });
     }
@@ -76,6 +76,14 @@ export class ConversationDO implements DurableObject {
       !projectId
     ) {
       return new Response("Missing connection headers", { status: 400 });
+    }
+
+    const db = drizzle(this.env.DB);
+    const conversation = await new ChatService(
+      db,
+    ).getOperationalConversationById(conversationId, projectId);
+    if (!conversation) {
+      return new Response("Conversation unavailable", { status: 410 });
     }
 
     const pair = new WebSocketPair();
@@ -171,6 +179,11 @@ export class ConversationDO implements DurableObject {
 
       const db = drizzle(this.env.DB);
       const chatService = new ChatService(db);
+      const conversation = await chatService.getOperationalConversationById(
+        att.conversationId,
+        att.projectId,
+      );
+      if (!conversation) return;
       const ids =
         msg.type === "delivered"
           ? await chatService.markDeliveredUpTo(att.conversationId, msg.upToMessageId)
@@ -207,6 +220,11 @@ export class ConversationDO implements DurableObject {
 
     const db = drizzle(this.env.DB);
     const chatService = new ChatService(db);
+    const conversation = await chatService.getOperationalConversationById(
+      attachment.conversationId,
+      attachment.projectId,
+    );
+    if (!conversation) return;
 
     let sinceMs = 0;
     if (lastMessageId) {
@@ -261,6 +279,12 @@ export class ConversationDO implements DurableObject {
       }
       try {
         ws.send(payload);
+        if (
+          body.event.type === "conversation:archived" &&
+          attachment?.kind === "visitor"
+        ) {
+          ws.close(1000, "conversation_archived");
+        }
       } catch {
         // Socket might be in a weird state — Cloudflare will clean it up.
       }

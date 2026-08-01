@@ -59,6 +59,9 @@ export async function handleWidgetWsUpgrade(
     project.id,
   );
   if (!conversation) return c.json({ error: "Conversation not found" }, 404);
+  if (conversation.archivedAt) {
+    return c.json({ error: "Conversation archived" }, 410);
+  }
   if (conversation.visitorId !== visitorId) {
     return c.json({ error: "Forbidden" }, 403);
   }

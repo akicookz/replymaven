@@ -57,7 +57,6 @@ import { claimWidgetInstance } from "./instance-guard";
   let pageContext: Record<string, string> = {};
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let config: Record<string, any> | null = null;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let _isHandedOff = false;
   let isBanned = false;
 
@@ -66,7 +65,6 @@ import { claimWidgetInstance } from "./instance-guard";
   let lastMessageTimestamp: number | null = null;
   let lastNewMessageAt: number = Date.now();
   const renderedMessageIds = new Set<string>();
-  let unreadCount = 0;
 
   // WebSocket state — primary transport when available; polling is fallback.
   let wsSocket: ReconnectingWebSocket | null = null;
@@ -3266,6 +3264,31 @@ import { claimWidgetInstance } from "./instance-guard";
     chatView.classList.remove("active");
   }
 
+  function retireArchivedConversation() {
+    conversationId = null;
+    conversationStatus = null;
+    clearPersistedConversation();
+    stopPolling();
+    stopHeartbeat();
+    disconnectWebSocket();
+
+    conversationHistoryBuffer.splice(0);
+    renderedMessageIds.clear();
+    activeToolCallCards.clear();
+    lastSeenMessageId = null;
+    newestResponseId = null;
+    lastMessageTimestamp = null;
+    lastNewMessageAt = Date.now();
+    lastVisitorStatusEl = null;
+    messagesContainer.replaceChildren(typingRow);
+    previewStack.replaceChildren();
+    clearUnreadBadge();
+    hideTyping();
+    syncConversationModeUi();
+    showHomeScreen();
+    renderGreetings({ force: true });
+  }
+
   function showFormScreen() {
     currentView = "form";
     homeView.classList.add("hidden");
@@ -4400,6 +4423,7 @@ import { claimWidgetInstance } from "./instance-guard";
         await createConversation();
       }
       if (!conversationId && !options.acceptedResponse) return;
+      let streamedConversationId = conversationId;
 
       // Reopen closed conversation — server handles status update
       if (conversationStatus === "closed") {
@@ -4515,6 +4539,10 @@ import { claimWidgetInstance } from "./instance-guard";
 
         if (!res.ok) {
           hideTyping();
+          if (res.status === 410 || res.status === 404) {
+            retireArchivedConversation();
+            return;
+          }
           if (res.status === 403) {
             const data = await res.json().catch(() => null);
             if (data?.banned) {
@@ -4593,6 +4621,13 @@ import { claimWidgetInstance } from "./instance-guard";
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (
+            streamedConversationId &&
+            conversationId !== streamedConversationId
+          ) {
+            await reader.cancel();
+            break;
+          }
 
           sseBuffer += decoder.decode(value, { stream: true });
           const lines = sseBuffer.split("\n");
@@ -4608,6 +4643,7 @@ import { claimWidgetInstance } from "./instance-guard";
                   const accepted =
                     data.contactAccepted as ContactAcceptedClientPayload;
                   applyContactAccepted(accepted);
+                  streamedConversationId = accepted.conversationId;
                   activeContactFallbackMessage = accepted.fallbackMessage;
                   contactTurnAccepted = true;
                   continue;
@@ -4828,6 +4864,14 @@ import { claimWidgetInstance } from "./instance-guard";
               }
             }
           }
+        }
+
+        if (
+          streamedConversationId &&
+          conversationId !== streamedConversationId
+        ) {
+          clearTimeout(streamTimeout);
+          return;
         }
 
         // Edge case: stream ended without a done event but inquiry was detected
@@ -5753,6 +5797,8 @@ import { claimWidgetInstance } from "./instance-guard";
           stopPolling();
           stopHeartbeat();
         }
+      } else if (parsed.type === "conversation:archived") {
+        retireArchivedConversation();
       }
     });
   }
@@ -5929,7 +5975,12 @@ import { claimWidgetInstance } from "./instance-guard";
             body: JSON.stringify({ presence }),
           },
         );
-        if (!res.ok) return;
+        if (!res.ok) {
+          if (res.status === 410 || res.status === 404) {
+            retireArchivedConversation();
+          }
+          return;
+        }
         const data = await res.json();
         if (data.status && data.status !== conversationStatus) {
           conversationStatus = data.status;
@@ -5962,7 +6013,12 @@ import { claimWidgetInstance } from "./instance-guard";
       }
 
       const res = await fetch(url);
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (res.status === 410 || res.status === 404) {
+          retireArchivedConversation();
+        }
+        return;
+      }
 
       const data = await res.json();
       const msgs = data.messages ?? data;
@@ -6128,12 +6184,10 @@ import { claimWidgetInstance } from "./instance-guard";
   // ─── Unread Badge ────────────────────────────────────────────────────────────
 
   function incrementUnreadBadge() {
-    unreadCount++;
     triggerBadge.classList.add("visible");
   }
 
   function clearUnreadBadge() {
-    unreadCount = 0;
     triggerBadge.classList.remove("visible");
   }
 
@@ -6156,10 +6210,8 @@ import { claimWidgetInstance } from "./instance-guard";
       );
       if (!res.ok) {
         // Conversation might not exist anymore
-        if (res.status === 404) {
-          conversationId = null;
-          conversationStatus = null;
-          clearPersistedConversation();
+        if (res.status === 404 || res.status === 410) {
+          retireArchivedConversation();
         }
         return;
       }

@@ -256,7 +256,7 @@ export async function handleWidgetMessageTurn(
   // history are loaded only after muted and human-agent turns have exited.
   const [ownerSub, conversationLookup, settings] = await Promise.all([
     billingService.getSubscriptionByUserId(context.project.userId),
-    chatService.getConversationById(
+    chatService.getOperationalConversationById(
       context.conversationId,
       context.project.id,
     ),
@@ -359,11 +359,20 @@ export async function handleWidgetMessageTurn(
   const imageUrl = context.payload.imageUrl ?? null;
   let isFirstVisitorTurn = context.isFirstVisitorTurn ?? false;
   if (!context.visitorMessageAlreadySaved) {
-    const visitorResult = await chatService.addVisitorMessageWithFirstTurn({
-      conversationId: context.conversationId,
-      content: context.payload.content,
-      imageUrl,
-    });
+    const visitorResult = await chatService.addVisitorMessageWithFirstTurn(
+      {
+        conversationId: context.conversationId,
+        content: context.payload.content,
+        imageUrl,
+      },
+      context.project.id,
+    );
+    if (!visitorResult) {
+      return Response.json(
+        { error: "Conversation archived" },
+        { status: 410 },
+      );
+    }
     const visitorMessage = visitorResult.message;
     isFirstVisitorTurn = visitorResult.isFirstVisitorTurn;
     markStage("visitor_message_saved");
@@ -397,7 +406,7 @@ export async function handleWidgetMessageTurn(
     status: WidgetCompletedPayload["conversationStatus"];
     chatState: string | null;
   }> {
-    const latestConversation = await chatService.getConversationById(
+    const latestConversation = await chatService.getOperationalConversationById(
       context.conversationId,
       context.project.id,
     );
@@ -441,17 +450,26 @@ export async function handleWidgetMessageTurn(
     settings.telegramChatId
   ) {
     const telegramService = new TelegramService(context.db);
+    const telegramBotToken = settings.telegramBotToken;
+    const telegramChatId = settings.telegramChatId;
     context.executionCtx.waitUntil(
-      telegramService.forwardVisitorMessage(
-        settings.telegramBotToken,
-        settings.telegramChatId,
-        conversation.visitorName,
-        context.payload.content,
-        conversation.id,
-        conversation.telegramThreadId
-          ? Number.parseInt(conversation.telegramThreadId, 10)
-          : undefined,
-      ).catch((error) => {
+      (async () => {
+        const operational = await chatService.getOperationalConversationById(
+          conversation.id,
+          context.project.id,
+        );
+        if (!operational) return;
+        await telegramService.forwardVisitorMessage(
+          telegramBotToken,
+          telegramChatId,
+          conversation.visitorName,
+          context.payload.content,
+          conversation.id,
+          conversation.telegramThreadId
+            ? Number.parseInt(conversation.telegramThreadId, 10)
+            : undefined,
+        );
+      })().catch((error) => {
         logError(
           "widget_turn.telegram_forward_failed",
           error,
@@ -1218,24 +1236,31 @@ export async function handleWidgetMessageTurn(
         );
         if (settings?.telegramBotToken && settings.telegramChatId) {
           const telegramService = new TelegramService(context.db);
+          const telegramBotToken = settings.telegramBotToken;
+          const telegramChatId = settings.telegramChatId;
           context.executionCtx.waitUntil(
-            telegramService
-              .notifyBotResolved(
-                settings.telegramBotToken,
-                settings.telegramChatId,
+            (async () => {
+              const operational = await chatService.getOperationalConversationById(
+                context.conversationId,
+                context.project.id,
+              );
+              if (!operational) return;
+              await telegramService.notifyBotResolved(
+                telegramBotToken,
+                telegramChatId,
                 settings.botName,
                 context.conversationId,
                 conversation.telegramThreadId
                   ? Number.parseInt(conversation.telegramThreadId, 10)
                   : undefined,
-              )
-              .catch((error) => {
-                logError(
-                  "widget_turn.telegram_resolution_update_failed",
-                  error,
-                  buildWidgetTurnLogContext(context, turnId),
-                );
-              }),
+              );
+            })().catch((error) => {
+              logError(
+                "widget_turn.telegram_resolution_update_failed",
+                error,
+                buildWidgetTurnLogContext(context, turnId),
+              );
+            }),
           );
         }
       }

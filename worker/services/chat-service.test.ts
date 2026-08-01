@@ -2,12 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import {
   buildAiResolutionQuery,
+  buildActiveConversationByVisitorQuery,
   buildBanSweepQuery,
   buildConditionalBotMessageQuery,
+  buildConditionalAgentMessageQuery,
+  buildConditionalSystemMessageQuery,
+  buildConditionalVisitorMessageQuery,
   buildHumanTakeoverQuery,
   buildInboxCountsQuery,
   buildBulkConversationActionQuery,
   buildNeedsReviewQuery,
+  buildOperationalConversationQuery,
   ChatService,
   type ConversationRow,
 } from "./chat-service";
@@ -115,7 +120,60 @@ describe("ChatService ownership and atomic writes", () => {
 
     expect(sql).toContain('"conversations"."status" = ?');
     expect(sql).toContain('"conversations"."chat_state" = ?');
+    expect(sql).toContain('"conversations"."archived_at" is null');
     expect(params).toEqual(expect.arrayContaining(["waiting_agent", '{"ownershipRevision":2}']));
+  });
+
+  test("inserts visitor output only while the conversation is operational", () => {
+    const { sql, params } = buildConditionalVisitorMessageQuery(
+      drizzle({} as never),
+      {
+        id: "visitor-message-1",
+        conversationId: "conv-1",
+        projectId: "project-1",
+        content: "Can you help?",
+        imageUrl: null,
+        sources: null,
+        createdAt: new Date("2026-08-01T00:00:00.000Z"),
+      },
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."project_id" = ?');
+    expect(sql).toContain('"conversations"."archived_at" is null');
+    expect(params).toEqual(expect.arrayContaining(["conv-1", "project-1"]));
+  });
+
+  test("does not append system history after archival", () => {
+    const { sql, params } = buildConditionalSystemMessageQuery(
+      drizzle({} as never),
+      {
+        id: "system-1",
+        conversationId: "conv-1",
+        content: "Agent joined",
+        sources: '{"systemKind":"joined"}',
+        createdAt: new Date("2026-08-01T00:00:00.000Z"),
+      },
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."archived_at" is null');
+    expect(params).toContain("conv-1");
+  });
+
+  test("does not append an agent reply after archival", () => {
+    const { sql, params } = buildConditionalAgentMessageQuery(
+      drizzle({} as never),
+      {
+        id: "agent-message-1",
+        conversationId: "conv-1",
+        projectId: "project-1",
+        content: "I can help.",
+        createdAt: new Date("2026-08-01T00:00:00.000Z"),
+      },
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."project_id" = ?');
+    expect(sql).toContain('"conversations"."archived_at" is null');
+    expect(params).toEqual(expect.arrayContaining(["conv-1", "project-1"]));
   });
 
   test("takes ownership and advances the JSON revision in one update", () => {
@@ -125,6 +183,7 @@ describe("ChatService ownership and atomic writes", () => {
 
     expect(sql).toContain("json_set");
     expect(sql).toContain("$.ownershipRevision");
+    expect(sql).toContain('"conversations"."archived_at" is null');
     expect(params).toEqual(expect.arrayContaining(["agent_replied", "conv-1", "project-1"]));
   });
 });
@@ -160,6 +219,23 @@ describe("ChatService tenant and AI ownership guards", () => {
     expect(inboxCounts.sql).toContain('"conversations"."archived_at" is not null');
   });
 
+  test("excludes archived rows from widget identity lookups", () => {
+    const db = drizzle({} as never);
+    const direct = buildOperationalConversationQuery(
+      db,
+      "conv-1",
+      "project-1",
+    ).toSQL();
+    const active = buildActiveConversationByVisitorQuery(
+      db,
+      "project-1",
+      "visitor-1",
+    ).toSQL();
+
+    expect(direct.sql).toContain('"conversations"."archived_at" is null');
+    expect(active.sql).toContain('"conversations"."archived_at" is null');
+  });
+
   test("closes only this project's OPEN conversations, as spam, returning ids", () => {
     const { sql, params } = buildBanSweepQuery(
       drizzle({} as never), "project-1", "visitor-1",
@@ -167,6 +243,7 @@ describe("ChatService tenant and AI ownership guards", () => {
 
     expect(sql).toContain('"conversations"."project_id" = ?');
     expect(sql).toContain('"conversations"."status" <> ?');
+    expect(sql).toContain('"conversations"."archived_at" is null');
     expect(sql).toContain('returning "id"');
     expect(params).toEqual(expect.arrayContaining(["closed", "spam", "project-1", "visitor-1"]));
   });
@@ -190,10 +267,11 @@ describe("ChatService tenant and AI ownership guards", () => {
   });
 
   test("only resolves currently AI-owned active or waiting conversations", () => {
-    const { params } = buildAiResolutionQuery(
+    const { sql, params } = buildAiResolutionQuery(
       drizzle({} as never), "conv-1", "project-1",
     ).toSQL();
 
+    expect(sql).toContain('"conversations"."archived_at" is null');
     expect(params).toEqual(expect.arrayContaining(["active", "waiting_agent"]));
   });
 

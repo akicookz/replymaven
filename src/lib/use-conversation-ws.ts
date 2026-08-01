@@ -153,6 +153,21 @@ export function useConversationWs(
         queryClient.invalidateQueries({
           queryKey: ["conversations", projectId],
         });
+      } else if (parsed.type === "conversation:archived") {
+        const archivedAt = new Date(parsed.archivedAt).toISOString();
+        queryClient.setQueryData<ConversationDetailData | undefined>(
+          ["conversation-detail", conversationId],
+          (old) => {
+            if (!old) return old;
+            return {
+              ...old,
+              conversation: { ...old.conversation, archivedAt },
+            };
+          },
+        );
+        queryClient.invalidateQueries({
+          queryKey: ["conversations", projectId],
+        });
       } else if (parsed.type === "message:status") {
         const idSet = new Set(parsed.messageIds);
         const iso = new Date(parsed.at).toISOString();

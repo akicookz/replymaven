@@ -36,6 +36,11 @@ export type ServerEvent =
       reason: string | null;
     }
   | {
+      type: "conversation:archived";
+      conversationId: string;
+      archivedAt: number;
+    }
+  | {
       type: "message:status";
       conversationId: string;
       status: "delivered" | "read";

@@ -55,7 +55,7 @@ function makeChatService() {
       data: UpdateConversationCall["data"],
     ) => {
       calls.updateConversation.push({ id, projectId, data });
-      return null;
+      return { id };
     },
   } as unknown as ChatService;
   return { service, calls };
@@ -263,5 +263,24 @@ describe("createEscalation - telegram notification", () => {
     expect(tg.calls[0].params.conversationUrl).toBe(
       "https://app.test/app/projects/project-1/conversations?filter=needs-you&id=conv-1&msg=msg-existing",
     );
+  });
+
+  test("does not notify after the conversation becomes unavailable", async () => {
+    const tg = makeTelegramService();
+    const unavailableChatService = {
+      addSystemMessage: async () => null,
+      updateConversation: async () => null,
+    } as unknown as ChatService;
+    const { params } = baseParams({
+      chatService: unavailableChatService,
+      telegramService: tg.service,
+      settings,
+    });
+
+    const result = await createEscalation(params as never);
+
+    expect(tg.calls).toHaveLength(0);
+    expect(result.created).toBe(false);
+    expect(result.summaryMessageId).toBeNull();
   });
 });

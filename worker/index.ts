@@ -92,6 +92,7 @@ import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
 import {
   broadcastClosed,
+  broadcastArchived,
   broadcastMessageDeleted,
   broadcastMessageNew,
   broadcastStatusChange,
@@ -675,6 +676,9 @@ const app = new Hono<HonoAppContext>()
     if (!conversation) {
       return c.json({ error: "Conversation not found" }, 404);
     }
+    if (conversation.archivedAt) {
+      return c.json({ error: "Conversation archived" }, 410);
+    }
 
     // ─── Lazy auto-close check ──────────────────────────────────────────────
     if (conversation.status !== "closed") {
@@ -835,6 +839,9 @@ const app = new Hono<HonoAppContext>()
       conversationId,
       project.id,
     );
+    if (convForBan?.archivedAt) {
+      return c.json({ error: "Conversation archived" }, 410);
+    }
     if (convForBan) {
       const banService = new VisitorBanService(db);
       const ban = await banService.isVisitorBanned(
@@ -892,7 +899,7 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const chatService = new ChatService(db);
-    const conversation = await chatService.getConversationById(
+    const conversation = await chatService.getOperationalConversationById(
       conversationId,
       project.id,
     );
@@ -929,7 +936,7 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const chatService = new ChatService(db);
-    const conversation = await chatService.getConversationById(
+    const conversation = await chatService.getOperationalConversationById(
       conversationId,
       project.id,
     );
@@ -1050,12 +1057,18 @@ const app = new Hono<HonoAppContext>()
       visitorName,
       visitorEmail,
     );
-    const formVisitorResult = await chatService.addVisitorMessageWithFirstTurn({
-      conversationId: conversation.id,
-      content: formMessage,
-      imageUrl: null,
-      sources: null,
-    });
+    const formVisitorResult = await chatService.addVisitorMessageWithFirstTurn(
+      {
+        conversationId: conversation.id,
+        content: formMessage,
+        imageUrl: null,
+        sources: null,
+      },
+      project.id,
+    );
+    if (!formVisitorResult) {
+      return c.json({ error: "Conversation archived" }, 410);
+    }
     const formVisitorMessage = formVisitorResult.message;
     const isFirstVisitorTurn = formVisitorResult.isFirstVisitorTurn;
     broadcastMessageNew(
@@ -1075,7 +1088,10 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Conversation ownership changed. Try again." }, 409);
     }
     conversation =
-      (await chatService.getConversationById(conversation.id, project.id)) ??
+      (await chatService.getOperationalConversationById(
+        conversation.id,
+        project.id,
+      )) ??
       conversation;
     broadcastStatusChange(
       c.env,
@@ -1313,7 +1329,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    const conversation = await chatService.getConversationById(
+    const conversation = await chatService.getOperationalConversationById(
       conversationId,
       projectId,
     );
@@ -2138,6 +2154,7 @@ const app = new Hono<HonoAppContext>()
           sourceMessage.conversationId,
           project.id,
         );
+        if (conv?.archivedAt) return c.json({ ok: true });
         if (conv) {
           conversation = conv;
           referencedAgentUserId = sourceMessage.userId ?? null;
@@ -2239,18 +2256,27 @@ const app = new Hono<HonoAppContext>()
 
     if (isVisitor) {
       // ─── Visitor reply branch ─────────────────────────────────────────
-      const inboundEmailMessage = await chatService.addMessage({
-        conversationId: conversation.id,
-        role: "visitor",
-        content: cleanedText,
-        sources: null,
-      });
+      const inboundEmailMessage = await chatService.addMessage(
+        {
+          conversationId: conversation.id,
+          role: "visitor",
+          content: cleanedText,
+          sources: null,
+        },
+        project.id,
+      );
+      if (!inboundEmailMessage) return c.json({ ok: true });
       broadcastMessageNew(
         c.env,
         c.executionCtx,
         conversation.id,
         inboundEmailMessage,
       );
+      const stillOperational = await chatService.getOperationalConversationById(
+        conversation.id,
+        project.id,
+      );
+      if (!stillOperational) return c.json({ ok: true });
 
       // Forward to Telegram if conversation is in agent mode
       if (
@@ -2355,11 +2381,17 @@ const app = new Hono<HonoAppContext>()
       // the message still lands in the dashboard.
       if (conversation.visitorEmail && c.env.RESEND_API_KEY) {
         const emailService = new EmailService(c.env.RESEND_API_KEY);
+        const visitorEmail = conversation.visitorEmail;
         const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`;
         c.executionCtx.waitUntil(
-          emailService
-            .sendAgentMessageEmail({
-              to: conversation.visitorEmail,
+          (async () => {
+            const operational = await chatService.getOperationalConversationById(
+              conversation.id,
+              project.id,
+            );
+            if (!operational) return;
+            await emailService.sendAgentMessageEmail({
+              to: visitorEmail,
               projectSlug: project.slug,
               projectName: project.name,
               conversationId: conversation.id,
@@ -2371,8 +2403,8 @@ const app = new Hono<HonoAppContext>()
               accentColor: widgetCfgForReply?.primaryColor ?? null,
               inReplyToMessageId: referencedMessageId ?? null,
               autoSubmitted: true,
-            })
-            .catch((err) => {
+            });
+          })().catch((err) => {
               console.error(
                 "[InboundEmail] Agent-reply outbound to visitor failed:",
                 err,
@@ -6184,6 +6216,7 @@ const app = new Hono<HonoAppContext>()
     // conversation immediately; the WS broadcast pushes the closed status
     // moments later if it flips.
     if (
+      !conversation.archivedAt &&
       conversation.status !== "closed" &&
       settings?.autoCloseMinutes &&
       isConversationStale(conversation, settings.autoCloseMinutes)
@@ -6350,7 +6383,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = new ChatService(db);
-    const conversation = await chatService.getConversationById(
+    const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
     );
@@ -6451,7 +6484,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = new ChatService(db);
-    const conversation = await chatService.getConversationById(
+    const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
     );
@@ -6582,7 +6615,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = new ChatService(db);
-    const conversation = await chatService.getConversationById(
+    const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
     );
@@ -6658,7 +6691,7 @@ const app = new Hono<HonoAppContext>()
       const messageId = c.req.param("messageId");
 
       const chatService = new ChatService(db);
-      const conversation = await chatService.getConversationById(
+      const conversation = await chatService.getOperationalConversationById(
         convId,
         project.id,
       );
@@ -6713,11 +6746,24 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = new ChatService(db);
+    const actionAt = new Date();
     const result = await chatService.bulkUpdateConversations(
       project.id,
       parsed.data.conversationIds,
       parsed.data,
+      actionAt,
     );
+
+    if (parsed.data.action === "archive") {
+      for (const conversationId of result.updatedIds) {
+        broadcastArchived(
+          c.env,
+          c.executionCtx,
+          conversationId,
+          actionAt,
+        );
+      }
+    }
 
     if (parsed.data.action === "snooze") {
       const until = parsed.data.until ? new Date(parsed.data.until) : null;
@@ -6768,7 +6814,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     const chatService = new ChatService(db);
-    const conversation = await chatService.getConversationById(
+    const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
     );
@@ -6833,7 +6879,7 @@ const app = new Hono<HonoAppContext>()
     if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
       return c.json({ error: "Not found" }, 404);
     const chatService = new ChatService(db);
-    const conversation = await chatService.getConversationById(
+    const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
     );
@@ -6859,7 +6905,10 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
     const chatService = new ChatService(db);
     const convId = c.req.param("convId");
-    const conversation = await chatService.getConversationById(convId, project.id);
+    const conversation = await chatService.getOperationalConversationById(
+      convId,
+      project.id,
+    );
     if (!conversation) return c.json({ error: "Not found" }, 404);
     const until = parsed.data.until ? new Date(parsed.data.until) : null;
     await chatService.setSnooze(convId, project.id, until);
@@ -6882,7 +6931,10 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(prioritySchema, await c.req.json());
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
     const chatService = new ChatService(db);
-    const conversation = await chatService.getConversationById(c.req.param("convId"), project.id);
+    const conversation = await chatService.getOperationalConversationById(
+      c.req.param("convId"),
+      project.id,
+    );
     if (!conversation) return c.json({ error: "Not found" }, 404);
     await chatService.setPriority(conversation.id, project.id, parsed.data.priority);
     return c.json({ ok: true });
@@ -6898,7 +6950,7 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(assignSchema, await c.req.json());
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
     const chatService = new ChatService(db);
-    const conversation = await chatService.getConversationById(
+    const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
     );
@@ -6950,6 +7002,15 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(banVisitorSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
+    const chatService = new ChatService(db);
+    if (parsed.data.conversationId) {
+      const conversation = await chatService.getOperationalConversationById(
+        parsed.data.conversationId,
+        project.id,
+      );
+      if (!conversation) return c.json({ error: "Not found" }, 404);
+    }
+
     const banService = new VisitorBanService(db);
     const existing = await banService.isVisitorBanned(
       project.id,
@@ -6964,7 +7025,6 @@ const app = new Hono<HonoAppContext>()
     // the Flagged tab is where a blocked visitor's thread belongs), then sweep
     // ALL of the visitor's other open conversations too: the ban 403s the
     // visitor, so any leftovers would sit in Needs You forever.
-    const chatService = new ChatService(db);
     const closedIds = new Set<string>();
     if (parsed.data.conversationId) {
       await chatService.updateConversationStatus(

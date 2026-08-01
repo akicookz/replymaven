@@ -41,6 +41,43 @@ export interface BulkConversationActionResult {
   skippedIds: string[];
 }
 
+export function buildOperationalConversationQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+  projectId: string,
+) {
+  return db
+    .select()
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+        isNull(conversations.archivedAt),
+      ),
+    )
+    .limit(1);
+}
+
+export function buildActiveConversationByVisitorQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  projectId: string,
+  visitorId: string,
+) {
+  return db
+    .select()
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.projectId, projectId),
+        eq(conversations.visitorId, visitorId),
+        isNull(conversations.archivedAt),
+      ),
+    )
+    .orderBy(desc(conversations.updatedAt))
+    .limit(1);
+}
+
 export function buildBulkConversationActionQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   projectId: string,
@@ -171,6 +208,109 @@ interface ConditionalBotMessageInput {
   expectedChatState: string | null;
 }
 
+interface ConditionalOperationalMessageInput {
+  id: string;
+  conversationId: string;
+  projectId: string;
+  content: string;
+  imageUrl?: string | null;
+  sources?: string | null;
+  senderName?: string | null;
+  senderAvatar?: string | null;
+  userId?: string | null;
+  createdAt: Date;
+}
+
+function buildConditionalOperationalMessageQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  input: ConditionalOperationalMessageInput,
+  role: "visitor" | "agent",
+) {
+  const selectQuery = db
+    .select({
+      id: sql<string>`${input.id}`.as("id"),
+      conversationId: conversations.id,
+      role: sql<"visitor" | "agent">`${role}`.as("role"),
+      content: sql<string>`${input.content}`.as("content"),
+      imageUrl: sql<string | null>`${input.imageUrl ?? null}`.as("image_url"),
+      sources: sql<string | null>`${input.sources ?? null}`.as("sources"),
+      senderName: sql<string | null>`${input.senderName ?? null}`.as("sender_name"),
+      senderAvatar: sql<string | null>`${input.senderAvatar ?? null}`.as("sender_avatar"),
+      userId: sql<string | null>`${input.userId ?? null}`.as("user_id"),
+      createdAt: sql<Date>`${Math.floor(input.createdAt.getTime() / 1000)}`.as(
+        "created_at",
+      ),
+      emailedAt: sql<null>`null`.as("emailed_at"),
+      deliveredAt: sql<null>`null`.as("delivered_at"),
+      readAt: sql<null>`null`.as("read_at"),
+    })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.id, input.conversationId),
+        eq(conversations.projectId, input.projectId),
+        isNull(conversations.archivedAt),
+      ),
+    );
+
+  return db.insert(messages).select(selectQuery).returning();
+}
+
+export function buildConditionalVisitorMessageQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  input: ConditionalOperationalMessageInput,
+) {
+  return buildConditionalOperationalMessageQuery(db, input, "visitor");
+}
+
+export function buildConditionalAgentMessageQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  input: ConditionalOperationalMessageInput,
+) {
+  return buildConditionalOperationalMessageQuery(db, input, "agent");
+}
+
+interface ConditionalSystemMessageInput {
+  id: string;
+  conversationId: string;
+  content: string;
+  sources: string;
+  createdAt: Date;
+}
+
+export function buildConditionalSystemMessageQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  input: ConditionalSystemMessageInput,
+) {
+  const selectQuery = db
+    .select({
+      id: sql<string>`${input.id}`.as("id"),
+      conversationId: conversations.id,
+      role: sql<"system">`${"system"}`.as("role"),
+      content: sql<string>`${input.content}`.as("content"),
+      imageUrl: sql<null>`null`.as("image_url"),
+      sources: sql<string>`${input.sources}`.as("sources"),
+      senderName: sql<null>`null`.as("sender_name"),
+      senderAvatar: sql<null>`null`.as("sender_avatar"),
+      userId: sql<null>`null`.as("user_id"),
+      createdAt: sql<Date>`${Math.floor(input.createdAt.getTime() / 1000)}`.as(
+        "created_at",
+      ),
+      emailedAt: sql<null>`null`.as("emailed_at"),
+      deliveredAt: sql<null>`null`.as("delivered_at"),
+      readAt: sql<null>`null`.as("read_at"),
+    })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.id, input.conversationId),
+        isNull(conversations.archivedAt),
+      ),
+    );
+
+  return db.insert(messages).select(selectQuery).returning();
+}
+
 export function buildConditionalBotMessageQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   input: ConditionalBotMessageInput,
@@ -204,6 +344,7 @@ export function buildConditionalBotMessageQuery(
         eq(conversations.projectId, input.projectId),
         eq(conversations.status, input.expectedStatus),
         chatStateCondition,
+        isNull(conversations.archivedAt),
       ),
     );
 
@@ -235,6 +376,7 @@ export function buildHumanTakeoverQuery(
       and(
         eq(conversations.id, conversationId),
         eq(conversations.projectId, projectId),
+        isNull(conversations.archivedAt),
       ),
     )
     .returning({
@@ -342,6 +484,7 @@ export function buildBanSweepQuery(
       and(
         eq(conversations.projectId, projectId),
         ne(conversations.status, "closed"),
+        isNull(conversations.archivedAt),
         visitorMatch,
       ),
     )
@@ -359,6 +502,7 @@ export function buildAiResolutionQuery(
     eq(conversations.id, conversationId),
     eq(conversations.projectId, projectId),
     inArray(conversations.status, ["active", "waiting_agent"]),
+    isNull(conversations.archivedAt),
   ];
   if (expectedChatState !== undefined) {
     conditions.push(
@@ -391,9 +535,21 @@ export class ChatService {
       .select()
       .from(conversations)
       .where(
-        and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
+        ),
       )
       .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async getOperationalConversationById(
+    id: string,
+    projectId: string,
+  ): Promise<ConversationRow | null> {
+    const rows = await buildOperationalConversationQuery(this.db, id, projectId);
     return rows[0] ?? null;
   }
 
@@ -495,13 +651,21 @@ export class ChatService {
   async setSnooze(conversationId: string, projectId: string, until: Date | null): Promise<void> {
     await this.db.update(conversations)
       .set({ snoozedUntil: until })
-      .where(and(eq(conversations.id, conversationId), eq(conversations.projectId, projectId)));
+      .where(and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+        isNull(conversations.archivedAt),
+      ));
   }
 
   async setPriority(conversationId: string, projectId: string, priority: "low" | "medium" | "high"): Promise<void> {
     await this.db.update(conversations)
       .set({ priority })
-      .where(and(eq(conversations.id, conversationId), eq(conversations.projectId, projectId)));
+      .where(and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+        isNull(conversations.archivedAt),
+      ));
   }
 
   async setAssignee(
@@ -511,7 +675,11 @@ export class ChatService {
   ): Promise<void> {
     await this.db.update(conversations)
       .set({ assigneeId })
-      .where(and(eq(conversations.id, conversationId), eq(conversations.projectId, projectId)));
+      .where(and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+        isNull(conversations.archivedAt),
+      ));
   }
 
   async getConversationUpdatesSince(
@@ -602,7 +770,11 @@ export class ChatService {
       .update(conversations)
       .set(updates)
       .where(
-        and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
+        ),
       );
   }
 
@@ -610,7 +782,7 @@ export class ChatService {
     id: string,
     projectId: string,
   ): Promise<boolean> {
-    const conversation = await this.getConversationById(id, projectId);
+    const conversation = await this.getOperationalConversationById(id, projectId);
     if (!conversation) return false;
     const currentState = parseChatState(conversation.chatState, {
       fallbackAiParticipation: fallbackAiParticipationForStatus(
@@ -639,7 +811,7 @@ export class ChatService {
   ): Promise<ConversationRow["status"] | null> {
     if (event === "team_requested") {
       await this.claimTeamRequest(id, projectId);
-      const latest = await this.getConversationById(id, projectId);
+      const latest = await this.getOperationalConversationById(id, projectId);
       return latest?.status ?? null;
     }
 
@@ -648,7 +820,7 @@ export class ChatService {
       return ownership?.status ?? null;
     }
 
-    const conversation = await this.getConversationById(id, projectId);
+    const conversation = await this.getOperationalConversationById(id, projectId);
     if (!conversation) return null;
 
     const currentState = parseChatState(conversation.chatState, {
@@ -661,6 +833,7 @@ export class ChatService {
     const ownershipConditions = [
       eq(conversations.id, id),
       eq(conversations.projectId, projectId),
+      isNull(conversations.archivedAt),
       eq(conversations.status, conversation.status),
       conversation.chatState === null
         ? isNull(conversations.chatState)
@@ -677,12 +850,12 @@ export class ChatService {
       .returning({ status: conversations.status });
 
     if (updated[0]) return updated[0].status;
-    const latest = await this.getConversationById(id, projectId);
+    const latest = await this.getOperationalConversationById(id, projectId);
     return latest?.status ?? null;
   }
 
   async claimTeamRequest(id: string, projectId: string): Promise<boolean> {
-    const conversation = await this.getConversationById(id, projectId);
+    const conversation = await this.getOperationalConversationById(id, projectId);
     if (!conversation) return false;
 
     const currentState = parseChatState(conversation.chatState, {
@@ -704,6 +877,7 @@ export class ChatService {
           eq(conversations.id, id),
           eq(conversations.projectId, projectId),
           inArray(conversations.status, ["active", "waiting_agent"]),
+          isNull(conversations.archivedAt),
           conversation.chatState === null
             ? isNull(conversations.chatState)
             : eq(conversations.chatState, conversation.chatState),
@@ -730,7 +904,7 @@ export class ChatService {
     projectId: string,
   ): Promise<"waiting_agent" | "agent_replied" | null> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const conversation = await this.getConversationById(id, projectId);
+      const conversation = await this.getOperationalConversationById(id, projectId);
       if (!conversation) return null;
       const currentState = parseChatState(conversation.chatState, {
         fallbackAiParticipation: fallbackAiParticipationForStatus(
@@ -796,17 +970,11 @@ export class ChatService {
     projectId: string,
     visitorId: string,
   ): Promise<ConversationRow | null> {
-    const rows = await this.db
-      .select()
-      .from(conversations)
-      .where(
-        and(
-          eq(conversations.projectId, projectId),
-          eq(conversations.visitorId, visitorId),
-        ),
-      )
-      .orderBy(desc(conversations.updatedAt))
-      .limit(1);
+    const rows = await buildActiveConversationByVisitorQuery(
+      this.db,
+      projectId,
+      visitorId,
+    );
     const conv = rows[0] ?? null;
     if (!conv) return null;
     // Return non-closed conversations directly
@@ -826,7 +994,7 @@ export class ChatService {
       metadata?: string;
     },
   ): Promise<ConversationRow | null> {
-    const existing = await this.getConversationById(id, projectId);
+    const existing = await this.getOperationalConversationById(id, projectId);
     if (!existing) return null;
 
     const updates: Record<string, unknown> = {};
@@ -847,10 +1015,14 @@ export class ChatService {
       .update(conversations)
       .set(updates)
       .where(
-        and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
+        ),
       );
 
-    return this.getConversationById(id, projectId);
+    return this.getOperationalConversationById(id, projectId);
   }
 
   async updateTelegramThreadId(
@@ -862,7 +1034,11 @@ export class ChatService {
       .update(conversations)
       .set({ telegramThreadId: threadId })
       .where(
-        and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
+        ),
       );
   }
 
@@ -876,6 +1052,7 @@ export class ChatService {
         and(
           eq(conversations.projectId, projectId),
           inArray(conversations.status, ["waiting_agent", "agent_replied"]),
+          isNull(conversations.archivedAt),
         ),
       )
       .orderBy(desc(conversations.updatedAt))
@@ -889,7 +1066,10 @@ export class ChatService {
     projectId: string,
     autoCloseMinutes: number,
   ): Promise<{ closed: boolean; conversation: ConversationRow | null }> {
-    const conversation = await this.getConversationById(conversationId, projectId);
+    const conversation = await this.getOperationalConversationById(
+      conversationId,
+      projectId,
+    );
     if (!conversation) return { closed: false, conversation: null };
     if (conversation.status === "closed") return { closed: false, conversation };
     // Flagged-for-review conversations stay in Needs You until a human acts.
@@ -900,7 +1080,10 @@ export class ChatService {
 
     if (lastActivity < staleThreshold) {
       await this.updateConversationStatus(conversationId, projectId, "closed", "ended");
-      const updated = await this.getConversationById(conversationId, projectId);
+      const updated = await this.getOperationalConversationById(
+        conversationId,
+        projectId,
+      );
       return { closed: true, conversation: updated };
     }
 
@@ -915,6 +1098,7 @@ export class ChatService {
 
     const staleIds = projectConversations
       .filter((conv) => {
+        if (conv.archivedAt) return false;
         if (conv.status === "closed") return false;
         if (conv.status === "waiting_agent") return false;
         const lastActivity = conv.lastActivityAt?.getTime() ?? conv.createdAt.getTime();
@@ -926,7 +1110,12 @@ export class ChatService {
       await this.db
         .update(conversations)
         .set({ status: "closed", closeReason: "ended", updatedAt: new Date() })
-        .where(inArray(conversations.id, staleIds));
+        .where(
+          and(
+            inArray(conversations.id, staleIds),
+            isNull(conversations.archivedAt),
+          ),
+        );
     }
 
     return staleIds;
@@ -946,9 +1135,13 @@ export class ChatService {
         lastActivityAt: now,
       })
       .where(
-        and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
+        ),
       );
-    return this.getConversationById(id, projectId);
+    return this.getOperationalConversationById(id, projectId);
   }
 
   async updateVisitorLastSeen(
@@ -968,9 +1161,13 @@ export class ChatService {
       .update(conversations)
       .set(updates)
       .where(
-        and(eq(conversations.id, id), eq(conversations.projectId, projectId)),
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
+        ),
       );
-    return this.getConversationById(id, projectId);
+    return this.getOperationalConversationById(id, projectId);
   }
 
   async getLastConversationByVisitor(
@@ -984,6 +1181,7 @@ export class ChatService {
         and(
           eq(conversations.projectId, projectId),
           eq(conversations.visitorId, visitorId),
+          isNull(conversations.archivedAt),
         ),
       )
       .orderBy(desc(conversations.updatedAt))
@@ -1002,6 +1200,7 @@ export class ChatService {
         and(
           eq(conversations.projectId, projectId),
           eq(conversations.visitorEmail, email),
+          isNull(conversations.archivedAt),
         ),
       )
       .orderBy(desc(conversations.updatedAt))
@@ -1015,7 +1214,7 @@ export class ChatService {
     conversationId: string,
     projectId: string,
   ): Promise<ConversationChatState> {
-    const conversation = await this.getConversationById(
+    const conversation = await this.getOperationalConversationById(
       conversationId,
       projectId,
     );
@@ -1031,7 +1230,7 @@ export class ChatService {
     projectId: string,
     chatState: ConversationChatState,
   ): Promise<void> {
-    const conversation = await this.getConversationById(
+    const conversation = await this.getOperationalConversationById(
       conversationId,
       projectId,
     );
@@ -1057,6 +1256,7 @@ export class ChatService {
           // we read makes this an optimistic write, so an in-flight AI turn
           // cannot overwrite a human takeover or a later explicit handback.
           eq(conversations.status, conversation.status),
+          isNull(conversations.archivedAt),
           chatStateCondition,
         ),
       );
@@ -1206,91 +1406,81 @@ export class ChatService {
     conversationId: string,
     kind: SystemEventKind,
     content: string,
-  ): Promise<MessageRow> {
+  ): Promise<MessageRow | null> {
     const id = crypto.randomUUID();
     const now = new Date();
     const sources = JSON.stringify({ systemKind: kind });
-    await this.db.insert(messages).values({
-      id, conversationId, role: "system", content, sources, createdAt: now,
+    const rows = await buildConditionalSystemMessageQuery(this.db, {
+      id,
+      conversationId,
+      content,
+      sources,
+      createdAt: now,
     });
-    return {
-      id, conversationId, role: "system", content, sources,
-      imageUrl: null, senderName: null, senderAvatar: null, userId: null,
-      createdAt: now, emailedAt: null, deliveredAt: null, readAt: null,
-    };
+    return rows[0] ?? null;
   }
 
   async addMessage(
     data: Omit<NewMessageRow, "id" | "createdAt">,
-  ): Promise<MessageRow> {
+    projectId: string,
+  ): Promise<MessageRow | null> {
+    if (data.role !== "visitor" && data.role !== "agent") return null;
     const id = crypto.randomUUID();
     const now = new Date();
 
-    await Promise.all([
-      this.db.insert(messages).values({ id, createdAt: now, ...data }),
-      this.db
-        .update(conversations)
-        .set({ updatedAt: now, lastActivityAt: now })
-        .where(eq(conversations.id, data.conversationId)),
-    ]);
-
-    return {
-      id,
-      conversationId: data.conversationId,
-      role: data.role,
-      content: data.content,
-      imageUrl: data.imageUrl ?? null,
-      sources: data.sources ?? null,
-      senderName: data.senderName ?? null,
-      senderAvatar: data.senderAvatar ?? null,
-      userId: data.userId ?? null,
-      createdAt: now,
-      emailedAt: null,
-      deliveredAt: null,
-      readAt: null,
-    };
+    const insertQuery = buildConditionalOperationalMessageQuery(
+      this.db,
+      { id, projectId, createdAt: now, ...data },
+      data.role,
+    );
+    const activityQuery = this.db
+      .update(conversations)
+      .set({ updatedAt: now, lastActivityAt: now })
+      .where(
+        and(
+          eq(conversations.id, data.conversationId),
+          eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
+        ),
+      );
+    const [insertedRows] = await this.db.batch([insertQuery, activityQuery]);
+    return insertedRows[0] ?? null;
   }
 
   async addVisitorMessageWithFirstTurn(
     data: Omit<NewMessageRow, "id" | "createdAt" | "role">,
-  ): Promise<{ message: MessageRow; isFirstVisitorTurn: boolean }> {
+    projectId: string,
+  ): Promise<{ message: MessageRow; isFirstVisitorTurn: boolean } | null> {
     const id = crypto.randomUUID();
     const now = new Date();
-    const insertQuery = this.db.insert(messages).values({
+    const insertQuery = buildConditionalVisitorMessageQuery(this.db, {
       id,
+      projectId,
       createdAt: now,
-      role: "visitor",
       ...data,
     });
     const activityQuery = this.db
       .update(conversations)
       .set({ updatedAt: now, lastActivityAt: now })
-      .where(eq(conversations.id, data.conversationId));
+      .where(
+        and(
+          eq(conversations.id, data.conversationId),
+          eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
+        ),
+      );
     const countQuery = buildVisitorMessageCountQuery(
       this.db,
       data.conversationId,
     );
-    const [, , countRows] = await this.db.batch([
+    const [insertedRows, , countRows] = await this.db.batch([
       insertQuery,
       activityQuery,
       countQuery,
     ]);
+    const message = insertedRows[0] ?? null;
+    if (!message) return null;
     const visitorMessageCount = countRows[0]?.count ?? 0;
-    const message: MessageRow = {
-      id,
-      conversationId: data.conversationId,
-      role: "visitor",
-      content: data.content,
-      imageUrl: data.imageUrl ?? null,
-      sources: data.sources ?? null,
-      senderName: data.senderName ?? null,
-      senderAvatar: data.senderAvatar ?? null,
-      userId: data.userId ?? null,
-      createdAt: now,
-      emailedAt: null,
-      deliveredAt: null,
-      readAt: null,
-    };
     return {
       message,
       isFirstVisitorTurn: visitorMessageCount === 1,
@@ -1301,12 +1491,6 @@ export class ChatService {
     data: Omit<NewMessageRow, "id" | "createdAt" | "role">,
     projectId: string,
   ): Promise<MessageRow | null> {
-    const conversation = await this.getConversationById(
-      data.conversationId,
-      projectId,
-    );
-    if (!conversation) return null;
-
     const id = crypto.randomUUID();
     const now = new Date();
     const takeoverQuery = buildHumanTakeoverQuery(
@@ -1315,29 +1499,14 @@ export class ChatService {
       projectId,
       now,
     );
-    const insertQuery = this.db.insert(messages).values({
+    const insertQuery = buildConditionalAgentMessageQuery(this.db, {
       id,
+      projectId,
       createdAt: now,
-      role: "agent",
       ...data,
     });
-    await this.db.batch([takeoverQuery, insertQuery]);
-
-    return {
-      id,
-      conversationId: data.conversationId,
-      role: "agent",
-      content: data.content,
-      imageUrl: data.imageUrl ?? null,
-      sources: data.sources ?? null,
-      senderName: data.senderName ?? null,
-      senderAvatar: data.senderAvatar ?? null,
-      userId: data.userId ?? null,
-      createdAt: now,
-      emailedAt: null,
-      deliveredAt: null,
-      readAt: null,
-    };
+    const [, insertedRows] = await this.db.batch([takeoverQuery, insertQuery]);
+    return insertedRows[0] ?? null;
   }
 
   async addBotMessageIfOwnershipMatches(
@@ -1371,6 +1540,7 @@ export class ChatService {
         and(
           eq(conversations.id, data.conversationId),
           eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
         ),
       );
     return botMessage;

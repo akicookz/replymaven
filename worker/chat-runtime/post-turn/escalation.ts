@@ -95,14 +95,16 @@ export async function createEscalation(params: {
       "review_summary",
       summary,
     );
-    summaryMessageId = row.id;
-    params.broadcast(row); // live dashboards render the callout immediately
+    if (row) {
+      summaryMessageId = row.id;
+      params.broadcast(row); // live dashboards render the callout immediately
+    }
   }
 
   // Preserve existing metadata keys (country/city/source, etc.) — spread the
   // parsed map so we never clobber them. `updateConversation` also re-merges
   // against the stored row, but the spread keeps this write self-consistent.
-  await params.chatService.updateConversation(
+  const updatedConversation = await params.chatService.updateConversation(
     params.conversation.id,
     params.project.id,
     {
@@ -117,6 +119,9 @@ export async function createEscalation(params: {
       }),
     },
   );
+  if (!updatedConversation) {
+    return { summary, summaryMessageId: null, created: false };
+  }
   logInfo("escalation.conversation_updated", {
     projectId: params.project.id,
     conversationId: params.conversation.id,
