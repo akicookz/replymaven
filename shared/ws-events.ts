@@ -41,6 +41,17 @@ export type ServerEvent =
       archivedAt: number;
     }
   | {
+      type: "conversation:updated";
+      conversationId: string;
+      updatedAt: number;
+    }
+  | {
+      type: "customer:updated";
+      projectId: string;
+      customerIds: string[];
+      updatedAt: number;
+    }
+  | {
       type: "message:status";
       conversationId: string;
       status: "delivered" | "read";

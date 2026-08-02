@@ -26,6 +26,7 @@ import {
 import { stripInternalTokens } from "../streaming/internal-tokens";
 import {
   broadcastClosed,
+  broadcastCustomerUpdated,
   broadcastMessageNew,
   broadcastStatusChange,
 } from "../../realtime/broadcast";
@@ -42,6 +43,7 @@ import {
 } from "../types";
 import { BillingService } from "../../services/billing-service";
 import { ChatService } from "../../services/chat-service";
+import { CustomerIdentityService } from "../../services/customer-identity-service";
 import { GuidelineService } from "../../services/guideline-service";
 import { logError, logInfo, logWarn } from "../../observability";
 import { ProjectService } from "../../services/project-service";
@@ -82,6 +84,38 @@ function getMetadataString(
 ): string | null {
   const value = metadata[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+interface CustomerLastSeenTouchService {
+  touchVisitorLastSeen(
+    projectId: string,
+    customerId: string,
+    visitorId: string,
+    occurredAt: Date,
+  ): Promise<void>;
+}
+
+export async function touchLinkedCustomerAfterVisitorMessage(options: {
+  projectId: string;
+  customerId: string | null;
+  visitorId: string;
+  occurredAt: Date;
+  identityService: CustomerLastSeenTouchService;
+  logFailure: (error: unknown) => void;
+  onTouched?: (customerId: string) => void;
+}): Promise<void> {
+  if (!options.customerId) return;
+  try {
+    await options.identityService.touchVisitorLastSeen(
+      options.projectId,
+      options.customerId,
+      options.visitorId,
+      options.occurredAt,
+    );
+    options.onTouched?.(options.customerId);
+  } catch (error) {
+    options.logFailure(error);
+  }
 }
 
 async function resolveSupportTurnOpening(options: {
@@ -233,6 +267,7 @@ export async function handleWidgetMessageTurn(
   const projectService = new ProjectService(context.db);
   const billingService = new BillingService(context.db, context.env);
   const chatService = new ChatService(context.db);
+  const customerIdentityService = new CustomerIdentityService(context.db);
   const toolService = new ToolService(context.db);
   const guidelineService = new GuidelineService(context.db);
   const resourceService = new ResourceService(context.db, context.env.UPLOADS);
@@ -358,6 +393,7 @@ export async function handleWidgetMessageTurn(
 
   const imageUrl = context.payload.imageUrl ?? null;
   let isFirstVisitorTurn = context.isFirstVisitorTurn ?? false;
+  let visitorMessageOccurredAt = new Date();
   if (!context.visitorMessageAlreadySaved) {
     const visitorResult = await chatService.addVisitorMessageWithFirstTurn(
       {
@@ -374,6 +410,7 @@ export async function handleWidgetMessageTurn(
       );
     }
     const visitorMessage = visitorResult.message;
+    visitorMessageOccurredAt = visitorMessage.createdAt;
     isFirstVisitorTurn = visitorResult.isFirstVisitorTurn;
     markStage("visitor_message_saved");
 
@@ -390,6 +427,33 @@ export async function handleWidgetMessageTurn(
   } else {
     markStage("visitor_message_previously_saved");
   }
+
+  context.executionCtx.waitUntil(
+    touchLinkedCustomerAfterVisitorMessage({
+      projectId: context.project.id,
+      customerId: conversation.customerId,
+      visitorId: conversation.visitorId,
+      occurredAt: visitorMessageOccurredAt,
+      identityService: customerIdentityService,
+      logFailure(error) {
+        logError(
+          "widget_turn.customer_last_seen_failed",
+          error,
+          buildWidgetTurnLogContext(context, turnId, {
+            customerId: conversation.customerId,
+          }),
+        );
+      },
+      onTouched(customerId) {
+        broadcastCustomerUpdated(
+          context.env,
+          context.executionCtx,
+          context.project.id,
+          [customerId],
+        );
+      },
+    }),
+  );
 
   const aiInvocation = parseVisitorAiInvocation(
     context.payload.content,

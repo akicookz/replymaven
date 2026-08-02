@@ -306,6 +306,124 @@ export const updateCrawledPageContentSchema = z.object({
   content: z.string().min(1, "Content is required").max(100000),
 });
 
+// ─── Customers ───────────────────────────────────────────────────────────────
+const customerFieldValueSchema = z.union([
+  z.string().max(500),
+  z.number().finite(),
+  z.boolean(),
+  z.null(),
+]);
+
+const customerCustomFieldsSchema = z
+  .record(z.string().min(1).max(64), customerFieldValueSchema)
+  .refine(
+    (value) => Object.keys(value).length <= 50,
+    "Maximum 50 custom fields",
+  )
+  .refine(
+    (value) =>
+      new TextEncoder().encode(JSON.stringify(value)).byteLength <= 16_384,
+    "Custom fields must be 16 KB or less",
+  );
+
+const customerCoreFields = {
+  name: z.string().trim().max(200).nullable().optional(),
+  email: z.string().trim().email().max(320).nullable().optional(),
+  phone: z.string().trim().max(50).nullable().optional(),
+};
+
+export const createCustomerSchema = z
+  .object({
+    ...customerCoreFields,
+    externalId: z.string().trim().min(1).max(255).nullable().optional(),
+    customFields: customerCustomFieldsSchema.default({}),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.email && !value.externalId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["email"],
+        message: "Email or external ID is required",
+      });
+    }
+  });
+
+export const updateCustomerSchema = z
+  .object({
+    ...customerCoreFields,
+    externalId: z.string().trim().min(1).max(255).nullable().optional(),
+    customFields: customerCustomFieldsSchema.optional(),
+  })
+  .strict();
+
+export const conversationCustomerSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("create"),
+      customer: createCustomerSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("link"),
+      customerId: z.string().trim().min(1).max(100),
+    })
+    .strict(),
+]);
+
+export const customerListQuerySchema = z
+  .object({
+    query: z.string().trim().max(200).optional(),
+    cursor: z.string().trim().max(1000).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+  })
+  .strict();
+
+export const mergeCustomerSchema = z
+  .object({
+    sourceCustomerId: z.string().trim().min(1).max(100),
+  })
+  .strict();
+
+export const customerIdentityTokenPayloadSchema = z
+  .object({
+    v: z.literal(1),
+    projectId: z.string().trim().min(1).max(100),
+    externalId: z.string().trim().min(1).max(255).optional(),
+    email: z.string().trim().email().max(320).optional(),
+    name: z.string().trim().max(200).optional(),
+    phone: z.string().trim().max(50).optional(),
+    customFields: customerCustomFieldsSchema.optional(),
+    iat: z.number().int().nonnegative(),
+    exp: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.email && !value.externalId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["email"],
+        message: "Email or external ID is required",
+      });
+    }
+    if (value.exp <= value.iat || value.exp - value.iat > 3_600) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["exp"],
+        message: "Token lifetime must be between 1 and 3,600 seconds",
+      });
+    }
+  });
+
+export const signedWidgetIdentifySchema = z
+  .object({
+    visitorId: z.string().trim().min(1).max(100),
+    conversationId: z.string().trim().min(1).max(100).optional(),
+    token: z.string().trim().min(1).max(32_768),
+  })
+  .strict();
+
 // ─── Conversations ────────────────────────────────────────────────────────────
 export const createConversationSchema = z.object({
   visitorId: z.string().min(1).max(100),

@@ -16,6 +16,7 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 - **Intro message** -- the first bot message visitors see when they open the widget.
 - **Telegram live agent handoff** -- when the bot cannot answer or the visitor requests a human, the conversation is relayed to the user's Telegram. Agent replies in Telegram are synced back to the widget. When a conversation is in agent mode, the AI is completely silenced and visitor messages are forwarded to Telegram. Agents use `@BotName` commands to hand back to AI (with optional instructions), close conversations, or instruct the bot to respond immediately. New bookings, conversations, and contact form submissions also trigger Telegram notifications when configured.
 - **Canned response auto-drafting** -- after a conversation ends, the AI analyzes it and generates draft canned responses. Users approve or reject drafts from the dashboard.
+- **Customer continuity** -- anonymous widget visitor IDs can be connected to project-scoped customer profiles. Signed server-issued tokens keep exact visitor history together across devices without trusting browser-supplied email.
 
 ---
 
@@ -522,7 +523,7 @@ resources
   content, status (pending|indexed|failed), lastIndexedAt, createdAt, updatedAt
 
 conversations
-  id, projectId (FK projects), visitorId, visitorName, visitorEmail,
+  id, projectId (FK projects), customerId (nullable FK customers), visitorId, visitorName, visitorEmail,
   status (active|waiting_agent|agent_replied|closed), telegramThreadId
   (populated on handoff/new-convo Telegram notification for reply threading),
   metadata (JSON -- geo data, device info, agentHandbackInstructions),
@@ -538,6 +539,14 @@ canned_responses
 
 api_keys
   id, projectId (FK projects), keyHash (SHA-256), prefix, label, createdAt
+
+customers
+  id, projectId (FK projects), name, email, externalId, phone, customFields (JSON),
+  firstSeenAt, lastSeenAt, createdAt, updatedAt
+
+customer_visitors
+  id, projectId, customerId, visitorId, linkedBy (dashboard|signed_widget),
+  createdAt
 ```
 
 ### KV Namespace: CONVERSATIONS_CACHE
@@ -562,6 +571,7 @@ Do NOT re-add conversation-message caching here -- prior attempts introduced sta
 | POST/GET | `/api/auth/*` | Better Auth handler |
 | GET | `/api/widget/:projectSlug/config` | Widget config + quick actions/topics |
 | POST | `/api/widget/:projectSlug/conversations` | Start a new conversation |
+| POST | `/api/widget/:projectSlug/identify` | Verify an opaque signed customer token and attach exact visitor history |
 | POST | `/api/widget/:projectSlug/conversations/:id/messages` | Send message (returns SSE stream, or JSON `{ agentMode: true }` when in agent mode) |
 | GET | `/api/widget/:projectSlug/conversations/:id/messages` | Get conversation history |
 | POST | `/api/telegram/webhook/:projectId` | Telegram bot webhook |
@@ -578,6 +588,12 @@ Do NOT re-add conversation-message caching here -- prior attempts introduced sta
 | GET/POST/DELETE | `/api/projects/:id/quick-actions` | Quick actions CRUD |
 | GET/POST/DELETE | `/api/projects/:id/quick-topics` | Quick topics CRUD |
 | GET/POST/DELETE | `/api/projects/:id/resources` | Resource management |
+| GET/POST | `/api/projects/:id/customers` | List/create customer profiles |
+| GET | `/api/projects/:id/customers/ws` | Project-scoped customer cache update stream |
+| GET/PATCH/DELETE | `/api/projects/:id/customers/:customerId` | Customer detail/profile lifecycle |
+| POST | `/api/projects/:id/conversations/:conversationId/customer` | Promote a visitor or link a conversation to a customer |
+| POST | `/api/projects/:id/customers/:targetCustomerId/merge` | Merge a duplicate customer into the target profile |
+| POST | `/api/projects/:id/customer-identity-secret/rotate` | Create or rotate the project-scoped signing secret |
 | POST | `/api/projects/:id/resources/:resId/reindex` | Trigger re-index |
 | GET | `/api/projects/:id/conversations` | List conversations |
 | GET | `/api/projects/:id/conversations/:convId` | Conversation detail + messages |
@@ -609,11 +625,29 @@ window.ReplyMaven.close()
 window.ReplyMaven.toggle()
 window.ReplyMaven.sendMessage("Hello")
 window.ReplyMaven.identify({ name: "John", email: "john@example.com" })
+await window.ReplyMaven.identify({ token })
+window.ReplyMaven.reset()
 window.ReplyMaven.setPageContext({ page: "Pricing", plan: "Pro" })
 window.ReplyMaven.setMetadata({ internalId: "abc123" })
 window.ReplyMaven.requestNotifications()
 window.ReplyMaven.openInquiryForm()
 ```
+
+### Customer Continuity
+
+- A customer is the canonical project-scoped person. The current stable application `externalId` and normalized email live directly on that customer; they are not stored as an identity or alias history.
+- Anonymous `visitorId` remains the widget device ID. `customer_visitors` only maps exact visitor IDs to customers so their conversations stay on one profile. It does not track per-device first/last-seen activity or other analytics.
+- Dashboard create/link/promote actions are trusted. They attach every same-project conversation with the exact visitor ID, regardless of whether the conversation is active, closed, or archived.
+- Every new chat, inquiry, or ticket resolves the visitor ID before insertion and stores the resulting `customerId`, keeping future threads on the same profile.
+- Signed widget identify uses a project-scoped HMAC-SHA256 token with `v`, `projectId`, `iat`, `exp`, and at least `externalId` or email. Tokens may also carry name, phone, and primitive custom fields. Prefer a stable application `externalId` and a 15-minute lifetime; one hour is the maximum.
+- The per-project identity secret is encrypted in `project_settings.customerIdentitySecret`, returned in plaintext only when created or rotated, and must never be shipped to browser code.
+- Site owners should call `identify({ token })` as soon as authenticated data is available. They may start with only `externalId`, then fetch a fresh token and identify again whenever email, name, phone, or custom fields become available or change.
+- Signed identify is serialized in invocation order and returns a promise. Await it so token rejection is observable before continuing an account lifecycle operation.
+- For an already-connected visitor ID, at least one signed external ID or email must resolve to the same customer before profile enrichment is accepted. An entirely unmatched signed account conflicts rather than relabeling existing history.
+- Unsigned `identify({ name, email, phone, metadata })` only updates the current conversation snapshot. It never creates a customer or attaches earlier threads.
+- `reset()` rotates `rm_visitor_id` and clears conversation-scoped widget state. Call it before logout or account switching.
+- External ID, email, and visitor-link conflicts fail without mutation. Customers are never auto-merged.
+- Customer mutations publish a project-scoped realtime event so customer lists and details refresh even when no conversation changed.
 
 ### SSE Streaming Flow
 

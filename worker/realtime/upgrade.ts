@@ -9,6 +9,7 @@ interface UpgradeContext {
   projectId: string;
   kind: "agent" | "visitor";
   subjectId: string;
+  roomKind?: "conversation" | "customer_project";
 }
 
 async function forwardUpgradeToDO(
@@ -28,6 +29,7 @@ async function forwardUpgradeToDO(
   forwardHeaders.set("x-subject-id", ctx.subjectId);
   forwardHeaders.set("x-conversation-id", ctx.conversationId);
   forwardHeaders.set("x-project-id", ctx.projectId);
+  forwardHeaders.set("x-room-kind", ctx.roomKind ?? "conversation");
 
   return stub.fetch(
     new Request("https://do/connect", {
@@ -106,5 +108,31 @@ export async function handleDashboardWsUpgrade(
     projectId: project.id,
     kind: "agent",
     subjectId: user.id,
+  });
+}
+
+export async function handleCustomerProjectWsUpgrade(
+  c: Context<HonoAppContext>,
+): Promise<Response> {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+  const projectId = c.req.param("id");
+  if (!projectId) return c.json({ error: "Missing parameters" }, 400);
+
+  const project = await new ProjectService(c.get("db")).getProjectById(
+    projectId,
+  );
+  const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+  if (!project || project.userId !== effectiveUserId) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  return forwardUpgradeToDO(c, {
+    conversationId: `customer-project:${projectId}`,
+    projectId,
+    kind: "agent",
+    subjectId: user.id,
+    roomKind: "customer_project",
   });
 }

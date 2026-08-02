@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { drizzle as drizzleSqlite } from "drizzle-orm/bun-sqlite";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import { schema } from "../db";
 import {
   buildAiResolutionQuery,
   buildActiveConversationByVisitorQuery,
@@ -23,6 +26,7 @@ function makeConversation(overrides: Partial<ConversationRow>): ConversationRow 
   const now = new Date();
   return {
     id: "conv-1", projectId: "project-1", visitorId: "visitor-1",
+    customerId: null,
     visitorName: null, visitorEmail: null, status: "active", closeReason: null,
     telegramThreadId: null, metadata: null, chatState: null, lastActivityAt: now,
     visitorLastSeenAt: null, visitorPresence: "active", visitorLastOnlineAt: null,
@@ -35,6 +39,57 @@ function makeConversation(overrides: Partial<ConversationRow>): ConversationRow 
 function makeUpdatingDb(): DrizzleD1Database<Record<string, unknown>> {
   const db = { update: () => ({ set: () => ({ where: async () => undefined }) }) };
   return db as unknown as DrizzleD1Database<Record<string, unknown>>;
+}
+
+function createConversationContinuityService(): {
+  service: ChatService;
+  sqlite: Database;
+} {
+  const sqlite = new Database(":memory:");
+  sqlite.exec(`CREATE TABLE customers (
+    id text PRIMARY KEY NOT NULL,
+    project_id text NOT NULL
+  )`);
+  sqlite.exec(`CREATE TABLE customer_visitors (
+    id text PRIMARY KEY NOT NULL,
+    project_id text NOT NULL,
+    customer_id text NOT NULL,
+    visitor_id text NOT NULL,
+    linked_by text NOT NULL,
+    created_at integer DEFAULT (unixepoch()) NOT NULL
+  )`);
+  sqlite.exec(`CREATE TABLE conversations (
+    id text PRIMARY KEY NOT NULL,
+    project_id text NOT NULL,
+    customer_id text,
+    visitor_id text NOT NULL,
+    visitor_name text,
+    visitor_email text,
+    status text DEFAULT 'active' NOT NULL,
+    close_reason text,
+    telegram_thread_id text,
+    metadata text,
+    chat_state text,
+    last_activity_at integer DEFAULT (unixepoch()) NOT NULL,
+    visitor_last_seen_at integer,
+    visitor_presence text DEFAULT 'active',
+    visitor_last_online_at integer,
+    snoozed_until integer,
+    archived_at integer,
+    purge_started_at integer,
+    external_action_started_at integer,
+    priority text DEFAULT 'medium' NOT NULL,
+    assignee_id text,
+    created_at integer DEFAULT (unixepoch()) NOT NULL,
+    updated_at integer DEFAULT (unixepoch()) NOT NULL
+  )`);
+  const db = drizzleSqlite(sqlite, { schema });
+  return {
+    service: new ChatService(
+      db as unknown as DrizzleD1Database<Record<string, unknown>>,
+    ),
+    sqlite,
+  };
 }
 
 function makeOwnershipDb(row: ConversationRow): {
@@ -286,6 +341,131 @@ describe("ChatService ownership and atomic writes", () => {
 });
 
 describe("ChatService tenant and AI ownership guards", () => {
+  test("resolves a visitor mapping inside conversation insertion", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    sqlite
+      .query("INSERT INTO customers (id, project_id) VALUES (?, ?)")
+      .run("customer-1", "project-1");
+    sqlite
+      .query(
+        "INSERT INTO customer_visitors (id, project_id, customer_id, visitor_id, linked_by) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(
+        "visitor-link-1",
+        "project-1",
+        "customer-1",
+        "visitor-1",
+        "signed_widget",
+      );
+
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: null,
+      visitorEmail: null,
+      metadata: null,
+    });
+
+    expect(conversation.customerId).toBe("customer-1");
+  });
+
+  test("prefers the current visitor mapping over stale caller ownership", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    sqlite
+      .query("INSERT INTO customers (id, project_id) VALUES (?, ?), (?, ?)")
+      .run(
+        "customer-current",
+        "project-1",
+        "customer-before-merge",
+        "project-1",
+      );
+    sqlite
+      .query(
+        "INSERT INTO customer_visitors (id, project_id, customer_id, visitor_id, linked_by) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(
+        "visitor-link-1",
+        "project-1",
+        "customer-current",
+        "visitor-1",
+        "dashboard",
+      );
+
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: "customer-before-merge",
+      visitorId: "visitor-1",
+      visitorName: null,
+      visitorEmail: null,
+      metadata: null,
+    });
+
+    expect(conversation.customerId).toBe("customer-current");
+  });
+
+  test("discards stale caller ownership after customer deletion", async () => {
+    const { service } = createConversationContinuityService();
+
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: "customer-deleted",
+      visitorId: "visitor-1",
+      visitorName: null,
+      visitorEmail: null,
+      metadata: null,
+    });
+
+    expect(conversation.customerId).toBeNull();
+  });
+
+  test("persists a pre-resolved customer on conversation creation", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    sqlite
+      .query("INSERT INTO customers (id, project_id) VALUES (?, ?)")
+      .run("customer-1", "project-1");
+
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: "customer-1",
+      visitorId: "visitor-1",
+      visitorName: "Customer name",
+      visitorEmail: "customer@example.com",
+      metadata: null,
+    });
+
+    expect(conversation.customerId).toBe("customer-1");
+    expect(conversation).toMatchObject({
+      visitorName: "Customer name",
+      visitorEmail: "customer@example.com",
+    });
+  });
+
+  test("includes customer identity in incremental inbox updates", async () => {
+    let selectedKeys: string[] = [];
+    const db = {
+      select: (projection: Record<string, unknown>) => {
+        selectedKeys = Object.keys(projection);
+        return {
+          from: () => ({
+            where: () => ({
+              orderBy: () => ({
+                limit: async () => [],
+              }),
+            }),
+          }),
+        };
+      },
+    } as unknown as DrizzleD1Database<Record<string, unknown>>;
+
+    await new ChatService(db).getConversationUpdatesSince(
+      "project-1",
+      new Date("2026-08-01T00:00:00.000Z"),
+    );
+
+    expect(selectedKeys).toContain("customerId");
+  });
+
   test("scopes needs-review rows and inbox counts to the current project", () => {
     const db = drizzle({} as never);
     const now = new Date("2026-08-01T00:00:00.000Z");

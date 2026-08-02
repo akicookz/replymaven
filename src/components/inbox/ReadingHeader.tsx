@@ -10,7 +10,12 @@ import {
   ChevronUpIcon,
   ChevronDownIcon,
   XIcon,
+  Link2Icon,
+  UserPlusIcon,
 } from "lucide-react";
+import { shouldOfferCustomerAssignment } from "@/lib/customers";
+import { Link } from "react-router-dom";
+import type { CustomerDetail } from "../../../shared/customer-types";
 import type { Conversation } from "@/lib/inbox/types";
 import { countryFlag } from "@/lib/inbox/country-flag";
 import { getVisitorPresenceState } from "@/lib/conversation-presence";
@@ -91,6 +96,8 @@ function conversationState(c: Conversation): { label: string; dotClass: string }
 
 interface ReadingHeaderProps {
   conversation: Conversation;
+  customer: CustomerDetail | null;
+  customerProfileHref?: string;
   onResolve: (convId: string) => void;
   onSnooze: (convId: string, until: number | null) => void;
   onFlagSpam: (convId: string) => void;
@@ -98,6 +105,8 @@ interface ReadingHeaderProps {
   onBlock: (convId: string) => void;
   onAssign: (convId: string, assigneeId: string | null) => void;
   onArchive: (convId: string, action: "archive" | "unarchive") => void;
+  onCreateCustomer: () => void;
+  onLinkCustomer: () => void;
   onFocus: () => void;
   /** Mobile: go back to the conversation list. */
   onBack?: () => void;
@@ -118,6 +127,8 @@ interface ReadingHeaderProps {
 
 export default function ReadingHeader({
   conversation,
+  customer,
+  customerProfileHref,
   onResolve,
   onSnooze,
   onFlagSpam,
@@ -125,6 +136,8 @@ export default function ReadingHeader({
   onBlock,
   onAssign,
   onArchive,
+  onCreateCustomer,
+  onLinkCustomer,
   onFocus,
   onBack,
   search,
@@ -158,9 +171,12 @@ export default function ReadingHeader({
   const isBlocked = !!conversation.visitorBlocked;
   const isArchived = !!conversation.archivedAt;
 
-  const displayName =
+  const visitorDisplayName =
     conversation.visitorName ?? conversation.visitorEmail ?? conversation.visitorId;
-  const initials = getInitials(conversation.visitorName ?? conversation.visitorEmail);
+  const displayName = customer?.name ?? customer?.email ?? visitorDisplayName;
+  const initials = getInitials(
+    customer?.name ?? customer?.email ?? conversation.visitorName ?? conversation.visitorEmail,
+  );
   const tint = avatarTint(conversation.visitorId);
 
   // Toggle: when already snoozed, the lit clock un-snoozes (until=null);
@@ -391,17 +407,33 @@ export default function ReadingHeader({
             {/* Name row */}
             <div className="flex items-center gap-1.5 min-w-0">
               {flag && <span className="text-base leading-none shrink-0">{flag}</span>}
-              <span className="text-[18px] font-semibold text-ink-1 leading-snug truncate">
-                {displayName}
-              </span>
+              {customer && customerProfileHref ? (
+                <Link
+                  to={customerProfileHref}
+                  className="truncate text-[18px] font-semibold leading-snug text-ink-1 transition-colors hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                >
+                  {displayName}
+                </Link>
+              ) : (
+                <span className="truncate text-[18px] font-semibold leading-snug text-ink-1">
+                  {displayName}
+                </span>
+              )}
             </div>
 
             {/* Email */}
-            {conversation.visitorEmail && (
+            {customer ? (
+              <span className="truncate text-[12px] leading-none text-ink-7">
+                Conversation snapshot: {visitorDisplayName}
+                {conversation.visitorEmail && conversation.visitorEmail !== visitorDisplayName
+                  ? ` · ${conversation.visitorEmail}`
+                  : ""}
+              </span>
+            ) : conversation.visitorEmail ? (
               <span className="text-[12px] text-ink-7 leading-none truncate">
                 {conversation.visitorEmail}
               </span>
-            )}
+            ) : null}
 
             {/* Meta line — single row; stays put while there's width to spare */}
             <div className="flex items-center gap-2 mt-1 whitespace-nowrap">
@@ -437,10 +469,58 @@ export default function ReadingHeader({
                 </span>
               ))}
             </div>
+
+            {shouldOfferCustomerAssignment(
+              conversation.customerId,
+              conversation.archivedAt,
+            ) ? (
+              <div className="mt-2 flex items-center gap-1.5 lg:hidden">
+                <button
+                  type="button"
+                  onClick={onCreateCustomer}
+                  className="glass-button flex min-h-10 items-center gap-1.5 rounded-glass px-2.5 text-[11px] text-ink-3 active:scale-[0.96]"
+                >
+                  <UserPlusIcon className="size-3.5" />
+                  Create customer
+                </button>
+                <button
+                  type="button"
+                  onClick={onLinkCustomer}
+                  className="glass-button flex min-h-10 items-center gap-1.5 rounded-glass px-2.5 text-[11px] text-ink-3 active:scale-[0.96]"
+                >
+                  <Link2Icon className="size-3.5" />
+                  Link
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
 
-        {/* Right: Priority menu */}
+        {/* Right: customer actions + priority */}
+        {shouldOfferCustomerAssignment(
+          conversation.customerId,
+          conversation.archivedAt,
+        ) ? (
+          <div className="hidden shrink-0 items-center gap-1.5 lg:flex">
+            <button
+              type="button"
+              onClick={onCreateCustomer}
+              className="glass-button flex min-h-10 items-center gap-1.5 rounded-glass px-3 text-[12px] text-ink-3 transition-[color,scale] duration-150 ease-out hover:text-ink-1 active:scale-[0.96]"
+            >
+              <UserPlusIcon className="size-3.5" />
+              Create customer
+            </button>
+            <button
+              type="button"
+              onClick={onLinkCustomer}
+              className="glass-button flex min-h-10 items-center gap-1.5 rounded-glass px-3 text-[12px] text-ink-3 transition-[color,scale] duration-150 ease-out hover:text-ink-1 active:scale-[0.96]"
+            >
+              <Link2Icon className="size-3.5" />
+              Link
+            </button>
+          </div>
+        ) : null}
+
         {!isArchived && (
           <div className="shrink-0 mt-0.5">
             <PriorityMenu

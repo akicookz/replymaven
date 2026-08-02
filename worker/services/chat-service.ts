@@ -2,6 +2,8 @@ import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq, desc, and, gt, lt, lte, ne, isNull, inArray, isNotNull, or, like, sql, type SQL } from "drizzle-orm";
 import {
   conversations,
+  customerVisitors,
+  customers,
   messages,
   type ConversationRow,
   type NewConversationRow,
@@ -805,6 +807,7 @@ export class ChatService {
       .select({
         id: conversations.id,
         projectId: conversations.projectId,
+        customerId: conversations.customerId,
         visitorId: conversations.visitorId,
         visitorName: conversations.visitorName,
         visitorEmail: conversations.visitorEmail,
@@ -851,6 +854,22 @@ export class ChatService {
       .values({
         id,
         ...data,
+        customerId: sql`COALESCE(
+          (
+            SELECT ${customerVisitors.customerId}
+            FROM ${customerVisitors}
+            WHERE ${customerVisitors.projectId} = ${data.projectId}
+              AND ${customerVisitors.visitorId} = ${data.visitorId}
+            LIMIT 1
+          ),
+          (
+            SELECT ${customers.id}
+            FROM ${customers}
+            WHERE ${customers.projectId} = ${data.projectId}
+              AND ${customers.id} = ${data.customerId}
+            LIMIT 1
+          )
+        )`,
         chatState: JSON.stringify(createInitialChatState()),
       });
     return (await this.getConversationById(id, data.projectId))!;

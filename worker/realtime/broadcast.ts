@@ -133,6 +133,45 @@ export function broadcastArchived(
   });
 }
 
+export function broadcastConversationUpdated(
+  env: AppEnv,
+  ctx: ExecutionContext,
+  conversationId: string,
+): void {
+  dispatch(
+    env,
+    ctx,
+    conversationId,
+    {
+      type: "conversation:updated",
+      conversationId,
+      updatedAt: Date.now(),
+    },
+    { audience: "agents" },
+  );
+}
+
+export function broadcastCustomerUpdated(
+  env: AppEnv,
+  ctx: ExecutionContext,
+  projectId: string,
+  customerIds: string[],
+): void {
+  if (customerIds.length === 0) return;
+  dispatch(
+    env,
+    ctx,
+    `customer-project:${projectId}`,
+    {
+      type: "customer:updated",
+      projectId,
+      customerIds,
+      updatedAt: Date.now(),
+    },
+    { audience: "agents" },
+  );
+}
+
 export function broadcastMessageStatus(
   env: AppEnv,
   ctx: ExecutionContext,

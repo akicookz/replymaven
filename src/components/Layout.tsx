@@ -152,6 +152,7 @@ function Layout() {
 
   const workspaceNav = currentProject ? [
     { label: "Dashboard", href: `/app/projects/${currentProject.id}`,           icon: LayoutDashboard, exact: true },
+    { label: "Customers", href: `/app/projects/${currentProject.id}/customers`, icon: Users },
     { label: "Knowledge", href: `/app/projects/${currentProject.id}/knowledge`, icon: BookOpen },
   ] : [];
 

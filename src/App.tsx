@@ -14,6 +14,8 @@ import { useSubscription } from "./hooks/use-subscription";
 import Dashboard from "./pages/Dashboard";
 import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
+import Customers from "./pages/Customers";
+import CustomerDetail from "./pages/CustomerDetail";
 import Knowledge from "./pages/Knowledge";
 import QuickActions from "./pages/QuickActions";
 import Configuration from "./pages/Configuration";
@@ -215,6 +217,14 @@ function App() {
         <Route
           path="projects/:projectId/conversations"
           element={<Conversations />}
+        />
+        <Route
+          path="projects/:projectId/customers"
+          element={<Customers />}
+        />
+        <Route
+          path="projects/:projectId/customers/:customerId"
+          element={<CustomerDetail />}
         />
         <Route
           path="projects/:projectId/knowledge"

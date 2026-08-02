@@ -53,6 +53,7 @@ export const projectSettings = sqliteTable(
     geminiApiKey: text("gemini_api_key"), // deprecated: platform key used instead
     aiSearchInstanceName: text("ai_search_instance_name"),
     telegramBotToken: text("telegram_bot_token"), // encrypted
+    customerIdentitySecret: text("customer_identity_secret"), // encrypted
     telegramChatId: text("telegram_chat_id"),
     companyName: text("company_name"),
     companyUrl: text("company_url"),
@@ -360,6 +361,82 @@ export const crawledPages = sqliteTable(
 export type CrawledPageRow = typeof crawledPages.$inferSelect;
 export type NewCrawledPageRow = typeof crawledPages.$inferInsert;
 
+// ─── Customers ───────────────────────────────────────────────────────────────
+
+export const customers = sqliteTable(
+  "customers",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    externalId: text("external_id"),
+    name: text("name"),
+    email: text("email"),
+    phone: text("phone"),
+    customFields: text("custom_fields").notNull().default("{}"),
+    firstSeenAt: integer("first_seen_at", { mode: "timestamp" }),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("idx_customers_project").on(table.projectId),
+    uniqueIndex("idx_customers_project_external_id").on(
+      table.projectId,
+      table.externalId,
+    ),
+    uniqueIndex("idx_customers_project_email").on(
+      table.projectId,
+      table.email,
+    ),
+    index("idx_customers_project_updated").on(
+      table.projectId,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export type CustomerRow = typeof customers.$inferSelect;
+export type NewCustomerRow = typeof customers.$inferInsert;
+
+// ─── Customer Visitors ───────────────────────────────────────────────────────
+
+export const customerVisitors = sqliteTable(
+  "customer_visitors",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    visitorId: text("visitor_id").notNull(),
+    linkedBy: text("linked_by", {
+      enum: ["dashboard", "signed_widget"],
+    }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_customer_visitors_project_visitor").on(
+      table.projectId,
+      table.visitorId,
+    ),
+    index("idx_customer_visitors_customer").on(table.customerId),
+  ],
+);
+
+export type CustomerVisitorRow = typeof customerVisitors.$inferSelect;
+export type NewCustomerVisitorRow = typeof customerVisitors.$inferInsert;
+
 // ─── Conversations ────────────────────────────────────────────────────────────
 
 export const conversations = sqliteTable(
@@ -369,6 +446,9 @@ export const conversations = sqliteTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    customerId: text("customer_id").references(() => customers.id, {
+      onDelete: "set null",
+    }),
     visitorId: text("visitor_id").notNull(),
     visitorName: text("visitor_name"),
     visitorEmail: text("visitor_email"),
@@ -423,6 +503,15 @@ export const conversations = sqliteTable(
     index("idx_conversations_visitor").on(table.visitorId),
     index("idx_conversations_status").on(table.status),
     index("idx_conversations_assignee").on(table.assigneeId),
+    index("idx_conversations_project_customer").on(
+      table.projectId,
+      table.customerId,
+    ),
+    index("idx_conversations_project_customer_activity").on(
+      table.projectId,
+      table.customerId,
+      table.lastActivityAt,
+    ),
     index("idx_conversations_project_archived").on(
       table.projectId,
       table.archivedAt,
@@ -994,6 +1083,8 @@ export const schema = {
   quickActions,
   resources,
   crawledPages,
+  customers,
+  customerVisitors,
   conversations,
   messages,
   ticketConfig,

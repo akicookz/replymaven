@@ -20,6 +20,12 @@ import {
   shouldShowMessageContent,
 } from "../shared/message-images";
 import { claimWidgetInstance } from "./instance-guard";
+import {
+  isSignedIdentityInput,
+  planCustomerIdentityReset,
+  WidgetIdentitySessionGuard,
+  type WidgetIdentitySessionToken,
+} from "./customer-identity-state";
 
 (function () {
   // Find the script tag to get config
@@ -50,7 +56,7 @@ import { claimWidgetInstance } from "./instance-guard";
   let isOpen = false;
   let conversationId: string | null = null;
   let conversationStatus: string | null = null;
-  const visitorId =
+  let visitorId =
     localStorage.getItem("rm_visitor_id") || generateVisitorId();
   let visitorInfo: { name?: string; email?: string; phone?: string } = {};
   let customMetadata: Record<string, string> = {};
@@ -59,6 +65,7 @@ import { claimWidgetInstance } from "./instance-guard";
   let config: Record<string, any> | null = null;
   let _isHandedOff = false;
   let isBanned = false;
+  const identitySessions = new WidgetIdentitySessionGuard();
 
   // Polling state
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -186,7 +193,7 @@ import { claimWidgetInstance } from "./instance-guard";
   let titleOverridden = false;
 
   function generateVisitorId(): string {
-    const id = "v_" + Math.random().toString(36).substring(2, 15);
+    const id = `v_${crypto.randomUUID()}`;
     localStorage.setItem("rm_visitor_id", id);
     return id;
   }
@@ -3450,10 +3457,17 @@ import { claimWidgetInstance } from "./instance-guard";
     }
 
     pendingImageFile = file;
+    const identitySession = identitySessions.capture();
 
     // Show preview
     const reader = new FileReader();
     reader.onload = () => {
+      if (
+        !identitySessions.isCurrent(identitySession) ||
+        pendingImageFile !== file
+      ) {
+        return;
+      }
       imagePreviewImg.src = reader.result as string;
       imagePreviewImg.title = file.name;
       imagePreview.classList.add("visible");
@@ -4039,6 +4053,9 @@ import { claimWidgetInstance } from "./instance-guard";
 
           submitBtn2.disabled = true;
           submitBtn2.textContent = "Sending...";
+          const identitySession = identitySessions.capture();
+          const requestVisitorId = visitorId;
+          const requestVisitorInfo = { ...visitorInfo };
 
           const data: Record<string, string> = {};
           for (const fi of fieldInputs) {
@@ -4053,18 +4070,21 @@ import { claimWidgetInstance } from "./instance-guard";
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                signal: identitySession.signal,
                 body: JSON.stringify({
-                  visitorId,
-                  visitorName: visitorInfo.name,
-                  visitorEmail: visitorInfo.email,
+                  visitorId: requestVisitorId,
+                  visitorName: requestVisitorInfo.name,
+                  visitorEmail: requestVisitorInfo.email,
                   data,
                   streamAi: true,
                 }),
               },
             );
+            if (!identitySessions.isCurrent(identitySession)) return;
 
             if (!res.ok) {
               const err = await res.json().catch(() => null);
+              if (!identitySessions.isCurrent(identitySession)) return;
               formError.textContent =
                 (err as { error?: string })?.error ||
                 "Something went wrong. Please try again.";
@@ -4084,7 +4104,9 @@ import { claimWidgetInstance } from "./instance-guard";
             showChatScreen();
             await handleSendMessage(formDisplayMessage, {
               acceptedResponse: res,
+              identitySession,
             });
+            if (!identitySessions.isCurrent(identitySession)) return;
 
             // Reset the form so it stays usable if the visitor returns to it
             // (the backend appends repeat submissions to the same conversation).
@@ -4096,6 +4118,7 @@ import { claimWidgetInstance } from "./instance-guard";
             submitBtn2.textContent = "Send message";
 
           } catch {
+            if (!identitySessions.isCurrent(identitySession)) return;
             formError.textContent =
               "Couldn't send message. Please check your connection.";
             formError.style.display = "block";
@@ -4318,8 +4341,11 @@ import { claimWidgetInstance } from "./instance-guard";
     }
   }
 
-  async function createConversation() {
+  async function createConversation(
+    session: WidgetIdentitySessionToken = identitySessions.capture(),
+  ) {
     if (conversationId) return;
+    const requestVisitorId = visitorId;
     try {
       const deviceMeta = collectDeviceMetadata();
       const metadata = { ...deviceMeta, ...customMetadata };
@@ -4329,8 +4355,9 @@ import { claimWidgetInstance } from "./instance-guard";
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: session.signal,
           body: JSON.stringify({
-            visitorId,
+            visitorId: requestVisitorId,
             visitorName: visitorInfo.name,
             visitorEmail: visitorInfo.email,
             metadata,
@@ -4339,6 +4366,12 @@ import { claimWidgetInstance } from "./instance-guard";
       );
       if (res.ok) {
         const data = await res.json();
+        if (
+          !identitySessions.isCurrent(session) ||
+          visitorId !== requestVisitorId
+        ) {
+          return;
+        }
         conversationId = data.id;
         conversationStatus = data.status ?? "active";
         persistConversationId(data.id);
@@ -4353,6 +4386,7 @@ import { claimWidgetInstance } from "./instance-guard";
         }
       }
     } catch (err) {
+      if (!identitySessions.isCurrent(session)) return;
       console.error("[ReplyMaven] Failed to create conversation:", err);
     }
   }
@@ -4360,6 +4394,7 @@ import { claimWidgetInstance } from "./instance-guard";
   interface SendMessageOptions {
     acceptedResponse?: Response;
     contactFallbackMessage?: string;
+    identitySession?: WidgetIdentitySessionToken;
   }
 
   interface ContactAcceptedClientPayload {
@@ -4399,6 +4434,10 @@ import { claimWidgetInstance } from "./instance-guard";
     text: string,
     options: SendMessageOptions = {},
   ) {
+    const identitySession =
+      options.identitySession ?? identitySessions.capture();
+    if (!identitySessions.isCurrent(identitySession)) return;
+    const requestVisitorId = visitorId;
     if (isBanned) return;
     // Prevent duplicate sends
     if (isSending) return;
@@ -4420,8 +4459,9 @@ import { claimWidgetInstance } from "./instance-guard";
 
       // Create conversation if needed
       if (!conversationId && !options.acceptedResponse) {
-        await createConversation();
+        await createConversation(identitySession);
       }
+      if (!identitySessions.isCurrent(identitySession)) return;
       if (!conversationId && !options.acceptedResponse) return;
       let streamedConversationId = conversationId;
 
@@ -4465,13 +4505,20 @@ import { claimWidgetInstance } from "./instance-guard";
           const formData = new FormData();
           formData.append("file", imageFile);
           formData.append("conversationId", conversationId!);
-          formData.append("visitorId", visitorId);
+          formData.append("visitorId", requestVisitorId);
           const uploadRes = await fetch(
             `${baseUrl}/api/widget/${projectSlug}/upload`,
-            { method: "POST", body: formData },
+            {
+              method: "POST",
+              body: formData,
+              signal: identitySession.signal,
+            },
           );
           if (!uploadRes.ok) throw new Error(`upload ${uploadRes.status}`);
           const uploadData = await uploadRes.json();
+          if (!identitySessions.isCurrent(identitySession)) {
+            throw new DOMException("Identity session reset", "AbortError");
+          }
           return uploadData.url;
         };
         try {
@@ -4479,8 +4526,10 @@ import { claimWidgetInstance } from "./instance-guard";
         } catch {
           try {
             await new Promise((resolve) => setTimeout(resolve, 600));
+            if (!identitySessions.isCurrent(identitySession)) return;
             uploadedImageUrl = await tryUpload();
           } catch (err) {
+            if (!identitySessions.isCurrent(identitySession)) return;
             console.error("[ReplyMaven] Image upload failed:", err);
             if (lastVisitorStatusEl) {
               lastVisitorStatusEl.textContent = "Image failed to upload";
@@ -4535,9 +4584,12 @@ import { claimWidgetInstance } from "./instance-guard";
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
+              signal: identitySession.signal,
               body: JSON.stringify(body),
             },
           ));
+
+        if (!identitySessions.isCurrent(identitySession)) return;
 
         if (!res.ok) {
           hideTyping();
@@ -4624,6 +4676,7 @@ import { claimWidgetInstance } from "./instance-guard";
           const { done, value } = await reader.read();
           if (done) break;
           if (
+            !identitySessions.isCurrent(identitySession) ||
             streamedConversationId &&
             conversationId !== streamedConversationId
           ) {
@@ -4902,6 +4955,7 @@ import { claimWidgetInstance } from "./instance-guard";
         }
         clearTimeout(streamTimeout);
       } catch {
+        if (!identitySessions.isCurrent(identitySession)) return;
         hideTyping();
         if (lastVisitorStatusEl) {
           lastVisitorStatusEl.textContent = "Failed to send";
@@ -4913,24 +4967,26 @@ import { claimWidgetInstance } from "./instance-guard";
         );
       }
     } finally {
-      isStreaming = false;
-      lastNewMessageAt = Date.now();
-      if (conversationStatus !== "closed") {
-        startPolling();
-      }
-      isSending = false;
-      sendBtn.disabled = false;
-      input.disabled = false;
-      // Re-enable and focus the correct input
-      if (isInlineBarVariant) {
-        inlineBarInput.disabled = false;
-        if (!isMobileViewport()) {
-          inlineBarInput.focus();
+      if (identitySessions.isCurrent(identitySession)) {
+        isStreaming = false;
+        lastNewMessageAt = Date.now();
+        if (conversationStatus !== "closed") {
+          startPolling();
+        }
+        isSending = false;
+        sendBtn.disabled = false;
+        input.disabled = false;
+        // Re-enable and focus the correct input
+        if (isInlineBarVariant) {
+          inlineBarInput.disabled = false;
+          if (!isMobileViewport()) {
+            inlineBarInput.focus();
+          } else {
+            input.focus();
+          }
         } else {
           input.focus();
         }
-      } else {
-        input.focus();
       }
     }
   }
@@ -5967,16 +6023,25 @@ import { claimWidgetInstance } from "./instance-guard";
       }
       // Skip when WS is doing the job
       if (wsHealthy) return;
+      const identitySession = identitySessions.capture();
+      const requestedConversationId = conversationId;
       try {
         const presence = document.hidden ? "background" : "active";
         const res = await fetch(
-          `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/heartbeat`,
+          `${baseUrl}/api/widget/${projectSlug}/conversations/${requestedConversationId}/heartbeat`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            signal: identitySession.signal,
             body: JSON.stringify({ presence }),
           },
         );
+        if (
+          !identitySessions.isCurrent(identitySession) ||
+          conversationId !== requestedConversationId
+        ) {
+          return;
+        }
         if (!res.ok) {
           if (res.status === 410 || res.status === 404) {
             retireArchivedConversation();
@@ -5984,6 +6049,12 @@ import { claimWidgetInstance } from "./instance-guard";
           return;
         }
         const data = await res.json();
+        if (
+          !identitySessions.isCurrent(identitySession) ||
+          conversationId !== requestedConversationId
+        ) {
+          return;
+        }
         if (data.status && data.status !== conversationStatus) {
           conversationStatus = data.status;
           if (data.status === "closed") {
@@ -6007,14 +6078,22 @@ import { claimWidgetInstance } from "./instance-guard";
     if (!conversationId) return;
     if (isStreaming) return; // Don't poll during active SSE stream
     if (wsHealthy) return; // WS is delivering messages — polling is fallback only
+    const identitySession = identitySessions.capture();
+    const requestedConversationId = conversationId;
 
     try {
-      let url = `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`;
+      let url = `${baseUrl}/api/widget/${projectSlug}/conversations/${requestedConversationId}/messages`;
       if (lastMessageTimestamp) {
         url += `?since=${lastMessageTimestamp}`;
       }
 
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: identitySession.signal });
+      if (
+        !identitySessions.isCurrent(identitySession) ||
+        conversationId !== requestedConversationId
+      ) {
+        return;
+      }
       if (!res.ok) {
         if (res.status === 410 || res.status === 404) {
           retireArchivedConversation();
@@ -6023,6 +6102,12 @@ import { claimWidgetInstance } from "./instance-guard";
       }
 
       const data = await res.json();
+      if (
+        !identitySessions.isCurrent(identitySession) ||
+        conversationId !== requestedConversationId
+      ) {
+        return;
+      }
       const msgs = data.messages ?? data;
       const status = data.status;
 
@@ -6203,13 +6288,24 @@ import { claimWidgetInstance } from "./instance-guard";
 
   // ─── Conversation History Loading ────────────────────────────────────────────
 
-  async function loadConversationHistory(openChat = true) {
-    if (!conversationId) return;
+  async function loadConversationHistory(
+    openChat = true,
+    identitySession: WidgetIdentitySessionToken = identitySessions.capture(),
+    requestedConversationId: string | null = conversationId,
+  ) {
+    if (!requestedConversationId) return;
 
     try {
       const res = await fetch(
-        `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`,
+        `${baseUrl}/api/widget/${projectSlug}/conversations/${requestedConversationId}/messages`,
+        { signal: identitySession.signal },
       );
+      if (
+        !identitySessions.isCurrent(identitySession) ||
+        conversationId !== requestedConversationId
+      ) {
+        return;
+      }
       if (!res.ok) {
         // Conversation might not exist anymore
         if (res.status === 404 || res.status === 410) {
@@ -6219,6 +6315,12 @@ import { claimWidgetInstance } from "./instance-guard";
       }
 
       const data = await res.json();
+      if (
+        !identitySessions.isCurrent(identitySession) ||
+        conversationId !== requestedConversationId
+      ) {
+        return;
+      }
       const msgs = data.messages ?? data;
       conversationStatus = data.status ?? null;
       syncConversationModeUi();
@@ -6317,16 +6419,21 @@ import { claimWidgetInstance } from "./instance-guard";
       startPolling();
       startHeartbeat();
     } catch (err) {
+      if (!identitySessions.isCurrent(identitySession)) return;
       console.error("[ReplyMaven] Failed to load conversation history:", err);
     }
   }
 
-  async function restoreConversation() {
+  async function restoreConversation(
+    identitySession: WidgetIdentitySessionToken = identitySessions.capture(),
+  ) {
+    const requestVisitorId = visitorId;
     // First try localStorage
     const storedId = loadPersistedConversationId();
     if (storedId) {
       conversationId = storedId;
-      await loadConversationHistory();
+      await loadConversationHistory(true, identitySession, storedId);
+      if (!identitySessions.isCurrent(identitySession)) return;
       if (conversationId) {
         // Hide inline action bubbles — conversation already exists
         inlineBarActions.classList.remove("has-actions");
@@ -6337,16 +6444,29 @@ import { claimWidgetInstance } from "./instance-guard";
     // Fallback: try to find active conversation by visitorId
     try {
       const res = await fetch(
-        `${baseUrl}/api/widget/${projectSlug}/conversations/active?visitorId=${encodeURIComponent(visitorId)}`,
+        `${baseUrl}/api/widget/${projectSlug}/conversations/active?visitorId=${encodeURIComponent(requestVisitorId)}`,
+        { signal: identitySession.signal },
       );
+      if (!identitySessions.isCurrent(identitySession)) return;
       if (!res.ok) return;
 
       const data = await res.json();
+      if (
+        !identitySessions.isCurrent(identitySession) ||
+        visitorId !== requestVisitorId
+      ) {
+        return;
+      }
       if (data.conversation) {
         conversationId = data.conversation.id;
         conversationStatus = data.conversation.status;
         persistConversationId(data.conversation.id);
-        await loadConversationHistory();
+        await loadConversationHistory(
+          true,
+          identitySession,
+          data.conversation.id,
+        );
+        if (!identitySessions.isCurrent(identitySession)) return;
         // Hide inline action bubbles — conversation already exists
         inlineBarActions.classList.remove("has-actions");
       }
@@ -6594,12 +6714,15 @@ import { claimWidgetInstance } from "./instance-guard";
 
   async function syncIdentityToServer() {
     if (!conversationId) return;
+    const identitySession = identitySessions.capture();
+    const requestedConversationId = conversationId;
     try {
       await fetch(
-        `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}`,
+        `${baseUrl}/api/widget/${projectSlug}/conversations/${requestedConversationId}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
+          signal: identitySession.signal,
           body: JSON.stringify({
             visitorName: visitorInfo.name,
             visitorEmail: visitorInfo.email,
@@ -6613,20 +6736,158 @@ import { claimWidgetInstance } from "./instance-guard";
 
   async function syncMetadataToServer() {
     if (!conversationId) return;
+    const identitySession = identitySessions.capture();
+    const requestedConversationId = conversationId;
     try {
       const deviceMeta = collectDeviceMetadata();
       const merged = { ...deviceMeta, ...customMetadata };
       await fetch(
-        `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}`,
+        `${baseUrl}/api/widget/${projectSlug}/conversations/${requestedConversationId}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
+          signal: identitySession.signal,
           body: JSON.stringify({ metadata: merged }),
         },
       );
     } catch {
       // Silently ignore sync errors
     }
+  }
+
+  async function identifySignedCustomer(token: string): Promise<void> {
+    const identitySession = identitySessions.capture();
+    const requestVisitorId = visitorId;
+    const requestedConversationId = conversationId;
+    return identitySessions.enqueueSignedIdentify(async () => {
+      if (!identitySessions.isCurrent(identitySession)) {
+        throw new Error("ReplyMaven customer identification was cancelled");
+      }
+      try {
+        const response = await fetch(
+          `${baseUrl}/api/widget/${projectSlug}/identify`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: identitySession.signal,
+            body: JSON.stringify({
+              visitorId: requestVisitorId,
+              ...(requestedConversationId
+                ? { conversationId: requestedConversationId }
+                : {}),
+              token,
+            }),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(
+            `ReplyMaven customer identification was rejected (${response.status})`,
+          );
+        }
+      } catch (error) {
+        if (identitySessions.isCurrent(identitySession)) {
+          console.warn("[ReplyMaven] Customer identification failed");
+        }
+        throw error;
+      }
+    });
+  }
+
+  function resetCustomerIdentity(): void {
+    identitySessions.rotate();
+    closeChatWidget();
+    stopPolling();
+    stopHeartbeat();
+    disconnectWebSocket();
+
+    const plan = planCustomerIdentityReset({
+      projectSlug,
+      currentVisitorId: visitorId,
+      nextUuid: crypto.randomUUID(),
+      state: {
+        config,
+        conversationId,
+        conversationStatus,
+        visitorInfo,
+        customMetadata,
+        pageContext,
+        messages: [...conversationHistoryBuffer],
+        renderedMessageIds: [...renderedMessageIds],
+        lastSeenMessageId,
+        newestResponseId,
+        lastMessageTimestamp,
+        wsHealthy,
+        polling: pollTimer !== null,
+        heartbeat: heartbeatTimer !== null,
+        messageDraft: input.value,
+        inlineDraft: inlineBarInput.value,
+        formDrafts: Array.from(
+          formView.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+            "input, textarea",
+          ),
+        ).map((field) => field.value),
+        pendingAttachment: pendingImageFile !== null,
+        inputDisabled: input.disabled,
+      },
+    });
+    for (const key of plan.storageKeysToRemove) {
+      localStorage.removeItem(key);
+    }
+    localStorage.setItem("rm_visitor_id", plan.nextState.visitorId);
+
+    visitorId = plan.nextState.visitorId;
+    conversationId = null;
+    conversationStatus = null;
+    visitorInfo = {};
+    customMetadata = {};
+    pageContext = {};
+    conversationHistoryBuffer.splice(0);
+    renderedMessageIds.clear();
+    activeToolCallCards.clear();
+    lastSeenMessageId = null;
+    newestResponseId = null;
+    lastMessageTimestamp = null;
+    lastNewMessageAt = Date.now();
+    lastVisitorStatusEl = null;
+    isSending = false;
+    isStreaming = false;
+    _isHandedOff = false;
+    isBanned = false;
+    input.value = plan.nextState.messageDraft;
+    input.style.height = "auto";
+    homeAskInput.value = "";
+    inlineBarInput.value = plan.nextState.inlineDraft;
+    for (const field of formView.querySelectorAll<
+      HTMLInputElement | HTMLTextAreaElement
+    >("input, textarea")) {
+      field.value = "";
+    }
+    pendingImageFile = null;
+    fileInput.value = "";
+    imagePreview.classList.remove("visible");
+    imagePreviewImg.src = "";
+    imagePreviewImg.title = "";
+    attachError.classList.remove("visible");
+    attachError.textContent = "";
+    dropHint.classList.remove("visible");
+    attachDragDepth = 0;
+    sendBtn.disabled = plan.nextState.inputDisabled;
+    input.disabled = plan.nextState.inputDisabled;
+    inlineBarInput.disabled = plan.nextState.inputDisabled;
+    for (const button of formView.querySelectorAll<HTMLButtonElement>(
+      ".rm-form-submit",
+    )) {
+      button.disabled = false;
+      button.textContent = "Send message";
+    }
+    messagesContainer.replaceChildren(typingRow);
+    previewStack.replaceChildren();
+    clearUnreadBadge();
+    hideTyping();
+    syncConversationModeUi();
+    showHomeScreen();
+
+    void restoreConversation();
   }
 
   // ─── Open / Close / Toggle ──────────────────────────────────────────────────
@@ -6727,11 +6988,15 @@ import { claimWidgetInstance } from "./instance-guard";
       handleSendMessage(text);
     },
     identify: (info: {
+      token?: string;
       name?: string;
       email?: string;
       phone?: string;
       metadata?: Record<string, string>;
     }) => {
+      if (isSignedIdentityInput(info)) {
+        return identifySignedCustomer(info.token);
+      }
       visitorInfo = {
         ...visitorInfo,
         name: info.name ?? visitorInfo.name,
@@ -6747,6 +7012,7 @@ import { claimWidgetInstance } from "./instance-guard";
         if (info.metadata) syncMetadataToServer();
       }
     },
+    reset: resetCustomerIdentity,
     setMetadata: (meta: Record<string, string>) => {
       customMetadata = { ...customMetadata, ...meta };
       if (conversationId) syncMetadataToServer();

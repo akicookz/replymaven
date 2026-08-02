@@ -7,9 +7,15 @@ import {
   keepPreviousData,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
+import type {
+  CustomerDetail,
+  CustomerListItem,
+  ConversationCustomerResponse,
+} from "../../shared/customer-types";
 import { cn } from "@/lib/utils";
 import { serializeMessageImageUrls } from "../../shared/message-images";
 import { useConversationWs } from "@/lib/use-conversation-ws";
+import { useCustomerWs } from "@/lib/use-customer-ws";
 import { passesInboxFilter, type InboxFilter, type InboxSort } from "@/lib/inbox/filters";
 import {
   moveRangeSelection,
@@ -31,6 +37,14 @@ import type {
 import MessageList from "@/components/inbox/MessageList";
 import ReadingPane from "@/components/inbox/ReadingPane";
 import FocusView from "@/components/inbox/FocusView";
+import CustomerFormDialog from "@/components/customers/CustomerFormDialog";
+import CustomerPickerDialog from "@/components/customers/CustomerPickerDialog";
+import {
+  applyConversationCustomerResult,
+  customerKeys,
+  fetchCustomer,
+  setConversationCustomer,
+} from "@/lib/customers";
 
 // ─── Wire shapes (orchestrator-local) ──────────────────────────────────────────
 
@@ -44,6 +58,7 @@ interface ConversationsPage {
 interface ConversationUpdate {
   id: string;
   projectId: string;
+  customerId: string | null;
   visitorId: string;
   visitorName: string | null;
   visitorEmail: string | null;
@@ -182,6 +197,8 @@ function Conversations() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [selectionFocusId, setSelectionFocusId] = useState<string | null>(null);
+  const [createCustomerOpen, setCreateCustomerOpen] = useState(false);
+  const [linkCustomerOpen, setLinkCustomerOpen] = useState(false);
 
   // Sync selectedConvo <-> ?id= URL param so deep links work and shares are
   // stable. Other params (e.g. ?filter=) are preserved.
@@ -325,6 +342,7 @@ function Conversations() {
   // ["conversation-detail", id] cache on incoming events so messages and
   // status changes appear in real time without polling.
   useConversationWs(projectId, selectedConvo);
+  useCustomerWs(projectId);
 
   // ── List query (drives the conversation column) ──────────────────────────
   const {
@@ -1160,6 +1178,44 @@ function Conversations() {
     ? conversations.findIndex((c) => c.id === selected.id)
     : -1;
 
+  const selectedCustomerId = selected?.customerId ?? null;
+  const { data: selectedCustomer = null } = useQuery<CustomerDetail>({
+    queryKey: customerKeys.detail(
+      projectId ?? "missing",
+      selectedCustomerId ?? "missing",
+    ),
+    queryFn: () => fetchCustomer(projectId!, selectedCustomerId!),
+    enabled: Boolean(projectId && selectedCustomerId),
+  });
+
+  const setCustomerMutation = useMutation({
+    mutationFn: (options: {
+      conversationId: string;
+      customerId: string;
+    }) =>
+      setConversationCustomer(projectId!, options.conversationId, {
+        action: "link",
+        customerId: options.customerId,
+      }),
+    onSuccess(result) {
+      applyCustomerResult(result);
+      setCreateCustomerOpen(false);
+      setLinkCustomerOpen(false);
+      toast.success("Customer linked");
+    },
+    onError() {
+      toast.error("Could not link customer");
+    },
+  });
+
+  const customerFormInitialValues = useMemo(
+    () => ({
+      name: selected?.visitorName ?? null,
+      email: selected?.visitorEmail ?? null,
+    }),
+    [selected?.visitorEmail, selected?.visitorName],
+  );
+
   // ── Handlers ──────────────────────────────────────────────────────────────
   // Resolve / flag / block are toggles: acting on an already-active state
   // reverses it (reopen / un-flag / unblock). We read the current state from
@@ -1169,6 +1225,61 @@ function Conversations() {
   function findConv(convId: string): Conversation | null {
     if (selected?.id === convId) return selected;
     return conversations.find((c) => c.id === convId) ?? null;
+  }
+
+  function applyCustomerResult(result: ConversationCustomerResponse): void {
+    setLoadedConversations((previous) =>
+      applyConversationCustomerResult(previous, result),
+    );
+    queryClient.setQueriesData<ConversationsPage>(
+      { queryKey: ["conversations", projectId] },
+      (old) =>
+        old
+          ? {
+              ...old,
+              conversations: applyConversationCustomerResult(
+                old.conversations,
+                result,
+              ),
+            }
+          : old,
+    );
+    queryClient.setQueriesData<ConversationDetail>(
+      { queryKey: ["conversation-detail"] },
+      (old) => {
+        if (!old) return old;
+        const [conversation] = applyConversationCustomerResult(
+          [old.conversation],
+          result,
+        );
+        return conversation === old.conversation
+          ? old
+          : { ...old, conversation };
+      },
+    );
+    queryClient.setQueryData(
+      customerKeys.detail(projectId!, result.customer.id),
+      result.customer,
+    );
+    queryClient.invalidateQueries({ queryKey: customerKeys.lists(projectId!) });
+  }
+
+  function handleCustomerCreated(
+    _customer: CustomerDetail,
+    result?: ConversationCustomerResponse,
+  ): void {
+    if (!result) return;
+    applyCustomerResult(result);
+    setCreateCustomerOpen(false);
+    toast.success("Customer created and linked");
+  }
+
+  function handleCustomerSelected(customer: CustomerListItem): void {
+    if (!selectedConvo) return;
+    setCustomerMutation.mutate({
+      conversationId: selectedConvo,
+      customerId: customer.id,
+    });
   }
 
   function handleSend(
@@ -1528,6 +1639,12 @@ function Conversations() {
       {selected ? (
         <ReadingPane
           conversation={selected}
+          customer={selectedCustomer}
+          customerProfileHref={
+            selected.customerId
+              ? `/app/projects/${projectId}/customers/${selected.customerId}`
+              : undefined
+          }
           messages={messages}
           messagesLoading={detailLoading}
           draft={draft}
@@ -1541,6 +1658,8 @@ function Conversations() {
           onBlock={handleBlock}
           onAssign={handleAssign}
           onArchive={handleArchive}
+          onCreateCustomer={() => setCreateCustomerOpen(true)}
+          onLinkCustomer={() => setLinkCustomerOpen(true)}
           onDeleteMessage={handleDeleteMessage}
           onBack={() => setSelectedConvo(null)}
           onCompose={handleCompose}
@@ -1554,6 +1673,22 @@ function Conversations() {
           Select a conversation
         </div>
       )}
+
+      <CustomerFormDialog
+        projectId={projectId!}
+        open={createCustomerOpen}
+        onOpenChange={setCreateCustomerOpen}
+        initialValues={customerFormInitialValues}
+        conversationId={selectedConvo ?? undefined}
+        onCreated={handleCustomerCreated}
+      />
+      <CustomerPickerDialog
+        projectId={projectId!}
+        open={linkCustomerOpen}
+        onOpenChange={setLinkCustomerOpen}
+        onSelect={handleCustomerSelected}
+        pending={setCustomerMutation.isPending}
+      />
     </div>
   );
 }

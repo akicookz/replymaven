@@ -8,6 +8,7 @@ interface SocketAttachment {
   subjectId: string;
   conversationId: string;
   projectId: string;
+  roomKind: "conversation" | "customer_project";
 }
 
 interface BroadcastBody {
@@ -68,22 +69,27 @@ export class ConversationDO implements DurableObject {
     const subjectId = req.headers.get("x-subject-id");
     const conversationId = req.headers.get("x-conversation-id");
     const projectId = req.headers.get("x-project-id");
+    const roomKind = req.headers.get("x-room-kind") ?? "conversation";
 
     if (
       (kind !== "agent" && kind !== "visitor") ||
       !subjectId ||
       !conversationId ||
-      !projectId
+      !projectId ||
+      (roomKind !== "conversation" && roomKind !== "customer_project") ||
+      (roomKind === "customer_project" && kind !== "agent")
     ) {
       return new Response("Missing connection headers", { status: 400 });
     }
 
-    const db = drizzle(this.env.DB);
-    const conversation = await new ChatService(
-      db,
-    ).getOperationalConversationById(conversationId, projectId);
-    if (!conversation) {
-      return new Response("Conversation unavailable", { status: 410 });
+    if (roomKind === "conversation") {
+      const db = drizzle(this.env.DB);
+      const conversation = await new ChatService(
+        db,
+      ).getOperationalConversationById(conversationId, projectId);
+      if (!conversation) {
+        return new Response("Conversation unavailable", { status: 410 });
+      }
     }
 
     const pair = new WebSocketPair();
@@ -95,6 +101,7 @@ export class ConversationDO implements DurableObject {
       subjectId,
       conversationId,
       projectId,
+      roomKind,
     };
     server.serializeAttachment(attachment);
 
@@ -105,7 +112,7 @@ export class ConversationDO implements DurableObject {
 
     // Mark the visitor as active on connect. Done in waitUntil-style fire
     // and forget — failure to update presence shouldn't fail the upgrade.
-    if (kind === "visitor") {
+    if (kind === "visitor" && roomKind === "conversation") {
       this.markVisitorPresence(conversationId, projectId, "active").catch(() => {
         // best-effort; the next presence frame or HTTP heartbeat will resync
       });
@@ -217,6 +224,7 @@ export class ConversationDO implements DurableObject {
       | SocketAttachment
       | undefined;
     if (!attachment) return;
+    if (attachment.roomKind !== "conversation") return;
 
     const db = drizzle(this.env.DB);
     const chatService = new ChatService(db);

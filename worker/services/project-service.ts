@@ -10,6 +10,14 @@ import {
   type ProjectSettingsRow,
 } from "../db";
 import { RESERVED_INBOUND_LOCAL_PARTS } from "./email-service";
+import { encrypt } from "./encryption-service";
+
+function encodeBase64Url(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
+}
 
 export class ProjectService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
@@ -160,6 +168,21 @@ export class ProjectService {
       .where(eq(projectSettings.projectId, projectId));
 
     return this.getSettings(projectId);
+  }
+
+  async rotateCustomerIdentitySecret(
+    projectId: string,
+    encryptionKey: string,
+  ): Promise<{ configured: true; secret: string }> {
+    const secret = encodeBase64Url(
+      crypto.getRandomValues(new Uint8Array(32)),
+    );
+    const encryptedSecret = await encrypt(secret, encryptionKey);
+    await this.db
+      .update(projectSettings)
+      .set({ customerIdentitySecret: encryptedSecret })
+      .where(eq(projectSettings.projectId, projectId));
+    return { configured: true, secret };
   }
 
   async markOnboarded(projectId: string): Promise<void> {

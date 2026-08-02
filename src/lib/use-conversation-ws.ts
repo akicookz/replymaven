@@ -6,6 +6,7 @@ import {
   type ServerEvent,
 } from "../../shared/ws-events";
 import { isImagePlaceholderContent } from "../../shared/message-images";
+import { invalidateCustomerProjectQueries } from "./customers";
 
 interface ConversationDetailMessage extends MessagePayload {
   toolExecutions?: unknown[];
@@ -50,6 +51,7 @@ export function useConversationWs(
 
   useEffect(() => {
     if (!projectId || !conversationId) return;
+    const activeProjectId = projectId;
 
     let lastSeenMessageId: string | null = null;
 
@@ -168,6 +170,14 @@ export function useConversationWs(
         queryClient.invalidateQueries({
           queryKey: ["conversations", projectId],
         });
+      } else if (parsed.type === "conversation:updated") {
+        queryClient.invalidateQueries({
+          queryKey: ["conversation-detail", conversationId],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["conversations", projectId],
+        });
+        void invalidateCustomerProjectQueries(queryClient, activeProjectId);
       } else if (parsed.type === "message:status") {
         const idSet = new Set(parsed.messageIds);
         const iso = new Date(parsed.at).toISOString();

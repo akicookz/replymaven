@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Conversation, Message } from "@/lib/inbox/types";
+import type { CustomerDetail } from "../../../shared/customer-types";
 import { cn } from "@/lib/utils";
 import ReadingHeader from "./ReadingHeader";
 import ChatThread from "./ChatThread";
@@ -11,6 +12,8 @@ import ConversationSearchDialog from "./ConversationSearchDialog";
 // are additive from the Task-7 stub. Tasks 10/11 receive the subset they need.
 interface ReadingPaneProps {
   conversation: Conversation;
+  customer: CustomerDetail | null;
+  customerProfileHref?: string;
   messages: Message[];
   /** True while the conversation detail (messages) is loading for the first time. */
   messagesLoading?: boolean;
@@ -31,6 +34,8 @@ interface ReadingPaneProps {
   onAssign: (convId: string, assigneeId: string | null) => void;
   /** Archive the conversation or restore it from the archive. */
   onArchive: (convId: string, action: "archive" | "unarchive") => void;
+  onCreateCustomer: () => void;
+  onLinkCustomer: () => void;
   /** Delete a sent agent message by id. */
   onDeleteMessage: (messageId: string) => void;
   /** Mobile: return to the conversation list (clears the selection). */
@@ -47,6 +52,8 @@ interface ReadingPaneProps {
 
 export default function ReadingPane({
   conversation,
+  customer,
+  customerProfileHref,
   messages,
   messagesLoading,
   draft,
@@ -60,6 +67,8 @@ export default function ReadingPane({
   onBlock,
   onAssign,
   onArchive,
+  onCreateCustomer,
+  onLinkCustomer,
   onDeleteMessage,
   onBack,
   onCompose,
@@ -191,6 +200,8 @@ export default function ReadingPane({
       {/* Header: toolbar row + user bar (fixed; thread scrolls below it) */}
       <ReadingHeader
         conversation={conversation}
+        customer={customer}
+        customerProfileHref={customerProfileHref}
         onResolve={onResolve}
         onSnooze={onSnooze}
         onFlagSpam={onFlagSpam}
@@ -198,6 +209,8 @@ export default function ReadingPane({
         onBlock={onBlock}
         onAssign={onAssign}
         onArchive={onArchive}
+        onCreateCustomer={onCreateCustomer}
+        onLinkCustomer={onLinkCustomer}
         onFocus={onFocus}
         onBack={onBack}
         search={search}

@@ -15,6 +15,7 @@ export interface LastMessagePreview {
 
 export interface Conversation {
   id: string;
+  customerId: string | null;
   visitorId: string;
   visitorName: string | null;
   visitorEmail: string | null;

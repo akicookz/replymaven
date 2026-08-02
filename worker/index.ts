@@ -1,4 +1,4 @@
-import { Hono, type MiddlewareHandler } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
@@ -16,6 +16,8 @@ import { WidgetService } from "./services/widget-service";
 import { getAssignableUsers } from "./services/assignable-users";
 import { ContactFormService } from "./services/contact-form-service";
 import { ChatService, type InboxFilter } from "./services/chat-service";
+import { CustomerIdentityService } from "./services/customer-identity-service";
+import { CustomerService } from "./services/customer-service";
 import { ResourceService, type FaqPair } from "./services/resource-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
 import { FAQ_SET_MAX_CHARS } from "../shared/faq-limits";
@@ -72,7 +74,10 @@ import {
   invalidateTeamContext,
 } from "./services/team-context";
 import { VisitorBanService } from "./services/visitor-ban-service";
-import { handleWidgetMessageTurn } from "./chat-runtime/orchestration/handle-widget-message-turn";
+import {
+  handleWidgetMessageTurn,
+  touchLinkedCustomerAfterVisitorMessage,
+} from "./chat-runtime/orchestration/handle-widget-message-turn";
 import {
   buildContactAcceptedPayload,
   buildContactFormMessage,
@@ -98,12 +103,26 @@ import { parseHelpTopNav } from "./lib/help-top-nav";
 import {
   broadcastClosed,
   broadcastArchived,
+  broadcastCustomerUpdated,
+  broadcastConversationUpdated,
   broadcastMessageDeleted,
   broadcastMessageNew,
   broadcastStatusChange,
   broadcastMessageStatus,
 } from "./realtime/broadcast";
 import {
+  handleConversationCustomer,
+  handleCreateCustomer,
+  handleDeleteCustomer,
+  handleGetCustomer,
+  handleListCustomers,
+  handleMergeCustomers,
+  handleSignedWidgetIdentify,
+  handleUpdateCustomer,
+  serializeProjectSettings,
+} from "./routes/customer-handlers";
+import {
+  handleCustomerProjectWsUpgrade,
   handleDashboardWsUpgrade,
   handleWidgetWsUpgrade,
 } from "./realtime/upgrade";
@@ -518,6 +537,36 @@ const projectAccessMiddleware: MiddlewareHandler<HonoAppContext> = async (
   return c.json({ error: "Not found" }, 404);
 };
 
+async function canAccessCustomerProject(
+  c: Context<HonoAppContext>,
+  projectId: string,
+): Promise<boolean> {
+  const user = c.get("user");
+  if (!user) return false;
+  const effectiveUserId = c.get("effectiveUserId") ?? user.id;
+  const project = await new ProjectService(c.get("db")).getProjectById(
+    projectId,
+  );
+  return project?.userId === effectiveUserId;
+}
+
+function broadcastCustomerConversationChanges(
+  c: Context<HonoAppContext>,
+  conversationIds: string[],
+): void {
+  for (const conversationId of conversationIds) {
+    broadcastConversationUpdated(c.env, c.executionCtx, conversationId);
+  }
+}
+
+function broadcastCustomerChanges(
+  c: Context<HonoAppContext>,
+  projectId: string,
+  customerIds: string[],
+): void {
+  broadcastCustomerUpdated(c.env, c.executionCtx, projectId, customerIds);
+}
+
 const app = new Hono<HonoAppContext>()
   // ─── Global CORS ────────────────────────────────────────────────────────────
   .use("*", cors())
@@ -581,6 +630,41 @@ const app = new Hono<HonoAppContext>()
     return c.json({ ...config, projectName: project.name });
   })
 
+  // ─── Signed Customer Identity ──────────────────────────────────────────────
+  .post("/api/widget/:projectSlug/identify", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`identify:${ip}`, 20, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const db = drizzle(c.env.DB);
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectBySlugPublic(
+      c.req.param("projectSlug"),
+    );
+    if (!project) return c.json({ error: "Project not found" }, 404);
+    const settings = await projectService.getSettings(project.id);
+    const chatService = new ChatService(db);
+
+    return handleSignedWidgetIdentify({
+      projectId: project.id,
+      body: await c.req.json(),
+      encryptedSecret: settings?.customerIdentitySecret ?? null,
+      encryptionKey: c.env.ENCRYPTION_KEY,
+      nowSeconds: Math.floor(Date.now() / 1000),
+      getConversation(projectId, conversationId) {
+        return chatService.getConversationById(conversationId, projectId);
+      },
+      identityService: new CustomerIdentityService(db),
+      onConversationsChanged(conversationIds) {
+        broadcastCustomerConversationChanges(c, conversationIds);
+      },
+      onCustomersChanged(customerIds) {
+        broadcastCustomerChanges(c, project.id, customerIds);
+      },
+    });
+  })
+
   // ─── Create Conversation ────────────────────────────────────────────────────
   .post("/api/widget/:projectSlug/conversations", async (c) => {
     const ip = getClientIp(c);
@@ -598,11 +682,20 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(createConversationSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
+    const customerIdentityService = new CustomerIdentityService(db);
+    const linkedCustomer = await customerIdentityService.findCustomerByVisitorId(
+      project.id,
+      parsed.data.visitorId,
+    );
+    const visitorName = parsed.data.visitorName ?? linkedCustomer?.name ?? null;
+    const visitorEmail =
+      parsed.data.visitorEmail ?? linkedCustomer?.email ?? null;
+
     const banService = new VisitorBanService(db);
     const ban = await banService.isVisitorBanned(
       project.id,
       parsed.data.visitorId,
-      parsed.data.visitorEmail,
+      visitorEmail,
     );
     if (ban) {
       return c.json({ banned: true, reason: ban.reason }, 403);
@@ -624,9 +717,10 @@ const app = new Hono<HonoAppContext>()
     const chatService = new ChatService(db);
     const conversation = await chatService.createConversation({
       projectId: project.id,
+      customerId: linkedCustomer?.id ?? null,
       visitorId: parsed.data.visitorId,
-      visitorName: parsed.data.visitorName,
-      visitorEmail: parsed.data.visitorEmail,
+      visitorName,
+      visitorEmail,
       metadata: JSON.stringify(geoMeta),
     });
 
@@ -1049,10 +1143,21 @@ const app = new Hono<HonoAppContext>()
     }
 
     const visitorId = parsed.data.visitorId ?? crypto.randomUUID();
+    const customerIdentityService = new CustomerIdentityService(db);
+    const linkedCustomer = await customerIdentityService.findCustomerByVisitorId(
+      project.id,
+      visitorId,
+    );
     const visitorEmail =
-      parsed.data.visitorEmail ?? extractFormEmail(parsed.data.data);
+      parsed.data.visitorEmail ??
+      extractFormEmail(parsed.data.data) ??
+      linkedCustomer?.email ??
+      null;
     const visitorName =
-      parsed.data.visitorName ?? extractFormName(parsed.data.data);
+      parsed.data.visitorName ??
+      extractFormName(parsed.data.data) ??
+      linkedCustomer?.name ??
+      null;
 
     const ban = await new VisitorBanService(db).isVisitorBanned(
       project.id,
@@ -1096,6 +1201,7 @@ const app = new Hono<HonoAppContext>()
 
       conversation = await chatService.createConversation({
         projectId: project.id,
+        customerId: linkedCustomer?.id ?? null,
         visitorId,
         visitorName: visitorName ?? null,
         visitorEmail: visitorEmail ?? null,
@@ -1448,7 +1554,6 @@ const app = new Hono<HonoAppContext>()
           );
           broadcastStatusChange(c.env, c.executionCtx, conversationId, "closed");
           broadcastClosed(c.env, c.executionCtx, conversationId, "resolved");
-
           await sendConversationTelegramMessage(
             "Conversation closed.",
             message.message_id,
@@ -2327,6 +2432,30 @@ const app = new Hono<HonoAppContext>()
         c.executionCtx,
         conversation.id,
         inboundEmailMessage,
+      );
+      c.executionCtx.waitUntil(
+        touchLinkedCustomerAfterVisitorMessage({
+          projectId: project.id,
+          customerId: conversation.customerId,
+          visitorId: conversation.visitorId,
+          occurredAt: inboundEmailMessage.createdAt,
+          identityService: new CustomerIdentityService(db),
+          logFailure(error) {
+            logError("inbound_email.customer_last_seen_failed", error, {
+              projectId: project.id,
+              conversationId: conversation.id,
+              customerId: conversation.customerId,
+            });
+          },
+          onTouched(customerId) {
+            broadcastCustomerUpdated(
+              c.env,
+              c.executionCtx,
+              project.id,
+              [customerId],
+            );
+          },
+        }),
       );
       const stillOperational = await chatService.getOperationalConversationById(
         conversation.id,
@@ -3679,6 +3808,150 @@ const app = new Hono<HonoAppContext>()
   .use("/api/projects/:id", projectAccessMiddleware)
   .use("/api/projects/:id/*", projectAccessMiddleware)
 
+  // ─── Customers ─────────────────────────────────────────────────────────────
+  .get("/api/projects/:id/customers", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const projectId = c.req.param("id");
+    if (!(await canAccessCustomerProject(c, projectId))) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    return handleListCustomers({
+      projectId,
+      query: c.req.query(),
+      customerService: new CustomerService(c.get("db")),
+    });
+  })
+  .post("/api/projects/:id/customers", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const projectId = c.req.param("id");
+    if (!(await canAccessCustomerProject(c, projectId))) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    return handleCreateCustomer({
+      projectId,
+      body: await c.req.json(),
+      identityService: new CustomerIdentityService(c.get("db")),
+      onCustomersChanged(customerIds) {
+        broadcastCustomerChanges(c, projectId, customerIds);
+      },
+    });
+  })
+  .get("/api/projects/:id/customers/ws", (c) =>
+    handleCustomerProjectWsUpgrade(c),
+  )
+  .get("/api/projects/:id/customers/:customerId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const projectId = c.req.param("id");
+    if (!(await canAccessCustomerProject(c, projectId))) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    return handleGetCustomer({
+      projectId,
+      customerId: c.req.param("customerId"),
+      customerService: new CustomerService(c.get("db")),
+    });
+  })
+  .patch("/api/projects/:id/customers/:customerId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const projectId = c.req.param("id");
+    if (!(await canAccessCustomerProject(c, projectId))) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    return handleUpdateCustomer({
+      projectId,
+      customerId: c.req.param("customerId"),
+      body: await c.req.json(),
+      identityService: new CustomerIdentityService(c.get("db")),
+      onCustomersChanged(customerIds) {
+        broadcastCustomerChanges(c, projectId, customerIds);
+      },
+    });
+  })
+  .delete("/api/projects/:id/customers/:customerId", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    const projectId = c.req.param("id");
+    if (!(await canAccessCustomerProject(c, projectId))) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    return handleDeleteCustomer({
+      projectId,
+      customerId: c.req.param("customerId"),
+      identityService: new CustomerIdentityService(c.get("db")),
+      onConversationsChanged(conversationIds) {
+        broadcastCustomerConversationChanges(c, conversationIds);
+      },
+      onCustomersChanged(customerIds) {
+        broadcastCustomerChanges(c, projectId, customerIds);
+      },
+    });
+  })
+  .post(
+    "/api/projects/:id/customers/:targetCustomerId/merge",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+      const projectId = c.req.param("id");
+      if (!(await canAccessCustomerProject(c, projectId))) {
+        return c.json({ error: "Not found" }, 404);
+      }
+      return handleMergeCustomers({
+        projectId,
+        targetCustomerId: c.req.param("targetCustomerId"),
+        body: await c.req.json(),
+        identityService: new CustomerIdentityService(c.get("db")),
+        onConversationsChanged(conversationIds) {
+          broadcastCustomerConversationChanges(c, conversationIds);
+        },
+        onCustomersChanged(customerIds) {
+          broadcastCustomerChanges(c, projectId, customerIds);
+        },
+      });
+    },
+  )
+  .post(
+    "/api/projects/:id/conversations/:conversationId/customer",
+    async (c) => {
+      const user = c.get("user");
+      if (!user) return c.json({ error: "Unauthorized" }, 401);
+      const projectId = c.req.param("id");
+      if (!(await canAccessCustomerProject(c, projectId))) {
+        return c.json({ error: "Not found" }, 404);
+      }
+      return handleConversationCustomer({
+        projectId,
+        conversationId: c.req.param("conversationId"),
+        body: await c.req.json(),
+        identityService: new CustomerIdentityService(c.get("db")),
+        onConversationsChanged(conversationIds) {
+          broadcastCustomerConversationChanges(c, conversationIds);
+        },
+        onCustomersChanged(customerIds) {
+          broadcastCustomerChanges(c, projectId, customerIds);
+        },
+      });
+    },
+  )
+  .post("/api/projects/:id/customer-identity-secret/rotate", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+    if (c.get("activeRole") === "member") {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+    const projectId = c.req.param("id");
+    if (!(await canAccessCustomerProject(c, projectId))) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    const result = await new ProjectService(
+      c.get("db"),
+    ).rotateCustomerIdentitySecret(projectId, c.env.ENCRYPTION_KEY);
+    return c.json(result);
+  })
+
   // ─── Projects CRUD ──────────────────────────────────────────────────────────
   .get("/api/projects", async (c) => {
     const user = c.get("user");
@@ -3795,8 +4068,11 @@ const app = new Hono<HonoAppContext>()
     const settings = await projectService.getSettings(project.id);
     // Don't expose encrypted keys to frontend
     if (settings) {
+      const serialized = serializeProjectSettings(
+        settings as unknown as Record<string, unknown>,
+      );
       return c.json({
-        ...settings,
+        ...serialized,
         telegramBotToken: settings.telegramBotToken ? "••••••••" : null,
         helpTopNav: parseHelpTopNav(settings.helpTopNav),
       });
@@ -3847,7 +4123,15 @@ const app = new Hono<HonoAppContext>()
       project.id,
       updatePayload,
     );
-    return c.json(settings);
+    if (!settings) return c.json(null);
+    const serialized = serializeProjectSettings(
+      settings as unknown as Record<string, unknown>,
+    );
+    return c.json({
+      ...serialized,
+      telegramBotToken: settings.telegramBotToken ? "••••••••" : null,
+      helpTopNav: parseHelpTopNav(settings.helpTopNav),
+    });
   })
   .post("/api/projects/:id/context/refresh", async (c) => {
     const user = c.get("user");
