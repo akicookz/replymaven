@@ -16,9 +16,9 @@ const CTA_VARIANTS = {
 } as const;
 
 const CTA_SIZES = {
-  sm: "h-8 px-4 text-[13px]",
-  md: "px-5 py-2.5 text-[13.5px]",
-  lg: "px-6 py-3 text-[14px]",
+  sm: "h-10 px-4 text-[13px]",
+  md: "min-h-10 px-5 py-2.5 text-[13.5px]",
+  lg: "min-h-11 pl-6 pr-[22px] py-3 text-[14px]",
 } as const;
 
 export interface CtaProps
@@ -40,7 +40,7 @@ export function Cta({
   return (
     <Comp
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-full font-medium whitespace-nowrap transition-all cursor-pointer disabled:opacity-50",
+        "inline-flex items-center justify-center gap-2 rounded-full font-medium whitespace-nowrap transition-[transform,background-color,color,opacity,box-shadow] duration-150 ease-out active:scale-[0.96] motion-reduce:transition-none motion-reduce:active:scale-100 cursor-pointer disabled:opacity-50 disabled:active:scale-100",
         CTA_VARIANTS[variant],
         CTA_SIZES[size],
         className,

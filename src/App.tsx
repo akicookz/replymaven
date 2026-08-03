@@ -25,6 +25,11 @@ import Docs from "./pages/Docs";
 import TeamAccept from "./pages/TeamAccept";
 import HelpCenterSettings from "./pages/HelpCenterSettings";
 import HelpArticleEditor from "./pages/HelpArticleEditor";
+import AiAgent from "./pages/marketing/AiAgent";
+import Inbox from "./pages/marketing/Inbox";
+import MarketingHelpCenter from "./pages/marketing/HelpCenter";
+import Actions from "./pages/marketing/Actions";
+import Mcp from "./pages/marketing/Mcp";
 
 // ─── Redirect /app to first project's dashboard ──────────────────────────────
 function DashboardRedirect() {
@@ -130,6 +135,11 @@ function App() {
     />
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/ai-agent" element={<AiAgent />} />
+      <Route path="/inbox" element={<Inbox />} />
+      <Route path="/help-center" element={<MarketingHelpCenter />} />
+      <Route path="/actions" element={<Actions />} />
+      <Route path="/mcp" element={<Mcp />} />
       <Route path="/docs" element={<Docs />} />
 
       <Route

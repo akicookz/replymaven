@@ -130,7 +130,7 @@ export function BillingToggle({
           type="button"
           onClick={() => onChange("monthly")}
           className={cn(
-            "px-4 py-1.5 rounded-lg text-sm font-medium transition-all",
+            "min-h-10 px-4 py-1.5 rounded-lg text-sm font-medium transition-[background-color,color,box-shadow,scale] duration-150 active:scale-[0.96]",
             interval === "monthly"
               ? "bg-background text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
@@ -142,7 +142,7 @@ export function BillingToggle({
           type="button"
           onClick={() => onChange("annual")}
           className={cn(
-            "px-4 py-1.5 rounded-lg text-sm font-medium transition-all",
+            "min-h-10 px-4 py-1.5 rounded-lg text-sm font-medium transition-[background-color,color,box-shadow,scale] duration-150 active:scale-[0.96]",
             interval === "annual"
               ? "bg-background text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
@@ -218,13 +218,13 @@ export function PricingCards({
                   )}
                 </div>
                 <div className="flex items-baseline gap-1">
-                  <span className="text-4xl font-semibold text-foreground tracking-tight">
+                  <span className="text-4xl font-semibold text-foreground tracking-tight tabular-nums">
                     ${price}
                   </span>
                   <span className="text-quaternary text-sm">
                     /mo
                     {interval === "annual" && (
-                      <span className="ml-1 text-xs text-muted-foreground">
+                      <span className="ml-1 text-xs text-muted-foreground tabular-nums">
                         (${plan.annualPrice}/yr)
                       </span>
                     )}
