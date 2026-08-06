@@ -38,7 +38,7 @@ function AuthCallback() {
             }
           }
 
-          navigate("/app", { replace: true });
+          navigate("/app/inbox", { replace: true });
           return;
         }
 
@@ -53,7 +53,7 @@ function AuthCallback() {
           } catch {
             // Response was not JSON, that's fine
           }
-          navigate("/app", { replace: true });
+          navigate("/app/inbox", { replace: true });
           return;
         }
 

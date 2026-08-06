@@ -28,7 +28,7 @@ function makeCustomer(id: string): CustomerListItem {
 }
 
 describe("customer field rows", () => {
-  test("converts primitive custom fields to editable typed rows", () => {
+  test("converts primitive custom fields to editable text rows", () => {
     const rows = customerFieldsToRows({
       plan: "pro",
       seats: 5,
@@ -39,20 +39,17 @@ describe("customer field rows", () => {
     expect(
       rows.map((row) => ({
         key: row.key,
-        type: row.type,
         value: row.value,
       })),
     ).toEqual([
-      { key: "plan", type: "string", value: "pro" },
-      { key: "seats", type: "number", value: "5" },
+      { key: "plan", value: "pro" },
+      { key: "seats", value: "5" },
       {
         key: "renewed",
-        type: "boolean",
-        value: true,
+        value: "true",
       },
       {
         key: "cancellationReason",
-        type: "null",
         value: "",
       },
     ]);
@@ -63,20 +60,17 @@ describe("customer field rows", () => {
       {
         id: "row-1",
         key: "plan",
-        type: "string",
         value: "pro",
       },
       {
         id: "row-2",
         key: " plan ",
-        type: "number",
         value: "5",
       },
       {
         id: "row-3",
         key: "",
-        type: "boolean",
-        value: false,
+        value: "true",
       },
     ]);
 
@@ -90,31 +84,27 @@ describe("customer field rows", () => {
     });
   });
 
-  test("serializes typed primitive values without retired AI metadata", () => {
+  test("serializes non-empty custom field values as text", () => {
     const result = serializeCustomerFieldRows([
       {
         id: "row-1",
         key: "plan",
-        type: "string",
         value: "pro",
       },
       {
         id: "row-2",
         key: "seats",
-        type: "number",
         value: "12",
       },
       {
         id: "row-3",
         key: "renewed",
-        type: "boolean",
-        value: true,
+        value: "true",
       },
       {
         id: "row-4",
         key: "note",
-        type: "null",
-        value: "ignored",
+        value: "",
       },
     ]);
 
@@ -122,9 +112,8 @@ describe("customer field rows", () => {
       success: true,
       customFields: {
         plan: "pro",
-        seats: 12,
-        renewed: true,
-        note: null,
+        seats: "12",
+        renewed: "true",
       },
     });
   });

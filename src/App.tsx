@@ -25,11 +25,6 @@ import Docs from "./pages/Docs";
 import TeamAccept from "./pages/TeamAccept";
 import HelpCenterSettings from "./pages/HelpCenterSettings";
 import HelpArticleEditor from "./pages/HelpArticleEditor";
-import AiAgent from "./pages/marketing/AiAgent";
-import Inbox from "./pages/marketing/Inbox";
-import MarketingHelpCenter from "./pages/marketing/HelpCenter";
-import Actions from "./pages/marketing/Actions";
-import Mcp from "./pages/marketing/Mcp";
 
 // ─── Redirect /app to first project's dashboard ──────────────────────────────
 function DashboardRedirect() {
@@ -37,9 +32,10 @@ function DashboardRedirect() {
   const isTeamMember =
     subData?.role === "admin" || subData?.role === "member";
 
-  const { data: projects, isPending: projectsPending } = useQuery<
-    { id: string }[]
-  >({
+  const {
+    data: projects,
+    isPending: projectsPending,
+  } = useQuery<{ id: string }[]>({
     queryKey: ["projects"],
     queryFn: async () => {
       const res = await fetch("/api/projects");
@@ -82,6 +78,54 @@ function DashboardRedirect() {
   }
 
   return <Navigate to="/app/onboarding" replace />;
+}
+
+function InboxRedirect() {
+  const {
+    data: projects,
+    isPending: projectsPending,
+    isFetching: projectsFetching,
+  } = useQuery<{ id: string }[]>({
+    queryKey: ["projects"],
+    queryFn: async () => {
+      const res = await fetch("/api/projects");
+      if (!res.ok) throw new Error("Failed to fetch projects");
+      return res.json();
+    },
+    staleTime: 0,
+  });
+
+  const projectId = projects?.[0]?.id;
+  const {
+    data: inboxCounts,
+    isPending: countsPending,
+    isFetching: countsFetching,
+  } = useQuery<Record<string, number>>({
+    queryKey: ["inbox-counts", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/inbox-counts`);
+      if (!res.ok) return {};
+      return res.json();
+    },
+    enabled: Boolean(projectId),
+    staleTime: 0,
+  });
+
+  if (
+    projectsPending ||
+    projectsFetching ||
+    (projectId && (countsPending || countsFetching))
+  ) {
+    return null;
+  }
+  if (!projectId) return <Navigate to="/app" replace />;
+
+  const hasNeedsYou = (inboxCounts?.["needs-you"] ?? 0) > 0;
+  const destination = hasNeedsYou
+    ? `/app/projects/${projectId}/conversations?filter=needs-you&focus=true`
+    : `/app/projects/${projectId}/conversations?filter=all`;
+
+  return <Navigate to={destination} replace />;
 }
 
 function AccountRedirect({ tab }: { tab: string }) {
@@ -135,11 +179,6 @@ function App() {
     />
     <Routes>
       <Route path="/" element={<Landing />} />
-      <Route path="/ai-agent" element={<AiAgent />} />
-      <Route path="/inbox" element={<Inbox />} />
-      <Route path="/help-center" element={<MarketingHelpCenter />} />
-      <Route path="/actions" element={<Actions />} />
-      <Route path="/mcp" element={<Mcp />} />
       <Route path="/docs" element={<Docs />} />
 
       <Route
@@ -154,6 +193,19 @@ function App() {
           <ErrorBoundary>
             <AuthGuard>
               <Onboarding />
+            </AuthGuard>
+          </ErrorBoundary>
+        }
+      />
+
+      <Route
+        path="/app/inbox"
+        element={
+          <ErrorBoundary>
+            <AuthGuard>
+              <OnboardingGuard>
+                <InboxRedirect />
+              </OnboardingGuard>
             </AuthGuard>
           </ErrorBoundary>
         }

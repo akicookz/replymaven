@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -157,10 +156,6 @@ function CustomerFormDialog({
             <DialogTitle className="text-balance font-display text-2xl">
               Create customer
             </DialogTitle>
-            <DialogDescription className="max-w-xl text-pretty">
-              Create one customer profile so every linked past and future thread
-              stays together.
-            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 px-6 py-6 sm:px-7">
@@ -212,9 +207,6 @@ function CustomerFormDialog({
                   maxLength={255}
                   disabled={createMutation.isPending}
                 />
-                <p className="text-pretty text-[11px] text-muted-foreground">
-                  Your stable account or user ID. Case is preserved.
-                </p>
               </div>
             </div>
 
@@ -255,16 +247,18 @@ function CustomerFormDialog({
             <Button
               type="button"
               variant="ghost"
+              size="sm"
               onClick={() => onOpenChange(false)}
               disabled={createMutation.isPending}
-              className="min-h-10 transition-transform duration-150 ease-out active:scale-[0.96]"
+              className="transition-transform duration-150 ease-out active:scale-[0.96]"
             >
               Cancel
             </Button>
             <Button
               type="submit"
+              size="sm"
               disabled={createMutation.isPending}
-              className="min-h-10 pl-4 pr-3.5 transition-transform duration-150 ease-out active:scale-[0.96]"
+              className="transition-transform duration-150 ease-out active:scale-[0.96]"
             >
               {createMutation.isPending ? (
                 <Loader2 className="animate-spin" />

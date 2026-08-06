@@ -187,7 +187,21 @@ function Conversations() {
     searchParams.get("id"),
   );
   const [draft, setDraft] = useState("");
-  const [view, setView] = useState<"split" | "focus">("split");
+  const view = searchParams.get("focus") === "true" ? "focus" : "split";
+  const setView = useCallback(
+    (nextView: "split" | "focus") => {
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          if (nextView === "focus") next.set("focus", "true");
+          else next.delete("focus");
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
   // List sort order + "unread only" filter, surfaced by the list's sort/filter
   // control. Both apply client-side over the loaded page.
   const [sort, setSort] = useState<InboxSort>("newest");
@@ -287,11 +301,9 @@ function Conversations() {
   }, [filter, debouncedSearch]);
 
   // Switching inbox filters (sidebar links to ?filter=<id>) keeps this page
-  // mounted, so the open conversation and focus overlay are just component
-  // state — they don't unmount on navigation. Clear the selection and drop back
-  // to split view whenever the filter changes, so the new view starts clean
-  // (no stale thread in the reading pane, no lingering focus mode). The mount
-  // run is skipped via the ref so deep links (?filter=…&id=…) still open.
+  // mounted. Clear the selection whenever the filter changes and drop back to
+  // split view unless the new URL explicitly requests focus mode. The mount run
+  // is skipped via the ref so deep links (?filter=…&id=…) still open.
   //
   // But a filter change can arrive TOGETHER with an explicit selection: the ping
   // toast and dashboard rows navigate to `?filter=…&id=…` in one shot. Bail out
@@ -304,8 +316,8 @@ function Conversations() {
     prevFilterRef.current = filter;
     if (searchParams.get("id")) return;
     setSelectedConvo(null);
-    setView("split");
-  }, [filter, searchParams]);
+    if (searchParams.get("focus") !== "true") setView("split");
+  }, [filter, searchParams, setView]);
 
   // Load the per-project read overlay from localStorage (writes happen in
   // handleMarkAllRead so the initial empty state can't clobber a stored value).
@@ -1143,6 +1155,25 @@ function Conversations() {
   }, [loadedConversations, unreadOnly, sort, isUnread]);
 
   useEffect(() => {
+    if (
+      view !== "focus" ||
+      selectedConvo ||
+      convosLoading ||
+      isPlaceholderData
+    ) {
+      return;
+    }
+    const firstConversation = conversations[0];
+    if (firstConversation) setSelectedConvo(firstConversation.id);
+  }, [
+    conversations,
+    convosLoading,
+    isPlaceholderData,
+    selectedConvo,
+    view,
+  ]);
+
+  useEffect(() => {
     const visibleIds = new Set(conversations.map((conversation) => conversation.id));
     setSelectedIds((prev) => {
       const next = new Set([...prev].filter((id) => visibleIds.has(id)));
@@ -1556,7 +1587,7 @@ function Conversations() {
         if (selected && !selected.archivedAt) handleResolve(selected.id);
       } else if (e.key === "f" || e.key === "F") {
         if (selected && !selected.archivedAt) {
-          setView((v) => (v === "focus" ? "split" : "focus"));
+          setView(view === "focus" ? "split" : "focus");
         }
       } else if (e.key === "Escape") {
         if (selectedIds.size > 0) clearBulkSelection();

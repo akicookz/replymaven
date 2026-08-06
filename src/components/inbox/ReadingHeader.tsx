@@ -13,13 +13,19 @@ import {
   Link2Icon,
   UserPlusIcon,
 } from "lucide-react";
-import { shouldOfferCustomerAssignment } from "@/lib/customers";
 import { Link } from "react-router-dom";
-import type { CustomerDetail } from "../../../shared/customer-types";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { Conversation } from "@/lib/inbox/types";
 import { countryFlag } from "@/lib/inbox/country-flag";
 import { getVisitorPresenceState } from "@/lib/conversation-presence";
+import { shouldOfferCustomerAssignment } from "@/lib/customers";
 import { cn } from "@/lib/utils";
+import type { CustomerDetail } from "../../../shared/customer-types";
 import PriorityMenu from "./PriorityMenu";
 import AssigneeMenu from "./AssigneeMenu";
 import PresenceDot from "./PresenceDot";
@@ -121,6 +127,47 @@ interface ReadingHeaderProps {
   onOpenSearch: () => void;
   /** A search query is currently active (tints the mobile search icon). */
   searchActive: boolean;
+}
+
+interface CustomerAssignmentMenuProps {
+  onCreateCustomer: () => void;
+  onLinkCustomer: () => void;
+}
+
+function CustomerAssignmentMenu({
+  onCreateCustomer,
+  onLinkCustomer,
+}: CustomerAssignmentMenuProps) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="glass-button flex h-8 items-center gap-1.5 rounded-glass px-2.5 text-[11px] text-ink-3 transition-[color,scale] duration-150 ease-out hover:text-ink-1 active:scale-[0.96]"
+        >
+          <UserPlusIcon className="size-3.5" />
+          Add customer
+          <ChevronDownIcon className="size-3" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-48 rounded-xl p-1.5">
+        <DropdownMenuItem
+          onSelect={onCreateCustomer}
+          className="min-h-10 rounded-lg px-2.5"
+        >
+          <UserPlusIcon className="size-4" />
+          Create new customer
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={onLinkCustomer}
+          className="min-h-10 rounded-lg px-2.5"
+        >
+          <Link2Icon className="size-4" />
+          Link existing customer
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -474,23 +521,11 @@ export default function ReadingHeader({
               conversation.customerId,
               conversation.archivedAt,
             ) ? (
-              <div className="mt-2 flex items-center gap-1.5 lg:hidden">
-                <button
-                  type="button"
-                  onClick={onCreateCustomer}
-                  className="glass-button flex min-h-10 items-center gap-1.5 rounded-glass px-2.5 text-[11px] text-ink-3 active:scale-[0.96]"
-                >
-                  <UserPlusIcon className="size-3.5" />
-                  Create customer
-                </button>
-                <button
-                  type="button"
-                  onClick={onLinkCustomer}
-                  className="glass-button flex min-h-10 items-center gap-1.5 rounded-glass px-2.5 text-[11px] text-ink-3 active:scale-[0.96]"
-                >
-                  <Link2Icon className="size-3.5" />
-                  Link
-                </button>
+              <div className="mt-2 lg:hidden">
+                <CustomerAssignmentMenu
+                  onCreateCustomer={onCreateCustomer}
+                  onLinkCustomer={onLinkCustomer}
+                />
               </div>
             ) : null}
           </div>
@@ -501,23 +536,11 @@ export default function ReadingHeader({
           conversation.customerId,
           conversation.archivedAt,
         ) ? (
-          <div className="hidden shrink-0 items-center gap-1.5 lg:flex">
-            <button
-              type="button"
-              onClick={onCreateCustomer}
-              className="glass-button flex min-h-10 items-center gap-1.5 rounded-glass px-3 text-[12px] text-ink-3 transition-[color,scale] duration-150 ease-out hover:text-ink-1 active:scale-[0.96]"
-            >
-              <UserPlusIcon className="size-3.5" />
-              Create customer
-            </button>
-            <button
-              type="button"
-              onClick={onLinkCustomer}
-              className="glass-button flex min-h-10 items-center gap-1.5 rounded-glass px-3 text-[12px] text-ink-3 transition-[color,scale] duration-150 ease-out hover:text-ink-1 active:scale-[0.96]"
-            >
-              <Link2Icon className="size-3.5" />
-              Link
-            </button>
+          <div className="hidden shrink-0 lg:block">
+            <CustomerAssignmentMenu
+              onCreateCustomer={onCreateCustomer}
+              onLinkCustomer={onLinkCustomer}
+            />
           </div>
         ) : null}
 

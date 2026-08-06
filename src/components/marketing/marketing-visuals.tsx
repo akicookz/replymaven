@@ -10,14 +10,10 @@ import {
   FileText,
   Github,
   MessageSquareText,
-  RefreshCw,
   Search,
-  Sparkles,
-  TicketCheck,
   UserRoundCheck,
   Wrench,
 } from "lucide-react";
-import { LogoIcon } from "@/components/Logo";
 import { cn } from "@/lib/utils";
 
 function ProductFrame({
@@ -74,40 +70,43 @@ export function InboxVisual() {
 export function HelpCenterVisual() {
   return (
     <ProductFrame>
-      <div className="flex min-h-[410px] flex-col">
-        <div className="flex items-center justify-between px-5 py-4">
-          <div className="flex items-center gap-2.5">
-            <span className="flex size-8 items-center justify-center rounded-xl bg-brand/15 text-brand-soft">
-              <BookOpen className="size-4" />
-            </span>
-            <div>
-              <p className="text-sm font-semibold text-ink-1">Help center</p>
-              <p className="text-[11px] text-ink-7">Published knowledge</p>
-            </div>
-          </div>
-          <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-[11px] font-medium text-emerald-300">
-            Suggestions ready
+      <div className="flex min-h-[440px] flex-col">
+        <div className="flex items-center gap-2.5 px-5 py-4">
+          <span className="flex size-8 items-center justify-center rounded-xl bg-brand/15 text-brand-soft">
+            <BookOpen className="size-4" />
           </span>
+          <div>
+            <p className="text-sm font-semibold text-ink-1">Help center</p>
+            <p className="text-[11px] text-ink-7">Published knowledge</p>
+          </div>
         </div>
 
-        <div className="grid flex-1 gap-3 p-4 pt-1 sm:grid-cols-[1fr_0.88fr]">
+        <div className="grid flex-1 gap-3 p-4 pt-1 sm:grid-cols-[0.72fr_1.28fr]">
           <div className="rounded-2xl bg-white/[0.035] p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
             <div className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2.5 text-xs text-ink-7">
               <Search className="size-3.5" />
               Search articles
             </div>
-            <div className="mt-4 space-y-2">
+            <div className="mt-3 space-y-2">
               {[
-                ["Upgrade your workspace", "Refresh suggested", true],
-                ["Managing billing details", "Current", false],
-                ["Invite a teammate", "Current", false],
-                ["Troubleshoot webhooks", "Addition suggested", true],
-              ].map(([title, status, attention]) => (
+                ["Upgrade your workspace", "Update available", true],
+                ["Managing billing details", "Updated Jul 18", false],
+                ["Invite a teammate", "Updated Jul 12", false],
+                ["Troubleshoot webhooks", "Updated Jun 28", false],
+              ].map(([title, detail, selected]) => (
                 <div
                   key={title as string}
-                  className="flex items-center gap-3 rounded-xl bg-white/[0.025] px-3 py-3"
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl px-3 py-3",
+                    selected ? "bg-brand/10" : "bg-white/[0.025]",
+                  )}
                 >
-                  <FileText className="size-4 shrink-0 text-ink-6" />
+                  <FileText
+                    className={cn(
+                      "size-4 shrink-0",
+                      selected ? "text-brand-soft" : "text-ink-6",
+                    )}
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-medium text-ink-2">
                       {title as string}
@@ -115,10 +114,10 @@ export function HelpCenterVisual() {
                     <p
                       className={cn(
                         "mt-0.5 text-[10px]",
-                        attention ? "text-amber-300" : "text-ink-7",
+                        selected ? "text-brand-soft" : "text-ink-7",
                       )}
                     >
-                      {status}
+                      {detail}
                     </p>
                   </div>
                 </div>
@@ -126,118 +125,94 @@ export function HelpCenterVisual() {
             </div>
           </div>
 
-          <div className="rounded-2xl bg-brand/[0.08] p-4 shadow-[0_0_0_1px_rgba(96,165,250,0.16)]">
-            <div className="flex items-center gap-2 text-xs font-semibold text-brand-soft">
-              <Sparkles className="size-4" />
-              Maven suggestion
+          <article className="rounded-2xl bg-white/[0.035] p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.06)] sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <h3 className="text-balance text-base font-semibold text-ink-1">
+                Upgrade your workspace
+              </h3>
+              <p className="shrink-0 text-[10px] text-ink-7">Published</p>
             </div>
-            <p className="mt-5 text-sm font-semibold leading-5 text-ink-1">
-              Refresh “Upgrade your workspace”
+
+            <p className="mt-4 text-pretty text-xs leading-5 text-ink-5">
+              Add seats to your plan whenever your team grows. Changes are
+              prorated automatically.
             </p>
+
+            <p className="mt-5 text-xs font-semibold text-ink-2">Add seats</p>
             <p className="mt-2 text-pretty text-xs leading-5 text-ink-5">
-              Customers now upgrade from Billing, not Workspace settings. I
-              found recent conversations using the new flow.
+              Open Workspace settings, select Members, and choose Add seats.
             </p>
-            <div className="mt-6 rounded-xl bg-black/20 p-3 text-[11px] leading-5 text-ink-4">
-              <span className="text-rose-300 line-through">
-                Open Workspace settings
-              </span>
-              <br />
-              <span className="text-emerald-300">Open Billing settings</span>
+
+            <div className="mt-5 rounded-xl bg-brand/[0.08] p-4 shadow-[0_0_0_1px_rgba(96,165,250,0.14)]">
+              <p className="text-xs font-semibold text-ink-2">
+                Replace an outdated step
+              </p>
+              <p className="mt-1 text-pretty text-[11px] leading-5 text-ink-6">
+                Recent support conversations show that upgrades now start in
+                Billing.
+              </p>
+              <div className="mt-3 rounded-lg bg-black/20 px-3 py-2.5 text-[11px] leading-5">
+                <p className="text-rose-300 line-through">
+                  Open Workspace settings
+                </p>
+                <p className="text-emerald-300">Open Billing settings</p>
+              </div>
+              <div className="mt-4 flex items-center justify-end gap-3">
+                <span className="text-[11px] font-medium text-ink-6">
+                  Dismiss
+                </span>
+                <span className="flex min-h-10 items-center gap-2 rounded-xl bg-brand pl-4 pr-3.5 text-[11px] font-semibold text-white">
+                  Apply update
+                  <Check className="size-3.5" />
+                </span>
+              </div>
             </div>
-            <span
-              className="mt-5 flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-brand px-3 text-xs font-semibold text-white"
-            >
-              Review refresh
-              <ArrowRight className="size-3.5" />
-            </span>
-          </div>
+          </article>
         </div>
       </div>
     </ProductFrame>
   );
 }
 
-const actionRows = [
-  {
-    icon: Database,
-    title: "Customer data pulled",
-    detail: "Business plan · 8 seats · renewal Sep 18",
-  },
-  {
-    icon: RefreshCw,
-    title: "Subscription updated",
-    detail: "Added 2 seats and calculated proration",
-  },
-  {
-    icon: TicketCheck,
-    title: "Issue created in Linear",
-    detail: "SUP-284 · Seat invite fails on Safari",
-  },
+const integrations = [
+  { name: "Attio", logo: "/integrations/attio.svg" },
+  { name: "Linear", logo: "/integrations/linear.svg" },
+  { name: "GitHub", logo: "/integrations/github.svg" },
+  { name: "Slack", logo: "/integrations/slack.svg" },
+  { name: "Telegram", logo: "/integrations/telegram.svg" },
+  { name: "Stripe", logo: "/integrations/stripe.svg" },
+  { name: "ChatGPT", logo: "/integrations/openai.svg" },
+  { name: "Claude", logo: "/integrations/claude.svg" },
+  { name: "PostHog", logo: "/integrations/posthog.svg" },
 ] as const;
 
 export function ActionsVisual() {
   return (
     <ProductFrame>
-      <div className="min-h-[430px] p-4 sm:p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <LogoIcon className="h-4 w-auto text-ink-1" />
-            <span className="text-xs font-semibold text-ink-2">Maven</span>
-          </div>
-          <span className="rounded-full bg-brand/12 px-3 py-1 text-[10px] font-medium text-brand-soft">
-            3 actions completed
-          </span>
-        </div>
-
-        <div className="mt-6 max-w-[88%] rounded-[18px_18px_18px_6px] bg-white/[0.07] px-4 py-3 text-sm leading-6 text-ink-2">
-          We need two more seats, but invites fail for our Safari users. Can
-          you upgrade us and report the bug?
-        </div>
-
-        <div className="mt-6 space-y-2.5">
-          {actionRows.map((row, index) => (
-            <div
-              key={row.title}
-              className="flex items-start gap-3 rounded-2xl bg-white/[0.035] p-3.5 shadow-[0_0_0_1px_rgba(255,255,255,0.055)]"
-            >
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand/12 text-brand-soft">
-                <row.icon className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs font-semibold text-ink-2">
-                    {row.title}
-                  </p>
-                  <Check className="size-4 shrink-0 text-emerald-300" />
-                </div>
-                <p className="mt-1 truncate text-[11px] text-ink-7">
-                  {row.detail}
-                </p>
-              </div>
-              <span className="sr-only">Action {index + 1}</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="ml-auto mt-6 max-w-[92%] rounded-[18px_18px_6px_18px] bg-brand px-4 py-3 text-sm leading-6 text-white">
-          Done. Your plan now has 10 seats, and I filed the Safari invite bug
-          with the conversation details attached.
-        </div>
-
-        <div className="mt-5 flex flex-wrap gap-2" aria-label="Supported integrations">
-          {["Linear", "GitHub", "Slack", "Discord", "Webhooks", "Custom HTTP"].map(
-            (integration) => (
-              <span
-                key={integration}
-                className="rounded-full bg-white/[0.04] px-3 py-1.5 text-[10px] font-medium text-ink-6 shadow-[0_0_0_1px_rgba(255,255,255,0.055)]"
-              >
-                {integration}
-              </span>
-            ),
-          )}
-        </div>
-      </div>
+      <ul
+        className="grid list-none grid-cols-2 gap-3 p-4 sm:grid-cols-3 sm:p-6"
+        aria-label="Supported integrations"
+      >
+        {integrations.map((integration) => (
+          <li
+            key={integration.name}
+            className="flex min-h-32 flex-col justify-between rounded-2xl bg-white/[0.035] p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.065)] last:col-span-2 sm:min-h-36 sm:p-6 sm:last:col-span-1"
+          >
+            <span className="flex size-12 items-center justify-center rounded-[14px] bg-white/[0.045] shadow-[0_0_0_1px_rgba(255,255,255,0.07)] sm:size-14 sm:rounded-2xl">
+              <img
+                src={integration.logo}
+                alt=""
+                width={28}
+                height={28}
+                className="size-6 sm:size-7"
+              />
+            </span>
+            <p className="text-pretty text-sm font-semibold text-ink-2 sm:text-base">
+              {integration.name}
+            </p>
+          </li>
+        ))}
+      </ul>
     </ProductFrame>
   );
 }

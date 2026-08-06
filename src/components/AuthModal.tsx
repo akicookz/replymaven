@@ -17,7 +17,7 @@ interface AuthModalProps {
   callbackURL?: string;
 }
 
-function AuthModal({ open, onOpenChange, callbackURL = "/app" }: AuthModalProps) {
+function AuthModal({ open, onOpenChange, callbackURL = "/app/inbox" }: AuthModalProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [internalOpen, setInternalOpen] = useState(false);
 

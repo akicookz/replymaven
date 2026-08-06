@@ -10,19 +10,16 @@ import type {
   UpdateCustomerInput,
 } from "../../shared/customer-types";
 
-export type CustomerFieldType = "string" | "number" | "boolean" | "null";
-
 export interface CustomerFieldRow {
   id: string;
   key: string;
-  type: CustomerFieldType;
-  value: string | boolean;
+  value: string;
 }
 
 export type SerializeCustomerFieldsResult =
   | {
       success: true;
-      customFields: Record<string, CustomerFieldValue>;
+      customFields: Record<string, string>;
     }
   | { success: false; errors: Record<string, string> };
 
@@ -85,24 +82,10 @@ export function shouldOfferCustomerAssignment(
   return customerId === null;
 }
 
-function fieldType(value: CustomerFieldValue): CustomerFieldType {
-  if (value === null) return "null";
-  if (typeof value === "number") return "number";
-  if (typeof value === "boolean") return "boolean";
-  return "string";
-}
-
-function fieldEditorValue(value: CustomerFieldValue): string | boolean {
-  if (value === null) return "";
-  if (typeof value === "boolean") return value;
-  return String(value);
-}
-
 export function createEmptyCustomerFieldRow(): CustomerFieldRow {
   return {
     id: crypto.randomUUID(),
     key: "",
-    type: "string",
     value: "",
   };
 }
@@ -113,30 +96,22 @@ export function customerFieldsToRows(
   return Object.entries(customFields).map(([key, value]) => ({
     id: crypto.randomUUID(),
     key,
-    type: fieldType(value),
-    value: fieldEditorValue(value),
+    value: value === null ? "" : String(value),
   }));
-}
-
-function parseFieldValue(row: CustomerFieldRow): CustomerFieldValue | undefined {
-  if (row.type === "null") return null;
-  if (row.type === "boolean") return Boolean(row.value);
-  if (row.type === "string") return String(row.value);
-  const parsed = Number(row.value);
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 export function serializeCustomerFieldRows(
   rows: CustomerFieldRow[],
 ): SerializeCustomerFieldsResult {
   const errors: Record<string, string> = {};
-  const trimmedKeys = rows.map((row) => row.key.trim());
+  const rowsWithValues = rows.filter((row) => row.value.trim().length > 0);
+  const trimmedKeys = rowsWithValues.map((row) => row.key.trim());
   const keyCounts = new Map<string, number>();
   for (const key of trimmedKeys) {
     if (key) keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
   }
 
-  for (const [index, row] of rows.entries()) {
+  for (const [index, row] of rowsWithValues.entries()) {
     const key = trimmedKeys[index];
     if (!key) {
       errors[row.id] = "Field key is required";
@@ -144,20 +119,16 @@ export function serializeCustomerFieldRows(
       errors[row.id] = "Field key must be 64 characters or fewer";
     } else if ((keyCounts.get(key) ?? 0) > 1) {
       errors[row.id] = "Field keys must be unique";
-    } else if (row.type === "string" && String(row.value).length > 500) {
+    } else if (row.value.length > 500) {
       errors[row.id] = "Text value must be 500 characters or fewer";
-    } else if (row.type === "number" && parseFieldValue(row) === undefined) {
-      errors[row.id] = "Enter a valid number";
     }
   }
   if (Object.keys(errors).length > 0) return { success: false, errors };
 
-  const customFields: Record<string, CustomerFieldValue> = {};
-  for (const [index, row] of rows.entries()) {
+  const customFields: Record<string, string> = {};
+  for (const [index, row] of rowsWithValues.entries()) {
     const key = trimmedKeys[index];
-    const value = parseFieldValue(row);
-    if (value === undefined) continue;
-    customFields[key] = value;
+    customFields[key] = row.value;
   }
   return { success: true, customFields };
 }
