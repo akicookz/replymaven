@@ -14,17 +14,18 @@ Make the Customers page feel native to the existing ReplyMaven dashboard. Reuse 
 
 - Render the directory inside one `bg-card rounded-xl` surface, matching the Recent Conversations table.
 - Put a compact search field in the table toolbar.
-- Use the columns `Customer`, `External ID`, `Conversations`, and `Last active`.
-- Show the customer initial, name, and email together in the first column.
+- Use the columns `Name`, `Email`, `Phone`, `External ID`, `Conversations`, `First seen`, and `Last active`.
+- Show the customer initial and name together in the first column.
+- Keep arbitrary custom fields on the customer detail page so the directory schema remains stable.
 - Make each row a keyboard-accessible link to the customer detail page.
 - Use subtle background change on hover. Do not animate rows vertically or add decorative outlines.
 - Use tabular numerals for conversation counts.
 
 ## Responsive Behavior
 
-- Keep the customer identity visible at every width.
+- Keep the customer name and email visible at every width.
 - Hide lower-priority columns as space becomes limited instead of forcing horizontal scrolling.
-- Show conversations before last activity when only one metadata column fits.
+- Preserve fields in this responsive order: name, email, conversations, last active, phone, external ID, first seen.
 
 ## States
 
