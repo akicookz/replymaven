@@ -1,16 +1,16 @@
-# Private Sidechat and MCP Action System
+# Private Sidechat and MCP Connections
 
-**Date:** 2026-08-07  
-**Status:** Approved in the product-design conversation; implementation is split into three plans  
-**Scope:** Dashboard inbox, private agent runtime, project MCP connections, safe customer-data reads, and approved writes
+**Date:** 2026-08-08
+**Status:** Revised after product review; implementation remains split into three plans
+**Scope:** Dashboard inbox, private sidechat, generic MCP connections, connection presets, native MCP tool configuration, and generic write approval
 
 ## 1. Product outcome
 
-ReplyMaven's dashboard agent needs a private place to investigate a customer issue, use project tools and MCP connections, ask the human agent for approval when a write is required, and prepare the final visitor-facing reply.
+ReplyMaven's dashboard agent needs a private place to investigate a customer issue, use project MCP connections, ask the human agent for approval before a write, and prepare the final visitor-facing reply.
 
-The visitor must receive only the normal message the human sends from the existing reply composer. The private reasoning thread, MCP responses, progress, approvals, and internal customer context never enter the visitor transcript.
+The visitor receives only the normal message the human sends from the existing reply composer. The private thread, MCP tool traffic, progress, approvals, and internal customer context never enter the visitor transcript.
 
-This replaces the current one-shot inline Compose feature end to end. It does not replace the public reply composer, the existing D1 conversation transcript, the widget SSE path, or Telegram ownership/handoff.
+This replaces the current one-shot inline Compose feature end to end. It does not replace the public reply composer, D1 visitor transcript, widget SSE path, or Telegram ownership/handoff.
 
 ## 2. Final interaction model
 
@@ -20,46 +20,46 @@ The current `Compose ⇧⇥` action in `src/components/inbox/Composer.tsx` becom
 
 `Start sidechat  ⇧⇥`
 
-There is no icon. In particular, there is no sparkle icon or decorative AI mark.
+There is no icon or decorative AI mark.
 
 - Clicking the action or pressing Shift+Tab opens the private right pane.
-- If the reply composer contains text, that text becomes the first human message in the sidechat.
-- The public reply composer clears only after the private message has been accepted by the sidechat agent. A connection or submission error leaves the original text untouched.
-- If the reply composer is empty, the first private message is `Help me respond to {customerFirstName}.`
-- Pending public image attachments remain staged in the public composer. Only text moves to sidechat.
-- If a sidechat already exists for the selected conversation, the action copy becomes `Open sidechat`; Shift+Tab opens it without creating a second thread.
+- If the public reply composer contains text, that text becomes the first human message in sidechat.
+- The public draft clears only after sidechat accepts the private message. Failure leaves it untouched.
+- If the public composer is empty, the first private message is `Help me respond to {customerFirstName}.`
+- Public image attachments remain staged. Only text moves.
+- Once a private thread exists, the action reads `Open sidechat`. Opening it never creates a duplicate thread or starter message.
 
 ### 2.2 Pane behavior
 
-The sidechat is closed by default. Closing it does not cancel work.
+Sidechat is closed by default. Closing it never cancels work.
 
 - One private sidechat exists per project conversation.
-- Switching conversations while the pane is open loads the selected conversation's sidechat. Work on the previous conversation continues.
-- A quiet status dot on the conversation row and beside `Open sidechat` indicates working, waiting for approval, ready, or failed. There is no status badge or alert banner.
-- Archived conversations may open an existing sidechat read-only, but cannot start new work or add a draft to the disabled public composer.
-- The sidechat title is `Sidechat`.
-- The subline is `Private · Maven has {customerFirstName}'s context`.
-- The pane has a close button. It does not have a permanent toggle rail, duplicate visitor preview, or separate "what the visitor sees" panel.
+- Switching conversations while open loads the selected conversation's sidechat. Prior work continues.
+- A quiet status dot indicates working, waiting for approval, ready, or failed. There is no status badge or alert banner.
+- Archived conversations may open existing sidechat history read-only.
+- Title: `Sidechat`.
+- Subline: `Private · Maven has {customerFirstName}'s context`.
+- The pane has a close/back control, not a permanent rail, visitor preview, or duplicate conversation panel.
 
-### 2.3 Private conversation
+### 2.3 Private conversation and reply draft
 
-The human and Maven talk in the right pane. Maven may show compact activity lines such as `Stripe · Checking recent payments`, but raw tool payloads are never rendered.
+The human and Maven talk in the private pane. MCP work appears only as compact activity such as `Stripe · Searching payments`; MCP request/result bodies are not rendered.
 
-When Maven has a visitor-ready answer, it attaches a structured `reply_draft` to a normal Maven message. That message includes one compact action:
+When Maven has a visitor-ready answer, it adds a structured reply-draft body to a normal Maven message with one compact action:
 
 `Add to reply`
 
-Selecting it inserts the exact draft into the existing public reply composer, focuses the textarea at the end, and leaves the sidechat open. It never sends automatically. The human can edit the draft, attach images, and use the existing Send action.
+Selecting it inserts the exact draft into the existing public Composer, focuses the textarea at the end, and leaves sidechat open. It never sends automatically. The human may edit, attach images, and use the existing Send action.
 
-### 2.4 Approval interaction
+### 2.4 Generic write approval
 
-Writes are approved only in the authenticated dashboard sidechat. A visitor, public widget, email ingress, Telegram command, or model-generated text cannot approve a write.
+Any MCP tool configured as a write pauses before execution. Approval is possible only from the authenticated dashboard sidechat. A visitor, widget request, Telegram message, API-key caller, or model-generated text cannot approve it.
 
-The approval request is a normal received-message bubble, not a card, alert, permission panel, or account badge. It uses the same font size, line height, bubble width, padding, radius, and surface as Maven's other private messages.
+The request is rendered inside the same Maven message bubble used by the rest of sidechat. It is not a card, alert, permission panel, or badge.
 
-Example copy, addressed to the human agent:
+Example:
 
-> Refund the $49.00 payment from Aug 2?  
+> Refund the $49.00 payment from Aug 2?
 > This **sends $49.00 back to the customer** and cannot be undone.
 
 The only visible actions, in this order, are:
@@ -68,52 +68,57 @@ The only visible actions, in this order, are:
 
 - `Always allow` is visually secondary.
 - `Allow once` is the compact primary action.
-- There is no `Not now`, reject button, verified-account badge, warning alert, nested card, or duplicate detail block.
-- Closing the sidechat defers the decision. The durable request remains pending until approved, invalidated, or expired.
-- Important details live in the description. Only text requiring attention is bold.
+- There is no `Not now`, rejection button, verified-account badge, warning alert, nested card, or duplicate detail block.
+- Closing sidechat defers the decision until approval, invalidation, or expiry.
+- Important information remains in the description. Only text needing attention is bold.
 
-`Always allow` means project-wide permission for the exact canonical action on the exact connection and action-schema version. Changing the MCP tool mapping, reconnecting a different account, or incrementing the action schema invalidates the grant.
+`Always allow` is project-wide for the exact connection, native MCP tool name, and current input-schema fingerprint. Reconnecting the account, changing the tool schema, disabling the tool, or changing its read/write classification invalidates the grant.
 
-## 3. Responsive layout and exact visual language
+## 3. Reuse the existing chat UI
 
-### 3.1 Desktop
+Sidechat must use the inbox's existing chat primitives. It must not introduce parallel bubble, thread, markdown, or composer implementations that merely copy their styles.
 
-The existing inbox remains the base layout: project sidebar, conversation list, and reading pane.
+### 3.1 Existing primitives become reusable
 
-- At 1536px and wider, the conversation list remains visible and the sidechat is 400px wide.
-- From 768px through 1535px, opening sidechat hides the conversation list and gives the reading pane the remaining width; the sidechat is 380px wide, capped at 42vw.
-- Focus mode becomes conversation plus sidechat. The centered conversation card keeps its existing max width within the available space.
-- The reading pane compresses. The sidechat does not overlay it.
+- `ChatThread.tsx` remains the thread primitive for skeletons, date grouping, sender grouping, message spacing, and message layout.
+- `MessageBubble.tsx` remains the only bubble shell and Markdown-rendering path. It gains narrow content/action slots for sidechat activity, reply drafts, and approvals.
+- `Composer.tsx` remains the only chat composer primitive. A private mode removes uploads and Resolve, changes placeholder/keyboard submission behavior, and otherwise retains its container, textarea auto-grow, focus restoration, and send button.
+- `FocusView.tsx` removes its local `FocusBubble` implementation and uses the same `ChatThread`/`MessageBubble` path as ReadingPane and sidechat.
+- `SidechatPane.tsx` composes those primitives. It does not own alternate versions of them.
 
-### 3.2 Mobile
+Public conversation behavior and appearance must remain unchanged after this refactor.
 
-Below 768px, sidechat replaces the reading pane in the same screen. A compact back control closes sidechat and restores the conversation. It is not a drawer over the conversation and does not leave a sliver of the right pane permanently visible.
+### 3.2 Responsive layout
 
-### 3.3 Component measurements
+- At 1536px and wider, the conversation list remains visible and sidechat is 400px wide.
+- From 768px through 1535px, opening sidechat hides the conversation list; sidechat is 380px wide, capped at 42vw.
+- Focus mode becomes conversation plus sidechat. The focus card keeps its existing max width in the remaining space.
+- Below 768px, sidechat replaces the reading pane in the same screen. It is not an overlay/drawer and leaves no permanent sliver.
 
-New UI uses the existing tokens and components rather than introducing a second assistant aesthetic:
+### 3.3 Existing visual measurements
 
-- Pane: `glass-reading`, `text-ink-*`, existing wallpaper blur.
-- Private bubbles: `max-w-[88%]`, `rounded-[20px]`, 14.5px text, 1.5 line height, `bg-bubble-received` for Maven and `bg-bubble-sent` for the human.
-- Pane horizontal inset: 16px on narrow screens and 20px on desktop.
-- Sidechat header: 14px semibold title, 11.5–12px muted subline.
-- Approval buttons: 28px visible height, 12.5–13px text, 8px radius. Their interactive hit area must still reach 40px using surrounding padding or a pseudo-element.
-- Sidechat composer: the existing `glass-bar`/20px-radius language, a 14–14.5px auto-growing textarea, and the existing 32px circular send button.
-- No new gradients, oversized titles, ornamental glow, sparkle icon, horizontal divider, `border-t`, `border-b`, or nested card stack.
-- Motion uses targeted opacity/transform/width transitions, 180–220ms, and respects `prefers-reduced-motion`. Never use `transition-all`.
+- Pane uses `glass-reading`, `text-ink-*`, and the existing wallpaper blur.
+- Bubbles retain `MessageBubble`'s `max-w-9/10 sm:max-w-3/4`, `px-3.5 py-2.5`, 14.5px text, `leading-normal`, `rounded-bubble`, and six-pixel tail corner.
+- Human messages use the existing sent treatment; Maven messages use the existing received treatment.
+- Thread horizontal padding follows the existing `ChatThread` primitive. Sidechat may reduce only its outer desktop inset to fit the narrower pane; bubble internals do not change.
+- Header is 14px semibold with an 11.5–12px muted subline.
+- Approval controls are 28px visibly high, 12.5–13px text, and eight-pixel radius, with a minimum 40px interactive target.
+- Private Composer uses the existing `glass-bar`, 20px radius, 14.5px textarea, auto-grow behavior, and 32px circular send control.
+- No new gradients, oversized titles, glow, sparkle icon, horizontal divider, `border-t`, `border-b`, nested card stack, or `transition-all`.
+- Motion is limited to opacity/transform/width at 180–220ms and respects reduced motion.
 
 ### 3.4 Required visual states
 
-Visual QA must cover all of these at 1440x1000, 1100x900, 768x900, and 390x844:
+Visual QA covers these states at 1440x1000, 1100x900, 768x900, and 390x844:
 
 1. Sidechat closed.
-2. Empty sidechat immediately after opening.
+2. Empty sidechat after opening.
 3. Existing private history.
-4. Streaming/private work in progress.
-5. Read-action activity.
+4. Streaming/private work.
+5. MCP activity.
 6. Pending write approval with long critical detail.
 7. Ready reply draft with `Add to reply`.
-8. Failed work with a retry affordance.
+8. Failed work with retry.
 9. Conversation switch while prior work continues.
 10. Focus mode.
 11. Archived/read-only conversation.
@@ -123,190 +128,137 @@ Visual QA must cover all of these at 1440x1000, 1100x900, 768x900, and 390x844:
 
 ### 4.1 Preserve the public source of truth
 
-The current public architecture remains untouched:
-
 - D1 `conversations` and `messages` remain the visitor transcript source of truth.
 - `ChatService` remains the only public reply persistence path.
-- Widget SSE, polling, delivery receipts, Telegram handoff, and `ConversationDO` realtime behavior remain in place.
-- No sidechat message is inserted into `messages`.
-- The only bridge from private to public is the human selecting `Add to reply`, followed by the existing dashboard send path.
+- Widget SSE, polling, delivery receipts, Telegram handoff, and `ConversationDO` realtime remain unchanged.
+- No private sidechat message is inserted into `messages`.
+- The only bridge to public output is `Add to reply`, followed by the existing dashboard Send path.
 
-### 4.2 Cloudflare Agents
+### 4.2 Cloudflare agents
 
-Add two new Durable Object classes:
+Add two generic Durable Object classes:
 
-1. `MavenSidechatAgent extends Think` — one instance per project conversation. It owns the private message tree, durable turn recovery, streaming, structured reply drafts, and write approval state.
-2. `MavenIntegrationAgent extends Agent` — one instance per project MCP connection. It owns that connection's MCP client, OAuth/token state, discovered catalog, and deterministic tool execution.
+1. `MavenSidechatAgent extends Think` — one instance per project conversation. It owns the private message tree, recovery, streaming, reply drafts, and pending approval state.
+2. `MavenIntegrationAgent extends Agent` — one instance per project MCP connection. It owns one generic MCP client, OAuth/token state, catalog, and native tool execution.
 
-The sidechat agent calls the integration agent through typed RPC. The integration agent is not model-facing and never generates text.
+The integration agent contains no PostHog, Stripe, Slack, Attio, or Linear execution branches. It exposes catalog entries and exact native tools through a generic typed RPC bridge. The sidechat agent creates AI SDK tools dynamically from enabled catalog entries and executes them through that bridge.
 
-The sidechat agent configuration is intentionally narrow:
-
-- `sendReasoning = false`.
-- `includeMcpTools = false`.
-- `workspaceBash = false`.
-- `beforeTurn().activeTools` contains only ReplyMaven-owned safe reads, approved actions, and the `presentReplyDraft` action. Think's workspace tools are not active.
-- Chat recovery remains enabled with a bounded stall timeout.
-- The public `runTurn()` API is wrapped behind a ReplyMaven adapter because Think remains experimental.
-
-Use `@cloudflare/think` and `@cloudflare/ai-chat` on top of `agents@0.20.x`/current lockfile-compatible releases while keeping this repository on AI SDK v6. Do not migrate the stable public widget to Chat SDK in this work.
+Sidechat uses `sendReasoning = false` and `workspaceBash = false`. Only project-enabled MCP tools and `presentReplyDraft` are active. Public widget chat is not migrated to Chat SDK in this work.
 
 ### 4.3 Authentication
 
-The dashboard requests a short-lived sidechat connection token through the existing authenticated Hono project route. That route performs the same team/project authorization as the conversation detail route.
+The dashboard obtains a two-minute HMAC-signed token from an authenticated project/conversation route. It includes user/effective-owner IDs, project/conversation/agent IDs, role/approval claims, timestamps, audience, and version—never customer data or provider credentials.
 
-The token contains:
-
-- user ID and effective owner ID;
-- project ID and conversation ID;
-- agent instance name;
-- team role and action permission claims;
-- issued-at, expiry, audience, and version.
-
-It is HMAC signed, expires in two minutes, is scoped to one agent instance, and carries no provider credentials or customer data. `MavenSidechatAgent.onConnect` validates it before accepting the WebSocket and stores only the authorization claims on the connection.
-
-Agent and MCP OAuth routes run before the SPA fallback. The widget has no route to either new agent class.
+Agent and MCP OAuth routes run before the SPA fallback. The widget cannot address either new agent class.
 
 ### 4.4 Private status projection
 
-Think stores the private transcript in Durable Object SQLite. D1 stores only a small dashboard projection so the inbox list can show status without opening every agent:
+Think stores the private transcript in Durable Object SQLite. D1 stores only `sidechat_threads`: project/conversation/agent IDs, `idle | working | waiting_approval | ready | failed`, unread, bounded safe preview, and timestamps.
 
-`sidechat_threads`
+Status changes broadcast only the projection through the authenticated dashboard realtime channel. The private transcript is never copied into D1.
 
-- project ID and conversation ID (unique);
-- deterministic agent instance name;
-- status: `idle | working | waiting_approval | ready | failed`;
-- unread boolean;
-- last safe preview (bounded, no raw tool data);
-- last activity and timestamps.
+## 5. Customer context
 
-Status changes broadcast through the existing dashboard realtime channel as a new `sidechat:status` event. Conversation list responses include the projection. The private transcript is never copied into D1.
+The private model context may include the canonical customer linked to the conversation:
 
-## 5. Trusted customer identity
+1. Prefer non-empty `customer.externalId` when searching an MCP system.
+2. Fall back to normalized `customer.email` only when external ID is absent or the native tool cannot use it.
+3. If neither exists, tell the human the customer profile must be linked or completed.
 
-Actions resolve identity only from the project-scoped `customers` record already linked to the conversation.
+Visitor-authored text, widget metadata, `visitorName`, and unverified conversation email snapshots are never treated as trusted identity.
 
-Resolution order:
+Because the MCP layer is generic, there is no provider-specific identity mapper. Maven follows the native MCP tool schema and the system instruction above.
 
-1. Non-empty trusted `customer.externalId`.
-2. Normalized trusted `customer.email`.
-3. Fail closed with `customer_identity_missing`.
+## 6. MCP connections and presets
 
-Visitor message text, widget metadata, `visitorName`, and unverified conversation email snapshots are never used to select an external account. If no canonical customer is linked, Maven tells the human to link or create the customer profile. Identity conflicts fail without guessing or merging.
+### 6.1 One generic client
 
-Each connection profile defines how ReplyMaven's external ID maps to the provider's identity field. Email remains a fallback, never the preferred key.
+A project may connect any compatible remote Streamable HTTP MCP server. The same generic client handles URL validation, OAuth or bearer authentication, catalog discovery, native tool execution, reconnect, and disconnect.
 
-## 6. MCP consumer and provider profiles
+OAuth/client state lives in `MavenIntegrationAgent` SQLite. D1 and React never receive provider tokens or authorization headers.
 
-### 6.1 Generic client, thin profiles
+### 6.2 Presets are inert metadata only
 
-The MCP transport is generic. A project can connect any Streamable HTTP MCP server supported by the Cloudflare Agents client. OAuth is handled by the Agents SDK and stored in the integration agent's SQLite; bearer headers are submitted directly to the agent and never stored in D1.
+The initial connection picker includes PostHog, Stripe, Slack, Attio, Linear, and Custom.
 
-Connecting a server does not expose all discovered tools to Maven. The setup flow discovers the catalog, then requires an owner to review explicit canonical-action mappings. Unknown tools stay disabled.
+A preset contains only:
 
-Thin built-in profiles supply mapping and normalization rules for PostHog, Stripe, Slack, Attio, and Linear. A mapping is accepted only when the selected tool's input schema satisfies the profile contract. A changed catalog returns the mapping to `needs_review` instead of guessing.
+- stable preset ID;
+- display name and existing provider icon asset;
+- default remote MCP URL;
+- generic authentication mode/setup copy;
+- official documentation URL.
 
-### 6.2 Canonical read actions
+Verified default URLs:
 
-Initial reads are deliberately small and bounded:
+- PostHog: `https://mcp.posthog.com/mcp`
+- Stripe: `https://mcp.stripe.com`
+- Slack: `https://mcp.slack.com/mcp`
+- Attio: `https://mcp.attio.com/mcp`
+- Linear: `https://mcp.linear.app/mcp`
 
-#### PostHog — `customer.posthog.events`
+Presets do not provide action templates, canonical action names, schema matchers, reducers, provider prompts, identity rules, output transforms, or provider-specific runtime code. Selecting a preset simply fills the generic connection form.
 
-Input: trusted identity plus `from`, `to`, optional event-name filter, optional property filters, and limit (default 25, maximum 100).
+### 6.3 Configure native tools directly
 
-Output: ordered normalized events with event name, timestamp, and allowlisted primitive properties. No complete person, session, or event payload.
+After connection, the generic client discovers the server's native tool catalog. Every tool starts disabled. In the connection detail, an owner/admin configures each tool directly:
 
-#### Stripe — `customer.stripe.billing_summary`
+- enabled/disabled for sidechat;
+- read or write classification;
+- for writes, `Ask every time` or `Always allow` policy;
+- optional short project instruction appended to the tool description.
 
-Output:
+MCP safety annotations may suggest a classification, but never enable a tool or grant write permission automatically. A changed input schema disables the tool until an owner/admin reviews it again.
 
-- whether a subscription exists;
-- subscription status and product/plan label;
-- current period start and renewal date;
-- cancel-at-period-end, cancel date, and canceled date;
-- recent payment activity (maximum 10) normalized as purchase, upgrade, downgrade, renewal, refund, or failed payment with date, amount, currency, and status.
-
-No complete Stripe customer, subscription, invoice, charge, payment method, address, tax, or metadata object reaches Maven.
-
-#### Slack — `customer.slack.search`
-
-Input: trusted identity, date range, project-configured channel allowlist, and maximum 10 hits.
-
-Output: channel name, author display name, timestamp, bounded excerpt, and permalink. No full thread dump, member profile, or workspace export.
-
-#### Attio — `customer.attio.record`
-
-Output: matched person/company label, project-allowlisted attributes, relationship stage, owner, and maximum 10 recent notes/tasks. No complete record payload.
-
-#### Linear — `customer.linear.issues`
-
-Output: maximum 10 linked issues with identifier, title, status, priority, assignee, updated date, and URL. No full workspace or issue history.
-
-### 6.3 Canonical write actions
-
-Initial writes are:
-
-- `customer.stripe.refund_payment`;
-- `customer.stripe.cancel_subscription_at_period_end`;
-- `customer.slack.post_internal_message`;
-- `customer.attio.add_note`;
-- `customer.linear.create_issue`.
-
-PostHog remains read-only in v1.
-
-Every write uses a two-stage contract:
-
-1. Prepare: resolve trusted identity, validate current provider state, generate an opaque preparation ID, encrypt the exact provider arguments, calculate an input hash, attach a human-readable safe summary, and set an action-specific expiry.
-2. Execute: after approval, load the sealed preparation, revalidate identity and provider preconditions, enforce idempotency, call the exact mapped MCP tool once, reduce the result, and mark the preparation settled.
-
-The model and approval descriptor receive the preparation ID and safe summary, not the raw provider arguments.
+There is no separate canonical-action mapping screen and no provider-specific `Agent actions` catalog.
 
 ## 7. Data boundary
 
-Prompt instructions are defense in depth, not the security boundary.
+MCP tool results may reach the private LLM context, as requested. There is no provider reducer or normalization layer.
 
-The enforceable path is:
+The path is:
 
-`raw MCP response -> provider reducer in MavenIntegrationAgent -> normalized safe fact -> MavenSidechatAgent -> private sidechat -> structured reply draft -> human Add to reply -> existing public send`
+`native MCP tool -> private Maven model context -> private Maven message/reply draft -> human Add to reply -> existing public send`
 
 Rules:
 
-- Raw MCP responses exist only in the integration agent execution scope and are reduced before RPC returns.
-- Direct MCP tools are never passed to the LLM.
-- Raw provider payloads, request headers, OAuth tokens, plaintext tool arguments, and complete tool outputs are not logged, traced, streamed to the browser, written to D1, or inserted into either transcript. Exact write arguments may exist only as authenticated ciphertext in `action_preparations` until execution/expiry.
-- Action activity stores action name, connection ID, status, duration, approval actor/mode, schema version, timestamps, idempotency hash, and a bounded safe summary only.
-- Workers traces remain disabled for the new agents until a production redaction test proves that message/tool payloads are not captured.
-- The sidechat system prompt says private customer facts are context, not copy; never paste identifiers, internal links, raw records, hidden metadata, or unsupported claims into a proposed visitor reply.
-- A reply draft still requires the human to select `Add to reply` and then Send.
+- Native MCP request/result bodies are never rendered as chat parts or sent to the browser.
+- Tool results may be retained only inside the private agent transcript/state required for continuity.
+- Provider credentials, authorization headers, and OAuth tokens never enter model context.
+- Tool request/results are not copied to D1, public `messages`, Telegram, widget APIs, activity logs, or traces.
+- The sidechat system prompt explicitly says provider data is context, not copy: answer the human's question concisely; never dump records, identifiers, internal links, hidden metadata, or full tool responses; never place them in a visitor reply.
+- Visible activity contains only connection label, native tool display name, state, and safe error code.
+- A draft still requires `Add to reply` and public Send.
 
-## 8. Approval and policy model
+Prompt rules are the requested disclosure control. The hard architectural boundary prevents private tool traffic from entering visitor-facing storage or transport.
 
-Think Actions with `kind: "durable-pause"` provide the durable approval ledger and resume behavior for single external writes. Cloudflare Workflows are not added for these one-step writes. They remain the future primitive for multi-step business workflows with several durable stages or external waits.
+## 8. Generic write permissions
 
-ReplyMaven adds project policy around Think Actions:
+Think durable-pause Actions provide the approval ledger for any enabled native MCP tool classified as write.
 
-- `Allow once` approves only the exact execution ID and authoritative descriptor hash.
-- `Always allow` writes a project policy for `(projectId, connectionId, canonicalActionId, actionSchemaVersion, mappingVersion)`, then approves the current execution.
-- Read actions never require approval, but must be enabled in project action settings.
-- Write actions default to `every_time` approval.
-- Owner/admin may change persistent policy. A member may approve once when their project role grants write approval but may not create an always-allow policy.
-- Reconnect, mapping edit, schema-version change, account change, or action disable immediately invalidates persistent permission.
-- Server-side value limits and precondition checks apply even when an action is always allowed.
-- Approval requests expire (15 minutes for payments/subscription changes, 24 hours for Slack/Attio/Linear writes). Expiry resolves the durable pause as rejected with reason `expired`; it never executes.
-- There is no visible rejection action in the compact bubble. Closing the pane simply leaves the request pending.
+- `Allow once` approves the exact pending tool-call execution and argument hash.
+- `Always allow` saves permission for `(projectId, connectionId, toolName, inputSchemaFingerprint)` and approves the current call.
+- Reconnect, schema change, classification change, or disable invalidates persistent permission.
+- Owner/admin may change persistent policy. A member with approval rights may approve once but cannot persist `Always allow`.
+- Pending calls expire after a project-wide configurable duration, default 24 hours. Expiry rejects the paused call and never executes it.
+- Exact pending tool arguments remain private in the sidechat Durable Object. The browser receives only the human-readable descriptor and its hash.
+- An approved write is dispatched once. Timeout after dispatch becomes `outcome_unknown`; it is never automatically retried.
+
+There are no provider-specific refund, cancellation, message, note, issue, or PostHog rules in ReplyMaven. Available behavior is exactly what the connected MCP server advertises and the project enables.
 
 ## 9. Project configuration UI
 
-The existing project `Actions & Tools` page gains two tabs without creating a separate design language:
+The existing project `Actions & Tools` page gains one tab:
 
-1. Existing `Actions` — widget shortcuts/contact form.
-2. Existing `Tools` — generic public-bot HTTP tools.
-3. `Connections` — outbound MCP servers available to sidechat.
-4. `Agent actions` — canonical read/write enablement, mapping status, approval policy, and safe activity.
+1. Existing `Actions`.
+2. Existing `Tools`.
+3. `Connections` — MCP presets, custom connections, native tool configuration, write policy, and safe recent activity.
 
-The account-level Settings > MCP page remains the inverse capability: external AI clients connecting to ReplyMaven's MCP server. Its copy is clarified so it cannot be confused with project provider connections.
+There is no separate `Agent actions` tab.
 
-Connection and action rows reuse current page typography, muted surfaces, compact controls, and spacing. Rows are separated by space/background contrast, never horizontal rules. Provider names are text-led; no sparkle treatment is added.
+The account Settings > MCP page remains the inverse capability: external clients connecting to ReplyMaven's MCP server. Its copy is clarified accordingly.
+
+Connections reuse the existing page shell, typography, muted surfaces, compact controls, spacing, and dialog primitives. Provider presets are compact picker rows, not marketplace cards. Rows use spacing/background contrast, never separator rules.
 
 ## 10. Persistence model
 
@@ -314,74 +266,67 @@ New D1 tables:
 
 ### `sidechat_threads`
 
-Private-thread status projection described in section 4.4.
+Private-thread status projection from section 4.4.
 
 ### `integration_connections`
 
-Project, display name, provider kind (`posthog | stripe | slack | attio | linear | custom`), MCP server URL, integration-agent instance name, stable SDK server ID, state, catalog fingerprint, last error code, last connected time, timestamps. No tokens or headers.
+Project, optional preset ID, display name, MCP URL, integration-agent instance name, stable SDK server ID, state, catalog fingerprint, safe error code, connected time, and timestamps. No credentials.
 
-### `integration_action_mappings`
+### `integration_tool_settings`
 
-Connection, canonical action ID, selected MCP tool name, profile version, mapping version, reducer version, schema fingerprint, enabled/read-write kind, review state, timestamps.
+Connection, native tool name, input-schema fingerprint, enabled flag, `read | write`, `every_time | always`, optional project instruction, configuring actor, and timestamps. Unique per connection/tool/schema fingerprint.
 
-### `action_policies`
+### `mcp_tool_runs`
 
-Project, connection, canonical action ID, action schema version, mapping version, approval mode (`every_time | always`), enabled flag, actor, timestamps. Unique on the policy scope.
+Project, conversation, connection, native tool name, status, approval mode/actor, duration, argument hash, safe error code, and timestamps. No raw arguments or result.
 
-### `action_preparations`
-
-Project, conversation, connection, canonical action ID, encrypted provider arguments, safe descriptor JSON, input hash, idempotency key hash, status, expiry, settled time, timestamps. Never stores a raw response.
-
-### `action_runs`
-
-Project, conversation, connection, canonical action ID, preparation ID, status, approval mode/actor, duration, provider result reference hash, safe summary, error code, timestamps. No raw input/output.
-
-OAuth credentials and MCP client state live only in `MavenIntegrationAgent` Durable Object SQLite.
+OAuth state, catalog bodies, private transcript, pending tool arguments, and durable approvals live only in the relevant Durable Object SQLite.
 
 ## 11. Errors and recovery
 
-- Sidechat connection failure: keep public draft intact and show a compact private retry state after the pane opens.
-- Interrupted Think turn: reconnect and resume the durable stream; do not finalize partial output.
-- MCP unavailable: return a normalized unavailable error, mark only that connection degraded, and let Maven prepare a reply without inventing facts.
-- Identity missing/conflict: fail closed and tell the human what profile link must be fixed.
-- Reducer/schema mismatch: disable the mapping and mark it `needs_review`; never return the raw payload as fallback.
-- Approval from stale UI: refetch the authoritative pending descriptor and compare its hash before enabling either button.
-- Provider timeout or ambiguous write result: mark `unknown`, do not retry the side effect automatically, and ask the human to verify provider state.
-- Duplicate approve: idempotent no-op.
-- Expired/stale prepared action: reject and prepare a fresh request.
+- Sidechat connection failure keeps the public draft intact and offers compact retry.
+- Interrupted Think turns reconnect and resume; partial output is not finalized.
+- MCP unavailable marks only that connection degraded and returns a safe private error.
+- Missing trusted customer identity tells the human to fix the linked profile.
+- Catalog/schema change disables affected native tools until reviewed.
+- Stale approval refetches the authoritative pending descriptor/hash.
+- Ambiguous write outcome becomes `outcome_unknown` and is not retried.
+- Duplicate approval is idempotent.
+- Disconnect removes MCP registration/credentials and destroys the connection agent after D1 records the pending cleanup.
 
 ## 12. Retention and deletion
 
-Private sidechat lifetime follows its public conversation. Manual conversation deletion and automated retention call the sidechat agent's idempotent destroy method before deleting the D1 projection. Failed cleanup is queued and retried. Removing a project destroys its integration agents and sidechat agents before D1 cascade cleanup.
+Private sidechat lifetime follows its public conversation. Manual and automated deletion invoke the sidechat agent's idempotent destroy method before deleting the D1 projection; failed cleanup is retried durably.
 
-Action-preparation ciphertext is deleted after its audit retention window; settled run metadata follows the project's audit retention. Disconnecting an MCP connection removes the SDK server registration and destroys its integration-agent state after the D1 row is marked disconnected.
+Project/connection deletion destroys integration-agent state and credentials. Safe `mcp_tool_runs` metadata follows project audit retention. Raw MCP results are never placed in D1.
 
 ## 13. Rollout
 
-The implementation ships in three independently verifiable phases:
+1. Private Sidechat Foundation — Think/AI Chat runtime, existing-chat-primitive refactor, authenticated private thread, draft bridge, responsive layout, and removal of inline Compose.
+2. MCP Connection Presets — one generic MCP client, inert presets, native catalog/tool configuration, customer context, and Connections UI.
+3. Generic MCP Write Approval — durable pause for any configured write tool, exact approval bubble, always/once policy, expiry, no automatic retry, and safe activity metadata.
 
-1. Private Sidechat Foundation — Cloudflare Think/AI Chat runtime, authenticated private thread, structured draft, inbox layout, status projection, and complete removal of inline Compose.
-2. Safe MCP Read Actions — generic MCP connection agent, catalog review, trusted identity, five provider profiles, reducer boundary, and project connection/action settings.
-3. Write Actions and Approvals — sealed preparations, Think durable-pause actions, exact approval bubble, always/once policy, five provider writes, idempotency, expiry, and audit metadata.
-
-Each phase is guarded by a server-side feature flag until its automated, responsive, keyboard, and production-like visual acceptance suite passes. Deployment remains a separate user-approved action.
+Each phase is feature-flagged until automated, responsive, keyboard, and production-like visual acceptance passes. Deployment remains separately approved by the user.
 
 ## 14. Explicitly out of scope
 
-- Replacing the public widget transcript or SSE delivery with `@cloudflare/ai-chat`.
-- Sending a sidechat draft automatically.
-- Exposing private sidechat to visitors or Telegram.
-- Directly exposing an arbitrary MCP tool to Maven.
-- Code Mode, browser automation, shell/workspace tools, or model-written integration code.
-- A permanently open right rail.
-- A visitor-preview pane.
-- Multi-stage business workflows; use Cloudflare Workflows when one is designed.
+- Provider-specific actions, profiles, reducers, mappings, schemas, prompts, or runtime branches.
+- Automatically configuring or enabling native MCP tools from a preset.
+- A separate Agent actions catalog.
+- Replacing public widget chat with AI Chat.
+- Sending drafts automatically.
+- Exposing sidechat to visitors or Telegram.
+- Browser/shell/workspace tools or model-written integration code.
+- Permanent sidechat rail or visitor-preview pane.
+- Multi-stage business workflows.
 
-## 15. Current official primitives used
+## 15. Current official primitives and preset sources
 
-- [Think](https://developers.cloudflare.com/agents/harnesses/think/)
-- [Think Actions](https://developers.cloudflare.com/agents/harnesses/think/actions/)
-- [Think programmatic submissions](https://developers.cloudflare.com/agents/harnesses/think/programmatic-submissions/)
-- [MCP client API](https://developers.cloudflare.com/agents/model-context-protocol/apis/client-api/)
-- [Cross-domain and WebSocket authentication](https://developers.cloudflare.com/agents/runtime/operations/cross-domain-authentication/)
-- [Human-in-the-loop patterns](https://developers.cloudflare.com/agents/concepts/agentic-patterns/human-in-the-loop/)
+- [Cloudflare Think](https://developers.cloudflare.com/agents/harnesses/think/)
+- [Cloudflare Think Actions](https://developers.cloudflare.com/agents/harnesses/think/actions/)
+- [Cloudflare MCP client API](https://developers.cloudflare.com/agents/model-context-protocol/apis/client-api/)
+- [PostHog MCP](https://posthog.com/docs/model-context-protocol)
+- [Stripe MCP](https://docs.stripe.com/mcp)
+- [Slack MCP](https://docs.slack.dev/ai/slack-mcp-server)
+- [Attio MCP](https://docs.attio.com/mcp/overview)
+- [Linear MCP](https://linear.app/docs/mcp)

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the dashboard's one-shot inline Compose feature with an authenticated, durable, private Cloudflare Think sidechat that prepares structured reply drafts and fits the current inbox precisely on desktop, focus mode, tablet, and mobile.
+**Goal:** Replace the dashboard's one-shot inline Compose feature with an authenticated, durable, private Cloudflare Think sidechat built from the inbox's existing thread, bubble, and composer primitives across desktop, focus mode, tablet, and mobile.
 
-**Architecture:** Add one `MavenSidechatAgent extends Think` Durable Object per project conversation. Think owns the private transcript and resumable stream; D1 stores only a small status projection. The React inbox connects with `useAgent` + `useAgentChat` using a two-minute project-scoped token. The stable visitor transcript, widget, Telegram path, and existing public reply/send flow remain unchanged.
+**Architecture:** Add one `MavenSidechatAgent extends Think` Durable Object per project conversation. Think owns the private transcript and resumable stream; D1 stores only a small status projection. The React inbox connects with `useAgent` + `useAgentChat` using a two-minute project-scoped token, while `ChatThread`, `MessageBubble`, and `Composer` are generalized once and reused by ReadingPane, FocusView, and SidechatPane. The stable visitor transcript, widget, Telegram path, and public reply/send flow remain unchanged.
 
 **Tech Stack:** Bun, React 19, Tailwind CSS v4, TanStack Query, Hono, D1/Drizzle, Cloudflare Durable Objects, `agents@0.20.0`, `@cloudflare/think@0.14.0`, `@cloudflare/ai-chat@0.10.0`, AI SDK v6.
 
@@ -19,7 +19,8 @@
 - No private sidechat content may enter `messages`, public SSE, Telegram, or widget APIs.
 - No sparkle icon. Exact entry copy is `Start sidechat` / `Open sidechat` plus the existing `⇧⇥` keycap.
 - No row separators, `border-t`, `border-b`, `<hr>`, or nested card stacks.
-- Reuse `glass-reading`, `glass-bar`, `glass-button`, `bg-bubble-*`, `text-ink-*`, `rounded-[20px]`, and the existing typography.
+- Reuse and extend `ChatThread`, `MessageBubble`, and `Composer`; do not create sidechat-specific copies of their thread, bubble, Markdown, auto-grow, focus, or send-control implementations.
+- Preserve `glass-reading`, `glass-bar`, `glass-button`, `bg-bubble-*`, `text-ink-*`, `rounded-bubble`, and the existing typography.
 - Think remains behind `worker/agents/sidechat-runtime.ts`; React remains behind `src/lib/use-sidechat.ts`. Do not scatter experimental SDK calls through inbox components.
 - `sendReasoning = false`, `includeMcpTools = false`, `workspaceBash = false`, and a strict `activeTools` allowlist are non-negotiable.
 - Do not enable Workers traces for the new agent in this phase.
@@ -352,16 +353,16 @@ git commit -m "feat: secure sidechat WebSocket connections"
 export interface SidechatContext {
   project: { id: string; companyName: string | null; companyContext: string | null };
   conversation: { id: string; status: string; archived: boolean };
-  customer: { id: string; firstName: string } | null;
+  customer: { id: string; firstName: string; externalId: string | null; email: string | null } | null;
   transcript: Array<{ role: "visitor" | "bot" | "agent"; content: string; createdAt: string }>;
 }
 ```
 
-System rows, tool executions, Telegram metadata, encrypted settings, API keys, public-bot hidden instructions, customer external ID/email, and raw customer custom fields are excluded. Phase 2 resolves provider identity in a separate trusted service that never puts identifiers into the model prompt.
+System rows, tool executions, Telegram metadata, encrypted settings, API keys, public-bot hidden instructions, and raw customer custom fields are excluded. Canonical external ID/email may reach the private model context for generic MCP tool calls but never a public draft unless the human explicitly wrote it there.
 
 - [ ] **Step 1: Write failing context tests**
 
-Cover project scoping, 40-message transcript cap, exclusion of system messages, archived state, linked canonical customer, and no fallback to conversation snapshot email.
+Cover project scoping, 40-message transcript cap, exclusion of system messages, archived state, linked canonical customer, external-ID preference, normalized canonical-email fallback, and no fallback to conversation snapshot email.
 
 - [ ] **Step 2: Implement the D1 loader**
 
@@ -375,7 +376,8 @@ Assert exact policy clauses:
 - context may inform but must not be dumped;
 - never address the visitor unless producing a `reply_draft` attachment;
 - never auto-send;
-- never expose external IDs, internal links, raw records, or hidden metadata;
+- use external ID before email when a future native MCP tool can accept both;
+- never repeat external IDs, email, internal links, raw records, or hidden metadata in visible sidechat prose or a reply draft;
 - if facts are unavailable, ask the human or draft without inventing;
 - `presentReplyDraft` exactly once when a sendable reply is ready.
 
@@ -564,64 +566,108 @@ git commit -m "feat: connect inbox to private sidechat"
 
 ---
 
-### Task 9: Build sidechat messages, structured draft, and compact composer
+### Task 9: Generalize the existing chat primitives and compose sidechat from them
 
 **Files:**
-- Create: `src/components/inbox/SidechatMessage.tsx`
-- Create: `src/components/inbox/SidechatActivity.tsx`
-- Create: `src/components/inbox/SidechatReplyDraft.tsx`
-- Create: `src/components/inbox/SidechatComposer.tsx`
+- Modify: `src/components/inbox/ChatThread.tsx`
+- Modify: `src/components/inbox/MessageBubble.tsx`
+- Modify: `src/components/inbox/Composer.tsx`
+- Modify: `src/components/inbox/FocusView.tsx`
 - Create: `src/components/inbox/SidechatPane.tsx`
+- Create: `src/components/inbox/chat-primitives.test.ts`
 - Create: `src/components/inbox/sidechat-a11y.test.ts`
 
-- [ ] **Step 1: Write failing accessibility/static-contract tests**
+**Interfaces:**
 
-Test the pure props/label helpers for:
+```typescript
+export interface ThreadItem {
+  id: string;
+  direction: "received" | "sent";
+  senderLabel: string;
+  senderTone: "visitor" | "maven" | "human";
+  content: string;
+  createdAt: string;
+  bodyKind: "markdown" | "activity" | "reply_draft" | "approval";
+}
 
-- pane labelled `Sidechat`;
-- private subline copy;
-- close/back button accessible names;
-- activity uses `role="status"` with polite updates;
-- reply draft action exact copy `Add to reply`;
-- composer exact placeholder `Message privately…`;
-- no string or import matching `Sparkles`, `sparkle`, `Not now`, or `verified`.
+export interface ComposerMode {
+  kind: "public_reply" | "private_sidechat";
+  placeholder: string;
+  submitOnEnter: boolean;
+  showAttachments: boolean;
+  showResolve: boolean;
+}
+```
 
-- [ ] **Step 2: Implement private message bubbles**
+- [ ] **Step 1: Write failing reuse/static-contract tests**
 
-Use:
+Assert:
 
-- human: right, `bg-bubble-sent`, white text, `rounded-br-[6px]`;
-- Maven: left, `bg-bubble-received`, `text-ink-2`, `rounded-bl-[6px]`;
-- both: `max-w-[88%] px-3.5 py-2.5 text-[14.5px] leading-[1.5] break-words`.
+- `SidechatPane.tsx` imports and renders `ChatThread`, `MessageBubble` through the thread renderer, and `Composer`;
+- there is no `SidechatMessage`, `SidechatComposer`, alternate bubble shell, alternate Markdown renderer, or copied textarea auto-grow hook;
+- `FocusView.tsx` no longer defines `FocusBubble` or calls `renderMarkdown` directly;
+- public mode retains attachments, Resolve, Cmd/Ctrl+Enter, and existing placeholder behavior;
+- private mode uses `Message privately…`, Enter to submit, Shift+Enter for a newline, no attachment/Resolve controls;
+- no string/import matches `Sparkles`, `sparkle`, `Not now`, or `verified`.
 
-Reuse the existing markdown renderer/sanitizer used by `MessageBubble`; do not create a second unsafe Markdown path.
-
-- [ ] **Step 3: Implement inline activity and reply draft**
-
-Activity is a compact muted line in the message flow, not a card. Reply draft is a normal Maven bubble with one 30px `glass-button` action. `Add to reply` calls a parent callback; it never sends or closes the pane.
-
-- [ ] **Step 4: Implement the private composer**
-
-Copy the proven auto-grow/focus behavior from `Composer.tsx`, but omit attachments, Resolve, and public Send shortcut. Enter submits; Shift+Enter adds a line. The visible send button is the existing 32px blue circle.
-
-- [ ] **Step 5: Implement pane structure**
-
-- width classes: `w-full md:w-[min(380px,42vw)] 2xl:w-[400px]`;
-- `glass-reading flex shrink-0 flex-col h-full overflow-hidden`;
-- no border-left; surface contrast supplies separation;
-- 14px semibold title; muted 11.5–12px subline;
-- scroll to latest only when already near bottom;
-- restore last scroll per conversation;
-- targeted `opacity`/`translate-x` 200ms transition with reduced-motion override.
-
-- [ ] **Step 6: Run tests/build and commit**
+Run:
 
 ```bash
-bun test src/components/inbox/sidechat-a11y.test.ts
+bun test src/components/inbox/chat-primitives.test.ts src/components/inbox/sidechat-a11y.test.ts
+```
+
+Expected: fail because the existing primitives do not yet expose the required modes/slots.
+
+- [ ] **Step 2: Extract a reusable bubble shell inside `MessageBubble.tsx`**
+
+Keep `MessageBubble` as the public adapter, but export one named `MessageBubbleShell` used by both public messages and sidechat. It owns:
+
+- sender/timestamp header;
+- sent/received alignment and colors;
+- `max-w-9/10 sm:max-w-3/4 px-3.5 py-2.5 text-[14.5px] leading-normal`;
+- `rounded-bubble` and six-pixel tail corner;
+- the existing `prose-chat`/`renderMarkdown` path;
+- an optional `actions` slot inside the bubble body.
+
+Activity, reply-draft, and approval content may supply body/actions; none may recreate the outer bubble markup.
+
+- [ ] **Step 3: Generalize `ChatThread` without changing public output**
+
+Add a typed adapter from current `Message`/`Conversation` to `ThreadItem`, plus an optional private item collection/body renderer. Preserve the current skeleton, date dividers, five-minute sender grouping, search hooks, message IDs, and spacing. Snapshot/class-contract tests must prove ReadingPane output is unchanged for representative visitor/bot/agent/system sequences.
+
+- [ ] **Step 4: Add private mode to `Composer`**
+
+Move the existing layout-effect auto-grow, focus restoration, container, textarea, and 32px circular send control into the shared mode path. Public mode retains uploads, drag/drop, Resolve, sidechat entry, and Cmd/Ctrl+Enter. Private mode reuses the same structure while hiding public-only controls and submitting on Enter.
+
+- [ ] **Step 5: Remove FocusView's duplicate bubble implementation**
+
+Delete `FocusBubble`, `renderMarkdown`, and local image/body rendering from `FocusView.tsx`. Render the conversation with the generalized `ChatThread` so focus mode, ReadingPane, and sidechat share one thread/bubble implementation.
+
+- [ ] **Step 6: Compose `SidechatPane` from the shared primitives**
+
+`SidechatPane` owns only pane orchestration and sidechat-specific body content:
+
+- width `w-full md:w-[min(380px,42vw)] 2xl:w-[400px]`;
+- `glass-reading flex shrink-0 flex-col h-full overflow-hidden`;
+- 14px semibold title and 11.5–12px muted subline;
+- close/back control;
+- conversion of normalized sidechat messages to `ThreadItem`;
+- compact activity with `role="status"`;
+- reply-draft body with one `Add to reply` action in the shared bubble action slot;
+- shared Composer in `private_sidechat` mode;
+- near-bottom scroll pinning and per-conversation scroll restoration;
+- 200ms opacity/translate transition with reduced-motion override.
+
+It must not define bubble surfaces, Markdown, textarea growth, or a second send button.
+
+- [ ] **Step 7: Run tests/build and commit**
+
+```bash
+bun test src/components/inbox/chat-primitives.test.ts src/components/inbox/sidechat-a11y.test.ts
 bun run build
 bun run lint
-git add src/components/inbox/SidechatMessage.tsx src/components/inbox/SidechatActivity.tsx src/components/inbox/SidechatReplyDraft.tsx src/components/inbox/SidechatComposer.tsx src/components/inbox/SidechatPane.tsx src/components/inbox/sidechat-a11y.test.ts
-git commit -m "feat: build private sidechat interface"
+git add src/components/inbox/ChatThread.tsx src/components/inbox/MessageBubble.tsx src/components/inbox/Composer.tsx src/components/inbox/FocusView.tsx src/components/inbox/SidechatPane.tsx src/components/inbox/chat-primitives.test.ts src/components/inbox/sidechat-a11y.test.ts
+git commit -m "refactor: reuse inbox chat primitives for sidechat"
 ```
 
 ---
@@ -687,7 +733,7 @@ Split view rules:
 
 - [ ] **Step 4: Integrate focus view**
 
-Render FocusView and SidechatPane as siblings. The focus conversation card keeps its max width and centers in remaining space. Do not duplicate sidechat state or create a second agent connection.
+Render FocusView and SidechatPane as siblings. The focus conversation card keeps its max width and centers in remaining space. Reuse the `ChatThread` and `Composer` primitive instances introduced in Task 9; do not restore `FocusBubble`, duplicate sidechat state, or create a second agent connection.
 
 - [ ] **Step 5: Add quiet status dots**
 
