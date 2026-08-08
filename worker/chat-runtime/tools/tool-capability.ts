@@ -58,5 +58,5 @@ function sortJsonKeys(value: unknown): unknown {
     .reduce<Record<string, unknown>>((sorted, key) => {
       sorted[key] = sortJsonKeys((value as Record<string, unknown>)[key]);
       return sorted;
-    }, {});
+    }, Object.create(null) as Record<string, unknown>);
 }

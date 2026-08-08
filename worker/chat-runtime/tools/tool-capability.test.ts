@@ -132,6 +132,13 @@ describe("fingerprintJsonSchema", () => {
 
     expect(changed).not.toBe(original);
   });
+
+  test("preserves a parsed __proto__ schema key in the fingerprint", async () => {
+    const empty = await fingerprintJsonSchema({});
+    const schema = JSON.parse('{"__proto__":{"type":"string"}}') as unknown;
+
+    expect(await fingerprintJsonSchema(schema)).not.toBe(empty);
+  });
 });
 
 test("parseAllowedChannels fails closed for malformed or unknown values", () => {
