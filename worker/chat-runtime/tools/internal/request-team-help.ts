@@ -98,6 +98,9 @@ function getAcceptedTeamRequest(
     if (!parsed || typeof parsed !== "object") return null;
     const record = parsed as Record<string, unknown>;
     if (typeof record.mavenTeamRequestAcceptedAt !== "string") return null;
+    if (typeof record.mavenTeamRequestAcceptanceToken !== "string") {
+      return null;
+    }
     const needsRepair =
       typeof record.escalatedAt !== "string" ||
       typeof record.reviewSummaryMessageId !== "string" ||
@@ -112,7 +115,7 @@ function getAcceptedTeamRequest(
     const summary = record.teamRequestSummary.trim();
     if (!summary) return null;
     return {
-      acceptanceToken: record.reviewSummaryMessageId,
+      acceptanceToken: record.mavenTeamRequestAcceptanceToken,
       needsRepair,
       summary,
     };
@@ -192,6 +195,7 @@ export function createRequestTeamHelpTool(dependencies: {
               project,
               conversation,
               summary: acceptedRequest.summary,
+              acceptedTeamRequestToken: acceptedRequest.acceptanceToken,
               settings,
               env: dependencies.env,
               executionCtx: dependencies.executionCtx,
@@ -200,6 +204,7 @@ export function createRequestTeamHelpTool(dependencies: {
                 return dependencies.chatService.claimNewTeamRequestNotification(
                   dependencies.context.conversationId,
                   dependencies.context.projectId,
+                  acceptedRequest.acceptanceToken,
                 );
               },
               persistTelegramThreadId(threadId) {
@@ -294,6 +299,7 @@ export function createRequestTeamHelpTool(dependencies: {
             metadata: claimedConversation.metadata,
           },
           summary: acceptedSummary,
+          acceptedTeamRequestToken: acceptedRequest?.acceptanceToken,
           settings,
           env: dependencies.env,
           executionCtx: dependencies.executionCtx,
@@ -302,6 +308,7 @@ export function createRequestTeamHelpTool(dependencies: {
             return dependencies.chatService.claimNewTeamRequestNotification(
               dependencies.context.conversationId,
               dependencies.context.projectId,
+              acceptedRequest?.acceptanceToken ?? "",
             );
           },
           persistTelegramThreadId(threadId) {

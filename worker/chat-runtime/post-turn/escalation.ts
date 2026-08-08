@@ -54,6 +54,7 @@ export async function createEscalation(params: {
   };
   executionCtx: ExecutionContext;
   broadcast: (message: MessageRow) => void;
+  acceptedTeamRequestToken?: string;
   notifyExternalActions?: boolean;
   claimExternalNotificationAttempt?: () => Promise<boolean>;
   persistTelegramThreadId?: (threadId: string) => Promise<boolean>;
@@ -64,24 +65,57 @@ export async function createEscalation(params: {
   created: boolean;
   accepted: boolean;
 }> {
-  const summary = params.summary.trim() || "Visitor asked for team follow-up.";
-
-  // First escalation vs repeat: a prior escalation leaves `escalatedAt` in the
-  // conversation metadata.
+  let summary = params.summary.trim() || "Visitor asked for team follow-up.";
   let existingMeta: Record<string, unknown> = {};
-  try {
-    const parsed = params.conversation.metadata
-      ? JSON.parse(params.conversation.metadata)
-      : {};
-    existingMeta = typeof parsed === "object" && parsed !== null ? parsed : {};
-  } catch {
-    /* ignore malformed metadata */
+  let created: boolean;
+  let summaryMessageId: string | null;
+  let summaryNeedsPersistence: boolean;
+
+  if (params.acceptedTeamRequestToken) {
+    const acceptance = await params.chatService.getNewTeamRequestAcceptance(
+      params.conversation.id,
+      params.project.id,
+      params.acceptedTeamRequestToken,
+    );
+    if (!acceptance) {
+      return {
+        summary,
+        summaryMessageId: null,
+        created: false,
+        accepted: false,
+      };
+    }
+    summary =
+      acceptance.summary.trim() || "Visitor asked for team follow-up.";
+    summaryMessageId = acceptance.summaryMessageId;
+    summaryNeedsPersistence = acceptance.summaryPending;
+    created =
+      acceptance.summaryPending || acceptance.notificationState === "pending";
+  } else {
+    try {
+      const parsed = params.conversation.metadata
+        ? JSON.parse(params.conversation.metadata)
+        : {};
+      existingMeta =
+        typeof parsed === "object" && parsed !== null ? parsed : {};
+    } catch {
+      /* ignore malformed metadata */
+    }
+    created =
+      typeof existingMeta.escalatedAt !== "string" ||
+      existingMeta.teamRequestSummaryPending === true ||
+      (typeof existingMeta.mavenTeamRequestAcceptedAt === "string" &&
+        existingMeta.teamRequestNotificationState === "pending");
+    summaryMessageId =
+      typeof existingMeta.reviewSummaryMessageId === "string"
+        ? existingMeta.reviewSummaryMessageId
+        : null;
+    summaryNeedsPersistence =
+      created ||
+      summaryMessageId === null ||
+      existingMeta.teamRequestSummaryPending === true;
+    summaryMessageId ??= crypto.randomUUID();
   }
-  const created =
-    typeof existingMeta.escalatedAt !== "string" ||
-    existingMeta.teamRequestSummaryPending === true ||
-    (typeof existingMeta.mavenTeamRequestAcceptedAt === "string" &&
-      existingMeta.teamRequestNotificationState === "pending");
 
   logInfo("escalation.started", {
     projectId: params.project.id,
@@ -96,71 +130,71 @@ export async function createEscalation(params: {
     created,
   });
 
-  // Persist the idempotency key before inserting the summary. If inserting or
-  // broadcasting fails after this write, a later repair uses the same message
-  // id and cannot append a duplicate summary.
-  let summaryMessageId: string | null =
-    typeof existingMeta.reviewSummaryMessageId === "string"
-      ? existingMeta.reviewSummaryMessageId
-      : null;
-  const summaryNeedsPersistence =
-    created ||
-    summaryMessageId === null ||
-    existingMeta.teamRequestSummaryPending === true;
-  summaryMessageId ??= crypto.randomUUID();
-
-  // Patch only escalation-owned keys. `updateConversation` merges this patch
-  // against the live row so a delayed repair cannot replay stale ownership or
-  // notification state over a newer compare-and-set result.
-  const updatedConversation = await params.chatService.updateConversation(
-    params.conversation.id,
-    params.project.id,
-    {
-      metadata: JSON.stringify({
-        teamRequestSummary: summary,
-        escalatedAt:
-          typeof existingMeta.escalatedAt === "string"
-            ? existingMeta.escalatedAt
-            : new Date().toISOString(),
-        reviewSummaryMessageId: summaryMessageId,
-        ...(summaryNeedsPersistence
-          ? { teamRequestSummaryPending: true }
-          : {}),
-      }),
-    },
-  );
-  if (!updatedConversation) {
-    return {
-      summary,
-      summaryMessageId: null,
-      created: false,
-      accepted: false,
-    };
-  }
-
-  if (summaryNeedsPersistence) {
-    const row = await params.chatService.addSystemMessage(
-      params.conversation.id,
-      "review_summary",
-      summary,
-      summaryMessageId,
-    );
-    if (row) {
-      params.broadcast(row);
-    }
-
-    const completedConversation = await params.chatService.updateConversation(
+  if (!params.acceptedTeamRequestToken) {
+    const updatedConversation = await params.chatService.updateConversation(
       params.conversation.id,
       params.project.id,
       {
         metadata: JSON.stringify({
           teamRequestSummary: summary,
+          escalatedAt:
+            typeof existingMeta.escalatedAt === "string"
+              ? existingMeta.escalatedAt
+              : new Date().toISOString(),
           reviewSummaryMessageId: summaryMessageId,
-          teamRequestSummaryPending: false,
+          ...(summaryNeedsPersistence
+            ? { teamRequestSummaryPending: true }
+            : {}),
         }),
       },
     );
-    if (!completedConversation) {
+    if (!updatedConversation) {
+      return {
+        summary,
+        summaryMessageId: null,
+        created: false,
+        accepted: false,
+      };
+    }
+  }
+
+  if (summaryNeedsPersistence) {
+    const row = params.acceptedTeamRequestToken
+      ? await params.chatService.addNewTeamRequestSummary(
+          params.conversation.id,
+          params.project.id,
+          params.acceptedTeamRequestToken,
+        )
+      : await params.chatService.addSystemMessage(
+          params.conversation.id,
+          "review_summary",
+          summary,
+          summaryMessageId,
+        );
+    if (row) {
+      params.broadcast(row);
+    }
+
+    const completed = params.acceptedTeamRequestToken
+      ? await params.chatService.completeNewTeamRequestSummary(
+          params.conversation.id,
+          params.project.id,
+          params.acceptedTeamRequestToken,
+        )
+      : Boolean(
+          await params.chatService.updateConversation(
+            params.conversation.id,
+            params.project.id,
+            {
+              metadata: JSON.stringify({
+                teamRequestSummary: summary,
+                reviewSummaryMessageId: summaryMessageId,
+                teamRequestSummaryPending: false,
+              }),
+            },
+          ),
+        );
+    if (!completed) {
       return {
         summary,
         summaryMessageId,

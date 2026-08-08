@@ -417,6 +417,7 @@ describe("ChatService ownership and atomic writes", () => {
       "Alice",
       "alice@example.com",
       {
+        acceptanceToken: "acceptance-1",
         summary: "Visitor needs help.",
         acceptedAt: "2026-08-09T00:00:00.000Z",
         summaryMessageId: "summary-1",
@@ -505,15 +506,23 @@ describe("ChatService ownership and atomic writes", () => {
         "Visitor needs help.",
       ),
     ).toEqual({ status: "claimed" });
+    const accepted = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const acceptanceToken = JSON.parse(accepted?.metadata ?? "{}")
+      .mavenTeamRequestAcceptanceToken as string;
 
     const attempts = await Promise.all([
       service.claimNewTeamRequestNotification(
         conversation.id,
         conversation.projectId,
+        acceptanceToken,
       ),
       service.claimNewTeamRequestNotification(
         conversation.id,
         conversation.projectId,
+        acceptanceToken,
       ),
     ]);
     const latest = await service.getOperationalConversationById(
@@ -605,6 +614,12 @@ describe("ChatService ownership and atomic writes", () => {
         "Visitor needs help.",
       ),
     ).toEqual({ status: "claimed" });
+    const accepted = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const acceptanceToken = JSON.parse(accepted?.metadata ?? "{}")
+      .mavenTeamRequestAcceptanceToken as string;
 
     const staleWriterReady = createDeferred();
     const releaseStaleWriter = createDeferred();
@@ -624,6 +639,7 @@ describe("ChatService ownership and atomic writes", () => {
       await service.claimNewTeamRequestNotification(
         conversation.id,
         conversation.projectId,
+        acceptanceToken,
       ),
     ).toBe(true);
     releaseStaleWriter.resolve();
@@ -637,6 +653,46 @@ describe("ChatService ownership and atomic writes", () => {
     expect(metadata.teamRequestNotificationState).toBe("attempted");
     expect(metadata.teamRequestSummaryPending).toBe(false);
     expect(metadata.mavenTeamRequestAcceptedAt).toBeString();
+    expect(metadata.source).toBe("widget");
+  });
+
+  test("generic metadata patches cannot replace the immutable acceptance token", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+    expect(
+      await service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Visitor needs help.",
+      ),
+    ).toEqual({ status: "claimed" });
+    const accepted = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const originalToken = JSON.parse(accepted?.metadata ?? "{}")
+      .mavenTeamRequestAcceptanceToken as string;
+
+    const updated = await service.updateConversation(
+      conversation.id,
+      conversation.projectId,
+      {
+        metadata: JSON.stringify({
+          mavenTeamRequestAcceptanceToken: "replacement-token",
+          source: "widget",
+        }),
+      },
+    );
+    const metadata = JSON.parse(updated?.metadata ?? "{}");
+
+    expect(metadata.mavenTeamRequestAcceptanceToken).toBe(originalToken);
     expect(metadata.source).toBe("widget");
   });
 
@@ -660,18 +716,20 @@ describe("ChatService ownership and atomic writes", () => {
         "Visitor needs help.",
       ),
     ).toEqual({ status: "claimed" });
-    expect(
-      await service.claimNewTeamRequestNotification(
-        conversation.id,
-        conversation.projectId,
-      ),
-    ).toBe(true);
     const accepted = await service.getOperationalConversationById(
       conversation.id,
       conversation.projectId,
     );
     const acceptedMetadata = JSON.parse(accepted?.metadata ?? "{}");
-    const acceptanceToken = acceptedMetadata.reviewSummaryMessageId as string;
+    const acceptanceToken =
+      acceptedMetadata.mavenTeamRequestAcceptanceToken as string;
+    expect(
+      await service.claimNewTeamRequestNotification(
+        conversation.id,
+        conversation.projectId,
+        acceptanceToken,
+      ),
+    ).toBe(true);
 
     expect(
       await service.persistNewTeamRequestTelegramThreadId(

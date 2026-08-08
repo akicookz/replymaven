@@ -398,6 +398,54 @@ export function buildConditionalSystemMessageQuery(
     .returning();
 }
 
+export function buildAcceptedTeamRequestSummaryQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+  projectId: string,
+  acceptanceToken: string,
+  createdAt: Date,
+) {
+  const selectQuery = db
+    .select({
+      id: sql<string>`json_extract(${conversations.metadata}, '$.reviewSummaryMessageId')`.as("id"),
+      conversationId: conversations.id,
+      role: sql<"system">`${"system"}`.as("role"),
+      content: sql<string>`json_extract(${conversations.metadata}, '$.teamRequestSummary')`.as("content"),
+      imageUrl: sql<null>`null`.as("image_url"),
+      sources: sql<string>`${JSON.stringify({ systemKind: "review_summary" })}`.as("sources"),
+      senderName: sql<null>`null`.as("sender_name"),
+      senderAvatar: sql<null>`null`.as("sender_avatar"),
+      userId: sql<null>`null`.as("user_id"),
+      createdAt: sql<Date>`${Math.floor(createdAt.getTime() / 1000)}`.as(
+        "created_at",
+      ),
+      emailedAt: sql<null>`null`.as("emailed_at"),
+      deliveredAt: sql<null>`null`.as("delivered_at"),
+      readAt: sql<null>`null`.as("read_at"),
+    })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+        eq(conversations.status, "waiting_agent"),
+        isNull(conversations.archivedAt),
+        sql`json_valid(${conversations.metadata})`,
+        sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestAcceptanceToken') = ${acceptanceToken}`,
+        sql`json_extract(${conversations.metadata}, '$.teamRequestSummaryPending') = 1`,
+        sql`json_type(${conversations.metadata}, '$.reviewSummaryMessageId') = 'text'`,
+        sql`json_type(${conversations.metadata}, '$.teamRequestSummary') = 'text'`,
+        sql`coalesce(json_extract(${conversations.chatState}, '$.aiParticipation'), 'assist_until_agent') <> 'human_only'`,
+      ),
+    );
+
+  return db
+    .insert(messages)
+    .select(selectQuery)
+    .onConflictDoNothing()
+    .returning();
+}
+
 export function buildConditionalBotMessageQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   input: ConditionalBotMessageInput,
@@ -481,6 +529,7 @@ export function buildNewTeamRequestClaimQuery(
   expectedVisitorName: string | null,
   expectedVisitorEmail: string | null,
   acceptance: {
+    acceptanceToken: string;
     summary: string;
     acceptedAt: string;
     summaryMessageId: string;
@@ -507,7 +556,8 @@ export function buildNewTeamRequestClaimQuery(
     '$.reviewSummaryMessageId', ${acceptance.summaryMessageId},
     '$.teamRequestSummaryPending', json('true'),
     '$.teamRequestNotificationState', 'pending',
-    '$.mavenTeamRequestAcceptedAt', ${acceptance.acceptedAt}
+    '$.mavenTeamRequestAcceptedAt', ${acceptance.acceptedAt},
+    '$.mavenTeamRequestAcceptanceToken', ${acceptance.acceptanceToken}
   )`;
   return db
     .update(conversations)
@@ -539,6 +589,15 @@ export type NewTeamRequestClaimResult =
       requiredFields: Array<"name" | "email">;
     }
   | { status: "unavailable" };
+
+export interface NewTeamRequestAcceptance {
+  acceptanceToken: string;
+  acceptedAt: string;
+  notificationState: string;
+  summary: string;
+  summaryMessageId: string;
+  summaryPending: boolean;
+}
 
 // ─── Inbox tab predicates ────────────────────────────────────────────────────
 // Snoozed and flagged (spam) conversations live ONLY in their own tabs: they
@@ -1144,6 +1203,7 @@ export class ChatService {
       conversation.visitorName,
       conversation.visitorEmail,
       {
+        acceptanceToken: crypto.randomUUID(),
         summary: summary.trim() || "Visitor asked for team follow-up.",
         acceptedAt: new Date().toISOString(),
         summaryMessageId: crypto.randomUUID(),
@@ -1160,6 +1220,7 @@ export class ChatService {
   async claimNewTeamRequestNotification(
     id: string,
     projectId: string,
+    acceptanceToken: string,
   ): Promise<boolean> {
     const conversation = await this.getOperationalConversationById(
       id,
@@ -1185,6 +1246,7 @@ export class ChatService {
       return false;
     }
     if (
+      metadata.mavenTeamRequestAcceptanceToken !== acceptanceToken ||
       typeof metadata.mavenTeamRequestAcceptedAt !== "string" ||
       metadata.teamRequestNotificationState !== "pending"
     ) {
@@ -1215,6 +1277,102 @@ export class ChatService {
       )
       .returning({ id: conversations.id });
     return updated.length > 0;
+  }
+
+  async getNewTeamRequestAcceptance(
+    id: string,
+    projectId: string,
+    acceptanceToken: string,
+  ): Promise<NewTeamRequestAcceptance | null> {
+    const conversation = await this.getOperationalConversationById(
+      id,
+      projectId,
+    );
+    if (!conversation || conversation.status !== "waiting_agent") return null;
+    const state = parseChatState(conversation.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    });
+    if (state.aiParticipation === "human_only") return null;
+
+    try {
+      const metadata: unknown = conversation.metadata
+        ? JSON.parse(conversation.metadata)
+        : null;
+      if (!metadata || typeof metadata !== "object") return null;
+      const record = metadata as Record<string, unknown>;
+      if (
+        record.mavenTeamRequestAcceptanceToken !== acceptanceToken ||
+        typeof record.mavenTeamRequestAcceptedAt !== "string" ||
+        typeof record.teamRequestSummary !== "string" ||
+        typeof record.reviewSummaryMessageId !== "string" ||
+        typeof record.teamRequestNotificationState !== "string"
+      ) {
+        return null;
+      }
+      return {
+        acceptanceToken,
+        acceptedAt: record.mavenTeamRequestAcceptedAt,
+        notificationState: record.teamRequestNotificationState,
+        summary: record.teamRequestSummary,
+        summaryMessageId: record.reviewSummaryMessageId,
+        summaryPending: record.teamRequestSummaryPending === true,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async addNewTeamRequestSummary(
+    id: string,
+    projectId: string,
+    acceptanceToken: string,
+  ): Promise<MessageRow | null> {
+    const rows = await buildAcceptedTeamRequestSummaryQuery(
+      this.db,
+      id,
+      projectId,
+      acceptanceToken,
+      new Date(),
+    );
+    return rows[0] ?? null;
+  }
+
+  async completeNewTeamRequestSummary(
+    id: string,
+    projectId: string,
+    acceptanceToken: string,
+  ): Promise<boolean> {
+    const updated = await this.db
+      .update(conversations)
+      .set({
+        metadata: sql`json_set(
+          ${conversations.metadata},
+          '$.teamRequestSummaryPending',
+          json('false')
+        )`,
+      })
+      .where(
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          eq(conversations.status, "waiting_agent"),
+          isNull(conversations.archivedAt),
+          sql`json_valid(${conversations.metadata})`,
+          sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestAcceptanceToken') = ${acceptanceToken}`,
+          sql`json_extract(${conversations.metadata}, '$.teamRequestSummaryPending') = 1`,
+          sql`coalesce(json_extract(${conversations.chatState}, '$.aiParticipation'), 'assist_until_agent') <> 'human_only'`,
+        ),
+      )
+      .returning({ id: conversations.id });
+    if (updated.length > 0) return true;
+    const current = await this.getNewTeamRequestAcceptance(
+      id,
+      projectId,
+      acceptanceToken,
+    );
+    return current?.summaryPending === false;
   }
 
   async takeHumanOwnership(
@@ -1335,7 +1493,12 @@ export class ChatService {
       ) {
         throw new TypeError("Conversation metadata patch must be an object");
       }
-      const serializedPatch = JSON.stringify(metadataPatch);
+      const mutableMetadataPatch = {
+        ...(metadataPatch as Record<string, unknown>),
+      };
+      delete mutableMetadataPatch.mavenTeamRequestAcceptanceToken;
+      delete mutableMetadataPatch.mavenTeamRequestTelegramThreadAcceptanceToken;
+      const serializedPatch = JSON.stringify(mutableMetadataPatch);
       updates.metadata = sql`json_patch(
         CASE
           WHEN json_valid(COALESCE(${conversations.metadata}, '{}'))
@@ -1390,7 +1553,7 @@ export class ChatService {
           eq(conversations.projectId, projectId),
           isNull(conversations.archivedAt),
           sql`json_valid(${conversations.metadata})`,
-          sql`json_extract(${conversations.metadata}, '$.reviewSummaryMessageId') = ${acceptanceToken}`,
+          sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestAcceptanceToken') = ${acceptanceToken}`,
           sql`json_extract(${conversations.metadata}, '$.teamRequestNotificationState') = 'attempted'`,
           or(
             sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestTelegramThreadAcceptanceToken') IS NULL`,
@@ -1412,7 +1575,8 @@ export class ChatService {
       return Boolean(
         metadata &&
           typeof metadata === "object" &&
-          (metadata as Record<string, unknown>).reviewSummaryMessageId ===
+          (metadata as Record<string, unknown>)
+            .mavenTeamRequestAcceptanceToken ===
             acceptanceToken &&
           (metadata as Record<string, unknown>)
             .teamRequestNotificationState === "attempted" &&

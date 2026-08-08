@@ -23,6 +23,19 @@ interface TestConversation {
   metadata: string | null;
 }
 
+interface Deferred {
+  promise: Promise<void>;
+  resolve: () => void;
+}
+
+function createDeferred(): Deferred {
+  let resolve = (): void => undefined;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 interface TestHarness {
   context: MavenTurnContext;
   conversation: TestConversation;
@@ -49,6 +62,11 @@ interface TestHarness {
   throwNotificationClaimOnce: boolean;
   throwTelegramNotification: boolean;
   rejectExternalActionOnce: boolean;
+  pauseAcceptedRequestReadOnce: boolean;
+  acceptedRequestReadReached: Deferred;
+  releaseAcceptedRequestRead: Deferred;
+  summaryInsertTokens: string[];
+  threadPersistenceTokens: string[];
 }
 
 function createContext(channel: MavenTurnContext["channel"]): MavenTurnContext {
@@ -121,9 +139,11 @@ function createHarness(options: {
   throwTelegramNotification?: boolean;
   throwNotificationClaimOnce?: boolean;
   rejectExternalActionOnce?: boolean;
+  pauseAcceptedRequestReadOnce?: boolean;
 } = {}): {
   harness: TestHarness;
   definition: ReturnType<typeof createRequestTeamHelpTool>;
+  chatService: ChatService;
 } {
   const harness: TestHarness = {
     context: createContext(options.channel ?? "public"),
@@ -154,6 +174,12 @@ function createHarness(options: {
     throwNotificationClaimOnce: options.throwNotificationClaimOnce ?? false,
     throwTelegramNotification: options.throwTelegramNotification ?? false,
     rejectExternalActionOnce: options.rejectExternalActionOnce ?? false,
+    pauseAcceptedRequestReadOnce:
+      options.pauseAcceptedRequestReadOnce ?? false,
+    acceptedRequestReadReached: createDeferred(),
+    releaseAcceptedRequestRead: createDeferred(),
+    summaryInsertTokens: [],
+    threadPersistenceTokens: [],
   };
 
   const chatService = {
@@ -240,6 +266,7 @@ function createHarness(options: {
         contactDeclined: false,
       });
       const acceptedAt = new Date().toISOString();
+      const acceptanceToken = crypto.randomUUID();
       harness.conversation.metadata = JSON.stringify({
         ...(harness.conversation.metadata
           ? JSON.parse(harness.conversation.metadata)
@@ -250,6 +277,7 @@ function createHarness(options: {
         teamRequestSummaryPending: true,
         teamRequestNotificationState: "pending",
         mavenTeamRequestAcceptedAt: acceptedAt,
+        mavenTeamRequestAcceptanceToken: acceptanceToken,
       });
       if (harness.humanTakesOwnershipAfterClaim) {
         harness.conversation.status = "agent_replied";
@@ -276,6 +304,70 @@ function createHarness(options: {
       harness.systemMessageIds.add(messageId);
       harness.reviewSummaries.push(content);
       return { ...createMessage(content), id: messageId };
+    },
+    async getNewTeamRequestAcceptance(
+      _conversationId: string,
+      _projectId: string,
+      acceptanceToken: string,
+    ) {
+      const metadata = harness.conversation.metadata
+        ? JSON.parse(harness.conversation.metadata)
+        : {};
+      if (metadata.mavenTeamRequestAcceptanceToken !== acceptanceToken) {
+        return null;
+      }
+      const snapshot = {
+        acceptanceToken,
+        acceptedAt: metadata.mavenTeamRequestAcceptedAt as string,
+        notificationState: metadata.teamRequestNotificationState as string,
+        summary: metadata.teamRequestSummary as string,
+        summaryMessageId: metadata.reviewSummaryMessageId as string,
+        summaryPending: metadata.teamRequestSummaryPending === true,
+      };
+      if (harness.pauseAcceptedRequestReadOnce) {
+        harness.pauseAcceptedRequestReadOnce = false;
+        harness.acceptedRequestReadReached.resolve();
+        await harness.releaseAcceptedRequestRead.promise;
+      }
+      return snapshot;
+    },
+    async addNewTeamRequestSummary(
+      _conversationId: string,
+      _projectId: string,
+      acceptanceToken: string,
+    ) {
+      const metadata = harness.conversation.metadata
+        ? JSON.parse(harness.conversation.metadata)
+        : {};
+      if (
+        metadata.mavenTeamRequestAcceptanceToken !== acceptanceToken ||
+        metadata.teamRequestSummaryPending !== true
+      ) {
+        return null;
+      }
+      harness.summaryInsertTokens.push(acceptanceToken);
+      const messageId = metadata.reviewSummaryMessageId as string;
+      if (harness.systemMessageIds.has(messageId)) return null;
+      harness.systemMessageIds.add(messageId);
+      const summary = metadata.teamRequestSummary as string;
+      harness.reviewSummaries.push(summary);
+      const message = createMessage(summary);
+      return { ...message, id: messageId };
+    },
+    async completeNewTeamRequestSummary(
+      _conversationId: string,
+      _projectId: string,
+      acceptanceToken: string,
+    ) {
+      const metadata = harness.conversation.metadata
+        ? JSON.parse(harness.conversation.metadata)
+        : {};
+      if (metadata.mavenTeamRequestAcceptanceToken !== acceptanceToken) {
+        return false;
+      }
+      metadata.teamRequestSummaryPending = false;
+      harness.conversation.metadata = JSON.stringify(metadata);
+      return true;
     },
     async updateConversation(
       _conversationId: string,
@@ -339,10 +431,23 @@ function createHarness(options: {
         harness.failTelegramThreadUpdate = false;
         throw new Error("thread persistence failed");
       }
+      const metadata = harness.conversation.metadata
+        ? JSON.parse(harness.conversation.metadata)
+        : {};
+      if (
+        metadata.mavenTeamRequestAcceptanceToken !== _acceptanceToken
+      ) {
+        return false;
+      }
+      harness.threadPersistenceTokens.push(_acceptanceToken);
       harness.conversation.telegramThreadId = threadId;
       return true;
     },
-    async claimNewTeamRequestNotification() {
+    async claimNewTeamRequestNotification(
+      _conversationId: string,
+      _projectId: string,
+      acceptanceToken: string,
+    ) {
       harness.notificationClaims += 1;
       if (harness.throwNotificationClaimOnce) {
         harness.throwNotificationClaimOnce = false;
@@ -353,6 +458,9 @@ function createHarness(options: {
       const metadata = harness.conversation.metadata
         ? JSON.parse(harness.conversation.metadata)
         : {};
+      if (metadata.mavenTeamRequestAcceptanceToken !== acceptanceToken) {
+        return false;
+      }
       harness.conversation.metadata = JSON.stringify({
         ...metadata,
         teamRequestNotificationState: "attempted",
@@ -401,6 +509,7 @@ function createHarness(options: {
 
   return {
     harness,
+    chatService,
     definition: createRequestTeamHelpTool({
       context: harness.context,
       chatService,
@@ -585,6 +694,7 @@ describe("createRequestTeamHelpTool", () => {
           reviewSummaryMessageId: "repair-summary-1",
           teamRequestSummaryPending: true,
           mavenTeamRequestAcceptedAt: acceptedAt,
+          mavenTeamRequestAcceptanceToken: "repair-generation",
           teamRequestNotificationState: "pending",
         }),
       },
@@ -602,6 +712,78 @@ describe("createRequestTeamHelpTool", () => {
     expect(harness.notificationClaims).toBe(2);
     expect(harness.reviewSummaries).toEqual([summary]);
     expect(harness.telegramSummaries).toEqual([summary]);
+  });
+
+  test("a paused prior-generation repair cannot mutate or notify the new generation", async () => {
+    const oldAcceptedAt = "2026-08-09T00:00:00.000Z";
+    const { harness, definition, chatService } = createHarness({
+      pauseAcceptedRequestReadOnce: true,
+      conversation: {
+        status: "waiting_agent",
+        chatState: JSON.stringify({
+          aiParticipation: "assist_until_agent",
+          contactDeclined: false,
+        }),
+        metadata: JSON.stringify({
+          teamRequestSummary: "Old accepted summary.",
+          escalatedAt: oldAcceptedAt,
+          reviewSummaryMessageId: "old-message",
+          teamRequestSummaryPending: true,
+          teamRequestNotificationState: "pending",
+          mavenTeamRequestAcceptedAt: oldAcceptedAt,
+          mavenTeamRequestAcceptanceToken: "old-generation",
+        }),
+      },
+    });
+
+    const oldRepair = executePublicTool(definition, harness.context, {
+      summary: "stale model summary",
+    });
+    await harness.acceptedRequestReadReached.promise;
+
+    harness.conversation.status = "active";
+    harness.conversation.chatState = JSON.stringify({
+      aiParticipation: "continuous",
+      contactDeclined: false,
+    });
+    expect(
+      await chatService.claimNewTeamRequest(
+        harness.conversation.id,
+        harness.conversation.projectId,
+        "New accepted summary.",
+      ),
+    ).toEqual({ status: "claimed" });
+    const newAcceptance = JSON.parse(harness.conversation.metadata ?? "{}");
+    harness.releaseAcceptedRequestRead.resolve();
+    expect((await oldRepair).status).toBe("requested");
+
+    const afterOldRepair = JSON.parse(harness.conversation.metadata ?? "{}");
+    expect(afterOldRepair).toMatchObject({
+      teamRequestSummary: "New accepted summary.",
+      reviewSummaryMessageId: newAcceptance.reviewSummaryMessageId,
+      teamRequestSummaryPending: true,
+      teamRequestNotificationState: "pending",
+      mavenTeamRequestAcceptanceToken:
+        newAcceptance.mavenTeamRequestAcceptanceToken,
+    });
+    expect(harness.summaryInsertTokens).toEqual([]);
+    expect(harness.notificationClaims).toBe(0);
+    expect(harness.telegramSummaries).toEqual([]);
+    expect(harness.threadPersistenceTokens).toEqual([]);
+
+    const newRepair = await executePublicTool(definition, harness.context, {
+      summary: "later model summary",
+    });
+    expect(newRepair.status).toBe("requested");
+    expect(harness.reviewSummaries).toEqual(["New accepted summary."]);
+    expect(harness.telegramSummaries).toEqual(["New accepted summary."]);
+    expect(harness.summaryInsertTokens).toEqual([
+      newAcceptance.mavenTeamRequestAcceptanceToken,
+    ]);
+    expect(harness.threadPersistenceTokens).toEqual([
+      newAcceptance.mavenTeamRequestAcceptanceToken,
+    ]);
+    expect(harness.conversation.telegramThreadId).toBe("123");
   });
 
   test("concurrent repeated calls produce only one escalation side effect", async () => {
