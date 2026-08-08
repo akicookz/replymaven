@@ -717,52 +717,15 @@ describe("ChatService ownership and atomic writes", () => {
     expect(metadata.campaign).toBe("spring");
   });
 
-  test("generic metadata patches cannot replace the immutable acceptance token", async () => {
-    const { service } = createConversationContinuityService();
-    const conversation = await service.createConversation({
-      projectId: "project-1",
-      customerId: null,
-      visitorId: "visitor-1",
-      visitorName: "Alice",
-      visitorEmail: "alice@example.com",
-      metadata: null,
-    });
-    expect(
-      await service.claimNewTeamRequest(
-        conversation.id,
-        conversation.projectId,
-        "Visitor needs help.",
-      ),
-    ).toEqual({ status: "claimed" });
-    const accepted = await service.getOperationalConversationById(
-      conversation.id,
-      conversation.projectId,
-    );
-    const originalToken = JSON.parse(accepted?.metadata ?? "{}")
-      .mavenTeamRequestAcceptanceToken as string;
-
-    const updated = await service.updateConversation(
-      conversation.id,
-      conversation.projectId,
-      {
-        metadata: JSON.stringify({
-          mavenTeamRequestAcceptanceToken: "replacement-token",
-          source: "widget",
-        }),
-      },
-    );
-    const metadata = JSON.parse(updated?.metadata ?? "{}");
-
-    expect(metadata.mavenTeamRequestAcceptanceToken).toBe(originalToken);
-    expect(metadata.source).toBe("widget");
-  });
-
   const protectedAcceptanceFieldCases: Array<{
     field:
       | "teamRequestSummary"
       | "reviewSummaryMessageId"
       | "teamRequestSummaryPending"
       | "teamRequestNotificationState"
+      | "teamRequestNotificationAttemptedAt"
+      | "mavenTeamRequestAcceptedAt"
+      | "mavenTeamRequestAcceptanceToken"
       | "mavenTeamRequestTelegramThreadAcceptanceToken";
     replacement: unknown;
   }> = [
@@ -770,6 +733,18 @@ describe("ChatService ownership and atomic writes", () => {
     { field: "reviewSummaryMessageId", replacement: "forged-message" },
     { field: "teamRequestSummaryPending", replacement: "false" },
     { field: "teamRequestNotificationState", replacement: "attempted" },
+    {
+      field: "teamRequestNotificationAttemptedAt",
+      replacement: "2099-01-01T00:00:00.000Z",
+    },
+    {
+      field: "mavenTeamRequestAcceptedAt",
+      replacement: "2099-01-01T00:00:00.000Z",
+    },
+    {
+      field: "mavenTeamRequestAcceptanceToken",
+      replacement: "forged-generation",
+    },
     {
       field: "mavenTeamRequestTelegramThreadAcceptanceToken",
       replacement: "forged-thread-generation",
@@ -844,6 +819,9 @@ describe("ChatService ownership and atomic writes", () => {
           reviewSummaryMessageId: "forged-message",
           teamRequestSummaryPending: "false",
           teamRequestNotificationState: "attempted",
+          teamRequestNotificationAttemptedAt:
+            "2099-01-01T00:00:00.000Z",
+          mavenTeamRequestAcceptedAt: "2099-01-01T00:00:00.000Z",
           mavenTeamRequestAcceptanceToken: "forged-generation",
           mavenTeamRequestTelegramThreadAcceptanceToken:
             "forged-thread-generation",

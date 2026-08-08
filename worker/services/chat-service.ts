@@ -1513,6 +1513,8 @@ export class ChatService {
       delete mutableMetadataPatch.reviewSummaryMessageId;
       delete mutableMetadataPatch.teamRequestSummaryPending;
       delete mutableMetadataPatch.teamRequestNotificationState;
+      delete mutableMetadataPatch.teamRequestNotificationAttemptedAt;
+      delete mutableMetadataPatch.mavenTeamRequestAcceptedAt;
       delete mutableMetadataPatch.mavenTeamRequestAcceptanceToken;
       delete mutableMetadataPatch.mavenTeamRequestTelegramThreadAcceptanceToken;
       if (Object.keys(mutableMetadataPatch).length > 0) {
