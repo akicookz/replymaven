@@ -30,10 +30,21 @@ interface TestHarness {
   teamRequestNotifications: number;
   reviewSummaries: string[];
   telegramSummaries: string[];
+  telegramAttempts: number;
   broadcasts: MessageRow[];
+  systemMessageIds: Set<string>;
   failOwnershipClaim: boolean;
   humanTakesOwnershipAfterClaim: boolean;
+  parsedHumanOwnershipAfterClaim: boolean;
   failEscalationUpdate: boolean;
+  throwEscalationUpdate: boolean;
+  failTelegramThreadUpdate: boolean;
+  clearContactBeforeClaim: boolean;
+  escalationUpdateCalls: number;
+  throwEscalationUpdateOnCall: number | null;
+  notificationClaims: number;
+  notificationClaimed: boolean;
+  throwTelegramNotification: boolean;
 }
 
 function createContext(channel: MavenTurnContext["channel"]): MavenTurnContext {
@@ -97,7 +108,13 @@ function createHarness(options: {
   conversation?: Partial<TestConversation>;
   failOwnershipClaim?: boolean;
   humanTakesOwnershipAfterClaim?: boolean;
+  parsedHumanOwnershipAfterClaim?: boolean;
   failEscalationUpdate?: boolean;
+  throwEscalationUpdate?: boolean;
+  failTelegramThreadUpdate?: boolean;
+  clearContactBeforeClaim?: boolean;
+  throwEscalationUpdateOnCall?: number;
+  throwTelegramNotification?: boolean;
 } = {}): {
   harness: TestHarness;
   definition: ReturnType<typeof createRequestTeamHelpTool>;
@@ -109,11 +126,24 @@ function createHarness(options: {
     teamRequestNotifications: 0,
     reviewSummaries: [],
     telegramSummaries: [],
+    telegramAttempts: 0,
     broadcasts: [],
+    systemMessageIds: new Set(),
     failOwnershipClaim: options.failOwnershipClaim ?? false,
     humanTakesOwnershipAfterClaim:
       options.humanTakesOwnershipAfterClaim ?? false,
+    parsedHumanOwnershipAfterClaim:
+      options.parsedHumanOwnershipAfterClaim ?? false,
     failEscalationUpdate: options.failEscalationUpdate ?? false,
+    throwEscalationUpdate: options.throwEscalationUpdate ?? false,
+    failTelegramThreadUpdate: options.failTelegramThreadUpdate ?? false,
+    clearContactBeforeClaim: options.clearContactBeforeClaim ?? false,
+    escalationUpdateCalls: 0,
+    throwEscalationUpdateOnCall:
+      options.throwEscalationUpdateOnCall ?? null,
+    notificationClaims: 0,
+    notificationClaimed: false,
+    throwTelegramNotification: options.throwTelegramNotification ?? false,
   };
 
   const chatService = {
@@ -154,20 +184,62 @@ function createHarness(options: {
       }
       return true;
     },
-    async claimNewTeamRequest(conversationId: string, projectId: string) {
+    async claimNewTeamRequest(
+      conversationId: string,
+      projectId: string,
+      summary: string,
+    ) {
       harness.ownershipClaims += 1;
+      if (harness.clearContactBeforeClaim) {
+        harness.conversation.visitorEmail = null;
+        harness.clearContactBeforeClaim = false;
+      }
+      const authoritativeMissingFields = [
+        ...(harness.conversation.visitorName?.trim() ? [] : ["name" as const]),
+        ...(harness.conversation.visitorEmail?.trim() ? [] : ["email" as const]),
+      ];
+      const authoritativeState = harness.conversation.chatState
+        ? JSON.parse(harness.conversation.chatState)
+        : {};
+      if (
+        authoritativeMissingFields.length > 0 &&
+        authoritativeState.contactDeclined !== true
+      ) {
+        return {
+          status: "contact_required" as const,
+          requiredFields: authoritativeMissingFields,
+        };
+      }
       if (
         harness.failOwnershipClaim ||
         conversationId !== harness.conversation.id ||
         projectId !== harness.conversation.projectId ||
         harness.conversation.status !== "active"
       ) {
-        return false;
+        if (
+          harness.conversation.status === "waiting_agent" ||
+          harness.conversation.status === "agent_replied"
+        ) {
+          return { status: "already_requested" as const };
+        }
+        return { status: "unavailable" as const };
       }
       harness.conversation.status = "waiting_agent";
       harness.conversation.chatState = JSON.stringify({
         aiParticipation: "assist_until_agent",
         contactDeclined: false,
+      });
+      const acceptedAt = new Date().toISOString();
+      harness.conversation.metadata = JSON.stringify({
+        ...(harness.conversation.metadata
+          ? JSON.parse(harness.conversation.metadata)
+          : {}),
+        teamRequestSummary: summary,
+        escalatedAt: acceptedAt,
+        reviewSummaryMessageId: crypto.randomUUID(),
+        teamRequestSummaryPending: true,
+        teamRequestNotificationState: "pending",
+        mavenTeamRequestAcceptedAt: acceptedAt,
       });
       if (harness.humanTakesOwnershipAfterClaim) {
         harness.conversation.status = "agent_replied";
@@ -175,25 +247,51 @@ function createHarness(options: {
           aiParticipation: "human_only",
           contactDeclined: false,
         });
+      } else if (harness.parsedHumanOwnershipAfterClaim) {
+        harness.conversation.chatState = JSON.stringify({
+          aiParticipation: "human_only",
+          contactDeclined: false,
+        });
       }
-      return true;
+      return { status: "claimed" as const };
     },
     async addSystemMessage(
       _conversationId: string,
       _kind: string,
       content: string,
+      idempotencyKey?: string,
     ) {
+      const messageId = idempotencyKey ?? "review-summary-1";
+      if (harness.systemMessageIds.has(messageId)) return null;
+      harness.systemMessageIds.add(messageId);
       harness.reviewSummaries.push(content);
-      return createMessage(content);
+      return { ...createMessage(content), id: messageId };
     },
     async updateConversation(
       _conversationId: string,
       _projectId: string,
       data: { metadata?: string },
     ) {
+      harness.escalationUpdateCalls += 1;
+      if (
+        harness.throwEscalationUpdateOnCall ===
+        harness.escalationUpdateCalls
+      ) {
+        throw new Error("metadata completion write failed");
+      }
+      if (harness.throwEscalationUpdate) {
+        harness.throwEscalationUpdate = false;
+        throw new Error("metadata write failed");
+      }
       if (harness.failEscalationUpdate) return null;
       if (data.metadata) {
-        harness.conversation.metadata = data.metadata;
+        const existing = harness.conversation.metadata
+          ? JSON.parse(harness.conversation.metadata)
+          : {};
+        harness.conversation.metadata = JSON.stringify({
+          ...existing,
+          ...JSON.parse(data.metadata),
+        });
       }
       return { ...harness.conversation };
     },
@@ -209,7 +307,24 @@ function createHarness(options: {
       _projectId: string,
       threadId: string,
     ) {
+      if (harness.failTelegramThreadUpdate) {
+        harness.failTelegramThreadUpdate = false;
+        throw new Error("thread persistence failed");
+      }
       harness.conversation.telegramThreadId = threadId;
+    },
+    async claimNewTeamRequestNotification() {
+      harness.notificationClaims += 1;
+      if (harness.notificationClaimed) return false;
+      harness.notificationClaimed = true;
+      const metadata = harness.conversation.metadata
+        ? JSON.parse(harness.conversation.metadata)
+        : {};
+      harness.conversation.metadata = JSON.stringify({
+        ...metadata,
+        teamRequestNotificationState: "attempted",
+      });
+      return true;
     },
   } as unknown as ChatService;
 
@@ -237,6 +352,10 @@ function createHarness(options: {
       _chatId: string,
       params: { summary: string },
     ) {
+      harness.telegramAttempts += 1;
+      if (harness.throwTelegramNotification) {
+        throw new Error("Telegram unavailable");
+      }
       harness.telegramSummaries.push(params.summary);
       return 123;
     },
@@ -394,6 +513,63 @@ describe("createRequestTeamHelpTool", () => {
     expect(harness.telegramSummaries).toHaveLength(1);
   });
 
+  test("does not repair an unrelated pre-existing waiting handoff", async () => {
+    const { harness, definition } = createHarness({
+      conversation: {
+        status: "waiting_agent",
+        chatState: JSON.stringify({
+          aiParticipation: "assist_until_agent",
+          contactDeclined: false,
+        }),
+        metadata: null,
+        telegramThreadId: "999",
+      },
+    });
+
+    const result = await executePublicTool(definition, harness.context, {
+      summary: "A later request should not create another notification.",
+    });
+
+    expect(result.status).toBe("requested");
+    expect(harness.reviewSummaries).toEqual([]);
+    expect(harness.telegramSummaries).toEqual([]);
+  });
+
+  test("concurrent stale repairs claim one external notification attempt", async () => {
+    const acceptedAt = new Date().toISOString();
+    const summary = "Visitor needs a refund on order 123.";
+    const { harness, definition } = createHarness({
+      conversation: {
+        status: "waiting_agent",
+        chatState: JSON.stringify({
+          aiParticipation: "assist_until_agent",
+          contactDeclined: false,
+        }),
+        metadata: JSON.stringify({
+          teamRequestSummary: summary,
+          escalatedAt: acceptedAt,
+          reviewSummaryMessageId: "repair-summary-1",
+          teamRequestSummaryPending: true,
+          mavenTeamRequestAcceptedAt: acceptedAt,
+          teamRequestNotificationState: "pending",
+        }),
+      },
+    });
+
+    const results = await Promise.all([
+      executePublicTool(definition, harness.context, { summary: "stale A" }),
+      executePublicTool(definition, harness.context, { summary: "stale B" }),
+    ]);
+
+    expect(results.map((result) => result.status)).toEqual([
+      "requested",
+      "requested",
+    ]);
+    expect(harness.notificationClaims).toBe(2);
+    expect(harness.reviewSummaries).toEqual([summary]);
+    expect(harness.telegramSummaries).toEqual([summary]);
+  });
+
   test("concurrent repeated calls produce only one escalation side effect", async () => {
     const { harness, definition } = createHarness();
     const input = { summary: "Visitor needs a refund on order 123." };
@@ -405,7 +581,7 @@ describe("createRequestTeamHelpTool", () => {
 
     expect(results.map((result) => result.status).sort()).toEqual([
       "requested",
-      "unavailable",
+      "requested",
     ]);
     expect(harness.ownershipClaims).toBe(2);
     expect(harness.teamRequestNotifications).toBe(1);
@@ -425,9 +601,9 @@ describe("createRequestTeamHelpTool", () => {
     );
 
     expect(result).toEqual({
-      status: "unavailable",
+      status: "requested",
       visitorMessage:
-        "I couldn't forward that to the team just now. I can keep helping here, or you can try again in a moment.",
+        "This is already with an engineer and they'll continue the follow-up there.",
     });
     expect(harness.ownershipClaims).toBe(1);
     expect(harness.teamRequestNotifications).toBe(0);
@@ -435,7 +611,50 @@ describe("createRequestTeamHelpTool", () => {
     expect(harness.telegramSummaries).toEqual([]);
   });
 
-  test("does not claim success when the escalation write becomes unavailable", async () => {
+  test("treats parsed human-only ownership as already forwarded even with active status", async () => {
+    const { harness, definition } = createHarness({
+      conversation: {
+        status: "active",
+        chatState: JSON.stringify({
+          aiParticipation: "human_only",
+          contactDeclined: false,
+        }),
+      },
+    });
+
+    const result = await executePublicTool(definition, harness.context, {
+      summary: "Visitor needs a refund on order 123.",
+    });
+
+    expect(result).toEqual({
+      status: "requested",
+      visitorMessage:
+        "This is already with an engineer and they'll continue the follow-up there.",
+    });
+    expect(harness.ownershipClaims).toBe(0);
+    expect(harness.telegramSummaries).toEqual([]);
+  });
+
+  test("suppresses side effects when parsed human ownership wins after the claim", async () => {
+    const { harness, definition } = createHarness({
+      parsedHumanOwnershipAfterClaim: true,
+    });
+
+    const result = await executePublicTool(definition, harness.context, {
+      summary: "Visitor needs a refund on order 123.",
+    });
+
+    expect(result).toEqual({
+      status: "requested",
+      visitorMessage:
+        "This is already with an engineer and they'll continue the follow-up there.",
+    });
+    expect(harness.teamRequestNotifications).toBe(0);
+    expect(harness.reviewSummaries).toEqual([]);
+    expect(harness.telegramSummaries).toEqual([]);
+  });
+
+  test("keeps accepted ownership monotonic and repairs a failed metadata write", async () => {
     const { harness, definition } = createHarness({
       conversation: { metadata: JSON.stringify({ source: "widget" }) },
       failEscalationUpdate: true,
@@ -448,10 +667,93 @@ describe("createRequestTeamHelpTool", () => {
     );
 
     expect(result).toEqual({
-      status: "unavailable",
+      status: "requested",
       visitorMessage:
-        "I couldn't forward that to the team just now. I can keep helping here, or you can try again in a moment.",
+        "I've passed this along and an engineer will follow up with you shortly.",
     });
+    harness.failEscalationUpdate = false;
+    const retry = await executePublicTool(definition, harness.context, {
+      summary: "Visitor needs a refund on order 123.",
+    });
+    expect(retry.status).toBe("requested");
+    expect(harness.reviewSummaries).toHaveLength(1);
+    expect(harness.telegramSummaries).toHaveLength(1);
+  });
+
+  test("repairs a thrown metadata write without repeating external effects", async () => {
+    const { harness, definition } = createHarness({
+      throwEscalationUpdate: true,
+    });
+    const input = { summary: "Visitor needs a refund on order 123." };
+
+    const first = await executePublicTool(definition, harness.context, input);
+    const retry = await executePublicTool(definition, harness.context, input);
+
+    expect(first.status).toBe("requested");
+    expect(retry.status).toBe("requested");
+    expect(harness.reviewSummaries).toHaveLength(1);
+    expect(harness.telegramSummaries).toHaveLength(1);
+  });
+
+  test("retries a thrown summary-completion write with the same review message", async () => {
+    const { harness, definition } = createHarness({
+      throwEscalationUpdateOnCall: 2,
+    });
+    const input = { summary: "Visitor needs a refund on order 123." };
+
+    const first = await executePublicTool(definition, harness.context, input);
+    const retry = await executePublicTool(definition, harness.context, input);
+
+    expect(first.status).toBe("requested");
+    expect(retry.status).toBe("requested");
+    expect(harness.reviewSummaries).toEqual([input.summary]);
+    expect(harness.telegramSummaries).toEqual([input.summary]);
+  });
+
+  test("does not reverse acceptance or duplicate Telegram when thread persistence fails", async () => {
+    const { harness, definition } = createHarness({
+      failTelegramThreadUpdate: true,
+    });
+    const input = { summary: "Visitor needs a refund on order 123." };
+
+    const first = await executePublicTool(definition, harness.context, input);
+    const retry = await executePublicTool(definition, harness.context, input);
+
+    expect(first.status).toBe("requested");
+    expect(retry.status).toBe("requested");
+    expect(harness.telegramSummaries).toHaveLength(1);
+  });
+
+  test("does not repeat an external attempt after Telegram throws", async () => {
+    const { harness, definition } = createHarness({
+      throwTelegramNotification: true,
+    });
+    const input = { summary: "Visitor needs a refund on order 123." };
+
+    const first = await executePublicTool(definition, harness.context, input);
+    const retry = await executePublicTool(definition, harness.context, input);
+
+    expect(first.status).toBe("requested");
+    expect(retry.status).toBe("requested");
+    expect(harness.telegramAttempts).toBe(1);
+    expect(harness.notificationClaims).toBe(1);
+  });
+
+  test("returns contact_required when saved contact is cleared before the claim", async () => {
+    const { harness, definition } = createHarness({
+      clearContactBeforeClaim: true,
+    });
+
+    const result = await executePublicTool(definition, harness.context, {
+      summary: "Visitor needs a refund on order 123.",
+    });
+
+    expect(result).toEqual({
+      status: "contact_required",
+      requiredFields: ["email"],
+    });
+    expect(harness.conversation.status).toBe("active");
+    expect(harness.teamRequestNotifications).toBe(0);
     expect(harness.telegramSummaries).toEqual([]);
   });
 });

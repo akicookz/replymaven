@@ -54,6 +54,8 @@ export async function createEscalation(params: {
   };
   executionCtx: ExecutionContext;
   broadcast: (message: MessageRow) => void;
+  notifyExternalActions?: boolean;
+  claimExternalNotificationAttempt?: () => Promise<boolean>;
 }): Promise<{
   summary: string;
   summaryMessageId: string | null;
@@ -74,7 +76,9 @@ export async function createEscalation(params: {
   } catch {
     /* ignore malformed metadata */
   }
-  const created = typeof existingMeta.escalatedAt !== "string";
+  const created =
+    typeof existingMeta.escalatedAt !== "string" ||
+    existingMeta.teamRequestSummaryPending === true;
 
   logInfo("escalation.started", {
     projectId: params.project.id,
@@ -89,38 +93,36 @@ export async function createEscalation(params: {
     created,
   });
 
-  // Post the agent-facing summary into the thread once, on first escalation.
+  // Persist the idempotency key before inserting the summary. If inserting or
+  // broadcasting fails after this write, a later repair uses the same message
+  // id and cannot append a duplicate summary.
   let summaryMessageId: string | null =
     typeof existingMeta.reviewSummaryMessageId === "string"
       ? existingMeta.reviewSummaryMessageId
       : null;
-  if (created) {
-    const row = await params.chatService.addSystemMessage(
-      params.conversation.id,
-      "review_summary",
-      summary,
-    );
-    if (row) {
-      summaryMessageId = row.id;
-      params.broadcast(row); // live dashboards render the callout immediately
-    }
-  }
+  const summaryNeedsPersistence =
+    created ||
+    summaryMessageId === null ||
+    existingMeta.teamRequestSummaryPending === true;
+  summaryMessageId ??= crypto.randomUUID();
 
-  // Preserve existing metadata keys (country/city/source, etc.) — spread the
-  // parsed map so we never clobber them. `updateConversation` also re-merges
-  // against the stored row, but the spread keeps this write self-consistent.
+  // Patch only escalation-owned keys. `updateConversation` merges this patch
+  // against the live row so a delayed repair cannot replay stale ownership or
+  // notification state over a newer compare-and-set result.
   const updatedConversation = await params.chatService.updateConversation(
     params.conversation.id,
     params.project.id,
     {
       metadata: JSON.stringify({
-        ...existingMeta,
         teamRequestSummary: summary,
         escalatedAt:
           typeof existingMeta.escalatedAt === "string"
             ? existingMeta.escalatedAt
             : new Date().toISOString(),
-        ...(summaryMessageId ? { reviewSummaryMessageId: summaryMessageId } : {}),
+        reviewSummaryMessageId: summaryMessageId,
+        ...(summaryNeedsPersistence
+          ? { teamRequestSummaryPending: true }
+          : {}),
       }),
     },
   );
@@ -131,6 +133,38 @@ export async function createEscalation(params: {
       created: false,
       accepted: false,
     };
+  }
+
+  if (summaryNeedsPersistence) {
+    const row = await params.chatService.addSystemMessage(
+      params.conversation.id,
+      "review_summary",
+      summary,
+      summaryMessageId,
+    );
+    if (row) {
+      params.broadcast(row);
+    }
+
+    const completedConversation = await params.chatService.updateConversation(
+      params.conversation.id,
+      params.project.id,
+      {
+        metadata: JSON.stringify({
+          teamRequestSummary: summary,
+          reviewSummaryMessageId: summaryMessageId,
+          teamRequestSummaryPending: false,
+        }),
+      },
+    );
+    if (!completedConversation) {
+      return {
+        summary,
+        summaryMessageId,
+        created: false,
+        accepted: false,
+      };
+    }
   }
   logInfo("escalation.conversation_updated", {
     projectId: params.project.id,
@@ -148,8 +182,22 @@ export async function createEscalation(params: {
 
   const isUpdate = !created;
 
+  const hasExternalActions = Boolean(
+    (params.telegramService &&
+      params.settings?.telegramBotToken &&
+      params.settings?.telegramChatId) ||
+      params.env.RESEND_API_KEY,
+  );
+  const externalActionsClaimed =
+    params.notifyExternalActions !== false && hasExternalActions
+      ? params.claimExternalNotificationAttempt
+        ? await params.claimExternalNotificationAttempt()
+        : true
+      : false;
+
   let telegramThreadId: string | undefined;
   if (
+    externalActionsClaimed &&
     params.telegramService &&
     params.settings?.telegramBotToken &&
     params.settings?.telegramChatId
@@ -198,7 +246,7 @@ export async function createEscalation(params: {
     }
   }
 
-  if (params.env.RESEND_API_KEY) {
+  if (externalActionsClaimed && params.env.RESEND_API_KEY) {
     const emailService = new EmailService(params.env.RESEND_API_KEY);
     const ownerEmail = await params.projectService.getOwnerEmail(
       params.project.id,

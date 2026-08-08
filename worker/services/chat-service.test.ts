@@ -128,6 +128,31 @@ function makeReopenDb(row: ConversationRow): {
 }
 
 describe("ChatService ownership and atomic writes", () => {
+  test("merges metadata patches against the live conversation", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: JSON.stringify({ source: "widget", country: "US" }),
+    });
+
+    const updated = await service.updateConversation(
+      conversation.id,
+      conversation.projectId,
+      { metadata: JSON.stringify({ teamRequestSummaryPending: false }) },
+    );
+    const metadata = JSON.parse(updated?.metadata ?? "{}");
+
+    expect(metadata).toMatchObject({
+      source: "widget",
+      country: "US",
+      teamRequestSummaryPending: false,
+    });
+  });
+
   test("reads archived conversation detail without making it operational", () => {
     const readable = buildConversationByIdQuery(
       drizzle({} as never),
@@ -357,12 +382,23 @@ describe("ChatService ownership and atomic writes", () => {
       "project-1",
       expectedChatState,
       nextChatState,
+      "Alice",
+      "alice@example.com",
+      {
+        summary: "Visitor needs help.",
+        acceptedAt: "2026-08-09T00:00:00.000Z",
+        summaryMessageId: "summary-1",
+      },
     ).toSQL();
 
     expect(sql).toContain('"conversations"."project_id" = ?');
     expect(sql).toContain('"conversations"."status" = ?');
     expect(sql).toContain('"conversations"."chat_state" = ?');
     expect(sql).toContain('"conversations"."archived_at" is null');
+    expect(sql).toContain('"conversations"."visitor_name" = ?');
+    expect(sql).toContain('"conversations"."visitor_email" = ?');
+    expect(sql).toContain("json_set");
+    expect(sql).toContain("$.mavenTeamRequestAcceptedAt");
     expect(sql).toContain('returning "id"');
     expect(params).toEqual(
       expect.arrayContaining([
@@ -372,6 +408,8 @@ describe("ChatService ownership and atomic writes", () => {
         "project-1",
         "active",
         expectedChatState,
+        "Alice",
+        "alice@example.com",
       ]),
     );
     expect(params).not.toContain("agent_replied");
@@ -389,16 +427,72 @@ describe("ChatService ownership and atomic writes", () => {
     });
 
     const claims = await Promise.all([
-      service.claimNewTeamRequest(conversation.id, conversation.projectId),
-      service.claimNewTeamRequest(conversation.id, conversation.projectId),
+      service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Visitor needs help.",
+      ),
+      service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Visitor needs help.",
+      ),
     ]);
     const latest = await service.getOperationalConversationById(
       conversation.id,
       conversation.projectId,
     );
 
-    expect(claims.sort()).toEqual([false, true]);
+    expect(claims.map((claim) => claim.status).sort()).toEqual([
+      "already_requested",
+      "claimed",
+    ]);
     expect(latest?.status).toBe("waiting_agent");
+    const metadata = JSON.parse(latest?.metadata ?? "{}");
+    expect(metadata.teamRequestSummary).toBe("Visitor needs help.");
+    expect(metadata.teamRequestSummaryPending).toBe(true);
+    expect(metadata.teamRequestNotificationState).toBe("pending");
+    expect(metadata.mavenTeamRequestAcceptedAt).toBeString();
+    expect(metadata.reviewSummaryMessageId).toBeString();
+  });
+
+  test("allows only one external notification attempt for an accepted request", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+    expect(
+      await service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Visitor needs help.",
+      ),
+    ).toEqual({ status: "claimed" });
+
+    const attempts = await Promise.all([
+      service.claimNewTeamRequestNotification(
+        conversation.id,
+        conversation.projectId,
+      ),
+      service.claimNewTeamRequestNotification(
+        conversation.id,
+        conversation.projectId,
+      ),
+    ]);
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const metadata = JSON.parse(latest?.metadata ?? "{}");
+
+    expect(attempts.sort()).toEqual([false, true]);
+    expect(metadata.teamRequestNotificationState).toBe("attempted");
+    expect(metadata.teamRequestNotificationAttemptedAt).toBeString();
   });
 
   test("rejects an active row whose authoritative state is human-owned", async () => {
@@ -414,10 +508,79 @@ describe("ChatService ownership and atomic writes", () => {
     const claimed = await new ChatService(db).claimNewTeamRequest(
       activeHuman.id,
       activeHuman.projectId,
+      "Visitor needs help.",
     );
 
-    expect(claimed).toBe(false);
+    expect(claimed).toEqual({ status: "already_requested" });
     expect(getUpdateCount()).toBe(0);
+  });
+
+  test("contact cleared after the authoritative read prevents the ownership claim", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+
+    const claimPromise = service.claimNewTeamRequest(
+      conversation.id,
+      conversation.projectId,
+      "Visitor needs help.",
+    );
+    sqlite
+      .query("UPDATE conversations SET visitor_email = NULL WHERE id = ?")
+      .run(conversation.id);
+
+    const claim = await claimPromise;
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+
+    expect(claim).toEqual({
+      status: "contact_required",
+      requiredFields: ["email"],
+    });
+    expect(latest?.status).toBe("active");
+  });
+
+  test("trusted contactDeclined permits an atomic claim without saved contact", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: null,
+      visitorEmail: null,
+      metadata: null,
+    });
+    sqlite
+      .query("UPDATE conversations SET chat_state = ? WHERE id = ?")
+      .run(
+        JSON.stringify({
+          state: "active",
+          aiParticipation: "continuous",
+          contactDeclined: true,
+        }),
+        conversation.id,
+      );
+
+    const claim = await service.claimNewTeamRequest(
+      conversation.id,
+      conversation.projectId,
+      "Visitor needs help.",
+    );
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+
+    expect(claim).toEqual({ status: "claimed" });
+    expect(latest?.status).toBe("waiting_agent");
   });
 });
 

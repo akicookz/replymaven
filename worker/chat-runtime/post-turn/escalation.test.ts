@@ -30,11 +30,12 @@ function makeChatService() {
       conversationId: string,
       kind: string,
       content: string,
+      idempotencyKey?: string,
     ): Promise<MessageRow> => {
       calls.addSystemMessage.push({ conversationId, kind, content });
       const now = new Date();
       return {
-        id: "msg-review-1",
+        id: idempotencyKey ?? "msg-review-1",
         conversationId,
         role: "system",
         content,
@@ -126,7 +127,7 @@ describe("createEscalation - first escalation (created)", () => {
     const result = await createEscalation(params as never);
 
     expect(result.created).toBe(true);
-    expect(result.summaryMessageId).toBe("msg-review-1");
+    expect(result.summaryMessageId).toBeString();
     expect(calls.addSystemMessage).toHaveLength(1);
     expect(calls.addSystemMessage[0]).toMatchObject({
       conversationId: "conv-1",
@@ -134,10 +135,10 @@ describe("createEscalation - first escalation (created)", () => {
       content: "Visitor needs a refund on order 123.",
     });
     expect(broadcasts).toHaveLength(1);
-    expect(broadcasts[0].id).toBe("msg-review-1");
+    expect(broadcasts[0].id).toBe(result.summaryMessageId);
   });
 
-  test("preserves existing metadata keys (country/city/source)", async () => {
+  test("patches escalation fields without replaying unrelated metadata", async () => {
     const { params, calls } = baseParams({
       conversation: makeConversation({
         metadata: JSON.stringify({
@@ -152,10 +153,31 @@ describe("createEscalation - first escalation (created)", () => {
 
     expect(result.created).toBe(true);
     const meta = JSON.parse(calls.updateConversation[0].data.metadata!);
-    expect(meta.country).toBe("US");
-    expect(meta.city).toBe("NYC");
-    expect(meta.source).toBe("widget");
-    expect(meta.reviewSummaryMessageId).toBe("msg-review-1");
+    expect(meta).not.toHaveProperty("country");
+    expect(meta).not.toHaveProperty("city");
+    expect(meta).not.toHaveProperty("source");
+    expect(meta.reviewSummaryMessageId).toBe(result.summaryMessageId);
+  });
+
+  test("does not replay stale notification state in its metadata patch", async () => {
+    const { params, calls } = baseParams({
+      conversation: makeConversation({
+        metadata: JSON.stringify({
+          escalatedAt: "2026-08-09T00:00:00.000Z",
+          reviewSummaryMessageId: "msg-review-1",
+          teamRequestSummary: "Accepted summary.",
+          teamRequestSummaryPending: true,
+          teamRequestNotificationState: "pending",
+          mavenTeamRequestAcceptedAt: "2026-08-09T00:00:00.000Z",
+        }),
+      }),
+    });
+
+    await createEscalation(params as never);
+
+    const firstPatch = JSON.parse(calls.updateConversation[0].data.metadata!);
+    expect(firstPatch).not.toHaveProperty("teamRequestNotificationState");
+    expect(firstPatch).not.toHaveProperty("mavenTeamRequestAcceptedAt");
   });
 
   test('treats the metadata literal "null" as absent instead of crashing', async () => {
@@ -241,9 +263,9 @@ describe("createEscalation - telegram notification", () => {
     expect(tg.calls[0].params.isUpdate).toBe(false);
     expect(tg.calls[0].params.replyToMessageId).toBeUndefined();
     expect(tg.calls[0].params.conversationUrl).toBe(
-      "https://app.test/app/projects/project-1/conversations?filter=needs-you&id=conv-1&msg=msg-review-1",
+      `https://app.test/app/projects/project-1/conversations?filter=needs-you&id=conv-1&msg=${result.summaryMessageId}`,
     );
-    expect(result.summaryMessageId).toBe("msg-review-1");
+    expect(result.summaryMessageId).toBeString();
     expect(result.telegramThreadId).toBe("555");
   });
 

@@ -195,6 +195,25 @@ test("persisted contact state proceeds without relying on a prior message's word
 });
 
 describe("recoverPlannerDecisionFromText", () => {
+  test("rejects legacy planner-owned handoff actions", () => {
+    const legacyDecision = JSON.stringify({
+      goal: "Forward to the team",
+      intent: "handoff",
+      actionType: "escalate",
+      reason: "The visitor requested a person.",
+      query: null,
+      broaderQueries: null,
+      toolName: null,
+      toolInput: null,
+      question: null,
+      missingFields: null,
+      answerStyle: null,
+      composeKind: null,
+    });
+
+    expect(recoverPlannerDecisionFromText(legacyDecision)).toBeNull();
+  });
+
   test("recovers a valid planner decision from fenced JSON with surrounding prose", () => {
     const response = `Planner result:\n\`\`\`json
 ${JSON.stringify({

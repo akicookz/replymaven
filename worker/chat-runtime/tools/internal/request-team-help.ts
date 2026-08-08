@@ -84,6 +84,26 @@ function getMissingContactFields(conversation: {
   return requiredFields;
 }
 
+function getEscalationRepairSummary(metadata: string | null): string | null {
+  try {
+    const parsed: unknown = metadata ? JSON.parse(metadata) : null;
+    if (!parsed || typeof parsed !== "object") return null;
+    const record = parsed as Record<string, unknown>;
+    if (typeof record.mavenTeamRequestAcceptedAt !== "string") return null;
+    const needsRepair =
+      typeof record.escalatedAt !== "string" ||
+      typeof record.reviewSummaryMessageId !== "string" ||
+      record.teamRequestSummaryPending === true ||
+      record.teamRequestNotificationState === "pending";
+    if (!needsRepair || typeof record.teamRequestSummary !== "string") {
+      return null;
+    }
+    return record.teamRequestSummary.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function createRequestTeamHelpTool(dependencies: {
   context: MavenTurnContext;
   chatService: ChatService;
@@ -123,13 +143,15 @@ export function createRequestTeamHelpTool(dependencies: {
       if (!project || !conversation) return createUnavailableResult();
 
       const agentLabel = settings?.agentName?.trim() || "our team";
-      if (
-        conversation.status === "waiting_agent" ||
-        conversation.status === "agent_replied"
-      ) {
+      if (conversation.status === "agent_replied") {
         return createRequestedResult(agentLabel, "already_forwarded");
       }
-      if (conversation.status !== "active") return createUnavailableResult();
+      if (
+        conversation.status !== "active" &&
+        conversation.status !== "waiting_agent"
+      ) {
+        return createUnavailableResult();
+      }
 
       const chatState = parseChatState(conversation.chatState, {
         fallbackAiParticipation: fallbackAiParticipationForStatus(
@@ -137,6 +159,48 @@ export function createRequestTeamHelpTool(dependencies: {
         ),
       });
       if (chatState.aiParticipation === "human_only") {
+        return createRequestedResult(agentLabel, "already_forwarded");
+      }
+
+      if (conversation.status === "waiting_agent") {
+        const repairSummary = getEscalationRepairSummary(
+          conversation.metadata,
+        );
+        if (repairSummary) {
+          try {
+            const repair = await createEscalation({
+              chatService: dependencies.chatService,
+              projectService: dependencies.projectService,
+              telegramService: dependencies.telegramService,
+              project,
+              conversation,
+              summary: repairSummary,
+              settings,
+              env: dependencies.env,
+              executionCtx: dependencies.executionCtx,
+              broadcast: dependencies.broadcast,
+              claimExternalNotificationAttempt() {
+                return dependencies.chatService.claimNewTeamRequestNotification(
+                  dependencies.context.conversationId,
+                  dependencies.context.projectId,
+                );
+              },
+            });
+            if (repair.telegramThreadId) {
+              try {
+                await dependencies.chatService.updateTelegramThreadId(
+                  dependencies.context.conversationId,
+                  dependencies.context.projectId,
+                  repair.telegramThreadId,
+                );
+              } catch {
+                // Ownership is already accepted; thread persistence is repairable.
+              }
+            }
+          } catch {
+            // The durable ownership state remains truthful even if repair fails.
+          }
+        }
         return createRequestedResult(agentLabel, "already_forwarded");
       }
 
@@ -148,12 +212,22 @@ export function createRequestTeamHelpTool(dependencies: {
         };
       }
 
-      const ownershipClaimed =
+      const claim =
         await dependencies.chatService.claimNewTeamRequest(
           dependencies.context.conversationId,
           dependencies.context.projectId,
+          parsedInput.data.summary,
         );
-      if (!ownershipClaimed) return createUnavailableResult();
+      if (claim.status === "contact_required") {
+        return {
+          status: "contact_required",
+          requiredFields: claim.requiredFields,
+        };
+      }
+      if (claim.status === "already_requested") {
+        return createRequestedResult(agentLabel, "already_forwarded");
+      }
+      if (claim.status !== "claimed") return createUnavailableResult();
 
       // Reload after the compare-and-set ownership claim. This is the final
       // authoritative gate before createEscalation can reach Telegram/email.
@@ -162,8 +236,22 @@ export function createRequestTeamHelpTool(dependencies: {
           dependencies.context.conversationId,
           dependencies.context.projectId,
         );
-      if (!claimedConversation || claimedConversation.status !== "waiting_agent") {
-        return createUnavailableResult();
+      if (!claimedConversation) {
+        return createRequestedResult(agentLabel, "created");
+      }
+      const claimedState = parseChatState(claimedConversation.chatState, {
+        fallbackAiParticipation: fallbackAiParticipationForStatus(
+          claimedConversation.status,
+        ),
+      });
+      if (
+        claimedConversation.status === "agent_replied" ||
+        claimedState.aiParticipation === "human_only"
+      ) {
+        return createRequestedResult(agentLabel, "already_forwarded");
+      }
+      if (claimedConversation.status !== "waiting_agent") {
+        return createRequestedResult(agentLabel, "created");
       }
       try {
         dependencies.onTeamRequested();
@@ -172,6 +260,9 @@ export function createRequestTeamHelpTool(dependencies: {
       }
 
       try {
+        const acceptedSummary =
+          getEscalationRepairSummary(claimedConversation.metadata) ??
+          parsedInput.data.summary;
         const submission = await createEscalation({
           chatService: dependencies.chatService,
           projectService: dependencies.projectService,
@@ -186,29 +277,33 @@ export function createRequestTeamHelpTool(dependencies: {
             status: claimedConversation.status,
             metadata: claimedConversation.metadata,
           },
-          summary: parsedInput.data.summary,
+          summary: acceptedSummary,
           settings,
           env: dependencies.env,
           executionCtx: dependencies.executionCtx,
           broadcast: dependencies.broadcast,
+          claimExternalNotificationAttempt() {
+            return dependencies.chatService.claimNewTeamRequestNotification(
+              dependencies.context.conversationId,
+              dependencies.context.projectId,
+            );
+          },
         });
 
-        if (!submission.accepted) {
-          return createUnavailableResult();
-        }
         if (submission.telegramThreadId) {
-          await dependencies.chatService.updateTelegramThreadId(
-            dependencies.context.conversationId,
-            dependencies.context.projectId,
-            submission.telegramThreadId,
-          );
+          try {
+            await dependencies.chatService.updateTelegramThreadId(
+              dependencies.context.conversationId,
+              dependencies.context.projectId,
+              submission.telegramThreadId,
+            );
+          } catch {
+            // The team request was durably accepted before external effects.
+          }
         }
-        return createRequestedResult(
-          agentLabel,
-          submission.created ? "created" : "already_forwarded",
-        );
+        return createRequestedResult(agentLabel, "created");
       } catch {
-        return createUnavailableResult();
+        return createRequestedResult(agentLabel, "created");
       }
     },
     async reauthorize() {

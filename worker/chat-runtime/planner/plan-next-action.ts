@@ -73,9 +73,6 @@ const plannerDecisionSchema = z.object({
       "search_docs",
       "call_tool",
       "ask_user",
-      "offer_handoff",
-      "collect_contact",
-      "escalate",
       "compose",
       "stop",
     ])
@@ -124,7 +121,7 @@ const plannerDecisionSchema = z.object({
     .max(2)
     .nullable()
     .describe(
-      "Missing contact fields (required when actionType is collect_contact; null otherwise).",
+      "Reserved compatibility field; return null.",
     ),
   answerStyle: z
     .enum(["direct", "step_by_step", "summary"])
@@ -500,7 +497,7 @@ Current planner state:
 - clarificationAttemptsThisConversation: ${options.state.clarificationAttempts}
 - lastClarifyingQuestionAsked: ${options.state.lastBotQuestion ?? "none"}
 
-When handoffRequested is true, the conversation has already been forwarded or a human already owns it. Do not choose offer_handoff, collect_contact, or escalate again. Keep helping with documentation, tools, a focused diagnostic question, or a substantive reply.
+When handoffRequested is true, the conversation has already been forwarded or a human already owns it. Keep helping with documentation, tools, a focused diagnostic question, or a substantive reply.
 
 Action history:
 ${buildActionHistorySummary(options.state.actionHistory)}
@@ -516,25 +513,17 @@ ${buildToolCatalog(options.availableTools)}
 
 Allowed next actions:
 - search_docs: search the knowledge base again with a better query
-- call_tool: call exactly one assigned tool with explicit input
+- call_tool: call exactly one assigned tool with explicit input, including request_team_help when it is assigned
 - ask_user: ask one focused question when a required detail is missing
-- offer_handoff: offer team follow-up when support is exhausted and wait for confirmation
-- collect_contact: ask only for the missing name/email needed for a team follow-up
-- escalate: flag this conversation for human review and notify the team
 - compose: answer now using the gathered evidence
 - stop: no further search or tool action is useful; compose a best-effort answer using whatever evidence was gathered, or acknowledge the gap honestly
 
 Message classification (YOU are the classifier — there is no separate routing step):
 - Greetings ("hi", "hello", "hey", "good morning"): choose compose with composeKind "greeting" and intent "smalltalk". No search needed.
 - Resolution signals ("thanks", "that worked", "got it", "it's ok now", "never mind", "all good", "no worries"): choose compose with composeKind "resolution" and intent "smalltalk". No search needed.
-- Frustration/anger ("this is useless", "not helping", profanity, "I already told you"): choose offer_handoff immediately. Do NOT search docs or ask clarifying questions.
-- Explicit human requests ("talk to a person", "live agent", "speak to someone"): choose offer_handoff if issue context is thin, or collect_contact/escalate if context is sufficient.
-- Account actions ("cancel my account", "delete my data", "close my account"): choose offer_handoff immediately. These require human authorization and cannot be handled by the bot.
+- Human follow-up requests, account actions requiring authorization, or exhausted support: choose call_tool with request_team_help when that native tool is assigned. Pass a concise factual issue summary and let the tool return any ordinary contact follow-up needed.
 - Chit-chat or off-topic ("what's the weather", "tell me a joke"): choose compose with composeKind "redirect" and intent "smalltalk" to politely redirect.
 - Product-overview questions ("what is this?", "how does it work?", "what does this product do?", "what do you offer?", "is this right for me?") are NOT ambiguous — the subject is this product and company. Never choose ask_user for them. If the SOPs, FAQs, or company background above already describe the product, choose compose with composeKind "grounded". Otherwise choose search_docs with an overview-style query such as "product overview what it does features getting started".
-- Affirmative confirmations ("yes", "yeah", "please do", "go ahead") when the last bot message offered a handoff: choose collect_contact or escalate to proceed with the handoff flow.
-- Contact detail responses (visitor provides name/email after being asked): recognize as contact info and proceed to escalate.
-- Declining contact details ("no email", "prefer not to share", "continue here"): proceed to escalate without contact details.
 
 Rules:
 - Output exactly one next action.
@@ -544,11 +533,8 @@ Rules:
 - Prefer search_docs before call_tool when documentation can clarify expected product behavior.
 - A single well-formed search_docs query is usually enough. The runtime will automatically reformulate and retry once if no results come back, so do not stack redundant queries.
 - Use call_tool only when a tool is clearly needed and the required inputs are available.
+- Never emulate team handoff in planner state or prose; request_team_help is the only handoff action.
 - If a required tool input is missing, choose ask_user instead of guessing.
-- If the visitor explicitly asks for a human, do not route them back into normal docs troubleshooting unless the issue context is still missing.
-- Use offer_handoff only when you need visitor confirmation before forwarding.
-- Use collect_contact only when optional contact details would genuinely help follow-up and the visitor has not already declined to share them.
-- Use escalate when the visitor wants human follow-up, there is enough issue context to forward, and either contact details are already known or the visitor has declined to share them.
 - After search_docs returns evidence, prefer compose. After search_docs returns nothing even after the runtime's automatic reformulation, prefer compose with an honest acknowledgment over endless retries.
 - Choose compose with composeKind "grounded" ONLY when SOPs, FAQs, or docs/tool evidence directly answers the question, OR when documentation searches have already been exhausted. Greetings, resolution signals, and off-topic redirects use their own composeKind and need no evidence.
 - Do NOT compose answers based on general context or business domain knowledge without explicit documentation.
@@ -562,12 +548,12 @@ Rules:
 - Only use ask_user when critical details are genuinely missing relative to the business context and what would be reasonable to expect.
 
 Anti-loop rules (CRITICAL):
-- If action history already contains one or more ask_user entries, do NOT choose ask_user again. Instead choose offer_handoff, escalate, or compose with best-effort grounding.
+- If action history already contains one or more ask_user entries, do NOT choose ask_user again. Instead choose compose with best-effort grounding or stop.
 - Never repeat the same ask_user question or a paraphrase of it. Cross-check the action history before picking ask_user.
 - If the visitor already provided an image, URL, page context, or specific feature name, do NOT ask what feature/page they mean. Use what they gave you.
-- If the visitor shows frustration signals ("useless", "not helping", "stop asking", "I already said"), immediately prefer offer_handoff over any further ask_user.
+- If the visitor shows frustration signals ("useless", "not helping", "stop asking", "I already said"), do not ask another clarifying question.
 - If the visitor says the issue is resolved or thanks you, choose compose — do NOT search docs or ask further questions.
-- If clarificationAttemptsThisConversation is 2 or more, ask_user is forbidden for the rest of this conversation — choose offer_handoff or compose instead.
+- If clarificationAttemptsThisConversation is 2 or more, ask_user is forbidden for the rest of this conversation — choose compose or stop instead.
 
 - If no safe action remains, choose stop. The runtime will still compose a reply using available evidence or a candid acknowledgment that no concrete answer was found.`;
 

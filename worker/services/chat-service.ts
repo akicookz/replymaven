@@ -391,7 +391,11 @@ export function buildConditionalSystemMessageQuery(
       ),
     );
 
-  return db.insert(messages).select(selectQuery).returning();
+  return db
+    .insert(messages)
+    .select(selectQuery)
+    .onConflictDoNothing()
+    .returning();
 }
 
 export function buildConditionalBotMessageQuery(
@@ -474,16 +478,43 @@ export function buildNewTeamRequestClaimQuery(
   projectId: string,
   expectedChatState: string | null,
   nextChatState: string,
+  expectedVisitorName: string | null,
+  expectedVisitorEmail: string | null,
+  acceptance: {
+    summary: string;
+    acceptedAt: string;
+    summaryMessageId: string;
+  },
+  enforceContactSnapshot = true,
 ) {
   const chatStateCondition =
     expectedChatState === null
       ? isNull(conversations.chatState)
       : eq(conversations.chatState, expectedChatState);
+  const visitorNameCondition =
+    expectedVisitorName === null
+      ? isNull(conversations.visitorName)
+      : eq(conversations.visitorName, expectedVisitorName);
+  const visitorEmailCondition =
+    expectedVisitorEmail === null
+      ? isNull(conversations.visitorEmail)
+      : eq(conversations.visitorEmail, expectedVisitorEmail);
+  const validMetadata = sql`case when json_valid(${conversations.metadata}) then coalesce(${conversations.metadata}, '{}') else '{}' end`;
+  const nextMetadata = sql`json_set(
+    ${validMetadata},
+    '$.teamRequestSummary', ${acceptance.summary},
+    '$.escalatedAt', ${acceptance.acceptedAt},
+    '$.reviewSummaryMessageId', ${acceptance.summaryMessageId},
+    '$.teamRequestSummaryPending', json('true'),
+    '$.teamRequestNotificationState', 'pending',
+    '$.mavenTeamRequestAcceptedAt', ${acceptance.acceptedAt}
+  )`;
   return db
     .update(conversations)
     .set({
       status: "waiting_agent",
       chatState: nextChatState,
+      metadata: nextMetadata,
     })
     .where(
       and(
@@ -492,10 +523,22 @@ export function buildNewTeamRequestClaimQuery(
         eq(conversations.status, "active"),
         isNull(conversations.archivedAt),
         chatStateCondition,
+        ...(enforceContactSnapshot
+          ? [visitorNameCondition, visitorEmailCondition]
+          : []),
       ),
     )
     .returning({ id: conversations.id });
 }
+
+export type NewTeamRequestClaimResult =
+  | { status: "claimed" }
+  | { status: "already_requested" }
+  | {
+      status: "contact_required";
+      requiredFields: Array<"name" | "email">;
+    }
+  | { status: "unavailable" };
 
 // ─── Inbox tab predicates ────────────────────────────────────────────────────
 // Snoozed and flagged (spam) conversations live ONLY in their own tabs: they
@@ -1036,20 +1079,51 @@ export class ChatService {
     return updated.length > 0;
   }
 
-  async claimNewTeamRequest(id: string, projectId: string): Promise<boolean> {
+  async claimNewTeamRequest(
+    id: string,
+    projectId: string,
+    summary: string,
+  ): Promise<NewTeamRequestClaimResult> {
     const conversation = await this.getOperationalConversationById(
       id,
       projectId,
     );
-    if (!conversation || conversation.status !== "active") return false;
+    if (!conversation) return { status: "unavailable" };
+
+    function classifyConversation(
+      row: ConversationRow,
+    ): Exclude<NewTeamRequestClaimResult, { status: "claimed" }> | null {
+      const state = parseChatState(row.chatState, {
+        fallbackAiParticipation: fallbackAiParticipationForStatus(row.status),
+      });
+      if (
+        row.status === "waiting_agent" ||
+        row.status === "agent_replied" ||
+        state.aiParticipation === "human_only"
+      ) {
+        return { status: "already_requested" };
+      }
+      if (row.status !== "active" || state.aiParticipation !== "continuous") {
+        return { status: "unavailable" };
+      }
+
+      const requiredFields: Array<"name" | "email"> = [];
+      if (!row.visitorName?.trim()) requiredFields.push("name");
+      if (!row.visitorEmail?.trim()) requiredFields.push("email");
+      if (requiredFields.length > 0 && !state.contactDeclined) {
+        return { status: "contact_required", requiredFields };
+      }
+      return null;
+    }
+
+    const currentClassification = classifyConversation(conversation);
+    if (currentClassification) return currentClassification;
 
     const currentState = parseChatState(conversation.chatState, {
       fallbackAiParticipation: fallbackAiParticipationForStatus(
         conversation.status,
       ),
     });
-    if (currentState.aiParticipation !== "continuous") return false;
-
     const nextState = applyChatOwnershipEvent(currentState, "team_requested");
     const updated = await buildNewTeamRequestClaimQuery(
       this.db,
@@ -1057,7 +1131,79 @@ export class ChatService {
       projectId,
       conversation.chatState,
       JSON.stringify(nextState),
+      conversation.visitorName,
+      conversation.visitorEmail,
+      {
+        summary: summary.trim() || "Visitor asked for team follow-up.",
+        acceptedAt: new Date().toISOString(),
+        summaryMessageId: crypto.randomUUID(),
+      },
+      !currentState.contactDeclined,
     );
+    if (updated.length > 0) return { status: "claimed" };
+
+    const latest = await this.getOperationalConversationById(id, projectId);
+    if (!latest) return { status: "unavailable" };
+    return classifyConversation(latest) ?? { status: "unavailable" };
+  }
+
+  async claimNewTeamRequestNotification(
+    id: string,
+    projectId: string,
+  ): Promise<boolean> {
+    const conversation = await this.getOperationalConversationById(
+      id,
+      projectId,
+    );
+    if (!conversation || conversation.status !== "waiting_agent") return false;
+
+    const chatState = parseChatState(conversation.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    });
+    if (chatState.aiParticipation === "human_only") return false;
+
+    let metadata: Record<string, unknown>;
+    try {
+      const parsed: unknown = conversation.metadata
+        ? JSON.parse(conversation.metadata)
+        : null;
+      if (!parsed || typeof parsed !== "object") return false;
+      metadata = parsed as Record<string, unknown>;
+    } catch {
+      return false;
+    }
+    if (
+      typeof metadata.mavenTeamRequestAcceptedAt !== "string" ||
+      metadata.teamRequestNotificationState !== "pending"
+    ) {
+      return false;
+    }
+
+    const nextMetadata = JSON.stringify({
+      ...metadata,
+      teamRequestNotificationState: "attempted",
+      teamRequestNotificationAttemptedAt: new Date().toISOString(),
+    });
+    const updated = await this.db
+      .update(conversations)
+      .set({ metadata: nextMetadata })
+      .where(
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          eq(conversations.status, "waiting_agent"),
+          isNull(conversations.archivedAt),
+          conversation.chatState === null
+            ? isNull(conversations.chatState)
+            : eq(conversations.chatState, conversation.chatState),
+          conversation.metadata === null
+            ? isNull(conversations.metadata)
+            : eq(conversations.metadata, conversation.metadata),
+        ),
+      )
+      .returning({ id: conversations.id });
     return updated.length > 0;
   }
 
@@ -1579,8 +1725,9 @@ export class ChatService {
     conversationId: string,
     kind: SystemEventKind,
     content: string,
+    idempotencyKey?: string,
   ): Promise<MessageRow | null> {
-    const id = crypto.randomUUID();
+    const id = idempotencyKey ?? crypto.randomUUID();
     const now = new Date();
     const sources = JSON.stringify({ systemKind: kind });
     const rows = await buildConditionalSystemMessageQuery(this.db, {
