@@ -7,6 +7,10 @@ import {
   type NewToolRow,
   type ToolExecutionRow,
 } from "../db";
+import {
+  toolAudienceSchema,
+  type MavenChannel,
+} from "../validation";
 
 // ─── Tool Service ─────────────────────────────────────────────────────────────
 
@@ -31,6 +35,25 @@ export class ToolService {
       .orderBy(tools.sortOrder);
   }
 
+  async getEnabledToolsForChannel(
+    projectId: string,
+    channel: MavenChannel,
+  ): Promise<ToolRow[]> {
+    const enabledTools = await this.getEnabledTools(projectId);
+
+    return enabledTools.filter((tool) => {
+      let allowedChannels: unknown;
+      try {
+        allowedChannels = JSON.parse(tool.allowedChannels);
+      } catch {
+        return false;
+      }
+
+      const parsed = toolAudienceSchema.safeParse(allowedChannels);
+      return parsed.success && parsed.data.includes(channel);
+    });
+  }
+
   async getToolById(id: string, projectId: string): Promise<ToolRow | null> {
     const rows = await this.db
       .select()
@@ -38,6 +61,13 @@ export class ToolService {
       .where(and(eq(tools.id, id), eq(tools.projectId, projectId)))
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  async getAuthoritativeTool(
+    projectId: string,
+    toolId: string,
+  ): Promise<ToolRow | null> {
+    return this.getToolById(toolId, projectId);
   }
 
   async getToolByName(name: string, projectId: string): Promise<ToolRow | null> {
@@ -73,6 +103,9 @@ export class ToolService {
         | "enabled"
         | "timeout"
         | "sortOrder"
+        | "allowedChannels"
+        | "access"
+        | "schemaFingerprint"
       >
     >,
   ): Promise<ToolRow | null> {

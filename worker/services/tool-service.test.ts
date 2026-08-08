@@ -1,0 +1,106 @@
+import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { drizzle as drizzleSqlite } from "drizzle-orm/bun-sqlite";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { schema } from "../db";
+import { ToolService } from "./tool-service";
+
+function createToolService(): ToolService {
+  const sqlite = new Database(":memory:");
+  sqlite.exec(`
+    CREATE TABLE projects (id text PRIMARY KEY NOT NULL);
+    CREATE TABLE tools (
+      id text PRIMARY KEY NOT NULL,
+      project_id text NOT NULL,
+      name text NOT NULL,
+      display_name text NOT NULL,
+      description text NOT NULL,
+      endpoint text NOT NULL,
+      method text NOT NULL DEFAULT 'POST',
+      headers text,
+      parameters text NOT NULL DEFAULT '[]',
+      response_mapping text,
+      enabled integer NOT NULL DEFAULT 1,
+      timeout integer NOT NULL DEFAULT 10000,
+      sort_order integer NOT NULL DEFAULT 0,
+      allowed_channels text NOT NULL DEFAULT '["public"]',
+      access text NOT NULL DEFAULT 'read',
+      schema_fingerprint text NOT NULL DEFAULT 'legacy-v1',
+      created_at integer NOT NULL DEFAULT (unixepoch()),
+      updated_at integer NOT NULL DEFAULT (unixepoch())
+    );
+    INSERT INTO projects (id) VALUES ('project-1'), ('project-2');
+    INSERT INTO tools (id, project_id, name, display_name, description, endpoint, enabled, sort_order, allowed_channels)
+      VALUES
+        ('public-tool', 'project-1', 'public_tool', 'Public tool', 'Public', 'https://example.com/public', 1, 1, '["public"]'),
+        ('sidechat-tool', 'project-1', 'sidechat_tool', 'Sidechat tool', 'Sidechat', 'https://example.com/sidechat', 1, 2, '["sidechat"]'),
+        ('shared-tool', 'project-1', 'shared_tool', 'Shared tool', 'Shared', 'https://example.com/shared', 1, 3, '["public","sidechat"]'),
+        ('disabled-tool', 'project-1', 'disabled_tool', 'Disabled tool', 'Disabled', 'https://example.com/disabled', 0, 4, '["public"]'),
+        ('malformed-tool', 'project-1', 'malformed_tool', 'Malformed tool', 'Malformed', 'https://example.com/malformed', 1, 5, 'not-json'),
+        ('other-project-tool', 'project-2', 'other_tool', 'Other tool', 'Other', 'https://example.com/other', 1, 1, '["public"]');
+  `);
+  const db = drizzleSqlite(sqlite, { schema });
+
+  return new ToolService(
+    db as unknown as DrizzleD1Database<Record<string, unknown>>,
+  );
+}
+
+describe("ToolService Maven audience policy", () => {
+  test("returns only enabled tools authorized for the requested channel", async () => {
+    const service = createToolService();
+
+    const publicTools = await service.getEnabledToolsForChannel(
+      "project-1",
+      "public",
+    );
+    const sidechatTools = await service.getEnabledToolsForChannel(
+      "project-1",
+      "sidechat",
+    );
+
+    expect(publicTools.map((tool) => tool.id)).toEqual([
+      "public-tool",
+      "shared-tool",
+    ]);
+    expect(sidechatTools.map((tool) => tool.id)).toEqual([
+      "sidechat-tool",
+      "shared-tool",
+    ]);
+  });
+
+  test("fails closed for malformed persisted audiences", async () => {
+    const service = createToolService();
+
+    const tools = await service.getEnabledToolsForChannel("project-1", "public");
+
+    expect(tools.map((tool) => tool.id)).not.toContain("malformed-tool");
+  });
+
+  test("retrieves an authoritative tool only from its project", async () => {
+    const service = createToolService();
+
+    expect(
+      await service.getAuthoritativeTool("project-1", "public-tool"),
+    ).toMatchObject({ id: "public-tool", allowedChannels: '["public"]' });
+    expect(
+      await service.getAuthoritativeTool("project-2", "public-tool"),
+    ).toBeNull();
+  });
+
+  test("updates every authoritative policy field", async () => {
+    const service = createToolService();
+
+    const updated = await service.updateTool("public-tool", "project-1", {
+      allowedChannels: '["sidechat"]',
+      access: "write",
+      schemaFingerprint: "schema-v2",
+    });
+
+    expect(updated).toMatchObject({
+      allowedChannels: '["sidechat"]',
+      access: "write",
+      schemaFingerprint: "schema-v2",
+    });
+  });
+});

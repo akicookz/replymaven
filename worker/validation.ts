@@ -564,6 +564,20 @@ export const submitContactFormSchema = z.object({
 
 // ─── Tools ────────────────────────────────────────────────────────────────────
 
+export type MavenChannel = "public" | "sidechat";
+export type MavenToolAccess = "read" | "write";
+
+export interface HttpToolPolicyInput {
+  allowedChannels: MavenChannel[];
+  access: MavenToolAccess;
+}
+
+export const toolAudienceSchema = z
+  .array(z.enum(["public", "sidechat"]))
+  .min(1)
+  .max(2)
+  .refine((values) => new Set(values).size === values.length, "Duplicate channel");
+
 const toolParameterSchema = z.object({
   name: z.string().min(1, "Parameter name is required").max(100),
   type: z.enum(["string", "number", "boolean"]),
@@ -598,6 +612,8 @@ export const createToolSchema = z.object({
   responseMapping: responseMappingSchema,
   enabled: z.boolean().default(true),
   timeout: z.number().int().min(1000).max(30000).default(10000),
+  allowedChannels: toolAudienceSchema.default(["public"]),
+  access: z.enum(["read", "write"]).default("read"),
 });
 
 export const updateToolSchema = z.object({
@@ -611,6 +627,8 @@ export const updateToolSchema = z.object({
   enabled: z.boolean().optional(),
   timeout: z.number().int().min(1000).max(30000).optional(),
   sortOrder: z.number().int().min(0).optional(),
+  allowedChannels: toolAudienceSchema.optional(),
+  access: z.enum(["read", "write"]).optional(),
 });
 
 export const testToolSchema = z.object({
