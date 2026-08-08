@@ -14,6 +14,37 @@ import {
 
 // ─── Tool Service ─────────────────────────────────────────────────────────────
 
+type CreateToolInput = Omit<
+  NewToolRow,
+  "id" | "createdAt" | "updatedAt" | "allowedChannels"
+> & {
+  allowedChannels?: MavenChannel[];
+};
+
+type ToolUpdateInput = Partial<
+  Pick<
+    ToolRow,
+    | "displayName"
+    | "description"
+    | "endpoint"
+    | "method"
+    | "headers"
+    | "parameters"
+    | "responseMapping"
+    | "enabled"
+    | "timeout"
+    | "sortOrder"
+    | "access"
+    | "schemaFingerprint"
+  >
+> & {
+  allowedChannels?: MavenChannel[];
+};
+
+function serializeAllowedChannels(allowedChannels: unknown): string {
+  return JSON.stringify(toolAudienceSchema.parse(allowedChannels));
+}
+
 export class ToolService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
 
@@ -80,38 +111,34 @@ export class ToolService {
   }
 
   async createTool(
-    data: Omit<NewToolRow, "id" | "createdAt" | "updatedAt">,
+    data: CreateToolInput,
   ): Promise<ToolRow> {
     const id = crypto.randomUUID();
-    await this.db.insert(tools).values({ id, ...data });
+    const { allowedChannels, ...toolData } = data;
+    await this.db.insert(tools).values({
+      id,
+      ...toolData,
+      ...(allowedChannels === undefined
+        ? {}
+        : { allowedChannels: serializeAllowedChannels(allowedChannels) }),
+    });
     return (await this.getToolById(id, data.projectId))!;
   }
 
   async updateTool(
     id: string,
     projectId: string,
-    updates: Partial<
-      Pick<
-        ToolRow,
-        | "displayName"
-        | "description"
-        | "endpoint"
-        | "method"
-        | "headers"
-        | "parameters"
-        | "responseMapping"
-        | "enabled"
-        | "timeout"
-        | "sortOrder"
-        | "allowedChannels"
-        | "access"
-        | "schemaFingerprint"
-      >
-    >,
+    updates: ToolUpdateInput,
   ): Promise<ToolRow | null> {
+    const { allowedChannels, ...toolUpdates } = updates;
     await this.db
       .update(tools)
-      .set(updates)
+      .set({
+        ...toolUpdates,
+        ...(allowedChannels === undefined
+          ? {}
+          : { allowedChannels: serializeAllowedChannels(allowedChannels) }),
+      })
       .where(and(eq(tools.id, id), eq(tools.projectId, projectId)));
     return this.getToolById(id, projectId);
   }

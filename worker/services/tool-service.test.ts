@@ -92,7 +92,7 @@ describe("ToolService Maven audience policy", () => {
     const service = createToolService();
 
     const updated = await service.updateTool("public-tool", "project-1", {
-      allowedChannels: '["sidechat"]',
+      allowedChannels: ["sidechat"],
       access: "write",
       schemaFingerprint: "schema-v2",
     });
@@ -102,5 +102,43 @@ describe("ToolService Maven audience policy", () => {
       access: "write",
       schemaFingerprint: "schema-v2",
     });
+  });
+
+  test("serializes validated audiences immediately before creating a tool", async () => {
+    const service = createToolService();
+
+    const created = await service.createTool({
+      projectId: "project-1",
+      name: "created_sidechat_tool",
+      displayName: "Created sidechat tool",
+      description: "Created with a typed audience.",
+      endpoint: "https://example.com/created-sidechat",
+      allowedChannels: ["sidechat"],
+    });
+
+    expect(created.allowedChannels).toBe('["sidechat"]');
+  });
+
+  test("rejects unvalidated audience values before writing tools", async () => {
+    const service = createToolService();
+
+    await expect(
+      service.createTool({
+        projectId: "project-1",
+        name: "invalid_created_tool",
+        displayName: "Invalid created tool",
+        description: "Must not persist an unvalidated audience.",
+        endpoint: "https://example.com/invalid-created",
+        allowedChannels: "not-json" as never,
+      }),
+    ).rejects.toThrow();
+    await expect(
+      service.updateTool("public-tool", "project-1", {
+        allowedChannels: "not-json" as never,
+      }),
+    ).rejects.toThrow();
+    expect(
+      await service.getAuthoritativeTool("project-1", "public-tool"),
+    ).toMatchObject({ allowedChannels: '["public"]' });
   });
 });
