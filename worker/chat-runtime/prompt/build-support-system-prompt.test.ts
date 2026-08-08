@@ -84,3 +84,56 @@ test("adds the trusted Maven channel contract to the common prompt", () => {
   expect(sidechatPrompt).not.toContain("request_team_help");
   expect(sidechatPrompt).not.toContain("[RESOLVED]");
 });
+
+test("frames populated sidechat sections as private evidence for the human agent", () => {
+  const prompt = buildSupportSystemPrompt(
+    {
+      ...settings,
+      companyContext: "Acme builds account software.",
+      workingHours: "Weekdays",
+      avgResponseTime: "One business day",
+    },
+    "Acme",
+    "Retrieved setup instructions.",
+    "The visitor cannot finish setup.",
+    {
+      channel: "sidechat",
+      aiParticipation: "continuous",
+      guidelines: [
+        {
+          condition: "Setup is blocked",
+          instruction: "Verify the account state.",
+        },
+      ],
+      faqMatchHint: {
+        question: "How do I finish setup?",
+        answer: "Open Settings and complete verification.",
+        score: 0.96,
+      },
+      faqContext: "Q: Can setup be retried? A: Yes, after verification.",
+      pageContext: { page: "Setup" },
+      visitorInfo: { name: "Alice", email: "alice@example.com" },
+      toolEvidenceSummary: "The account lookup returned pending.",
+      retrievalAttempted: true,
+      groundingConfidence: "none",
+      agentHandbackInstructions: "Check the verification timestamp.",
+      turnIntent: "troubleshoot",
+      plannerGoal: "Find the setup blocker",
+    },
+  );
+
+  expect(prompt).toContain("human dashboard support agent");
+  expect(prompt).toContain("Verify the account state.");
+  expect(prompt).toContain("Open Settings and complete verification.");
+  expect(prompt).toContain("Retrieved setup instructions.");
+  expect(prompt).toContain("The account lookup returned pending.");
+  expect(prompt).not.toContain("Share them when visitors ask");
+  expect(prompt).not.toContain("When a visitor's question matches");
+  expect(prompt).not.toContain("visitor's language");
+  expect(prompt).not.toContain("deliver its content rewritten in your voice");
+  expect(prompt).not.toContain("for the visitor's current question");
+  expect(prompt).not.toContain("give contextually relevant answers");
+  expect(prompt).not.toContain("executed for this visitor");
+  expect(prompt).not.toContain("request_team_help");
+  expect(prompt).not.toContain("[RESOLVED]");
+});

@@ -6,6 +6,7 @@ import { streamMavenAgent } from "./support-agent";
 interface ModelCall {
   prompt?: unknown;
   toolChoice?: unknown;
+  abortSignal?: AbortSignal;
 }
 
 const emptyUsage = {
@@ -88,6 +89,32 @@ async function collectText(stream: AsyncIterable<{ type: string; text?: string }
 }
 
 describe("streamMavenAgent", () => {
+  test("preserves the caller abort signal through the provider guard", async () => {
+    const fake = createFakeModel(() => createTextStep("A direct answer."));
+    const abortController = new AbortController();
+
+    const result = await streamMavenAgent(
+      {
+        modelConfig: {
+          model: "test-model",
+          geminiApiKey: null,
+          openaiApiKey: null,
+        },
+        createModel: () => fake.model,
+      },
+      {
+        systemPrompt: "Be helpful.",
+        conversationHistory: [],
+        userMessage: "Hello",
+        tools: {},
+        abortSignal: abortController.signal,
+      },
+    );
+
+    expect(await collectText(result.fullStream)).toBe("A direct answer.");
+    expect(fake.calls[0]?.abortSignal).toBe(abortController.signal);
+  });
+
   test("uses ToolLoopAgent with toolChoice none for an empty registry", async () => {
     const fake = createFakeModel(() => createTextStep("A direct answer."));
 

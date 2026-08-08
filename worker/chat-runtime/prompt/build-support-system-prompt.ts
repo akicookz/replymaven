@@ -42,11 +42,20 @@ Stay within ${projectName}'s support domain. Refuse dangerous, illegal, harmful,
 `;
 
   prompt += buildChannelContract("sidechat");
-  prompt += buildCompanySection(projectName, settings.companyContext, {
-    workingHours: settings.workingHours,
-    avgResponseTime: settings.avgResponseTime,
-  });
-  prompt += buildGuidelinesSection(projectName, options.guidelines);
+  prompt += buildCompanySection(
+    projectName,
+    settings.companyContext,
+    {
+      workingHours: settings.workingHours,
+      avgResponseTime: settings.avgResponseTime,
+    },
+    "sidechat",
+  );
+  prompt += buildGuidelinesSection(
+    projectName,
+    options.guidelines,
+    "sidechat",
+  );
 
   prompt += `<response-rules>
 - Address the human agent as your conversation partner and distinguish clearly between known facts, reasonable investigative next steps, and missing evidence.
@@ -64,8 +73,8 @@ This is a private advisory channel. Do not emit public conversation lifecycle to
 `;
 
   prompt += buildTimeContextSection(options.timeContext);
-  prompt += buildPageContextSection(options.pageContext);
-  prompt += buildVisitorInfoSection(options.visitorInfo);
+  prompt += buildPageContextSection(options.pageContext, "sidechat");
+  prompt += buildVisitorInfoSection(options.visitorInfo, "sidechat");
 
   if (options.agentHandbackInstructions) {
     prompt += `<agent-instructions>
@@ -82,10 +91,13 @@ ${options.agentHandbackInstructions}
     options.plannerGoal,
     options.plannerActionHistory,
   );
-  prompt += buildFaqMatchSection(options.faqMatchHint);
-  prompt += buildFaqContextSection(options.faqContext);
-  prompt += buildKnowledgeBaseSection(ragContext);
-  prompt += buildToolEvidenceSection(options.toolEvidenceSummary);
+  prompt += buildFaqMatchSection(options.faqMatchHint, "sidechat");
+  prompt += buildFaqContextSection(options.faqContext, "sidechat");
+  prompt += buildKnowledgeBaseSection(ragContext, "sidechat");
+  prompt += buildToolEvidenceSection(
+    options.toolEvidenceSummary,
+    "sidechat",
+  );
   prompt += buildConversationSummarySection(conversationSummary);
 
   return prompt;

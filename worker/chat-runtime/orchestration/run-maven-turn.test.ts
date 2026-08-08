@@ -167,6 +167,82 @@ function createFailingModel(
   return { model, calls };
 }
 
+function createErrorThenDelayedToolModel(): {
+  model: LanguageModel;
+  calls: ModelCall[];
+  releaseDelayedTool(): void;
+  waitForDelayedTool(): Promise<void>;
+  getCancellationCount(): number;
+} {
+  const calls: ModelCall[] = [];
+  let cancellationCount = 0;
+  let releaseDelayedTool = () => {};
+  let markDelayedToolSettled = () => {};
+  const delayedToolGate = new Promise<void>((resolve) => {
+    releaseDelayedTool = resolve;
+  });
+  const delayedToolSettled = new Promise<void>((resolve) => {
+    markDelayedToolSettled = resolve;
+  });
+  const model = {
+    specificationVersion: "v3" as const,
+    provider: "test",
+    modelId: "maven-turn-delayed-tool-test",
+    supportedUrls: {},
+    async doGenerate() {
+      throw new Error("Unexpected non-streaming generation");
+    },
+    async doStream(options: ModelCall) {
+      calls.push(options);
+      if (calls.length > 1) {
+        throw new Error("Unexpected primary model call after delayed tool");
+      }
+
+      let cancelled = false;
+      return {
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "stream-start", warnings: [] });
+            controller.enqueue({
+              type: "error",
+              error: new Error("provider stream unavailable"),
+            });
+            void delayedToolGate.then(() => {
+              if (!cancelled) {
+                controller.enqueue({
+                  type: "tool-call",
+                  toolCallId: "delayed-primary-tool",
+                  toolName: "lookup_account",
+                  input: JSON.stringify({ accountId: "acct-delayed" }),
+                });
+                controller.enqueue({
+                  type: "finish",
+                  usage: emptyUsage,
+                  finishReason: { unified: "tool-calls", raw: "tool_calls" },
+                });
+                controller.close();
+              }
+              markDelayedToolSettled();
+            });
+          },
+          cancel() {
+            cancelled = true;
+            cancellationCount += 1;
+          },
+        }),
+      };
+    },
+  } as LanguageModel;
+
+  return {
+    model,
+    calls,
+    releaseDelayedTool,
+    waitForDelayedTool: () => delayedToolSettled,
+    getCancellationCount: () => cancellationCount,
+  };
+}
+
 function createContext(): MavenTurnContext {
   return {
     channel: "public",
@@ -433,6 +509,48 @@ describe("runMavenTurn", () => {
     });
   });
 
+  test("cancels a failed primary provider before fallback can race a delayed tool", async () => {
+    const primary = createErrorThenDelayedToolModel();
+    const fallback = createFakeModel([createTextStep("Safe fallback answer.")]);
+    const dependencies = createDependencies({
+      model: primary.model,
+      calls: primary.calls,
+    });
+    dependencies.modelRuntime = createModelRuntimeState({
+      model: "gpt-primary",
+      geminiApiKey: "gemini-key",
+      openaiApiKey: "openai-key",
+    });
+    dependencies.createModel = (config) =>
+      config.model === "gpt-primary" ? primary.model : fallback.model;
+    let primaryToolExecutions = 0;
+    globalThis.fetch = async () => {
+      primaryToolExecutions += 1;
+      return Response.json({ privateResult: "active" });
+    };
+
+    const turn = await runMavenTurn({
+      context: createContext(),
+      dependencies,
+      conversationHistory: [],
+      currentMessage: "Check my account.",
+    });
+    primary.releaseDelayedTool();
+    const browserEvents: Record<string, unknown>[] = [];
+    for await (const event of mapAgentEventsToSse(turn.fullStream)) {
+      browserEvents.push(event);
+    }
+    await primary.waitForDelayedTool();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(browserEvents).toEqual([{ text: "Safe fallback answer." }]);
+    expect(primaryToolExecutions).toBe(0);
+    expect(primary.getCancellationCount()).toBe(1);
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(1);
+    expect(dependencies.modelRuntime.hasUsedFallback).toBe(true);
+  });
+
   test("does not retry after visible primary text has started", async () => {
     const primary = createFakeModel([
       [
@@ -463,11 +581,17 @@ describe("runMavenTurn", () => {
       currentMessage: "Please help.",
     });
     const browserEvents: Record<string, unknown>[] = [];
-    for await (const event of mapAgentEventsToSse(turn.fullStream)) {
-      browserEvents.push(event);
+    let streamError: unknown;
+    try {
+      for await (const event of mapAgentEventsToSse(turn.fullStream)) {
+        browserEvents.push(event);
+      }
+    } catch (error) {
+      streamError = error;
     }
 
     expect(browserEvents).toEqual([{ text: "Primary text." }]);
+    expect(streamError).toBeInstanceOf(Error);
     expect(primary.calls).toHaveLength(1);
     expect(fallback.calls).toHaveLength(0);
     expect(dependencies.modelRuntime.hasUsedFallback).toBe(false);

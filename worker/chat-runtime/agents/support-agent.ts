@@ -1,4 +1,11 @@
-import { ToolLoopAgent, stepCountIs, type ToolSet } from "ai";
+import {
+  ToolLoopAgent,
+  stepCountIs,
+  wrapLanguageModel,
+  type LanguageModel,
+  type LanguageModelMiddleware,
+  type ToolSet,
+} from "ai";
 import {
   type SupportAgentDependencies,
   type SupportAgentResult,
@@ -17,12 +24,95 @@ export interface MavenAgentStreamOptions {
   abortSignal?: AbortSignal;
 }
 
+type LanguageModelV3 = Extract<
+  LanguageModel,
+  { specificationVersion: "v3" }
+>;
+
+class ModelAttemptTerminationError extends Error {
+  constructor() {
+    super("Unable to stop failed model attempt safely");
+    this.name = "ModelAttemptTerminationError";
+  }
+}
+
+function isLanguageModelV3(model: LanguageModel): model is LanguageModelV3 {
+  return typeof model === "object" &&
+    model !== null &&
+    model.specificationVersion === "v3";
+}
+
+function createTerminalProviderStream<
+  Part extends { type: string; error?: unknown },
+>(source: ReadableStream<Part>): ReadableStream<Part> {
+  const reader = source.getReader();
+  let terminal = false;
+
+  return new ReadableStream<Part>({
+    async pull(controller) {
+      try {
+        const next = await reader.read();
+        if (terminal) return;
+        if (next.done) {
+          terminal = true;
+          controller.close();
+          return;
+        }
+
+        if (next.value.type === "error") {
+          terminal = true;
+          const providerError = next.value.error;
+          try {
+            await reader.cancel(providerError);
+          } catch {
+            controller.error(new ModelAttemptTerminationError());
+            return;
+          }
+          controller.error(providerError);
+          return;
+        }
+
+        controller.enqueue(next.value);
+      } catch (error) {
+        terminal = true;
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      if (terminal) return;
+      terminal = true;
+      await reader.cancel(reason);
+    },
+  });
+}
+
+const terminalProviderErrorMiddleware: LanguageModelMiddleware = {
+  specificationVersion: "v3",
+  async wrapStream({ doStream }) {
+    const result = await doStream();
+    return {
+      ...result,
+      stream: createTerminalProviderStream(result.stream),
+    };
+  },
+};
+
+function guardProviderErrorParts(model: LanguageModel): LanguageModel {
+  if (!isLanguageModelV3(model)) return model;
+  return wrapLanguageModel({
+    model,
+    middleware: terminalProviderErrorMiddleware,
+  });
+}
+
 export async function streamMavenAgent(
   dependencies: SupportAgentDependencies,
   options: MavenAgentStreamOptions,
 ): Promise<SupportAgentResult> {
-  const model = (dependencies.createModel ?? createLanguageModel)(
-    dependencies.modelConfig,
+  const model = guardProviderErrorParts(
+    (dependencies.createModel ?? createLanguageModel)(
+      dependencies.modelConfig,
+    ),
   );
 
   const messages = toSdkConversationMessages(options.conversationHistory);
