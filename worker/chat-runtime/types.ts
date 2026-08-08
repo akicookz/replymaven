@@ -1,9 +1,10 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { type ModelMessage } from "ai";
+import { type FlexibleSchema, type ModelMessage } from "ai";
 import { type ToolRow } from "../db";
 import { type ProjectSettingsRow } from "../db";
 import { type AppEnv } from "../types";
 import { type SourceReference } from "../services/resource-service";
+import { type MavenChannel, type MavenToolAccess } from "../validation";
 import { type InternalToken } from "./streaming/internal-tokens";
 
 export type GroundingConfidence = "high" | "low" | "none";
@@ -212,6 +213,44 @@ export type ChatOwnershipEvent =
 export interface ChatOwnershipSnapshot {
   status: string;
   chatState: string | null;
+}
+
+export interface MavenTurnContext {
+  channel: MavenChannel;
+  projectId: string;
+  conversationId: string;
+  actorUserId: string | null;
+  customerId: string | null;
+  ownership: ChatOwnershipSnapshot;
+}
+
+export interface MavenToolCapability {
+  id: string;
+  projectId: string;
+  connectionId: string | null;
+  modelName: string;
+  displayName: string;
+  source: "internal" | "http" | "mcp";
+  allowedChannels: MavenChannel[];
+  access: MavenToolAccess;
+  enabled: boolean;
+  schemaFingerprint: string;
+}
+
+export type MavenToolAuthorizationError =
+  | "tool_disabled"
+  | "project_mismatch"
+  | "channel_not_allowed";
+
+export interface MavenToolDefinition {
+  capability: MavenToolCapability;
+  description: string;
+  inputSchema: FlexibleSchema<unknown>;
+  execute(
+    input: unknown,
+    options: { abortSignal?: AbortSignal },
+  ): Promise<unknown>;
+  reauthorize(): Promise<MavenToolCapability | null>;
 }
 
 export function isChatOwnershipSnapshotCurrent(
