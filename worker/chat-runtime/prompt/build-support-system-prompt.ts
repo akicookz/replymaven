@@ -72,7 +72,7 @@ This is a private advisory channel. Do not emit public conversation lifecycle to
 
 `;
 
-  prompt += buildTimeContextSection(options.timeContext);
+  prompt += buildTimeContextSection(options.timeContext, "sidechat");
   prompt += buildPageContextSection(options.pageContext, "sidechat");
   prompt += buildVisitorInfoSection(options.visitorInfo, "sidechat");
 
@@ -90,6 +90,7 @@ ${options.agentHandbackInstructions}
     options.turnIntent,
     options.plannerGoal,
     options.plannerActionHistory,
+    "sidechat",
   );
   prompt += buildFaqMatchSection(options.faqMatchHint, "sidechat");
   prompt += buildFaqContextSection(options.faqContext, "sidechat");
@@ -98,7 +99,10 @@ ${options.agentHandbackInstructions}
     options.toolEvidenceSummary,
     "sidechat",
   );
-  prompt += buildConversationSummarySection(conversationSummary);
+  prompt += buildConversationSummarySection(
+    conversationSummary,
+    "sidechat",
+  );
 
   return prompt;
 }

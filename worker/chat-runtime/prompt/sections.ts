@@ -148,6 +148,7 @@ export function buildTimeContextSection(
     | { nowMs: number; conversationHistory: ConversationTurnMessage[] }
     | null
     | undefined,
+  audience: PromptAudience = "public",
 ): string {
   if (!timeContext) return "";
   const { nowMs, conversationHistory } = timeContext;
@@ -169,8 +170,11 @@ export function buildTimeContextSection(
     );
   }
 
+  const framing = audience === "sidechat"
+    ? "Private case timing context for advising the human support agent.\n"
+    : "";
   return `<time-context>
-${lines.join("\n")}
+${framing}${lines.join("\n")}
 </time-context>
 
 `;
@@ -231,6 +235,7 @@ export function buildPlannerLoopSection(
   turnIntent: string | null | undefined,
   plannerGoal: string | null | undefined,
   plannerActionHistory: PlannerActionHistoryEntry[] | undefined,
+  audience: PromptAudience = "public",
 ): string {
   if (
     !turnIntent &&
@@ -248,8 +253,11 @@ export function buildPlannerLoopSection(
           .join("\n")
       : "No prior planner actions.";
 
+  const framing = audience === "sidechat"
+    ? "Private planning context for advising the human support agent.\n"
+    : "";
   return `<planner-loop>
-Support intent: ${turnIntent ?? "unknown"}
+${framing}Support intent: ${turnIntent ?? "unknown"}
 Planner goal: ${plannerGoal ?? "unknown"}
 Action history:
 ${plannerHistory}
@@ -396,10 +404,14 @@ ${trimToCharBudget(toolEvidenceSummary, MAX_TOOL_EVIDENCE_CHARS)}
 
 export function buildConversationSummarySection(
   conversationSummary: string | null,
+  audience: PromptAudience = "public",
 ): string {
   if (!conversationSummary) return "";
+  const framing = audience === "sidechat"
+    ? "Private case summary for advising the human support agent. Use it as context for the current investigation and avoid repeating work already covered."
+    : "This is a summary of the conversation so far. Use it to stay on topic and avoid repeating information already covered.";
   return `<conversation-summary>
-This is a summary of the conversation so far. Use it to stay on topic and avoid repeating information already covered.
+${framing}
 
 ${trimToCharBudget(conversationSummary, MAX_CONVERSATION_SUMMARY_CHARS)}
 </conversation-summary>

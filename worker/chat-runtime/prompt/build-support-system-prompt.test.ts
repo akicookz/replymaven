@@ -137,3 +137,77 @@ test("frames populated sidechat sections as private evidence for the human agent
   expect(prompt).not.toContain("request_team_help");
   expect(prompt).not.toContain("[RESOLVED]");
 });
+
+test("frames sidechat timing, planner state, and summary as private case context", () => {
+  const nowMs = Date.UTC(2026, 7, 9, 12, 0, 0);
+  const sharedOptions = {
+    aiParticipation: "continuous" as const,
+    timeContext: {
+      nowMs,
+      conversationHistory: [
+        {
+          role: "visitor" as const,
+          content: "Setup is blocked.",
+          createdAt: new Date(nowMs - 2 * 60 * 60 * 1000).toISOString(),
+        },
+        {
+          role: "bot" as const,
+          content: "Please check verification.",
+          createdAt: new Date(nowMs - 30 * 60 * 1000).toISOString(),
+        },
+      ],
+    },
+    turnIntent: "troubleshoot",
+    plannerGoal: "Identify the verification blocker",
+    plannerActionHistory: [
+      {
+        type: "search_docs" as const,
+        reason: "Find the verification policy",
+        query: "verification policy",
+        outcome: "executed" as const,
+        note: "Found a relevant setup article",
+      },
+    ],
+  };
+  const sidechatPrompt = buildSupportSystemPrompt(
+    settings,
+    "Acme",
+    "",
+    "The case is waiting on account verification.",
+    { ...sharedOptions, channel: "sidechat" },
+  );
+  const publicPrompt = buildSupportSystemPrompt(
+    settings,
+    "Acme",
+    "",
+    "The case is waiting on account verification.",
+    { ...sharedOptions, channel: "public" },
+  );
+
+  expect(sidechatPrompt).toContain(
+    "Private case timing context for advising the human support agent.",
+  );
+  expect(sidechatPrompt).toContain(
+    "Private planning context for advising the human support agent.",
+  );
+  expect(sidechatPrompt).toContain(
+    "Private case summary for advising the human support agent.",
+  );
+  expect(sidechatPrompt).toContain("Find the verification policy");
+  expect(sidechatPrompt).toContain(
+    "The case is waiting on account verification.",
+  );
+  expect(sidechatPrompt).not.toContain(
+    "This is a summary of the conversation so far. Use it to stay on topic and avoid repeating information already covered.",
+  );
+  expect(publicPrompt).toContain("<time-context>\nCurrent date and time:");
+  expect(publicPrompt).toContain(
+    "<planner-loop>\nSupport intent: troubleshoot",
+  );
+  expect(publicPrompt).toContain(
+    "This is a summary of the conversation so far. Use it to stay on topic and avoid repeating information already covered.",
+  );
+  expect(publicPrompt).not.toContain("Private case timing context");
+  expect(publicPrompt).not.toContain("Private planning context");
+  expect(publicPrompt).not.toContain("Private case summary");
+});
