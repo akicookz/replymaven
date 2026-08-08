@@ -1,6 +1,43 @@
 import { z } from "zod";
 import { tool, type ToolSet } from "ai";
-import { type SupportToolDefinition } from "../types";
+import { type ToolRow } from "../../db";
+import {
+  decryptHeaders,
+  isEncrypted,
+} from "../../services/encryption-service";
+import {
+  type MavenToolCapability,
+  type MavenToolDefinition,
+  type MavenTurnContext,
+  type SupportToolDefinition,
+} from "../types";
+import {
+  authorizeCapability,
+  fingerprintJsonSchema,
+  parseAllowedChannels,
+} from "./tool-capability";
+
+interface HttpToolParameter {
+  name: string;
+  type: "string" | "number" | "boolean";
+  description: string;
+  required: boolean;
+  enum?: string[];
+}
+
+interface AuthoritativeHttpToolStore {
+  getAuthoritativeTool(
+    projectId: string,
+    toolId: string,
+  ): Promise<ToolRow | null>;
+}
+
+interface CreateHttpToolDefinitionOptions {
+  context: MavenTurnContext;
+  tool: ToolRow;
+  toolService: AuthoritativeHttpToolStore;
+  encryptionKey: string;
+}
 
 const BLOCKED_HOST_PATTERNS = [
   /^localhost$/i,
@@ -40,6 +77,76 @@ function getNestedValue(
 
     return undefined;
   }, obj);
+}
+
+function parseHttpToolParameters(parameters: string): HttpToolParameter[] {
+  return JSON.parse(parameters) as HttpToolParameter[];
+}
+
+function buildHttpInputSchema(parameters: string): z.ZodObject {
+  const shape: Record<string, z.ZodType> = Object.create(null) as Record<
+    string,
+    z.ZodType
+  >;
+
+  for (const param of parseHttpToolParameters(parameters)) {
+    let paramSchema: z.ZodType;
+    switch (param.type) {
+      case "number":
+        paramSchema = z.number().describe(param.description);
+        break;
+      case "boolean":
+        paramSchema = z.boolean().describe(param.description);
+        break;
+      default:
+        paramSchema = param.enum?.length
+          ? z.enum(param.enum as [string, ...string[]]).describe(param.description)
+          : z.string().describe(param.description);
+        break;
+    }
+
+    if (!param.required) {
+      paramSchema = paramSchema.optional();
+    }
+
+    shape[param.name] = paramSchema;
+  }
+
+  return z.object(shape);
+}
+
+function toHttpExecutionDefinition(toolRow: ToolRow): SupportToolDefinition {
+  return {
+    name: toolRow.name,
+    displayName: toolRow.displayName,
+    description: toolRow.description,
+    endpoint: toolRow.endpoint,
+    method: toolRow.method,
+    headers: toolRow.headers,
+    parameters: toolRow.parameters,
+    responseMapping: toolRow.responseMapping,
+    enabled: toolRow.enabled,
+    timeout: toolRow.timeout,
+  };
+}
+
+async function toHttpCapability(
+  toolRow: ToolRow,
+): Promise<MavenToolCapability> {
+  return {
+    id: toolRow.id,
+    projectId: toolRow.projectId,
+    connectionId: null,
+    modelName: toolRow.name,
+    displayName: toolRow.displayName,
+    source: "http",
+    allowedChannels: parseAllowedChannels(toolRow.allowedChannels),
+    access: toolRow.access,
+    enabled: toolRow.enabled,
+    schemaFingerprint: await fingerprintJsonSchema(
+      parseHttpToolParameters(toolRow.parameters),
+    ),
+  };
 }
 
 export async function executeHttpTool(
@@ -148,6 +255,64 @@ export async function executeHttpTool(
   }
 }
 
+export async function createHttpToolDefinition(
+  options: CreateHttpToolDefinitionOptions,
+): Promise<MavenToolDefinition> {
+  const capability = await toHttpCapability(options.tool);
+  const authorizedExecutions: SupportToolDefinition[] = [];
+
+  return {
+    capability,
+    description: options.tool.description,
+    inputSchema: buildHttpInputSchema(options.tool.parameters),
+    async execute(input, { abortSignal }) {
+      const executableTool = authorizedExecutions.shift();
+      if (!executableTool) return { error: "tool_unavailable" };
+
+      return executeHttpTool(
+        executableTool,
+        input as Record<string, unknown>,
+        abortSignal,
+      );
+    },
+    async reauthorize() {
+      const authoritativeTool = await options.toolService.getAuthoritativeTool(
+        options.context.projectId,
+        capability.id,
+      );
+      if (!authoritativeTool) return null;
+
+      const authoritativeCapability = await toHttpCapability(authoritativeTool);
+      const authorization = authorizeCapability(
+        options.context,
+        authoritativeCapability,
+      );
+      if (
+        !authorization.ok ||
+        authoritativeCapability.schemaFingerprint !== capability.schemaFingerprint
+      ) {
+        return authoritativeCapability;
+      }
+
+      const executableTool = { ...authoritativeTool };
+      if (executableTool.headers && isEncrypted(executableTool.headers)) {
+        try {
+          const decrypted = await decryptHeaders(
+            executableTool.headers,
+            options.encryptionKey,
+          );
+          executableTool.headers = JSON.stringify(decrypted);
+        } catch {
+          executableTool.headers = null;
+        }
+      }
+      authorizedExecutions.push(toHttpExecutionDefinition(executableTool));
+
+      return authoritativeCapability;
+    },
+  };
+}
+
 export function buildToolRegistry(
   toolDefs: SupportToolDefinition[],
 ): ToolSet {
@@ -156,41 +321,9 @@ export function buildToolRegistry(
   for (const toolDef of toolDefs) {
     if (!toolDef.enabled) continue;
 
-    const params = JSON.parse(toolDef.parameters) as Array<{
-      name: string;
-      type: "string" | "number" | "boolean";
-      description: string;
-      required: boolean;
-      enum?: string[];
-    }>;
-
-    const shape: Record<string, z.ZodType> = {};
-    for (const param of params) {
-      let paramSchema: z.ZodType;
-      switch (param.type) {
-        case "number":
-          paramSchema = z.number().describe(param.description);
-          break;
-        case "boolean":
-          paramSchema = z.boolean().describe(param.description);
-          break;
-        default:
-          paramSchema = param.enum?.length
-            ? z.enum(param.enum as [string, ...string[]]).describe(param.description)
-            : z.string().describe(param.description);
-          break;
-      }
-
-      if (!param.required) {
-        paramSchema = paramSchema.optional();
-      }
-
-      shape[param.name] = paramSchema;
-    }
-
     tools[toolDef.name] = tool({
       description: toolDef.description,
-      inputSchema: z.object(shape),
+      inputSchema: buildHttpInputSchema(toolDef.parameters),
       execute: async (input, { abortSignal }) =>
         executeHttpTool(
           toolDef,
