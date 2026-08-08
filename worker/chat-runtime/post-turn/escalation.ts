@@ -70,6 +70,7 @@ export async function createEscalation(params: {
   let created: boolean;
   let summaryMessageId: string | null;
   let summaryNeedsPersistence: boolean;
+  let legacyMavenAcceptanceToken: string | null = null;
 
   if (params.acceptedTeamRequestToken) {
     const acceptance = await params.chatService.getNewTeamRequestAcceptance(
@@ -101,6 +102,10 @@ export async function createEscalation(params: {
     } catch {
       /* ignore malformed metadata */
     }
+    legacyMavenAcceptanceToken =
+      typeof existingMeta.mavenTeamRequestAcceptanceToken === "string"
+        ? existingMeta.mavenTeamRequestAcceptanceToken
+        : null;
     created =
       typeof existingMeta.escalatedAt !== "string" ||
       existingMeta.teamRequestSummaryPending === true ||
@@ -131,23 +136,21 @@ export async function createEscalation(params: {
   });
 
   if (!params.acceptedTeamRequestToken) {
-    const updatedConversation = await params.chatService.updateConversation(
-      params.conversation.id,
-      params.project.id,
-      {
-        metadata: JSON.stringify({
-          teamRequestSummary: summary,
+    const updatedConversation =
+      await params.chatService.updateLegacyEscalationMetadata(
+        params.conversation.id,
+        params.project.id,
+        {
+          expectedMavenAcceptanceToken: legacyMavenAcceptanceToken,
+          summary,
+          summaryMessageId,
           escalatedAt:
             typeof existingMeta.escalatedAt === "string"
               ? existingMeta.escalatedAt
               : new Date().toISOString(),
-          reviewSummaryMessageId: summaryMessageId,
-          ...(summaryNeedsPersistence
-            ? { teamRequestSummaryPending: true }
-            : {}),
-        }),
-      },
-    );
+          ...(summaryNeedsPersistence ? { summaryPending: true } : {}),
+        },
+      );
     if (!updatedConversation) {
       return {
         summary,
@@ -182,15 +185,14 @@ export async function createEscalation(params: {
           params.acceptedTeamRequestToken,
         )
       : Boolean(
-          await params.chatService.updateConversation(
+          await params.chatService.updateLegacyEscalationMetadata(
             params.conversation.id,
             params.project.id,
             {
-              metadata: JSON.stringify({
-                teamRequestSummary: summary,
-                reviewSummaryMessageId: summaryMessageId,
-                teamRequestSummaryPending: false,
-              }),
+              expectedMavenAcceptanceToken: legacyMavenAcceptanceToken,
+              summary,
+              summaryMessageId,
+              summaryPending: false,
             },
           ),
         );

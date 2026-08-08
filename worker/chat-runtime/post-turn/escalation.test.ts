@@ -19,11 +19,24 @@ interface UpdateConversationCall {
   projectId: string;
   data: { metadata?: string; visitorName?: string; visitorEmail?: string };
 }
+interface UpdateLegacyEscalationMetadataCall {
+  id: string;
+  projectId: string;
+  data: {
+    expectedMavenAcceptanceToken: string | null;
+    summary: string;
+    summaryMessageId: string;
+    escalatedAt?: string;
+    summaryPending?: boolean;
+  };
+}
 
 function makeChatService() {
   const calls = {
     addSystemMessage: [] as AddSystemMessageCall[],
     updateConversation: [] as UpdateConversationCall[],
+    updateLegacyEscalationMetadata:
+      [] as UpdateLegacyEscalationMetadataCall[],
   };
   const service = {
     addSystemMessage: async (
@@ -56,6 +69,14 @@ function makeChatService() {
       data: UpdateConversationCall["data"],
     ) => {
       calls.updateConversation.push({ id, projectId, data });
+      return { id };
+    },
+    updateLegacyEscalationMetadata: async (
+      id: string,
+      projectId: string,
+      data: UpdateLegacyEscalationMetadataCall["data"],
+    ) => {
+      calls.updateLegacyEscalationMetadata.push({ id, projectId, data });
       return { id };
     },
     runExternalActionIfOperational: async (
@@ -152,11 +173,33 @@ describe("createEscalation - first escalation (created)", () => {
     const result = await createEscalation(params as never);
 
     expect(result.created).toBe(true);
-    const meta = JSON.parse(calls.updateConversation[0].data.metadata!);
+    const meta = calls.updateLegacyEscalationMetadata[0].data;
     expect(meta).not.toHaveProperty("country");
     expect(meta).not.toHaveProperty("city");
     expect(meta).not.toHaveProperty("source");
-    expect(meta.reviewSummaryMessageId).toBe(result.summaryMessageId);
+    expect(meta.summaryMessageId).toBe(result.summaryMessageId);
+  });
+
+  test("uses the dedicated non-Maven metadata path instead of the generic patch", async () => {
+    const { params, calls } = baseParams();
+
+    const result = await createEscalation(params as never);
+
+    expect(result.accepted).toBe(true);
+    expect(calls.updateConversation).toHaveLength(0);
+    expect(calls.updateLegacyEscalationMetadata).toHaveLength(2);
+    expect(calls.updateLegacyEscalationMetadata[0].data).toMatchObject({
+      expectedMavenAcceptanceToken: null,
+      summary: "Visitor needs a refund on order 123.",
+      summaryMessageId: result.summaryMessageId,
+      summaryPending: true,
+    });
+    expect(calls.updateLegacyEscalationMetadata[1].data).toEqual({
+      expectedMavenAcceptanceToken: null,
+      summary: "Visitor needs a refund on order 123.",
+      summaryMessageId: result.summaryMessageId,
+      summaryPending: false,
+    });
   });
 
   test("does not replay stale notification state in its metadata patch", async () => {
@@ -175,7 +218,7 @@ describe("createEscalation - first escalation (created)", () => {
 
     await createEscalation(params as never);
 
-    const firstPatch = JSON.parse(calls.updateConversation[0].data.metadata!);
+    const firstPatch = calls.updateLegacyEscalationMetadata[0].data;
     expect(firstPatch).not.toHaveProperty("teamRequestNotificationState");
     expect(firstPatch).not.toHaveProperty("mavenTeamRequestAcceptedAt");
   });
@@ -188,9 +231,9 @@ describe("createEscalation - first escalation (created)", () => {
     const result = await createEscalation(params as never);
 
     expect(result.created).toBe(true);
-    const meta = JSON.parse(calls.updateConversation[0].data.metadata!);
+    const meta = calls.updateLegacyEscalationMetadata[0].data;
     expect(typeof meta.escalatedAt).toBe("string");
-    expect(meta.teamRequestSummary).toBe("Visitor needs a refund on order 123.");
+    expect(meta.summary).toBe("Visitor needs a refund on order 123.");
   });
 });
 
@@ -297,6 +340,7 @@ describe("createEscalation - telegram notification", () => {
     const unavailableChatService = {
       addSystemMessage: async () => null,
       updateConversation: async () => null,
+      updateLegacyEscalationMetadata: async () => null,
     } as unknown as ChatService;
     const { params } = baseParams({
       chatService: unavailableChatService,

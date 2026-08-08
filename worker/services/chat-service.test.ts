@@ -60,6 +60,7 @@ class BarrierChatService extends ChatService {
     db: DrizzleD1Database<Record<string, unknown>>,
     private readonly afterTeamRequestRead?: () => Promise<void>,
     private readonly beforeMetadataPatch?: () => Promise<void>,
+    private readonly beforeTelegramThreadPersistence?: () => Promise<void>,
   ) {
     super(db);
   }
@@ -70,6 +71,10 @@ class BarrierChatService extends ChatService {
 
   protected override async beforeConversationMetadataPatch(): Promise<void> {
     await this.beforeMetadataPatch?.();
+  }
+
+  protected override async beforeNewTeamRequestTelegramThreadPersistence(): Promise<void> {
+    await this.beforeTelegramThreadPersistence?.();
   }
 }
 
@@ -125,6 +130,61 @@ function createConversationContinuityService(): {
   };
 }
 
+async function createAttemptedTeamRequest(
+  service: ChatService,
+): Promise<{ conversation: ConversationRow; acceptanceToken: string }> {
+  const created = await service.createConversation({
+    projectId: "project-1",
+    customerId: null,
+    visitorId: "visitor-1",
+    visitorName: "Alice",
+    visitorEmail: "alice@example.com",
+    metadata: null,
+  });
+  const claim = await service.claimNewTeamRequest(
+    created.id,
+    created.projectId,
+    "Visitor needs help.",
+  );
+  if (claim.status !== "claimed") {
+    throw new Error(`Expected a claimed team request, received ${claim.status}`);
+  }
+  const conversation = await service.getOperationalConversationById(
+    created.id,
+    created.projectId,
+  );
+  if (!conversation) throw new Error("Expected an operational conversation");
+  const acceptanceToken = JSON.parse(conversation.metadata ?? "{}")
+    .mavenTeamRequestAcceptanceToken as unknown;
+  if (typeof acceptanceToken !== "string") {
+    throw new Error("Expected a Maven acceptance token");
+  }
+  const attempted = await service.claimNewTeamRequestNotification(
+    conversation.id,
+    conversation.projectId,
+    acceptanceToken,
+  );
+  if (!attempted) throw new Error("Expected a notification attempt claim");
+  return { conversation, acceptanceToken };
+}
+
+function createTelegramPersistenceBarrier(
+  db: DrizzleD1Database<Record<string, unknown>>,
+) {
+  const ready = createDeferred();
+  const release = createDeferred();
+  const service = new BarrierChatService(
+    db,
+    undefined,
+    undefined,
+    async () => {
+      ready.resolve();
+      await release.promise;
+    },
+  );
+  return { ready, release, service };
+}
+
 function makeOwnershipDb(row: ConversationRow): {
   db: DrizzleD1Database<Record<string, unknown>>;
   getUpdateCount: () => number;
@@ -160,7 +220,7 @@ function makeReopenDb(row: ConversationRow): {
 }
 
 describe("ChatService ownership and atomic writes", () => {
-  test("merges metadata patches against the live conversation", async () => {
+  test("merges ordinary metadata patches against the live conversation", async () => {
     const { service } = createConversationContinuityService();
     const conversation = await service.createConversation({
       projectId: "project-1",
@@ -174,14 +234,14 @@ describe("ChatService ownership and atomic writes", () => {
     const updated = await service.updateConversation(
       conversation.id,
       conversation.projectId,
-      { metadata: JSON.stringify({ teamRequestSummaryPending: false }) },
+      { metadata: JSON.stringify({ country: "CA", campaign: "spring" }) },
     );
     const metadata = JSON.parse(updated?.metadata ?? "{}");
 
     expect(metadata).toMatchObject({
       source: "widget",
-      country: "US",
-      teamRequestSummaryPending: false,
+      country: "CA",
+      campaign: "spring",
     });
   });
 
@@ -597,7 +657,7 @@ describe("ChatService ownership and atomic writes", () => {
     expect(latest?.status).toBe("active");
   });
 
-  test("an escalation metadata patch cannot replay stale notification state", async () => {
+  test("an ordinary metadata patch cannot replay stale notification state", async () => {
     const { service, db } = createConversationContinuityService();
     const conversation = await service.createConversation({
       projectId: "project-1",
@@ -631,7 +691,7 @@ describe("ChatService ownership and atomic writes", () => {
       conversation.id,
       conversation.projectId,
       {
-        metadata: JSON.stringify({ teamRequestSummaryPending: false }),
+        metadata: JSON.stringify({ source: "dashboard", campaign: "spring" }),
       },
     );
     await staleWriterReady.promise;
@@ -651,9 +711,10 @@ describe("ChatService ownership and atomic writes", () => {
     );
     const metadata = JSON.parse(latest?.metadata ?? "{}");
     expect(metadata.teamRequestNotificationState).toBe("attempted");
-    expect(metadata.teamRequestSummaryPending).toBe(false);
+    expect(metadata.teamRequestSummaryPending).toBe(true);
     expect(metadata.mavenTeamRequestAcceptedAt).toBeString();
-    expect(metadata.source).toBe("widget");
+    expect(metadata.source).toBe("dashboard");
+    expect(metadata.campaign).toBe("spring");
   });
 
   test("generic metadata patches cannot replace the immutable acceptance token", async () => {
@@ -694,6 +755,249 @@ describe("ChatService ownership and atomic writes", () => {
 
     expect(metadata.mavenTeamRequestAcceptanceToken).toBe(originalToken);
     expect(metadata.source).toBe("widget");
+  });
+
+  const protectedAcceptanceFieldCases: Array<{
+    field:
+      | "teamRequestSummary"
+      | "reviewSummaryMessageId"
+      | "teamRequestSummaryPending"
+      | "teamRequestNotificationState"
+      | "mavenTeamRequestTelegramThreadAcceptanceToken";
+    replacement: unknown;
+  }> = [
+    { field: "teamRequestSummary", replacement: "Forged summary." },
+    { field: "reviewSummaryMessageId", replacement: "forged-message" },
+    { field: "teamRequestSummaryPending", replacement: "false" },
+    { field: "teamRequestNotificationState", replacement: "attempted" },
+    {
+      field: "mavenTeamRequestTelegramThreadAcceptanceToken",
+      replacement: "forged-thread-generation",
+    },
+  ];
+
+  for (const { field, replacement } of protectedAcceptanceFieldCases) {
+    test(`generic metadata patches cannot replace ${field}`, async () => {
+      const { service } = createConversationContinuityService();
+      const conversation = await service.createConversation({
+        projectId: "project-1",
+        customerId: null,
+        visitorId: "visitor-1",
+        visitorName: "Alice",
+        visitorEmail: "alice@example.com",
+        metadata: JSON.stringify({ source: "widget" }),
+      });
+      expect(
+        await service.claimNewTeamRequest(
+          conversation.id,
+          conversation.projectId,
+          "Accepted summary.",
+        ),
+      ).toEqual({ status: "claimed" });
+      const accepted = await service.getOperationalConversationById(
+        conversation.id,
+        conversation.projectId,
+      );
+      const acceptedMetadata = JSON.parse(accepted?.metadata ?? "{}");
+
+      const updated = await service.updateConversation(
+        conversation.id,
+        conversation.projectId,
+        {
+          metadata: JSON.stringify({
+            [field]: replacement,
+            source: "dashboard",
+          }),
+        },
+      );
+      const metadata = JSON.parse(updated?.metadata ?? "{}");
+
+      expect(metadata[field]).toEqual(acceptedMetadata[field]);
+      expect(metadata.source).toBe("dashboard");
+    });
+  }
+
+  test("protected-only metadata patches leave metadata and updatedAt unchanged", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: JSON.stringify({ source: "widget" }),
+    });
+    sqlite
+      .query("UPDATE conversations SET updated_at = ? WHERE id = ?")
+      .run(946_684_800, conversation.id);
+    const before = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+
+    const updated = await service.updateConversation(
+      conversation.id,
+      conversation.projectId,
+      {
+        metadata: JSON.stringify({
+          teamRequestSummary: "Forged summary.",
+          reviewSummaryMessageId: "forged-message",
+          teamRequestSummaryPending: "false",
+          teamRequestNotificationState: "attempted",
+          mavenTeamRequestAcceptanceToken: "forged-generation",
+          mavenTeamRequestTelegramThreadAcceptanceToken:
+            "forged-thread-generation",
+        }),
+      },
+    );
+
+    expect(updated?.metadata).toBe(before?.metadata);
+    expect(updated?.updatedAt).toEqual(before?.updatedAt);
+  });
+
+  test("trusted legacy escalation metadata remains writable outside generic patches", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: JSON.stringify({ source: "contact_form" }),
+    });
+
+    const started = await service.updateLegacyEscalationMetadata(
+      conversation.id,
+      conversation.projectId,
+      {
+        expectedMavenAcceptanceToken: null,
+        summary: "Legacy contact request.",
+        summaryMessageId: "legacy-summary-message",
+        escalatedAt: "2026-08-09T12:00:00.000Z",
+        summaryPending: true,
+      },
+    );
+    const completed = await service.updateLegacyEscalationMetadata(
+      conversation.id,
+      conversation.projectId,
+      {
+        expectedMavenAcceptanceToken: null,
+        summary: "Legacy contact request.",
+        summaryMessageId: "legacy-summary-message",
+        summaryPending: false,
+      },
+    );
+    const metadata = JSON.parse(completed?.metadata ?? "{}");
+
+    expect(started).not.toBeNull();
+    expect(metadata).toMatchObject({
+      source: "contact_form",
+      teamRequestSummary: "Legacy contact request.",
+      reviewSummaryMessageId: "legacy-summary-message",
+      escalatedAt: "2026-08-09T12:00:00.000Z",
+      teamRequestSummaryPending: false,
+    });
+  });
+
+  test("stale legacy escalation metadata loses to a fresh Maven acceptance token", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: JSON.stringify({ source: "widget" }),
+    });
+    expect(
+      await service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Accepted Maven summary.",
+      ),
+    ).toEqual({ status: "claimed" });
+    const accepted = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const acceptedMetadata = JSON.parse(accepted?.metadata ?? "{}");
+
+    const staleUpdate = await service.updateLegacyEscalationMetadata(
+      conversation.id,
+      conversation.projectId,
+      {
+        expectedMavenAcceptanceToken: null,
+        summary: "Stale legacy summary.",
+        summaryMessageId: "stale-legacy-message",
+        summaryPending: false,
+      },
+    );
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const metadata = JSON.parse(latest?.metadata ?? "{}");
+
+    expect(staleUpdate).toBeNull();
+    expect(metadata.teamRequestSummary).toBe("Accepted Maven summary.");
+    expect(metadata.reviewSummaryMessageId).toBe(
+      acceptedMetadata.reviewSummaryMessageId,
+    );
+    expect(metadata.teamRequestSummaryPending).toBe(true);
+    expect(metadata.teamRequestNotificationState).toBe("pending");
+  });
+
+  test("retained Maven history does not block a trusted legacy escalation after handback", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+    expect(
+      await service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Earlier Maven summary.",
+      ),
+    ).toEqual({ status: "claimed" });
+    const accepted = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const acceptanceToken = JSON.parse(accepted?.metadata ?? "{}")
+      .mavenTeamRequestAcceptanceToken as string;
+    expect(
+      await service.transitionChatOwnership(
+        conversation.id,
+        conversation.projectId,
+        "ai_handed_back",
+      ),
+    ).toBe("active");
+
+    const updated = await service.updateLegacyEscalationMetadata(
+      conversation.id,
+      conversation.projectId,
+      {
+        expectedMavenAcceptanceToken: acceptanceToken,
+        summary: "Later contact-form summary.",
+        summaryMessageId: "later-contact-form-message",
+        escalatedAt: "2026-08-09T13:00:00.000Z",
+        summaryPending: true,
+      },
+    );
+    const metadata = JSON.parse(updated?.metadata ?? "{}");
+
+    expect(updated).not.toBeNull();
+    expect(metadata.mavenTeamRequestAcceptanceToken).toBe(acceptanceToken);
+    expect(metadata.teamRequestSummary).toBe("Later contact-form summary.");
+    expect(metadata.reviewSummaryMessageId).toBe(
+      "later-contact-form-message",
+    );
+    expect(metadata.teamRequestSummaryPending).toBe(true);
   });
 
   test("persists a returned Telegram thread only for the accepted request", async () => {
@@ -771,6 +1075,158 @@ describe("ChatService ownership and atomic writes", () => {
         )
       )?.telegramThreadId,
     ).toBe("123");
+  });
+
+  test("uses waiting-agent ownership fallback when persisting through malformed chat state", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    const { conversation, acceptanceToken } =
+      await createAttemptedTeamRequest(service);
+    sqlite
+      .query("UPDATE conversations SET chat_state = ? WHERE id = ?")
+      .run("{malformed", conversation.id);
+
+    const persisted = await service.persistNewTeamRequestTelegramThreadId(
+      conversation.id,
+      conversation.projectId,
+      acceptanceToken,
+      "new-thread",
+    );
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const metadata = JSON.parse(latest?.metadata ?? "{}");
+
+    expect(persisted).toBe(true);
+    expect(latest?.telegramThreadId).toBe("new-thread");
+    expect(metadata.mavenTeamRequestTelegramThreadAcceptanceToken).toBe(
+      acceptanceToken,
+    );
+  });
+
+  test("handback winning the Telegram thread persistence race prevents mutation", async () => {
+    const { service, db } = createConversationContinuityService();
+    const { conversation, acceptanceToken } =
+      await createAttemptedTeamRequest(service);
+
+    const barrier = createTelegramPersistenceBarrier(db);
+    const persistence = barrier.service.persistNewTeamRequestTelegramThreadId(
+      conversation.id,
+      conversation.projectId,
+      acceptanceToken,
+      "new-thread",
+    );
+    const firstEvent = await Promise.race([
+      barrier.ready.promise.then(() => "persistence_ready" as const),
+      persistence.then(() => "persistence_completed" as const),
+    ]);
+    expect(firstEvent).toBe("persistence_ready");
+
+    expect(
+      await service.transitionChatOwnership(
+        conversation.id,
+        conversation.projectId,
+        "ai_handed_back",
+      ),
+    ).toBe("active");
+    barrier.release.resolve();
+
+    expect(await persistence).toBe(false);
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(latest?.status).toBe("active");
+    expect(latest?.telegramThreadId).toBeNull();
+    expect(
+      JSON.parse(latest?.metadata ?? "{}")
+        .mavenTeamRequestTelegramThreadAcceptanceToken,
+    ).toBeUndefined();
+  });
+
+  test("takeover winning the Telegram thread persistence race prevents mutation", async () => {
+    const { service, db } = createConversationContinuityService();
+    const { conversation, acceptanceToken } =
+      await createAttemptedTeamRequest(service);
+    const barrier = createTelegramPersistenceBarrier(db);
+    const persistence = barrier.service.persistNewTeamRequestTelegramThreadId(
+      conversation.id,
+      conversation.projectId,
+      acceptanceToken,
+      "new-thread",
+    );
+    const firstEvent = await Promise.race([
+      barrier.ready.promise.then(() => "persistence_ready" as const),
+      persistence.then(() => "persistence_completed" as const),
+    ]);
+    expect(firstEvent).toBe("persistence_ready");
+
+    const ownership = await service.takeHumanOwnership(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(ownership?.status).toBe("agent_replied");
+    barrier.release.resolve();
+
+    expect(await persistence).toBe(false);
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(latest?.status).toBe("agent_replied");
+    expect(latest?.telegramThreadId).toBeNull();
+    expect(
+      JSON.parse(latest?.metadata ?? "{}")
+        .mavenTeamRequestTelegramThreadAcceptanceToken,
+    ).toBeUndefined();
+  });
+
+  test("human-only ownership prevents thread persistence while waiting status lags", async () => {
+    const { service, sqlite, db } = createConversationContinuityService();
+    const { conversation, acceptanceToken } =
+      await createAttemptedTeamRequest(service);
+
+    const barrier = createTelegramPersistenceBarrier(db);
+    const persistence = barrier.service.persistNewTeamRequestTelegramThreadId(
+      conversation.id,
+      conversation.projectId,
+      acceptanceToken,
+      "new-thread",
+    );
+    const firstEvent = await Promise.race([
+      barrier.ready.promise.then(() => "persistence_ready" as const),
+      persistence.then(() => "persistence_completed" as const),
+    ]);
+    expect(firstEvent).toBe("persistence_ready");
+
+    const acceptedState = JSON.parse(conversation.chatState ?? "{}");
+    sqlite
+      .query("UPDATE conversations SET chat_state = ? WHERE id = ?")
+      .run(
+        JSON.stringify({
+          ...acceptedState,
+          state: "agent_mode",
+          aiParticipation: "human_only",
+          ownershipRevision:
+            typeof acceptedState.ownershipRevision === "number"
+              ? acceptedState.ownershipRevision + 1
+              : 1,
+        }),
+        conversation.id,
+      );
+    barrier.release.resolve();
+
+    expect(await persistence).toBe(false);
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(latest?.status).toBe("waiting_agent");
+    expect(latest?.telegramThreadId).toBeNull();
+    expect(
+      JSON.parse(latest?.metadata ?? "{}")
+        .mavenTeamRequestTelegramThreadAcceptanceToken,
+    ).toBeUndefined();
   });
 
   test("trusted contactDeclined permits an atomic claim without saved contact", async () => {

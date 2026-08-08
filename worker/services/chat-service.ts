@@ -599,6 +599,14 @@ export interface NewTeamRequestAcceptance {
   summaryPending: boolean;
 }
 
+export interface LegacyEscalationMetadataUpdate {
+  expectedMavenAcceptanceToken: string | null;
+  summary: string;
+  summaryMessageId: string;
+  escalatedAt?: string;
+  summaryPending?: boolean;
+}
+
 // ─── Inbox tab predicates ────────────────────────────────────────────────────
 // Snoozed and flagged (spam) conversations live ONLY in their own tabs: they
 // are excluded from Needs You, All, and Resolved. "Blocked" visitors'
@@ -745,6 +753,10 @@ export class ChatService {
 
   protected async beforeConversationMetadataPatch(): Promise<void> {
     // Test seam for exercising a delayed metadata patch against a live row.
+  }
+
+  protected async beforeNewTeamRequestTelegramThreadPersistence(): Promise<void> {
+    // Test seam for exercising ownership races immediately before the CAS.
   }
 
   // ─── Conversations ──────────────────────────────────────────────────────────
@@ -1482,6 +1494,7 @@ export class ChatService {
     },
   ): Promise<ConversationRow | null> {
     const updates: Record<string, unknown> = {};
+    let hasMutableMetadataPatch = false;
     if (data.visitorName !== undefined) updates.visitorName = data.visitorName;
     if (data.visitorEmail !== undefined) updates.visitorEmail = data.visitorEmail;
     if (data.metadata !== undefined) {
@@ -1496,24 +1509,31 @@ export class ChatService {
       const mutableMetadataPatch = {
         ...(metadataPatch as Record<string, unknown>),
       };
+      delete mutableMetadataPatch.teamRequestSummary;
+      delete mutableMetadataPatch.reviewSummaryMessageId;
+      delete mutableMetadataPatch.teamRequestSummaryPending;
+      delete mutableMetadataPatch.teamRequestNotificationState;
       delete mutableMetadataPatch.mavenTeamRequestAcceptanceToken;
       delete mutableMetadataPatch.mavenTeamRequestTelegramThreadAcceptanceToken;
-      const serializedPatch = JSON.stringify(mutableMetadataPatch);
-      updates.metadata = sql`json_patch(
-        CASE
-          WHEN json_valid(COALESCE(${conversations.metadata}, '{}'))
-            THEN COALESCE(${conversations.metadata}, '{}')
-          ELSE '{}'
-        END,
-        ${serializedPatch}
-      )`;
+      if (Object.keys(mutableMetadataPatch).length > 0) {
+        hasMutableMetadataPatch = true;
+        const serializedPatch = JSON.stringify(mutableMetadataPatch);
+        updates.metadata = sql`json_patch(
+          CASE
+            WHEN json_valid(COALESCE(${conversations.metadata}, '{}'))
+              THEN COALESCE(${conversations.metadata}, '{}')
+            ELSE '{}'
+          END,
+          ${serializedPatch}
+        )`;
+      }
     }
 
     if (Object.keys(updates).length === 0) {
       return this.getOperationalConversationById(id, projectId);
     }
 
-    if (data.metadata !== undefined) {
+    if (hasMutableMetadataPatch) {
       await this.beforeConversationMetadataPatch();
     }
 
@@ -1531,12 +1551,61 @@ export class ChatService {
     return this.getOperationalConversationById(id, projectId);
   }
 
+  async updateLegacyEscalationMetadata(
+    id: string,
+    projectId: string,
+    data: LegacyEscalationMetadataUpdate,
+  ): Promise<ConversationRow | null> {
+    const metadataPatch: Record<string, unknown> = {
+      teamRequestSummary: data.summary,
+      reviewSummaryMessageId: data.summaryMessageId,
+    };
+    if (data.escalatedAt !== undefined) {
+      metadataPatch.escalatedAt = data.escalatedAt;
+    }
+    if (data.summaryPending !== undefined) {
+      metadataPatch.teamRequestSummaryPending = data.summaryPending;
+    }
+    const serializedPatch = JSON.stringify(metadataPatch);
+    const validMetadata = sql`CASE
+      WHEN json_valid(COALESCE(${conversations.metadata}, '{}'))
+        THEN COALESCE(${conversations.metadata}, '{}')
+      ELSE '{}'
+    END`;
+    const acceptanceTokenCondition =
+      data.expectedMavenAcceptanceToken === null
+        ? sql`json_extract(${validMetadata}, '$.mavenTeamRequestAcceptanceToken') IS NULL`
+        : sql`json_extract(${validMetadata}, '$.mavenTeamRequestAcceptanceToken') = ${data.expectedMavenAcceptanceToken}`;
+    const updated = await this.db
+      .update(conversations)
+      .set({
+        metadata: sql`json_patch(${validMetadata}, ${serializedPatch})`,
+      })
+      .where(
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
+          acceptanceTokenCondition,
+        ),
+      )
+      .returning();
+    return updated[0] ?? null;
+  }
+
   async persistNewTeamRequestTelegramThreadId(
     id: string,
     projectId: string,
     acceptanceToken: string,
     threadId: string,
   ): Promise<boolean> {
+    await this.beforeNewTeamRequestTelegramThreadPersistence();
+
+    const validChatState = sql`CASE
+      WHEN json_valid(COALESCE(${conversations.chatState}, '{}'))
+        THEN COALESCE(${conversations.chatState}, '{}')
+      ELSE '{}'
+    END`;
     const updated = await this.db
       .update(conversations)
       .set({
@@ -1551,10 +1620,12 @@ export class ChatService {
         and(
           eq(conversations.id, id),
           eq(conversations.projectId, projectId),
+          eq(conversations.status, "waiting_agent"),
           isNull(conversations.archivedAt),
           sql`json_valid(${conversations.metadata})`,
           sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestAcceptanceToken') = ${acceptanceToken}`,
           sql`json_extract(${conversations.metadata}, '$.teamRequestNotificationState') = 'attempted'`,
+          sql`coalesce(json_extract(${validChatState}, '$.aiParticipation'), 'assist_until_agent') <> 'human_only'`,
           or(
             sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestTelegramThreadAcceptanceToken') IS NULL`,
             sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestTelegramThreadAcceptanceToken') <> ${acceptanceToken}`,
