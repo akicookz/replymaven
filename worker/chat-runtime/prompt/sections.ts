@@ -10,7 +10,6 @@
 import {
   type ConversationTurnMessage,
   type GroundingConfidence,
-  type PlannerActionHistoryEntry,
   type SupportTurnContext,
 } from "../types";
 import {
@@ -225,43 +224,6 @@ ${framing}
 Name: ${nameStr}
 Email: ${emailStr}
 </visitor-info>
-
-`;
-}
-
-// ─── Planner loop state ─────────────────────────────────────────────────────
-
-export function buildPlannerLoopSection(
-  turnIntent: string | null | undefined,
-  plannerGoal: string | null | undefined,
-  plannerActionHistory: PlannerActionHistoryEntry[] | undefined,
-  audience: PromptAudience = "public",
-): string {
-  if (
-    !turnIntent &&
-    !plannerGoal &&
-    (!plannerActionHistory || plannerActionHistory.length === 0)
-  ) {
-    return "";
-  }
-  const plannerHistory =
-    plannerActionHistory && plannerActionHistory.length > 0
-      ? plannerActionHistory
-          .map((entry, index) => {
-            return `${index + 1}. ${entry.type}: ${entry.reason}${entry.note ? ` (${entry.note})` : ""}`;
-          })
-          .join("\n")
-      : "No prior planner actions.";
-
-  const framing = audience === "sidechat"
-    ? "Private planning context for advising the human support agent.\n"
-    : "";
-  return `<planner-loop>
-${framing}Support intent: ${turnIntent ?? "unknown"}
-Planner goal: ${plannerGoal ?? "unknown"}
-Action history:
-${plannerHistory}
-</planner-loop>
 
 `;
 }

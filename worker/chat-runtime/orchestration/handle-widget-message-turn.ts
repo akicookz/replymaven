@@ -8,12 +8,11 @@ import {
   fallbackRenderContactTimingMessage,
   renderContactTimingMessage,
 } from "../llm/render-contact-timing-message";
-import { runAgenticTurn } from "./run-agentic-pipeline";
-import { prepareTurnRouting } from "./prepare-turn-routing";
-import { normalizeConversationHistory } from "./normalize-history";
 import {
-  type RetrievalResult,
-} from "../retrieval/run-ai-search";
+  runMavenTurn,
+  type MavenTurnResult,
+} from "./run-maven-turn";
+import { normalizeConversationHistory } from "./normalize-history";
 import { classifyTaskScope } from "../workflows/classify-task-scope";
 import { createWidgetSseResponse } from "../streaming/create-widget-sse-response";
 import {
@@ -21,9 +20,16 @@ import {
   emitCompletedEvent,
   emitSseEvent,
   emitStatusEvent,
+  mapAgentEventsToSse,
   type WidgetCompletedPayload,
 } from "../streaming/map-agent-events-to-sse";
-import { stripInternalTokens } from "../streaming/internal-tokens";
+import {
+  createStreamingStripState,
+  flushStreamingStripState,
+  stripInternalTokens,
+  stripInternalTokensStreaming,
+  type InternalToken,
+} from "../streaming/internal-tokens";
 import {
   broadcastClosed,
   broadcastCustomerUpdated,
@@ -39,7 +45,6 @@ import {
   fallbackAiParticipationForStatus,
   isChatOwnershipSnapshotCurrent,
   parseChatState,
-  toToolDefinition,
 } from "../types";
 import { BillingService } from "../../services/billing-service";
 import { ChatService } from "../../services/chat-service";
@@ -47,19 +52,16 @@ import { CustomerIdentityService } from "../../services/customer-identity-servic
 import { GuidelineService } from "../../services/guideline-service";
 import { logError, logInfo, logWarn } from "../../observability";
 import { ProjectService } from "../../services/project-service";
-import { ResourceService } from "../../services/resource-service";
+import { type SourceReference } from "../../services/resource-service";
 import { TelegramService } from "../../services/telegram-service";
 import { ToolService } from "../../services/tool-service";
-import { decryptEnabledToolHeaders } from "../../services/encryption-service";
 import {
-  identifyFastPath,
   identifyHardGate,
   parseVisitorAiInvocation,
-} from "../routing/identify-fast-path";
-import { findBestFaqMatch } from "../prompt/build-compiled-faq-context";
+} from "../routing/public-turn-gates";
 import { buildSupportTurnOpening } from "../prompt/sections";
 import { buildContactFallbackMessage } from "../contact-support/contact-support";
-import { persistGuardedAiOutput } from "../executor/run-planner-loop";
+import { persistGuardedAiOutput } from "../post-turn/persist-guarded-ai-output";
 
 function parseConversationMetadata(
   rawMetadata: string | null | undefined,
@@ -212,35 +214,8 @@ async function loadMessageImage(options: {
   }
 }
 
-function createEmptyRetrievalResult(): RetrievalResult {
-  return {
-    ragContext: "",
-    faqContext: "",
-    knowledgeBaseContext: "",
-    sourceReferences: [],
-    groundingConfidence: "none",
-    unresolvedKeys: [],
-    droppedCrossTenant: 0,
-    retrievalAttempted: false,
-    broaderSearchAttempted: false,
-    topScore: 0,
-  };
-}
-
 function isAgentRequestedStatus(status: string): boolean {
   return status === "waiting_agent" || status === "agent_replied";
-}
-
-function shouldAllowEscalation(options: {
-  conversation: {
-    status: string;
-  };
-}): { allowed: boolean; reason: string } {
-  if (isAgentRequestedStatus(options.conversation.status)) {
-    return { allowed: false, reason: "already_in_agent_mode" };
-  }
-
-  return { allowed: true, reason: "planner_decided" };
 }
 
 function buildWidgetTurnLogContext(
@@ -256,21 +231,122 @@ function buildWidgetTurnLogContext(
   };
 }
 
-function getToolNames(tools: Array<{ name: string }>): string[] {
-  return tools.map((tool) => tool.name);
+export interface PublicMavenStreamResult {
+  fullResponse: string;
+  sources: SourceReference[];
+  detectedInternalTokens: InternalToken[];
+  hadToolCalls: boolean;
 }
+
+export async function streamPublicMavenTurn(options: {
+  runTurn: typeof runMavenTurn;
+  turnInput: Parameters<typeof runMavenTurn>[0];
+  controller: ReadableStreamDefaultController;
+  encoder: TextEncoder;
+  streamProtocolVersion: 1 | 2;
+  responseOpening: string;
+  telemetry?: TurnTelemetry;
+}): Promise<PublicMavenStreamResult> {
+  const turn: MavenTurnResult = await options.runTurn(options.turnInput);
+  const stripState = createStreamingStripState();
+  const detectedInternalTokens: InternalToken[] = [];
+  let fullResponse = options.responseOpening;
+
+  if (options.responseOpening && options.streamProtocolVersion === 2) {
+    emitSseEvent(options.controller, options.encoder, {
+      text: options.responseOpening,
+    });
+  }
+
+  for await (const event of mapAgentEventsToSse(turn.fullStream)) {
+    if ("status" in event) {
+      emitStatusEvent(options.controller, options.encoder, event.status);
+      continue;
+    }
+
+    if (options.telemetry && !options.telemetry.firstTextAt) {
+      options.telemetry.firstTextAt = Date.now();
+    }
+    const stripped = stripInternalTokensStreaming(stripState, event.text);
+    detectedInternalTokens.push(...stripped.tokens);
+    if (!stripped.emit) continue;
+    fullResponse += stripped.emit;
+    if (options.streamProtocolVersion === 2) {
+      emitSseEvent(options.controller, options.encoder, { text: stripped.emit });
+    }
+  }
+
+  const flushed = flushStreamingStripState(stripState);
+  detectedInternalTokens.push(...flushed.tokens);
+  if (flushed.emit) {
+    fullResponse += flushed.emit;
+    if (options.streamProtocolVersion === 2) {
+      emitSseEvent(options.controller, options.encoder, { text: flushed.emit });
+    }
+  }
+
+  return {
+    fullResponse,
+    sources: turn.collectedSources,
+    detectedInternalTokens,
+    hadToolCalls: turn.toolActivity.length > 0,
+  };
+}
+
+export interface WidgetMessageTurnRuntime {
+  createProjectService(db: WidgetMessageTurnContext["db"]): ProjectService;
+  createBillingService(
+    db: WidgetMessageTurnContext["db"],
+    env: WidgetMessageTurnContext["env"],
+  ): BillingService;
+  createChatService(db: WidgetMessageTurnContext["db"]): ChatService;
+  createCustomerIdentityService(
+    db: WidgetMessageTurnContext["db"],
+  ): CustomerIdentityService;
+  createToolService(db: WidgetMessageTurnContext["db"]): ToolService;
+  createGuidelineService(db: WidgetMessageTurnContext["db"]): GuidelineService;
+  createTelegramService(db: WidgetMessageTurnContext["db"]): TelegramService;
+  runMavenTurn: typeof runMavenTurn;
+}
+
+const defaultWidgetMessageTurnRuntime: WidgetMessageTurnRuntime = {
+  createProjectService(db) {
+    return new ProjectService(db);
+  },
+  createBillingService(db, env) {
+    return new BillingService(db, env);
+  },
+  createChatService(db) {
+    return new ChatService(db);
+  },
+  createCustomerIdentityService(db) {
+    return new CustomerIdentityService(db);
+  },
+  createToolService(db) {
+    return new ToolService(db);
+  },
+  createGuidelineService(db) {
+    return new GuidelineService(db);
+  },
+  createTelegramService(db) {
+    return new TelegramService(db);
+  },
+  runMavenTurn,
+};
 
 export async function handleWidgetMessageTurn(
   context: WidgetMessageTurnContext,
+  runtime: WidgetMessageTurnRuntime = defaultWidgetMessageTurnRuntime,
 ): Promise<Response> {
   const turnId = crypto.randomUUID();
-  const projectService = new ProjectService(context.db);
-  const billingService = new BillingService(context.db, context.env);
-  const chatService = new ChatService(context.db);
-  const customerIdentityService = new CustomerIdentityService(context.db);
-  const toolService = new ToolService(context.db);
-  const guidelineService = new GuidelineService(context.db);
-  const resourceService = new ResourceService(context.db, context.env.UPLOADS);
+  const projectService = runtime.createProjectService(context.db);
+  const billingService = runtime.createBillingService(context.db, context.env);
+  const chatService = runtime.createChatService(context.db);
+  const customerIdentityService = runtime.createCustomerIdentityService(
+    context.db,
+  );
+  const toolService = runtime.createToolService(context.db);
+  const guidelineService = runtime.createGuidelineService(context.db);
 
   const startedAt = context.routeStartedAt;
   const stageTimings: Record<string, number> = {};
@@ -337,7 +413,7 @@ export async function handleWidgetMessageTurn(
     );
   }
 
-  let conversation = conversationLookup;
+  const conversation = conversationLookup;
   if (!conversation) {
     logWarn(
       "widget_turn.blocked",
@@ -363,29 +439,6 @@ export async function handleWidgetMessageTurn(
   );
   const participationAtTurnStart = chatState.aiParticipation;
 
-  // Spam-flagged conversations are "muted": never reopen them (reopening would
-  // clear the spam flag and pull the thread back into the active inbox). They
-  // stay closed/spam under the Flagged view; the visitor's message is still
-  // recorded below so it reaches the agent there — it just won't notify,
-  // escalate, or spend a bot turn.
-  const isSpam = conversation.closeReason === "spam";
-  if (conversation.status === "closed" && !isSpam) {
-    const reopened = await chatService.reopenConversation(
-      context.conversationId,
-      context.project.id,
-      chatState.aiParticipation === "human_only"
-        ? "agent_replied"
-        : "active",
-    );
-    if (reopened) {
-      conversation = reopened;
-      conversationStatusForTurn = reopened.status;
-      logInfo(
-        "widget_turn.reopened_conversation",
-        buildWidgetTurnLogContext(context, turnId),
-      );
-    }
-  }
   const ownershipSnapshotAtTurnStart = {
     status: conversation.status,
     chatState: conversation.chatState,
@@ -513,7 +566,7 @@ export async function handleWidgetMessageTurn(
     settings?.telegramBotToken &&
     settings.telegramChatId
   ) {
-    const telegramService = new TelegramService(context.db);
+    const telegramService = runtime.createTelegramService(context.db);
     const telegramBotToken = settings.telegramBotToken;
     const telegramChatId = settings.telegramChatId;
     context.executionCtx.waitUntil(
@@ -570,11 +623,18 @@ export async function handleWidgetMessageTurn(
     return Response.json({ ok: true, agentMode: true });
   }
 
-  const [enabledTools, enabledGuidelines, allResources, recentHistory] =
+  if (hardGate === "closed") {
+    logInfo(
+      "widget_turn.closed_conversation_bypassed",
+      buildWidgetTurnLogContext(context, turnId, { modelCallCount: 0 }),
+    );
+    return Response.json({ error: "Conversation closed" }, { status: 410 });
+  }
+
+  const [enabledTools, enabledGuidelines, recentHistory] =
     await Promise.all([
-      toolService.getEnabledTools(context.project.id),
+      toolService.getEnabledToolsForChannel(context.project.id, "public"),
       guidelineService.getEnabledByProject(context.project.id),
-      resourceService.getResourcesByProject(context.project.id),
       chatService.getRecentMessages(context.conversationId, 11),
     ]);
   const parallelPrefetchedHistory = recentHistory.messages;
@@ -589,53 +649,13 @@ export async function handleWidgetMessageTurn(
     kind: context.turnKind ?? "standard",
     isFirstVisitorTurn,
   } as const;
-  const scopeDecision = classifyTaskScope({
-    message: aiMessageContent,
-    pageContext: context.payload.pageContext,
-  });
-  const sortedFaqResources = allResources
-    .filter((resource) => resource.type === "faq")
-    .sort((left, right) => left.title.localeCompare(right.title));
-  const faqMatch = findBestFaqMatch(
-    sortedFaqResources.map((resource) => ({
-      title: resource.title,
-      content: resource.content,
-    })),
-    aiMessageContent,
-  );
   const conversationMetadata = parseConversationMetadata(conversation.metadata);
   const agentHandbackInstructions =
     typeof conversationMetadata.agentHandbackInstructions === "string"
       ? conversationMetadata.agentHandbackInstructions
       : null;
-  const fastPathDecision = identifyFastPath({
-    message: aiMessageContent,
-    scopeDecision,
-    faqMatch,
-    hasPendingWorkflow:
-      chatState.awaitingHandoffConfirmation ||
-      chatState.awaitingContactFields.length > 0,
-    hasImage: Boolean(context.payload.imageUrl),
-    hasPriorityInstructions:
-      enabledGuidelines.length > 0 || Boolean(agentHandbackInstructions),
-  });
-  const hasIndexedResources = allResources.some(
-    (resource) => resource.status === "indexed",
-  );
 
-  logInfo(
-    "widget_turn.fast_path_evaluated",
-    buildWidgetTurnLogContext(context, turnId, {
-      selected: fastPathDecision?.kind ?? null,
-      reason: fastPathDecision?.reason ?? null,
-      faqScore: faqMatch?.score ?? null,
-      faqPrecision: faqMatch?.precision ?? null,
-      faqRecall: faqMatch?.recall ?? null,
-      faqMargin: faqMatch?.margin ?? null,
-    }),
-  );
-
-  if (!fastPathDecision && enabledTools.length > 0) {
+  if (enabledTools.length > 0) {
     if (!context.checkRateLimit(`toolmsg:${context.project.id}`, 100, 60_000)) {
       logWarn(
         "widget_turn.blocked",
@@ -650,24 +670,7 @@ export async function handleWidgetMessageTurn(
         { status: 429 },
       );
     }
-
-    await decryptEnabledToolHeaders(
-      enabledTools,
-      context.env.ENCRYPTION_KEY,
-      (row) => {
-        logWarn(
-          "widget_turn.tool_headers_decrypt_failed",
-          buildWidgetTurnLogContext(context, turnId, {
-            toolId: row.id,
-            toolName: row.name,
-          }),
-        );
-      },
-    );
   }
-  const availableTools = fastPathDecision
-    ? []
-    : enabledTools.map(toToolDefinition);
   const modelConfig = {
     model: context.env.AI_MODEL,
     geminiApiKey: context.env.GEMINI_API_KEY,
@@ -699,7 +702,6 @@ export async function handleWidgetMessageTurn(
     const telemetry: TurnTelemetry = {
       startedAt,
       routeStartedAt: startedAt,
-      fastPathSelected: fastPathDecision?.kind ?? null,
     };
 
     if (context.contactAccepted) {
@@ -708,22 +710,12 @@ export async function handleWidgetMessageTurn(
       });
     }
 
-    // Deterministic routes have already been selected before the SSE stream
-    // opens, so describe the remaining composer work accurately instead of
-    // showing a misleading reasoning phase.
-    if (fastPathDecision) {
-      emitStatus("Writing the reply...", "compose");
-    } else {
-      emitStatus("Thinking", "thinking");
-    }
+    emitStatus("Thinking", "thinking");
 
     let currentStage = "load_message_image";
-    let retrieval = createEmptyRetrievalResult();
     let eventState = createInitialAgentEventState();
-    let turnIntent: string | null = null;
     let executionPath: string | null = null;
-    let retrievalMode: string | null = null;
-    let safeAiReplayWindowClosed = false;
+    let sourceReferences: SourceReference[] = [];
     let persistedAiMessage = false;
 
     function emitStatus(
@@ -734,18 +726,6 @@ export async function handleWidgetMessageTurn(
         telemetry.firstStatusAt = Date.now();
       }
       emitStatusEvent(controller, encoder, { phase, message });
-    }
-
-    function closeSafeAiReplayWindow(reason: string): void {
-      if (safeAiReplayWindowClosed) return;
-      safeAiReplayWindowClosed = true;
-      logInfo(
-        "widget_turn.safe_ai_replay_closed",
-        buildWidgetTurnLogContext(context, turnId, {
-          reason,
-          activeModel: modelRuntime.activeConfig.model,
-        }),
-      );
     }
 
     async function emitAndSaveImmediateResponse(
@@ -885,7 +865,7 @@ export async function handleWidgetMessageTurn(
       "widget_turn.pipeline_started",
       buildWidgetTurnLogContext(context, turnId, {
         conversationStatus: conversation.status,
-        availableToolNames: getToolNames(availableTools),
+        availableToolCount: enabledTools.length,
         guidelineCount: enabledGuidelines.length,
         stageTimings,
       }),
@@ -910,9 +890,7 @@ export async function handleWidgetMessageTurn(
         pageContext: context.payload.pageContext,
       });
       if (scopeDecision.kind !== "in_scope_support") {
-        turnIntent = scopeDecision.kind;
         executionPath = "scope_blocked";
-        retrievalMode = "none";
         currentStage = "scope_gate";
         logWarn(
           "widget_turn.scope_blocked",
@@ -928,256 +906,136 @@ export async function handleWidgetMessageTurn(
         return;
       }
 
-      currentStage = "classify_turn";
-      if (!fastPathDecision) {
-        emitStatus("Understanding your message...", "thinking");
-      }
-      const routing =
-        fastPathDecision?.kind === "small_talk" ||
-        fastPathDecision?.kind === "authoritative_faq"
-          ? {
-              conversationSummary: null,
-              compiledFaqContext:
-                fastPathDecision.kind === "authoritative_faq"
-                  ? `<source type="faq-match" score="${fastPathDecision.faq.score.toFixed(2)}">\nQ: ${fastPathDecision.faq.question}\nA: ${fastPathDecision.faq.answer}\n</source>`
-                  : "",
-              faqMatchHint:
-                fastPathDecision.kind === "authoritative_faq"
-                  ? faqMatch
-                  : null,
-              selectedFaqSetIds: [],
-              selectorOutcome: "fast_path" as const,
-              sortedFaqResources,
-              hasIndexedResources,
-            }
-          : await prepareTurnRouting({
-              modelRuntime,
-              conversationHistory,
-              currentMessage: aiMessageContent,
-              pageContext: context.payload.pageContext,
-              sortedFaqResources,
-              faqMatchHint: faqMatch,
-              hasIndexedResources,
-              kv: context.env.CONVERSATIONS_CACHE,
-              projectId: context.project.id,
-              executionCtx: context.executionCtx,
-              onRouterFinished: (ms) => {
-                telemetry.routerMs = ms;
-              },
-              buildLogContext: (extra = {}) =>
-                buildWidgetTurnLogContext(context, turnId, extra),
-            });
-      const {
-        conversationSummary,
-        compiledFaqContext,
-        faqMatchHint,
-        selectedFaqSetIds,
-        selectorOutcome,
-      } = routing;
-      const selectedTitles = sortedFaqResources
-        .filter((r) => selectedFaqSetIds.includes(r.id))
-        .map((r) => r.title);
-      logInfo(
-        "widget_turn.faq_sets_selected",
-        buildWidgetTurnLogContext(context, turnId, {
-          totalFaqSets: sortedFaqResources.length,
-          selectorOutcome,
-          selectedIds: selectedFaqSetIds,
-          selectedTitles,
-          compiledFaqChars: compiledFaqContext.length,
-          faqHintFired: Boolean(faqMatchHint),
-          faqHintQuestion: faqMatchHint?.question ?? null,
-          faqHintScore: faqMatchHint?.score ?? null,
-        }),
-      );
-
-      executionPath = fastPathDecision
-        ? `fast_path:${fastPathDecision.kind}`
-        : "agentic_loop";
+      executionPath = "maven_tool_loop";
 
       chatState = {
         ...chatState,
         state: "answering",
       };
 
-      currentStage = "planner_loop";
+      currentStage = "maven_turn";
       logInfo(
         "widget_turn.loop_started",
         buildWidgetTurnLogContext(context, turnId, {
-          availableTools: getToolNames(availableTools),
+          availableToolCount: enabledTools.length,
           hasImage: Boolean(image),
         }),
       );
 
-      const loopResult = await runAgenticTurn({
+      const loopStartedAt = Date.now();
+      const streamedTurn = await streamPublicMavenTurn({
+        runTurn: runtime.runMavenTurn,
+        turnInput: {
+          context: {
+            channel: "public",
+            projectId: context.project.id,
+            conversationId: context.conversationId,
+            actorUserId: null,
+            customerId: conversation.customerId,
+            ownership: ownershipSnapshotAtTurnStart,
+          },
+          dependencies: {
+            db: context.db,
+            env: context.env,
+            modelRuntime,
+            toolService,
+            projectName: context.project.name,
+            settings: settings ?? {
+              toneOfVoice: "professional",
+              customTonePrompt: null,
+              companyContext: null,
+              botName: null,
+              agentName: null,
+              workingHours: null,
+              avgResponseTime: null,
+            },
+            abortSignal: context.abortSignal,
+            promptOptions: {
+              guidelines: enabledGuidelines.map((guideline) => ({
+                condition: guideline.condition,
+                instruction: guideline.instruction,
+              })),
+              agentHandbackInstructions,
+              pageContext: context.payload.pageContext,
+              visitorInfo: {
+                name: conversation.visitorName,
+                email: conversation.visitorEmail,
+              },
+              timeContext: {
+                nowMs: Date.now(),
+                conversationHistory,
+              },
+              turnContext,
+              aiParticipation: chatState.aiParticipation,
+              escalated: isAgentRequestedStatus(conversation.status),
+            },
+            publicToolDependencies: {
+              executionCtx: context.executionCtx,
+              chatService,
+              projectService,
+              telegramService: runtime.createTelegramService(context.db),
+              onTeamRequested() {
+                conversationStatusForTurn = "waiting_agent";
+                broadcastStatusChange(
+                  context.env,
+                  context.executionCtx,
+                  context.conversationId,
+                  "waiting_agent",
+                );
+              },
+              broadcast(message) {
+                broadcastMessageNew(
+                  context.env,
+                  context.executionCtx,
+                  context.conversationId,
+                  message,
+                  { audience: "agents" },
+                );
+              },
+            },
+          },
+          conversationHistory,
+          currentMessage: aiMessageContent,
+          image,
+        },
         controller,
         encoder,
-        modelRuntime,
-        telemetry,
-        currentMessage: aiMessageContent,
-        pageContext: context.payload.pageContext,
-        conversationHistory,
-        conversationSummary,
-        availableTools,
-        enabledToolRows: enabledTools,
-        toolService,
-        chatService,
-        projectService,
-        db: context.db,
-        env: context.env,
-        executionCtx: context.executionCtx,
-        project: context.project,
-        conversation: {
-          id: context.conversationId,
-          visitorId: conversation.visitorId,
-          visitorName: conversation.visitorName,
-          visitorEmail: conversation.visitorEmail,
-          status: conversation.status,
-          metadata: conversation.metadata,
-          telegramThreadId: conversation.telegramThreadId ?? null,
-        },
-        settings: settings ?? {
-          toneOfVoice: "professional",
-          customTonePrompt: null,
-          companyContext: null,
-          botName: null,
-          agentName: null,
-          workingHours: null,
-          avgResponseTime: null,
-        },
-        guidelines: enabledGuidelines.map((guideline) => ({
-          condition: guideline.condition,
-          instruction: guideline.instruction,
-        })),
-        compiledFaqContext,
-        hasIndexedResources,
-        visitorInfo: {
-          name: conversation.visitorName,
-          email: conversation.visitorEmail,
-        },
-        turnContext,
-        aiParticipation: chatState.aiParticipation,
-        responseOpening,
-        persistedContactState: {
-          awaitingContactFields: chatState.awaitingContactFields,
-          awaitingHandoffConfirmation: chatState.awaitingHandoffConfirmation,
-          contactDeclined: chatState.contactDeclined,
-        },
-        persistedClarifyState: {
-          clarificationAttempts: chatState.clarificationAttempts,
-          lastBotQuestion: chatState.lastBotQuestion,
-        },
-        agentHandbackInstructions,
-        image,
-        faqMatchHint,
-        fastPathDecision,
         streamProtocolVersion: context.streamProtocolVersion,
-        emitStatus,
-        shouldAllowEscalation: () => shouldAllowEscalation({ conversation }),
-        closeSafeAiReplayWindow,
-        buildLogContext: (extra = {}) =>
-          buildWidgetTurnLogContext(context, turnId, extra),
-        // buildSystemPrompt omitted → planner falls back to the visitor-facing
-        // `buildSupportSystemPrompt` (byte-identical to pre-refactor behavior).
+        responseOpening,
+        telemetry,
       });
-      retrieval = loopResult.retrieval;
+      telemetry.loopMs = Date.now() - loopStartedAt;
+      sourceReferences = streamedTurn.sources;
       eventState = {
         ...createInitialAgentEventState(),
-        fullResponse: loopResult.fullResponse,
-        hadToolCalls: loopResult.hadToolCalls,
-        lastToolOutput: loopResult.lastToolOutput,
-        lastToolError: loopResult.lastToolError,
-        stepCount: loopResult.stepCount,
-        detectedInternalTokens: loopResult.detectedInternalTokens,
+        fullResponse: streamedTurn.fullResponse,
+        hadToolCalls: streamedTurn.hadToolCalls,
+        detectedInternalTokens: streamedTurn.detectedInternalTokens,
       };
-
-      turnIntent = loopResult.turnIntent;
-      retrievalMode = loopResult.retrieval.retrievalAttempted
-        ? "bounded_actions"
-        : "none";
-
-      // Persist escalation continuity so the next turn resumes the handoff
-      // without regex-matching the bot's own (now LLM-rendered) wording.
-      chatState = {
-        ...chatState,
-        lastIntent: loopResult.turnIntent ?? chatState.lastIntent,
-        awaitingContactFields: loopResult.awaitingContactFields,
-        awaitingHandoffConfirmation: loopResult.awaitingHandoffConfirmation,
-        contactDeclined: loopResult.contactDeclined,
-        clarificationAttempts:
-          loopResult.terminationAction === "ask_user"
-            ? chatState.clarificationAttempts + 1
-            : 0,
-        lastBotQuestion:
-          loopResult.terminationAction === "ask_user"
-            ? loopResult.fullResponse
-            : null,
-      };
-      if (loopResult.terminationAction === "escalate") {
-        chatState = applyChatOwnershipEvent(chatState, "team_requested");
-      }
 
       logInfo(
         "widget_turn.loop_completed",
         buildWidgetTurnLogContext(context, turnId, {
           textLength: eventState.fullResponse.length,
           hadToolCalls: eventState.hadToolCalls,
-          stepCount: eventState.stepCount,
-          terminationAction: loopResult.terminationAction,
-        }),
-      );
-
-      if (retrieval.droppedCrossTenant > 0) {
-        logWarn(
-          "widget_turn.retrieval_cross_tenant_dropped",
-          buildWidgetTurnLogContext(context, turnId, {
-            droppedCrossTenant: retrieval.droppedCrossTenant,
-          }),
-        );
-      }
-      if (retrieval.unresolvedKeys.length > 0) {
-        logWarn(
-          "widget_turn.retrieval_unresolved_sources",
-          buildWidgetTurnLogContext(context, turnId, {
-            unresolvedSourceCount: retrieval.unresolvedKeys.length,
-          }),
-        );
-      }
-      logInfo(
-        "widget_turn.retrieval_completed",
-        buildWidgetTurnLogContext(context, turnId, {
-          groundingConfidence: retrieval.groundingConfidence,
-          sourceCount: retrieval.sourceReferences.length,
-          retrievalAttempted: retrieval.retrievalAttempted,
-          broaderSearchAttempted: retrieval.broaderSearchAttempted,
-          unresolvedSourceCount: retrieval.unresolvedKeys.length,
-          droppedCrossTenant: retrieval.droppedCrossTenant,
+          sourceCount: sourceReferences.length,
         }),
       );
 
       let fullResponse = eventState.fullResponse;
-      if (loopResult.capabilityFallbackApplied) {
-        logWarn(
-          "widget_turn.unavailable_capability_claim_blocked",
-          buildWidgetTurnLogContext(context, turnId, {
-            executionPath,
-            turnIntent,
-          }),
-        );
-      }
-
       const flaggedForReview = chatState.aiParticipation === "human_only";
       let finalConversationStatus: WidgetCompletedPayload["conversationStatus"] =
-        loopResult.terminationAction === "escalate"
-          ? "waiting_agent"
-          : conversation.status === "waiting_agent" ||
-              conversation.status === "agent_replied"
-            ? conversation.status
-            : "active";
+        conversationStatusForTurn === "waiting_agent" ||
+        conversationStatusForTurn === "agent_replied"
+          ? conversationStatusForTurn
+          : "active";
       let resolvedByThisTurn = false;
+      let outputPermission = await getAiOutputPermission();
       if (
-        loopResult.detectedInternalTokens.includes("[RESOLVED]") &&
-        !flaggedForReview
+        eventState.detectedInternalTokens.includes("[RESOLVED]") &&
+        !flaggedForReview &&
+        outputPermission.allowed &&
+        outputPermission.status === "active"
       ) {
         currentStage = "close_conversation";
         resolvedByThisTurn = await chatService.resolveConversationByAi(
@@ -1201,12 +1059,12 @@ export async function handleWidgetMessageTurn(
             : "widget_turn.ai_resolution_blocked_by_human_takeover",
           buildWidgetTurnLogContext(context, turnId),
         );
+        outputPermission = await getAiOutputPermission(resolvedByThisTurn);
       }
 
-      const outputPermission = await getAiOutputPermission(resolvedByThisTurn);
+      finalConversationStatus = outputPermission.status;
       if (!outputPermission.allowed) {
         fullResponse = "";
-        finalConversationStatus = outputPermission.status;
       }
 
       // Task 3 guard fallout: on an escalated / waiting_agent conversation the
@@ -1258,8 +1116,8 @@ export async function handleWidgetMessageTurn(
               conversationId: context.conversationId,
               content: fullResponse,
               sources:
-                retrieval.sourceReferences.length > 0
-                  ? JSON.stringify(retrieval.sourceReferences)
+                sourceReferences.length > 0
+                  ? JSON.stringify(sourceReferences)
                   : null,
               senderName: settings?.botName ?? null,
             },
@@ -1274,7 +1132,10 @@ export async function handleWidgetMessageTurn(
         onPersisted: () => {
           persistedAiMessage = true;
           if (context.streamProtocolVersion !== 1) return;
-          if (loopResult.terminationAction === "escalate") {
+          if (
+            ownershipSnapshotAtTurnStart.status !== "waiting_agent" &&
+            finalConversationStatus === "waiting_agent"
+          ) {
             emitSseEvent(controller, encoder, { inquiry: true });
           }
           if (resolvedByThisTurn) {
@@ -1298,7 +1159,7 @@ export async function handleWidgetMessageTurn(
           "bot_resolved",
         );
         if (settings?.telegramBotToken && settings.telegramChatId) {
-          const telegramService = new TelegramService(context.db);
+          const telegramService = runtime.createTelegramService(context.db);
           const telegramBotToken = settings.telegramBotToken;
           const telegramChatId = settings.telegramChatId;
           context.executionCtx.waitUntil(
@@ -1337,7 +1198,7 @@ export async function handleWidgetMessageTurn(
       );
 
       const MAX_SOURCES = 3;
-      const cappedSources = retrieval.sourceReferences.slice(0, MAX_SOURCES);
+      const cappedSources = sourceReferences.slice(0, MAX_SOURCES);
 
       if (context.streamProtocolVersion === 2) {
         emitCompletedEvent(controller, encoder, {
@@ -1401,7 +1262,7 @@ export async function handleWidgetMessageTurn(
         "widget_turn.completed",
         buildWidgetTurnLogContext(context, turnId, {
           messageId: botMessage.id,
-          sourceCount: retrieval.sourceReferences.length,
+          sourceCount: sourceReferences.length,
           statusLatencyMs: telemetry.firstStatusAt
             ? telemetry.firstStatusAt - telemetry.startedAt
             : null,
@@ -1431,18 +1292,12 @@ export async function handleWidgetMessageTurn(
           stage: currentStage,
           configuredModel: context.env.AI_MODEL,
           activeModel: modelRuntime.activeConfig.model,
-          intent: turnIntent,
           executionPath,
-          retrievalMode,
-          retrievalAttempted: retrieval.retrievalAttempted,
-          broaderSearchAttempted: retrieval.broaderSearchAttempted,
-          groundingConfidence: retrieval.groundingConfidence,
-          sourceCount: retrieval.sourceReferences.length,
+          sourceCount: sourceReferences.length,
           hadToolCalls: eventState.hadToolCalls,
           stepCount: eventState.stepCount,
           verifierRan: telemetry.verifierRan ?? false,
           verifierVerdict: telemetry.verifierVerdict ?? null,
-          safeAiReplayWindowClosed,
         }),
       );
       const errorMessage =

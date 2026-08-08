@@ -1008,6 +1008,7 @@ const app = new Hono<HonoAppContext>()
       executionCtx: c.executionCtx,
       routeStartedAt,
       streamProtocolVersion: parsed.data.streamProtocolVersion ?? 1,
+      abortSignal: c.req.raw.signal,
       checkRateLimit,
       project: {
         id: project.id,
@@ -1314,6 +1315,7 @@ const app = new Hono<HonoAppContext>()
       executionCtx: c.executionCtx,
       routeStartedAt,
       streamProtocolVersion: 2,
+      abortSignal: c.req.raw.signal,
       checkRateLimit,
       project: {
         id: project.id,

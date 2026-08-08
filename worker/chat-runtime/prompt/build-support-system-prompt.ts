@@ -11,7 +11,6 @@ import {
   buildPageContextSection,
   buildSupportTurnSection,
   buildTimeContextSection,
-  buildPlannerLoopSection,
   buildToolEvidenceSection,
   buildVisitorInfoSection,
 } from "./sections";
@@ -86,12 +85,6 @@ ${options.agentHandbackInstructions}
 `;
   }
 
-  prompt += buildPlannerLoopSection(
-    options.turnIntent,
-    options.plannerGoal,
-    options.plannerActionHistory,
-    "sidechat",
-  );
   prompt += buildFaqMatchSection(options.faqMatchHint, "sidechat");
   prompt += buildFaqContextSection(options.faqContext, "sidechat");
   prompt += buildKnowledgeBaseSection(ragContext, "sidechat");
@@ -213,7 +206,6 @@ Answering questions:
 - If multiple solutions exist, present the most likely one first, then briefly mention alternatives.
 - Keep responses concise but complete, in the chat register described in <identity>.
 - Do not end with optional offers like "Would you like an example?" or "Let me know if you want me to...". Ask a follow-up question only when it is required to continue. The ONE exception: when the documentation does not contain the answer, end by asking whether they'd like the question passed to our team — that question is required, not optional.
-- Use the planner goal and action history only as working context. Base the final answer on evidence, not on the plan itself.
 - If <tool-evidence> is present, use only what those tool results explicitly show. Do not embellish or infer unsupported details.
 - If tools are available and the visitor is asking you to look something up, verify something, or perform an action, use the relevant allowed tool before saying you do not know.
 - If no tools are assigned, then you have no tools. Do not imply that you searched the web, browsed online, used native tools, or accessed any hidden system.
@@ -296,12 +288,6 @@ ${options.agentHandbackInstructions}
 
 `;
   }
-
-  prompt += buildPlannerLoopSection(
-    options?.turnIntent,
-    options?.plannerGoal,
-    options?.plannerActionHistory,
-  );
 
   prompt += buildFaqMatchSection(options?.faqMatchHint);
   prompt += buildFaqContextSection(options?.faqContext);

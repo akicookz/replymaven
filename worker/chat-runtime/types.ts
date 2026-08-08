@@ -9,42 +9,8 @@ import { type ProjectSettingsRow } from "../db";
 import { type AppEnv } from "../types";
 import { type SourceReference } from "../services/resource-service";
 import { type MavenChannel, type MavenToolAccess } from "../validation";
-import { type InternalToken } from "./streaming/internal-tokens";
 
 export type GroundingConfidence = "high" | "low" | "none";
-export type SupportIntent =
-  | "how_to"
-  | "troubleshoot"
-  | "lookup"
-  | "policy"
-  | "clarify"
-  | "handoff"
-  | "smalltalk";
-export type FastPathKind =
-  | "scope_blocked"
-  | "small_talk"
-  | "authoritative_faq";
-
-export type FastPathDecision =
-  | {
-      kind: "scope_blocked";
-      reason: string;
-      response: string;
-    }
-  | {
-      kind: "small_talk";
-      reason: "pure_greeting" | "pure_resolution";
-      composeKind: "greeting" | "resolution";
-    }
-  | {
-      kind: "authoritative_faq";
-      reason: "exact_faq" | "high_coverage_faq";
-      faq: {
-        question: string;
-        answer: string;
-        score: number;
-      };
-    };
 export type AgentToolChoice =
   | "auto"
   | "none"
@@ -118,7 +84,6 @@ export interface SupportPromptOptions {
   faqMatchHint?: { question: string; answer: string; score: number } | null;
   groundingConfidence?: GroundingConfidence;
   topScore?: number;
-  turnIntent?: string | null;
   // Current time + conversation timing for the <time-context> section. The
   // compose model gets history as a structured message array (no inline gap
   // annotations), so this block carries the timing signal instead.
@@ -126,8 +91,6 @@ export interface SupportPromptOptions {
     nowMs: number;
     conversationHistory: ConversationTurnMessage[];
   } | null;
-  plannerGoal?: string | null;
-  plannerActionHistory?: PlannerActionHistoryEntry[];
   toolEvidenceSummary?: string | null;
   retrievalAttempted?: boolean;
   broaderSearchAttempted?: boolean;
@@ -486,87 +449,6 @@ export interface ChatRuntimeAiConfig {
   openaiApiKey: string | null;
 }
 
-export type PlannerActionType =
-  | "search_docs"
-  | "call_tool"
-  | "ask_user"
-  | "offer_handoff"
-  | "collect_contact"
-  | "escalate"
-  | "compose"
-  | "stop";
-
-export interface PlannerSearchDocsAction {
-  type: "search_docs";
-  reason: string;
-  query: string;
-  broaderQueries?: string[];
-}
-
-export interface PlannerCallToolAction {
-  type: "call_tool";
-  reason: string;
-  toolName: string;
-  input: Record<string, unknown>;
-}
-
-export interface PlannerAskUserAction {
-  type: "ask_user";
-  reason: string;
-  question: string;
-}
-
-export interface PlannerOfferHandoffAction {
-  type: "offer_handoff";
-  reason: string;
-}
-
-export interface PlannerCollectContactAction {
-  type: "collect_contact";
-  reason: string;
-  missingFields: Array<"name" | "email">;
-}
-
-export interface PlannerEscalateAction {
-  type: "escalate";
-  reason: string;
-}
-
-export type ComposeKind = "grounded" | "greeting" | "resolution" | "redirect";
-
-export interface PlannerComposeAction {
-  type: "compose";
-  reason: string;
-  answerStyle?: "direct" | "step_by_step" | "summary";
-  // "grounded" composes require evidence (or an exhausted search); the other
-  // kinds are declared evidence-free turns the sanitizer must not rewrite.
-  composeKind?: ComposeKind;
-}
-
-export interface PlannerStopAction {
-  type: "stop";
-  reason: string;
-}
-
-export type PlannerNextAction =
-  | PlannerSearchDocsAction
-  | PlannerCallToolAction
-  | PlannerAskUserAction
-  | PlannerOfferHandoffAction
-  | PlannerCollectContactAction
-  | PlannerEscalateAction
-  | PlannerComposeAction
-  | PlannerStopAction;
-
-export interface PlannerDecision {
-  goal: string;
-  // Classification of the visitor's latest message, set by the planner's
-  // structured output (the planner IS the classifier). Optional because
-  // deterministic fast paths and legacy fallbacks may omit it.
-  intent?: SupportIntent;
-  nextAction: PlannerNextAction;
-}
-
 // What the runtime decides to say at an escalation step, before any wording is
 // chosen. The runtime owns this decision (whether to hand off, which contact
 // fields to collect, whether the forward already happened); a scoped model call
@@ -589,82 +471,6 @@ export type HandoffRenderDirective =
       agentLabel: string;
     };
 
-export interface PlannerActionHistoryEntry {
-  type: PlannerActionType;
-  reason: string;
-  query?: string;
-  broaderQueries?: string[];
-  toolName?: string;
-  input?: Record<string, unknown>;
-  outcome: "executed" | "completed" | "rejected";
-  note?: string | null;
-}
-
-export interface PlannerToolEvidence {
-  toolName: string;
-  input: Record<string, unknown>;
-  output: unknown;
-  error: string | null;
-  success: boolean;
-  durationMs: number;
-}
-
-export interface PlannerDocsEvidence {
-  ragContext: string;
-  faqContext: string;
-  knowledgeBaseContext: string;
-  sourceReferences: SourceReference[];
-  groundingConfidence: GroundingConfidence;
-  topScore: number;
-  unresolvedKeys: string[];
-  droppedCrossTenant: number;
-  retrievalAttempted: boolean;
-  broaderSearchAttempted: boolean;
-  queries: string[];
-  broaderQueries: string[];
-}
-
-export interface PlannerLoopState {
-  goal: string;
-  stepCount: number;
-  conversationSummary: string | null;
-  actionHistory: PlannerActionHistoryEntry[];
-  docsEvidence: PlannerDocsEvidence;
-  toolEvidence: PlannerToolEvidence[];
-  missingInputs: string[];
-  knownVisitorName: string | null;
-  knownVisitorEmail: string | null;
-  handoffRequested: boolean;
-  awaitingHandoffConfirmation: boolean;
-  awaitingContactFields: Array<"name" | "email">;
-  contactDeclined: boolean;
-  handoffSummary: string | null;
-  finalDraft: string | null;
-  terminationReason: string | null;
-  reformulationUsed: boolean;
-  queryTracker: {
-    normalizedQueries: Map<string, number>; // normalized query -> search count
-    semanticGroups: string[]; // track semantic groups of similar queries
-  };
-  // Classification recorded from the first planner decision of this turn.
-  intent: SupportIntent | null;
-  // Cross-turn clarify continuity, persisted via ConversationChatState.
-  clarificationAttempts: number;
-  lastBotQuestion: string | null;
-}
-
-export interface PlannerLoopResult {
-  fullResponse: string;
-  retrieval: PlannerDocsEvidence;
-  hadToolCalls: boolean;
-  lastToolOutput: unknown;
-  lastToolError: string | null;
-  stepCount: number;
-  terminationAction: PlannerActionType;
-  loopState: PlannerLoopState;
-  detectedInternalTokens: InternalToken[];
-}
-
 export interface SupportAgentDependencies {
   modelConfig: ChatRuntimeAiConfig;
   createModel?: (config: ChatRuntimeAiConfig) => LanguageModel;
@@ -676,6 +482,7 @@ export interface WidgetMessageTurnContext {
   executionCtx: ExecutionContext;
   routeStartedAt: number;
   streamProtocolVersion: 1 | 2;
+  abortSignal?: AbortSignal;
   checkRateLimit: (key: string, maxRequests: number, windowMs: number) => boolean;
   project: {
     id: string;
@@ -722,7 +529,6 @@ export interface TurnTelemetry {
   plannerStepMs?: number[];
   retrievalMs?: number[];
   toolCallMs?: number[];
-  fastPathSelected?: FastPathKind | null;
   modelCallCount?: number;
   modelCallsByStage?: Record<string, number>;
 }
