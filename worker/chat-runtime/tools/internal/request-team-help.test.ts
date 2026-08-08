@@ -30,7 +30,9 @@ interface TestHarness {
   teamRequestNotifications: number;
   reviewSummaries: string[];
   telegramSummaries: string[];
+  telegramUpdates: boolean[];
   telegramAttempts: number;
+  telegramThreadPersistenceAttempts: number;
   broadcasts: MessageRow[];
   systemMessageIds: Set<string>;
   failOwnershipClaim: boolean;
@@ -44,7 +46,9 @@ interface TestHarness {
   throwEscalationUpdateOnCall: number | null;
   notificationClaims: number;
   notificationClaimed: boolean;
+  throwNotificationClaimOnce: boolean;
   throwTelegramNotification: boolean;
+  rejectExternalActionOnce: boolean;
 }
 
 function createContext(channel: MavenTurnContext["channel"]): MavenTurnContext {
@@ -115,6 +119,8 @@ function createHarness(options: {
   clearContactBeforeClaim?: boolean;
   throwEscalationUpdateOnCall?: number;
   throwTelegramNotification?: boolean;
+  throwNotificationClaimOnce?: boolean;
+  rejectExternalActionOnce?: boolean;
 } = {}): {
   harness: TestHarness;
   definition: ReturnType<typeof createRequestTeamHelpTool>;
@@ -126,7 +132,9 @@ function createHarness(options: {
     teamRequestNotifications: 0,
     reviewSummaries: [],
     telegramSummaries: [],
+    telegramUpdates: [],
     telegramAttempts: 0,
+    telegramThreadPersistenceAttempts: 0,
     broadcasts: [],
     systemMessageIds: new Set(),
     failOwnershipClaim: options.failOwnershipClaim ?? false,
@@ -143,7 +151,9 @@ function createHarness(options: {
       options.throwEscalationUpdateOnCall ?? null,
     notificationClaims: 0,
     notificationClaimed: false,
+    throwNotificationClaimOnce: options.throwNotificationClaimOnce ?? false,
     throwTelegramNotification: options.throwTelegramNotification ?? false,
+    rejectExternalActionOnce: options.rejectExternalActionOnce ?? false,
   };
 
   const chatService = {
@@ -300,6 +310,10 @@ function createHarness(options: {
       _projectId: string,
       action: () => Promise<T>,
     ) {
+      if (harness.rejectExternalActionOnce) {
+        harness.rejectExternalActionOnce = false;
+        return { executed: false };
+      }
       return { executed: true, value: await action() };
     },
     async updateTelegramThreadId(
@@ -307,14 +321,33 @@ function createHarness(options: {
       _projectId: string,
       threadId: string,
     ) {
+      harness.telegramThreadPersistenceAttempts += 1;
       if (harness.failTelegramThreadUpdate) {
         harness.failTelegramThreadUpdate = false;
         throw new Error("thread persistence failed");
       }
       harness.conversation.telegramThreadId = threadId;
     },
+    async persistNewTeamRequestTelegramThreadId(
+      _conversationId: string,
+      _projectId: string,
+      _acceptanceToken: string,
+      threadId: string,
+    ) {
+      harness.telegramThreadPersistenceAttempts += 1;
+      if (harness.failTelegramThreadUpdate) {
+        harness.failTelegramThreadUpdate = false;
+        throw new Error("thread persistence failed");
+      }
+      harness.conversation.telegramThreadId = threadId;
+      return true;
+    },
     async claimNewTeamRequestNotification() {
       harness.notificationClaims += 1;
+      if (harness.throwNotificationClaimOnce) {
+        harness.throwNotificationClaimOnce = false;
+        throw new Error("notification preflight failed");
+      }
       if (harness.notificationClaimed) return false;
       harness.notificationClaimed = true;
       const metadata = harness.conversation.metadata
@@ -350,13 +383,14 @@ function createHarness(options: {
     async notifyEscalation(
       _botToken: string,
       _chatId: string,
-      params: { summary: string },
+      params: { summary: string; isUpdate: boolean },
     ) {
       harness.telegramAttempts += 1;
       if (harness.throwTelegramNotification) {
         throw new Error("Telegram unavailable");
       }
       harness.telegramSummaries.push(params.summary);
+      harness.telegramUpdates.push(params.isUpdate);
       return 123;
     },
   } as unknown as TelegramService;
@@ -710,7 +744,7 @@ describe("createRequestTeamHelpTool", () => {
     expect(harness.telegramSummaries).toEqual([input.summary]);
   });
 
-  test("does not reverse acceptance or duplicate Telegram when thread persistence fails", async () => {
+  test("retries a returned thread ID without duplicating Telegram", async () => {
     const { harness, definition } = createHarness({
       failTelegramThreadUpdate: true,
     });
@@ -722,6 +756,44 @@ describe("createRequestTeamHelpTool", () => {
     expect(first.status).toBe("requested");
     expect(retry.status).toBe("requested");
     expect(harness.telegramSummaries).toHaveLength(1);
+    expect(harness.telegramThreadPersistenceAttempts).toBe(2);
+    expect(harness.conversation.telegramThreadId).toBe("123");
+  });
+
+  test("retries a known-unsent notification preflight failure", async () => {
+    const { harness, definition } = createHarness({
+      throwNotificationClaimOnce: true,
+    });
+    const input = { summary: "Visitor needs a refund on order 123." };
+
+    const first = await executePublicTool(definition, harness.context, input);
+    expect(first.status).toBe("requested");
+    expect(harness.telegramAttempts).toBe(0);
+
+    const retry = await executePublicTool(definition, harness.context, input);
+    expect(retry.status).toBe("requested");
+    expect(harness.notificationClaims).toBe(2);
+    expect(harness.telegramAttempts).toBe(1);
+    expect(harness.telegramSummaries).toEqual([input.summary]);
+    expect(harness.telegramUpdates).toEqual([false]);
+  });
+
+  test("keeps notification pending when the external-action lease rejects", async () => {
+    const { harness, definition } = createHarness({
+      rejectExternalActionOnce: true,
+    });
+    const input = { summary: "Visitor needs a refund on order 123." };
+
+    const first = await executePublicTool(definition, harness.context, input);
+    expect(first.status).toBe("requested");
+    expect(harness.notificationClaims).toBe(0);
+    expect(harness.telegramAttempts).toBe(0);
+
+    const retry = await executePublicTool(definition, harness.context, input);
+    expect(retry.status).toBe("requested");
+    expect(harness.notificationClaims).toBe(1);
+    expect(harness.telegramAttempts).toBe(1);
+    expect(harness.telegramSummaries).toEqual([input.summary]);
   });
 
   test("does not repeat an external attempt after Telegram throws", async () => {

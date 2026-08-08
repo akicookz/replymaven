@@ -56,6 +56,7 @@ export async function createEscalation(params: {
   broadcast: (message: MessageRow) => void;
   notifyExternalActions?: boolean;
   claimExternalNotificationAttempt?: () => Promise<boolean>;
+  persistTelegramThreadId?: (threadId: string) => Promise<boolean>;
 }): Promise<{
   summary: string;
   summaryMessageId: string | null;
@@ -78,7 +79,9 @@ export async function createEscalation(params: {
   }
   const created =
     typeof existingMeta.escalatedAt !== "string" ||
-    existingMeta.teamRequestSummaryPending === true;
+    existingMeta.teamRequestSummaryPending === true ||
+    (typeof existingMeta.mavenTeamRequestAcceptedAt === "string" &&
+      existingMeta.teamRequestNotificationState === "pending");
 
   logInfo("escalation.started", {
     projectId: params.project.id,
@@ -182,26 +185,16 @@ export async function createEscalation(params: {
 
   const isUpdate = !created;
 
-  const hasExternalActions = Boolean(
-    (params.telegramService &&
+  const hasTelegram = Boolean(
+    params.telegramService &&
       params.settings?.telegramBotToken &&
-      params.settings?.telegramChatId) ||
-      params.env.RESEND_API_KEY,
+      params.settings?.telegramChatId,
   );
-  const externalActionsClaimed =
-    params.notifyExternalActions !== false && hasExternalActions
-      ? params.claimExternalNotificationAttempt
-        ? await params.claimExternalNotificationAttempt()
-        : true
-      : false;
+  const notificationsEnabled = params.notifyExternalActions !== false;
+  let externalActionsClaimed = false;
 
   let telegramThreadId: string | undefined;
-  if (
-    externalActionsClaimed &&
-    params.telegramService &&
-    params.settings?.telegramBotToken &&
-    params.settings?.telegramChatId
-  ) {
+  if (notificationsEnabled && hasTelegram) {
     try {
       const replyToMessageId = isUpdate
         ? parseTelegramThreadId(params.conversation.telegramThreadId)
@@ -210,26 +203,67 @@ export async function createEscalation(params: {
         .runExternalActionIfOperational(
           params.conversation.id,
           params.project.id,
-          () => params.telegramService!.notifyEscalation(
-            params.settings!.telegramBotToken!,
-            params.settings!.telegramChatId!,
-            {
-              visitorName: params.conversation.visitorName,
-              visitorEmail: params.conversation.visitorEmail,
-              summary,
-              conversationUrl,
-              conversationId: params.conversation.id,
-              isUpdate,
-              replyToMessageId,
-            },
-          ),
+          async () => {
+            externalActionsClaimed = params.claimExternalNotificationAttempt
+              ? await params.claimExternalNotificationAttempt()
+              : true;
+            if (!externalActionsClaimed) {
+              return { claimed: false, messageId: null };
+            }
+            const messageId = await params.telegramService!.notifyEscalation(
+              params.settings!.telegramBotToken!,
+              params.settings!.telegramChatId!,
+              {
+                visitorName: params.conversation.visitorName,
+                visitorEmail: params.conversation.visitorEmail,
+                summary,
+                conversationUrl,
+                conversationId: params.conversation.id,
+                isUpdate,
+                replyToMessageId,
+              },
+            );
+            return { claimed: true, messageId };
+          },
         );
-      const messageId = notification.value ?? null;
       if (!notification.executed) {
         return { summary, summaryMessageId, created, accepted: true };
       }
+      if (!notification.value?.claimed) {
+        return { summary, summaryMessageId, created, accepted: true };
+      }
+      const messageId = notification.value.messageId ?? null;
       if (messageId) {
         telegramThreadId = String(messageId);
+        if (params.persistTelegramThreadId) {
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              const persisted = await params.persistTelegramThreadId(
+                telegramThreadId,
+              );
+              if (!persisted) {
+                logError(
+                  "escalation.telegram_thread_persistence_rejected",
+                  new Error("Telegram thread persistence was rejected"),
+                  {
+                    projectId: params.project.id,
+                    conversationId: params.conversation.id,
+                    telegramThreadId,
+                  },
+                );
+              }
+              break;
+            } catch (error) {
+              if (attempt === 1) {
+                logError("escalation.telegram_thread_persistence_failed", error, {
+                  projectId: params.project.id,
+                  conversationId: params.conversation.id,
+                  telegramThreadId,
+                });
+              }
+            }
+          }
+        }
       }
       logInfo("escalation.telegram_notified", {
         projectId: params.project.id,
@@ -246,7 +280,7 @@ export async function createEscalation(params: {
     }
   }
 
-  if (externalActionsClaimed && params.env.RESEND_API_KEY) {
+  if (notificationsEnabled && params.env.RESEND_API_KEY) {
     const emailService = new EmailService(params.env.RESEND_API_KEY);
     const ownerEmail = await params.projectService.getOwnerEmail(
       params.project.id,
@@ -263,16 +297,25 @@ export async function createEscalation(params: {
           .runExternalActionIfOperational(
             params.conversation.id,
             params.project.id,
-            () => emailService.sendEscalationNotification({
-              ownerEmail,
-              projectName,
-              visitorName: params.conversation.visitorName,
-              visitorEmail: params.conversation.visitorEmail,
-              visitorId: params.conversation.visitorId,
-              summary,
-              conversationUrl,
-              accentColor: null,
-            }),
+            async () => {
+              if (!hasTelegram) {
+                externalActionsClaimed =
+                  params.claimExternalNotificationAttempt
+                    ? await params.claimExternalNotificationAttempt()
+                    : true;
+              }
+              if (!externalActionsClaimed) return;
+              await emailService.sendEscalationNotification({
+                ownerEmail,
+                projectName,
+                visitorName: params.conversation.visitorName,
+                visitorEmail: params.conversation.visitorEmail,
+                visitorId: params.conversation.visitorId,
+                summary,
+                conversationUrl,
+                accentColor: null,
+              });
+            },
           )
           .catch((err) => {
             logError("escalation.email_failed", err, {

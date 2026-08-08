@@ -680,6 +680,14 @@ export function buildAiResolutionQuery(
 export class ChatService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
 
+  protected async afterNewTeamRequestAuthoritativeRead(): Promise<void> {
+    // Test seam for exercising races between the authoritative read and CAS.
+  }
+
+  protected async beforeConversationMetadataPatch(): Promise<void> {
+    // Test seam for exercising a delayed metadata patch against a live row.
+  }
+
   // ─── Conversations ──────────────────────────────────────────────────────────
 
   async getConversationById(
@@ -1119,6 +1127,8 @@ export class ChatService {
     const currentClassification = classifyConversation(conversation);
     if (currentClassification) return currentClassification;
 
+    await this.afterNewTeamRequestAuthoritativeRead();
+
     const currentState = parseChatState(conversation.chatState, {
       fallbackAiParticipation: fallbackAiParticipationForStatus(
         conversation.status,
@@ -1313,22 +1323,36 @@ export class ChatService {
       metadata?: string;
     },
   ): Promise<ConversationRow | null> {
-    const existing = await this.getOperationalConversationById(id, projectId);
-    if (!existing) return null;
-
     const updates: Record<string, unknown> = {};
     if (data.visitorName !== undefined) updates.visitorName = data.visitorName;
     if (data.visitorEmail !== undefined) updates.visitorEmail = data.visitorEmail;
     if (data.metadata !== undefined) {
-      // Merge new metadata with existing metadata
-      const existingMeta = existing.metadata
-        ? JSON.parse(existing.metadata)
-        : {};
-      const newMeta = JSON.parse(data.metadata);
-      updates.metadata = JSON.stringify({ ...existingMeta, ...newMeta });
+      const metadataPatch: unknown = JSON.parse(data.metadata);
+      if (
+        !metadataPatch ||
+        typeof metadataPatch !== "object" ||
+        Array.isArray(metadataPatch)
+      ) {
+        throw new TypeError("Conversation metadata patch must be an object");
+      }
+      const serializedPatch = JSON.stringify(metadataPatch);
+      updates.metadata = sql`json_patch(
+        CASE
+          WHEN json_valid(COALESCE(${conversations.metadata}, '{}'))
+            THEN COALESCE(${conversations.metadata}, '{}')
+          ELSE '{}'
+        END,
+        ${serializedPatch}
+      )`;
     }
 
-    if (Object.keys(updates).length === 0) return existing;
+    if (Object.keys(updates).length === 0) {
+      return this.getOperationalConversationById(id, projectId);
+    }
+
+    if (data.metadata !== undefined) {
+      await this.beforeConversationMetadataPatch();
+    }
 
     await this.db
       .update(conversations)
@@ -1342,6 +1366,62 @@ export class ChatService {
       );
 
     return this.getOperationalConversationById(id, projectId);
+  }
+
+  async persistNewTeamRequestTelegramThreadId(
+    id: string,
+    projectId: string,
+    acceptanceToken: string,
+    threadId: string,
+  ): Promise<boolean> {
+    const updated = await this.db
+      .update(conversations)
+      .set({
+        telegramThreadId: threadId,
+        metadata: sql`json_set(
+          ${conversations.metadata},
+          '$.mavenTeamRequestTelegramThreadAcceptanceToken',
+          ${acceptanceToken}
+        )`,
+      })
+      .where(
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
+          sql`json_valid(${conversations.metadata})`,
+          sql`json_extract(${conversations.metadata}, '$.reviewSummaryMessageId') = ${acceptanceToken}`,
+          sql`json_extract(${conversations.metadata}, '$.teamRequestNotificationState') = 'attempted'`,
+          or(
+            sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestTelegramThreadAcceptanceToken') IS NULL`,
+            sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestTelegramThreadAcceptanceToken') <> ${acceptanceToken}`,
+            isNull(conversations.telegramThreadId),
+            eq(conversations.telegramThreadId, threadId),
+          ),
+        ),
+      )
+      .returning({ id: conversations.id });
+    if (updated.length > 0) return true;
+
+    const current = await this.getOperationalConversationById(id, projectId);
+    if (!current || current.telegramThreadId !== threadId) return false;
+    try {
+      const metadata: unknown = current.metadata
+        ? JSON.parse(current.metadata)
+        : null;
+      return Boolean(
+        metadata &&
+          typeof metadata === "object" &&
+          (metadata as Record<string, unknown>).reviewSummaryMessageId ===
+            acceptanceToken &&
+          (metadata as Record<string, unknown>)
+            .teamRequestNotificationState === "attempted" &&
+          (metadata as Record<string, unknown>)
+            .mavenTeamRequestTelegramThreadAcceptanceToken === acceptanceToken,
+      );
+    } catch {
+      return false;
+    }
   }
 
   async updateTelegramThreadId(

@@ -42,9 +42,41 @@ function makeUpdatingDb(): DrizzleD1Database<Record<string, unknown>> {
   return db as unknown as DrizzleD1Database<Record<string, unknown>>;
 }
 
+interface Deferred {
+  promise: Promise<void>;
+  resolve: () => void;
+}
+
+function createDeferred(): Deferred {
+  let resolve = (): void => undefined;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+class BarrierChatService extends ChatService {
+  constructor(
+    db: DrizzleD1Database<Record<string, unknown>>,
+    private readonly afterTeamRequestRead?: () => Promise<void>,
+    private readonly beforeMetadataPatch?: () => Promise<void>,
+  ) {
+    super(db);
+  }
+
+  protected override async afterNewTeamRequestAuthoritativeRead(): Promise<void> {
+    await this.afterTeamRequestRead?.();
+  }
+
+  protected override async beforeConversationMetadataPatch(): Promise<void> {
+    await this.beforeMetadataPatch?.();
+  }
+}
+
 function createConversationContinuityService(): {
   service: ChatService;
   sqlite: Database;
+  db: DrizzleD1Database<Record<string, unknown>>;
 } {
   const sqlite = new Database(":memory:");
   sqlite.exec(`CREATE TABLE customers (
@@ -84,12 +116,12 @@ function createConversationContinuityService(): {
     created_at integer DEFAULT (unixepoch()) NOT NULL,
     updated_at integer DEFAULT (unixepoch()) NOT NULL
   )`);
-  const db = drizzleSqlite(sqlite, { schema });
+  const sqliteDb = drizzleSqlite(sqlite, { schema });
+  const db = sqliteDb as unknown as DrizzleD1Database<Record<string, unknown>>;
   return {
-    service: new ChatService(
-      db as unknown as DrizzleD1Database<Record<string, unknown>>,
-    ),
+    service: new ChatService(db),
     sqlite,
+    db,
   };
 }
 
@@ -516,7 +548,13 @@ describe("ChatService ownership and atomic writes", () => {
   });
 
   test("contact cleared after the authoritative read prevents the ownership claim", async () => {
-    const { service, sqlite } = createConversationContinuityService();
+    const { sqlite, db } = createConversationContinuityService();
+    const authoritativeRead = createDeferred();
+    const releaseClaim = createDeferred();
+    const service = new BarrierChatService(db, async () => {
+      authoritativeRead.resolve();
+      await releaseClaim.promise;
+    });
     const conversation = await service.createConversation({
       projectId: "project-1",
       customerId: null,
@@ -531,9 +569,11 @@ describe("ChatService ownership and atomic writes", () => {
       conversation.projectId,
       "Visitor needs help.",
     );
+    await authoritativeRead.promise;
     sqlite
       .query("UPDATE conversations SET visitor_email = NULL WHERE id = ?")
       .run(conversation.id);
+    releaseClaim.resolve();
 
     const claim = await claimPromise;
     const latest = await service.getOperationalConversationById(
@@ -546,6 +586,133 @@ describe("ChatService ownership and atomic writes", () => {
       requiredFields: ["email"],
     });
     expect(latest?.status).toBe("active");
+  });
+
+  test("an escalation metadata patch cannot replay stale notification state", async () => {
+    const { service, db } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: JSON.stringify({ source: "widget" }),
+    });
+    expect(
+      await service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Visitor needs help.",
+      ),
+    ).toEqual({ status: "claimed" });
+
+    const staleWriterReady = createDeferred();
+    const releaseStaleWriter = createDeferred();
+    const staleWriter = new BarrierChatService(db, undefined, async () => {
+      staleWriterReady.resolve();
+      await releaseStaleWriter.promise;
+    });
+    const patchPromise = staleWriter.updateConversation(
+      conversation.id,
+      conversation.projectId,
+      {
+        metadata: JSON.stringify({ teamRequestSummaryPending: false }),
+      },
+    );
+    await staleWriterReady.promise;
+    expect(
+      await service.claimNewTeamRequestNotification(
+        conversation.id,
+        conversation.projectId,
+      ),
+    ).toBe(true);
+    releaseStaleWriter.resolve();
+    await patchPromise;
+
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const metadata = JSON.parse(latest?.metadata ?? "{}");
+    expect(metadata.teamRequestNotificationState).toBe("attempted");
+    expect(metadata.teamRequestSummaryPending).toBe(false);
+    expect(metadata.mavenTeamRequestAcceptedAt).toBeString();
+    expect(metadata.source).toBe("widget");
+  });
+
+  test("persists a returned Telegram thread only for the accepted request", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+    sqlite
+      .query("UPDATE conversations SET telegram_thread_id = ? WHERE id = ?")
+      .run("older-thread", conversation.id);
+    expect(
+      await service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Visitor needs help.",
+      ),
+    ).toEqual({ status: "claimed" });
+    expect(
+      await service.claimNewTeamRequestNotification(
+        conversation.id,
+        conversation.projectId,
+      ),
+    ).toBe(true);
+    const accepted = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const acceptedMetadata = JSON.parse(accepted?.metadata ?? "{}");
+    const acceptanceToken = acceptedMetadata.reviewSummaryMessageId as string;
+
+    expect(
+      await service.persistNewTeamRequestTelegramThreadId(
+        conversation.id,
+        conversation.projectId,
+        "prior-acceptance",
+        "999",
+      ),
+    ).toBe(false);
+    expect(
+      await service.persistNewTeamRequestTelegramThreadId(
+        conversation.id,
+        conversation.projectId,
+        acceptanceToken,
+        "123",
+      ),
+    ).toBe(true);
+    expect(
+      await service.persistNewTeamRequestTelegramThreadId(
+        conversation.id,
+        conversation.projectId,
+        acceptanceToken,
+        "123",
+      ),
+    ).toBe(true);
+    expect(
+      await service.persistNewTeamRequestTelegramThreadId(
+        conversation.id,
+        conversation.projectId,
+        acceptanceToken,
+        "456",
+      ),
+    ).toBe(false);
+    expect(
+      (
+        await service.getOperationalConversationById(
+          conversation.id,
+          conversation.projectId,
+        )
+      )?.telegramThreadId,
+    ).toBe("123");
   });
 
   test("trusted contactDeclined permits an atomic claim without saved contact", async () => {

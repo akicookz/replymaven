@@ -84,7 +84,15 @@ function getMissingContactFields(conversation: {
   return requiredFields;
 }
 
-function getEscalationRepairSummary(metadata: string | null): string | null {
+interface AcceptedTeamRequest {
+  acceptanceToken: string;
+  needsRepair: boolean;
+  summary: string;
+}
+
+function getAcceptedTeamRequest(
+  metadata: string | null,
+): AcceptedTeamRequest | null {
   try {
     const parsed: unknown = metadata ? JSON.parse(metadata) : null;
     if (!parsed || typeof parsed !== "object") return null;
@@ -95,10 +103,19 @@ function getEscalationRepairSummary(metadata: string | null): string | null {
       typeof record.reviewSummaryMessageId !== "string" ||
       record.teamRequestSummaryPending === true ||
       record.teamRequestNotificationState === "pending";
-    if (!needsRepair || typeof record.teamRequestSummary !== "string") {
+    if (
+      typeof record.teamRequestSummary !== "string" ||
+      typeof record.reviewSummaryMessageId !== "string"
+    ) {
       return null;
     }
-    return record.teamRequestSummary.trim() || null;
+    const summary = record.teamRequestSummary.trim();
+    if (!summary) return null;
+    return {
+      acceptanceToken: record.reviewSummaryMessageId,
+      needsRepair,
+      summary,
+    };
   } catch {
     return null;
   }
@@ -163,18 +180,18 @@ export function createRequestTeamHelpTool(dependencies: {
       }
 
       if (conversation.status === "waiting_agent") {
-        const repairSummary = getEscalationRepairSummary(
+        const acceptedRequest = getAcceptedTeamRequest(
           conversation.metadata,
         );
-        if (repairSummary) {
+        if (acceptedRequest?.needsRepair) {
           try {
-            const repair = await createEscalation({
+            await createEscalation({
               chatService: dependencies.chatService,
               projectService: dependencies.projectService,
               telegramService: dependencies.telegramService,
               project,
               conversation,
-              summary: repairSummary,
+              summary: acceptedRequest.summary,
               settings,
               env: dependencies.env,
               executionCtx: dependencies.executionCtx,
@@ -185,18 +202,15 @@ export function createRequestTeamHelpTool(dependencies: {
                   dependencies.context.projectId,
                 );
               },
-            });
-            if (repair.telegramThreadId) {
-              try {
-                await dependencies.chatService.updateTelegramThreadId(
+              persistTelegramThreadId(threadId) {
+                return dependencies.chatService.persistNewTeamRequestTelegramThreadId(
                   dependencies.context.conversationId,
                   dependencies.context.projectId,
-                  repair.telegramThreadId,
+                  acceptedRequest.acceptanceToken,
+                  threadId,
                 );
-              } catch {
-                // Ownership is already accepted; thread persistence is repairable.
-              }
-            }
+              },
+            });
           } catch {
             // The durable ownership state remains truthful even if repair fails.
           }
@@ -260,10 +274,12 @@ export function createRequestTeamHelpTool(dependencies: {
       }
 
       try {
+        const acceptedRequest = getAcceptedTeamRequest(
+          claimedConversation.metadata,
+        );
         const acceptedSummary =
-          getEscalationRepairSummary(claimedConversation.metadata) ??
-          parsedInput.data.summary;
-        const submission = await createEscalation({
+          acceptedRequest?.summary ?? parsedInput.data.summary;
+        await createEscalation({
           chatService: dependencies.chatService,
           projectService: dependencies.projectService,
           telegramService: dependencies.telegramService,
@@ -288,19 +304,16 @@ export function createRequestTeamHelpTool(dependencies: {
               dependencies.context.projectId,
             );
           },
-        });
-
-        if (submission.telegramThreadId) {
-          try {
-            await dependencies.chatService.updateTelegramThreadId(
+          persistTelegramThreadId(threadId) {
+            if (!acceptedRequest) return Promise.resolve(false);
+            return dependencies.chatService.persistNewTeamRequestTelegramThreadId(
               dependencies.context.conversationId,
               dependencies.context.projectId,
-              submission.telegramThreadId,
+              acceptedRequest.acceptanceToken,
+              threadId,
             );
-          } catch {
-            // The team request was durably accepted before external effects.
-          }
-        }
+          },
+        });
         return createRequestedResult(agentLabel, "created");
       } catch {
         return createRequestedResult(agentLabel, "created");
