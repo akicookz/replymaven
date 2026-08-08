@@ -1,608 +1,463 @@
-# MCP Connection Presets Implementation Plan
+# Generic MCP Connections and Presets Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Required skill:** Execute with `superpowers:test-driven-development`; use `superpowers:verification-before-completion` before calling the phase complete.
 
-**Goal:** Give each project one generic MCP client with simple PostHog, Stripe, Slack, Attio, Linear, and Custom connection presets, then let owners configure the connected server's native tools directly for Maven sidechat.
+**Goal:** Let a project connect Streamable HTTP MCP servers from simple PostHog, Stripe, Slack, Attio, Linear, or Custom presets, review native tools, and expose enabled read tools to Maven sidechat through one generic path.
 
-**Architecture:** One `MavenIntegrationAgent extends Agent` Durable Object owns each connection's generic MCP client, credentials, OAuth state, and discovered catalog. Presets are inert metadata that only prefill the standard connection form. Native MCP tools are discovered generically, disabled by default, and configured by exact tool name/input-schema fingerprint; there are no provider profiles, canonical actions, reducers, templates, or provider-specific runtime branches.
+**Architecture:** Use the repository's existing `@modelcontextprotocol/sdk` from a Worker `McpConnectionService`. Persist project-scoped connection/catalog/tool settings and AES-GCM-encrypted auth/OAuth material in D1. Presets only prefill the connection form. Native tools are discovered and executed generically; there are no provider actions, profiles, reducers, mappings, or provider-specific branches.
 
-**Tech Stack:** Bun, Hono, D1/Drizzle, Cloudflare Durable Objects, Cloudflare Agents MCP client, AI SDK v6, React 19, TanStack Query, Tailwind CSS v4, Zod v4.
+**Dependency:** Phase 1 internal sidechat channel is complete. Do not add a new Durable Object or chat runtime.
 
-**Prerequisite:** Complete `docs/superpowers/plans/2026-08-07-private-sidechat-foundation.md` first.
+**Design source:** `docs/superpowers/specs/2026-08-07-private-sidechat-mcp-actions-design.md`
 
-**Spec:** `docs/superpowers/specs/2026-08-07-private-sidechat-mcp-actions-design.md` — read sections 5–10 before starting.
+## Non-negotiable invariants
 
-## Global Constraints
-
-- Use Bun only. Never use npm/yarn.
-- Read every target file before modifying it. Preserve unrelated/uncommitted work and use `git add -p` when a named file already contains unrelated edits.
-- Function declarations for named functions/components; arrows only for inline callbacks.
-- One generic MCP transport/catalog/execution path serves every preset and custom connection.
-- Presets contain only ID, label, existing icon path, default URL, auth-mode/setup copy, and official docs URL.
-- No preset may create tools, action templates, canonical action IDs, provider prompts, mappings, reducers, profile versions, provider schemas, identity rules, or code branches.
-- Every discovered native tool starts disabled.
-- Owner/admin configures the native tool directly as enabled, `read | write`, optional project instruction, and write approval mode.
-- MCP annotations may suggest read/write classification but never enable or authorize a tool automatically.
-- Customer lookup instructions prefer canonical `externalId`, then normalized canonical customer email. Never treat visitor-authored text, widget metadata, `visitorName`, or conversation snapshot email as trusted identity.
-- MCP tool inputs/results may reach the private LLM context. They must never render in browser frames, visible messages, public D1 `messages`, Telegram, widget APIs, D1 integration tables, logs, or traces.
-- Credentials, OAuth tokens, and authorization headers never reach the model or D1.
-- Reuse the existing `Actions & Tools` page shell/components. Add only `Connections`; do not add `Agent actions`.
-- No sparkle treatment, marketplace card grid, nested card stack, alert banner, or row separators.
-- Migrations are Drizzle-generated, inspected, and applied locally only.
-- Test each task with targeted tests, `bun run build`, and `bun run lint`; commit only named files; never push/deploy.
+- One generic transport/catalog/call implementation serves all presets and Custom.
+- A preset contains only display/setup metadata and never changes runtime behavior.
+- Every discovered native tool is disabled until an owner/admin reviews it.
+- Tool settings bind to exact connection ID, native tool name, and input-schema fingerprint.
+- Catalog/schema drift disables the tool until reviewed.
+- Trusted identity comes from the linked canonical customer: external ID first, normalized email fallback.
+- Native tool inputs/results may reach the private LLM turn but never browser events, message rows, public transcripts, Telegram, logs, traces, or safe activity records.
+- Phase 2 executes only tools configured as `read`. Configured `write` tools remain unavailable until phase 3.
+- Do not add `MavenIntegrationAgent`, provider enums that affect execution, canonical actions, schema mappings, or reducers.
 
 ---
 
-### Task 1: Add the generic integration-agent binding and RPC shell
+## Task 1: Define inert preset and generic MCP contracts
 
 **Files:**
-- Modify: `wrangler.jsonc`
-- Modify: `worker/types.ts`
-- Modify: `worker/index.ts`
-- Create: `worker/agents/maven-integration-agent.ts`
-- Create: `worker/agents/maven-integration-agent.test.ts`
-- Modify: `worker-configuration.d.ts`
 
-**Interfaces:**
-
-```typescript
-export interface IntegrationAgentRpc {
-  connect(input: McpConnectInput): Promise<McpConnectionState>;
-  getCatalog(): Promise<McpToolCatalog>;
-  refreshCatalog(): Promise<McpToolCatalog>;
-  callTool(input: NativeMcpToolCall): Promise<NativeMcpToolResult>;
-  disconnect(): Promise<void>;
-}
-```
-
-- [ ] **Step 1: Write a failing export/binding test**
-
-Assert the Worker exports `MavenIntegrationAgent`, `AppEnv` contains `MAVEN_INTEGRATION`, and the class exposes no browser WebSocket chat route.
-
-```bash
-bun test worker/agents/maven-integration-agent.test.ts
-```
-
-Expected: fail because the class/binding do not exist.
-
-- [ ] **Step 2: Add the Durable Object binding**
-
-Append `MAVEN_INTEGRATION -> MavenIntegrationAgent` and migration tag `v3-maven-integration-agent` with `new_sqlite_classes: ["MavenIntegrationAgent"]`. Do not edit earlier migration tags or enable traces.
-
-- [ ] **Step 3: Add a sealed shell and regenerate types**
-
-The shell rejects direct WebSocket/client access. Only authenticated Hono handlers and `MavenSidechatAgent` may call its RPC methods.
-
-```bash
-bun run cf-typegen
-bun test worker/agents/maven-integration-agent.test.ts
-bun run build
-bun run lint
-```
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add wrangler.jsonc worker/types.ts worker/index.ts worker/agents/maven-integration-agent.ts worker/agents/maven-integration-agent.test.ts worker-configuration.d.ts
-git commit -m "chore: add generic MCP connection agent"
-```
-
----
-
-### Task 2: Define the inert preset catalog and generic MCP contracts
-
-**Files:**
-- Create: `shared/mcp-types.ts`
 - Create: `shared/mcp-presets.ts`
 - Create: `shared/mcp-presets.test.ts`
+- Create: `shared/mcp-types.ts`
 
-**Contracts:**
+### Step 1: Write failing preset tests
 
-```typescript
-export type McpPresetId =
-  | "posthog"
-  | "stripe"
-  | "slack"
-  | "attio"
-  | "linear";
+Define expected presets:
 
-export interface McpConnectionPreset {
-  id: McpPresetId;
-  label: string;
-  iconPath: string;
-  defaultUrl: string;
-  authMode: "oauth_discovery" | "oauth_client_credentials";
-  setupCopy: string;
-  docsUrl: string;
-}
-
-export interface McpToolCatalogEntry {
-  name: string;
-  description: string;
-  inputSchema: JsonSchema;
-  inputSchemaFingerprint: string;
-  annotations: {
-    readOnlyHint?: boolean;
-    destructiveHint?: boolean;
-    idempotentHint?: boolean;
-    openWorldHint?: boolean;
-  };
-}
-```
-
-- [ ] **Step 1: Write failing preset tests**
-
-Assert exact records:
-
-| Preset | URL | Auth |
+| ID | Label | URL |
 |---|---|---|
-| PostHog | `https://mcp.posthog.com/mcp` | OAuth discovery |
-| Stripe | `https://mcp.stripe.com` | OAuth discovery |
-| Slack | `https://mcp.slack.com/mcp` | OAuth client credentials |
-| Attio | `https://mcp.attio.com/mcp` | OAuth discovery |
-| Linear | `https://mcp.linear.app/mcp` | OAuth discovery |
+| `posthog` | PostHog | `https://mcp.posthog.com/mcp` |
+| `stripe` | Stripe | `https://mcp.stripe.com` |
+| `slack` | Slack | `https://mcp.slack.com/mcp` |
+| `attio` | Attio | `https://mcp.attio.com/mcp` |
+| `linear` | Linear | `https://mcp.linear.app/mcp` |
 
-Also assert existing icon paths under `/integrations/*.svg`, official docs URLs, unique IDs, HTTPS URLs, and that preset objects have no keys matching `action`, `tool`, `profile`, `reducer`, `mapping`, `prompt`, or `schema`.
+Assert HTTPS URLs, unique IDs, valid existing icon/docs paths, and absence of keys matching `action`, `tool`, `profile`, `reducer`, `mapping`, `prompt`, `identity`, `schema`, or `parameter`.
 
-- [ ] **Step 2: Implement the immutable catalog**
+Custom is a picker choice, not a stored preset object.
 
-Export `MCP_CONNECTION_PRESETS` as a readonly array and `getMcpPreset(id)`. Custom is a UI choice, not a stored preset record; it leaves URL/auth fields editable.
+### Step 2: Define transport-neutral types
 
-- [ ] **Step 3: Define generic connection/catalog/call contracts**
+Types cover:
 
-Include connection state, safe catalog, tool settings, OAuth start/callback state, native tool call, raw private result, and normalized transport error. Do not add provider unions beyond optional `presetId`.
+- safe connection summary;
+- auth mode (`oauth | bearer | headers | none`);
+- safe catalog entry (native name, description, input schema, annotations, fingerprint);
+- per-tool setting (`enabled`, `read | write`, optional bounded instructions, approval mode);
+- generic call request/result used only inside Worker scope; and
+- normalized transport errors without payloads.
 
-- [ ] **Step 4: Verify no provider behavior entered the catalog**
+Do not add provider unions beyond nullable `presetId`.
+
+### Step 3: Verify
 
 ```bash
 bun test shared/mcp-presets.test.ts
-rg -n "canonical|reducer|billing_summary|refund_payment|post_internal|add_note|create_issue" shared/mcp-presets.ts shared/mcp-types.ts
-bun run build
+rg -n "billing_summary|refund_payment|post_internal|add_note|create_issue|canonical|reducer" shared/mcp-*.ts
 ```
 
-Expected: tests pass and the search returns zero hits.
+Expected grep: no matches.
 
-- [ ] **Step 5: Commit**
+### Step 4: Commit
 
 ```bash
-git add shared/mcp-types.ts shared/mcp-presets.ts shared/mcp-presets.test.ts
-git commit -m "feat: define simple MCP connection presets"
+git add shared/mcp-presets.ts shared/mcp-presets.test.ts shared/mcp-types.ts
+git commit -m "feat: define inert MCP connection presets"
 ```
 
 ---
 
-### Task 3: Persist connection metadata, native tool settings, and safe run metadata
+## Task 2: Add project-scoped MCP connection and tool-setting storage
 
 **Files:**
+
 - Modify: `worker/db/schema.ts`
-- Create: generated `worker/db/drizzle/006X_*.sql`
-- Modify: generated `worker/db/drizzle/meta/*`
-- Create: `worker/services/mcp-connection-service.ts`
-- Create: `worker/services/mcp-connection-service.test.ts`
-- Create: `worker/services/mcp-tool-service.ts`
-- Create: `worker/services/mcp-tool-service.test.ts`
+- Create: generated migration under `worker/db/drizzle/`
+- Create: `worker/db/mcp-connection-schema.test.ts`
 
-**Tables:**
+### Step 1: Write failing schema tests
 
-```text
-integration_connections
-  projectId, presetId?, displayName, serverUrl, agentName, sdkServerId,
-  state, catalogFingerprint, lastErrorCode?, connectedAt?, timestamps
+Add tables:
 
-integration_tool_settings
-  projectId, connectionId, toolName, inputSchemaFingerprint, enabled,
-  access(read|write), approvalMode(every_time|always), projectInstruction?,
-  configuredBy, timestamps
+### `mcp_connections`
 
-mcp_tool_runs
-  projectId, conversationId, connectionId, toolName, status,
-  approvalMode?, approvalActorId?, durationMs?, argumentHash?, errorCode?, timestamps
-```
+- project ID;
+- nullable preset ID;
+- display name;
+- server URL;
+- auth mode;
+- encrypted auth material;
+- encrypted OAuth client/tokens/state as needed by the SDK provider;
+- connection state;
+- catalog fingerprint and encrypted/safe cached catalog strategy;
+- last checked/connected timestamp;
+- bounded safe error code;
+- timestamps.
 
-No table contains OAuth state/token, authorization header, full catalog/schema, tool arguments, or tool result.
+### `mcp_tool_settings`
 
-- [ ] **Step 1: Write failing service tests**
+- connection/project IDs;
+- native tool name;
+- input-schema fingerprint;
+- enabled;
+- access `read | write`;
+- bounded optional instructions;
+- write approval mode;
+- reviewed by/at;
+- timestamps;
+- unique exact setting scope.
 
-Cover project scoping, optional preset ID, arbitrary custom connection, unique stable agent/server IDs, all discovered tools disabled until configured, exact tool/schema setting uniqueness, instruction length cap, catalog drift disablement, safe run metadata, and absence of secret/raw columns.
+### `mcp_action_runs`
 
-- [ ] **Step 2: Implement schema/services**
+- safe audit only: project, conversation, connection, native tool name, access, status, approval actor/mode, duration, schema fingerprint, safe summary/error code, timestamps.
 
-Require `(projectId, connectionId)` for every lookup/mutation. `approvalMode` is accepted only when `access="write"`; read tools always store `every_time` internally but do not prompt.
+Tests must prove:
 
-- [ ] **Step 3: Generate, inspect, and apply migration**
+- project cascade cleanup;
+- arbitrary Custom HTTPS server support;
+- exact setting uniqueness;
+- disabled-by-default behavior;
+- instruction length bounds at validation/service layer; and
+- no plaintext credential, raw arguments, or raw result column.
+
+### Step 2: Implement and generate migration
+
+Reuse `worker/services/encryption-service.ts` for AES-GCM. Never return encrypted blobs from API serializers.
 
 ```bash
 bun run db:generate
 bun run db:migrate:dev
+bun test worker/db/mcp-connection-schema.test.ts
 ```
 
-The SQL may only create the three named tables/indexes. It must not rebuild or drop existing tables.
-
-- [ ] **Step 4: Verify and commit**
+### Step 3: Commit
 
 ```bash
-bun test worker/services/mcp-connection-service.test.ts worker/services/mcp-tool-service.test.ts
-bun run build
-git add worker/db/schema.ts worker/services/mcp-connection-service.ts worker/services/mcp-connection-service.test.ts worker/services/mcp-tool-service.ts worker/services/mcp-tool-service.test.ts
-git add -p worker/db/drizzle
-git diff --cached --name-only
-git commit -m "feat: persist generic MCP tool settings"
+git add worker/db/schema.ts worker/db/drizzle worker/db/mcp-connection-schema.test.ts
+git commit -m "feat: persist generic MCP connection settings"
 ```
-
-The staged list must contain only the new migration/meta files and named schema/service/test files.
 
 ---
 
-### Task 4: Build one generic MCP client runtime
+## Task 3: Implement one Worker MCP client service
 
 **Files:**
-- Create: `worker/agents/mcp-runtime.ts`
-- Create: `worker/agents/mcp-runtime.test.ts`
-- Replace shell: `worker/agents/maven-integration-agent.ts`
-- Modify: `worker/agents/maven-integration-agent.test.ts`
 
-**Runtime boundary:**
+- Create: `worker/services/mcp-connection-service.ts`
+- Create: `worker/services/mcp-connection-service.test.ts`
+- Create: `worker/mcp-client/create-mcp-client.ts`
+- Create: `worker/mcp-client/oauth-provider.ts`
+- Create: `worker/mcp-client/schema-fingerprint.ts`
+- Create: matching tests under `worker/mcp-client/`
+- Reuse: `worker/services/encryption-service.ts`
 
-```typescript
-export interface McpRuntime {
-  connect(input: McpConnectInput): Promise<McpConnectionState>;
-  getCatalog(): Promise<McpToolCatalog>;
-  callTool(input: NativeMcpToolCall): Promise<NativeMcpToolResult>;
-  disconnect(): Promise<void>;
-}
-```
+### Step 1: Build a fake Streamable HTTP MCP server fixture
 
-- [ ] **Step 1: Write failing fake-transport tests**
+The fixture exposes:
 
-Cover Streamable HTTP, stable server ID, OAuth-discovery pending/connected, confidential OAuth fields, bearer auth for Custom, no-auth Custom, catalog listing, exact native tool call, timeout, reconnect, disconnect, normalized errors, and credential non-export.
+- one read tool;
+- one write tool;
+- JSON Schema inputs;
+- annotations;
+- controllable OAuth/bearer behavior;
+- schema drift;
+- large/sensitive results; and
+- timeout/ambiguous transport failures.
 
-- [ ] **Step 2: Implement generic connection lifecycle**
+Use it for every preset and Custom; do not mock separate provider behavior.
 
-Use the Cloudflare Agents MCP client behind `McpRuntime`. Preset ID is never switched on after UI form hydration; runtime consumes only the generic resolved URL/auth input.
+### Step 2: Write failing service tests
 
-- [ ] **Step 3: Implement generic catalog serialization**
+Cover:
 
-Return native name, description, JSON input schema, annotations, and deterministic input-schema fingerprint. Store catalog bodies in integration-agent SQLite only. D1 receives the aggregate catalog fingerprint and configured tool settings.
+- SSRF-safe HTTPS URL validation and redirect revalidation;
+- connect/initialize/listTools/callTool/close with `@modelcontextprotocol/sdk`;
+- OAuth state/PKCE/replay/expiry and encrypted token refresh;
+- bearer/header decryption only inside call scope;
+- catalog fingerprint stability;
+- catalog drift disabling affected settings;
+- connection/project scoping;
+- deadline and response-size limits;
+- transport errors reduced to safe codes; and
+- raw arguments/results absent from logs and returned API DTOs.
 
-- [ ] **Step 4: Implement exact native execution**
+### Step 3: Implement the generic client lifecycle
 
-Validate current fingerprint, validate arguments against the current native input schema, call exactly `(sdkServerId, toolName)`, and return the raw MCP result only over private typed RPC to sidechat. Do not parse or transform it by provider.
+For discovery or a sidechat turn:
 
-- [ ] **Step 5: Prove presets do not affect runtime behavior**
+1. load and authorize the project connection;
+2. decrypt auth material in memory;
+3. construct `Client` + `StreamableHTTPClientTransport`;
+4. connect and perform the bounded operation;
+5. close in `finally`;
+6. clear references to decrypted data; and
+7. persist only safe connection/catalog/run metadata.
 
-Run the same fake catalog/tool execution once with each preset ID and once as Custom. The transport calls/results must be byte-equivalent after resolved URL/auth input.
+Reuse one connected client for multiple tool calls within a single sidechat turn. Do not introduce a long-lived global client or isolate-global customer state.
+
+### Step 4: Prove presets are runtime-inert
+
+Resolve each preset form to the fake server in test mode and run the same discovery/call. After URL/auth resolution, captured SDK operations must be equivalent for every preset and Custom.
+
+### Step 5: Verify
 
 ```bash
-bun test worker/agents/mcp-runtime.test.ts worker/agents/maven-integration-agent.test.ts
-bun run build
+bun test worker/services/mcp-connection-service.test.ts worker/mcp-client
 bun run lint
-```
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add worker/agents/mcp-runtime.ts worker/agents/mcp-runtime.test.ts worker/agents/maven-integration-agent.ts worker/agents/maven-integration-agent.test.ts
-git commit -m "feat: connect arbitrary MCP servers generically"
-```
-
----
-
-### Task 5: Secure remote URLs, OAuth, and credential submission
-
-**Files:**
-- Create: `worker/security/mcp-server-url.ts`
-- Create: `worker/security/mcp-server-url.test.ts`
-- Create: `worker/security/mcp-oauth-state.ts`
-- Create: `worker/security/mcp-oauth-state.test.ts`
-- Modify: `worker/agents/mcp-runtime.ts`
-- Modify: `worker/agents/mcp-runtime.test.ts`
-
-- [ ] **Step 1: Write failing URL/OAuth tests**
-
-Cover HTTPS-only, production loopback/private/link-local denial, development loopback exception, URL userinfo/fragment rejection, redirect revalidation, callback host/state/PKCE mismatch, expired state, cross-project connection ID, secret redaction, and callback replay.
-
-- [ ] **Step 2: Implement generic URL validation**
-
-Apply the same validation to presets and Custom. A preset URL is editable only after selecting Custom; backend still validates all URLs rather than trusting preset ID.
-
-- [ ] **Step 3: Implement generic auth flows**
-
-- `oauth_discovery`: use MCP OAuth metadata/dynamic registration supported by the Agents client.
-- `oauth_client_credentials`: accept client ID/secret through the authenticated route and forward directly to the integration agent; never store/return them in D1.
-- `bearer`: accept a header value through the authenticated Custom flow and store only inside the integration agent.
-- `none`: permit only when explicitly selected for Custom.
-
-- [ ] **Step 4: Verify and commit**
-
-```bash
-bun test worker/security/mcp-server-url.test.ts worker/security/mcp-oauth-state.test.ts worker/agents/mcp-runtime.test.ts
 bun run build
-git add worker/security/mcp-server-url.ts worker/security/mcp-server-url.test.ts worker/security/mcp-oauth-state.ts worker/security/mcp-oauth-state.test.ts worker/agents/mcp-runtime.ts worker/agents/mcp-runtime.test.ts
-git commit -m "feat: secure generic MCP authentication"
+```
+
+### Step 6: Commit
+
+```bash
+git add worker/services/mcp-connection-service.ts worker/services/mcp-connection-service.test.ts worker/mcp-client
+git commit -m "feat: consume MCP servers through one Worker service"
 ```
 
 ---
 
-### Task 6: Add authenticated connection and native-tool configuration APIs
+## Task 4: Add authenticated connection, OAuth, catalog, and tool-setting APIs
 
 **Files:**
-- Create: `worker/routes/mcp-connection-handlers.ts`
-- Create: `worker/routes/mcp-connection-handlers.test.ts`
-- Modify: `worker/index.ts`
+
 - Modify: `worker/validation.ts`
 - Modify: `worker/validation.test.ts`
+- Modify: `worker/index.ts`
+- Create: `worker/routes/mcp-connection-handlers.ts`
+- Create: `worker/routes/mcp-connection-handlers.test.ts`
 
-**Endpoints:**
+### Step 1: Write failing route tests
+
+Cover:
+
+- unauthenticated `401`;
+- cross-project `404`;
+- owner/admin mutation and member read behavior according to existing project access helpers;
+- safe list/detail serialization with no secrets;
+- preset ID validation without trusting its URL;
+- Custom HTTPS URL validation;
+- OAuth start/callback state and replay rejection;
+- connect/reconnect/disconnect;
+- catalog refresh;
+- tool setting update bound to current fingerprint;
+- write tool cannot become executable before phase 3; and
+- stale settings return `needs_review`.
+
+### Step 2: Add routes before SPA fallback
+
+Suggested routes:
 
 ```text
 GET    /api/projects/:id/mcp-connections
 POST   /api/projects/:id/mcp-connections
 GET    /api/projects/:id/mcp-connections/:connectionId
-POST   /api/projects/:id/mcp-connections/:connectionId/connect
-GET    /api/projects/:id/mcp-connections/:connectionId/oauth/callback
-POST   /api/projects/:id/mcp-connections/:connectionId/refresh
-PUT    /api/projects/:id/mcp-connections/:connectionId/tools/:toolName
+PATCH  /api/projects/:id/mcp-connections/:connectionId
 DELETE /api/projects/:id/mcp-connections/:connectionId
+POST   /api/projects/:id/mcp-connections/:connectionId/connect
+POST   /api/projects/:id/mcp-connections/:connectionId/refresh
+PATCH  /api/projects/:id/mcp-connections/:connectionId/tools/:toolName
+GET    /api/mcp-client/oauth/:connectionId/callback
 ```
 
-- [ ] **Step 1: Write failing auth/validation tests**
+OAuth callback state must bind project, connection, initiating user, redirect origin, expiry, and nonce. Never accept a project/connection reassignment from callback query data.
 
-Cover unauthenticated 401, wrong project 404, member write denial, valid owner/admin access, preset URL tampering, Custom URL/auth validation, cross-project IDs, secret non-echo, OAuth replay, missing current catalog fingerprint, unknown tool, schema drift, and invalid access/approval combinations.
+### Step 3: Serialize safe DTOs explicitly
 
-- [ ] **Step 2: Implement connection routes**
+Return preset/display metadata, connection state, catalog fingerprint, safe native schemas/annotations, tool settings, and safe errors. Do not spread database rows into JSON.
 
-The POST accepts `presetId | null`, display name, resolved URL, and auth mode. Preset selection is validated against `shared/mcp-presets.ts`, but the resulting connection row/runtime remains generic.
-
-- [ ] **Step 3: Implement native tool settings**
-
-The PUT body is exactly:
-
-```typescript
-{
-  enabled: boolean;
-  access: "read" | "write";
-  approvalMode: "every_time" | "always";
-  projectInstruction: string | null;
-  inputSchemaFingerprint: string;
-}
-```
-
-Re-read the current catalog inside the integration agent before saving. Any mismatch returns 409 and leaves the tool disabled.
-
-- [ ] **Step 4: Implement disconnect ordering**
-
-Mark `disconnecting`, remove SDK server/credentials and destroy integration-agent state, then delete connection/tool settings. Persist a cleanup retry before returning if destruction fails.
-
-- [ ] **Step 5: Verify and commit**
+### Step 4: Verify
 
 ```bash
 bun test worker/routes/mcp-connection-handlers.test.ts worker/validation.test.ts
-bun run build
-bun run lint
-git add worker/routes/mcp-connection-handlers.ts worker/routes/mcp-connection-handlers.test.ts worker/index.ts worker/validation.ts worker/validation.test.ts
-git commit -m "feat: configure native MCP tools"
 ```
 
----
-
-### Task 7: Add canonical customer context to the private model only
-
-**Files:**
-- Modify: `worker/agents/sidechat-context.ts`
-- Modify: `worker/agents/sidechat-context.test.ts`
-- Modify: `worker/agents/sidechat-prompt.ts`
-- Modify: `worker/agents/sidechat-prompt.test.ts`
-
-- [ ] **Step 1: Write failing customer-context tests**
-
-Cover linked project customer, external ID present, normalized canonical email fallback, missing identity, project isolation, and refusal to use conversation `visitorEmail`, `visitorName`, widget metadata, customer custom fields, or visitor message text as identity.
-
-- [ ] **Step 2: Expose minimal trusted identity to Maven**
-
-The private context contains customer display name, external ID, and normalized email. There is no provider mapper. The native MCP tool schema determines which argument Maven uses.
-
-- [ ] **Step 3: Add exact prompt tests**
-
-Assert instructions:
-
-- prefer external ID; use email only when external ID is absent or unsupported by the native tool;
-- MCP data is private working context, not copy;
-- answer the dashboard human concisely;
-- never dump tool results, records, identifiers, emails, internal links, or hidden metadata;
-- never put them in `presentReplyDraft` unless the human explicitly asks to include a specific safe fact;
-- never invent results when a tool fails.
-
-- [ ] **Step 4: Verify and commit**
+### Step 5: Commit
 
 ```bash
-bun test worker/agents/sidechat-context.test.ts worker/agents/sidechat-prompt.test.ts
-bun run build
-git add worker/agents/sidechat-context.ts worker/agents/sidechat-context.test.ts worker/agents/sidechat-prompt.ts worker/agents/sidechat-prompt.test.ts
-git commit -m "feat: provide private customer lookup context"
+git add worker/validation.ts worker/validation.test.ts worker/index.ts worker/routes/mcp-connection-handlers.ts worker/routes/mcp-connection-handlers.test.ts
+git commit -m "feat: manage project MCP connections"
 ```
 
 ---
 
-### Task 8: Expose enabled native MCP tools to Think generically
+## Task 5: Expose configured native read tools to the existing sidechat runtime
 
 **Files:**
-- Create: `worker/agents/sidechat-mcp-tools.ts`
-- Create: `worker/agents/sidechat-mcp-tools.test.ts`
-- Modify: `worker/agents/maven-sidechat-agent.ts`
-- Modify: `worker/agents/sidechat-runtime.ts`
-- Modify: `worker/agents/sidechat-runtime.test.ts`
 
-- [ ] **Step 1: Write failing dynamic-tool tests**
+- Create: `worker/chat-runtime/sidechat/build-mcp-tools.ts`
+- Create: `worker/chat-runtime/sidechat/build-mcp-tools.test.ts`
+- Modify: `worker/chat-runtime/sidechat/build-sidechat-context.ts`
+- Modify: `worker/chat-runtime/sidechat/build-sidechat-prompt.ts`
+- Modify: `worker/chat-runtime/sidechat/run-sidechat-turn.ts`
 
-Cover disabled tool omitted, enabled read included, write omitted from phase 2 execution until phase 3 wrapper exists, exact native name/description/schema, project instruction appended after the server description, fingerprint recheck, multiple connections with namespaced stable tool IDs, and no provider branching.
+### Step 1: Write failing dynamic-tool tests
 
-- [ ] **Step 2: Implement generic AI SDK tool construction**
+Assert:
 
-For each enabled current catalog entry, build one dynamic AI SDK tool from its native JSON Schema. Use a stable model-facing key derived from connection ID/tool name while preserving exact native name in execution metadata. The executor calls `MavenIntegrationAgent.callTool` by typed RPC.
+- only enabled, current-fingerprint, `read` tools appear;
+- write tools do not appear in phase 2;
+- model-facing keys are stable and collision-safe while native names remain exact internally;
+- native JSON Schema is passed without provider transformation;
+- per-tool instructions are bounded and clearly untrusted project configuration, never system override text;
+- trusted external ID and email are supplied to context, not injected into arbitrary parameters;
+- system prompt says external ID first, email fallback;
+- raw call arguments/results reach only the in-memory model tool loop; and
+- sentinels do not enter message content/metadata, WebSocket events, public replies, D1 run rows, or captured logs.
 
-- [ ] **Step 3: Keep raw results private while allowing model access**
+### Step 2: Build AI SDK tools generically
 
-Return native MCP results to the model execution context unchanged. The sidechat client projection must replace tool input/output UI parts with a bounded activity part containing connection label, tool display name, state, and safe error code only.
+For every eligible setting, create one AI SDK tool from native schema. The executor calls `McpConnectionService.callTool` with exact connection/tool/arguments.
 
-Plant unique argument/result sentinels and assert they do not appear in serialized WebSocket/UI frames, visible sidechat messages, D1, public `messages`, or captured logs.
+Do not add switch statements for PostHog, Stripe, Slack, Attio, or Linear.
 
-- [ ] **Step 4: Restrict active tools per turn**
+### Step 3: Make the model summarize, never dump
 
-`beforeTurn().activeTools` includes only `presentReplyDraft` plus enabled tools whose current fingerprints still match settings. Keep `workspaceBash=false` and `sendReasoning=false`.
+The sidechat prompt must say:
 
-- [ ] **Step 5: Verify and commit**
+- answer the human's task rather than reproducing records;
+- never paste raw MCP output, internal IDs, internal links, hidden metadata, or unnecessary personal data;
+- state uncertainty when a tool fails; and
+- keep `reply_draft` limited to facts appropriate for the visitor.
+
+Persist only the final safe Maven message and optional structured draft.
+
+### Step 4: Verify
 
 ```bash
-bun test worker/agents/sidechat-mcp-tools.test.ts worker/agents/sidechat-runtime.test.ts
-bun run build
-bun run lint
-git add worker/agents/sidechat-mcp-tools.ts worker/agents/sidechat-mcp-tools.test.ts worker/agents/maven-sidechat-agent.ts worker/agents/sidechat-runtime.ts worker/agents/sidechat-runtime.test.ts
-git commit -m "feat: expose configured MCP tools to sidechat"
+bun test worker/chat-runtime/sidechat/build-mcp-tools.test.ts worker/chat-runtime/sidechat
+```
+
+### Step 5: Commit
+
+```bash
+git add worker/chat-runtime/sidechat
+git commit -m "feat: give sidechat configured MCP read tools"
 ```
 
 ---
 
-### Task 9: Add the Connections tab using existing settings primitives
+## Task 6: Add the Connections UI using existing project settings patterns
 
 **Files:**
+
 - Modify: `src/pages/QuickActions.tsx`
-- Create: `src/components/connections/ConnectionsPanel.tsx`
-- Create: `src/components/connections/ConnectionPicker.tsx`
-- Create: `src/components/connections/ConnectionRow.tsx`
-- Create: `src/components/connections/ConnectionDialog.tsx`
-- Create: `src/components/connections/NativeToolRow.tsx`
-- Create: `src/components/connections/connections-ui.test.ts`
-- Modify: `src/pages/McpConnections.tsx`
+- Create: `src/components/integrations/McpConnectionsPanel.tsx`
+- Create: `src/components/integrations/McpConnectionDialog.tsx`
+- Create: `src/components/integrations/McpConnectionRow.tsx`
+- Create: `src/components/integrations/McpToolRow.tsx`
+- Create: `src/lib/mcp-connections.ts`
+- Create: `src/lib/mcp-connections.test.ts`
 
-- [ ] **Step 1: Write failing navigation/copy tests**
+### Step 1: Implement API/cache helpers first
 
-Exact project tabs:
+Add typed TanStack Query keys and safe DTO parsing for list/detail/create/update/delete/connect/refresh/tool settings.
 
-```text
-Actions | Tools | Connections
-```
+### Step 2: Add compact preset selection
 
-Assert no `Agent actions` tab, provider action list, marketplace grid, sparkle icon, raw schema/result, or credential echo. Settings > MCP copy must state it is for external clients connecting to ReplyMaven.
+The picker uses compact rows for PostHog, Stripe, Slack, Attio, Linear, and Custom. Selecting a preset fills label/URL/setup copy only. Custom exposes editable URL/auth fields.
 
-- [ ] **Step 2: Add compact preset selection**
+Do not render cards for provider actions because presets do not define actions.
 
-Use the existing page shell, segment control, shadcn Dialog, Button, Input, Label, Select, and Switch. Presets render as compact selectable rows using `/integrations/{provider}.svg`, provider name, and short connection copy. Selecting one fills URL/auth fields. `Custom` leaves them editable. Do not add large provider cards or provider-specific form components.
+### Step 3: Render the native catalog directly
 
-- [ ] **Step 3: Add the generic connection dialog**
+Each tool row shows:
 
-Fields:
+- native name and description;
+- enabled control;
+- read/write classification;
+- optional instructions;
+- approval setting disabled/explained for writes until phase 3;
+- `needs review` state on drift.
 
-- display name;
-- MCP URL;
-- auth mode;
-- Slack/generic confidential OAuth client ID and secret when selected;
-- bearer token when selected for Custom.
+Reuse existing typography, muted surfaces, compact buttons, controls, dialogs, and spacing. No sparkle, marketplace aesthetic, separator rules, or provider-specific copy beyond preset setup.
 
-Sensitive inputs are write-only and clear after submission. OAuth progress appears as local description text, not an alert card.
+### Step 4: Cover UI states
 
-- [ ] **Step 4: Add connection rows and native tool settings**
+Loading, empty, preset selected, Custom, OAuth pending, connected, degraded, empty catalog, tool disabled, read enabled, write pending phase 3, schema changed, reconnecting, and disconnect confirmation.
 
-Each connection row shows preset icon/name, display name, status, last checked, and compact overflow actions. Expanded/detail content lists discovered native tools directly. Each `NativeToolRow` has:
-
-- native tool name and server description;
-- enabled switch;
-- Read/Write select;
-- write approval select (`Ask every time` / `Always allow`);
-- optional project instruction;
-- schema-changed description with only the critical sentence bold.
-
-Do not rename native tools into ReplyMaven actions.
-
-- [ ] **Step 5: Cover UI states**
-
-Loading, no connections, preset selected, custom form, OAuth pending, connected, degraded, empty catalog, tool disabled, tool configured, schema changed, reconnecting, and disconnect confirmation preserve the same page geometry. Errors remain local to the row/dialog.
-
-- [ ] **Step 6: Verify and commit**
+### Step 5: Verify
 
 ```bash
-bun test src/components/connections/connections-ui.test.ts
-bun run build
+bun test src/lib/mcp-connections.test.ts
 bun run lint
-git add src/pages/QuickActions.tsx src/components/connections/ConnectionsPanel.tsx src/components/connections/ConnectionPicker.tsx src/components/connections/ConnectionRow.tsx src/components/connections/ConnectionDialog.tsx src/components/connections/NativeToolRow.tsx src/components/connections/connections-ui.test.ts src/pages/McpConnections.tsx
-git commit -m "feat: configure MCP connections from presets"
+bun run build
+```
+
+### Step 6: Commit
+
+```bash
+git add src
+git commit -m "feat: configure generic MCP connections from presets"
 ```
 
 ---
 
-### Task 10: Enforce integration lifecycle and privacy-safe observability
+## Task 7: Phase acceptance and provider smoke checks
 
 **Files:**
-- Create: `worker/services/mcp-retention-service.ts`
-- Create: `worker/services/mcp-retention-service.test.ts`
-- Modify: `worker/services/project-service.ts`
-- Modify: `worker/index.ts`
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- Create: `docs/superpowers/verification/2026-08-08-generic-mcp-connections.md`
 
-Cover connection/project deletion, credential removal, OAuth-state removal, agent destruction, retry after partial cleanup, stale safe-run retention, catalog-body exclusion from D1, and idempotent missing-agent cleanup.
-
-- [ ] **Step 2: Implement cleanup ordering**
-
-Record durable cleanup, mark connection disconnecting, remove MCP registration/credentials and agent SQLite, delete tool settings, then delete connection metadata. Project deletion repeats this per connection before D1 cascade.
-
-- [ ] **Step 3: Add log/trace allowlist tests**
-
-Only event name, project/connection/conversation IDs, native tool name, status, safe error code, duration, approval mode/actor ID, and hashes may be logged. Plant sentinels in OAuth fields, customer identity, tool arguments, and raw results; assert zero captured occurrences. Keep Workers traces disabled.
-
-- [ ] **Step 4: Verify and commit**
-
-```bash
-bun test worker/services/mcp-retention-service.test.ts
-bun test
-bun run build
-bun run lint
-git diff --check
-git add worker/services/mcp-retention-service.ts worker/services/mcp-retention-service.test.ts worker/services/project-service.ts worker/index.ts
-git commit -m "feat: enforce MCP connection lifecycle"
-```
-
----
-
-### Task 11: Run generic MCP and visual acceptance
-
-**Files:**
-- Modify only phase-2 files when a measured defect is found
-- Create: `docs/superpowers/verification/2026-08-08-mcp-connection-presets.md`
-
-- [ ] **Step 1: Exercise every preset through one generic fixture**
-
-Use a disposable Streamable HTTP MCP test server with read and write tools. Resolve each preset form, then override only the test URL in development. Prove every preset takes the identical connection/catalog/call code path and that Custom uses the same path.
-
-- [ ] **Step 2: Verify actual provider connection setup**
-
-Against non-production/sandbox accounts where available, verify endpoint discovery/OAuth only for PostHog, Stripe, Slack, Attio, and Linear. Do not add provider code if a provider changes its auth flow; update inert preset metadata/setup copy or use Custom.
-
-- [ ] **Step 3: Run disclosure sentinel tests**
-
-Put unique sentinels into MCP arguments/results. Prove the model can consume the result to answer a bounded private question while sentinels do not appear in browser frames, visible sidechat prose, reply draft, D1, logs, public transcript, widget, or Telegram.
-
-- [ ] **Step 4: Capture the Connections UI matrix**
-
-At `1440x1000`, `1100x900`, `768x900`, and `390x844`, capture loading, empty, picker, OAuth, connected, degraded, native tools, schema-changed, and long-description states in light/dark mode and 200% zoom. Compare page width, typography, radii, shadows, row height, controls, focus rings, icon size, and spacing against existing Actions/Tools.
-
-- [ ] **Step 5: Final verification**
+### Step 1: Automated verification
 
 ```bash
 bun test
-bun run build
 bun run lint
-git diff --check
-rg -n "billing_summary|refund_payment|post_internal_message|attio\.record|linear\.issues|provider-profiles|canonicalAction" worker src shared
+bun run build
 ```
 
-Expected: test/build/lint match baseline, no whitespace errors, and the provider-specific search returns zero new feature hits.
+### Step 2: Generic path proof
 
-- [ ] **Step 6: Commit verification-only fixes and evidence**
+Use the fake server to show all presets and Custom take the identical validation, client, discovery, fingerprint, configuration, and call paths.
 
-Stage the verification document and only exact files changed to fix measured defects, inspect `git diff --cached --name-only`, then commit:
+### Step 3: Leakage proof
+
+Plant unique argument/result/token sentinels and inspect:
+
+- both message channels;
+- all dashboard/visitor WebSocket frames;
+- public API responses;
+- Telegram/email fixtures;
+- `mcp_action_runs`;
+- captured application logs/errors; and
+- built client payloads.
+
+Only the private in-memory tool loop may contain argument/result sentinels. No token sentinel may leave the service call scope.
+
+### Step 4: Provider endpoint smoke checks
+
+Against non-production accounts where available, verify only endpoint discovery/auth for PostHog, Stripe, Slack, Attio, and Linear. If a provider changes setup, update preset URL/docs/copy—not runtime code.
+
+### Step 5: Visual QA
+
+Check the Connections tab at 1440, 1100, 768, and 390 widths; keyboard navigation; 200% zoom; dark mode; and reduced motion.
+
+### Step 6: Architecture grep
 
 ```bash
-git commit -m "fix: verify generic MCP connection presets"
+rg -n "MavenIntegrationAgent|providerProfile|canonicalAction|reducerVersion|billing_summary|refund_payment|post_internal_message|attio\.add|linear\.create" src worker shared wrangler.jsonc
 ```
 
-Do not deploy, run remote migrations, connect production accounts, push, or enable production tools without explicit user approval.
+Expected: no matches introduced by this phase.
+
+### Step 7: Commit verification fixes
+
+Stage only files changed by this phase, then:
+
+```bash
+git commit -m "fix: complete generic MCP connection acceptance"
+```
+
+Do not deploy or connect production provider accounts without separate user approval.

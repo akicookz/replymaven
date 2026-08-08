@@ -1,529 +1,478 @@
 # Generic MCP Write Approval Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Required skill:** Execute with `superpowers:test-driven-development`; use `superpowers:verification-before-completion` before calling the phase complete.
 
-**Goal:** Pause every enabled native MCP tool configured as a write, show one compact approval inside the existing Maven message bubble, and execute the exact tool call only after an authorized dashboard human chooses `Always allow` or `Allow once`.
+**Goal:** Let any configured native MCP write tool pause for a compact dashboard-sidechat approval and execute exactly once after `Always allow` or `Allow once`.
 
-**Architecture:** Phase 2 already discovers native MCP tools and stores exact tool settings. Phase 3 wraps any enabled write tool in the same dynamic Think `kind: "durable-pause"` action. Think Durable Object state owns pending native arguments and approval state; D1 stores only the tool setting and bounded safe run metadata. There are no provider-specific actions, preparation services, reducers, validators, policies, or execution branches.
+**Architecture:** Extend the phase 2 dynamic native-tool wrapper. Read tools still execute directly. A write without an exact persistent grant stores AES-GCM-encrypted native arguments in a project-scoped pending-call row, persists a safe `approval` sidechat message, and ends the current model turn. The authenticated decision route atomically claims and executes that pending call through `McpConnectionService`, then starts a normal sidechat continuation with the raw result only in memory. No Think Action, durable pause, provider-specific action, or second sidechat runtime is added.
 
-**Tech Stack:** Bun, Hono, D1/Drizzle, Cloudflare Think Actions, Cloudflare Durable Objects/RPC, React 19, existing inbox chat primitives, Tailwind CSS v4, Zod v4.
+**Dependency:** Phases 1 and 2 are complete.
 
-**Prerequisites:** Complete and verify:
+**Design source:** `docs/superpowers/specs/2026-08-07-private-sidechat-mcp-actions-design.md`
 
-- `docs/superpowers/plans/2026-08-07-private-sidechat-foundation.md`
-- `docs/superpowers/plans/2026-08-07-safe-mcp-read-actions.md`
+## Non-negotiable invariants
 
-**Spec:** `docs/superpowers/specs/2026-08-07-private-sidechat-mcp-actions-design.md` — read sections 2.4, 3, 7, 8, and 10–12 before starting.
-
-## Global Constraints
-
-- Use Bun only. Never use npm/yarn.
-- Read every target file before modifying it. Preserve unrelated work and use `git add -p` for files with pre-existing unrelated edits.
-- Function declarations for named functions/components; arrows only for inline callbacks.
-- Apply one generic approval path to every native MCP tool whose saved setting is `enabled=true` and `access="write"`.
-- Do not create provider-specific action IDs, schemas, files, validators, descriptors, expiry rules, reducers, retries, or runtime branches.
-- Tool availability and input schema come from the connected MCP server's current catalog.
-- Exact native arguments remain inside private Think/agent state and never reach browser frames, D1, logs, traces, public messages, Telegram, or widget APIs.
-- The browser receives only a human-readable approval descriptor, tool/connection labels, expiry, permissions, and descriptor hash.
-- Writes default to `Ask every time`.
-- `Always allow` is exact to project, connection, native tool name, and current input-schema fingerprint.
-- Reconnect, schema change, classification change, or disable invalidates `Always allow`.
-- Never automatically retry a native MCP write after dispatch. An uncertain transport outcome is `outcome_unknown`.
-- Approval is dashboard-sidechat-only. Widget, public chat, Telegram, API keys, and external MCP clients cannot approve.
-- Reuse `ChatThread`, `MessageBubbleShell`, and the shared bubble action slot. Do not create an approval card or a new bubble primitive.
-- Visible buttons are exactly `Always allow` then `Allow once`; no `Not now`, rejection action, badge, alert, or verification block.
-- Approval controls are 28px visibly high with 12.5–13px labels and minimum 40px hit targets.
-- Put needed details in description text and bold only the critical segment.
-- Test each task with targeted tests, `bun run build`, and `bun run lint`; commit only named files; never push/deploy.
+- Every native tool marked `write` uses one generic approval path.
+- The browser receives only a safe descriptor and opaque execution ID—never native arguments, schema, credentials, or result.
+- Exact native arguments are encrypted at rest with the existing `ENCRYPTION_KEY` and decrypted only during the authoritative execution.
+- Approval is accepted only from an authenticated dashboard route after project/conversation/role authorization.
+- The server ignores browser-supplied connection IDs, tool names, arguments, amounts, targets, and descriptors.
+- `Allow once` scopes to one exact execution. `Always allow` scopes to project + connection + native tool + input-schema fingerprint.
+- The same execution ID can cross `prepared -> executing` once. Duplicate clicks/calls are idempotent.
+- Ambiguous provider outcomes are `unknown` and never retried automatically.
+- Approval UI is the same received Maven bubble with two compact actions—no card, alert, badge, `Not now`, or reject button.
+- Raw inputs/results never enter either message channel, browser frames, Telegram, logs, traces, or audit rows.
 
 ---
 
-### Task 1: Define generic pending-call and approval contracts
+## Task 1: Define safe approval contracts
 
 **Files:**
-- Modify: `shared/mcp-types.ts`
-- Modify: `shared/sidechat-types.ts`
-- Create: `worker/agents/mcp-write/contracts.test.ts`
 
-**Contracts:**
+- Create: `shared/mcp-approvals.ts`
+- Create: `shared/mcp-approvals.test.ts`
+- Modify: `shared/ws-events.ts`
 
-```typescript
-export interface PendingMcpWrite {
+### Step 1: Write failing contract tests
+
+Define a safe descriptor:
+
+```ts
+interface McpApprovalDescriptor {
   executionId: string;
-  connectionId: string;
-  toolName: string;
-  inputSchemaFingerprint: string;
-  argumentHash: string;
-  descriptor: SafeMcpApprovalDescriptor;
-  expiresAt: string;
-}
-
-export interface SafeMcpApprovalDescriptor {
-  executionId: string;
-  connectionLabel: string;
-  toolLabel: string;
+  title: string;
   description: string;
-  criticalDetail: string | null;
-  descriptorHash: string;
-  expiresAt: string;
-  canApproveOnce: boolean;
-  canAlwaysAllow: boolean;
-}
-
-export type McpWriteStatus =
-  | "pending_approval"
-  | "approved"
-  | "executing"
-  | "succeeded"
-  | "failed"
-  | "expired"
-  | "outcome_unknown";
-```
-
-- [ ] **Step 1: Write failing contract tests**
-
-Reject descriptors with unknown fields, HTML, control characters, excessive text, OAuth/token/header keys, full native arguments, or raw MCP result. Verify only the critical-detail field can receive bold treatment in the UI model.
-
-- [ ] **Step 2: Add safe sidechat data parts**
-
-`data-sidechat-approval` contains only the descriptor/status. It cannot contain native arguments, catalog schema, Think internal state, or provider output.
-
-- [ ] **Step 3: Add deterministic hashing helpers**
-
-Canonicalize JSON object-key order and hash exact `(projectId, conversationId, connectionId, toolName, inputSchemaFingerprint, arguments)` for the argument hash. Hash the safe descriptor separately. Equivalent inputs must hash identically; any native argument change must alter the argument hash.
-
-- [ ] **Step 4: Verify and commit**
-
-```bash
-bun test worker/agents/mcp-write/contracts.test.ts
-bun run build
-git add shared/mcp-types.ts shared/sidechat-types.ts worker/agents/mcp-write/contracts.test.ts
-git commit -m "feat: define generic MCP write approvals"
-```
-
----
-
-### Task 2: Generate bounded human approval descriptions generically
-
-**Files:**
-- Create: `worker/agents/mcp-write/approval-descriptor.ts`
-- Create: `worker/agents/mcp-write/approval-descriptor.test.ts`
-- Modify: `worker/agents/sidechat-prompt.ts`
-- Modify: `worker/agents/sidechat-prompt.test.ts`
-
-**Model-facing wrapper input:**
-
-```typescript
-{
-  arguments: NativeToolArguments;
-  approvalDescription: string;
-  criticalDetail?: string;
+  criticalRanges: Array<{ start: number; end: number }>;
+  expiresAt: number;
 }
 ```
 
-`arguments` is validated by the current native MCP input schema. The two descriptor fields describe the same intended call to the dashboard human; they are not forwarded to the MCP server.
+It must not contain connection ID, native tool name, arguments, schema, raw result, provider object, credential, or model reasoning.
 
-- [ ] **Step 1: Write failing descriptor tests**
+Use validated ranges (or another bounded structured emphasis representation) so the UI can bold important description text without accepting arbitrary HTML.
 
-Cover short/long text, unsupported Markdown/HTML, critical segment absent/present, argument/description hash binding, stale description after argument mutation, secret-looking fields, and maximum 600-character description plus 240-character critical detail.
+Define statuses: `pending | executing | succeeded | failed | unknown | expired | invalidated`.
 
-- [ ] **Step 2: Implement generic descriptor construction**
+### Step 2: Add safe WebSocket update shape
 
-Use connection display name, native tool name, model-authored description, critical detail, expiry, and server-computed hashes. Do not parse tool names or arguments for provider semantics. Do not build provider-specific copy.
+`sidechat:approval_updated` contains conversation/message/execution IDs and safe status/summary only. It is always dashboard-agent-only through the phase 1 broadcast helper.
 
-- [ ] **Step 3: Add exact prompt rules**
-
-Maven must:
-
-- address the dashboard human, never the visitor;
-- describe the concrete effect and important values it intends to submit;
-- put only the most consequential sentence/value in `criticalDetail`;
-- never include credentials, customer external ID/email, raw records, or hidden MCP metadata;
-- never claim an effect occurred before the tool succeeds;
-- ask a private follow-up instead of preparing a write when native arguments are ambiguous.
-
-- [ ] **Step 4: Verify and commit**
+### Step 3: Verify
 
 ```bash
-bun test worker/agents/mcp-write/approval-descriptor.test.ts worker/agents/sidechat-prompt.test.ts
-bun run build
-git add worker/agents/mcp-write/approval-descriptor.ts worker/agents/mcp-write/approval-descriptor.test.ts worker/agents/sidechat-prompt.ts worker/agents/sidechat-prompt.test.ts
-git commit -m "feat: describe pending MCP writes safely"
+bun test shared/mcp-approvals.test.ts worker/realtime/broadcast.test.ts
+```
+
+### Step 4: Commit
+
+```bash
+git add shared/mcp-approvals.ts shared/mcp-approvals.test.ts shared/ws-events.ts worker/realtime/broadcast.test.ts
+git commit -m "feat: define generic MCP approval contract"
 ```
 
 ---
 
-### Task 3: Wrap every configured native write tool in one Think durable action
+## Task 2: Persist encrypted pending calls and exact policies
 
 **Files:**
-- Create: `worker/agents/mcp-write/dynamic-write-action.ts`
-- Create: `worker/agents/mcp-write/dynamic-write-action.test.ts`
-- Modify: `worker/agents/sidechat-mcp-tools.ts`
-- Modify: `worker/agents/sidechat-mcp-tools.test.ts`
-- Modify: `worker/agents/maven-sidechat-agent.ts`
-- Modify: `worker/agents/sidechat-runtime.ts`
 
-- [ ] **Step 1: Write failing dynamic-wrapper tests**
+- Modify: `worker/db/schema.ts`
+- Create: generated migration under `worker/db/drizzle/`
+- Create: `worker/db/mcp-approval-schema.test.ts`
 
-Cover enabled read executes without approval, disabled write omitted, enabled write wrapped, exact native JSON Schema nested under `arguments`, descriptor fields appended generically, current fingerprint required, stable execution/idempotency key, and zero provider-name switches/imports.
+### Step 1: Write failing schema tests
 
-- [ ] **Step 2: Implement the generic factory**
+Add:
 
-For every current setting with `enabled=true` and `access="write"`, create:
+### `mcp_pending_calls`
 
-```typescript
-action({
-  kind: "durable-pause",
-  approval: true,
-  inputSchema: buildWriteWrapperSchema(nativeInputSchema),
-  idempotencyKey: buildExecutionKey,
-  execute: executeApprovedNativeTool,
-})
-```
+- ID;
+- project, conversation, connection IDs with cascades;
+- native tool name and input-schema fingerprint;
+- encrypted arguments;
+- argument hash and execution/idempotency hash;
+- safe descriptor JSON and descriptor hash;
+- state;
+- expires/claimed/settled timestamps;
+- actor/approval mode after decision;
+- created/updated timestamps.
 
-The wrapper stores exact arguments in private Think state, generates the safe descriptor, and pauses before integration-agent RPC.
+### `mcp_tool_policies`
 
-- [ ] **Step 3: Apply persistent policy authoritatively**
+- project and connection IDs;
+- native tool name;
+- input-schema fingerprint;
+- mode `every_time | always`;
+- enabled;
+- actor and timestamps;
+- exact unique scope.
 
-Use `authorizeTurn`/`authorizeAction` plus the current `integration_tool_settings` row:
+Use the phase 2 `mcp_action_runs` table for safe audit output.
 
-- exact `always` setting and fingerprint -> authorize without prompt;
-- `every_time` -> pause;
-- disabled, changed schema, changed classification, disconnected server, or missing setting -> reject;
-- ignore model/browser claims about approval.
+Tests must prove:
 
-- [ ] **Step 4: Project safe pending state**
+- ciphertext is never equal to plaintext;
+- exact scope uniqueness;
+- project/conversation/connection cascade cleanup;
+- no raw result column;
+- status enum correctness; and
+- expired/policy indexes support approval lookup.
 
-Convert Think `pendingApprovals` into `data-sidechat-approval`, set `sidechat_threads.status="waiting_approval"`, and broadcast only status/unread. Closing the panel or losing the WebSocket leaves the durable pause intact.
+### Step 2: Implement and generate migration
 
-- [ ] **Step 5: Verify and commit**
+Use the existing AES-GCM encryption service. Hash canonical JSON with a deterministic key-order serializer before encryption; never log plaintext during canonicalization failures.
 
 ```bash
-bun test worker/agents/mcp-write/dynamic-write-action.test.ts worker/agents/sidechat-mcp-tools.test.ts
-bun run build
-bun run lint
-git add worker/agents/mcp-write/dynamic-write-action.ts worker/agents/mcp-write/dynamic-write-action.test.ts worker/agents/sidechat-mcp-tools.ts worker/agents/sidechat-mcp-tools.test.ts worker/agents/maven-sidechat-agent.ts worker/agents/sidechat-runtime.ts
-git commit -m "feat: pause native MCP writes generically"
+bun run db:generate
+bun run db:migrate:dev
+bun test worker/db/mcp-approval-schema.test.ts
+```
+
+### Step 3: Commit
+
+```bash
+git add worker/db/schema.ts worker/db/drizzle worker/db/mcp-approval-schema.test.ts
+git commit -m "feat: persist encrypted MCP write approvals"
 ```
 
 ---
 
-### Task 4: Add the authoritative dashboard approval endpoint
+## Task 3: Implement the generic pending-call state machine
 
 **Files:**
-- Create: `worker/routes/mcp-approval-handlers.ts`
-- Create: `worker/routes/mcp-approval-handlers.test.ts`
-- Modify: `worker/index.ts`
-- Modify: `worker/validation.ts`
-- Modify: `worker/validation.test.ts`
 
-**Endpoint:**
+- Create: `worker/services/mcp-approval-service.ts`
+- Create: `worker/services/mcp-approval-service.test.ts`
+- Modify: `worker/services/mcp-connection-service.ts`
 
-```text
-POST /api/projects/:id/conversations/:convId/sidechat/approvals/:executionId
-```
+### Step 1: Write failing state-machine tests
 
-```typescript
-{ decision: "allow_once" | "always_allow"; descriptorHash: string }
-```
+Cover:
 
-- [ ] **Step 1: Write failing authorization/race tests**
+- prepare validates current enabled write setting and schema fingerprint;
+- arguments encrypt before insert and round-trip only in service scope;
+- safe descriptor length/range validation;
+- `Allow once` binds one authoritative descriptor/argument hash;
+- `Always allow` creates exact current policy and approves current execution;
+- duplicate identical decision is idempotent;
+- conflicting/stale/expired decision returns conflict and does not execute;
+- reconnect, auth-account change, tool disable, access change, and schema drift invalidate policy/pending calls;
+- only one atomic transition from `prepared` to `executing`;
+- success/failure/unknown settlement is terminal;
+- ambiguous timeout/disconnect is `unknown`; and
+- plaintext arguments/results never appear in thrown errors or safe run records.
 
-Cover unauthenticated, wrong project/conversation, no approval role, member allow-once, member always denial, owner/admin always, stale descriptor hash, non-pending execution, expired request, disabled tool, schema drift, disconnect, duplicate click, concurrent humans, and archived conversation.
+### Step 2: Implement authoritative lookup
 
-- [ ] **Step 2: Implement authoritative lookup**
+The decision input is only `executionId`, `messageId`, and requested mode. The service reloads and validates:
 
-Load authenticated effective role, Think pending execution, current connection/tool setting, current catalog fingerprint, and safe descriptor. Ignore browser-supplied connection/tool/argument values.
+- authenticated project/conversation;
+- pending call and approval message relationship;
+- current connection and native tool setting;
+- current catalog/schema fingerprint;
+- expiry and state;
+- descriptor hash; and
+- actor permission.
 
-- [ ] **Step 3: Implement `Allow once`**
+Ignore all client copies of tool/connection/arguments/descriptor values.
 
-Bind the decision to exact execution/descriptor/argument hashes, record safe actor/mode metadata, then call Think `approveExecution`. An identical duplicate is idempotent; a conflicting decision returns 409.
+### Step 3: Implement exact-once execution
 
-- [ ] **Step 4: Implement `Always allow`**
+Atomically claim `prepared -> executing`, decrypt arguments, and call exact `(connectionId, nativeToolName, arguments)` once through `McpConnectionService`.
 
-Owner/admin only. Atomically set the exact current `integration_tool_settings.approvalMode="always"`, record the current decision, then approve. A concurrent schema/connection/classification change fails closed.
+If the MCP server exposes a standard idempotency capability, use the stable execution ID only through that generic capability. Never invent provider-specific idempotency parameters.
 
-- [ ] **Step 5: Verify and commit**
+Settle:
+
+- normal result: `succeeded`;
+- explicit MCP error before effect: `failed`;
+- timeout/disconnect after request dispatch: `unknown`.
+
+Never automatically retry `unknown`.
+
+### Step 4: Verify
 
 ```bash
-bun test worker/routes/mcp-approval-handlers.test.ts worker/validation.test.ts
-bun run build
-git add worker/routes/mcp-approval-handlers.ts worker/routes/mcp-approval-handlers.test.ts worker/index.ts worker/validation.ts worker/validation.test.ts
-git commit -m "feat: approve pending MCP writes"
+bun test worker/services/mcp-approval-service.test.ts worker/services/mcp-connection-service.test.ts
+```
+
+### Step 5: Commit
+
+```bash
+git add worker/services/mcp-approval-service.ts worker/services/mcp-approval-service.test.ts worker/services/mcp-connection-service.ts
+git commit -m "feat: execute approved MCP writes exactly once"
 ```
 
 ---
 
-### Task 5: Render approval content inside the existing Maven bubble
+## Task 4: Intercept every configured native write tool
 
 **Files:**
-- Create: `src/components/inbox/SidechatApprovalBody.tsx`
-- Create: `src/components/inbox/SidechatApprovalBody.test.ts`
-- Modify: `src/components/inbox/SidechatPane.tsx`
-- Modify: `src/components/inbox/MessageBubble.tsx`
-- Modify: `src/lib/use-sidechat.ts`
-- Modify: `src/lib/use-sidechat.test.ts`
 
-- [ ] **Step 1: Write failing reuse/copy/accessibility tests**
+- Modify: `worker/chat-runtime/sidechat/build-mcp-tools.ts`
+- Modify: `worker/chat-runtime/sidechat/build-mcp-tools.test.ts`
+- Modify: `worker/chat-runtime/sidechat/run-sidechat-turn.ts`
+- Modify: `worker/services/chat-service.ts`
+
+### Step 1: Write failing generic wrapper tests
 
 Assert:
 
-- `SidechatApprovalBody` is rendered through `MessageBubbleShell`'s body/action slot;
-- it defines no background, max-width, padding, bubble radius, sender header, Markdown renderer, or outer bubble container;
-- exact button order/copy is `Always allow`, `Allow once`;
-- no `Not now`, reject, verified, badge, alert, card, or sparkle string/import;
-- critical detail alone uses `<strong>`;
-- pending state disables both without changing width;
-- status updates use polite live announcements and retain focus.
+- read tool executes immediately;
+- write + exact active always policy executes immediately;
+- write without policy calls `prepare`, persists one `bot/sidechat/approval` message, sets conversation `sidechatStatus = waiting_approval`, and stops the current turn;
+- no provider/native switch statement exists;
+- approval message metadata contains only the safe descriptor;
+- closing the browser does not alter pending state;
+- duplicate model preparation with identical run/tool/args resolves to the same pending execution; and
+- raw arguments never reach message rows or WebSocket events.
 
-- [ ] **Step 2: Implement the content-only approval renderer**
+### Step 2: Generate the descriptor safely
 
-Render description as normal text and `criticalDetail` as a code-owned `<strong>` segment; never use raw HTML. Put both controls in the existing bubble action slot with `gap-1.5` and wrapping.
+The model may propose a short title, description, and critical spans, but server validation owns bounds and removes unsupported markup. If the model does not provide a valid descriptor, synthesize a generic safe description from the native tool display name without copying arguments.
 
-- [ ] **Step 3: Match current compact controls**
+Do not build provider-specific copy templates.
 
-- 28px visible height;
-- 12.5–13px label;
-- 10–12px horizontal padding;
-- eight-pixel radius;
-- existing glass shadow/focus treatment;
-- transparent minimum 40px hit target;
-- secondary `Always allow`, primary `Allow once`.
+### Step 3: Stop and resume as two normal turns
 
-- [ ] **Step 4: Handle role and settled states without extra UI**
+Do not pause an SDK/LLM invocation durably.
 
-For a member without persistent-policy permission, keep `Always allow` visible/disabled and include **Only a project owner or admin can save this permission** in description text. Pending, saving, approved, running, succeeded, failed, expired, and outcome unknown stay inside the same bubble body; settled buttons become quiet status text.
+Preparation ends the current turn after persisting the approval bubble. After approval execution, start a new sidechat continuation with:
 
-- [ ] **Step 5: Verify and commit**
+- the successful/failed result in transient model context;
+- the prior sidechat/public histories;
+- a system instruction to report the outcome concisely and prepare a visitor draft only when appropriate.
+
+Only the new final Maven message is persisted.
+
+### Step 4: Verify
 
 ```bash
-bun test src/components/inbox/SidechatApprovalBody.test.ts src/lib/use-sidechat.test.ts src/components/inbox/chat-primitives.test.ts
-bun run build
-bun run lint
-git add src/components/inbox/SidechatApprovalBody.tsx src/components/inbox/SidechatApprovalBody.test.ts src/components/inbox/SidechatPane.tsx src/components/inbox/MessageBubble.tsx src/lib/use-sidechat.ts src/lib/use-sidechat.test.ts
-git commit -m "feat: show native write approval in chat bubble"
+bun test worker/chat-runtime/sidechat/build-mcp-tools.test.ts worker/chat-runtime/sidechat
+```
+
+### Step 5: Commit
+
+```bash
+git add worker/chat-runtime/sidechat worker/services/chat-service.ts
+git commit -m "feat: pause native MCP writes for approval"
 ```
 
 ---
 
-### Task 6: Execute an approved native tool exactly once from ReplyMaven
+## Task 5: Add authenticated approval decision routes
 
 **Files:**
-- Create: `worker/agents/mcp-write/execute-write.ts`
-- Create: `worker/agents/mcp-write/execute-write.test.ts`
-- Modify: `worker/agents/maven-integration-agent.ts`
-- Modify: `worker/agents/mcp-runtime.ts`
-- Modify: `worker/agents/mcp-runtime.test.ts`
-- Modify: `worker/services/mcp-tool-service.ts`
-- Modify: `worker/services/mcp-tool-service.test.ts`
 
-- [ ] **Step 1: Write failing execution-state tests**
-
-Cover valid approval, expired execution, disabled tool, changed schema/classification, disconnected server, duplicate execution, simultaneous calls, validation failure before dispatch, timeout before dispatch, timeout after dispatch, definite MCP error, malformed response, and safe run metadata.
-
-- [ ] **Step 2: Implement pre-dispatch checks**
-
-Atomically claim the execution, reload the current connection/tool setting/catalog, compare exact fingerprint/argument/descriptor hashes, revalidate arguments against native schema, and confirm authorization. Do not inspect provider/tool semantics.
-
-- [ ] **Step 3: Dispatch once**
-
-Call exact `(connectionId, nativeToolName, nativeArguments)` once through `MavenIntegrationAgent.callTool`. If the server advertises `idempotentHint`, include the stable execution key only through a generic protocol field supported by that server; never invent provider-specific idempotency arguments.
-
-- [ ] **Step 4: Settle conservatively**
-
-- definite success -> `succeeded` and raw result returned only to private model context;
-- definite pre-dispatch/native error -> `failed` with safe code;
-- disconnect/timeout after possible dispatch -> `outcome_unknown` with no retry;
-- duplicate completed execution -> return stored safe status without another call.
-
-Record only safe run metadata in D1. Do not store input/result.
-
-- [ ] **Step 5: Verify and commit**
-
-```bash
-bun test worker/agents/mcp-write/execute-write.test.ts worker/agents/mcp-runtime.test.ts worker/services/mcp-tool-service.test.ts
-bun run build
-bun run lint
-git add worker/agents/mcp-write/execute-write.ts worker/agents/mcp-write/execute-write.test.ts worker/agents/maven-integration-agent.ts worker/agents/mcp-runtime.ts worker/agents/mcp-runtime.test.ts worker/services/mcp-tool-service.ts worker/services/mcp-tool-service.test.ts
-git commit -m "feat: execute approved MCP writes once"
-```
-
----
-
-### Task 7: Invalidate persistent permission on any tool-scope change
-
-**Files:**
-- Modify: `worker/services/mcp-tool-service.ts`
-- Modify: `worker/services/mcp-tool-service.test.ts`
-- Modify: `worker/routes/mcp-connection-handlers.ts`
-- Modify: `worker/routes/mcp-connection-handlers.test.ts`
-
-- [ ] **Step 1: Write failing invalidation tests**
-
-Cover reconnect/new account, server URL change, native tool disappearance, input-schema fingerprint change, read/write reclassification, disable/re-enable, connection deletion, and description-only catalog change.
-
-- [ ] **Step 2: Implement exact policy scope**
-
-Persistent authorization key is `(projectId, connectionId, toolName, inputSchemaFingerprint)`. There is no provider-wide, connection-wide, wildcard-tool, or all-writes grant.
-
-- [ ] **Step 3: Reset grants transactionally**
-
-Set approval mode back to `every_time` in the same transaction that changes schema fingerprint, classification, enabled state, or connection identity. Description-only changes do not alter the fingerprint but still refresh displayed copy.
-
-- [ ] **Step 4: Verify and commit**
-
-```bash
-bun test worker/services/mcp-tool-service.test.ts worker/routes/mcp-connection-handlers.test.ts
-bun run build
-git add worker/services/mcp-tool-service.ts worker/services/mcp-tool-service.test.ts worker/routes/mcp-connection-handlers.ts worker/routes/mcp-connection-handlers.test.ts
-git commit -m "feat: scope MCP write permission exactly"
-```
-
----
-
-### Task 8: Add generic approval expiry and restart recovery
-
-**Files:**
-- Create: `worker/agents/mcp-write/approval-expiry.ts`
-- Create: `worker/agents/mcp-write/approval-expiry.test.ts`
-- Modify: `worker/agents/maven-sidechat-agent.ts`
-- Modify: `worker/agents/sidechat-runtime.ts`
-
-- [ ] **Step 1: Write failing clock/recovery tests**
-
-Cover default 24-hour expiry, project-configured duration, pane closed, WebSocket reconnect, agent restart, repeated alarm, approval racing expiry, and expired execution never dispatching.
-
-- [ ] **Step 2: Schedule durable expiry**
-
-Schedule by execution ID in sidechat agent state. At deadline, atomically mark expired, call Think `rejectExecution` with safe `expired`, update the visible approval part, and clear `waiting_approval` projection.
-
-- [ ] **Step 3: Preserve the no-rejection-button UX**
-
-There is no visible `Not now`. Closing the pane defers. System cleanup may reject through the same internal service but renders only a settled quiet state.
-
-- [ ] **Step 4: Verify and commit**
-
-```bash
-bun test worker/agents/mcp-write/approval-expiry.test.ts worker/agents/mcp-write/dynamic-write-action.test.ts
-bun run build
-git add worker/agents/mcp-write/approval-expiry.ts worker/agents/mcp-write/approval-expiry.test.ts worker/agents/maven-sidechat-agent.ts worker/agents/sidechat-runtime.ts
-git commit -m "feat: expire pending MCP approvals"
-```
-
----
-
-### Task 9: Add safe write activity to each connection detail
-
-**Files:**
-- Create: `worker/routes/mcp-tool-run-handlers.ts`
-- Create: `worker/routes/mcp-tool-run-handlers.test.ts`
+- Modify: `worker/validation.ts`
+- Modify: `worker/validation.test.ts`
 - Modify: `worker/index.ts`
-- Create: `src/components/connections/ToolActivity.tsx`
-- Create: `src/components/connections/ToolActivity.test.ts`
-- Modify: `src/components/connections/ConnectionsPanel.tsx`
+- Create: `worker/routes/mcp-approval-handlers.ts`
+- Create: `worker/routes/mcp-approval-handlers.test.ts`
 
-- [ ] **Step 1: Write failing API/UI tests**
+### Step 1: Write failing authorization tests
 
-API returns project-scoped paginated safe metadata only: connection/tool label, status, approval mode/actor display, duration, timestamp, and safe error code. It excludes native arguments/results, customer identity, hashes not needed by UI, OAuth state, and catalog schemas.
+Cover:
 
-- [ ] **Step 2: Implement paginated route**
+- unauthenticated `401`;
+- wrong project/conversation/message/execution `404`;
+- visitor/widget/Telegram/public route cannot decide;
+- authorized member can `Allow once` only when current team permissions allow writes;
+- only owner/admin can create `Always allow`;
+- stale descriptor/schema/policy returns `409`;
+- browser-supplied extra tool/argument fields are rejected;
+- duplicate identical decisions return current state without another call; and
+- connection unavailable/unknown result is reported safely.
 
-Add `GET /api/projects/:id/mcp-connections/:connectionId/activity` with timestamp/ID cursor and status filter. Reuse existing effective-owner/team authorization.
+### Step 2: Add one compact route
 
-- [ ] **Step 3: Render activity in Connections**
+```text
+POST /api/projects/:id/conversations/:convId/sidechat/approvals/:executionId
+body: { messageId, mode: "once" | "always" }
+```
 
-Use the existing settings list rhythm under the selected connection. No new Agent actions tab or activity card stack. Show native tool name, status, human actor, approval mode, duration, and timestamp. `outcome_unknown` puts **Check the provider before trying again** in description text.
+Sequence:
 
-- [ ] **Step 4: Verify and commit**
+1. authorize user/project/conversation;
+2. load authoritative pending call and message;
+3. validate team permission and current tool state;
+4. atomically record decision/claim;
+5. broadcast safe `executing` update;
+6. execute with a bounded wait under `executionCtx.waitUntil` / existing conversation coordinator;
+7. persist safe audit/status;
+8. broadcast safe final update; and
+9. run the normal sidechat continuation.
+
+### Step 3: Add policy management to existing tool settings API
+
+Owners/admins can inspect/revoke `always` on the native tool row. Changing access, reconnecting, disabling, or accepting catalog drift must invalidate the old policy server-side in the same mutation.
+
+### Step 4: Verify
 
 ```bash
-bun test worker/routes/mcp-tool-run-handlers.test.ts src/components/connections/ToolActivity.test.ts
-bun run build
-bun run lint
-git add worker/routes/mcp-tool-run-handlers.ts worker/routes/mcp-tool-run-handlers.test.ts worker/index.ts src/components/connections/ToolActivity.tsx src/components/connections/ToolActivity.test.ts src/components/connections/ConnectionsPanel.tsx
-git commit -m "feat: show safe MCP tool activity"
+bun test worker/routes/mcp-approval-handlers.test.ts worker/validation.test.ts
+```
+
+### Step 5: Commit
+
+```bash
+git add worker/validation.ts worker/validation.test.ts worker/index.ts worker/routes/mcp-approval-handlers.ts worker/routes/mcp-approval-handlers.test.ts
+git commit -m "feat: approve MCP writes from dashboard sidechat"
 ```
 
 ---
 
-### Task 10: Enforce private pending-state retention and observability
+## Task 6: Render approval actions inside the existing Maven bubble
 
 **Files:**
-- Create: `worker/services/mcp-write-retention-service.ts`
-- Create: `worker/services/mcp-write-retention-service.test.ts`
-- Modify: `worker/services/sidechat-retention-service.ts`
-- Modify: `worker/services/mcp-retention-service.ts`
-- Modify: `worker/services/project-service.ts`
-- Modify: `worker/index.ts`
 
-- [ ] **Step 1: Write failing cleanup/privacy tests**
+- Modify: `src/components/inbox/MessageBubble.tsx`
+- Modify: `src/components/inbox/SidechatMessageActions.tsx`
+- Modify: `src/components/inbox/SidechatPane.tsx`
+- Modify: `src/lib/inbox/types.ts`
+- Modify: `src/lib/inbox/sidechat-cache.ts`
+- Create: `src/lib/inbox/approval-presentation.test.ts`
 
-Cover expired/completed pending-call removal, conversation deletion, connection deletion, project deletion, active pending approval rejection, safe-run retention, partial cleanup retry, and unique sentinels in arguments/results/credentials/model text.
+### Step 1: Write presentation/state tests
 
-- [ ] **Step 2: Implement cleanup ordering**
+Assert:
 
-Reject pending Think executions, clear private pending arguments/schedules, destroy sidechat or integration state as scoped, then delete safe D1 metadata. Record durable cleanup before asynchronous destructive operations.
+- approval uses sidechat Maven `received` placement;
+- normal bubble shell owns max width, padding, font, line height, radius, surface, and sender header;
+- only description critical ranges are bold;
+- action order is `Always allow`, then `Allow once`;
+- `Always allow` is secondary and `Allow once` primary;
+- visible button height is 28px with a 40px hit target;
+- no `Not now`, reject, badge, alert, nested card, or duplicated details;
+- pending/executing/succeeded/failed/unknown/expired updates are idempotent; and
+- buttons disable before POST and re-enable only on safe retryable failure.
 
-- [ ] **Step 3: Enforce observability allowlist**
+### Step 2: Use the existing bubble action slot
 
-Logs/errors may contain event name, project/conversation/connection IDs, native tool name, status/error code, duration, approval mode/actor ID, and hashes. Tests must prove no credential, identity, argument, result, catalog schema, visible message, or descriptor body is emitted. Traces remain disabled.
+Render title, description, and buttons inside the same content surface already created by `MessageBubble`. Do not wrap them in another panel.
 
-- [ ] **Step 4: Verify and commit**
+Closing the pane is the deferral behavior. It does not mutate pending state.
+
+### Step 3: Match current control language
+
+Use current semantic tokens, compact button radius/type, focus rings, hover/pressed states, and disabled treatment. No sparkle icon, warning icon, provider badge, gradient, glow, or separator.
+
+### Step 4: Verify
 
 ```bash
-bun test worker/services/mcp-write-retention-service.test.ts
-bun test
-bun run build
+bun test src/lib/inbox/approval-presentation.test.ts
 bun run lint
-git diff --check
-git add worker/services/mcp-write-retention-service.ts worker/services/mcp-write-retention-service.test.ts worker/services/sidechat-retention-service.ts worker/services/mcp-retention-service.ts worker/services/project-service.ts worker/index.ts
-git commit -m "feat: enforce MCP write privacy lifecycle"
+bun run build
+```
+
+### Step 5: Commit
+
+```bash
+git add src/components/inbox src/lib/inbox
+git commit -m "feat: render compact sidechat write approvals"
 ```
 
 ---
 
-### Task 11: Run generic approval and visual acceptance
+## Task 7: Expiry, invalidation, cleanup, and safe audit
 
 **Files:**
-- Modify only phase-3 files when a measured defect is found
+
+- Modify: `worker/services/mcp-approval-service.ts`
+- Modify: `worker/services/mcp-approval-service.test.ts`
+- Modify: `worker/services/conversation-retention-service.ts`
+- Modify: `worker/services/conversation-retention-service.test.ts`
+- Modify: MCP disconnect/project deletion paths
+
+### Step 1: Implement lazy and scheduled expiry safely
+
+Every read/decision checks expiry atomically. Add a bounded scheduled cleanup path using the project's existing scheduled Worker mechanism if available; do not add Workflows for one-step writes.
+
+Expiry marks `expired`, clears ciphertext after the audit window, updates the safe approval message/status, and never executes.
+
+### Step 2: Invalidate on configuration change
+
+In one server-side mutation, invalidate relevant pending calls/policies when:
+
+- connection auth account changes;
+- server URL changes;
+- native schema fingerprint changes;
+- tool is disabled;
+- access changes; or
+- connection/project is removed.
+
+### Step 3: Retention
+
+Conversation/project deletion relies on D1 cascades for messages, pending calls, policies, and safe runs. Ensure in-flight execution checks current conversation/project state before dispatching the provider request.
+
+### Step 4: Verify
+
+```bash
+bun test worker/services/mcp-approval-service.test.ts worker/services/conversation-retention-service.test.ts
+```
+
+### Step 5: Commit
+
+```bash
+git add worker/services
+git commit -m "feat: expire and clean up MCP approvals"
+```
+
+---
+
+## Task 8: Security, idempotency, visual, and regression acceptance
+
+**Files:**
+
 - Create: `docs/superpowers/verification/2026-08-08-generic-mcp-write-approval.md`
+- Add focused regression tests where failures belong
 
-- [ ] **Step 1: Exercise one generic matrix across unrelated native tools**
-
-Use a disposable MCP server exposing differently shaped write tools: simple primitives, nested objects, arrays, optional values, and a long description. For every tool test owner/admin once/always, member once/always-disabled, schema drift, reconnect, expiry, pane close/reopen, restart, definite failure, and unknown outcome. No test code may branch by provider.
-
-- [ ] **Step 2: Prove no duplicate external dispatch**
-
-Count test-server invocations under duplicate approval, repeated execution callback, disconnect, timeout, and replay. Each approved execution dispatches zero or one external call. After a possible dispatch timeout, status is `outcome_unknown` and count never increases automatically.
-
-- [ ] **Step 3: Prove private-data boundaries**
-
-Plant sentinels in native arguments/results and prove they do not appear in browser frames, visible sidechat messages, reply drafts, D1, logs, public transcript, widget, or Telegram. Verify the private model can still use a successful result to prepare a concise non-dumping response.
-
-- [ ] **Step 4: Capture the approval visual matrix**
-
-At `1440x1000`, `1100x900`, `768x900`, and `390x844`, capture short/long descriptions, wrapped critical detail, idle/hover/focus/pressed/disabled/loading buttons, member role, expired/running/succeeded/failed/unknown states, light/dark mode, reduced motion, and 200% zoom.
-
-Compare the approval against adjacent Maven messages. Bubble shell, max width, padding, text, line height, sender header, radius, and spacing must be identical because they are the same `MessageBubbleShell` instance.
-
-- [ ] **Step 5: Verify removed provider scope**
+### Step 1: Full automated verification
 
 ```bash
-rg -n "customer\.stripe|customer\.posthog|customer\.slack|customer\.attio|customer\.linear|refund_payment|cancel_subscription|post_internal_message|add_note|create_issue|provider-profiles|canonicalAction" worker src shared
 bun test
-bun run build
 bun run lint
-git diff --check
+bun run build
 ```
 
-Expected: the provider-specific search returns zero new feature hits; test/build/lint match baseline; no whitespace errors.
+### Step 2: Sentinel leakage suite
 
-- [ ] **Step 6: Commit verification evidence**
+Plant unique sentinels in OAuth credentials, native arguments, native results, and model tool context. Prove they do not appear in:
 
-Stage the verification document and only exact files changed to fix measured defects, inspect `git diff --cached --name-only`, then commit:
+- public or sidechat message content/metadata;
+- any visitor/dashboard WebSocket payload;
+- public APIs;
+- Telegram/email;
+- safe action runs/errors;
+- application logs/traces; or
+- reply drafts.
+
+The model may receive arguments/results in memory and must produce only the required conclusion. The human must still choose `Add to reply` and Send.
+
+### Step 3: Race/idempotency suite
+
+Exercise double-clicks, two tabs, stale UI, expired call, revoked policy, reconnect, schema drift, timeout before dispatch, timeout after dispatch, browser close, Worker retry, and conversation/project deletion during approval.
+
+No case may dispatch the same execution twice.
+
+### Step 4: Visual QA
+
+At 1440×1000, 1100×900, 768×900, and 390×844 compare approval directly with adjacent Maven bubbles. Confirm identical shell/typography/spacing and compact controls. Test long critical description, executing, success, failure, unknown, expired, keyboard focus, 200% zoom, dark mode, and reduced motion.
+
+### Step 5: Architecture grep
 
 ```bash
-git commit -m "fix: verify generic MCP write approvals"
+rg -n "durable-pause|Think|MavenSidechatAgent|MavenIntegrationAgent|refund_payment|cancel_subscription|post_internal_message|attio\.add|linear\.create" src worker shared package.json wrangler.jsonc
 ```
 
-Do not deploy, run remote migrations, connect production servers, push, or enable production write tools without explicit user approval.
+Expected: no matches introduced by these phases.
+
+### Step 6: Commit verification fixes
+
+Stage only files changed by this phase, then:
+
+```bash
+git commit -m "fix: complete generic MCP write approval acceptance"
+```
+
+Do not deploy or run approval tests against production accounts without separate user authorization.
