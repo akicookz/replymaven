@@ -55,6 +55,17 @@ function isErrorResult(result: unknown): boolean {
   );
 }
 
+function notifyActivity(
+  callback: ((event: SafeToolActivity) => void) | undefined,
+  activity: SafeToolActivity,
+): void {
+  try {
+    callback?.(activity);
+  } catch {
+    // Activity collection must never change tool execution semantics.
+  }
+}
+
 export function buildMavenToolRegistry(
   options: MavenToolRegistryOptions,
 ): MavenToolRegistryResult {
@@ -74,7 +85,10 @@ export function buildMavenToolRegistry(
       inputSchema: definition.inputSchema,
       execute: async (input, { abortSignal }) => {
         const startedAt = Date.now();
-        options.onStart?.(createActivity(capability, "started", 0));
+        notifyActivity(
+          options.onStart,
+          createActivity(capability, "started", 0),
+        );
 
         try {
           const authoritative = await definition.reauthorize();
@@ -100,7 +114,8 @@ export function buildMavenToolRegistry(
             }
           }
 
-          options.onFinish?.(
+          notifyActivity(
+            options.onFinish,
             createActivity(
               capability,
               isErrorResult(result) ? "error" : "success",
@@ -109,7 +124,8 @@ export function buildMavenToolRegistry(
           );
           return result;
         } catch (error) {
-          options.onFinish?.(
+          notifyActivity(
+            options.onFinish,
             createActivity(capability, "error", Date.now() - startedAt),
           );
           throw error;

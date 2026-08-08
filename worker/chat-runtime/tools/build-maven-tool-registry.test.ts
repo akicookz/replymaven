@@ -193,6 +193,44 @@ describe("buildMavenToolRegistry", () => {
     expect(sideEffectCount).toBe(0);
   });
 
+  test("rejects an execution-time transition to public MCP before its side effect", async () => {
+    let sideEffectCount = 0;
+    const definition = createDefinition({
+      execute: async () => {
+        sideEffectCount += 1;
+        return { ok: true };
+      },
+      reauthorize: async () => createCapability({ source: "mcp" }),
+    });
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("public"),
+    );
+
+    expect(result).toEqual({ error: "channel_not_allowed" });
+    expect(sideEffectCount).toBe(0);
+  });
+
+  test("rejects an authoritative project change before its side effect", async () => {
+    let sideEffectCount = 0;
+    const definition = createDefinition({
+      execute: async () => {
+        sideEffectCount += 1;
+        return { ok: true };
+      },
+      reauthorize: async () => createCapability({ projectId: "project-2" }),
+    });
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("public"),
+    );
+
+    expect(result).toEqual({ error: "project_mismatch" });
+    expect(sideEffectCount).toBe(0);
+  });
+
   test("emits lifecycle activity without tool inputs or results", async () => {
     const starts: SafeToolActivity[] = [];
     const finishes: SafeToolActivity[] = [];
@@ -235,6 +273,33 @@ describe("buildMavenToolRegistry", () => {
       "toolId",
     ]);
     expect(JSON.stringify({ starts, finishes })).not.toContain("do-not-emit");
+  });
+
+  test("isolates a throwing finish callback after one successful side effect", async () => {
+    let sideEffectCount = 0;
+    let finishCount = 0;
+    const definition = createDefinition({
+      execute: async () => {
+        sideEffectCount += 1;
+        return { ok: true };
+      },
+    });
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("public"),
+      { orderId: "order-1" },
+      {
+        onFinish: () => {
+          finishCount += 1;
+          throw new Error("activity collector unavailable");
+        },
+      },
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(sideEffectCount).toBe(1);
+    expect(finishCount).toBe(1);
   });
 });
 
@@ -322,5 +387,36 @@ describe("createHttpToolDefinition", () => {
 
     expect(result).toEqual({ error: "channel_not_allowed" });
     expect(encryptionKeyRead).toBe(false);
+  });
+
+  test("does not fetch when authorized header decryption fails", async () => {
+    let fetchCount = 0;
+    const authoritative = createToolRow({
+      headers: btoa("x".repeat(28)),
+    });
+    const toolService = {
+      async getAuthoritativeTool(): Promise<ToolRow | null> {
+        return { ...authoritative };
+      },
+    };
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      return Response.json({ ok: true });
+    };
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: authoritative,
+      toolService,
+      encryptionKey: "00".repeat(32),
+    });
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("public"),
+      { accountId: "account-1" },
+    );
+
+    expect(result).toEqual({ error: "tool_unavailable" });
+    expect(fetchCount).toBe(0);
   });
 });

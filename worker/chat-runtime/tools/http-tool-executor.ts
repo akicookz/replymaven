@@ -303,7 +303,7 @@ export async function createHttpToolDefinition(
           );
           executableTool.headers = JSON.stringify(decrypted);
         } catch {
-          executableTool.headers = null;
+          return null;
         }
       }
       authorizedExecutions.push(toHttpExecutionDefinition(executableTool));
