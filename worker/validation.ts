@@ -572,6 +572,15 @@ export interface HttpToolPolicyInput {
   access: MavenToolAccess;
 }
 
+export const RESERVED_MAVEN_TOOL_NAMES = [
+  "search_knowledge",
+  "request_team_help",
+] as const;
+
+export function isReservedMavenToolName(name: string): boolean {
+  return (RESERVED_MAVEN_TOOL_NAMES as readonly string[]).includes(name);
+}
+
 export const toolAudienceSchema = z
   .array(z.enum(["public", "sidechat"]))
   .min(1)
@@ -602,6 +611,10 @@ export const createToolSchema = z.object({
     .regex(
       /^[a-z][a-z0-9_]*$/,
       "Must start with a letter and contain only lowercase letters, numbers, and underscores",
+    )
+    .refine(
+      (name) => !isReservedMavenToolName(name),
+      "This name is reserved for an internal Maven tool",
     ),
   displayName: z.string().min(1, "Display name is required").max(100),
   description: z.string().min(1, "Description is required").max(500),

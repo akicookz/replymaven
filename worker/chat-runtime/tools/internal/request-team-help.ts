@@ -225,6 +225,17 @@ export function createRequestTeamHelpTool(dependencies: {
 
       const requiredFields = getMissingContactFields(conversation);
       if (requiredFields.length > 0 && !chatState.contactDeclined) {
+        const pendingConversation =
+          await dependencies.chatService.updatePendingTeamRequestContact(
+            dependencies.context.conversationId,
+            dependencies.context.projectId,
+            {
+              status: conversation.status,
+              chatState: conversation.chatState,
+            },
+            { awaitingContactFields: requiredFields },
+          );
+        if (!pendingConversation) return createUnavailableResult();
         return {
           status: "contact_required",
           requiredFields,
@@ -238,6 +249,23 @@ export function createRequestTeamHelpTool(dependencies: {
           parsedInput.data.summary,
         );
       if (claim.status === "contact_required") {
+        const latestConversation =
+          await dependencies.chatService.getOperationalConversationById(
+            dependencies.context.conversationId,
+            dependencies.context.projectId,
+          );
+        if (!latestConversation) return createUnavailableResult();
+        const pendingConversation =
+          await dependencies.chatService.updatePendingTeamRequestContact(
+            dependencies.context.conversationId,
+            dependencies.context.projectId,
+            {
+              status: latestConversation.status,
+              chatState: latestConversation.chatState,
+            },
+            { awaitingContactFields: claim.requiredFields },
+          );
+        if (!pendingConversation) return createUnavailableResult();
         return {
           status: "contact_required",
           requiredFields: claim.requiredFields,

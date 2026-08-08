@@ -125,6 +125,104 @@ function createToolRow(overrides: Partial<ToolRow> = {}): ToolRow {
 }
 
 describe("buildMavenToolRegistry", () => {
+  test.each(["http", "mcp"] as const)(
+    "omits a standalone reserved %s definition",
+    (source) => {
+      const definition = createDefinition({
+        capability: createCapability({
+          id: `legacy-${source}-request-team-help`,
+          modelName: "request_team_help",
+          source,
+          allowedChannels: ["sidechat"],
+        }),
+      });
+
+      const registry = buildMavenToolRegistry({
+        context: createContext("sidechat"),
+        definitions: [definition],
+      });
+
+      expect(Object.keys(registry.tools)).toEqual([]);
+      expect(registry.capabilities.size).toBe(0);
+    },
+  );
+
+  test("keeps the public request_team_help internal tool when HTTP collides", async () => {
+    const internal = createDefinition({
+      capability: createCapability({
+        id: "internal-request-team-help",
+        modelName: "request_team_help",
+        source: "internal",
+      }),
+      execute: async () => ({ owner: "internal" }),
+    });
+    const legacyHttp = createDefinition({
+      capability: createCapability({
+        id: "legacy-http-request-team-help",
+        modelName: "request_team_help",
+        source: "http",
+      }),
+      execute: async () => ({ owner: "http" }),
+    });
+    const registry = buildMavenToolRegistry({
+      context: createContext("public"),
+      definitions: [internal, legacyHttp],
+    });
+    const registered = registry.tools.request_team_help;
+    if (!registered || typeof registered.execute !== "function") {
+      throw new Error("Expected request_team_help to remain executable");
+    }
+
+    const result = await registered.execute(
+      { orderId: "order-1" },
+      { toolCallId: "collision", messages: [] },
+    );
+
+    expect(result).toEqual({ owner: "internal" });
+    expect(registry.capabilities.get("request_team_help")?.id).toBe(
+      "internal-request-team-help",
+    );
+  });
+
+  test("keeps search_knowledge internal in a sidechat HTTP collision", async () => {
+    const internal = createDefinition({
+      capability: createCapability({
+        id: "internal-search-knowledge",
+        modelName: "search_knowledge",
+        source: "internal",
+        allowedChannels: ["public", "sidechat"],
+      }),
+      execute: async () => ({ owner: "internal" }),
+    });
+    const legacyHttp = createDefinition({
+      capability: createCapability({
+        id: "legacy-http-search-knowledge",
+        modelName: "search_knowledge",
+        source: "http",
+        allowedChannels: ["sidechat"],
+      }),
+      execute: async () => ({ owner: "http" }),
+    });
+    const registry = buildMavenToolRegistry({
+      context: createContext("sidechat"),
+      definitions: [internal, legacyHttp],
+    });
+    const registered = registry.tools.search_knowledge;
+    if (!registered || typeof registered.execute !== "function") {
+      throw new Error("Expected search_knowledge to remain executable");
+    }
+
+    const result = await registered.execute(
+      { orderId: "order-1" },
+      { toolCallId: "collision", messages: [] },
+    );
+
+    expect(result).toEqual({ owner: "internal" });
+    expect(registry.capabilities.get("search_knowledge")?.id).toBe(
+      "internal-search-knowledge",
+    );
+  });
+
   test("omits a public-only tool from a sidechat registry", () => {
     const definition = createDefinition();
 
@@ -304,6 +402,346 @@ describe("buildMavenToolRegistry", () => {
 });
 
 describe("createHttpToolDefinition", () => {
+  test.each(["takeover", "close"])(
+    "does not fetch or audit when public ownership loses a %s race",
+    async () => {
+      let fetchCount = 0;
+      let auditCount = 0;
+      const authoritative = createToolRow();
+      const toolService = {
+        async getAuthoritativeTool(): Promise<ToolRow | null> {
+          return { ...authoritative };
+        },
+        async logExecution() {
+          auditCount += 1;
+          return { id: "execution-1" };
+        },
+      };
+      globalThis.fetch = async () => {
+        fetchCount += 1;
+        return Response.json({ ok: true });
+      };
+      const definition = await createHttpToolDefinition({
+        context: createContext("public"),
+        tool: authoritative,
+        toolService,
+        encryptionKey: "00".repeat(32),
+        publicExecution: {
+          chatService: {
+            async runExternalActionIfOwnershipMatches() {
+              return { executed: false };
+            },
+          },
+          acquireRateLimitPermit: () => true,
+        },
+      } as never);
+
+      const result = await executeRegisteredTool(
+        definition,
+        createContext("public"),
+        { accountId: "account-1" },
+      );
+
+      expect(result).toEqual({ error: "conversation_ownership_changed" });
+      expect(fetchCount).toBe(0);
+      expect(auditCount).toBe(0);
+    },
+  );
+
+  test("checks the HTTP permit after ownership and denies without fetch or audit", async () => {
+    const events: string[] = [];
+    const authoritative = createToolRow();
+    const toolService = {
+      async getAuthoritativeTool(): Promise<ToolRow | null> {
+        return { ...authoritative };
+      },
+      async logExecution() {
+        events.push("audit");
+        return { id: "execution-1" };
+      },
+    };
+    globalThis.fetch = async () => {
+      events.push("fetch");
+      return Response.json({ ok: true });
+    };
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: authoritative,
+      toolService,
+      encryptionKey: "00".repeat(32),
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches(
+            _conversationId: string,
+            _projectId: string,
+            _ownership: unknown,
+            action: () => Promise<unknown>,
+          ) {
+            events.push("ownership");
+            return { executed: true, value: await action() };
+          },
+        },
+        acquireRateLimitPermit() {
+          events.push("permit");
+          return false;
+        },
+      },
+    } as never);
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("public"),
+      { accountId: "account-1" },
+    );
+
+    expect(result).toEqual({ error: "tool_rate_limited" });
+    expect(events).toEqual(["ownership", "permit"]);
+  });
+
+  test("does not consume an HTTP permit for a blocked endpoint", async () => {
+    let permitCount = 0;
+    let auditCount = 0;
+    const authoritative = createToolRow({
+      endpoint: "http://127.0.0.1/private",
+    });
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: authoritative,
+      toolService: {
+        async getAuthoritativeTool() {
+          return { ...authoritative };
+        },
+        async logExecution() {
+          auditCount += 1;
+          return { id: "execution-1" };
+        },
+      },
+      encryptionKey: "00".repeat(32),
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches(
+            _conversationId: string,
+            _projectId: string,
+            _ownership: unknown,
+            action: () => Promise<unknown>,
+          ) {
+            return { executed: true, value: await action() };
+          },
+        },
+        acquireRateLimitPermit() {
+          permitCount += 1;
+          return true;
+        },
+      },
+    } as never);
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("public"),
+      { accountId: "account-1" },
+    );
+
+    expect(result).toEqual({
+      error: "This endpoint URL is not allowed for security reasons.",
+    });
+    expect(permitCount).toBe(0);
+    expect(auditCount).toBe(0);
+  });
+
+  test("does not consume an HTTP permit when request construction fails", async () => {
+    let permitCount = 0;
+    let fetchCount = 0;
+    let auditCount = 0;
+    const authoritative = createToolRow({ headers: "{" });
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      return Response.json({ ok: true });
+    };
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: authoritative,
+      toolService: {
+        async getAuthoritativeTool() {
+          return { ...authoritative };
+        },
+        async logExecution() {
+          auditCount += 1;
+          return { id: "execution-1" };
+        },
+      },
+      encryptionKey: "00".repeat(32),
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches(
+            _conversationId: string,
+            _projectId: string,
+            _ownership: unknown,
+            action: () => Promise<unknown>,
+          ) {
+            return { executed: true, value: await action() };
+          },
+        },
+        acquireRateLimitPermit() {
+          permitCount += 1;
+          return true;
+        },
+      },
+    } as never);
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("public"),
+      { accountId: "account-1" },
+    );
+
+    expect(result).toMatchObject({ error: expect.any(String) });
+    expect(permitCount).toBe(0);
+    expect(fetchCount).toBe(0);
+    expect(auditCount).toBe(0);
+  });
+
+  test("audits one actual HTTP execution and returns its private execution id", async () => {
+    const auditRows: Array<Record<string, unknown>> = [];
+    const executionIds: string[] = [];
+    const authoritative = createToolRow();
+    const toolService = {
+      async getAuthoritativeTool(): Promise<ToolRow | null> {
+        return { ...authoritative };
+      },
+      async logExecution(data: Record<string, unknown>) {
+        auditRows.push(data);
+        return { id: "execution-1" };
+      },
+    };
+    globalThis.fetch = async () =>
+      Response.json({ account: { id: "account-1" } }, { status: 201 });
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: authoritative,
+      toolService,
+      encryptionKey: "00".repeat(32),
+      collectExecutionId(id: string) {
+        executionIds.push(id);
+      },
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches(
+            _conversationId: string,
+            _projectId: string,
+            _ownership: unknown,
+            action: () => Promise<unknown>,
+          ) {
+            return { executed: true, value: await action() };
+          },
+        },
+        acquireRateLimitPermit: () => true,
+      },
+    } as never);
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("public"),
+      { accountId: "account-1" },
+    );
+
+    expect(result).toMatchObject({ success: true, httpStatus: 201 });
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({
+      toolId: "http-tool-1",
+      conversationId: "conversation-1",
+      input: { accountId: "account-1" },
+      status: "success",
+      httpStatus: 201,
+      errorMessage: null,
+    });
+    expect(auditRows[0]?.duration).toBeNumber();
+    expect(executionIds).toEqual(["execution-1"]);
+  });
+
+  test("does not retry or misreport a completed HTTP side effect when audit logging fails", async () => {
+    let fetchCount = 0;
+    const authoritative = createToolRow();
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: authoritative,
+      toolService: {
+        async getAuthoritativeTool() {
+          return { ...authoritative };
+        },
+        async logExecution() {
+          throw new Error("audit unavailable");
+        },
+      },
+      encryptionKey: "00".repeat(32),
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches(
+            _conversationId: string,
+            _projectId: string,
+            _ownership: unknown,
+            action: () => Promise<unknown>,
+          ) {
+            return { executed: true, value: await action() };
+          },
+        },
+        acquireRateLimitPermit: () => true,
+      },
+    } as never);
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      return Response.json({ ok: true });
+    };
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("public"),
+      { accountId: "account-1" },
+    );
+
+    expect(result).toMatchObject({ success: true, httpStatus: 200 });
+    expect(fetchCount).toBe(1);
+  });
+
+  test("does not constrain a sidechat HTTP execution with public ownership", async () => {
+    let fetchCount = 0;
+    const authoritative = createToolRow({
+      allowedChannels: '["sidechat"]',
+    });
+    const toolService = {
+      async getAuthoritativeTool(): Promise<ToolRow | null> {
+        return { ...authoritative };
+      },
+      async logExecution() {
+        return { id: "execution-sidechat" };
+      },
+    };
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      return Response.json({ ok: true });
+    };
+    const options = {
+      context: createContext("sidechat"),
+      tool: authoritative,
+      toolService,
+      encryptionKey: "00".repeat(32),
+    };
+    Object.defineProperty(options, "publicExecution", {
+      get() {
+        throw new Error("sidechat read public ownership fence");
+      },
+    });
+    const definition = await createHttpToolDefinition(options as never);
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("sidechat"),
+      { accountId: "account-1" },
+    );
+
+    expect(result).toMatchObject({ success: true });
+    expect(fetchCount).toBe(1);
+  });
+
   test("reloads authority and decrypts headers only for an authorized execution", async () => {
     const encryptionKey = "00".repeat(32);
     const encryptedHeaders = await encryptHeaders(
@@ -335,7 +773,20 @@ describe("createHttpToolDefinition", () => {
       tool: authoritative,
       toolService,
       encryptionKey,
-    });
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches(
+            _conversationId: string,
+            _projectId: string,
+            _ownership: unknown,
+            action: () => Promise<unknown>,
+          ) {
+            return { executed: true, value: await action() };
+          },
+        },
+        acquireRateLimitPermit: () => true,
+      },
+    } as never);
 
     const firstResult = await executeRegisteredTool(
       definition,

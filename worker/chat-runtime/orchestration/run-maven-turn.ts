@@ -14,6 +14,7 @@ import {
 } from "../llm/create-language-model";
 import { buildSupportSystemPrompt } from "../prompt/build-support-system-prompt";
 import { getSourceReferenceDedupKey } from "../retrieval/build-rag-context";
+import { MavenStreamFailure } from "../streaming/maven-stream-failure";
 import {
   type ConversationTurnMessage,
   type MavenStreamPart,
@@ -38,6 +39,7 @@ export interface MavenTurnDependencies {
   env: AppEnv;
   modelRuntime: ModelRuntimeState;
   createModel?: (config: ModelRuntimeState["activeConfig"]) => LanguageModel;
+  streamAgent?: typeof streamMavenAgent;
   toolService: ToolService;
   projectName: string;
   settings: SupportPromptSettings;
@@ -53,6 +55,7 @@ export interface MavenPublicToolDependencies {
   chatService: ChatService;
   projectService: ProjectService;
   telegramService?: TelegramService;
+  acquireHttpRateLimitPermit(): boolean;
   onTeamRequested(): void;
   broadcast(message: MessageRow): void;
 }
@@ -61,6 +64,7 @@ export interface MavenTurnResult {
   fullStream: AsyncIterable<MavenStreamPart>;
   collectedSources: SourceReference[];
   toolActivity: SafeToolActivity[];
+  httpExecutionIds: string[];
 }
 
 function isStreamError(part: MavenStreamPart): part is MavenStreamPart & {
@@ -85,16 +89,30 @@ async function primeAgentStream(options: {
   result: Awaited<ReturnType<typeof streamMavenAgent>>;
   onVisibleText(): void;
   onToolCommitment(): void;
+  hasCommitted(): boolean;
 }): Promise<Awaited<ReturnType<typeof streamMavenAgent>>> {
   const iterator = options.result.fullStream[Symbol.asyncIterator]();
   const bufferedParts: MavenStreamPart[] = [];
 
   while (true) {
-    const next = await iterator.next();
+    let next: IteratorResult<MavenStreamPart>;
+    try {
+      next = await iterator.next();
+    } catch (error) {
+      if (options.hasCommitted()) {
+        throw new MavenStreamFailure();
+      }
+      throw error;
+    }
     if (next.done) break;
 
     const part = next.value;
-    if (isStreamError(part)) throw part.error;
+    if (isStreamError(part)) {
+      if (options.hasCommitted()) {
+        throw new MavenStreamFailure();
+      }
+      throw part.error;
+    }
     bufferedParts.push(part);
 
     if (isVisibleText(part)) {
@@ -110,8 +128,16 @@ async function primeAgentStream(options: {
   async function* replayPrimedStream(): AsyncGenerator<MavenStreamPart> {
     yield* bufferedParts;
     while (true) {
-      const next = await iterator.next();
+      let next: IteratorResult<MavenStreamPart>;
+      try {
+        next = await iterator.next();
+      } catch {
+        throw new MavenStreamFailure();
+      }
       if (next.done) return;
+      if (isStreamError(next.value)) {
+        throw new MavenStreamFailure();
+      }
       yield next.value;
     }
   }
@@ -138,6 +164,7 @@ export async function runMavenTurn(options: {
   const collectedSources: SourceReference[] = [];
   const collectedSourceKeys = new Set<string>();
   const toolActivity: SafeToolActivity[] = [];
+  const httpExecutionIds: string[] = [];
   let visibleTextStarted = false;
   let toolExecutionCommitted = false;
 
@@ -157,6 +184,9 @@ export async function runMavenTurn(options: {
     toolActivity.push(activity);
   }
 
+  const publicDependencies = options.context.channel === "public"
+    ? requirePublicToolDependencies(options.dependencies)
+    : undefined;
   const httpTools = await options.dependencies.toolService.getEnabledToolsForChannel(
     options.context.projectId,
     options.context.channel,
@@ -168,6 +198,18 @@ export async function runMavenTurn(options: {
         tool,
         toolService: options.dependencies.toolService,
         encryptionKey: options.dependencies.env.ENCRYPTION_KEY,
+        collectExecutionId(id) {
+          httpExecutionIds.push(id);
+        },
+        ...(publicDependencies
+          ? {
+              publicExecution: {
+                chatService: publicDependencies.chatService,
+                acquireRateLimitPermit:
+                  publicDependencies.acquireHttpRateLimitPermit,
+              },
+            }
+          : {}),
       }),
     ),
   );
@@ -181,9 +223,9 @@ export async function runMavenTurn(options: {
     ...httpDefinitions,
   ];
   if (options.context.channel === "public") {
-    const publicDependencies = requirePublicToolDependencies(
-      options.dependencies,
-    );
+    if (!publicDependencies) {
+      throw new Error("Public Maven turns require public tool dependencies");
+    }
     definitions.splice(
       1,
       0,
@@ -230,7 +272,7 @@ export async function runMavenTurn(options: {
       toolExecutionCommitted,
     }),
     operation: async (activeConfig) => {
-      const result = await streamMavenAgent(
+      const result = await (options.dependencies.streamAgent ?? streamMavenAgent)(
         {
           modelConfig: activeConfig,
           createModel: options.dependencies.createModel,
@@ -252,6 +294,9 @@ export async function runMavenTurn(options: {
         onToolCommitment() {
           toolExecutionCommitted = true;
         },
+        hasCommitted() {
+          return visibleTextStarted || toolExecutionCommitted;
+        },
       });
     },
   });
@@ -260,5 +305,6 @@ export async function runMavenTurn(options: {
     fullStream: agentResult.fullStream,
     collectedSources,
     toolActivity,
+    httpExecutionIds,
   };
 }

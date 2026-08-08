@@ -8,6 +8,7 @@ import {
   type ToolExecutionRow,
 } from "../db";
 import {
+  isReservedMavenToolName,
   toolAudienceSchema,
   type MavenChannel,
 } from "../validation";
@@ -73,6 +74,7 @@ export class ToolService {
     const enabledTools = await this.getEnabledTools(projectId);
 
     return enabledTools.filter((tool) => {
+      if (isReservedMavenToolName(tool.name)) return false;
       let allowedChannels: unknown;
       try {
         allowedChannels = JSON.parse(tool.allowedChannels);
@@ -113,6 +115,9 @@ export class ToolService {
   async createTool(
     data: CreateToolInput,
   ): Promise<ToolRow> {
+    if (isReservedMavenToolName(data.name)) {
+      throw new Error("This name is reserved for an internal Maven tool");
+    }
     const id = crypto.randomUUID();
     const { allowedChannels, ...toolData } = data;
     await this.db.insert(tools).values({
@@ -226,18 +231,21 @@ export class ToolService {
   // ─── Message Linking ────────────────────────────────────────────────────────
 
   /**
-   * Link all unlinked tool executions for a conversation to a specific bot message.
+   * Link the named, still-unlinked executions to a specific bot message.
    * Called after the bot message is stored post-streaming.
    */
   async linkExecutionsToMessage(
+    executionIds: string[],
     conversationId: string,
     messageId: string,
   ): Promise<void> {
+    if (executionIds.length === 0) return;
     await this.db
       .update(toolExecutions)
       .set({ messageId })
       .where(
         and(
+          inArray(toolExecutions.id, executionIds),
           eq(toolExecutions.conversationId, conversationId),
           isNull(toolExecutions.messageId),
         ),

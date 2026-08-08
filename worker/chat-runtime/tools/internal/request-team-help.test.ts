@@ -67,6 +67,10 @@ interface TestHarness {
   releaseAcceptedRequestRead: Deferred;
   summaryInsertTokens: string[];
   threadPersistenceTokens: string[];
+  pendingContactWrites: Array<{
+    fields: Array<"name" | "email">;
+    ownership: { status: string; chatState: string | null };
+  }>;
 }
 
 function createContext(channel: MavenTurnContext["channel"]): MavenTurnContext {
@@ -180,6 +184,7 @@ function createHarness(options: {
     releaseAcceptedRequestRead: createDeferred(),
     summaryInsertTokens: [],
     threadPersistenceTokens: [],
+    pendingContactWrites: [],
   };
 
   const chatService = {
@@ -193,6 +198,25 @@ function createHarness(options: {
       ) {
         return null;
       }
+      return { ...harness.conversation };
+    },
+    async updatePendingTeamRequestContact(
+      _conversationId: string,
+      _projectId: string,
+      ownership: { status: string; chatState: string | null },
+      update: { awaitingContactFields: Array<"name" | "email"> },
+    ) {
+      harness.pendingContactWrites.push({
+        fields: update.awaitingContactFields,
+        ownership,
+      });
+      const current = harness.conversation.chatState
+        ? JSON.parse(harness.conversation.chatState)
+        : {};
+      harness.conversation.chatState = JSON.stringify({
+        ...current,
+        awaitingContactFields: update.awaitingContactFields,
+      });
       return { ...harness.conversation };
     },
     async claimTeamRequest(conversationId: string, projectId: string) {
@@ -606,6 +630,18 @@ describe("createRequestTeamHelpTool", () => {
     expect(harness.teamRequestNotifications).toBe(0);
     expect(harness.reviewSummaries).toEqual([]);
     expect(harness.telegramSummaries).toEqual([]);
+    expect(harness.pendingContactWrites).toEqual([
+      {
+        fields: ["name", "email"],
+        ownership: {
+          status: "active",
+          chatState: JSON.stringify({
+            aiParticipation: "continuous",
+            contactDeclined: false,
+          }),
+        },
+      },
+    ]);
   });
 
   test("claims ownership and delegates one successful escalation", async () => {

@@ -370,6 +370,8 @@ function createDependencies(options: {
   searches?: SearchChunk[][];
   sources?: SourceReference[];
   httpTool?: ToolRow | null;
+  httpPermitCalls?: string[];
+  auditRows?: Array<Record<string, unknown>>;
 }): MavenTurnDependencies {
   const httpTool = options.httpTool === undefined ? createToolRow() : options.httpTool;
   const modelRuntime = createModelRuntimeState({
@@ -383,6 +385,10 @@ function createDependencies(options: {
     },
     async getAuthoritativeTool() {
       return httpTool;
+    },
+    async logExecution(data: Record<string, unknown>) {
+      options.auditRows?.push(data);
+      return { id: `execution-${(options.auditRows?.length ?? 1)}` };
     },
   } as unknown as ToolService;
 
@@ -414,8 +420,21 @@ function createDependencies(options: {
     },
     publicToolDependencies: {
       executionCtx: {} as ExecutionContext,
-      chatService: {} as ChatService,
+      chatService: {
+        async runExternalActionIfOwnershipMatches(
+          _conversationId: string,
+          _projectId: string,
+          _ownership: unknown,
+          action: () => Promise<unknown>,
+        ) {
+          return { executed: true, value: await action() };
+        },
+      } as ChatService,
       projectService: {} as ProjectService,
+      acquireHttpRateLimitPermit() {
+        options.httpPermitCalls?.push("permit");
+        return true;
+      },
       onTeamRequested() {},
       broadcast() {},
     },
@@ -640,7 +659,9 @@ describe("runMavenTurn", () => {
       streamError = error;
     }
 
-    expect(streamError).toBeUndefined();
+    expect(streamError).toBeInstanceOf(Error);
+    expect((streamError as Error).message).toBe("The response stream failed.");
+    expect((streamError as Error).message).not.toContain("provider unavailable");
     expect(toolExecutions).toBe(1);
     expect(primary.calls).toHaveLength(2);
     expect(fallback.calls).toHaveLength(0);
@@ -648,6 +669,67 @@ describe("runMavenTurn", () => {
     expect(dependencies.modelRuntime.modelCallsByStage).toEqual({
       maven_turn: 1,
     });
+  });
+
+  test("sanitizes an initial prime failure after a tool onStart commitment", async () => {
+    const primary = createFakeModel([createTextStep("Unused primary answer.")]);
+    const fallback = createFakeModel([createTextStep("Fallback answer.")]);
+    const dependencies = createDependencies({
+      model: primary.model,
+      calls: primary.calls,
+    });
+    dependencies.modelRuntime = createModelRuntimeState({
+      model: "gpt-primary",
+      geminiApiKey: "gemini-key",
+      openaiApiKey: "openai-key",
+    });
+    dependencies.createModel = (config) =>
+      config.model === "gpt-primary" ? primary.model : fallback.model;
+    let toolExecutions = 0;
+    globalThis.fetch = async () => {
+      toolExecutions += 1;
+      return Response.json({ privateResult: "active" });
+    };
+    dependencies.streamAgent = async (_modelDependencies, options) => {
+      const httpTool = options.tools.lookup_account;
+      if (!httpTool || typeof httpTool.execute !== "function") {
+        throw new Error("Expected lookup_account tool");
+      }
+      await httpTool.execute(
+        { accountId: "acct-prime" },
+        { toolCallId: "http-prime", messages: [] },
+      );
+      return {
+        fullStream: {
+          [Symbol.asyncIterator]() {
+            return {
+              async next() {
+                throw new Error("provider secret during initial priming");
+              },
+            };
+          },
+        },
+      };
+    };
+
+    let streamError: unknown;
+    try {
+      await runMavenTurn({
+        context: createContext(),
+        dependencies,
+        conversationHistory: [],
+        currentMessage: "Check my account.",
+      });
+    } catch (error) {
+      streamError = error;
+    }
+
+    expect(streamError).toBeInstanceOf(Error);
+    expect((streamError as Error).message).toBe("The response stream failed.");
+    expect((streamError as Error).message).not.toContain("provider secret");
+    expect(toolExecutions).toBe(1);
+    expect(fallback.calls).toHaveLength(0);
+    expect(dependencies.modelRuntime.hasUsedFallback).toBe(false);
   });
 
   test("sidechat does not read or construct public team-help dependencies", async () => {
@@ -707,6 +789,8 @@ describe("runMavenTurn", () => {
   });
 
   test("searches repeatedly, calls HTTP, and composes final text in one agent loop", async () => {
+    const auditRows: Array<Record<string, unknown>> = [];
+    const permitCalls: string[] = [];
     const sources: SourceReference[] = Array.from({ length: 6 }, (_, index) => ({
       title: `Article ${index}`,
       url: `https://example.com/article-${index}`,
@@ -729,6 +813,8 @@ describe("runMavenTurn", () => {
       calls: fake.calls,
       sources,
       searches: [chunks.slice(0, 3), chunks.slice(2, 6), chunks.slice(5, 6)],
+      auditRows,
+      httpPermitCalls: permitCalls,
     });
     globalThis.fetch = async () => {
       return Response.json({ privateHttpResult: "active" });
@@ -762,6 +848,9 @@ describe("runMavenTurn", () => {
       "Article 4",
     ]);
     expect(turn.toolActivity.length).toBeLessThanOrEqual(32);
+    expect(permitCalls).toEqual(["permit"]);
+    expect(auditRows).toHaveLength(1);
+    expect(turn.httpExecutionIds).toEqual(["execution-1"]);
     expect(turn.toolActivity.every((activity) => {
       const keys = Object.keys(activity).sort();
       return keys.join(",") === "displayName,durationMs,source,status,toolId";
@@ -775,6 +864,7 @@ describe("runMavenTurn", () => {
   });
 
   test("asks an ordinary final-text question without an ask_user tool", async () => {
+    const permitCalls: string[] = [];
     const fake = createFakeModel([
       createTextStep("What account ID should I check?"),
     ]);
@@ -782,6 +872,7 @@ describe("runMavenTurn", () => {
       model: fake.model,
       calls: fake.calls,
       httpTool: null,
+      httpPermitCalls: permitCalls,
     });
 
     const turn = await runMavenTurn({
@@ -797,6 +888,7 @@ describe("runMavenTurn", () => {
 
     expect(browserEvents).toEqual([{ text: "What account ID should I check?" }]);
     expect(JSON.stringify(fake.calls[0]?.tools)).not.toContain("ask_user");
+    expect(permitCalls).toEqual([]);
   });
 
   test("bounds safe activity when one model step calls many tools", async () => {

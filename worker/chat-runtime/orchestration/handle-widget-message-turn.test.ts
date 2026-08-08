@@ -2,6 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { type SourceReference } from "../../services/resource-service";
 import { type MavenStreamPart } from "../types";
 import { persistGuardedAiOutput } from "../post-turn/persist-guarded-ai-output";
+import { buildMavenToolRegistry } from "../tools/build-maven-tool-registry";
+import {
+  createRequestTeamHelpTool,
+  type RequestTeamHelpResult,
+} from "../tools/internal/request-team-help";
 import {
   handleWidgetMessageTurn,
   streamPublicMavenTurn,
@@ -111,6 +116,12 @@ interface HandlerHarness {
   runTurnCalls: unknown[];
   resolveCalls: string[];
   botInsertCalls: unknown[];
+  checkRateLimitCalls: unknown[][];
+  linkCalls: unknown[][];
+  waitUntilCalls: Promise<unknown>[];
+  pendingContactUpdates: unknown[][];
+  saveChatStateCalls: unknown[][];
+  getConversation(): Record<string, unknown> | null;
   setConversation(conversation: Record<string, unknown> | null): void;
 }
 
@@ -122,13 +133,22 @@ function createHandlerHarness(options?: {
   streamParts?: MavenStreamPart[];
   abortSignal?: AbortSignal;
   teamRequestedDuringTurn?: boolean;
+  enabledHttpTool?: boolean;
+  allowToolRateLimit?: boolean;
+  botInsertSucceeds?: boolean;
+  httpExecutionIds?: string[];
+  visitorName?: string | null;
+  visitorEmail?: string | null;
+  executeTeamHelpDuringTurn?: boolean;
+  pendingContactUpdateLosesToHuman?: boolean;
+  contactAccepted?: boolean;
 }): HandlerHarness {
   let conversation: Record<string, unknown> | null = {
     id: "conversation-1",
     visitorId: "visitor-1",
     customerId: null,
-    visitorName: null,
-    visitorEmail: null,
+    visitorName: options?.visitorName ?? null,
+    visitorEmail: options?.visitorEmail ?? null,
     status: options?.status ?? "active",
     chatState: options?.chatState ?? null,
     closeReason: options?.closeReason ?? null,
@@ -138,6 +158,11 @@ function createHandlerHarness(options?: {
   const runTurnCalls: unknown[] = [];
   const resolveCalls: string[] = [];
   const botInsertCalls: unknown[] = [];
+  const checkRateLimitCalls: unknown[][] = [];
+  const linkCalls: unknown[][] = [];
+  const waitUntilCalls: Promise<unknown>[] = [];
+  const pendingContactUpdates: unknown[][] = [];
+  const saveChatStateCalls: unknown[][] = [];
   const chatService = {
     async getOperationalConversationById() {
       return conversation;
@@ -150,7 +175,19 @@ function createHandlerHarness(options?: {
     },
     async addBotMessageIfOwnershipMatches(...args: unknown[]) {
       botInsertCalls.push(args);
-      return null;
+      if (!options?.botInsertSucceeds) return null;
+      const message = args[0] as { content: string; sources?: string | null };
+      return {
+        id: "bot-message-1",
+        conversationId: "conversation-1",
+        role: "bot",
+        content: message.content,
+        imageUrl: null,
+        sources: message.sources ?? null,
+        senderName: "Maven",
+        senderAvatar: null,
+        createdAt: new Date(0),
+      };
     },
     async resolveConversationByAi() {
       resolveCalls.push("resolve");
@@ -165,7 +202,88 @@ function createHandlerHarness(options?: {
       };
       return false;
     },
-    async saveChatState() {},
+    async saveChatState(...args: unknown[]) {
+      saveChatStateCalls.push(args);
+      if (conversation) {
+        conversation = {
+          ...conversation,
+          chatState: JSON.stringify(args[2]),
+        };
+      }
+    },
+    async updatePendingTeamRequestContact(...args: unknown[]) {
+      pendingContactUpdates.push(args);
+      if (!conversation) return null;
+      if (options?.pendingContactUpdateLosesToHuman) {
+        conversation = {
+          ...conversation,
+          status: "agent_replied",
+          chatState: JSON.stringify({
+            state: "agent_mode",
+            aiParticipation: "human_only",
+            ownershipRevision: 2,
+            awaitingContactFields: ["name", "email"],
+          }),
+        };
+        return null;
+      }
+      const ownership = args[2] as { status: string; chatState: string | null };
+      if (
+        conversation.status !== ownership.status ||
+        conversation.chatState !== ownership.chatState
+      ) {
+        return null;
+      }
+      const update = args[3] as {
+        visitorName?: string;
+        visitorEmail?: string;
+        awaitingContactFields: Array<"name" | "email">;
+        contactDeclined?: boolean;
+      };
+      const currentState = conversation.chatState
+        ? JSON.parse(conversation.chatState as string) as Record<string, unknown>
+        : {};
+      conversation = {
+        ...conversation,
+        ...(update.visitorName ? { visitorName: update.visitorName } : {}),
+        ...(update.visitorEmail ? { visitorEmail: update.visitorEmail } : {}),
+        chatState: JSON.stringify({
+          ...currentState,
+          awaitingContactFields: update.awaitingContactFields,
+          contactDeclined: currentState.contactDeclined ?? false,
+          ...(update.contactDeclined === undefined
+            ? {}
+            : { contactDeclined: update.contactDeclined }),
+        }),
+      };
+      return { ...conversation };
+    },
+    async claimNewTeamRequest() {
+      if (!conversation) return { status: "unavailable" as const };
+      const state = conversation.chatState
+        ? JSON.parse(conversation.chatState as string) as Record<string, unknown>
+        : {};
+      const requiredFields: Array<"name" | "email"> = [];
+      if (!conversation.visitorName) requiredFields.push("name");
+      if (!conversation.visitorEmail) requiredFields.push("email");
+      if (requiredFields.length > 0 && state.contactDeclined !== true) {
+        return { status: "contact_required" as const, requiredFields };
+      }
+      conversation = {
+        ...conversation,
+        status: "waiting_agent",
+        chatState: JSON.stringify({
+          ...state,
+          state: "escalating",
+          aiParticipation: "assist_until_agent",
+          ownershipRevision:
+            typeof state.ownershipRevision === "number"
+              ? state.ownershipRevision + 1
+              : 1,
+        }),
+      };
+      return { status: "claimed" as const };
+    },
     async runExternalActionIfOperational() {
       return { executed: false, value: null };
     },
@@ -196,6 +314,9 @@ function createHandlerHarness(options?: {
     },
     createProjectService() {
       return {
+        async getProjectById() {
+          return { id: "project-1", name: "Acme" };
+        },
         async getSettings() {
           return {
             toneOfVoice: "professional",
@@ -217,13 +338,64 @@ function createHandlerHarness(options?: {
     createToolService() {
       return {
         async getEnabledToolsForChannel() {
-          return [];
+          return options?.enabledHttpTool ? [{ id: "http-tool-1" }] : [];
         },
-        async linkExecutionsToMessage() {},
+        async linkExecutionsToMessage(...args: unknown[]) {
+          linkCalls.push(args);
+        },
       };
     },
     async runMavenTurn(input: unknown) {
       runTurnCalls.push(input);
+      if (options?.executeTeamHelpDuringTurn) {
+        const turnInput = input as {
+          context: Parameters<typeof createRequestTeamHelpTool>[0]["context"];
+          dependencies: {
+            publicToolDependencies: NonNullable<
+              Parameters<typeof createRequestTeamHelpTool>[0]
+            >;
+          };
+        };
+        const publicDependencies = turnInput.dependencies.publicToolDependencies;
+        const definition = createRequestTeamHelpTool({
+          context: turnInput.context,
+          chatService: publicDependencies.chatService,
+          projectService: publicDependencies.projectService,
+          telegramService: publicDependencies.telegramService,
+          env: { BETTER_AUTH_URL: "https://app.test" },
+          executionCtx: publicDependencies.executionCtx,
+          onTeamRequested: publicDependencies.onTeamRequested,
+          broadcast: publicDependencies.broadcast,
+        });
+        const registered = buildMavenToolRegistry({
+          context: turnInput.context,
+          definitions: [definition],
+        }).tools.request_team_help;
+        if (!registered || typeof registered.execute !== "function") {
+          throw new Error("Expected request_team_help tool");
+        }
+        const result = await registered.execute(
+          { summary: "Visitor needs account help." },
+          { toolCallId: "team-help", messages: [] },
+        ) as RequestTeamHelpResult;
+        const text = result.status === "contact_required"
+          ? "What name and email should I include?"
+          : result.visitorMessage;
+        return {
+          fullStream: createMavenStream([
+            {
+              type: "tool-call",
+              toolCallId: "team-help",
+              toolName: "request_team_help",
+              input: { summary: "Visitor needs account help." },
+            },
+            { type: "text-delta", text },
+          ]),
+          collectedSources: [],
+          toolActivity: [],
+          httpExecutionIds: [],
+        };
+      }
       if (options?.teamRequestedDuringTurn && conversation) {
         conversation = {
           ...conversation,
@@ -246,7 +418,16 @@ function createHandlerHarness(options?: {
           options?.streamParts ?? [{ type: "text-delta", text: "Answer" }],
         ),
         collectedSources: [],
-        toolActivity: [],
+        toolActivity: options?.httpExecutionIds?.length
+          ? [{
+              toolId: "http-tool-1",
+              displayName: "HTTP tool",
+              source: "http",
+              status: "success",
+              durationMs: 1,
+            }]
+          : [],
+        httpExecutionIds: options?.httpExecutionIds ?? [],
       };
     },
   } as unknown as WidgetMessageTurnRuntime;
@@ -269,15 +450,36 @@ function createHandlerHarness(options?: {
         },
       },
     },
-    executionCtx: { waitUntil() {} },
+    executionCtx: {
+      waitUntil(promise: Promise<unknown>) {
+        waitUntilCalls.push(promise);
+      },
+    },
     routeStartedAt: Date.now(),
     streamProtocolVersion: 2,
-    checkRateLimit: () => true,
+    checkRateLimit(...args: unknown[]) {
+      checkRateLimitCalls.push(args);
+      return options?.allowToolRateLimit ?? true;
+    },
     project: { id: "project-1", userId: "user-1", name: "Acme" },
     conversationId: "conversation-1",
     visitorMessageAlreadySaved: true,
     payload: { content: options?.content ?? "Help me" },
     abortSignal: options?.abortSignal,
+    ...(options?.contactAccepted
+      ? {
+          contactAccepted: {
+            conversationId: "conversation-1",
+            visitorMessageId: "visitor-message-1",
+            conversationStatus: "waiting_agent",
+            aiWillRespond: true,
+            visitorName: null,
+            visitorEmail: null,
+            assistantName: "Maven",
+            fallbackMessage: "Initial fallback",
+          },
+        }
+      : {}),
   } as unknown as Parameters<typeof handleWidgetMessageTurn>[0];
 
   return {
@@ -286,6 +488,14 @@ function createHandlerHarness(options?: {
     runTurnCalls,
     resolveCalls,
     botInsertCalls,
+    checkRateLimitCalls,
+    linkCalls,
+    waitUntilCalls,
+    pendingContactUpdates,
+    saveChatStateCalls,
+    getConversation() {
+      return conversation ? { ...conversation } : null;
+    },
     setConversation(next) {
       conversation = next;
     },
@@ -364,6 +574,41 @@ describe("widget handler Maven gates", () => {
     ).toBe(abortController.signal);
   });
 
+  test("does not consume the HTTP execution limit for a text-only Maven turn", async () => {
+    const harness = createHandlerHarness({
+      enabledHttpTool: true,
+      allowToolRateLimit: false,
+    });
+
+    const response = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+    await response.text();
+
+    expect(harness.runTurnCalls).toHaveLength(1);
+    expect(harness.checkRateLimitCalls).toHaveLength(0);
+  });
+
+  test("does not consume the HTTP execution limit for a scope-blocked turn", async () => {
+    const harness = createHandlerHarness({
+      content: "Write a poem about the moon",
+      enabledHttpTool: true,
+      allowToolRateLimit: false,
+      botInsertSucceeds: true,
+    });
+
+    const response = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+    const body = await response.text();
+
+    expect(harness.runTurnCalls).toHaveLength(0);
+    expect(harness.checkRateLimitCalls).toHaveLength(0);
+    expect(body).toContain("unrelated general-purpose requests");
+  });
+
   test("a takeover winning RESOLVED close prevents bot persistence", async () => {
     const harness = createHandlerHarness({
       streamParts: [{ type: "text-delta", text: "Goodbye [RESOLVED]" }],
@@ -401,6 +646,210 @@ describe("widget handler Maven gates", () => {
     expect(harness.resolveCalls).toHaveLength(0);
     expect(body).not.toContain("[RESOLVED]");
     expect(body).toContain('"conversationStatus":"waiting_agent"');
+  });
+
+  test("a post-tool provider error emits only a sanitized error frame", async () => {
+    const harness = createHandlerHarness({
+      streamParts: [
+        {
+          type: "tool-call",
+          toolCallId: "http-1",
+          toolName: "lookup_account",
+          input: { accountId: "private-account" },
+        },
+        { type: "text-delta", text: "Partial answer" },
+        {
+          type: "error",
+          error: new Error("provider secret failure"),
+        },
+      ],
+    });
+
+    const response = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+    const body = await response.text();
+
+    expect(harness.runTurnCalls).toHaveLength(1);
+    expect(harness.botInsertCalls).toHaveLength(0);
+    expect(body).toContain('"error":"The response stream failed."');
+    expect(body).not.toContain("provider secret failure");
+    expect(body).not.toContain('"completed"');
+  });
+
+  test("a committed stream failure cannot become a contact fallback success", async () => {
+    const harness = createHandlerHarness({
+      contactAccepted: true,
+      botInsertSucceeds: true,
+      streamParts: [
+        {
+          type: "tool-call",
+          toolCallId: "http-1",
+          toolName: "lookup_account",
+          input: { accountId: "private-account" },
+        },
+        {
+          type: "error",
+          error: new Error("provider secret failure"),
+        },
+      ],
+    });
+
+    const response = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+    const body = await response.text();
+
+    expect(harness.botInsertCalls).toHaveLength(0);
+    expect(body).toContain('"error":"The response stream failed."');
+    expect(body).not.toContain('"completed"');
+  });
+
+  test("tracks exact HTTP execution linkage through waitUntil", async () => {
+    const harness = createHandlerHarness({
+      botInsertSucceeds: true,
+      httpExecutionIds: ["execution-1"],
+    });
+
+    const response = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+    await response.text();
+    await Promise.all(harness.waitUntilCalls);
+
+    expect(harness.linkCalls).toEqual([
+      [["execution-1"], "conversation-1", "bot-message-1"],
+    ]);
+  });
+
+  test("resumes a pending team request from explicit contact on the next visitor turn", async () => {
+    const harness = createHandlerHarness({
+      botInsertSucceeds: true,
+      executeTeamHelpDuringTurn: true,
+    });
+
+    const firstResponse = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+    await firstResponse.text();
+    await Promise.all(harness.waitUntilCalls.splice(0));
+
+    const afterQuestion = harness.getConversation();
+    expect(afterQuestion?.status).toBe("active");
+    expect(JSON.parse(afterQuestion?.chatState as string)).toMatchObject({
+      awaitingContactFields: ["name", "email"],
+      contactDeclined: false,
+    });
+
+    (harness.context.payload as { content: string }).content =
+      "Alice, alice@example.com";
+    const secondResponse = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+    await secondResponse.text();
+    await Promise.all(harness.waitUntilCalls.splice(0));
+
+    const afterResume = harness.getConversation();
+    expect(afterResume).toMatchObject({
+      status: "waiting_agent",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+    });
+    expect(JSON.parse(afterResume?.chatState as string)).toMatchObject({
+      awaitingContactFields: [],
+      contactDeclined: false,
+      aiParticipation: "assist_until_agent",
+    });
+    expect(harness.runTurnCalls).toHaveLength(2);
+    expect(harness.saveChatStateCalls).toHaveLength(0);
+  });
+
+  test("keeps only the omitted contact field pending on the second turn", async () => {
+    const harness = createHandlerHarness({
+      botInsertSucceeds: true,
+      executeTeamHelpDuringTurn: true,
+    });
+    await (await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    )).text();
+    await Promise.all(harness.waitUntilCalls.splice(0));
+
+    (harness.context.payload as { content: string }).content =
+      "alice@example.com";
+    await (await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    )).text();
+    await Promise.all(harness.waitUntilCalls.splice(0));
+
+    const afterPartial = harness.getConversation();
+    expect(afterPartial).toMatchObject({
+      status: "active",
+      visitorName: null,
+      visitorEmail: "alice@example.com",
+    });
+    expect(JSON.parse(afterPartial?.chatState as string)).toMatchObject({
+      awaitingContactFields: ["name"],
+      contactDeclined: false,
+    });
+    expect(harness.saveChatStateCalls).toHaveLength(0);
+  });
+
+  test("an explicit contact refusal resumes the pending team request", async () => {
+    const harness = createHandlerHarness({
+      botInsertSucceeds: true,
+      executeTeamHelpDuringTurn: true,
+    });
+    await (await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    )).text();
+    await Promise.all(harness.waitUntilCalls.splice(0));
+
+    (harness.context.payload as { content: string }).content =
+      "I'd rather not share that.";
+    await (await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    )).text();
+    await Promise.all(harness.waitUntilCalls.splice(0));
+
+    const afterRefusal = harness.getConversation();
+    expect(afterRefusal?.status).toBe("waiting_agent");
+    expect(JSON.parse(afterRefusal?.chatState as string)).toMatchObject({
+      awaitingContactFields: [],
+      contactDeclined: true,
+      aiParticipation: "assist_until_agent",
+    });
+    expect(harness.saveChatStateCalls).toHaveLength(0);
+  });
+
+  test("a takeover winning pending-contact CAS prevents a stale Maven turn", async () => {
+    const harness = createHandlerHarness({
+      content: "Alice, alice@example.com",
+      chatState: JSON.stringify({
+        state: "clarifying",
+        aiParticipation: "continuous",
+        ownershipRevision: 1,
+        awaitingContactFields: ["name", "email"],
+        contactDeclined: false,
+      }),
+      pendingContactUpdateLosesToHuman: true,
+    });
+
+    const response = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+
+    expect(await response.json()).toEqual({ ok: true, agentMode: true });
+    expect(harness.runTurnCalls).toHaveLength(0);
   });
 });
 

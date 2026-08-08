@@ -30,6 +30,7 @@ import {
   stripInternalTokensStreaming,
   type InternalToken,
 } from "../streaming/internal-tokens";
+import { MavenStreamFailure } from "../streaming/maven-stream-failure";
 import {
   broadcastClosed,
   broadcastCustomerUpdated,
@@ -59,6 +60,7 @@ import {
   identifyHardGate,
   parseVisitorAiInvocation,
 } from "../routing/public-turn-gates";
+import { parsePendingContactReply } from "../routing/pending-contact-reply";
 import { buildSupportTurnOpening } from "../prompt/sections";
 import { buildContactFallbackMessage } from "../contact-support/contact-support";
 import { persistGuardedAiOutput } from "../post-turn/persist-guarded-ai-output";
@@ -236,6 +238,7 @@ export interface PublicMavenStreamResult {
   sources: SourceReference[];
   detectedInternalTokens: InternalToken[];
   hadToolCalls: boolean;
+  httpExecutionIds: string[];
 }
 
 export async function streamPublicMavenTurn(options: {
@@ -290,6 +293,7 @@ export async function streamPublicMavenTurn(options: {
     sources: turn.collectedSources,
     detectedInternalTokens,
     hadToolCalls: turn.toolActivity.length > 0,
+    httpExecutionIds: turn.httpExecutionIds,
   };
 }
 
@@ -413,7 +417,7 @@ export async function handleWidgetMessageTurn(
     );
   }
 
-  const conversation = conversationLookup;
+  let conversation = conversationLookup;
   if (!conversation) {
     logWarn(
       "widget_turn.blocked",
@@ -437,13 +441,6 @@ export async function handleWidgetMessageTurn(
       ),
     },
   );
-  const participationAtTurnStart = chatState.aiParticipation;
-
-  const ownershipSnapshotAtTurnStart = {
-    status: conversation.status,
-    chatState: conversation.chatState,
-  };
-
   const imageUrl = context.payload.imageUrl ?? null;
   let isFirstVisitorTurn = context.isFirstVisitorTurn ?? false;
   let visitorMessageOccurredAt = new Date();
@@ -480,6 +477,76 @@ export async function handleWidgetMessageTurn(
   } else {
     markStage("visitor_message_previously_saved");
   }
+
+  if (
+    conversation.status === "active" &&
+    chatState.aiParticipation !== "human_only" &&
+    chatState.awaitingContactFields.length > 0
+  ) {
+    const contactReply = parsePendingContactReply(
+      context.payload.content,
+      chatState.awaitingContactFields,
+    );
+    if (
+      contactReply.visitorName ||
+      contactReply.visitorEmail ||
+      contactReply.contactDeclined
+    ) {
+      const updatedConversation =
+        await chatService.updatePendingTeamRequestContact(
+          context.conversationId,
+          context.project.id,
+          {
+            status: conversation.status,
+            chatState: conversation.chatState,
+          },
+          {
+            ...(contactReply.visitorName
+              ? { visitorName: contactReply.visitorName }
+              : {}),
+            ...(contactReply.visitorEmail
+              ? { visitorEmail: contactReply.visitorEmail }
+              : {}),
+            awaitingContactFields: contactReply.remainingFields,
+            contactDeclined: contactReply.contactDeclined,
+          },
+        );
+      if (updatedConversation) {
+        conversation = updatedConversation;
+        chatState = parseChatState(conversation.chatState, {
+          fallbackAiParticipation: fallbackAiParticipationForStatus(
+            conversation.status,
+          ),
+        });
+        conversationStatusForTurn = conversation.status;
+      } else {
+        const latestConversation =
+          await chatService.getOperationalConversationById(
+            context.conversationId,
+            context.project.id,
+          );
+        if (!latestConversation) {
+          return Response.json(
+            { error: "Conversation archived" },
+            { status: 410 },
+          );
+        }
+        conversation = latestConversation;
+        chatState = parseChatState(conversation.chatState, {
+          fallbackAiParticipation: fallbackAiParticipationForStatus(
+            conversation.status,
+          ),
+        });
+        conversationStatusForTurn = conversation.status;
+      }
+    }
+  }
+
+  const participationAtTurnStart = chatState.aiParticipation;
+  const ownershipSnapshotAtTurnStart = {
+    status: conversation.status,
+    chatState: conversation.chatState,
+  };
 
   context.executionCtx.waitUntil(
     touchLinkedCustomerAfterVisitorMessage({
@@ -631,12 +698,10 @@ export async function handleWidgetMessageTurn(
     return Response.json({ error: "Conversation closed" }, { status: 410 });
   }
 
-  const [enabledTools, enabledGuidelines, recentHistory] =
-    await Promise.all([
-      toolService.getEnabledToolsForChannel(context.project.id, "public"),
-      guidelineService.getEnabledByProject(context.project.id),
-      chatService.getRecentMessages(context.conversationId, 11),
-    ]);
+  const [enabledGuidelines, recentHistory] = await Promise.all([
+    guidelineService.getEnabledByProject(context.project.id),
+    chatService.getRecentMessages(context.conversationId, 11),
+  ]);
   const parallelPrefetchedHistory = recentHistory.messages;
   markStage("ai_prefetch_done");
 
@@ -655,22 +720,6 @@ export async function handleWidgetMessageTurn(
       ? conversationMetadata.agentHandbackInstructions
       : null;
 
-  if (enabledTools.length > 0) {
-    if (!context.checkRateLimit(`toolmsg:${context.project.id}`, 100, 60_000)) {
-      logWarn(
-        "widget_turn.blocked",
-        buildWidgetTurnLogContext(context, turnId, {
-          reason: "tool_rate_limit_exceeded",
-        }),
-      );
-      return Response.json(
-        {
-          error: "Tool execution rate limit exceeded. Please try again shortly.",
-        },
-        { status: 429 },
-      );
-    }
-  }
   const modelConfig = {
     model: context.env.AI_MODEL,
     geminiApiKey: context.env.GEMINI_API_KEY,
@@ -807,18 +856,6 @@ export async function handleWidgetMessageTurn(
       }
 
       context.executionCtx.waitUntil(
-        chatService
-          .saveChatState(context.conversationId, context.project.id, chatState)
-          .catch((err) => {
-            logError(
-              "widget_turn.save_chat_state_failed",
-              err,
-              buildWidgetTurnLogContext(context, turnId),
-            );
-          }),
-      );
-
-      context.executionCtx.waitUntil(
         billingService
           .incrementMessageUsage(context.project.userId, ownerSub)
           .catch((err) => {
@@ -865,7 +902,6 @@ export async function handleWidgetMessageTurn(
       "widget_turn.pipeline_started",
       buildWidgetTurnLogContext(context, turnId, {
         conversationStatus: conversation.status,
-        availableToolCount: enabledTools.length,
         guidelineCount: enabledGuidelines.length,
         stageTimings,
       }),
@@ -917,7 +953,6 @@ export async function handleWidgetMessageTurn(
       logInfo(
         "widget_turn.loop_started",
         buildWidgetTurnLogContext(context, turnId, {
-          availableToolCount: enabledTools.length,
           hasImage: Boolean(image),
         }),
       );
@@ -974,6 +1009,13 @@ export async function handleWidgetMessageTurn(
               chatService,
               projectService,
               telegramService: runtime.createTelegramService(context.db),
+              acquireHttpRateLimitPermit() {
+                return context.checkRateLimit(
+                  `toolmsg:${context.project.id}`,
+                  100,
+                  60_000,
+                );
+              },
               onTeamRequested() {
                 conversationStatusForTurn = "waiting_agent";
                 broadcastStatusChange(
@@ -1073,8 +1115,7 @@ export async function handleWidgetMessageTurn(
       // streaming that empty response would paint a blank bubble in the widget
       // and a blank row in the inbox. A human is already handling the thread, so
       // the bot has nothing to add — skip the empty message entirely (no message
-      // beats an empty bubble) while still emitting `done` so the widget
-      // finalizes, and still persisting chat state.
+      // beats an empty bubble) while still emitting `done` so the widget finalizes.
       if (!fullResponse.trim()) {
         logInfo(
           "widget_turn.empty_bot_message_skipped",
@@ -1090,17 +1131,6 @@ export async function handleWidgetMessageTurn(
         } else {
           emitSseEvent(controller, encoder, { done: true });
         }
-        context.executionCtx.waitUntil(
-          chatService
-            .saveChatState(context.conversationId, context.project.id, chatState)
-            .catch((err) => {
-              logError(
-                "widget_turn.save_chat_state_failed",
-                err,
-                buildWidgetTurnLogContext(context, turnId),
-              );
-            }),
-        );
         return;
       }
 
@@ -1217,20 +1247,6 @@ export async function handleWidgetMessageTurn(
       }
 
       context.executionCtx.waitUntil(
-        chatService
-          .saveChatState(context.conversationId, context.project.id, chatState)
-          .catch((err) => {
-            logError(
-              "widget_turn.save_chat_state_failed",
-              err,
-              buildWidgetTurnLogContext(context, turnId, {
-                messageId: botMessage.id,
-              }),
-            );
-          }),
-      );
-
-      context.executionCtx.waitUntil(
         billingService
           .incrementMessageUsage(context.project.userId, ownerSub)
           .catch((err) => {
@@ -1244,18 +1260,24 @@ export async function handleWidgetMessageTurn(
           }),
       );
 
-      if (eventState.hadToolCalls) {
-        toolService
-          .linkExecutionsToMessage(context.conversationId, botMessage.id)
-          .catch((err) => {
-            logError(
-              "widget_turn.link_tool_executions_failed",
-              err,
-              buildWidgetTurnLogContext(context, turnId, {
-                messageId: botMessage.id,
-              }),
-            );
-          });
+      if (streamedTurn.httpExecutionIds.length > 0) {
+        context.executionCtx.waitUntil(
+          toolService
+            .linkExecutionsToMessage(
+              streamedTurn.httpExecutionIds,
+              context.conversationId,
+              botMessage.id,
+            )
+            .catch((err) => {
+              logError(
+                "widget_turn.link_tool_executions_failed",
+                err,
+                buildWidgetTurnLogContext(context, turnId, {
+                  messageId: botMessage.id,
+                }),
+              );
+            }),
+        );
       }
 
       logInfo(
@@ -1303,7 +1325,11 @@ export async function handleWidgetMessageTurn(
       const errorMessage =
         err instanceof Error ? err.message : "Unknown error";
 
-      if (context.contactAccepted && !persistedAiMessage) {
+      if (
+        context.contactAccepted &&
+        !persistedAiMessage &&
+        !(err instanceof MavenStreamFailure)
+      ) {
         try {
           const outputPermission = await getAiOutputPermission();
           if (outputPermission.allowed) {

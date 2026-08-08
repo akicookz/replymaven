@@ -285,6 +285,208 @@ describe("ChatService ownership and atomic writes", () => {
     ]));
   });
 
+  test("adds exact status and raw chat-state ownership to an external-action lease", () => {
+    const leaseAt = new Date("2026-08-01T10:00:00.000Z");
+    const staleBefore = new Date("2026-08-01T09:58:00.000Z");
+    const buildOwnershipLease = buildExternalActionLeaseQuery as unknown as (
+      db: DrizzleD1Database<Record<string, unknown>>,
+      conversationId: string,
+      projectId: string,
+      leaseAt: Date,
+      staleBefore: Date,
+      ownership: { status: string; chatState: string | null },
+    ) => ReturnType<typeof buildExternalActionLeaseQuery>;
+    const { sql, params } = buildOwnershipLease(
+      drizzle({} as never),
+      "conv-1",
+      "project-1",
+      leaseAt,
+      staleBefore,
+      { status: "agent_replied", chatState: "{\"ownershipRevision\":4}" },
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."status" = ?');
+    expect(sql).toContain('"conversations"."chat_state" = ?');
+    expect(params).toEqual(expect.arrayContaining([
+      "agent_replied",
+      '{"ownershipRevision":4}',
+    ]));
+  });
+
+  test.each(["takeover", "close"])(
+    "an ownership-bound external action loses a prior %s race",
+    async (race) => {
+      const { service } = createConversationContinuityService();
+      const conversation = await service.createConversation({
+        projectId: "project-1",
+        customerId: null,
+        visitorId: "visitor-1",
+        visitorName: "Alice",
+        visitorEmail: "alice@example.com",
+        metadata: null,
+      });
+      const snapshot = {
+        status: conversation.status,
+        chatState: conversation.chatState,
+      };
+      if (race === "takeover") {
+        await service.takeHumanOwnership(conversation.id, conversation.projectId);
+      } else {
+        await service.updateConversationStatus(
+          conversation.id,
+          conversation.projectId,
+          "closed",
+          "resolved",
+        );
+      }
+      let actionCalled = false;
+      const ownershipService = service as unknown as {
+        runExternalActionIfOwnershipMatches<T>(
+          conversationId: string,
+          projectId: string,
+          ownership: typeof snapshot,
+          action: () => Promise<T>,
+        ): Promise<{ executed: boolean; value?: T }>;
+      };
+
+      const result = await ownershipService.runExternalActionIfOwnershipMatches(
+        conversation.id,
+        conversation.projectId,
+        snapshot,
+        async () => {
+          actionCalled = true;
+          return "sent";
+        },
+      );
+
+      expect(result).toEqual({ executed: false });
+      expect(actionCalled).toBe(false);
+    },
+  );
+
+  test("an explicit human-only invocation can lease its unchanged snapshot", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+    await service.takeHumanOwnership(conversation.id, conversation.projectId);
+    const humanOwned = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    if (!humanOwned) throw new Error("Expected a human-owned conversation");
+    const ownershipService = service as unknown as {
+      runExternalActionIfOwnershipMatches<T>(
+        conversationId: string,
+        projectId: string,
+        ownership: { status: string; chatState: string | null },
+        action: () => Promise<T>,
+      ): Promise<{ executed: boolean; value?: T }>;
+    };
+
+    const result = await ownershipService.runExternalActionIfOwnershipMatches(
+      humanOwned.id,
+      humanOwned.projectId,
+      { status: humanOwned.status, chatState: humanOwned.chatState },
+      async () => "sent",
+    );
+
+    expect(result).toEqual({ executed: true, value: "sent" });
+  });
+
+  test("atomically persists pending handoff contact against exact ownership", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: null,
+      visitorEmail: null,
+      metadata: null,
+    });
+    const pendingService = service as unknown as {
+      updatePendingTeamRequestContact(
+        conversationId: string,
+        projectId: string,
+        ownership: { status: string; chatState: string | null },
+        update: {
+          visitorName?: string;
+          visitorEmail?: string;
+          awaitingContactFields: Array<"name" | "email">;
+          contactDeclined?: boolean;
+        },
+      ): Promise<ConversationRow | null>;
+    };
+
+    const updated = await pendingService.updatePendingTeamRequestContact(
+      conversation.id,
+      conversation.projectId,
+      { status: conversation.status, chatState: conversation.chatState },
+      {
+        visitorName: "Alice",
+        visitorEmail: "alice@example.com",
+        awaitingContactFields: [],
+      },
+    );
+
+    expect(updated).toMatchObject({
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+    });
+    expect(JSON.parse(updated?.chatState ?? "{}")).toMatchObject({
+      awaitingContactFields: [],
+      contactDeclined: false,
+      aiParticipation: "continuous",
+    });
+  });
+
+  test("pending contact cannot write through a human takeover", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: null,
+      visitorEmail: null,
+      metadata: null,
+    });
+    await service.takeHumanOwnership(conversation.id, conversation.projectId);
+    const pendingService = service as unknown as {
+      updatePendingTeamRequestContact(
+        conversationId: string,
+        projectId: string,
+        ownership: { status: string; chatState: string | null },
+        update: {
+          visitorEmail?: string;
+          awaitingContactFields: Array<"name" | "email">;
+        },
+      ): Promise<ConversationRow | null>;
+    };
+
+    const updated = await pendingService.updatePendingTeamRequestContact(
+      conversation.id,
+      conversation.projectId,
+      { status: conversation.status, chatState: conversation.chatState },
+      {
+        visitorEmail: "alice@example.com",
+        awaitingContactFields: ["name"],
+      },
+    );
+
+    expect(updated).toBeNull();
+    const authoritative = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(authoritative?.visitorEmail).toBeNull();
+    expect(authoritative?.status).toBe("agent_replied");
+  });
+
   test("does not run an external action when its conversation cannot be leased", async () => {
     let actionCalled = false;
     const db = {

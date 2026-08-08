@@ -34,6 +34,15 @@ describe("tool audience validation", () => {
       updateToolSchema.parse({ allowedChannels: ["public", "public"] }),
     ).toThrow();
   });
+
+  test.each(["search_knowledge", "request_team_help"])(
+    "rejects the reserved internal Maven tool name %s",
+    (name) => {
+      expect(
+        createToolSchema.safeParse({ ...validTool, name }).success,
+      ).toBe(false);
+    },
+  );
 });
 
 describe("customer validation contracts", () => {

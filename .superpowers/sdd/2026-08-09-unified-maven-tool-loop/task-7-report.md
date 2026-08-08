@@ -135,3 +135,137 @@ The direct Vite build completed both production bundles: 2,184 SSR/Worker module
 - No open Task 7 code concern. Independent review's final ownership-save concern was retracted after tracing `mergeChatStateForPersistence` and the status/raw-state CAS in `ChatService.saveChatState`.
 - The production build retains the repository's existing large-chunk advisory; this task does not affect client chunking.
 - No deploy or push was performed.
+
+## Fix Round 1
+
+### Changed scope
+
+- Added an exact public-conversation external-action lease immediately around each HTTP execution. The lease CASes project, non-archived status, exact status, and raw chat state from `MavenTurnContext`; a takeover or close that linearizes first prevents the fetch. Sidechat HTTP remains independent of public conversation ownership, and an unchanged explicit human-only `@BotName` snapshot remains leaseable.
+- Made `request_team_help` contact collection resumable without another model branch. A `contact_required` result durably stores `awaitingContactFields`; the next visitor turn parses only explicit email, a conservative short name, or explicit refusal and applies the result with an exact ownership CAS before Maven. The obsolete generic handler `saveChatState` calls were removed so they cannot erase tool-written pending state.
+- Reserved `search_knowledge` and `request_team_help` at validation, service, and runtime-registry boundaries. Legacy HTTP/MCP collisions are omitted while the internal tool remains available.
+- Restored HTTP execution auditing for actual fetch attempts and collected each audit row's ID privately. Successful bot persistence waitUntil-links only those exact IDs, for that conversation, while still unlinked. Audit failure cannot alter or retry an already-completed external request.
+- Added `MavenStreamFailure` so post-commit provider failures, including failures during initial stream priming after tool `onStart`, are sanitized, suppress fallback replay, produce no successful completion or bot persistence, and cannot be converted into the contact-support fallback success path.
+- Moved the `toolmsg` permit into the HTTP executor after authorization/ownership and URL/header/body construction, immediately before `fetch`. Internal tools, text-only turns, scope blocks, blocked URLs, construction failures, and denied ownership consume no permit.
+
+### TDD evidence
+
+The initial Fix Round 1 public/service tests were added before implementation:
+
+```sh
+bun test worker/validation.test.ts worker/chat-runtime/tools/build-maven-tool-registry.test.ts worker/services/chat-service.test.ts worker/services/tool-service.test.ts worker/chat-runtime/tools/internal/request-team-help.test.ts worker/chat-runtime/routing/pending-contact-reply.test.ts worker/chat-runtime/orchestration/handle-widget-message-turn.test.ts
+```
+
+Initial result:
+
+```text
+128 pass
+21 fail
+1 module-load error
+```
+
+This RED covered all six official findings: ownership races, two-turn pending contact/no-stale-save behavior, reserved collisions, audit row/exact-ID linking, committed provider errors, and actual-HTTP-only rate limiting. The true two-turn handler integration then failed five assertions before the handler stopped replaying stale chat state.
+
+Independent-review regressions were also demonstrated RED before their fixes:
+
+```sh
+bun test worker/chat-runtime/routing/pending-contact-reply.test.ts worker/chat-runtime/orchestration/handle-widget-message-turn.test.ts worker/chat-runtime/tools/build-maven-tool-registry.test.ts
+```
+
+```text
+55 pass
+5 fail
+```
+
+Those five failures were the three short support phrases being accepted as names, a lost contact CAS continuing into Maven after takeover, and a blocked URL consuming an HTTP permit. The initial-prime regression was separately demonstrated against the unsanitized catch:
+
+```sh
+bun test worker/chat-runtime/orchestration/run-maven-turn.test.ts -t "sanitizes an initial prime failure"
+```
+
+```text
+0 pass
+1 fail
+Expected: The response stream failed.
+Received: provider secret during initial priming
+```
+
+The handler contact-fallback interaction was demonstrated RED:
+
+```sh
+bun test worker/chat-runtime/orchestration/handle-widget-message-turn.test.ts -t "committed stream failure cannot"
+```
+
+```text
+0 pass
+1 fail
+Expected bot inserts: 0
+Received bot inserts: 1
+```
+
+The final independent-review parser edge was also pinned RED:
+
+```sh
+bun test worker/chat-runtime/routing/pending-contact-reply.test.ts -t "before an email"
+```
+
+```text
+0 pass
+3 fail
+```
+
+Before the fix, `please continue alice@example.com`, `reset password alice@example.com`, and `need more help alice@example.com` all saved the support phrase as a name. Non-prefixed names must now satisfy the capitalization evidence even when an email is present; bare `Alice`, `Name: alice`, and `My name is Alice Smith` remain accepted.
+
+Final focused GREEN command:
+
+```sh
+bun test worker/validation.test.ts worker/services/chat-service.test.ts worker/services/tool-service.test.ts worker/chat-runtime/tools/build-maven-tool-registry.test.ts worker/chat-runtime/tools/internal/request-team-help.test.ts worker/chat-runtime/routing/pending-contact-reply.test.ts worker/chat-runtime/orchestration/run-maven-turn.test.ts worker/chat-runtime/streaming/map-agent-events-to-sse.test.ts worker/chat-runtime/orchestration/handle-widget-message-turn.test.ts
+```
+
+```text
+189 pass
+0 fail
+599 expect() calls
+Ran 189 tests across 9 files.
+```
+
+Fresh full backend/shared GREEN after the last review fix:
+
+```sh
+bun test worker shared
+```
+
+```text
+330 pass
+0 fail
+997 expect() calls
+Ran 330 tests across 47 files.
+```
+
+### Static and build evidence
+
+All commands completed with exit code 0 and no diagnostics, except the planner proof whose exit 1 is the expected no-match result:
+
+```sh
+bun ./node_modules/typescript/bin/tsc -p tsconfig.worker.json --noEmit
+bun ./node_modules/typescript/bin/tsc -b --pretty false
+bun ./node_modules/eslint/bin/eslint.js worker/chat-runtime/orchestration/handle-widget-message-turn.test.ts worker/chat-runtime/orchestration/handle-widget-message-turn.ts worker/chat-runtime/orchestration/run-maven-turn.test.ts worker/chat-runtime/orchestration/run-maven-turn.ts worker/chat-runtime/routing/pending-contact-reply.test.ts worker/chat-runtime/routing/pending-contact-reply.ts worker/chat-runtime/streaming/map-agent-events-to-sse.ts worker/chat-runtime/streaming/maven-stream-failure.ts worker/chat-runtime/tools/build-maven-tool-registry.test.ts worker/chat-runtime/tools/build-maven-tool-registry.ts worker/chat-runtime/tools/http-tool-executor.ts worker/chat-runtime/tools/internal/request-team-help.test.ts worker/chat-runtime/tools/internal/request-team-help.ts worker/services/chat-service.test.ts worker/services/chat-service.ts worker/services/tool-service.test.ts worker/services/tool-service.ts worker/validation.test.ts worker/validation.ts
+git diff --check
+rg -n "runPlannerLoop|planNextAction|prepareTurnRouting|runAgenticTurn|identifyFastPath" worker src
+WRANGLER_LOG_PATH=/tmp/replmaven-task7-fix1-final-wrangler.log bun ./node_modules/vite/bin/vite.js build
+```
+
+The direct production build transformed 2,186 Worker/SSR modules and 3,271 client modules. It emitted only the repository's existing advisory for chunks larger than 500 kB.
+
+### Safety review
+
+- **Ownership linearization:** the public HTTP lease is acquired after runtime reauthorization and immediately before request preparation/rate/fetch. Exact takeover and close races perform zero fetches and zero audit inserts when the ownership change wins. Sidechat does not construct or read public ownership dependencies.
+- **Rate order:** URL blocking and header/body construction happen before the permit; the permit is the final callback before `fetch`. Ownership loss, blocked URL, malformed headers, denial, greetings, knowledge, handoff, and scope blocking all prove zero permit or zero fetch/audit as applicable.
+- **Pending contact durability:** `request_team_help` owns the pending-state write. The handler performs a narrow exact-CAS contact update and has no generic end-of-turn chat-state save. A lost CAS reloads the authoritative row and applies the human/closed hard gate with zero Maven call or provisional text. Full/partial/refusal two-turn paths are covered.
+- **Audit privacy and attribution:** execution IDs are collected in a private turn result field and are absent from tool results, model inputs, safe activity, and browser frames. Linking uses an ID `IN` predicate plus exact conversation and `message_id IS NULL`, so an interrupted or concurrent turn cannot claim another turn's rows. The linkage promise is tracked with `waitUntil`.
+- **External effects:** only actual fetch attempts produce audit rows. Audit insertion failure is swallowed after the result and cannot cause replay. A committed tool sets the retry guard before execution; later provider failures use a sanitized typed failure and never persist partial output or emit success completion.
+- **Handoff ownership:** `request_team_help` remains summary-only and is still the sole handoff side-effect owner. Contact collection does not add a planner, classifier, or auxiliary model call, and the handler does not duplicate handoff post-processing.
+- **Reserved tools:** runtime omission protects legacy rows independently of route validation and preserves the internal definition rather than taking down the bot.
+
+### Independent review and concerns
+
+The independent re-review traced the final implementation clean after the combined-email parser fix. No open Fix Round 1 code concern remains. The contact parser is intentionally conservative: lowercase names without a `Name:`/`My name is` style prefix remain pending rather than being inferred. The existing Vite large-chunk advisory remains unrelated. No deploy or push was performed.

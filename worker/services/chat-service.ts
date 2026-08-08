@@ -13,6 +13,7 @@ import {
 import {
   applyChatOwnershipEvent,
   type ChatOwnershipEvent,
+  type ChatOwnershipSnapshot,
   type ConversationChatState,
   createInitialChatState,
   fallbackAiParticipationForStatus,
@@ -91,7 +92,19 @@ export function buildExternalActionLeaseQuery(
   projectId: string,
   leaseAt: Date,
   staleBefore: Date,
+  ownership?: ChatOwnershipSnapshot,
 ) {
+  const ownershipConditions = ownership
+    ? [
+        eq(
+          conversations.status,
+          ownership.status as ConversationRow["status"],
+        ),
+        ownership.chatState === null
+          ? isNull(conversations.chatState)
+          : eq(conversations.chatState, ownership.chatState),
+      ]
+    : [];
   return db
     .update(conversations)
     .set({
@@ -103,6 +116,7 @@ export function buildExternalActionLeaseQuery(
         eq(conversations.id, conversationId),
         eq(conversations.projectId, projectId),
         isNull(conversations.archivedAt),
+        ...ownershipConditions,
         or(
           isNull(conversations.externalActionStartedAt),
           lte(conversations.externalActionStartedAt, staleBefore),
@@ -790,6 +804,36 @@ export class ChatService {
       projectId,
       now,
       staleBefore,
+    );
+    if (leaseRows.length === 0) return { executed: false };
+
+    try {
+      return { executed: true, value: await action() };
+    } finally {
+      await buildExternalActionLeaseReleaseQuery(
+        this.db,
+        conversationId,
+        projectId,
+        now,
+      );
+    }
+  }
+
+  async runExternalActionIfOwnershipMatches<T>(
+    conversationId: string,
+    projectId: string,
+    ownership: ChatOwnershipSnapshot,
+    action: () => Promise<T>,
+    now: Date = new Date(),
+  ): Promise<ExternalActionResult<T>> {
+    const staleBefore = new Date(now.getTime() - EXTERNAL_ACTION_LEASE_MS);
+    const leaseRows = await buildExternalActionLeaseQuery(
+      this.db,
+      conversationId,
+      projectId,
+      now,
+      staleBefore,
+      ownership,
     );
     if (leaseRows.length === 0) return { executed: false };
 
@@ -1859,6 +1903,58 @@ export class ChatService {
         conversation?.status ?? "active",
       ),
     });
+  }
+
+  async updatePendingTeamRequestContact(
+    conversationId: string,
+    projectId: string,
+    ownership: ChatOwnershipSnapshot,
+    update: {
+      visitorName?: string;
+      visitorEmail?: string;
+      awaitingContactFields: Array<"name" | "email">;
+      contactDeclined?: boolean;
+    },
+  ): Promise<ConversationRow | null> {
+    const currentState = parseChatState(ownership.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        ownership.status,
+      ),
+    });
+    const nextState: ConversationChatState = {
+      ...currentState,
+      awaitingContactFields: update.awaitingContactFields,
+      ...(update.contactDeclined === undefined
+        ? {}
+        : { contactDeclined: update.contactDeclined }),
+    };
+    const rows = await this.db
+      .update(conversations)
+      .set({
+        ...(update.visitorName === undefined
+          ? {}
+          : { visitorName: update.visitorName }),
+        ...(update.visitorEmail === undefined
+          ? {}
+          : { visitorEmail: update.visitorEmail }),
+        chatState: JSON.stringify(nextState),
+      })
+      .where(
+        and(
+          eq(conversations.id, conversationId),
+          eq(conversations.projectId, projectId),
+          eq(
+            conversations.status,
+            ownership.status as ConversationRow["status"],
+          ),
+          isNull(conversations.archivedAt),
+          ownership.chatState === null
+            ? isNull(conversations.chatState)
+            : eq(conversations.chatState, ownership.chatState),
+        ),
+      )
+      .returning();
+    return rows[0] ?? null;
   }
 
   async saveChatState(

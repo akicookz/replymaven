@@ -1,4 +1,5 @@
 import { tool, type ToolSet } from "ai";
+import { isReservedMavenToolName } from "../../validation";
 import {
   type MavenToolCapability,
   type MavenToolDefinition,
@@ -75,6 +76,16 @@ export function buildMavenToolRegistry(
   for (const definition of options.definitions) {
     const capability = definition.capability;
     if (isPublicMcpTool(options.context, capability)) continue;
+    if (
+      capability.source !== "internal" &&
+      isReservedMavenToolName(capability.modelName)
+    ) {
+      continue;
+    }
+
+    const registeredCapability = capabilities.get(capability.modelName);
+    if (registeredCapability?.source === "internal") continue;
+    if (registeredCapability && capability.source !== "internal") continue;
 
     const initialAuthorization = authorizeCapability(options.context, capability);
     if (!initialAuthorization.ok) continue;

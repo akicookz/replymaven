@@ -5,6 +5,7 @@ import {
   type InternalToken,
   type StreamingStripState,
 } from "./internal-tokens";
+import { MavenStreamFailure } from "./maven-stream-failure";
 
 export interface AgentEventState {
   fullResponse: string;
@@ -48,6 +49,9 @@ export async function* mapAgentEventsToSse(
 ): AsyncGenerator<MavenBrowserEvent> {
   for await (const part of parts) {
     const type = readPartType(part);
+    if (type === "error") {
+      throw new MavenStreamFailure();
+    }
     if (type === "text-delta") {
       const text = (part as Record<string, unknown>).text;
       if (typeof text === "string" && text) {

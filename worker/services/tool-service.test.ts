@@ -5,7 +5,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { schema } from "../db";
 import { ToolService } from "./tool-service";
 
-function createToolService(): ToolService {
+function createToolServiceHarness(): { service: ToolService; sqlite: Database } {
   const sqlite = new Database(":memory:");
   sqlite.exec(`
     CREATE TABLE projects (id text PRIMARY KEY NOT NULL);
@@ -37,13 +37,35 @@ function createToolService(): ToolService {
         ('shared-tool', 'project-1', 'shared_tool', 'Shared tool', 'Shared', 'https://example.com/shared', 1, 3, '["public","sidechat"]'),
         ('disabled-tool', 'project-1', 'disabled_tool', 'Disabled tool', 'Disabled', 'https://example.com/disabled', 0, 4, '["public"]'),
         ('malformed-tool', 'project-1', 'malformed_tool', 'Malformed tool', 'Malformed', 'https://example.com/malformed', 1, 5, 'not-json'),
+        ('legacy-search-collision', 'project-1', 'search_knowledge', 'Legacy search collision', 'Collision', 'https://example.com/search', 1, 6, '["public","sidechat"]'),
+        ('legacy-team-collision', 'project-1', 'request_team_help', 'Legacy team collision', 'Collision', 'https://example.com/team', 1, 7, '["public"]'),
         ('other-project-tool', 'project-2', 'other_tool', 'Other tool', 'Other', 'https://example.com/other', 1, 1, '["public"]');
+    CREATE TABLE tool_executions (
+      id text PRIMARY KEY NOT NULL,
+      tool_id text NOT NULL,
+      conversation_id text,
+      message_id text,
+      input text,
+      output text,
+      status text NOT NULL,
+      http_status integer,
+      duration integer,
+      error_message text,
+      created_at integer NOT NULL DEFAULT (unixepoch())
+    );
   `);
   const db = drizzleSqlite(sqlite, { schema });
 
-  return new ToolService(
-    db as unknown as DrizzleD1Database<Record<string, unknown>>,
-  );
+  return {
+    service: new ToolService(
+      db as unknown as DrizzleD1Database<Record<string, unknown>>,
+    ),
+    sqlite,
+  };
+}
+
+function createToolService(): ToolService {
+  return createToolServiceHarness().service;
 }
 
 describe("ToolService Maven audience policy", () => {
@@ -75,6 +97,29 @@ describe("ToolService Maven audience policy", () => {
     const tools = await service.getEnabledToolsForChannel("project-1", "public");
 
     expect(tools.map((tool) => tool.id)).not.toContain("malformed-tool");
+  });
+
+  test("omits legacy rows that collide with internal Maven tools", async () => {
+    const service = createToolService();
+
+    const publicTools = await service.getEnabledToolsForChannel(
+      "project-1",
+      "public",
+    );
+    const sidechatTools = await service.getEnabledToolsForChannel(
+      "project-1",
+      "sidechat",
+    );
+
+    expect(publicTools.map((tool) => tool.id)).not.toContain(
+      "legacy-search-collision",
+    );
+    expect(publicTools.map((tool) => tool.id)).not.toContain(
+      "legacy-team-collision",
+    );
+    expect(sidechatTools.map((tool) => tool.id)).not.toContain(
+      "legacy-search-collision",
+    );
   });
 
   test("retrieves an authoritative tool only from its project", async () => {
@@ -140,5 +185,62 @@ describe("ToolService Maven audience policy", () => {
     expect(
       await service.getAuthoritativeTool("project-1", "public-tool"),
     ).toMatchObject({ allowedChannels: '["public"]' });
+  });
+
+  test("rejects reserved names at the service boundary", async () => {
+    const service = createToolService();
+
+    await expect(
+      service.createTool({
+        projectId: "project-1",
+        name: "request_team_help",
+        displayName: "Collision",
+        description: "Must not shadow an internal tool.",
+        endpoint: "https://example.com/collision",
+      }),
+    ).rejects.toThrow("reserved");
+  });
+
+  test("links only this turn's execution ids to the persisted bot message", async () => {
+    const { service, sqlite } = createToolServiceHarness();
+    const first = await service.logExecution({
+      toolId: "public-tool",
+      conversationId: "conversation-1",
+      input: { orderId: "order-1" },
+      output: { ok: true },
+      status: "success",
+      httpStatus: 200,
+      duration: 12,
+    });
+    const interrupted = await service.logExecution({
+      toolId: "public-tool",
+      conversationId: "conversation-1",
+      input: { orderId: "order-old" },
+      output: { ok: true },
+      status: "success",
+      httpStatus: 200,
+      duration: 9,
+    });
+    const linkExactExecutions = service.linkExecutionsToMessage.bind(
+      service,
+    ) as unknown as (
+      executionIds: string[],
+      conversationId: string,
+      messageId: string,
+    ) => Promise<void>;
+
+    await linkExactExecutions(
+      [first.id],
+      "conversation-1",
+      "message-1",
+    );
+
+    const rows = sqlite
+      .query("SELECT id, message_id FROM tool_executions ORDER BY id")
+      .all() as Array<{ id: string; message_id: string | null }>;
+    expect(rows.find((row) => row.id === first.id)?.message_id).toBe(
+      "message-1",
+    );
+    expect(rows.find((row) => row.id === interrupted.id)?.message_id).toBeNull();
   });
 });

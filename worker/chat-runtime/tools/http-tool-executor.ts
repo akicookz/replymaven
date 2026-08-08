@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { tool, type ToolSet } from "ai";
 import { type ToolRow } from "../../db";
+import { type ChatService } from "../../services/chat-service";
 import {
   decryptHeaders,
   isEncrypted,
@@ -30,6 +31,21 @@ interface AuthoritativeHttpToolStore {
     projectId: string,
     toolId: string,
   ): Promise<ToolRow | null>;
+  logExecution(data: {
+    toolId: string;
+    conversationId?: string | null;
+    input: Record<string, unknown>;
+    output: unknown;
+    status: "success" | "error" | "timeout";
+    httpStatus?: number | null;
+    duration: number;
+    errorMessage?: string | null;
+  }): Promise<{ id: string }>;
+}
+
+interface PublicHttpExecutionOptions {
+  chatService: Pick<ChatService, "runExternalActionIfOwnershipMatches">;
+  acquireRateLimitPermit(): boolean;
 }
 
 interface CreateHttpToolDefinitionOptions {
@@ -37,6 +53,17 @@ interface CreateHttpToolDefinitionOptions {
   tool: ToolRow;
   toolService: AuthoritativeHttpToolStore;
   encryptionKey: string;
+  publicExecution?: PublicHttpExecutionOptions;
+  collectExecutionId?(id: string): void;
+}
+
+interface HttpExecutionOutcome {
+  result: Record<string, unknown>;
+  attemptedFetch: boolean;
+  duration: number;
+  httpStatus: number | null;
+  status: "success" | "error" | "timeout";
+  errorMessage: string | null;
 }
 
 const BLOCKED_HOST_PATTERNS = [
@@ -149,24 +176,36 @@ async function toHttpCapability(
   };
 }
 
-export async function executeHttpTool(
+async function executeHttpToolWithOutcome(
   toolDef: SupportToolDefinition,
   params: Record<string, unknown>,
   abortSignal?: AbortSignal,
-): Promise<Record<string, unknown>> {
+  acquireRateLimitPermit?: () => boolean,
+): Promise<HttpExecutionOutcome> {
+  const startedAt = Date.now();
   if (isUrlBlocked(toolDef.endpoint)) {
     return {
-      error: "This endpoint URL is not allowed for security reasons.",
+      result: {
+        error: "This endpoint URL is not allowed for security reasons.",
+      },
+      attemptedFetch: false,
+      duration: Date.now() - startedAt,
+      httpStatus: null,
+      status: "error",
+      errorMessage: "This endpoint URL is not allowed for security reasons.",
     };
   }
 
   const timeout = toolDef.timeout ?? 10000;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
+  let fetchStarted = false;
 
-  if (abortSignal) {
-    abortSignal.addEventListener("abort", () => controller.abort());
+  function abortFromParent(): void {
+    controller.abort();
   }
+  abortSignal?.addEventListener("abort", abortFromParent, { once: true });
+  if (abortSignal?.aborted) controller.abort();
 
   try {
     const headers: Record<string, string> = {
@@ -193,6 +232,17 @@ export async function executeHttpTool(
       body = JSON.stringify(params);
     }
 
+    if (acquireRateLimitPermit && !acquireRateLimitPermit()) {
+      return {
+        result: { error: "tool_rate_limited" },
+        attemptedFetch: false,
+        duration: Date.now() - startedAt,
+        httpStatus: null,
+        status: "error",
+        errorMessage: null,
+      };
+    }
+    fetchStarted = true;
     const response = await fetch(url, {
       method: toolDef.method ?? "POST",
       headers,
@@ -223,36 +273,84 @@ export async function executeHttpTool(
             jsonResult;
         }
 
-        return {
+        const executionResult = {
           success: response.ok,
           httpStatus: response.status,
           data: result,
         };
+        return {
+          result: executionResult,
+          attemptedFetch: true,
+          duration: Date.now() - startedAt,
+          httpStatus: response.status,
+          status: response.ok ? "success" : "error",
+          errorMessage: response.ok ? null : `HTTP ${response.status}`,
+        };
       }
 
-      return {
+      const executionResult = {
         success: response.ok,
         httpStatus: response.status,
         data: jsonResult,
       };
-    } catch {
       return {
+        result: executionResult,
+        attemptedFetch: true,
+        duration: Date.now() - startedAt,
+        httpStatus: response.status,
+        status: response.ok ? "success" : "error",
+        errorMessage: response.ok ? null : `HTTP ${response.status}`,
+      };
+    } catch {
+      const executionResult = {
         success: response.ok,
         httpStatus: response.status,
         data: truncated,
       };
+      return {
+        result: executionResult,
+        attemptedFetch: true,
+        duration: Date.now() - startedAt,
+        httpStatus: response.status,
+        status: response.ok ? "success" : "error",
+        errorMessage: response.ok ? null : `HTTP ${response.status}`,
+      };
     }
   } catch (err) {
-    clearTimeout(timeoutId);
-
     if (err instanceof DOMException && err.name === "AbortError") {
-      return { error: `Tool execution timed out after ${timeout}ms` };
+      const errorMessage = `Tool execution timed out after ${timeout}ms`;
+      return {
+        result: { error: errorMessage },
+        attemptedFetch: true,
+        duration: Date.now() - startedAt,
+        httpStatus: null,
+        status: "timeout",
+        errorMessage,
+      };
     }
 
+    const errorMessage =
+      err instanceof Error ? err.message : "Tool execution failed";
     return {
-      error: err instanceof Error ? err.message : "Tool execution failed",
+      result: { error: errorMessage },
+      attemptedFetch: fetchStarted,
+      duration: Date.now() - startedAt,
+      httpStatus: null,
+      status: "error",
+      errorMessage,
     };
+  } finally {
+    clearTimeout(timeoutId);
+    abortSignal?.removeEventListener("abort", abortFromParent);
   }
+}
+
+export async function executeHttpTool(
+  toolDef: SupportToolDefinition,
+  params: Record<string, unknown>,
+  abortSignal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  return (await executeHttpToolWithOutcome(toolDef, params, abortSignal)).result;
 }
 
 export async function createHttpToolDefinition(
@@ -268,12 +366,59 @@ export async function createHttpToolDefinition(
     async execute(input, { abortSignal }) {
       const executableTool = authorizedExecutions.shift();
       if (!executableTool) return { error: "tool_unavailable" };
+      const executableDefinition = executableTool;
+      const params = input as Record<string, unknown>;
 
-      return executeHttpTool(
-        executableTool,
-        input as Record<string, unknown>,
-        abortSignal,
-      );
+      async function executeAndAudit(): Promise<Record<string, unknown>> {
+        const outcome = await executeHttpToolWithOutcome(
+          executableDefinition,
+          params,
+          abortSignal,
+          options.context.channel === "public"
+            ? options.publicExecution?.acquireRateLimitPermit
+            : undefined,
+        );
+        if (!outcome.attemptedFetch) return outcome.result;
+
+        try {
+          const execution = await options.toolService.logExecution({
+            toolId: capability.id,
+            conversationId: options.context.conversationId,
+            input: params,
+            output: outcome.result,
+            status: outcome.status,
+            httpStatus: outcome.httpStatus,
+            duration: outcome.duration,
+            errorMessage: outcome.errorMessage?.slice(0, 2000) ?? null,
+          });
+          try {
+            options.collectExecutionId?.(execution.id);
+          } catch {
+            // Private audit linkage collection must not alter tool semantics.
+          }
+        } catch {
+          // The external side effect already completed. Audit failures must not
+          // change the result or make the agent retry the request.
+        }
+        return outcome.result;
+      }
+
+      if (options.context.channel !== "public") {
+        return executeAndAudit();
+      }
+      if (!options.publicExecution) {
+        return { error: "conversation_ownership_changed" };
+      }
+      const leased =
+        await options.publicExecution.chatService.runExternalActionIfOwnershipMatches(
+          options.context.conversationId,
+          options.context.projectId,
+          options.context.ownership,
+          executeAndAudit,
+        );
+      return leased.executed
+        ? leased.value ?? { error: "tool_unavailable" }
+        : { error: "conversation_ownership_changed" };
     },
     async reauthorize() {
       const authoritativeTool = await options.toolService.getAuthoritativeTool(
