@@ -6,6 +6,10 @@ import { type MessageRow } from "../../db";
 import { logError, logInfo } from "../../observability";
 import { buildConversationDeepLink } from "../../lib/deep-links";
 
+export function buildTeamHelpUnavailableMessage(): string {
+  return "I couldn't forward that to the team just now. I can keep helping here, or you can try again in a moment.";
+}
+
 export function parseTelegramThreadId(
   value: string | null | undefined,
 ): number | undefined {
@@ -55,6 +59,7 @@ export async function createEscalation(params: {
   summaryMessageId: string | null;
   telegramThreadId?: string;
   created: boolean;
+  accepted: boolean;
 }> {
   const summary = params.summary.trim() || "Visitor asked for team follow-up.";
 
@@ -120,7 +125,12 @@ export async function createEscalation(params: {
     },
   );
   if (!updatedConversation) {
-    return { summary, summaryMessageId: null, created: false };
+    return {
+      summary,
+      summaryMessageId: null,
+      created: false,
+      accepted: false,
+    };
   }
   logInfo("escalation.conversation_updated", {
     projectId: params.project.id,
@@ -168,7 +178,7 @@ export async function createEscalation(params: {
         );
       const messageId = notification.value ?? null;
       if (!notification.executed) {
-        return { summary, summaryMessageId, created };
+        return { summary, summaryMessageId, created, accepted: true };
       }
       if (messageId) {
         telegramThreadId = String(messageId);
@@ -233,5 +243,11 @@ export async function createEscalation(params: {
     telegramThreadId: telegramThreadId ?? null,
   });
 
-  return { summary, summaryMessageId, telegramThreadId, created };
+  return {
+    summary,
+    summaryMessageId,
+    telegramThreadId,
+    created,
+    accepted: true,
+  };
 }

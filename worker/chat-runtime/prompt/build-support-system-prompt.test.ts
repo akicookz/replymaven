@@ -31,3 +31,31 @@ test("gives the shared Maven loop a factual knowledge-search rule", () => {
   expect(prompt).toContain("ask a normal conversational question if information is missing");
   expect(prompt).toContain("never invent a search result");
 });
+
+test("makes request_team_help the only public handoff path", () => {
+  const prompt = buildSupportSystemPrompt(settings, "Acme", "", "", {
+    aiParticipation: "continuous",
+  });
+  const missingGroundingPrompt = buildSupportSystemPrompt(
+    settings,
+    "Acme",
+    "",
+    "",
+    {
+      aiParticipation: "continuous",
+      retrievalAttempted: true,
+      groundingConfidence: "none",
+    },
+  );
+
+  expect(prompt).toContain("call request_team_help");
+  expect(prompt).toContain(
+    "ask only for the returned requiredFields as an ordinary conversational follow-up",
+  );
+  expect(prompt).toContain("use the returned visitorMessage exactly");
+  expect(prompt).not.toContain("Runtime decides whether handoff/contact collection is needed");
+  expect(prompt).not.toContain("The runtime handles forwarding silently");
+  expect(missingGroundingPrompt).not.toContain(
+    "Runtime owns escalation state",
+  );
+});

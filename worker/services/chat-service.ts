@@ -468,6 +468,35 @@ export function buildHumanTakeoverQuery(
     });
 }
 
+export function buildNewTeamRequestClaimQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+  projectId: string,
+  expectedChatState: string | null,
+  nextChatState: string,
+) {
+  const chatStateCondition =
+    expectedChatState === null
+      ? isNull(conversations.chatState)
+      : eq(conversations.chatState, expectedChatState);
+  return db
+    .update(conversations)
+    .set({
+      status: "waiting_agent",
+      chatState: nextChatState,
+    })
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+        eq(conversations.status, "active"),
+        isNull(conversations.archivedAt),
+        chatStateCondition,
+      ),
+    )
+    .returning({ id: conversations.id });
+}
+
 // ─── Inbox tab predicates ────────────────────────────────────────────────────
 // Snoozed and flagged (spam) conversations live ONLY in their own tabs: they
 // are excluded from Needs You, All, and Resolved. "Blocked" visitors'
@@ -1004,6 +1033,31 @@ export class ChatService {
       )
       .returning({ id: conversations.id });
 
+    return updated.length > 0;
+  }
+
+  async claimNewTeamRequest(id: string, projectId: string): Promise<boolean> {
+    const conversation = await this.getOperationalConversationById(
+      id,
+      projectId,
+    );
+    if (!conversation || conversation.status !== "active") return false;
+
+    const currentState = parseChatState(conversation.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    });
+    if (currentState.aiParticipation !== "continuous") return false;
+
+    const nextState = applyChatOwnershipEvent(currentState, "team_requested");
+    const updated = await buildNewTeamRequestClaimQuery(
+      this.db,
+      id,
+      projectId,
+      conversation.chatState,
+      JSON.stringify(nextState),
+    );
     return updated.length > 0;
   }
 

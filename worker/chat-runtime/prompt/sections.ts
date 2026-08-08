@@ -306,7 +306,7 @@ Confidence tier: NONE — You have no evidence to work with.
 - Clearly convey that you could not find information about this topic in the documentation. Use your own words and match the configured tone.
 - Do not provide suggestions or workarounds that are not explicitly documented.
 - Offer to forward the question to the team for a proper answer.
-- Do not turn missing grounding into a human handoff promise. Runtime owns escalation state.
+- Do not turn missing grounding into a human handoff promise. Offer team follow-up, then call request_team_help only after the visitor asks or confirms.
 </grounding-status>
 
 `;

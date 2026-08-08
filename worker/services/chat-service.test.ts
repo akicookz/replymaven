@@ -12,6 +12,7 @@ import {
   buildConditionalSystemMessageQuery,
   buildConditionalVisitorMessageQuery,
   buildHumanTakeoverQuery,
+  buildNewTeamRequestClaimQuery,
   buildInboxCountsQuery,
   buildBulkConversationActionQuery,
   buildConversationByIdQuery,
@@ -337,6 +338,86 @@ describe("ChatService ownership and atomic writes", () => {
     expect(sql).toContain("$.ownershipRevision");
     expect(sql).toContain('"conversations"."archived_at" is null');
     expect(params).toEqual(expect.arrayContaining(["agent_replied", "conv-1", "project-1"]));
+  });
+
+  test("claims a new team request only from one exact active AI-owned snapshot", () => {
+    const expectedChatState = JSON.stringify({
+      state: "active",
+      aiParticipation: "continuous",
+      ownershipRevision: 2,
+    });
+    const nextChatState = JSON.stringify({
+      state: "escalating",
+      aiParticipation: "assist_until_agent",
+      ownershipRevision: 3,
+    });
+    const { sql, params } = buildNewTeamRequestClaimQuery(
+      drizzle({} as never),
+      "conv-1",
+      "project-1",
+      expectedChatState,
+      nextChatState,
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."project_id" = ?');
+    expect(sql).toContain('"conversations"."status" = ?');
+    expect(sql).toContain('"conversations"."chat_state" = ?');
+    expect(sql).toContain('"conversations"."archived_at" is null');
+    expect(sql).toContain('returning "id"');
+    expect(params).toEqual(
+      expect.arrayContaining([
+        "waiting_agent",
+        nextChatState,
+        "conv-1",
+        "project-1",
+        "active",
+        expectedChatState,
+      ]),
+    );
+    expect(params).not.toContain("agent_replied");
+  });
+
+  test("allows only the first concurrent new-team-request claim", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+
+    const claims = await Promise.all([
+      service.claimNewTeamRequest(conversation.id, conversation.projectId),
+      service.claimNewTeamRequest(conversation.id, conversation.projectId),
+    ]);
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+
+    expect(claims.sort()).toEqual([false, true]);
+    expect(latest?.status).toBe("waiting_agent");
+  });
+
+  test("rejects an active row whose authoritative state is human-owned", async () => {
+    const activeHuman = makeConversation({
+      status: "active",
+      chatState: JSON.stringify({
+        state: "agent_mode",
+        aiParticipation: "human_only",
+      }),
+    });
+    const { db, getUpdateCount } = makeOwnershipDb(activeHuman);
+
+    const claimed = await new ChatService(db).claimNewTeamRequest(
+      activeHuman.id,
+      activeHuman.projectId,
+    );
+
+    expect(claimed).toBe(false);
+    expect(getUpdateCount()).toBe(0);
   });
 });
 
