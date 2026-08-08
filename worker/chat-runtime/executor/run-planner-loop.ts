@@ -54,7 +54,7 @@ import {
   type InternalToken,
   stripInternalTokensStreaming,
 } from "../streaming/internal-tokens";
-import { streamSupportAgent } from "../agents/support-agent";
+import { streamMavenAgent } from "../agents/support-agent";
 import { executeHttpTool } from "../tools/http-tool-executor";
 import { withCurrentTurn } from "../orchestration/normalize-history";
 import {
@@ -721,15 +721,14 @@ async function executeCompose(options: {
       streamTextStarted,
     }),
     operation: async (activeConfig) => {
-      return streamSupportAgent(
+      return streamMavenAgent(
         { modelConfig: activeConfig },
         {
           systemPrompt,
           conversationHistory: options.conversationHistory,
           userMessage: options.currentMessage,
           image: options.image,
-          tools: [],
-          toolChoice: "none",
+          tools: {},
         },
       );
     },

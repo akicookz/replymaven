@@ -28,6 +28,45 @@ export interface WidgetCompletedPayload {
   sources?: SourceReference[];
 }
 
+export type MavenBrowserEvent =
+  | { text: string }
+  | {
+      status: {
+        phase: "tool";
+        message: "Checking project information";
+      };
+    };
+
+function readPartType(part: unknown): string | null {
+  if (!part || typeof part !== "object") return null;
+  const type = (part as Record<string, unknown>).type;
+  return typeof type === "string" ? type : null;
+}
+
+export async function* mapAgentEventsToSse(
+  parts: Iterable<unknown> | AsyncIterable<unknown>,
+): AsyncGenerator<MavenBrowserEvent> {
+  for await (const part of parts) {
+    const type = readPartType(part);
+    if (type === "text-delta") {
+      const text = (part as Record<string, unknown>).text;
+      if (typeof text === "string" && text) {
+        yield { text };
+      }
+      continue;
+    }
+
+    if (type === "tool-call") {
+      yield {
+        status: {
+          phase: "tool",
+          message: "Checking project information",
+        },
+      };
+    }
+  }
+}
+
 export function createInitialAgentEventState(): AgentEventState {
   return {
     fullResponse: "",

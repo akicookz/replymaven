@@ -59,3 +59,20 @@ test("makes request_team_help the only public handoff path", () => {
     "Runtime owns escalation state",
   );
 });
+
+test("adds the trusted Maven channel contract to the common prompt", () => {
+  const publicPrompt = buildSupportSystemPrompt(settings, "Acme", "", "", {
+    channel: "public",
+    aiParticipation: "continuous",
+  });
+  const sidechatPrompt = buildSupportSystemPrompt(settings, "Acme", "", "", {
+    channel: "sidechat",
+    aiParticipation: "continuous",
+  });
+
+  expect(publicPrompt).toContain("Channel: public");
+  expect(publicPrompt).toContain("visible directly to the website visitor");
+  expect(sidechatPrompt).toContain("Channel: sidechat");
+  expect(sidechatPrompt).toContain("private conversation with a human support agent");
+  expect(publicPrompt).not.toContain("private conversation with a human support agent");
+});

@@ -8,12 +8,12 @@ async function* createModelStream(): AsyncGenerator<{
   yield { type: "text-delta", text: "AI draft" };
 }
 
-async function fakeStreamSupportAgent() {
+async function fakeStreamMavenAgent() {
   return { fullStream: createModelStream() } as never;
 }
 
 mock.module("../agents/support-agent", () => ({
-  streamSupportAgent: fakeStreamSupportAgent,
+  streamMavenAgent: fakeStreamMavenAgent,
 }));
 
 const { persistGuardedAiOutput, runPlannerLoop } = await import(

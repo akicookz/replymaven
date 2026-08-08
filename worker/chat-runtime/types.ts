@@ -1,5 +1,9 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { type FlexibleSchema, type ModelMessage } from "ai";
+import {
+  type FlexibleSchema,
+  type LanguageModel,
+  type ModelMessage,
+} from "ai";
 import { type ToolRow } from "../db";
 import { type ProjectSettingsRow } from "../db";
 import { type AppEnv } from "../types";
@@ -105,6 +109,7 @@ export interface SupportAgentStreamOptions {
 }
 
 export interface SupportPromptOptions {
+  channel?: MavenChannel;
   guidelines?: Array<{ condition: string; instruction: string }>;
   agentHandbackInstructions?: string | null;
   pageContext?: Record<string, string>;
@@ -167,9 +172,8 @@ export interface RagContextResult {
   unresolvedKeys: string[];
 }
 
-export interface SupportAgentResult {
-  fullStream: AsyncIterable<
-    | { type: "text-delta"; text: string }
+export type MavenStreamPart =
+  | { type: "text-delta"; text: string; [key: string]: unknown }
     | {
         type: "tool-call";
         toolCallId: string;
@@ -184,8 +188,10 @@ export interface SupportAgentResult {
         output: unknown;
       }
     | { type: "finish-step"; finishReason: string }
-    | { type: string; [key: string]: unknown }
-  >;
+    | { type: string; [key: string]: unknown };
+
+export interface SupportAgentResult {
+  fullStream: AsyncIterable<MavenStreamPart>;
 }
 
 export interface WidgetStatusPayload {
@@ -661,6 +667,7 @@ export interface PlannerLoopResult {
 
 export interface SupportAgentDependencies {
   modelConfig: ChatRuntimeAiConfig;
+  createModel?: (config: ChatRuntimeAiConfig) => LanguageModel;
 }
 
 export interface WidgetMessageTurnContext {
