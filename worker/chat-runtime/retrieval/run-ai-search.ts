@@ -18,6 +18,25 @@ export interface RetrievalResult {
   broaderSearchAttempted: boolean;
 }
 
+export function createEmptyRetrievalResult(options?: {
+  retrievalAttempted?: boolean;
+  broaderSearchAttempted?: boolean;
+  droppedCrossTenant?: number;
+}): RetrievalResult {
+  return {
+    ragContext: "",
+    faqContext: "",
+    knowledgeBaseContext: "",
+    sourceReferences: [],
+    groundingConfidence: "none",
+    topScore: 0,
+    unresolvedKeys: [],
+    droppedCrossTenant: options?.droppedCrossTenant ?? 0,
+    retrievalAttempted: options?.retrievalAttempted ?? false,
+    broaderSearchAttempted: options?.broaderSearchAttempted ?? false,
+  };
+}
+
 type SearchRetrievalType = "hybrid" | "vector";
 type SearchResponseKind = "result_chunks" | "chunks" | "data" | "unknown";
 
@@ -367,18 +386,7 @@ export async function runAiSearch(options: {
   runtimeState?: AiSearchRuntimeState;
 }): Promise<RetrievalResult> {
   if (options.queries.length === 0) {
-    return {
-      ragContext: "",
-      faqContext: "",
-      knowledgeBaseContext: "",
-      sourceReferences: [],
-      groundingConfidence: "none",
-      unresolvedKeys: [],
-      droppedCrossTenant: 0,
-      retrievalAttempted: false,
-      broaderSearchAttempted: false,
-      topScore: 0,
-    };
+    return createEmptyRetrievalResult();
   }
 
   const kv = options.env.CONVERSATIONS_CACHE;
@@ -467,18 +475,11 @@ export async function runAiSearch(options: {
   }
 
   if (!ragSelection.context) {
-    return {
-      ragContext: "",
-      faqContext: "",
-      knowledgeBaseContext: "",
-      sourceReferences: [],
-      groundingConfidence: "none",
-      topScore: 0,
-      unresolvedKeys: [],
-      droppedCrossTenant: prepared.droppedCrossTenant,
+    return createEmptyRetrievalResult({
       retrievalAttempted: true,
       broaderSearchAttempted,
-    };
+      droppedCrossTenant: prepared.droppedCrossTenant,
+    });
   }
 
   const ragConfident =
