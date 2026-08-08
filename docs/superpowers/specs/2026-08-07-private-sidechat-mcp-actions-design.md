@@ -1,309 +1,276 @@
-# Private Sidechat and Generic MCP Connections
+# Unified Maven Sidechat and MCP Connections
 
-**Date:** 2026-08-08
-
-**Status:** Revised after architecture review
-
-**Scope:** Dashboard inbox, an internal Maven channel on each conversation, generic MCP connections and presets, native tool configuration, and generic write approval
+**Date:** 2026-08-09
+**Status:** Approved design, revised after routing and infrastructure review
+**Scope:** One Maven tool loop for public chat and private sidechat, native MCP tools, and dashboard approval for MCP writes
 
 ## 1. Product outcome
 
-The dashboard human needs to talk privately with Maven while handling a customer conversation. Maven can inspect the public conversation, use project MCP connections, prepare a reply, and ask permission before a native MCP write.
+ReplyMaven gives the human support agent a private sidechat beside the customer conversation. The human and Maven can investigate, use project tools and MCP connections, approve writes, and prepare a visitor-facing reply. Only the final text the human deliberately adds to the public composer and sends reaches the visitor.
 
-The visitor receives only what the human explicitly places in the public reply composer and sends. Sidechat messages, MCP calls/results, progress, and approvals never enter the visitor transcript.
+The implementation extends the current conversation, message, chat, and realtime primitives. It does not add a sidechat-specific agent, Durable Object, transcript store, routing loop, or provider action layer.
 
-This replaces the one-shot inline Compose interaction. It does not replace the public reply composer, widget delivery, Telegram handoff, or the existing conversation runtime.
+## 2. Non-negotiable architecture
 
-## 2. Architecture decision: sidechat is a channel, not a second chat system
+- One AI SDK v6 `ToolLoopAgent` runs every Maven turn.
+- The server-authenticated entry route supplies `channel: "public" | "sidechat"`; the model never classifies the channel.
+- Public chat and sidechat use the same prompt builder, tool registry, execution middleware, model fallback, and event consumer with small channel-specific prompt sections.
+- Asking a question is ordinary assistant text. There is no `ask_user` action.
+- Knowledge retrieval is an internal tool. It is not a pre-loop branch.
+- Team handoff is an internal public-only tool. It is not a planner outcome.
+- Existing HTTP tools and discovered MCP tools enter the same registry.
+- A sidechat draft is produced through the internal sidechat-only `present_reply_draft` tool.
+- The only hard gates outside the loop are channel/ownership/persistence, authoritative tool authorization, and dashboard approval for MCP writes.
 
-Sidechat belongs to the same project conversation:
-
-```text
-Conversation
-├── public: visitor ↔ support agent / Maven
-└── sidechat: dashboard human ↔ Maven
-```
-
-It therefore reuses the existing infrastructure end to end:
-
-- the `conversations` row;
-- the `messages` table;
-- `ChatService`;
-- the existing AI SDK v6 model and fallback adapters;
-- the existing `ConversationDO` and authenticated dashboard WebSocket;
-- the current conversation-detail React Query state; and
-- the existing `ChatThread`, `MessageBubble`, and `Composer` primitives.
-
-There is no `MavenSidechatAgent`, separate sidechat Durable Object, sidechat WebSocket token, `sidechat_threads` table, Think runtime, AI Chat SDK runtime, or second chat hook.
-
-No new Durable Object class is required. Generic MCP consumption uses the repository's existing `@modelcontextprotocol/sdk` dependency from a Worker service. Connection/catalog state and AES-GCM-encrypted credentials live in project-scoped D1 rows; a client is opened for discovery or a bounded sidechat turn and then closed.
+The current explicit intent classifier and action planner (`search_docs`, `call_tool`, `ask_user`, `offer_handoff`, `compose`, and related branches) are removed after public behavior parity is covered by tests.
 
 ## 3. Interaction model
 
-### 3.1 Entry point
+### 3.1 Entry and pane
 
-The current `Compose ⇧⇥` action becomes:
+The current inline `Compose` action becomes:
 
 `Start sidechat  ⇧⇥`
 
-There is no icon or decorative AI mark.
+There is no icon or decorative AI treatment.
 
-- Click or Shift+Tab opens the closed-by-default right pane.
-- If the public composer has text, that text is submitted as the first private human message. The public composer clears only after the server accepts it.
-- If the composer is empty, submit `Help me respond to {customerFirstName}.`
-- Public image attachments remain staged in the public composer; only text moves.
-- Once a private history exists, the action reads `Open sidechat` and never creates another channel.
+- Clicking it or pressing Shift+Tab opens the right pane.
+- If the public composer has text, that text is submitted as the first private human message. It clears only after the sidechat route accepts and persists it.
+- If the public composer is empty, Maven receives `Help me respond to {customerFirstName}.`
+- Public attachments remain staged; only text moves.
+- An existing thread changes the action copy to `Open sidechat` and is never duplicated.
+- The pane is closed by default. Closing it does not cancel accepted work.
+- Switching public conversations loads the selected conversation's sidechat while accepted work on the prior conversation continues.
 
-### 3.2 Pane behavior
+The pane title is `Sidechat`. The subline is `Private · Maven has {customerFirstName}'s context`.
 
-- One sidechat channel exists per conversation.
-- Closing the pane does not cancel a running turn.
-- Switching conversations loads that conversation's sidechat while prior work continues.
-- A quiet status dot can indicate `working`, `waiting_approval`, `ready`, or `failed`.
-- Archived conversations can show existing sidechat history read-only.
-- The title is `Sidechat`.
-- The subline is `Private · Maven has {customerFirstName}'s context`.
-- There is no permanent right rail, visitor preview, alert banner, or duplicate transcript.
+### 3.2 Reuse the existing chat UI
 
-### 3.3 Draft handoff
+Sidechat uses the existing `ChatThread`, `MessageBubble`, and `Composer` primitives. Those components gain a channel/perspective option; the implementation must not create parallel bubble or composer systems.
 
-Maven's normal received bubble may contain a structured `reply_draft`. The bubble shows one compact action:
+- In public chat, visitor bubbles are received and agent/Maven bubbles are sent.
+- In sidechat, Maven bubbles are received and the human agent's bubbles are sent.
+- `FocusView` is refactored to use `ChatThread` instead of its current duplicate bubble renderer.
+- Tool activity is a compact, muted line in the thread. Raw tool arguments and results are never rendered.
 
-`Add to reply`
+When Maven has a visitor-ready reply, `present_reply_draft` attaches exact draft text to a normal Maven message. That bubble contains one compact `Add to reply` action. It fills the existing public composer, focuses the caret at the end, leaves sidechat open, and never sends.
 
-It copies the exact draft into the public composer, focuses the caret at the end, and leaves sidechat open. It never sends. The human can edit, attach images, and use the existing Send action.
+### 3.3 Write approval
 
-### 3.4 Write approval
+An MCP write requiring approval appears as a normal Maven message bubble using the same font, line height, width, padding, radius, and surface as other sidechat messages.
 
-A pending native MCP write is another normal Maven bubble, not a card or alert. Example:
+Example:
 
 > Refund the $49.00 payment from Aug 2?
->
 > This **sends $49.00 back to the customer** and cannot be undone.
 
-The only visible actions, in order, are:
+The only visible actions, in this order, are:
 
 `Always allow` | `Allow once`
 
-- `Always allow` is secondary; `Allow once` is the compact primary action.
-- There is no `Not now`, reject button, verified badge, warning panel, nested card, or repeated details.
-- Closing the pane defers the decision.
-- Important details live in the description; only details requiring attention are bold.
-- Approval is accepted only from the authenticated dashboard. Visitor content, Telegram, public APIs, and model output cannot approve a write.
+- `Always allow` is secondary and `Allow once` is the compact primary action.
+- There is no card, alert, verified badge, `Not now`, reject button, or repeated details.
+- Important detail stays in the description; only the text needing attention is bold.
+- Closing the pane leaves the request pending.
+- Only an authenticated dashboard human can approve. Visitor text, model output, widget requests, email ingress, and Telegram cannot approve.
 
-## 4. UI reuse and exact visual language
+## 4. One message model
 
-Sidechat must use the existing chat primitives, not copies that merely look similar.
+The existing `conversations` row remains the thread identity and the existing `messages` table remains the transcript store.
 
-- `ChatThread` owns scrolling, loading, grouping, date markers, and empty state.
-- `MessageBubble` owns sender header, content shell, typography, spacing, and bubble treatment.
-- `Composer` owns auto-grow, focus, keyboard behavior, and send controls.
-- A small mode/perspective prop changes placement: in sidechat, human `agent` messages are sent bubbles and Maven `bot` messages are received bubbles.
-- `reply_draft` and `approval` actions render through slots inside the same bubble shell. They are not nested cards.
-- `FocusView` stops maintaining its duplicate bubble renderer and uses the same primitives.
+`messages` gains:
 
-Measurements and tokens come from the current inbox implementation. New UI must not introduce gradients, glows, oversized titles, separator rules, or `transition-all`.
+- `channel`: `public | sidechat`, default `public`;
+- `kind`: `text | reply_draft | approval`, default `text`;
+- bounded nullable `metadata` for safe structured UI data.
 
-Desktop behavior:
+Existing roles remain unchanged:
 
-- At 1536px and wider, keep the list visible and use a 400px sidechat pane.
-- From 768px through 1535px, hide the list while sidechat is open; use a 380px pane capped at 42vw.
-- Compress the reading pane instead of overlaying it.
+- sidechat human: `agent`;
+- sidechat Maven: `bot`.
 
-Below 768px, sidechat replaces the reading pane and a compact back control returns to the conversation.
+Every existing public read, replay, delivery receipt, email, Telegram, widget, summary, canned-response, and deletion query must explicitly require `channel = public`. New sidechat methods explicitly require `channel = sidechat`. There is no generic unscoped transcript method available to a route.
 
-## 5. Persistence model
+The conversation row stores only compact sidechat coordination fields: status (`idle | working | waiting_approval | ready | failed`), active run ID, lease expiry, and last sidechat activity. No `sidechat_threads` table is added.
 
-### 5.1 Existing `messages` table
+## 5. Message routing and loop
 
-Add:
+### 5.1 Deterministic channel routing
 
-- `channel`: `public | sidechat`, non-null, default `public`;
-- `kind`: `text | reply_draft | approval`, non-null, default `text`;
-- `metadata`: nullable JSON text for bounded, UI-safe structured parts.
+The route is the classification:
 
-Existing rows migrate implicitly to `public/text`. Sidechat uses existing roles:
+- widget message endpoint creates a `public` turn;
+- authenticated dashboard sidechat endpoint creates a `sidechat` turn.
 
-- dashboard human: `agent`;
-- Maven: `bot`.
+The server constructs a trusted turn context containing project, conversation, channel, actor, ownership snapshot, and sidechat run lease. Channel is never accepted in model/tool input.
 
-Raw MCP arguments/results, credentials, provider objects, and model reasoning are never written to message content or metadata.
+### 5.2 Shared loop
 
-### 5.2 Existing `conversations` table
+Both routes call:
 
-Add projection columns instead of a new table:
-
-- `sidechatStatus`: `idle | working | waiting_approval | ready | failed`;
-- `sidechatUnread`: boolean;
-- `sidechatLastActivityAt`: timestamp;
-- `sidechatRunId` and `sidechatLeaseExpiresAt` for one bounded turn at a time and stale-run recovery.
-
-Sidechat activity never changes public `status`, `lastActivityAt`, assignee, handoff state, delivery state, or conversation ordering.
-
-### 5.3 Public isolation invariant
-
-Every existing public message read/write path must explicitly constrain `channel = public`, including:
-
-- widget history, polling, SSE, and WebSocket replay;
-- dashboard public history and pagination;
-- conversation-list previews;
-- visitor counts and first-turn checks;
-- Telegram and email context;
-- delivery/read receipts;
-- delete/edit routes; and
-- public AI transcript construction.
-
-Dedicated `ChatService` methods read and write `channel = sidechat`. No generic method may return both channels by default.
-
-## 6. Runtime and realtime
-
-### 6.1 Authenticated API
-
-Add dashboard-only routes under:
-
-```text
-GET  /api/projects/:id/conversations/:convId/sidechat/messages
-POST /api/projects/:id/conversations/:convId/sidechat/messages
-POST /api/projects/:id/conversations/:convId/sidechat/retry
+```typescript
+runMavenTurn({ context, messages, currentMessage, modelConfig })
 ```
 
-They use the same session, effective-owner, team-role, project, and conversation authorization as the existing conversation detail route. The widget has no sidechat route.
+The shared runtime:
 
-POST stores the human message, atomically claims the conversation's sidechat run lease, returns `202 Accepted`, and asks the existing `ConversationDO` to execute the turn. The DO-backed turn continues when the pane closes or the browser disconnects.
+1. builds the common Maven prompt plus the channel contract;
+2. asks the registry for tools authorized for that context;
+3. runs one `ToolLoopAgent` until final text, approval pause, or the step limit;
+4. consumes text/tool events without sending tool payloads to either browser;
+5. persists the final message into the correct channel using a channel-specific service method.
 
-### 6.2 Existing AI runtime
+The public route retains existing deterministic scope safety, human-ownership checks, guarded bot-message persistence, status updates, Telegram delivery, and SSE response behavior. Those are transport and ownership boundaries, not model routing.
 
-Create a sidechat-specific prompt and orchestration module under the existing `worker/chat-runtime/` tree. It uses `createLanguageModel`, `runWithModelFallback`, AI SDK v6 streaming/tool primitives, current project settings, and the existing model configuration.
+## 6. Tool audience and authorization
 
-The turn receives:
+Every model-visible tool has server-owned capability metadata:
 
-- bounded public transcript from `channel = public`;
-- bounded private transcript from `channel = sidechat`;
-- linked canonical customer context;
-- project knowledge retrieval when useful; and
-- enabled native MCP tools when phase 2 is installed.
+```typescript
+type MavenChannel = "public" | "sidechat";
 
-The model is instructed that customer and tool data are private working context: answer the human's question, do not dump records, do not repeat internal identifiers/links/metadata, and put only the minimum visitor-appropriate facts in a `reply_draft`.
+interface ToolCapability {
+  id: string;
+  projectId: string;
+  connectionId: string | null;
+  modelName: string;
+  displayName: string;
+  source: "internal" | "http" | "mcp";
+  allowedChannels: MavenChannel[];
+  access: "read" | "write";
+  enabled: boolean;
+  schemaFingerprint: string;
+}
+```
 
-### 6.3 Existing realtime path
+Authorization happens twice:
 
-Extend `shared/ws-events.ts` and `useConversationWs` with agent-only events:
+1. Registry filter: before inference, remove any tool whose enabled state, channel, project, or schema fingerprint does not match the turn.
+2. Executor recheck: immediately before execution, reload the authoritative record and repeat the project, channel, enabled, access, connection, and fingerprint checks.
 
-- `sidechat:message` — a finalized safe sidechat message;
-- `sidechat:delta` — ephemeral Maven text for the active turn;
-- `sidechat:status` — status/unread projection;
-- `sidechat:approval_updated` — safe approval state only.
+This prevents prompt injection and stale model/tool state from crossing the boundary. Hiding a tool in the prompt or relying on the model to avoid it is not authorization.
 
-Add explicit `broadcastSidechat*` helpers that always set `audience: agents`. Never send sidechat data using public `message:new`.
+Defaults:
 
-On reconnect, the dashboard refetches the sidechat query. Visitor replay remains public-only.
+| Tool source | Public | Sidechat | Approval |
+|---|---:|---:|---|
+| Knowledge search | Yes | Yes | Never |
+| Team handoff | Yes | No | Never |
+| Existing HTTP tools | Existing project setting | Optional project setting | Existing behavior in v1 |
+| Native MCP reads | No | Yes | Never |
+| Native MCP writes | No | Yes | Dashboard policy |
+| `present_reply_draft` | No | Yes | Never |
 
-## 7. Trusted customer identity
+MCP tools are hard-coded sidechat-only in v1. No configuration or API accepts `public` for an MCP tool.
 
-Maven receives identity only from the project-scoped `customers` row already linked to the conversation:
+## 7. Generic MCP connections and presets
 
-1. trusted non-empty `customer.externalId`;
-2. normalized trusted `customer.email` as fallback;
-3. otherwise no trusted lookup identity.
+ReplyMaven is a generic Streamable HTTP MCP client using the existing `@modelcontextprotocol/sdk`. It does not add provider-specific actions, schemas, reducers, mappings, or result models.
 
-The prompt tells Maven to prefer external ID whenever a native MCP schema accepts it, and to use email only when external ID is unsupported or returns no match. Visitor message text, widget metadata, `visitorName`, and conversation email snapshots are never promoted to trusted lookup keys.
+PostHog, Stripe, Slack, Attio, and Linear are inert connection presets containing only a label and official MCP server URL. `Custom` accepts another validated HTTPS Streamable HTTP endpoint.
 
-No provider-specific identity mapper is added. Native MCP schema plus the tool's project-configured instructions determine argument names.
+After OAuth or bearer authentication, ReplyMaven discovers the server's native tool catalog. Project owners/admins can:
 
-## 8. Generic MCP connections and inert presets
+- enable or disable each native tool;
+- label it `read` or `write`;
+- choose the write approval policy.
 
-The project connects any supported Streamable HTTP MCP server through one generic `McpConnectionService` built on the existing `@modelcontextprotocol/sdk`. Presets are convenience metadata only:
+The model receives each enabled native tool's name, description, and input schema unchanged except for a collision-safe local model name. There are no canonical customer actions.
 
-| Preset | Default URL |
-|---|---|
-| PostHog | `https://mcp.posthog.com/mcp` |
-| Stripe | `https://mcp.stripe.com` |
-| Slack | `https://mcp.slack.com/mcp` |
-| Attio | `https://mcp.attio.com/mcp` |
-| Linear | `https://mcp.linear.app/mcp` |
-| Custom | User-entered HTTPS URL |
+For customer lookup Maven uses the trusted customer linked to the conversation: non-empty `customer.externalId` first, then normalized `customer.email`. The prompt clearly labels both as private canonical identity and tells Maven never to guess from visitor text.
 
-A preset contains only ID, label, icon path, default URL, documentation URL, and short setup copy. It must not define actions, mappings, schema matchers, reducers, prompts, identity rules, parameter bindings, or provider runtime branches.
+## 8. MCP data boundary
 
-After connection, owners review the discovered native catalog. Every tool is disabled by default and can be configured with:
+MCP arguments and raw results may reach the LLM transiently because they are working context. They must not reach the public transcript, dashboard browser, D1 message metadata, application logs, traces, or analytics.
 
-- enabled;
-- access: `read` or `write`;
-- optional short instructions for Maven; and
-- write approval policy.
+The sidechat system contract says:
 
-Configuration is bound to the exact connection, native tool name, and input-schema fingerprint. Catalog drift disables the tool until reviewed.
+- use private customer data to reason, not to dump records;
+- never repeat raw payloads, complete event lists, identifiers, internal links, metadata, tokens, headers, or unrelated fields;
+- mention only the minimum customer-safe fact needed in a proposed reply;
+- never claim an action succeeded unless the tool result confirms it;
+- use the canonical external ID first and email only as fallback.
 
-## 9. Data boundary
+Prompting is not the only boundary: the stream adapter drops tool-call arguments/results, MCP run records store only safe audit metadata, and the human must still choose `Add to reply` and Send.
 
-The LLM may receive native MCP inputs and results as private turn context. The system does not automatically expose those values anywhere else.
+## 9. Generic MCP write approvals
 
-Enforced boundaries:
+Write behavior is derived only from the project-owned native tool setting. The model does not choose whether a call is a write or whether approval is required.
 
-- MCP credentials and authorization headers remain encrypted at rest and are decrypted only inside the Worker call scope.
-- Native inputs/results are not stored in D1 messages, browser frames, public transcripts, Telegram, widget APIs, analytics, or traces.
-- Only model-written safe sidechat text, structured drafts, safe approval descriptors, and bounded status metadata are persisted/rendered.
-- The public bridge remains human-controlled: `Add to reply`, edit, then Send.
-- Tool and model telemetry for this path is payload-free until redaction tests prove otherwise.
+When a native MCP write is called:
 
-Prompt rules are the requested content policy, not a claim that the model never sees data. Human review before public send remains the final disclosure checkpoint.
+1. the executor rechecks the connection, tool, channel, access label, enabled state, and schema fingerprint;
+2. if an active matching `always` policy exists, execute immediately;
+3. otherwise encrypt the exact arguments, hash the authoritative descriptor, persist a short-lived pending call, and stop the turn without contacting the MCP server;
+4. render the safe descriptor as an `approval` sidechat bubble;
+5. after `Allow once` or `Always allow`, atomically claim and execute the exact sealed call once;
+6. persist only safe status metadata and submit the tool result back into a new turn of the same Maven loop so Maven can finish the response.
 
-## 10. Generic write approval
+`Always allow` is project-wide for `(projectId, connectionId, toolName, schemaFingerprint)`. A reconnect, changed schema fingerprint, disabled tool, changed access label, or changed account invalidates the policy.
 
-Any configured native tool marked `write` uses the same interception path.
+Approval expiry is 15 minutes. Ambiguous provider results are recorded as `unknown` and never retried automatically. Duplicate approval is an idempotent no-op.
 
-1. The dynamic tool wrapper receives native arguments from Maven.
-2. If an exact persistent policy already allows the tool, execute it.
-3. Otherwise, the MCP service AES-GCM-encrypts the exact arguments under an opaque execution ID and returns a safe human descriptor.
-4. Sidechat persists a normal `approval` message containing only that descriptor and execution reference.
-5. An authenticated human chooses `Always allow` or `Allow once`.
-6. The server reloads the authoritative pending call; it ignores browser-supplied tool names and arguments.
-7. The MCP service executes once, then a new private model continuation receives the raw result transiently and prepares the safe final answer/draft.
+## 10. Existing realtime infrastructure
 
-`Always allow` is scoped to `(project, connection, native tool name, input-schema fingerprint)`. Reconnect, account change, schema drift, disabling the tool, or changing access invalidates it.
+The existing `ConversationDO` and dashboard WebSocket carry both channels.
 
-There is no Think durable pause. Idempotency and state transitions live in generic project-scoped D1 records: `prepared -> executing -> succeeded | failed | unknown | expired`.
+- Existing `message:*` events remain public-message events and may reach visitor sockets.
+- New `sidechat:*` events are broadcast with `audience: "agents"` and are never sent to visitor sockets.
+- Dashboard reconnect replays public and sidechat messages with separate cursors.
+- Partial model deltas are ephemeral; the durable source after reconnect is the persisted sidechat message.
 
-## 11. Project configuration UI
+No additional Durable Object class or WebSocket endpoint is introduced.
 
-The existing `Actions & Tools` area gains a `Connections` tab. It includes compact preset selection, Custom, connection state, discovered native tools, per-tool access/instructions/approval, and safe recent activity.
+## 11. Visual behavior
 
-It reuses current page shells, typography, controls, dialogs, surfaces, and spacing. Presets are compact picker rows, not marketplace cards. No provider-specific action list is shown.
+The sidechat pane extends the existing inbox design exactly:
 
-## 12. Errors, cleanup, and retention
+- closed by default;
+- no permanent rail or visitor preview;
+- at 1536px and wider, 400px wide and the conversation list remains visible;
+- from 768px to 1535px, 380px wide capped at 42vw and the conversation list hides;
+- below 768px, sidechat replaces the reading pane and a compact back action restores it;
+- the reading pane compresses; sidechat does not overlay it.
 
-- A failed sidechat submission leaves the public draft intact.
-- A stale sidechat lease becomes `failed` and can be retried without duplicating a finalized message.
-- MCP unavailability yields a safe private error; Maven must not invent provider facts.
-- Ambiguous write outcomes become `unknown` and are never retried automatically.
-- Expired approvals never execute.
-- Conversation deletion removes both channels and pending executions through existing D1 cascades.
-- Project deletion removes its MCP connections, encrypted credentials, settings, policies, and pending executions through D1 cascades.
+Use current `glass-reading`, `glass-bar`, ink, received/sent bubble, radius, typography, and shadow tokens. The approval actions are 28px visually with a 40px hit target. Motion is 180–220ms targeted opacity/transform/width and respects reduced motion. Do not use `transition-all`, new gradients, glow, dividers, nested card stacks, or sparkle icons.
 
-## 13. Rollout
+Required visual QA covers closed, empty, history, working, tool activity, approval, ready draft, failure, conversation switch, focus mode, archived mode, keyboard focus, 200% zoom, reduced motion, and the 1440x1000, 1100x900, 768x900, and 390x844 viewports.
 
-1. **Internal Sidechat Channel** — schema isolation, ChatService filters, existing ConversationDO/AI runtime, reused UI primitives, draft bridge, responsive pane, and removal of inline Compose.
-2. **Generic MCP Connections** — one Worker MCP client service, inert presets, catalog review, native tool configuration, trusted customer context, and Connections UI.
-3. **Generic Write Approval** — native write interception, exact pending call, same-bubble approval, always/once policy, idempotency, expiry, and safe audit metadata.
+## 12. Persistence
 
-Each phase stays behind a server-side feature flag until unit, integration, leakage, responsive, keyboard, zoom, and reduced-motion checks pass. Deployment requires separate user approval.
+New or changed D1 state is limited to:
+
+- message channel/kind/safe metadata;
+- compact sidechat coordination on `conversations`;
+- outbound project MCP connections and encrypted auth state;
+- discovered native MCP tool settings;
+- sealed pending MCP calls;
+- project-wide MCP write policies;
+- safe MCP run audit metadata.
+
+OAuth tokens, client registration data, PKCE verifier, bearer headers, and pending write arguments are AES-GCM encrypted with the existing `ENCRYPTION_KEY`. Raw MCP results are never stored.
+
+Conversation and project deletion cascade through sidechat messages, connections, tool settings, pending calls, policies, and runs. Disconnecting a connection revokes/deletes stored credentials, disables its tools, and invalidates its pending calls and policies.
+
+## 13. Delivery sequence
+
+Implementation is split into four independently testable plans:
+
+1. Unified Maven Tool Loop — replace the classifier/planner with one `ToolLoopAgent` and channel-aware tool capabilities while preserving public behavior.
+2. Internal Sidechat Channel — add channel-safe persistence/realtime, shared chat UI, sidechat routes, and `present_reply_draft`.
+3. Generic MCP Connections — add presets, OAuth/bearer connection management, native catalog discovery, and sidechat-only native tools.
+4. Generic MCP Write Approvals — add sealed calls, compact approval bubbles, once/always policy, idempotent execution, and same-loop continuation.
+
+Each plan uses TDD and ends with targeted tests, `bun test`, `bun run build`, `bun run lint`, and visual verification where applicable. Deployment is never part of these plans and requires separate approval.
 
 ## 14. Explicitly out of scope
 
-- A separate sidechat agent/chat infrastructure.
-- Migrating the public widget to Chat SDK.
-- Provider-specific MCP actions, profiles, reducers, or mappings.
-- Automatically enabling tools from a preset.
-- Sending a draft automatically.
-- Exposing sidechat to visitors or Telegram.
-- A permanent right rail or visitor-preview pane.
-- Multi-stage workflows that need hours/days of durable orchestration.
-
-## 15. Official MCP preset sources
-
-- [Cloudflare Agents MCP client](https://developers.cloudflare.com/agents/model-context-protocol/client/)
-- [PostHog MCP](https://posthog.com/docs/model-context-protocol)
-- [Stripe MCP](https://docs.stripe.com/mcp)
-- [Slack MCP](https://docs.slack.dev/ai/slack-mcp-server)
-- [Attio MCP](https://docs.attio.com/mcp/overview)
-- [Linear MCP](https://linear.app/docs/mcp)
+- a separate sidechat agent, Think agent, integration agent, or Durable Object;
+- a second planner/classifier/compose loop;
+- provider-specific PostHog, Stripe, Slack, Attio, or Linear actions;
+- provider reducers or canonical tool mappings;
+- exposing an MCP tool to the visitor;
+- automatic public sending;
+- showing raw tool payloads in either chat;
+- multi-stage business workflows;
+- changing the existing account-level ReplyMaven MCP server beyond clarifying its inverse purpose.
