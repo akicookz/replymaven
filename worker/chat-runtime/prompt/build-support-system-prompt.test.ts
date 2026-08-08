@@ -75,4 +75,12 @@ test("adds the trusted Maven channel contract to the common prompt", () => {
   expect(sidechatPrompt).toContain("Channel: sidechat");
   expect(sidechatPrompt).toContain("private conversation with a human support agent");
   expect(publicPrompt).not.toContain("private conversation with a human support agent");
+  expect(publicPrompt).toContain("You are answering visitors in Acme's live chat");
+  expect(publicPrompt).toContain("call request_team_help");
+  expect(publicPrompt).toContain("[RESOLVED]");
+  expect(sidechatPrompt).toContain("human dashboard support agent");
+  expect(sidechatPrompt).not.toContain("You are answering visitors");
+  expect(sidechatPrompt).not.toContain("Your job is to help visitors");
+  expect(sidechatPrompt).not.toContain("request_team_help");
+  expect(sidechatPrompt).not.toContain("[RESOLVED]");
 });

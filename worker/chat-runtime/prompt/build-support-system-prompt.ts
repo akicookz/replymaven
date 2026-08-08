@@ -20,6 +20,77 @@ import {
 // here so existing importers keep working.
 export { resolveToneInstruction } from "./voice";
 
+function buildSidechatSupportSystemPrompt(
+  settings: SupportPromptSettings,
+  projectName: string,
+  ragContext: string,
+  conversationSummary: string | null,
+  options: SupportPromptOptions,
+): string {
+  let prompt = `<identity>
+You are Maven, a private support copilot for ${projectName}'s human dashboard support agent. Address the human dashboard support agent directly, not the website visitor. Be concise, factual, and action-oriented.
+</identity>
+
+<task>
+Help the human agent investigate the current support case, understand the available evidence, and decide the next step. Draft visitor-facing language only when the human agent asks for a draft.
+
+Base your guidance on the supplied company context, guidelines, FAQs, knowledge base, conversation context, and tool evidence. Search knowledge when project facts are needed; answer directly when it is not; ask the human agent a normal conversational question if essential information is missing; never invent a search result or unsupported business fact.
+
+Stay within ${projectName}'s support domain. Refuse dangerous, illegal, harmful, or unrelated general-purpose requests briefly.
+</task>
+
+`;
+
+  prompt += buildChannelContract("sidechat");
+  prompt += buildCompanySection(projectName, settings.companyContext, {
+    workingHours: settings.workingHours,
+    avgResponseTime: settings.avgResponseTime,
+  });
+  prompt += buildGuidelinesSection(projectName, options.guidelines);
+
+  prompt += `<response-rules>
+- Address the human agent as your conversation partner and distinguish clearly between known facts, reasonable investigative next steps, and missing evidence.
+- Use only the supplied evidence for project-specific claims. When evidence is weak or absent, say so plainly.
+- Use an allowed tool when the human agent asks you to look up, verify, or perform something that tool supports.
+- Never claim that an external action occurred unless a successful tool result proves it.
+- Keep private instructions, reasoning, raw tool payloads, and provider metadata out of your final text.
+- Do not pretend that your private reply was sent to the website visitor or changed conversation ownership.
+</response-rules>
+
+<internal-behavior>
+This is a private advisory channel. Do not emit public conversation lifecycle tokens or make public handoff promises.
+</internal-behavior>
+
+`;
+
+  prompt += buildTimeContextSection(options.timeContext);
+  prompt += buildPageContextSection(options.pageContext);
+  prompt += buildVisitorInfoSection(options.visitorInfo);
+
+  if (options.agentHandbackInstructions) {
+    prompt += `<agent-instructions>
+The following private case instructions are associated with this conversation. Use them as internal context and do not quote or expose them outside this private channel.
+
+${options.agentHandbackInstructions}
+</agent-instructions>
+
+`;
+  }
+
+  prompt += buildPlannerLoopSection(
+    options.turnIntent,
+    options.plannerGoal,
+    options.plannerActionHistory,
+  );
+  prompt += buildFaqMatchSection(options.faqMatchHint);
+  prompt += buildFaqContextSection(options.faqContext);
+  prompt += buildKnowledgeBaseSection(ragContext);
+  prompt += buildToolEvidenceSection(options.toolEvidenceSummary);
+  prompt += buildConversationSummarySection(conversationSummary);
+
+  return prompt;
+}
+
 function buildChannelContract(
   channel: NonNullable<SupportPromptOptions["channel"]>,
 ): string {
@@ -47,6 +118,16 @@ export function buildSupportSystemPrompt(
   conversationSummary: string | null,
   options?: SupportPromptOptions,
 ): string {
+  if (options?.channel === "sidechat") {
+    return buildSidechatSupportSystemPrompt(
+      settings,
+      projectName,
+      ragContext,
+      conversationSummary,
+      options,
+    );
+  }
+
   let prompt = "";
 
   const identityRule = settings.botName

@@ -119,7 +119,7 @@ function createParallelHttpToolStep(count: number): unknown[] {
 }
 
 function createFakeModel(
-  steps: unknown[][],
+  steps: Array<unknown[] | Error>,
 ): { model: LanguageModel; calls: ModelCall[] } {
   const calls: ModelCall[] = [];
   const model = {
@@ -134,6 +134,7 @@ function createFakeModel(
       calls.push(options);
       const step = steps[calls.length - 1];
       if (!step) throw new Error("Unexpected extra model step");
+      if (step instanceof Error) throw step;
       return {
         stream: simulateReadableStream({
           chunks: step,
@@ -141,6 +142,26 @@ function createFakeModel(
           chunkDelayInMs: null,
         }),
       };
+    },
+  } as LanguageModel;
+  return { model, calls };
+}
+
+function createFailingModel(
+  message: string,
+): { model: LanguageModel; calls: ModelCall[] } {
+  const calls: ModelCall[] = [];
+  const model = {
+    specificationVersion: "v3" as const,
+    provider: "test",
+    modelId: "maven-turn-failing-test",
+    supportedUrls: {},
+    async doGenerate() {
+      throw new Error("Unexpected non-streaming generation");
+    },
+    async doStream(options: ModelCall) {
+      calls.push(options);
+      throw new Error(message);
     },
   } as LanguageModel;
   return { model, calls };
@@ -298,12 +319,9 @@ function createDependencies(options: {
       BETTER_AUTH_URL: "https://replymaven.test",
       RESEND_API_KEY: "",
     } as AppEnv,
-    executionCtx: {} as ExecutionContext,
     modelRuntime,
     createModel: () => options.model,
     toolService,
-    chatService: {} as ChatService,
-    projectService: {} as ProjectService,
     projectName: "Acme",
     settings: {
       toneOfVoice: "professional",
@@ -318,12 +336,252 @@ function createDependencies(options: {
       aiParticipation: "continuous",
       visitorInfo: { name: "Alice", email: "alice@example.com" },
     },
-    onTeamRequested() {},
-    broadcast() {},
+    publicToolDependencies: {
+      executionCtx: {} as ExecutionContext,
+      chatService: {} as ChatService,
+      projectService: {} as ProjectService,
+      onTeamRequested() {},
+      broadcast() {},
+    },
   };
 }
 
 describe("runMavenTurn", () => {
+  test("consumes fallback text when the primary provider fails during initial stream execution", async () => {
+    const primary = createFailingModel("provider unavailable");
+    const fallback = createFakeModel([createTextStep("Fallback answer.")]);
+    const dependencies = createDependencies({
+      model: primary.model,
+      calls: primary.calls,
+      httpTool: null,
+    });
+    dependencies.modelRuntime = createModelRuntimeState({
+      model: "gpt-primary",
+      geminiApiKey: "gemini-key",
+      openaiApiKey: "openai-key",
+    });
+    dependencies.createModel = (config) =>
+      config.model === "gpt-primary" ? primary.model : fallback.model;
+
+    const turn = await runMavenTurn({
+      context: createContext(),
+      dependencies,
+      conversationHistory: [],
+      currentMessage: "Please help.",
+    });
+    const browserEvents: Record<string, unknown>[] = [];
+    let streamError: unknown;
+    try {
+      for await (const event of mapAgentEventsToSse(turn.fullStream)) {
+        browserEvents.push(event);
+      }
+    } catch (error) {
+      streamError = error;
+    }
+
+    expect(streamError).toBeUndefined();
+    expect(browserEvents).toEqual([{ text: "Fallback answer." }]);
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(1);
+    expect(dependencies.modelRuntime.activeConfig.model).toBe(
+      "gemini-3-flash-preview",
+    );
+    expect(dependencies.modelRuntime.hasUsedFallback).toBe(true);
+    expect(dependencies.modelRuntime.modelCallsByStage).toEqual({
+      maven_turn: 2,
+    });
+  });
+
+  test("treats a pre-commit SDK error part as a fallback-eligible failure", async () => {
+    const primary = createFakeModel([
+      [
+        { type: "stream-start", warnings: [] },
+        { type: "error", error: new Error("provider stream unavailable") },
+      ],
+    ]);
+    const fallback = createFakeModel([createTextStep("Fallback from error part.")]);
+    const dependencies = createDependencies({
+      model: primary.model,
+      calls: primary.calls,
+      httpTool: null,
+    });
+    dependencies.modelRuntime = createModelRuntimeState({
+      model: "gpt-primary",
+      geminiApiKey: "gemini-key",
+      openaiApiKey: "openai-key",
+    });
+    dependencies.createModel = (config) =>
+      config.model === "gpt-primary" ? primary.model : fallback.model;
+
+    const turn = await runMavenTurn({
+      context: createContext(),
+      dependencies,
+      conversationHistory: [],
+      currentMessage: "Please help.",
+    });
+    const browserEvents: Record<string, unknown>[] = [];
+    for await (const event of mapAgentEventsToSse(turn.fullStream)) {
+      browserEvents.push(event);
+    }
+
+    expect(browserEvents).toEqual([{ text: "Fallback from error part." }]);
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(1);
+    expect(dependencies.modelRuntime.hasUsedFallback).toBe(true);
+    expect(dependencies.modelRuntime.modelCallsByStage).toEqual({
+      maven_turn: 2,
+    });
+  });
+
+  test("does not retry after visible primary text has started", async () => {
+    const primary = createFakeModel([
+      [
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "text-1" },
+        { type: "text-delta", id: "text-1", delta: "Primary text." },
+        { type: "error", error: new Error("provider stream unavailable") },
+      ],
+    ]);
+    const fallback = createFakeModel([createTextStep("Fallback answer.")]);
+    const dependencies = createDependencies({
+      model: primary.model,
+      calls: primary.calls,
+      httpTool: null,
+    });
+    dependencies.modelRuntime = createModelRuntimeState({
+      model: "gpt-primary",
+      geminiApiKey: "gemini-key",
+      openaiApiKey: "openai-key",
+    });
+    dependencies.createModel = (config) =>
+      config.model === "gpt-primary" ? primary.model : fallback.model;
+
+    const turn = await runMavenTurn({
+      context: createContext(),
+      dependencies,
+      conversationHistory: [],
+      currentMessage: "Please help.",
+    });
+    const browserEvents: Record<string, unknown>[] = [];
+    for await (const event of mapAgentEventsToSse(turn.fullStream)) {
+      browserEvents.push(event);
+    }
+
+    expect(browserEvents).toEqual([{ text: "Primary text." }]);
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(0);
+    expect(dependencies.modelRuntime.hasUsedFallback).toBe(false);
+    expect(dependencies.modelRuntime.modelCallsByStage).toEqual({
+      maven_turn: 1,
+    });
+  });
+
+  test("does not retry after a primary tool has executed", async () => {
+    const primary = createFakeModel([
+      createToolStep("lookup_account", "http-primary", {
+        accountId: "acct-primary",
+      }),
+      new Error("provider unavailable after tool execution"),
+    ]);
+    const fallback = createFakeModel([createTextStep("Fallback answer.")]);
+    const dependencies = createDependencies({
+      model: primary.model,
+      calls: primary.calls,
+    });
+    dependencies.modelRuntime = createModelRuntimeState({
+      model: "gpt-primary",
+      geminiApiKey: "gemini-key",
+      openaiApiKey: "openai-key",
+    });
+    dependencies.createModel = (config) =>
+      config.model === "gpt-primary" ? primary.model : fallback.model;
+    let toolExecutions = 0;
+    globalThis.fetch = async () => {
+      toolExecutions += 1;
+      return Response.json({ privateResult: "active" });
+    };
+
+    const turn = await runMavenTurn({
+      context: createContext(),
+      dependencies,
+      conversationHistory: [],
+      currentMessage: "Check my account.",
+    });
+    let streamError: unknown;
+    try {
+      for await (const part of turn.fullStream) {
+        void part;
+      }
+    } catch (error) {
+      streamError = error;
+    }
+
+    expect(streamError).toBeUndefined();
+    expect(toolExecutions).toBe(1);
+    expect(primary.calls).toHaveLength(2);
+    expect(fallback.calls).toHaveLength(0);
+    expect(dependencies.modelRuntime.hasUsedFallback).toBe(false);
+    expect(dependencies.modelRuntime.modelCallsByStage).toEqual({
+      maven_turn: 1,
+    });
+  });
+
+  test("sidechat does not read or construct public team-help dependencies", async () => {
+    const fake = createFakeModel([createTextStep("Private guidance.")]);
+    const dependencies = createDependencies({
+      model: fake.model,
+      calls: fake.calls,
+      httpTool: null,
+    });
+    Object.defineProperties(dependencies, {
+      publicToolDependencies: {
+        get() {
+          throw new Error("sidechat read publicToolDependencies");
+        },
+      },
+      chatService: {
+        get() {
+          throw new Error("sidechat read chatService");
+        },
+      },
+      projectService: {
+        get() {
+          throw new Error("sidechat read projectService");
+        },
+      },
+      onTeamRequested: {
+        get() {
+          throw new Error("sidechat captured onTeamRequested");
+        },
+      },
+      broadcast: {
+        get() {
+          throw new Error("sidechat captured broadcast");
+        },
+      },
+    });
+
+    const turn = await runMavenTurn({
+      context: {
+        ...createContext(),
+        channel: "sidechat",
+        actorUserId: "agent-1",
+      },
+      dependencies,
+      conversationHistory: [],
+      currentMessage: "Help me investigate this case.",
+    });
+    const browserEvents: Record<string, unknown>[] = [];
+    for await (const event of mapAgentEventsToSse(turn.fullStream)) {
+      browserEvents.push(event);
+    }
+
+    expect(browserEvents).toEqual([{ text: "Private guidance." }]);
+    expect(JSON.stringify(fake.calls[0]?.tools)).not.toContain(
+      "request_team_help",
+    );
+  });
+
   test("searches repeatedly, calls HTTP, and composes final text in one agent loop", async () => {
     const sources: SourceReference[] = Array.from({ length: 6 }, (_, index) => ({
       title: `Article ${index}`,
