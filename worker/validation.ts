@@ -587,7 +587,7 @@ export const toolAudienceSchema = z
   .max(2)
   .refine((values) => new Set(values).size === values.length, "Duplicate channel");
 
-const toolParameterSchema = z.object({
+export const toolParameterSchema = z.object({
   name: z.string().min(1, "Parameter name is required").max(100),
   type: z.enum(["string", "number", "boolean"]),
   description: z.string().max(500).default(""),

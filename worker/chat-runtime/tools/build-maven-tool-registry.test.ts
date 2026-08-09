@@ -455,12 +455,22 @@ describe("buildMavenToolRegistry", () => {
 });
 
 describe("createHttpToolDefinition", () => {
-  test("uses the persisted HTTP contract fingerprint for stale-call checks", async () => {
+  test("recomputes the persisted HTTP contract for stale-call checks", async () => {
     let fetchCount = 0;
-    const initial = createToolRow({ schemaFingerprint: "stored-contract-v1" });
+    const initial = createToolRow({ schemaFingerprint: "stale-stored-value" });
     const toolService = {
       async getAuthoritativeTool(): Promise<ToolRow | null> {
-        return createToolRow({ schemaFingerprint: "stored-contract-v2" });
+        return createToolRow({
+          schemaFingerprint: "stale-stored-value",
+          parameters: JSON.stringify([
+            {
+              name: "customerId",
+              type: "string",
+              description: "Customer identifier",
+              required: true,
+            },
+          ]),
+        });
       },
       async logExecution() {
         return { id: "execution-1" };
@@ -490,7 +500,7 @@ describe("createHttpToolDefinition", () => {
       },
     } as never);
 
-    expect(definition.capability.schemaFingerprint).toBe("stored-contract-v1");
+    expect(definition.capability.schemaFingerprint).not.toBe("stale-stored-value");
     expect(
       await executeRegisteredTool(
         definition,
@@ -498,6 +508,82 @@ describe("createHttpToolDefinition", () => {
         { accountId: "account-1" },
       ),
     ).toEqual({ error: "tool_schema_changed" });
+    expect(fetchCount).toBe(0);
+  });
+
+  test("does not register an HTTP tool with a malformed persisted contract", async () => {
+    const malformed = createToolRow({ parameters: "{" });
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: malformed,
+      toolService: {
+        async getAuthoritativeTool() {
+          return malformed;
+        },
+        async logExecution() {
+          return { id: "execution-1" };
+        },
+      },
+      encryptionKey: "00".repeat(32),
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches() {
+            throw new Error("Malformed tools must not execute");
+          },
+        },
+        acquireRateLimitPermit: () => true,
+      },
+    } as never);
+
+    const registry = buildMavenToolRegistry({
+      context: createContext("public"),
+      definitions: [definition],
+    });
+
+    expect(registry.tools.lookup_account).toBeUndefined();
+  });
+
+  test("rejects a malformed authoritative contract before its side effect", async () => {
+    let fetchCount = 0;
+    const initial = createToolRow();
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: initial,
+      toolService: {
+        async getAuthoritativeTool() {
+          return createToolRow({ parameters: "{" });
+        },
+        async logExecution() {
+          return { id: "execution-1" };
+        },
+      },
+      encryptionKey: "00".repeat(32),
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches(
+            _conversationId: string,
+            _projectId: string,
+            _ownership: unknown,
+            action: () => Promise<unknown>,
+          ) {
+            return { executed: true, value: await action() };
+          },
+        },
+        acquireRateLimitPermit: () => true,
+      },
+    } as never);
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      return Response.json({ ok: true });
+    };
+
+    expect(
+      await executeRegisteredTool(
+        definition,
+        createContext("public"),
+        { accountId: "account-1" },
+      ),
+    ).toEqual({ error: "tool_unavailable" });
     expect(fetchCount).toBe(0);
   });
 

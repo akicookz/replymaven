@@ -53,13 +53,14 @@ When sources provide conflicting information:
 - **Internal References**: The system internally tracks these as tier-1 and lower-tier sources
 - **User-Facing Language**: Never expose tier structure to users - always say "the documentation" or "my knowledge base"
 - **Prompt Building**: The tier hierarchy is enforced in `build-support-system-prompt.ts`
-- **Planner Logic**: The planner checks sources in tier order (see `plan-next-action.ts`)
+- **Maven Tool Loop**: Maven receives tier-1 prompt context directly and calls `search_knowledge` for lower-tier retrieval when needed
 
 ### Key Files
 
 - `prompt/build-support-system-prompt.ts` - Constructs prompts with tier priority
-- `planner/plan-next-action.ts` - Implements search strategy respecting tiers
-- `executor/run-planner-loop.ts` - Orchestrates the tier-based search process
+- `prompt/sections.ts` - Labels and orders authoritative prompt evidence
+- `tools/internal/search-knowledge.ts` - Retrieves bounded lower-tier knowledge
+- `orchestration/run-maven-turn.ts` - Runs the unified Maven tool loop
 
 ## Testing Guidelines
 
@@ -68,7 +69,7 @@ When testing tier behavior:
 1. **Test precedence**: Ensure tier-1 sources always override lower tiers
 2. **Test conflicts**: Verify correct resolution when tier-1 sources disagree
 3. **Test hiding**: Confirm users never see internal tier terminology
-4. **Test completeness**: Verify multiple search attempts before giving up
+4. **Test completeness**: Verify Maven retrieves lower-tier knowledge when prompt evidence is insufficient
 
 ## Maintenance
 
@@ -85,7 +86,7 @@ If adding new information sources:
 Changes to tier precedence require:
 1. Update this documentation
 2. Modify `build-support-system-prompt.ts` response rules
-3. Update planner prompts in `plan-next-action.ts`
+3. Update the prompt sections or `search_knowledge` tool contract as appropriate
 4. Add/update tests to verify new behavior
 5. Consider impact on existing production behaviors
 

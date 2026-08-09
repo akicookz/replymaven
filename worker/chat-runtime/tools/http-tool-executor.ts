@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { tool, type ToolSet } from "ai";
 import { type ToolRow } from "../../db";
+import { toolParameterSchema } from "../../validation";
 import { type ChatService } from "../../services/chat-service";
 import {
   decryptHeaders,
@@ -14,16 +15,11 @@ import {
 } from "../types";
 import {
   authorizeCapability,
+  fingerprintHttpToolContract,
   parseAllowedChannels,
 } from "./tool-capability";
 
-interface HttpToolParameter {
-  name: string;
-  type: "string" | "number" | "boolean";
-  description: string;
-  required: boolean;
-  enum?: string[];
-}
+type HttpToolParameter = z.infer<typeof toolParameterSchema>;
 
 interface AuthoritativeHttpToolStore {
   getAuthoritativeTool(
@@ -107,8 +103,14 @@ function getNestedValue(
   }, obj);
 }
 
-function parseHttpToolParameters(parameters: string): HttpToolParameter[] {
-  return JSON.parse(parameters) as HttpToolParameter[];
+function parseHttpToolParameters(parameters: string): HttpToolParameter[] | null {
+  try {
+    const parsed: unknown = JSON.parse(parameters);
+    const result = z.array(toolParameterSchema).max(10).safeParse(parsed);
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
 }
 
 function buildHttpInputSchema(parameters: string): z.ZodObject {
@@ -117,7 +119,7 @@ function buildHttpInputSchema(parameters: string): z.ZodObject {
     z.ZodType
   >;
 
-  for (const param of parseHttpToolParameters(parameters)) {
+  for (const param of parseHttpToolParameters(parameters) ?? []) {
     let paramSchema: z.ZodType;
     switch (param.type) {
       case "number":
@@ -160,7 +162,9 @@ function toHttpExecutionDefinition(toolRow: ToolRow): SupportToolDefinition {
 
 async function toHttpCapability(
   toolRow: ToolRow,
-): Promise<MavenToolCapability> {
+): Promise<MavenToolCapability | null> {
+  const parameters = parseHttpToolParameters(toolRow.parameters);
+  if (!parameters) return null;
   return {
     id: toolRow.id,
     projectId: toolRow.projectId,
@@ -171,7 +175,26 @@ async function toHttpCapability(
     allowedChannels: parseAllowedChannels(toolRow.allowedChannels),
     access: toolRow.access,
     enabled: toolRow.enabled,
-    schemaFingerprint: toolRow.schemaFingerprint,
+    schemaFingerprint: await fingerprintHttpToolContract({
+      name: toolRow.name,
+      description: toolRow.description,
+      parameters,
+    }),
+  };
+}
+
+function toUnavailableHttpCapability(toolRow: ToolRow): MavenToolCapability {
+  return {
+    id: toolRow.id,
+    projectId: toolRow.projectId,
+    connectionId: null,
+    modelName: toolRow.name,
+    displayName: toolRow.displayName,
+    source: "http",
+    allowedChannels: [],
+    access: toolRow.access,
+    enabled: false,
+    schemaFingerprint: "invalid-http-contract",
   };
 }
 
@@ -389,7 +412,9 @@ export async function executeHttpTool(
 export async function createHttpToolDefinition(
   options: CreateHttpToolDefinitionOptions,
 ): Promise<MavenToolDefinition> {
-  const capability = await toHttpCapability(options.tool);
+  const capability =
+    (await toHttpCapability(options.tool)) ??
+    toUnavailableHttpCapability(options.tool);
   const authorizedExecutions: SupportToolDefinition[] = [];
 
   return {
@@ -461,6 +486,7 @@ export async function createHttpToolDefinition(
       if (!authoritativeTool) return null;
 
       const authoritativeCapability = await toHttpCapability(authoritativeTool);
+      if (!authoritativeCapability) return null;
       const authorization = authorizeCapability(
         options.context,
         authoritativeCapability,

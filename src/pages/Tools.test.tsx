@@ -237,6 +237,41 @@ describe("Tools HTTP policy controls", () => {
     expect(publicSwitch?.getAttribute("aria-checked")).toBe("false");
   });
 
+  test("custom tool policy-only edits omit masked headers", async () => {
+    const customTool = makePresetTool({
+      id: "custom-1",
+      name: "lookup_account",
+      displayName: "Lookup Account",
+      description: "Look up an account.",
+      endpoint: "https://api.example.com/accounts",
+      method: "GET",
+      headers: {
+        Authorization: "••••••••",
+        "X-API-Key": "••••••••",
+      },
+    });
+    const { dom, requests } = await renderTools([customTool]);
+
+    await waitForText(dom, "Lookup Account");
+    const edit = dom.window.document.querySelector<HTMLButtonElement>(
+      'button[title="Edit"]',
+    );
+    await act(async () => edit?.click());
+
+    const sidechatSwitch = dom.window.document.querySelector<HTMLElement>(
+      '[aria-label="Available in sidechat"]',
+    );
+    await act(async () => sidechatSwitch?.click());
+    const update = await waitForText(dom, "Update Tool");
+    await act(async () => update.click());
+
+    const request = await waitForRequest(requests, "PATCH");
+    expect(request.body).toMatchObject({
+      allowedChannels: ["public", "sidechat"],
+    });
+    expect(request.body).not.toHaveProperty("headers");
+  });
+
   test("expanded presets expose the same policy and preserve configured values", async () => {
     const presetTool = makePresetTool({
       allowedChannels: ["public", "sidechat"],

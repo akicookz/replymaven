@@ -6,6 +6,7 @@ import {
   type MavenToolCapability,
 } from "../types";
 import { persistGuardedAiOutput } from "../post-turn/persist-guarded-ai-output";
+import { MavenTurnCancelled } from "../streaming/maven-turn-cancelled";
 import { buildMavenToolRegistry } from "../tools/build-maven-tool-registry";
 import {
   createRequestTeamHelpTool,
@@ -164,6 +165,8 @@ function createHandlerHarness(options?: {
   executeTeamHelpDuringTurn?: boolean;
   pendingContactUpdateLosesToHuman?: boolean;
   contactAccepted?: boolean;
+  turnKind?: "standard" | "contact_support";
+  avgResponseTime?: string | null;
   streamFactory?: (input: unknown) => AsyncIterable<MavenStreamPart>;
   resolveSucceeds?: boolean;
   streamProtocolVersion?: 1 | 2;
@@ -358,7 +361,7 @@ function createHandlerHarness(options?: {
             botName: "Maven",
             agentName: null,
             workingHours: null,
-            avgResponseTime: null,
+            avgResponseTime: options?.avgResponseTime ?? null,
             telegramBotToken: null,
             telegramChatId: null,
           };
@@ -504,6 +507,7 @@ function createHandlerHarness(options?: {
     visitorMessageAlreadySaved: true,
     payload: { content: options?.content ?? "Help me" },
     abortSignal: options?.abortSignal,
+    turnKind: options?.turnKind,
     ...(options?.contactAccepted
       ? {
           contactAccepted: {
@@ -618,6 +622,57 @@ describe("widget handler Maven gates", () => {
     abortController.abort(reason);
     expect(turnSignal?.aborted).toBe(true);
     expect(turnSignal?.reason).toBe(reason);
+  });
+
+  test("aborts the pre-SSE contact timing request before Maven starts", async () => {
+    const inboundAbortController = new AbortController();
+    const harness = createHandlerHarness({
+      abortSignal: inboundAbortController.signal,
+      turnKind: "contact_support",
+      avgResponseTime: "2-4 hours",
+    });
+    const originalFetch = globalThis.fetch;
+    let providerSignal: AbortSignal | undefined;
+    let rejectProvider: ((reason: unknown) => void) | undefined;
+    let resolveStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ): Promise<Response> => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      providerSignal = request.signal;
+      resolveStarted?.();
+      return new Promise<Response>((_resolve, reject) => {
+        rejectProvider = reject;
+        request.signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("cancelled", "AbortError")),
+          { once: true },
+        );
+      });
+    }) as typeof fetch;
+
+    const pending = handleWidgetMessageTurn(harness.context, harness.runtime);
+    await started;
+    inboundAbortController.abort(
+      new DOMException("visitor disconnected", "AbortError"),
+    );
+    const providerWasAborted = providerSignal?.aborted === true;
+    if (!providerWasAborted) {
+      rejectProvider?.(new Error("test cleanup"));
+    }
+    const result = await pending.then(
+      (response) => response,
+      (error: unknown) => error,
+    );
+    globalThis.fetch = originalFetch;
+
+    expect(providerWasAborted).toBe(true);
+    expect(result).toBeInstanceOf(MavenTurnCancelled);
+    expect(harness.runTurnCalls).toHaveLength(0);
   });
 
   test("does not consume the HTTP execution limit for a text-only Maven turn", async () => {

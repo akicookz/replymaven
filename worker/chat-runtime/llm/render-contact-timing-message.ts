@@ -290,7 +290,7 @@ After writing the sentence, set every self-report field honestly.`;
 export async function renderContactTimingMessage(
   model: LanguageModel,
   params: RenderContactTimingParams,
-  options?: { throwOnModelError?: boolean },
+  options?: { throwOnModelError?: boolean; abortSignal?: AbortSignal },
 ): Promise<string> {
   if (!params.avgResponseTime?.trim() && !params.workingHours?.trim()) {
     return fallbackRenderContactTimingMessage();
@@ -303,6 +303,7 @@ export async function renderContactTimingMessage(
       prompt: buildRenderContactTimingPrompt(params),
       temperature: 0.1,
       maxOutputTokens: 512,
+      abortSignal: options?.abortSignal,
     });
 
     if (!output) {

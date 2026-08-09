@@ -138,7 +138,9 @@ async function resolveSupportTurnOpening(options: {
   currentMessage: string;
   modelRuntime: ModelRuntimeState;
   logContext: Record<string, unknown>;
+  abortSignal?: AbortSignal;
 }): Promise<string> {
+  throwIfMavenTurnCancelled(options.abortSignal);
   const baseOpening = buildSupportTurnOpening(
     options.turnContext,
     options.visitorInfo,
@@ -176,11 +178,16 @@ async function resolveSupportTurnOpening(options: {
                 ),
               },
             },
-            { throwOnModelError: true },
+            {
+              throwOnModelError: true,
+              abortSignal: options.abortSignal,
+            },
           ),
         logContext: options.logContext,
+        canRetry: () => options.abortSignal?.aborted !== true,
       });
     } catch (error) {
+      throwIfMavenTurnCancelled(options.abortSignal);
       logWarn("widget_turn.contact_timing_fallback", {
         ...options.logContext,
         error: error instanceof Error ? error.message : String(error),
@@ -188,6 +195,7 @@ async function resolveSupportTurnOpening(options: {
     }
   }
 
+  throwIfMavenTurnCancelled(options.abortSignal);
   return `${baseOpening}${timingMessage}\n\n`;
 }
 
@@ -737,6 +745,19 @@ export async function handleWidgetMessageTurn(
     openaiApiKey: context.env.OPENAI_API_KEY,
   };
   const modelRuntime = createModelRuntimeState(modelConfig);
+  const turnAbortController = new AbortController();
+  function abortTurn(reason: unknown): void {
+    if (turnAbortController.signal.aborted) return;
+    turnAbortController.abort(reason);
+  }
+  function abortFromInboundRequest(): void {
+    abortTurn(context.abortSignal?.reason);
+  }
+  context.abortSignal?.addEventListener("abort", abortFromInboundRequest, {
+    once: true,
+  });
+  if (context.abortSignal?.aborted) abortFromInboundRequest();
+
   const responseOpening = await resolveSupportTurnOpening({
     turnContext,
     visitorInfo: {
@@ -752,24 +773,12 @@ export async function handleWidgetMessageTurn(
     currentMessage: aiMessageContent,
     modelRuntime,
     logContext: buildWidgetTurnLogContext(context, turnId),
+    abortSignal: turnAbortController.signal,
   });
   if (context.contactAccepted) {
     context.contactAccepted.fallbackMessage =
       buildContactFallbackMessage(responseOpening);
   }
-
-  const turnAbortController = new AbortController();
-  function abortTurn(reason: unknown): void {
-    if (turnAbortController.signal.aborted) return;
-    turnAbortController.abort(reason);
-  }
-  function abortFromInboundRequest(): void {
-    abortTurn(context.abortSignal?.reason);
-  }
-  context.abortSignal?.addEventListener("abort", abortFromInboundRequest, {
-    once: true,
-  });
-  if (context.abortSignal?.aborted) abortFromInboundRequest();
 
   return createWidgetSseResponse(async (controller, encoder) => {
     const telemetry: TurnTelemetry = {

@@ -824,6 +824,8 @@ export function ToolsPanel({
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ToolFormData>(emptyForm);
+  const [customHeadersDirty, setCustomHeadersDirty] = useState(false);
+  const [customHasStoredHeaders, setCustomHasStoredHeaders] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -1047,11 +1049,15 @@ export function ToolsPanel({
     setShowForm(false);
     setEditingId(null);
     setForm(emptyForm);
+    setCustomHeadersDirty(false);
+    setCustomHasStoredHeaders(false);
     setFormError(null);
   }
 
 
   function startEdit(tool: Tool) {
+    setCustomHasStoredHeaders(Boolean(tool.headers && Object.keys(tool.headers).length > 0));
+    setCustomHeadersDirty(false);
     setEditingId(tool.id);
     setForm({
       name: tool.name,
@@ -1059,9 +1065,7 @@ export function ToolsPanel({
       description: tool.description,
       endpoint: tool.endpoint,
       method: tool.method,
-      headers: tool.headers
-        ? Object.entries(tool.headers).map(([key, value]) => ({ key, value }))
-        : [],
+      headers: [],
       parameters: tool.parameters,
       responseMapping: tool.responseMapping ?? { resultPath: "", summaryTemplate: "" },
       enabled: tool.enabled,
@@ -1088,7 +1092,9 @@ export function ToolsPanel({
     e.preventDefault();
     setFormError(null);
     if (editingId) {
-      updateTool.mutate({ id: editingId, data: form });
+      const data: Partial<ToolFormData> = { ...form };
+      if (!customHeadersDirty) delete data.headers;
+      updateTool.mutate({ id: editingId, data });
     } else {
       createTool.mutate(form);
     }
@@ -1119,6 +1125,7 @@ export function ToolsPanel({
   }
 
   function addHeader() {
+    setCustomHeadersDirty(true);
     setForm((prev) => ({
       ...prev,
       headers: [...prev.headers, { key: "", value: "" }],
@@ -1126,6 +1133,7 @@ export function ToolsPanel({
   }
 
   function updateHeader(index: number, field: "key" | "value", value: string) {
+    setCustomHeadersDirty(true);
     setForm((prev) => ({
       ...prev,
       headers: prev.headers.map((h, i) => (i === index ? { ...h, [field]: value } : h)),
@@ -1133,6 +1141,7 @@ export function ToolsPanel({
   }
 
   function removeHeader(index: number) {
+    setCustomHeadersDirty(true);
     setForm((prev) => ({
       ...prev,
       headers: prev.headers.filter((_, i) => i !== index),
@@ -1365,7 +1374,15 @@ export function ToolsPanel({
                 </Button>
               </div>
               {form.headers.length === 0 && (
-                <p className="text-xs text-muted-foreground py-1">No custom headers. Add authentication or other headers above.</p>
+                <p className="text-xs text-muted-foreground py-1">
+                  {editingId && customHasStoredHeaders && !customHeadersDirty ? (
+                    <><strong className="font-semibold text-foreground">Saved headers are hidden.</strong> They will be kept unless you add replacements.</>
+                  ) : editingId && customHasStoredHeaders ? (
+                    <><strong className="font-semibold text-foreground">Saved headers will be removed.</strong> Add replacement headers to keep authentication configured.</>
+                  ) : (
+                    "No custom headers. Add authentication or other headers above."
+                  )}
+                </p>
               )}
               <div className="space-y-2">
                 {form.headers.map((header, i) => (
