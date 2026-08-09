@@ -2,13 +2,8 @@ import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import Composer from "@/components/inbox/Composer";
-import MessageImages from "@/components/inbox/MessageImages";
+import ChatThread from "@/components/inbox/ChatThread";
 import { countryFlag } from "@/lib/inbox/country-flag";
-import { renderMarkdown } from "@/lib/utils";
-import {
-  parseMessageImageUrls,
-  shouldShowMessageContent,
-} from "../../../shared/message-images";
 
 interface FocusViewProps {
   conversation: Conversation;
@@ -41,51 +36,6 @@ function initials(name: string | null): string {
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-/** A full chat bubble for the focus thread (markdown, no truncation). */
-function FocusBubble({ message }: { message: Message }) {
-  const isReceived = message.role === "visitor";
-  const isBot = message.role === "bot";
-
-  const labelClass = isReceived
-    ? "text-ink-5"
-    : isBot
-      ? "text-brand-label"
-      : "text-brand-label-human";
-
-  const senderLabel = isReceived
-    ? (message.senderName ?? "Visitor")
-    : isBot
-      ? "Maven · AI"
-      : (message.senderName ?? "Agent");
-
-  const html = renderMarkdown(message.content);
-  const imageCount = parseMessageImageUrls(message.imageUrl).length;
-  const showContent = shouldShowMessageContent(message.content);
-
-  return (
-    <div className={`flex flex-col mb-3 ${isReceived ? "items-start" : "items-end"}`}>
-      <span className={`text-[11px] font-semibold mb-[3px] ${labelClass}`}>
-        {senderLabel}
-      </span>
-      <div
-        className={`max-w-9/10 sm:max-w-[78%] px-3.5 py-2.25 text-[14.5px] leading-normal break-words ${
-          isReceived
-            ? "bg-bubble-received text-ink-2 rounded-[18px_18px_18px_6px]"
-            : "bg-bubble-sent text-white rounded-[18px_18px_6px_18px]"
-        }`}
-      >
-        <MessageImages imageUrl={message.imageUrl} />
-        {showContent && (
-          <div
-            className={`prose-chat${imageCount ? " mt-1.5" : ""}`}
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
-        )}
-      </div>
-    </div>
-  );
 }
 
 export default function FocusView({
@@ -133,7 +83,7 @@ export default function FocusView({
       {/* Floating exit button — top-right */}
       <button
         type="button"
-        className="glass-button absolute top-[18px] right-[30px] z-10 flex items-center gap-[7px] rounded-[9px] px-[12px] h-[34px] text-[13px] text-ink-2 font-medium"
+        className="glass-button absolute top-[18px] right-[30px] z-10 flex h-[34px] items-center gap-[7px] rounded-[9px] px-[12px] text-[13px] text-ink-2 font-medium after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
         onClick={onExit}
       >
         Exit Focus
@@ -193,11 +143,13 @@ export default function FocusView({
                 </div>
 
                 {/* Thread */}
-                <div className="px-[28px] py-3">
-                  {visible.map((m) => (
-                    <FocusBubble key={m.id} message={m} />
-                  ))}
-                </div>
+                <ChatThread
+                  messages={visible}
+                  conversation={conversation}
+                  onDeleteMessage={() => undefined}
+                  readOnly
+                  contentClassName="!px-[28px] !pt-3 !pb-3"
+                />
 
                 {/* Composer — sticky bottom, floats over the thread (bleed) */}
                 <Composer
@@ -205,8 +157,15 @@ export default function FocusView({
                   setDraft={setDraft}
                   onSend={onSend}
                   onResolve={onResolve}
-                  onCompose={onCompose}
-                  composing={composing}
+                  mode={{
+                    kind: "public",
+                    onStartSidechat: onCompose,
+                    sidechatExists:
+                      Boolean(conversation.sidechatUpdatedAt) ||
+                      (conversation.sidechatStatus ?? "idle") !== "idle",
+                    sidechatStatus: conversation.sidechatStatus ??
+                      (composing ? "working" : "idle"),
+                  }}
                   convId={conversation.id}
                 />
               </div>

@@ -1,8 +1,19 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Paperclip, ArrowUp, X, Loader2, ImagePlus } from "lucide-react";
+import SidechatStatusDot from "./SidechatStatusDot";
+import type { SidechatStatus } from "../../../shared/ws-events";
+
+export type ComposerMode =
+  | {
+      kind: "public";
+      onStartSidechat: () => void;
+      sidechatExists: boolean;
+      sidechatStatus: SidechatStatus;
+    }
+  | { kind: "sidechat"; onSendPrivate: () => void; working: boolean };
 
 export interface ComposerProps {
   draft: string;
@@ -12,8 +23,7 @@ export interface ComposerProps {
     opts?: { imageUrls?: string[] },
   ) => void;
   onResolve: (convId: string) => void;
-  onCompose: () => void;
-  composing: boolean;
+  mode: ComposerMode;
   convId: string;
 }
 
@@ -31,8 +41,7 @@ export default function Composer({
   setDraft,
   onSend,
   onResolve,
-  onCompose,
-  composing,
+  mode,
   convId,
 }: ComposerProps) {
   const { projectId = "" } = useParams<{ projectId: string }>();
@@ -58,21 +67,6 @@ export default function Composer({
     ta.style.height = "auto";
     ta.style.height = `${ta.scrollHeight}px`;
   }, [draft]);
-
-  // The textarea is disabled while composing, which drops keyboard focus —
-  // restore it (caret at the end) once the composed draft lands so the agent
-  // can keep typing or hit ⌘↵ without reaching for the mouse.
-  const wasComposing = useRef(false);
-  useEffect(() => {
-    if (wasComposing.current && !composing) {
-      const ta = textareaRef.current;
-      if (ta) {
-        ta.focus();
-        ta.setSelectionRange(ta.value.length, ta.value.length);
-      }
-    }
-    wasComposing.current = composing;
-  }, [composing]);
 
   // POST to /api/upload (field: "file") with one automatic retry — dev's
   // remote R2 binding (and real networks) hiccup transiently; a single retry
@@ -104,6 +98,7 @@ export default function Composer({
   // Upload each image, append { url }s in completion order. Shared by the
   // paperclip picker and drag-and-drop.
   function uploadFiles(files: File[]) {
+    if (mode.kind !== "public") return;
     const images = files.filter((f) => ACCEPTED_IMAGE_TYPES.includes(f.type));
     if (images.length < files.length) {
       toast.error("Only JPEG, PNG, WebP, or SVG images can be attached");
@@ -180,7 +175,12 @@ export default function Composer({
   }
 
   function send() {
-    if (composing || uploadingCount > 0) return;
+    if (mode.kind === "sidechat") {
+      if (mode.working || !draft.trim()) return;
+      mode.onSendPrivate();
+      return;
+    }
+    if (uploadingCount > 0) return;
     if (!draft.trim() && pendingImages.length === 0) return;
     onSend(draft || undefined, { imageUrls: pendingImages });
     setPendingImages([]);
@@ -189,8 +189,9 @@ export default function Composer({
   // Cmd/Ctrl+Enter shortcut to send.
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Tab" && e.shiftKey) {
-      e.preventDefault(); // keep focus in the textarea
-      if (!composing && draft.trim().length > 0) onCompose();
+      if (mode.kind !== "public") return;
+      e.preventDefault();
+      mode.onStartSidechat();
       return;
     }
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -199,10 +200,13 @@ export default function Composer({
     }
   }
 
-  const canSend =
-    (draft.trim().length > 0 || pendingImages.length > 0) &&
-    uploadingCount === 0 &&
-    !composing;
+  const canSend = mode.kind === "sidechat"
+    ? draft.trim().length > 0 && !mode.working
+    : (draft.trim().length > 0 || pendingImages.length > 0) &&
+      uploadingCount === 0;
+  const publicSidechatLabel = mode.kind === "public" && mode.sidechatExists
+    ? "Open sidechat"
+    : "Start sidechat";
 
   return (
     <div className="sticky bottom-0 z-[5] px-4 pt-3 pb-4">
@@ -214,7 +218,7 @@ export default function Composer({
         onDrop={handleDrop}
       >
         {/* Drop hint — covers the composer while dragging image files over it */}
-        {dragActive && (
+        {mode.kind === "public" && dragActive && (
           <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-[20px] border-2 border-dashed border-bubble-sent bg-glass-raised text-[13px] font-medium text-ink-2 pointer-events-none">
             <ImagePlus size={16} />
             Drop images to attach
@@ -223,10 +227,11 @@ export default function Composer({
 
         {/* Attachment chips — one thumbnail per pending image with a corner
             remove button, pulse tiles while uploads are in flight */}
-        {(uploadingCount > 0 || pendingImages.length > 0) && (
-          <div className="flex flex-wrap items-center gap-2.5 pt-1.5 mb-3">
+        {mode.kind === "public" &&
+          (uploadingCount > 0 || pendingImages.length > 0) && (
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-3 pt-1.5 mb-3">
             {pendingImages.map((url) => (
-              <div key={url} className="relative">
+              <div key={url} className="relative mt-2">
                 <img
                   src={url}
                   alt="attachment"
@@ -234,11 +239,14 @@ export default function Composer({
                 />
                 <button
                   type="button"
-                  className="absolute -top-[7px] -right-[7px] flex items-center justify-center w-[18px] h-[18px] rounded-full bg-glass-raised border border-hairline-strong text-ink-4 hover:text-ink-1 transition-colors cursor-pointer"
+                  className="absolute -right-3 -top-3 flex size-10 items-center justify-center text-ink-4 hover:text-ink-1 cursor-pointer motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
                   onClick={() => removePendingImage(url)}
                   title="Remove attachment"
+                  aria-label="Remove attachment"
                 >
-                  <X size={10} strokeWidth={2.5} />
+                  <span className="flex size-[18px] items-center justify-center rounded-full border border-hairline-strong bg-glass-raised">
+                    <X size={10} strokeWidth={2.5} />
+                  </span>
                 </button>
               </div>
             ))}
@@ -256,79 +264,85 @@ export default function Composer({
         {/* Reply textarea — auto-grows, capped at 200px */}
         <textarea
           ref={textareaRef}
+          data-public-composer={mode.kind === "public" ? "true" : undefined}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={composing ? "Composing…" : "Reply…"}
+          placeholder={mode.kind === "sidechat" ? "Ask Maven…" : "Reply…"}
           rows={1}
-          disabled={composing}
-          className={`w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60${composing ? " animate-pulse" : ""}`}
+          disabled={mode.kind === "sidechat" && mode.working}
+          className="w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60"
           style={{ fontSize: "14.5px", lineHeight: "1.5" }}
         />
 
         {/* Action row */}
         <div className="flex items-center justify-between mt-[9px]">
           {/* Left: paperclip */}
-          <div className="flex items-center gap-1.5">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={ACCEPTED_IMAGE_TYPES.join(",")}
-              multiple
-              className="hidden"
-              onChange={handleFilePick}
-            />
-            <button
-              type="button"
-              className="glass-button flex items-center justify-center rounded-[8px] w-[30px] h-[30px] text-ink-5 hover:text-ink-2 disabled:opacity-40"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={composing}
-              title="Attach images"
-            >
-              <Paperclip size={14} />
-            </button>
-          </div>
+          {mode.kind === "public" && (
+            <div className="flex items-center gap-1.5">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ACCEPTED_IMAGE_TYPES.join(",")}
+                multiple
+                className="hidden"
+                onChange={handleFilePick}
+              />
+              <button
+                type="button"
+                className="flex size-10 items-center justify-center text-ink-5 hover:text-ink-2 disabled:opacity-40 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach images"
+                aria-label="Attach images"
+              >
+                <span className="glass-button flex size-[30px] items-center justify-center rounded-[8px]">
+                  <Paperclip size={14} />
+                </span>
+              </button>
+            </div>
+          )}
 
-          {/* Right: Compose / Resolve / Send */}
-          <div className="flex items-center gap-[7px]">
-            <button
-              type="button"
-              className={`flex items-center gap-1.5 text-[13px] transition-colors cursor-pointer ${
-                composing ? "" : "text-ink-5 hover:text-ink-2 disabled:opacity-40"
-              }`}
-              onClick={onCompose}
-              disabled={composing || draft.trim().length === 0}
-              title="Turn your instruction into a reply, grounded in your docs (Shift+Tab)"
-            >
-              {composing ? (
-                <span className="text-shimmer">Composing…</span>
-              ) : (
-                <>
-                  Compose
+          {/* Right: Sidechat / Resolve / Send */}
+          <div className="ml-auto flex items-center gap-[7px]">
+            {mode.kind === "public" && (
+              <>
+                <button
+                  type="button"
+                  className="flex min-h-10 items-center gap-1.5 text-[13px] text-ink-5 hover:text-ink-2 cursor-pointer motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+                  onClick={mode.onStartSidechat}
+                  title={`${publicSidechatLabel} (Shift+Tab)`}
+                >
+                  {mode.sidechatExists && (
+                    <SidechatStatusDot status={mode.sidechatStatus} />
+                  )}
+                  {publicSidechatLabel}
                   <span className="keycap">⇧⇥</span>
-                </>
-              )}
-            </button>
+                </button>
 
-            <button
-              type="button"
-              className="flex items-center gap-1.5 text-[13px] text-ink-5 hover:text-ink-2 transition-colors cursor-pointer"
-              onClick={() => onResolve(convId)}
-              title="Resolve conversation"
-            >
-              Resolve
-              <span className="keycap">E</span>
-            </button>
+                <button
+                  type="button"
+                  className="flex min-h-10 items-center gap-1.5 text-[13px] text-ink-5 hover:text-ink-2 cursor-pointer motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+                  onClick={() => onResolve(convId)}
+                  title="Resolve conversation"
+                >
+                  Resolve
+                  <span className="keycap">E</span>
+                </button>
+              </>
+            )}
 
             {/* Send button */}
             <button
               type="button"
-              className="flex items-center justify-center rounded-full bg-bubble-sent text-white w-8 h-8 hover:opacity-90 disabled:opacity-40 transition-opacity"
+              className="group flex size-10 items-center justify-center disabled:opacity-40 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
               onClick={send}
               disabled={!canSend}
-              title="Send (⌘↵)"
+              title={mode.kind === "sidechat" ? "Send to Maven (⌘↵)" : "Send (⌘↵)"}
+              aria-label={mode.kind === "sidechat" ? "Send to Maven" : "Send reply"}
             >
-              <ArrowUp size={15} strokeWidth={2.5} />
+              <span className="flex size-8 items-center justify-center rounded-full bg-bubble-sent text-white transition-opacity group-hover:opacity-90">
+                <ArrowUp size={15} strokeWidth={2.5} />
+              </span>
             </button>
           </div>
         </div>

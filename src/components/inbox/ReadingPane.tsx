@@ -244,8 +244,15 @@ export default function ReadingPane({
           setDraft={setDraft}
           onSend={onSend}
           onResolve={onResolve}
-          onCompose={onCompose}
-          composing={composing}
+          mode={{
+            kind: "public",
+            onStartSidechat: onCompose,
+            sidechatExists:
+              Boolean(conversation.sidechatUpdatedAt) ||
+              (conversation.sidechatStatus ?? "idle") !== "idle",
+            sidechatStatus: conversation.sidechatStatus ??
+              (composing ? "working" : "idle"),
+          }}
           convId={conversation.id}
         />
       )}

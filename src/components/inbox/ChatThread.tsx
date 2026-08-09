@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { ChatPerspective } from "@/lib/inbox/sidechat";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import MessageBubble from "./MessageBubble";
 import SystemPill from "./SystemPill";
@@ -18,6 +19,11 @@ interface ChatThreadProps {
   activeMatchId?: string | null;
   /** The message id targeted by a `?msg=` deep link. */
   highlightMessageId?: string | null;
+  perspective?: ChatPerspective;
+  onAddToReply?: (draft: string) => void;
+  onApprovalAction?: (messageId: string, mode: "always" | "once") => void;
+  /** Optional inset override for layouts such as FocusView. */
+  contentClassName?: string;
 }
 
 // Placeholder bubbles shown while the conversation detail loads. Mirrors the
@@ -91,13 +97,17 @@ export default function ChatThread({
   readOnly = false,
   searchQuery,
   activeMatchId,
+  perspective = "public",
+  onAddToReply,
+  onApprovalAction,
+  contentClassName,
 }: ChatThreadProps) {
   const q = searchQuery ?? "";
   return (
     <div className="min-h-full">
       {/* Full-bleed with the same 30px inset as the header/composer so bubbles
           align to the pane edges (not a centered narrow column). */}
-      <div className="px-4 md:px-[30px] pt-4 pb-[10px]">
+      <div className={cn("px-4 md:px-[30px] pt-4 pb-[10px]", contentClassName)}>
         {loading && messages.length === 0 && <ChatThreadSkeleton />}
         {messages.map((message, i) => {
           const prev = messages[i - 1];
@@ -139,6 +149,9 @@ export default function ChatThread({
                   isMatch={isMatch}
                   isActiveMatch={isActiveMatch}
                   showHeader={!groupedWithPrev}
+                  perspective={perspective}
+                  onAddToReply={onAddToReply}
+                  onApprovalAction={onApprovalAction}
                 />
               )}
             </div>

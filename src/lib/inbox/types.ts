@@ -1,4 +1,8 @@
 import type { InboxFilter } from "./filters";
+import type {
+  SafeSidechatMessageMetadata,
+  SidechatStatus,
+} from "../../../shared/ws-events";
 
 // Shared inbox data shapes consumed by the Conversations orchestrator and the
 // inbox presentational components (MessageList / ReadingPane / FocusView and
@@ -36,14 +40,23 @@ export interface Conversation {
   updatedAt: string;
   lastActivityAt?: string | null;
   lastMessage?: LastMessagePreview | null;
+  sidechatStatus?: SidechatStatus;
+  sidechatRunId?: string | null;
+  sidechatUpdatedAt?: string | null;
 }
+
+export type MessageRole = "visitor" | "bot" | "agent" | "system";
+export type SidechatMessageKind = "text" | "reply_draft" | "approval";
 
 export interface Message {
   id: string;
   // Dashboard threads include centred `system` event rows (snoozed, flagged,
   // joined, …) in addition to the conversational roles.
-  role: "visitor" | "bot" | "agent" | "system";
+  role: MessageRole;
   content: string;
+  channel?: "public" | "sidechat";
+  kind?: SidechatMessageKind;
+  metadata?: SafeSidechatMessageMetadata | null;
   imageUrl?: string | null;
   sources?: string | null;
   senderName?: string | null;

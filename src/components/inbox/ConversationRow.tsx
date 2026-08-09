@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { countryFlag } from "@/lib/inbox/country-flag";
 import type { Conversation } from "@/lib/inbox/types";
 import PresenceDot from "./PresenceDot";
+import SidechatStatusDot from "./SidechatStatusDot";
 
 interface ConversationRowProps {
   conversation: Conversation;
@@ -127,6 +128,7 @@ export default function ConversationRow({
               visitorLastSeenAt={conversation.visitorLastSeenAt}
               visitorPresence={conversation.visitorPresence}
             />
+            <SidechatStatusDot status={conversation.sidechatStatus ?? "idle"} />
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {isResolved && (
@@ -159,11 +161,6 @@ export default function ConversationRow({
           </div>
         )}
       </div>
-
-      {/* Bottom hairline separator inset 28px — the ONLY divider; hidden on selected */}
-      {!isSelected && (
-        <div className="absolute bottom-0 left-[28px] right-0 h-[0.5px] bg-hairline" />
-      )}
     </div>
   );
 }
