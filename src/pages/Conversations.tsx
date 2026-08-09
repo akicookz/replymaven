@@ -2285,6 +2285,7 @@ function Conversations() {
           onDeleteMessage={handleDeleteMessage}
           onBack={() => setSelectedConvo(null)}
           onStartSidechat={handleStartSidechat}
+          sidechatOpen={sidechatOpen}
           sidechatExists={sidechatExists}
           sidechatStatus={visibleSidechatStatus}
           publicComposerFocusRequest={publicComposerFocusRequest}

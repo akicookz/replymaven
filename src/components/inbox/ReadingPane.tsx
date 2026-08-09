@@ -43,6 +43,8 @@ interface ReadingPaneProps {
   /** Mobile: return to the conversation list (clears the selection). */
   onBack?: () => void;
   onStartSidechat: () => void;
+  /** Sidechat currently constrains this pane in the shared split layout. */
+  sidechatOpen: boolean;
   sidechatExists: boolean;
   sidechatStatus: SidechatStatus;
   publicComposerFocusRequest: number;
@@ -74,6 +76,7 @@ export default function ReadingPane({
   onDeleteMessage,
   onBack,
   onStartSidechat,
+  sidechatOpen,
   sidechatExists,
   sidechatStatus,
   publicComposerFocusRequest,
@@ -226,6 +229,7 @@ export default function ReadingPane({
         onMatchPrev={() => stepMatch(-1)}
         onOpenSearch={() => setSearchOpen(true)}
         searchActive={query.length > 0}
+        compact={sidechatOpen}
       />
 
       {/* Chat thread — the only scroll region in the pane */}

@@ -2,11 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { JSDOM } from "jsdom";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import Composer from "./Composer";
 import FocusSidechatLayout from "./FocusSidechatLayout";
 import FocusView from "./FocusView";
+import ReadingPane from "./ReadingPane";
 
 interface RenderResult {
   dom: JSDOM;
@@ -345,6 +347,67 @@ describe("Composer contracts", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe("ReadingPane constrained header", () => {
+  test("uses compact search only while open Sidechat constrains the reading pane", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const { dom, root } = await renderNode(null);
+    function pane(sidechatOpen: boolean) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ReadingPane
+            conversation={makeConversation(null)}
+            customer={null}
+            messages={[]}
+            draft=""
+            setDraft={() => undefined}
+            onSend={() => undefined}
+            onResolve={() => undefined}
+            onSnooze={() => undefined}
+            onFlagSpam={() => undefined}
+            onPriority={() => undefined}
+            onFocus={() => undefined}
+            onBlock={() => undefined}
+            onAssign={() => undefined}
+            onArchive={() => undefined}
+            onCreateCustomer={() => undefined}
+            onLinkCustomer={() => undefined}
+            onDeleteMessage={() => undefined}
+            onStartSidechat={() => undefined}
+            sidechatOpen={sidechatOpen}
+            sidechatExists={sidechatOpen}
+            sidechatStatus="ready"
+            publicComposerFocusRequest={0}
+          />
+        </QueryClientProvider>
+      );
+    }
+
+    await act(async () => root.render(pane(true)));
+    const constrainedInline = dom.window.document.querySelector<HTMLInputElement>(
+      'input[placeholder="Search chat…"]',
+    )?.parentElement;
+    const constrainedCompact = dom.window.document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Search conversation"]',
+    );
+    expect(constrainedInline?.classList.contains("lg:flex")).toBe(true);
+    expect(constrainedInline?.classList.contains("md:flex")).toBe(false);
+    expect(constrainedCompact?.classList.contains("lg:hidden")).toBe(true);
+    expect(constrainedCompact?.classList.contains("md:hidden")).toBe(false);
+
+    await act(async () => root.render(pane(false)));
+    const roomyInline = dom.window.document.querySelector<HTMLInputElement>(
+      'input[placeholder="Search chat…"]',
+    )?.parentElement;
+    const roomyCompact = dom.window.document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Search conversation"]',
+    );
+    expect(roomyInline?.classList.contains("md:flex")).toBe(true);
+    expect(roomyCompact?.classList.contains("md:hidden")).toBe(true);
   });
 });
 

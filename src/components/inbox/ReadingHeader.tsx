@@ -127,6 +127,8 @@ interface ReadingHeaderProps {
   onOpenSearch: () => void;
   /** A search query is currently active (tints the mobile search icon). */
   searchActive: boolean;
+  /** The reading pane is sharing the row with Sidechat at compact widths. */
+  compact?: boolean;
 }
 
 interface CustomerAssignmentMenuProps {
@@ -195,6 +197,7 @@ export default function ReadingHeader({
   onMatchPrev,
   onOpenSearch,
   searchActive,
+  compact = false,
 }: ReadingHeaderProps) {
   const meta = parseMetadata(conversation.metadata);
   const country: string | undefined = meta.country;
@@ -377,7 +380,12 @@ export default function ReadingHeader({
         )}
 
         {/* Desktop: full inline search field — highlight + jump between matches */}
-        <div className="hidden md:flex glass-button rounded-[8px] items-center gap-1.5 px-2.5 h-8 w-[210px] shrink-0">
+        <div
+          className={cn(
+            "hidden glass-button rounded-[8px] items-center gap-1.5 px-2.5 h-8 w-[210px] shrink-0",
+            compact ? "lg:flex" : "md:flex",
+          )}
+        >
           <SearchIcon className="size-3.5 text-ink-7 shrink-0" />
           <input
             type="text"
@@ -428,7 +436,8 @@ export default function ReadingHeader({
           aria-label="Search conversation"
           onClick={onOpenSearch}
           className={cn(
-            "glass-button rounded-glass flex md:hidden items-center justify-center size-8 transition-colors shrink-0",
+            "glass-button rounded-glass items-center justify-center size-8 transition-colors shrink-0",
+            compact ? "flex lg:hidden" : "flex md:hidden",
             searchActive ? "text-brand bg-glass-raised" : "text-ink-3 hover:text-ink-1",
           )}
           title="Search conversation"
