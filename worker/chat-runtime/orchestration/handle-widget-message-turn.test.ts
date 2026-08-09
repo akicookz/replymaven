@@ -54,6 +54,20 @@ function createSource(title: string): SourceReference {
   return { title, url: `https://example.com/${title}`, type: "webpage" };
 }
 
+function createPersistedBotMessage(content: string): Record<string, unknown> {
+  return {
+    id: "bot-message-1",
+    conversationId: "conversation-1",
+    role: "bot",
+    content,
+    imageUrl: null,
+    sources: null,
+    senderName: "Maven",
+    senderAvatar: null,
+    createdAt: new Date(0),
+  };
+}
+
 function createTurnRunner(options: {
   parts: MavenStreamPart[];
   sources?: SourceReference[];
@@ -152,6 +166,10 @@ function createHandlerHarness(options?: {
   contactAccepted?: boolean;
   streamFactory?: (input: unknown) => AsyncIterable<MavenStreamPart>;
   resolveSucceeds?: boolean;
+  streamProtocolVersion?: 1 | 2;
+  botInsert?: (
+    args: unknown[],
+  ) => Promise<Record<string, unknown> | null>;
 }): HandlerHarness {
   let conversation: Record<string, unknown> | null = {
     id: "conversation-1",
@@ -187,18 +205,12 @@ function createHandlerHarness(options?: {
     },
     async addBotMessageIfOwnershipMatches(...args: unknown[]) {
       botInsertCalls.push(args);
+      if (options?.botInsert) return options.botInsert(args);
       if (!options?.botInsertSucceeds) return null;
       const message = args[0] as { content: string; sources?: string | null };
       return {
-        id: "bot-message-1",
-        conversationId: "conversation-1",
-        role: "bot",
-        content: message.content,
-        imageUrl: null,
+        ...createPersistedBotMessage(message.content),
         sources: message.sources ?? null,
-        senderName: "Maven",
-        senderAvatar: null,
-        createdAt: new Date(0),
       };
     },
     async resolveConversationByAi() {
@@ -482,7 +494,7 @@ function createHandlerHarness(options?: {
       },
     },
     routeStartedAt: Date.now(),
-    streamProtocolVersion: 2,
+    streamProtocolVersion: options?.streamProtocolVersion ?? 2,
     checkRateLimit(...args: unknown[]) {
       checkRateLimitCalls.push(args);
       return options?.allowToolRateLimit ?? true;
@@ -884,6 +896,155 @@ describe("widget handler Maven gates", () => {
     expect(browserFrames).not.toContain("private disconnect reason");
   });
 
+  test("cancellation while ordinary v1 persistence is pending emits no final text", async () => {
+    const abortController = new AbortController();
+    let resolvePersistStarted = () => {};
+    const persistStarted = new Promise<void>((resolve) => {
+      resolvePersistStarted = resolve;
+    });
+    let releasePersist: (
+      message: Record<string, unknown> | null,
+    ) => void = () => {};
+    const persistResult = new Promise<Record<string, unknown> | null>(
+      (resolve) => {
+        releasePersist = resolve;
+      },
+    );
+    const harness = createHandlerHarness({
+      abortSignal: abortController.signal,
+      streamProtocolVersion: 1,
+      httpExecutionIds: ["execution-1"],
+      async botInsert() {
+        resolvePersistStarted();
+        return persistResult;
+      },
+    });
+
+    const response = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+    const bodyResult = response.text();
+    await persistStarted;
+    abortController.abort(
+      new DOMException("private ordinary persist abort", "AbortError"),
+    );
+    releasePersist(createPersistedBotMessage("Answer"));
+    const body = await bodyResult;
+    await Promise.all(harness.waitUntilCalls);
+
+    expect(harness.botInsertCalls).toHaveLength(1);
+    expect(body).not.toContain('"finalText"');
+    expect(body).not.toContain('"done"');
+    expect(body).not.toContain('"completed"');
+    expect(body).not.toContain("private ordinary persist abort");
+    expect(harness.resolveCalls).toHaveLength(0);
+    expect(harness.linkCalls).toHaveLength(0);
+    expect(harness.usageIncrementCalls).toHaveLength(0);
+    expect(harness.broadcastFetchCalls).toHaveLength(0);
+  });
+
+  test("cancellation while immediate null persistence is pending emits no completion", async () => {
+    const abortController = new AbortController();
+    let resolvePersistStarted = () => {};
+    const persistStarted = new Promise<void>((resolve) => {
+      resolvePersistStarted = resolve;
+    });
+    let releasePersist: (
+      message: Record<string, unknown> | null,
+    ) => void = () => {};
+    const persistResult = new Promise<Record<string, unknown> | null>(
+      (resolve) => {
+        releasePersist = resolve;
+      },
+    );
+    const harness = createHandlerHarness({
+      abortSignal: abortController.signal,
+      content: "Write a poem about the moon",
+      async botInsert() {
+        resolvePersistStarted();
+        return persistResult;
+      },
+    });
+
+    const response = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+    const bodyResult = response.text();
+    await persistStarted;
+    abortController.abort(
+      new DOMException("private immediate persist abort", "AbortError"),
+    );
+    releasePersist(null);
+    const body = await bodyResult;
+    await Promise.all(harness.waitUntilCalls);
+
+    expect(harness.runTurnCalls).toHaveLength(0);
+    expect(harness.botInsertCalls).toHaveLength(1);
+    expect(body).not.toContain('"completed"');
+    expect(body).not.toContain('"done"');
+    expect(body).not.toContain('"error"');
+    expect(body).not.toContain("private immediate persist abort");
+    expect(harness.usageIncrementCalls).toHaveLength(0);
+    expect(harness.broadcastFetchCalls).toHaveLength(0);
+  });
+
+  test("cancellation while contact-fallback null persistence is pending emits no terminal frame", async () => {
+    const abortController = new AbortController();
+    let resolvePersistStarted = () => {};
+    const persistStarted = new Promise<void>((resolve) => {
+      resolvePersistStarted = resolve;
+    });
+    let releasePersist: (
+      message: Record<string, unknown> | null,
+    ) => void = () => {};
+    const persistResult = new Promise<Record<string, unknown> | null>(
+      (resolve) => {
+        releasePersist = resolve;
+      },
+    );
+    const harness = createHandlerHarness({
+      abortSignal: abortController.signal,
+      contactAccepted: true,
+      streamFactory() {
+        async function* fail(): AsyncGenerator<MavenStreamPart> {
+          yield* createMavenStream([]);
+          throw new Error("ordinary model failure");
+        }
+        return fail();
+      },
+      async botInsert() {
+        resolvePersistStarted();
+        return persistResult;
+      },
+    });
+
+    const response = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+    const bodyResult = response.text();
+    await persistStarted;
+    abortController.abort(
+      new DOMException("private contact persist abort", "AbortError"),
+    );
+    releasePersist(null);
+    const body = await bodyResult;
+    await Promise.all(harness.waitUntilCalls);
+
+    expect(harness.botInsertCalls).toHaveLength(1);
+    expect(body).not.toContain('"completed"');
+    expect(body).not.toContain('"done"');
+    expect(body).not.toContain('"error"');
+    expect(body).not.toContain("Initial fallback");
+    expect(body).not.toContain("private contact persist abort");
+    expect(harness.resolveCalls).toHaveLength(0);
+    expect(harness.linkCalls).toHaveLength(0);
+    expect(harness.usageIncrementCalls).toHaveLength(0);
+    expect(harness.broadcastFetchCalls).toHaveLength(0);
+  });
+
   test("tracks exact HTTP execution linkage through waitUntil", async () => {
     const harness = createHandlerHarness({
       botInsertSucceeds: true,
@@ -1259,6 +1420,7 @@ describe("public Maven stream cutover", () => {
       encoder: capture.encoder,
       streamProtocolVersion: 2,
       finalText: streamed.fullResponse,
+      abortSignal: undefined,
       persist: async () => null,
       getConversationStatusAfterFailure: async () => "agent_replied",
     });

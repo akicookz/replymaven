@@ -836,8 +836,10 @@ export async function handleWidgetMessageTurn(
           chatState: outputPermission.chatState,
         },
       );
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       if (!botMessage) {
         const latestPermission = await getAiOutputPermission();
+        throwIfMavenTurnCancelled(turnAbortController.signal);
         if (context.streamProtocolVersion === 2) {
           emitCompletedEvent(controller, encoder, {
             protocolVersion: 2,
@@ -851,7 +853,6 @@ export async function handleWidgetMessageTurn(
         return;
       }
       persistedAiMessage = true;
-      throwIfMavenTurnCancelled(turnAbortController.signal);
       if (context.streamProtocolVersion === 1) {
         emitSseEvent(controller, encoder, { finalText: cleanResponse });
       }
@@ -1180,6 +1181,7 @@ export async function handleWidgetMessageTurn(
         encoder,
         streamProtocolVersion: context.streamProtocolVersion,
         finalText: fullResponse,
+        abortSignal: turnAbortController.signal,
         persist: async () =>
           chatService.addBotMessageIfOwnershipMatches(
             {
@@ -1408,8 +1410,10 @@ export async function handleWidgetMessageTurn(
                 chatState: outputPermission.chatState,
               },
             );
+            throwIfMavenTurnCancelled(turnAbortController.signal);
             if (!botMessage) {
               const latestPermission = await getAiOutputPermission();
+              throwIfMavenTurnCancelled(turnAbortController.signal);
               if (context.streamProtocolVersion === 2) {
                 emitCompletedEvent(controller, encoder, {
                   protocolVersion: 2,
@@ -1423,7 +1427,6 @@ export async function handleWidgetMessageTurn(
               return;
             }
             persistedAiMessage = true;
-            throwIfMavenTurnCancelled(turnAbortController.signal);
             broadcastMessageNew(
               context.env,
               context.executionCtx,
