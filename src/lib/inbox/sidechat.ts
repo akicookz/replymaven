@@ -1,4 +1,8 @@
-import type { SidechatStatus } from "../../../shared/ws-events";
+import {
+  selectNewerSidechatCoordinationSnapshot,
+  type SidechatCoordinationSnapshot,
+  type SidechatStatus,
+} from "../../../shared/ws-events";
 import type { Message, MessageRole, SidechatMessageKind } from "./types";
 
 export type ChatPerspective = "public" | "sidechat";
@@ -97,6 +101,7 @@ export interface SidechatHistorySnapshot<
   hasMore: boolean;
   nextBefore: string | null;
   historyLoaded: boolean;
+  coordination?: SidechatCoordinationSnapshot;
 }
 
 export interface SidechatHistoryFetchSnapshot<
@@ -290,6 +295,9 @@ export function mergeSidechatHistorySnapshot<
     hasMore: incoming.hasMore,
     nextBefore: incoming.nextBefore,
     historyLoaded: incoming.historyLoaded,
+    ...(incoming.coordination
+      ? { coordination: incoming.coordination }
+      : {}),
   };
   if (!current) return fetched;
   const incomingIds = new Set(fetched.messages.map((message) => message.id));
@@ -329,6 +337,16 @@ export function mergeSidechatHistorySnapshot<
       ? current.nextBefore
       : fetched.nextBefore,
     historyLoaded: true,
+    ...(current.coordination || fetched.coordination
+      ? {
+          coordination: fetched.coordination
+            ? selectNewerSidechatCoordinationSnapshot(
+                current.coordination ?? null,
+                fetched.coordination,
+              )
+            : current.coordination,
+        }
+      : {}),
   };
 }
 

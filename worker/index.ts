@@ -625,13 +625,12 @@ function createSidechatMutationOptions(options: {
         message,
       );
     },
-    broadcastStatus(status, runId) {
+    broadcastStatus(snapshot) {
       broadcastSidechatStatus(
         c.env,
         c.executionCtx,
         conversationId,
-        status,
-        runId,
+        snapshot,
       );
     },
     runTurn({ message, runId }) {

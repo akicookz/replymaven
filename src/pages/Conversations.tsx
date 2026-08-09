@@ -24,9 +24,9 @@ import { cn } from "@/lib/utils";
 import { serializeMessageImageUrls } from "../../shared/message-images";
 import {
   reduceSidechatAcceptedConversation,
+  mergeConversationWithSidechatSnapshot,
   useConversationWs,
   type SidechatEphemeralStore,
-  type SidechatSettledRunStore,
 } from "@/lib/use-conversation-ws";
 import { useCustomerWs } from "@/lib/use-customer-ws";
 import { passesInboxFilter, type InboxFilter, type InboxSort } from "@/lib/inbox/filters";
@@ -74,9 +74,11 @@ import {
   fetchCustomer,
   setConversationCustomer,
 } from "@/lib/customers";
-import type {
-  SidechatMessagePayload,
-  SidechatStatus,
+import {
+  selectNewerSidechatCoordinationSnapshot,
+  type SidechatCoordinationSnapshot,
+  type SidechatMessagePayload,
+  type SidechatStatus,
 } from "../../shared/ws-events";
 
 // ─── Wire shapes (orchestrator-local) ──────────────────────────────────────────
@@ -110,6 +112,10 @@ interface ConversationUpdate {
   createdAt: string;
   updatedAt: string;
   lastMessage?: LastMessagePreview | null;
+  sidechatStatus?: SidechatStatus;
+  sidechatRunId?: string | null;
+  sidechatUpdatedAt?: string | null;
+  sidechatRevision?: number;
 }
 
 interface ConversationUpdatesResponse {
@@ -138,18 +144,21 @@ interface SidechatCacheData {
   hasMore: boolean;
   nextBefore: string | null;
   historyLoaded: boolean;
+  coordination?: SidechatCoordinationSnapshot;
 }
 
 interface SidechatHistoryResponse {
   messages: SidechatMessagePayload[];
   hasMore: boolean;
   nextBefore: string | null;
+  coordination: SidechatCoordinationSnapshot;
 }
 
 interface SidechatAcceptedResponse {
   outcome: "accepted";
   message: SidechatMessagePayload;
   runId: string;
+  coordination: SidechatCoordinationSnapshot;
 }
 
 interface SidechatExistingResponse {
@@ -491,7 +500,18 @@ function Conversations() {
     // placeholders, so a filter switch shows skeletons (over the cleared list)
     // rather than briefly re-displaying the previous filter's rows.
     if (!convosPage || isPlaceholderData) return;
-    setLoadedConversations(convosPage.conversations);
+    setLoadedConversations((current) => {
+      const currentById = new Map(current.map((conversation) => [
+        conversation.id,
+        conversation,
+      ]));
+      return convosPage.conversations.map((conversation) => {
+        const existing = currentById.get(conversation.id);
+        return existing
+          ? mergeConversationWithSidechatSnapshot(existing, conversation)
+          : conversation;
+      });
+    });
     if (convosPage.serverTime) setServerTimeBaseline(convosPage.serverTime);
     if (projectId) {
       queryClient.setQueryData(["inbox-counts", projectId], convosPage.counts);
@@ -545,7 +565,7 @@ function Conversations() {
         }
         changed = true;
         updateMap.delete(c.id);
-        const merged = { ...c, ...u };
+        const merged = mergeConversationWithSidechatSnapshot(c, u);
         if (passesInboxFilter(filter, merged, nowMs)) next.push(merged);
       }
 
@@ -577,7 +597,7 @@ function Conversations() {
             patched.push(c);
             continue;
           }
-          const merged = { ...c, ...u };
+          const merged = mergeConversationWithSidechatSnapshot(c, u);
           if (passesInboxFilter(filter, merged, nowMs)) patched.push(merged);
         }
         for (const u of updatesData.updates) {
@@ -612,6 +632,18 @@ function Conversations() {
     // Detail is kept fresh in real time by useConversationWs; cache 60s so
     // revisiting a conversation is instant.
     staleTime: 1000 * 60,
+    structuralSharing: (current, incoming) => {
+      const previous = current as ConversationDetail | undefined;
+      const fetched = incoming as ConversationDetail;
+      if (!previous) return fetched;
+      return {
+        ...fetched,
+        conversation: mergeConversationWithSidechatSnapshot(
+          previous.conversation,
+          fetched.conversation,
+        ),
+      };
+    },
   });
 
   const sidechatFetchGenerationRef = useRef(0);
@@ -635,6 +667,7 @@ function Conversations() {
         hasMore: data.hasMore,
         nextBefore: data.nextBefore,
         historyLoaded: true,
+        coordination: data.coordination,
       }, generation);
     },
     enabled: Boolean(projectId && sidechatConversationId),
@@ -650,6 +683,29 @@ function Conversations() {
     queryFn: async () => new Map(),
     enabled: false,
   });
+
+  useEffect(() => {
+    if (!sidechatConversationId || !sidechatData?.coordination) return;
+    const coordination = sidechatData.coordination;
+    queryClient.setQueryData<ConversationDetail | undefined>(
+      ["conversation-detail", sidechatConversationId],
+      (old) => {
+        if (!old) return old;
+        const conversation = reduceSidechatAcceptedConversation(
+          old.conversation,
+          coordination,
+        );
+        return conversation === old.conversation
+          ? old
+          : { ...old, conversation };
+      },
+    );
+    setLoadedConversations((current) => current.map((conversation) =>
+      conversation.id === sidechatConversationId
+        ? reduceSidechatAcceptedConversation(conversation, coordination)
+        : conversation
+    ));
+  }, [queryClient, sidechatConversationId, sidechatData?.coordination]);
 
   // Reset the composer draft when switching conversations.
   useEffect(() => {
@@ -805,6 +861,7 @@ function Conversations() {
         hasMore: old?.hasMore ?? false,
         nextBefore: old?.nextBefore ?? null,
         historyLoaded: old?.historyLoaded ?? false,
+        coordination: old?.coordination,
       }));
     },
     onSuccess: (data, variables) => {
@@ -818,11 +875,6 @@ function Conversations() {
         return;
       }
       const acceptedMessage = toSidechatMessage(data.message);
-      const settledRuns = queryClient.getQueryData<SidechatSettledRunStore>([
-        "sidechat-settled-runs",
-        projectId,
-        variables.conversationId,
-      ]);
       queryClient.setQueryData<SidechatCacheData>(queryKey, (old) => ({
         messages: reconcileSidechatMessages(
           old?.messages ?? [],
@@ -831,6 +883,10 @@ function Conversations() {
         hasMore: old?.hasMore ?? false,
         nextBefore: old?.nextBefore ?? null,
         historyLoaded: old?.historyLoaded ?? false,
+        coordination: selectNewerSidechatCoordinationSnapshot(
+          old?.coordination ?? null,
+          data.coordination,
+        ),
       }));
       queryClient.setQueryData<ConversationDetail | undefined>(
         ["conversation-detail", variables.conversationId],
@@ -838,9 +894,7 @@ function Conversations() {
           if (!old) return old;
           const conversation = reduceSidechatAcceptedConversation(
             old.conversation,
-            data.runId,
-            settledRuns,
-            acceptedMessage.createdAt,
+            data.coordination,
           );
           if (conversation === old.conversation) return old;
           return {
@@ -858,15 +912,14 @@ function Conversations() {
         const cached = acceptedDetail?.conversation ?? conversation;
         const accepted = reduceSidechatAcceptedConversation(
           cached,
-          data.runId,
-          settledRuns,
-          acceptedMessage.createdAt,
+          data.coordination,
         );
         return {
           ...conversation,
           sidechatStatus: accepted.sidechatStatus,
           sidechatRunId: accepted.sidechatRunId,
           sidechatUpdatedAt: accepted.sidechatUpdatedAt,
+          sidechatRevision: accepted.sidechatRevision,
         };
       }));
       dispatchSidechat({
@@ -953,6 +1006,10 @@ function Conversations() {
               hasMore: data.hasMore,
               nextBefore: data.nextBefore,
               historyLoaded: true,
+              coordination: selectNewerSidechatCoordinationSnapshot(
+                old.coordination ?? null,
+                data.coordination,
+              ),
             }
           : old,
       );
@@ -988,19 +1045,13 @@ function Conversations() {
       };
     },
     onSuccess: ({ conversationId, data }) => {
-      const settledRuns = queryClient.getQueryData<SidechatSettledRunStore>([
-        "sidechat-settled-runs",
-        projectId,
-        conversationId,
-      ]);
       queryClient.setQueryData<ConversationDetail | undefined>(
         ["conversation-detail", conversationId],
         (old) => {
           if (!old) return old;
           const conversation = reduceSidechatAcceptedConversation(
             old.conversation,
-            data.runId,
-            settledRuns,
+            data.coordination,
           );
           if (conversation === old.conversation) return old;
           return { ...old, conversation };
@@ -1015,13 +1066,14 @@ function Conversations() {
         const cached = acceptedDetail?.conversation ?? conversation;
         const accepted = reduceSidechatAcceptedConversation(
           cached,
-          data.runId,
-          settledRuns,
+          data.coordination,
         );
         return {
           ...conversation,
           sidechatStatus: accepted.sidechatStatus,
           sidechatRunId: accepted.sidechatRunId,
+          sidechatUpdatedAt: accepted.sidechatUpdatedAt,
+          sidechatRevision: accepted.sidechatRevision,
         };
       }));
       dispatchSidechat({

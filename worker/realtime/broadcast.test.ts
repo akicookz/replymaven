@@ -157,8 +157,12 @@ test("all sidechat broadcasters force the agent audience", async () => {
     harness.env,
     harness.ctx,
     "conversation-1",
-    "working",
-    "run-1",
+    {
+      status: "working",
+      runId: "run-1",
+      revision: 7,
+      updatedAt: Date.parse("2026-08-09T00:00:03.000Z"),
+    },
   );
   await harness.flush();
 
@@ -185,6 +189,14 @@ test("all sidechat broadcasters force the agent audience", async () => {
     metadata: { draft: "Send this to the visitor." },
     senderName: "Maven",
     createdAt: Date.parse("2026-08-09T00:00:02.000Z"),
+  });
+  expect(bodies[3]?.event).toEqual({
+    type: "sidechat:status",
+    conversationId: "conversation-1",
+    status: "working",
+    runId: "run-1",
+    revision: 7,
+    updatedAt: Date.parse("2026-08-09T00:00:03.000Z"),
   });
 });
 
@@ -313,6 +325,9 @@ test("visitor replay executes only the public query", async () => {
       calls.push(`sidechat:${since}`);
       return [createMessageRow()];
     },
+    async getSidechatCoordinationSnapshot() {
+      throw new Error("visitor replay must not query Sidechat coordination");
+    },
   };
   const visitor = createSocket({
     kind: "visitor",
@@ -341,6 +356,64 @@ test("visitor replay executes only the public query", async () => {
   ]);
 });
 
+test("agent replay sends the authoritative Sidechat status after message replay", async () => {
+  const calls: string[] = [];
+  const reader: ConversationReplayReader = {
+    async getMessageByIdForChannel() {
+      return null;
+    },
+    async getPublicMessagesSince() {
+      calls.push("public");
+      return [];
+    },
+    async getSidechatMessagesSince() {
+      calls.push("sidechat");
+      return [createMessageRow()];
+    },
+    async getSidechatCoordinationSnapshot(conversationId, projectId) {
+      calls.push(`coordination:${conversationId}:${projectId}`);
+      return {
+        status: "ready",
+        runId: null,
+        revision: 9,
+        updatedAt: Date.parse("2026-08-09T00:00:03.000Z"),
+      };
+    },
+  };
+  const agent = createSocket({
+    kind: "agent",
+    subjectId: "agent-1",
+    conversationId: "conversation-1",
+    projectId: "project-1",
+    roomKind: "conversation",
+  });
+
+  await replayConversationMessages(
+    agent,
+    agent.deserializeAttachment() as SocketAttachment,
+    { lastPublicMessageId: null, lastSidechatMessageId: null },
+    reader,
+  );
+
+  expect(calls).toEqual([
+    "public",
+    "sidechat",
+    "coordination:conversation-1:project-1",
+  ]);
+  expect(agent.sent.map((payload) => JSON.parse(payload).type)).toEqual([
+    "sidechat:message",
+    "sidechat:status",
+  ]);
+  expect(JSON.parse(agent.sent[1] ?? "")).toEqual({
+    type: "sidechat:status",
+    conversationId: "conversation-1",
+    status: "ready",
+    runId: null,
+    revision: 9,
+    updatedAt: Date.parse("2026-08-09T00:00:03.000Z"),
+  });
+});
+
 test("visitor replay fails closed when the public reader returns a private row", async () => {
   const reader: ConversationReplayReader = {
     async getMessageByIdForChannel() {
@@ -351,6 +424,9 @@ test("visitor replay fails closed when the public reader returns a private row",
     },
     async getSidechatMessagesSince() {
       throw new Error("visitor replay must not query sidechat");
+    },
+    async getSidechatCoordinationSnapshot() {
+      throw new Error("visitor replay must not query sidechat coordination");
     },
   };
   const visitor = createSocket({
@@ -402,6 +478,9 @@ test("public replay includes rows after a same-second cursor", async () => {
     },
     async getSidechatMessagesSince() {
       throw new Error("visitor replay must not query sidechat");
+    },
+    async getSidechatCoordinationSnapshot() {
+      throw new Error("visitor replay must not query sidechat coordination");
     },
   };
   const visitor = createSocket({
@@ -457,6 +536,9 @@ test("agent replay uses independent public and sidechat cursors", async () => {
     async getSidechatMessagesSince(_conversationId, since) {
       calls.push(`sidechat:${since}`);
       return [createMessageRow()];
+    },
+    async getSidechatCoordinationSnapshot() {
+      return null;
     },
   };
   const agent = createSocket({
@@ -516,6 +598,9 @@ test("sidechat replay includes rows after a same-second cursor", async () => {
     },
     async getSidechatMessagesSince(_conversationId, since) {
       return sidechatRows.filter((row) => row.createdAt.getTime() > since);
+    },
+    async getSidechatCoordinationSnapshot() {
+      return null;
     },
   };
   const agent = createSocket({

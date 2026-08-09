@@ -1,5 +1,6 @@
 import type { MessageRow } from "../db";
 import { sidechatMessageRowToPayload } from "../realtime/broadcast";
+import type { SidechatCoordinationSnapshot } from "../../shared/ws-events";
 import {
   sidechatHistoryQuerySchema,
   sidechatMessageSchema,
@@ -21,6 +22,8 @@ export interface SidechatConversationRecord {
   sidechatStatus: "idle" | "working" | "waiting_approval" | "ready" | "failed";
   sidechatRunId: string | null;
   sidechatLeaseExpiresAt: Date | null;
+  sidechatUpdatedAt: Date | null;
+  sidechatRevision: number;
 }
 
 export interface SidechatHandlerService {
@@ -41,27 +44,31 @@ export interface SidechatHandlerService {
     before: { createdAt: Date; id: string },
     limit: number,
   ): Promise<{ messages: MessageRow[]; hasMore: boolean }>;
-  claimSidechatRun(input: {
+  claimSidechatRunWithSnapshot(input: {
     projectId: string;
     conversationId: string;
     runId: string;
     now: Date;
     leaseExpiresAt: Date;
-  }): Promise<boolean>;
-  claimSidechatStartRun(input: {
+  }): Promise<SidechatCoordinationSnapshot | null>;
+  claimSidechatStartRunWithSnapshot(input: {
     projectId: string;
     conversationId: string;
     runId: string;
     now: Date;
     leaseExpiresAt: Date;
-  }): Promise<"claimed" | "existing" | "busy">;
-  settleSidechatRun(input: {
+  }): Promise<
+    | { outcome: "claimed"; coordination: SidechatCoordinationSnapshot }
+    | { outcome: "existing" }
+    | { outcome: "busy" }
+  >;
+  settleSidechatRunWithSnapshot(input: {
     projectId: string;
     conversationId: string;
     runId: string;
     status: "idle" | "ready" | "failed" | "waiting_approval";
     now: Date;
-  }): Promise<boolean>;
+  }): Promise<SidechatCoordinationSnapshot | null>;
   addSidechatHumanMessage(input: {
     projectId: string;
     conversationId: string;
@@ -112,6 +119,17 @@ function firstValidationError(result: {
   return result.error.issues[0]?.message ?? "Validation failed";
 }
 
+function sidechatCoordinationSnapshot(
+  conversation: SidechatConversationRecord,
+): SidechatCoordinationSnapshot {
+  return {
+    status: conversation.sidechatStatus,
+    runId: conversation.sidechatRunId,
+    revision: conversation.sidechatRevision,
+    updatedAt: conversation.sidechatUpdatedAt?.getTime() ?? null,
+  };
+}
+
 export async function handleGetSidechatHistory(options: {
   projectId: string;
   conversationId: string;
@@ -146,6 +164,7 @@ export async function handleGetSidechatHistory(options: {
     nextBefore: page.hasMore && oldestMessage
       ? `${oldestMessage.createdAt.getTime()}.${oldestMessage.id}`
       : null,
+    coordination: sidechatCoordinationSnapshot(conversation),
   });
 }
 
@@ -162,10 +181,7 @@ export interface SidechatMutationOptions {
     customerId: string,
   ): Promise<string | null>;
   broadcastMessage(message: MessageRow): void;
-  broadcastStatus(
-    status: "idle" | "working" | "waiting_approval" | "ready" | "failed",
-    runId: string | null,
-  ): void;
+  broadcastStatus(snapshot: SidechatCoordinationSnapshot): void;
   runTurn(input: { message: MessageRow; runId: string }): Promise<void>;
   scheduleBackground(promise: Promise<void>): void;
 }
@@ -176,7 +192,7 @@ async function settleFailedRun(
   broadcast: boolean,
 ): Promise<void> {
   try {
-    const settled = await options.service.settleSidechatRun({
+    const settled = await options.service.settleSidechatRunWithSnapshot({
       projectId: options.projectId,
       conversationId: options.conversationId,
       runId,
@@ -185,7 +201,7 @@ async function settleFailedRun(
     });
     if (settled && broadcast) {
       try {
-        options.broadcastStatus("failed", runId);
+        options.broadcastStatus(settled);
       } catch {
         // The exact run is already released; realtime is best-effort here.
       }
@@ -224,9 +240,9 @@ function isResponse(
 async function claimRun(
   options: SidechatMutationOptions,
   runId: string,
-): Promise<boolean> {
+): Promise<SidechatCoordinationSnapshot | null> {
   const claimTime = options.now();
-  return options.service.claimSidechatRun({
+  return options.service.claimSidechatRunWithSnapshot({
     projectId: options.projectId,
     conversationId: options.conversationId,
     runId,
@@ -255,6 +271,7 @@ async function acceptClaimedRun(
   options: SidechatMutationOptions,
   message: MessageRow,
   runId: string,
+  coordination: SidechatCoordinationSnapshot,
   broadcastMessage: boolean,
 ): Promise<Response> {
   const acceptedResponse = Response.json(
@@ -262,13 +279,14 @@ async function acceptClaimedRun(
       outcome: "accepted",
       message: sidechatMessageRowToPayload(message),
       runId,
+      coordination,
     },
     { status: 202 },
   );
 
   try {
     if (broadcastMessage) options.broadcastMessage(message);
-    options.broadcastStatus("working", runId);
+    options.broadcastStatus(coordination);
   } catch {
     await settleFailedRun(options, runId, true);
     return acceptedResponse;
@@ -307,30 +325,57 @@ export async function handleCreateSidechatMessage(
   const runId = options.createRunId();
   if (parsed.data.startOnlyIfEmpty) {
     const claimTime = options.now();
-    const outcome = await options.service.claimSidechatStartRun({
+    const result = await options.service.claimSidechatStartRunWithSnapshot({
       projectId: options.projectId,
       conversationId: options.conversationId,
       runId,
       now: claimTime,
       leaseExpiresAt: new Date(claimTime.getTime() + SIDECHAT_RUN_LEASE_MS),
     });
-    if (outcome === "existing") {
+    if (result.outcome === "existing") {
       return Response.json({ outcome: "existing" });
     }
-    if (outcome === "busy") {
+    if (result.outcome === "busy") {
       return Response.json(
         { outcome: "busy", error: "sidechat_busy" },
         { status: 409 },
       );
     }
-  } else if (!(await claimRun(options, runId))) {
+    return acceptCreatedSidechatMessage(
+      options,
+      conversation,
+      runId,
+      result.coordination,
+      parsed.data.content,
+    );
+  }
+
+  const coordination = await claimRun(options, runId);
+  if (!coordination) {
     return Response.json(
       { outcome: "busy", error: "sidechat_busy" },
       { status: 409 },
     );
   }
 
-  let content = parsed.data.content;
+  return acceptCreatedSidechatMessage(
+    options,
+    conversation,
+    runId,
+    coordination,
+    parsed.data.content,
+  );
+}
+
+async function acceptCreatedSidechatMessage(
+  options: SidechatMutationOptions,
+  conversation: SidechatConversationRecord,
+  runId: string,
+  coordination: SidechatCoordinationSnapshot,
+  requestedContent: string | undefined,
+): Promise<Response> {
+
+  let content = requestedContent;
   try {
     if (content === undefined) {
       const canonicalName = conversation.customerId
@@ -369,7 +414,7 @@ export async function handleCreateSidechatMessage(
     return errorResponse("sidechat_run_lost", 409);
   }
 
-  return acceptClaimedRun(options, message, runId, true);
+  return acceptClaimedRun(options, message, runId, coordination, true);
 }
 
 export async function handleRetrySidechatTurn(
@@ -394,8 +439,9 @@ export async function handleRetrySidechatTurn(
   }
 
   const runId = options.createRunId();
-  if (!(await claimRun(options, runId))) {
+  const coordination = await claimRun(options, runId);
+  if (!coordination) {
     return errorResponse("sidechat_busy", 409);
   }
-  return acceptClaimedRun(options, lastHuman, runId, false);
+  return acceptClaimedRun(options, lastHuman, runId, coordination, false);
 }

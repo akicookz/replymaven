@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { MessageRow } from "../db";
+import type { SidechatCoordinationSnapshot } from "../../shared/ws-events";
 import {
   buildTrustedDefaultSidechatMessage,
   canAccessSidechatProject,
@@ -23,6 +24,8 @@ interface TestConversation {
   sidechatStatus: "idle" | "working" | "waiting_approval" | "ready" | "failed";
   sidechatRunId: string | null;
   sidechatLeaseExpiresAt: Date | null;
+  sidechatUpdatedAt: Date | null;
+  sidechatRevision: number;
 }
 
 function makeConversation(
@@ -40,6 +43,8 @@ function makeConversation(
     sidechatStatus: "idle",
     sidechatRunId: null,
     sidechatLeaseExpiresAt: null,
+    sidechatUpdatedAt: new Date("2026-08-09T11:59:00.000Z"),
+    sidechatRevision: 4,
     ...overrides,
   };
 }
@@ -72,6 +77,15 @@ class MemorySidechatService implements SidechatHandlerService {
   calls: string[] = [];
   settlementTimes: Array<Date | undefined> = [];
   allowClaim = true;
+
+  coordination(): SidechatCoordinationSnapshot {
+    return {
+      status: this.conversation.sidechatStatus,
+      runId: this.conversation.sidechatRunId,
+      revision: this.conversation.sidechatRevision,
+      updatedAt: this.conversation.sidechatUpdatedAt?.getTime() ?? null,
+    };
+  }
 
   async getConversationById(): Promise<TestConversation> {
     this.calls.push("conversation");
@@ -114,56 +128,66 @@ class MemorySidechatService implements SidechatHandlerService {
     return { messages: this.messages.slice(-limit), hasMore: false };
   }
 
-  async claimSidechatRun(input: {
+  async claimSidechatRunWithSnapshot(input: {
     runId: string;
     leaseExpiresAt: Date;
-  }): Promise<boolean> {
+  }): Promise<SidechatCoordinationSnapshot | null> {
     this.calls.push("claim");
-    if (!this.allowClaim) return false;
+    if (!this.allowClaim) return null;
     this.conversation.sidechatStatus = "working";
     this.conversation.sidechatRunId = input.runId;
     this.conversation.sidechatLeaseExpiresAt = input.leaseExpiresAt;
-    return true;
+    this.conversation.sidechatUpdatedAt = now;
+    this.conversation.sidechatRevision += 1;
+    return this.coordination();
   }
 
-  async claimSidechatStartRun(input: {
+  async claimSidechatStartRunWithSnapshot(input: {
     runId: string;
     leaseExpiresAt: Date;
-  }): Promise<"claimed" | "existing" | "busy"> {
+  }): Promise<
+    | { outcome: "claimed"; coordination: SidechatCoordinationSnapshot }
+    | { outcome: "existing" }
+    | { outcome: "busy" }
+  > {
     this.calls.push("claim-start");
-    if (this.messages.length > 0) return "existing";
+    if (this.messages.length > 0) return { outcome: "existing" };
     if (
       !this.allowClaim ||
       (this.conversation.sidechatLeaseExpiresAt?.getTime() ?? 0) > now.getTime()
     ) {
-      return "busy";
+      return { outcome: "busy" };
     }
     this.conversation.sidechatStatus = "working";
     this.conversation.sidechatRunId = input.runId;
     this.conversation.sidechatLeaseExpiresAt = input.leaseExpiresAt;
-    return "claimed";
+    this.conversation.sidechatUpdatedAt = now;
+    this.conversation.sidechatRevision += 1;
+    return { outcome: "claimed", coordination: this.coordination() };
   }
 
-  async settleSidechatRun(input: {
+  async settleSidechatRunWithSnapshot(input: {
     runId: string;
     status: "idle" | "ready" | "failed" | "waiting_approval";
     now?: Date;
-  }): Promise<boolean> {
+  }): Promise<SidechatCoordinationSnapshot | null> {
     this.calls.push(`settle:${input.status}`);
     this.settlementTimes.push(input.now);
-    if (this.conversation.sidechatRunId !== input.runId) return false;
+    if (this.conversation.sidechatRunId !== input.runId) return null;
     if (
       !input.now ||
       this.conversation.archivedAt ||
       !this.conversation.sidechatLeaseExpiresAt ||
       this.conversation.sidechatLeaseExpiresAt.getTime() <= input.now.getTime()
     ) {
-      return false;
+      return null;
     }
     this.conversation.sidechatStatus = input.status;
     this.conversation.sidechatRunId = null;
     this.conversation.sidechatLeaseExpiresAt = null;
-    return true;
+    this.conversation.sidechatUpdatedAt = input.now;
+    this.conversation.sidechatRevision += 1;
+    return this.coordination();
   }
 
   async addSidechatHumanMessage(input: {
@@ -209,8 +233,8 @@ function createMutationOptions(service: MemorySidechatService) {
       expect(service.messages.some((row) => row.id === message.id)).toBe(true);
       events.push("broadcast:message");
     },
-    broadcastStatus(status: string) {
-      events.push(`broadcast:${status}`);
+    broadcastStatus(snapshot: SidechatCoordinationSnapshot) {
+      events.push(`broadcast:${snapshot.status}`);
     },
     runTurn(input: { message: MessageRow; runId: string }) {
       events.push(`run:${input.message.id}:${input.runId}`);
@@ -288,6 +312,12 @@ describe("sidechat history and acceptance", () => {
         createdAt: now.getTime(),
       },
     ]);
+    expect(body.coordination).toEqual({
+      status: "idle",
+      runId: null,
+      revision: 4,
+      updatedAt: Date.parse("2026-08-09T11:59:00.000Z"),
+    });
     expect(JSON.stringify(body)).not.toContain("user-private");
     expect(JSON.stringify(body)).not.toContain("avatar.png");
   });

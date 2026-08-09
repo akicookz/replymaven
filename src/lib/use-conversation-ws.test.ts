@@ -14,11 +14,11 @@ import type {
 } from "../../shared/ws-events";
 import {
   reduceConversationMessageEvent,
+  mergeConversationWithSidechatSnapshot,
   reduceSidechatAcceptedConversation,
   reduceSidechatEphemeralEvent,
   reduceSidechatEphemeralTerminalEvent,
   reduceSidechatAcceptedSnapshot,
-  reduceSidechatSettledRunEvent,
   reduceSidechatStatusSnapshot,
   type ConversationRealtimeMessageState,
   type SidechatEphemeralStore,
@@ -238,6 +238,9 @@ test("newer live delivery stays the cursor when an older deferred replay arrives
     async getSidechatMessagesSince() {
       return [];
     },
+    async getSidechatCoordinationSnapshot() {
+      return null;
+    },
   };
   const replay = replayConversationMessages(
     socket,
@@ -322,6 +325,8 @@ test("a delayed old durable row cannot clear a newer run's ephemeral state", () 
       conversationId: "conversation-1",
       status: "ready",
       runId: "run-old",
+      revision: 3,
+      updatedAt: 3_000,
     },
   );
   expect([...afterOldTerminal.keys()]).toEqual(["run-new"]);
@@ -330,102 +335,189 @@ test("a delayed old durable row cannot clear a newer run's ephemeral state", () 
 test("a delayed old terminal status cannot replace the active newer run", () => {
   expect(
     reduceSidechatStatusSnapshot(
-      { status: "working", runId: "run-new" },
-      { status: "ready", runId: "run-old" },
+      {
+        status: "working",
+        runId: "run-new",
+        revision: 8,
+        updatedAt: 8_000,
+      },
+      {
+        status: "ready",
+        runId: null,
+        revision: 7,
+        updatedAt: 7_000,
+      },
     ),
-  ).toEqual({ status: "working", runId: "run-new" });
+  ).toEqual({
+    status: "working",
+    runId: "run-new",
+    revision: 8,
+    updatedAt: 8_000,
+  });
   expect(
     reduceSidechatStatusSnapshot(
-      { status: "working", runId: "run-new" },
-      { status: "ready", runId: "run-new" },
+      {
+        status: "working",
+        runId: "run-new",
+        revision: 8,
+        updatedAt: 8_000,
+      },
+      {
+        status: "ready",
+        runId: null,
+        revision: 9,
+        updatedAt: 9_000,
+      },
     ),
-  ).toEqual({ status: "ready", runId: null });
+  ).toEqual({
+    status: "ready",
+    runId: null,
+    revision: 9,
+    updatedAt: 9_000,
+  });
+});
+
+test("authoritative fetch snapshots recover missed terminals without resurrecting them", () => {
+  const missedTerminal = reduceSidechatStatusSnapshot(
+    {
+      status: "working",
+      runId: "run-1",
+      revision: 2,
+      updatedAt: 2_000,
+    },
+    {
+      status: "failed",
+      runId: null,
+      revision: 3,
+      updatedAt: 3_000,
+    },
+  );
+  expect(missedTerminal).toEqual({
+    status: "failed",
+    runId: null,
+    revision: 3,
+    updatedAt: 3_000,
+  });
+
+  expect(reduceSidechatStatusSnapshot(missedTerminal, {
+    status: "working",
+    runId: "run-1",
+    revision: 2,
+    updatedAt: 2_000,
+  })).toBe(missedTerminal);
+  expect(reduceSidechatStatusSnapshot(missedTerminal, {
+    status: "working",
+    runId: "run-1",
+    revision: 3,
+    updatedAt: 3_000,
+  })).toBe(missedTerminal);
+});
+
+test("an unselected list row recovers a newer cross-client Sidechat status", () => {
+  const current = {
+    id: "conversation-unselected",
+    visitorName: "Alice",
+    sidechatStatus: "working" as const,
+    sidechatRunId: "run-old",
+    sidechatRevision: 5,
+    sidechatUpdatedAt: "2026-08-10T00:00:05.000Z",
+  };
+  const recovered = mergeConversationWithSidechatSnapshot(current, {
+    visitorName: "Alice Updated",
+    sidechatStatus: "failed",
+    sidechatRunId: null,
+    sidechatRevision: 6,
+    sidechatUpdatedAt: "2026-08-10T00:00:06.000Z",
+  });
+  expect(recovered).toEqual({
+    ...current,
+    visitorName: "Alice Updated",
+    sidechatStatus: "failed",
+    sidechatRunId: null,
+    sidechatRevision: 6,
+    sidechatUpdatedAt: "2026-08-10T00:00:06.000Z",
+  });
+  expect(mergeConversationWithSidechatSnapshot(recovered, {
+    sidechatStatus: "working",
+    sidechatRunId: "run-old",
+    sidechatRevision: 5,
+    sidechatUpdatedAt: "2026-08-10T00:00:05.000Z",
+  })).toEqual({
+    ...recovered,
+  });
 });
 
 test("terminal then detail refetch then 202 cannot resurrect the completed run", () => {
-  const terminalEvent = {
-    type: "sidechat:status" as const,
-    conversationId: "conversation-1",
+  const terminal = {
     status: "ready" as const,
-    runId: "run-fast",
-  };
-  const settledRuns = reduceSidechatSettledRunEvent(undefined, terminalEvent);
-  const terminal = reduceSidechatStatusSnapshot(
-    { status: "working", runId: "run-fast" },
-    terminalEvent,
-  );
-  const refetchedWithoutClientMarkers = {
-    status: terminal.status,
-    runId: terminal.runId,
+    runId: null,
+    revision: 8,
+    updatedAt: 8_000,
   };
   expect(
     reduceSidechatAcceptedSnapshot(
-      refetchedWithoutClientMarkers,
-      "run-fast",
-      settledRuns,
+      terminal,
+      {
+        status: "working",
+        runId: "run-fast",
+        revision: 7,
+        updatedAt: 7_000,
+      },
     ),
-  ).toEqual(refetchedWithoutClientMarkers);
+  ).toBe(terminal);
   expect(
     reduceSidechatAcceptedSnapshot(
-      refetchedWithoutClientMarkers,
-      "run-next",
-      settledRuns,
+      terminal,
+      {
+        status: "working",
+        runId: "run-next",
+        revision: 9,
+        updatedAt: 9_000,
+      },
     ),
   ).toEqual({
     status: "working",
     runId: "run-next",
+    revision: 9,
+    updatedAt: 9_000,
   });
-  expect([...settledRuns]).toEqual(["run-fast"]);
-  expect(reduceSidechatSettledRunEvent(settledRuns, {
-    type: "sidechat:message",
-    conversationId: "conversation-1",
-    message: createSidechatPayload("durable", 4_000),
-  })).toBe(
-    settledRuns,
-  );
 });
 
 test("terminal then detail refetch then delayed retry 202 cannot resurrect working", () => {
-  const terminalEvent = {
-    type: "sidechat:status" as const,
-    conversationId: "conversation-1",
-    status: "ready" as const,
-    runId: "run-retry-fast",
-  };
-  const settledRuns = reduceSidechatSettledRunEvent(undefined, terminalEvent);
   const terminalDetail = {
     id: "conversation-1",
     sidechatStatus: "ready" as const,
     sidechatRunId: null,
-  };
-  const refetchedDetail = {
-    ...terminalDetail,
-    sidechatUpdatedAt: "2026-08-10T00:00:02.000Z",
+    sidechatRevision: 8,
+    sidechatUpdatedAt: "2026-08-10T00:00:08.000Z",
   };
 
   expect(
     reduceSidechatAcceptedConversation(
       terminalDetail,
-      "run-retry-fast",
-      settledRuns,
+      {
+        status: "working",
+        runId: "run-retry-fast",
+        revision: 7,
+        updatedAt: Date.parse("2026-08-10T00:00:07.000Z"),
+      },
     ),
   ).toBe(terminalDetail);
   expect(
     reduceSidechatAcceptedConversation(
-      refetchedDetail,
-      "run-retry-fast",
-      settledRuns,
-    ),
-  ).toBe(refetchedDetail);
-  expect(
-    reduceSidechatAcceptedConversation(
-      refetchedDetail,
-      "run-retry-live",
-      settledRuns,
+      terminalDetail,
+      {
+        status: "working",
+        runId: "run-retry-live",
+        revision: 9,
+        updatedAt: Date.parse("2026-08-10T00:00:09.000Z"),
+      },
     ),
   ).toEqual({
-    ...refetchedDetail,
+    ...terminalDetail,
     sidechatStatus: "working",
     sidechatRunId: "run-retry-live",
+    sidechatRevision: 9,
+    sidechatUpdatedAt: "2026-08-10T00:00:09.000Z",
   });
 });

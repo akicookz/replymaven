@@ -3,6 +3,7 @@ import { type DrizzleD1Database } from "drizzle-orm/d1";
 import type { MessageRow, ProjectSettingsRow } from "../../db";
 import { ToolService } from "../../services/tool-service";
 import type { AppEnv } from "../../types";
+import type { SidechatCoordinationSnapshot } from "../../../shared/ws-events";
 import type {
   MavenStreamPart,
   MavenTurnResult,
@@ -77,13 +78,14 @@ interface HarnessOptions {
   takeoverBeforeInsert?: boolean;
   takeoverAfterInsert?: boolean;
   settlementRace?: "expiry" | "archive";
+  archiveThenUnarchiveBeforeCompletion?: boolean;
 }
 
 function createHarness(options: HarnessOptions = {}) {
   const calls: string[] = [];
   const deltas: string[] = [];
   const activities: Array<{ label: string; phase: "start" | "finish" }> = [];
-  const statuses: Array<{ status: string; runId: string | null }> = [];
+  const statuses: SidechatCoordinationSnapshot[] = [];
   const persisted: Array<Record<string, unknown>> = [];
   const publicRows = Array.from({ length: 30 }, (_, index) =>
     makeMessage({
@@ -102,6 +104,7 @@ function createHarness(options: HarnessOptions = {}) {
       createdAt: new Date(now.getTime() - (45 - index) * 1_000),
     }));
   let activeRun = true;
+  let sidechatRevision = 4;
   let archivedAt: Date | null = null;
   let leaseExpiresAt = new Date(now.getTime() + 60_000);
 
@@ -130,11 +133,31 @@ function createHarness(options: HarnessOptions = {}) {
       calls.push(`sidechat:${limit}`);
       return { messages: privateRows.slice(-limit), hasMore: true };
     },
-    async addSidechatMavenMessage(input: Record<string, unknown>) {
-      calls.push("persist");
-      persisted.push(input);
+    async completeSidechatRun(input: Record<string, unknown>) {
+      calls.push(`complete:${String(input.status)}`);
       if (options.takeoverBeforeInsert) activeRun = false;
-      if (!activeRun) return null;
+      if (options.archiveThenUnarchiveBeforeCompletion) {
+        activeRun = false;
+        archivedAt = input.now as Date;
+        archivedAt = null;
+      }
+      // These gates model a competing transition immediately before either
+      // statement in D1's transaction. The transaction observes the winner
+      // and commits neither the conditional insert nor the settlement.
+      if (options.takeoverAfterInsert) activeRun = false;
+      if (options.settlementRace === "expiry") {
+        leaseExpiresAt = input.now as Date;
+      }
+      if (options.settlementRace === "archive") {
+        archivedAt = input.now as Date;
+      }
+      if (
+        !activeRun ||
+        archivedAt ||
+        leaseExpiresAt.getTime() <= (input.now as Date).getTime()
+      ) {
+        return null;
+      }
       const message = options.insertResult === undefined
         ? makeMessage({
             id: "maven-final",
@@ -146,22 +169,39 @@ function createHarness(options: HarnessOptions = {}) {
             userId: null,
           })
         : options.insertResult;
-      if (options.takeoverAfterInsert) activeRun = false;
-      return message;
+      if (!message) return null;
+      persisted.push(input);
+      activeRun = false;
+      sidechatRevision += 1;
+      return {
+        message,
+        coordination: {
+          status: input.status as "idle" | "ready",
+          runId: null,
+          revision: sidechatRevision,
+          updatedAt: (input.now as Date).getTime(),
+        },
+      };
     },
-    async settleSidechatRun(input: { status: string; now: Date }) {
+    async settleSidechatRunWithSnapshot(input: { status: string; now: Date }) {
       calls.push(`settle:${input.status}`);
-      if (!activeRun) return false;
+      if (!activeRun) return null;
       if (options.settlementRace === "expiry") leaseExpiresAt = input.now;
       if (options.settlementRace === "archive") archivedAt = input.now;
       if (
         archivedAt ||
         leaseExpiresAt.getTime() <= input.now.getTime()
       ) {
-        return false;
+        return null;
       }
       activeRun = false;
-      return true;
+      sidechatRevision += 1;
+      return {
+        status: input.status as "idle" | "ready" | "failed" | "waiting_approval",
+        runId: null,
+        revision: sidechatRevision,
+        updatedAt: input.now.getTime(),
+      };
     },
   };
 
@@ -290,8 +330,8 @@ function createHarness(options: HarnessOptions = {}) {
     ) {
       activities.push({ label, phase });
     },
-    broadcastStatus(_env, _ctx, _conversationId, status, runId) {
-      statuses.push({ status, runId });
+    broadcastStatus(_env, _ctx, _conversationId, snapshot) {
+      statuses.push(snapshot);
     },
     now() {
       return now;
@@ -354,8 +394,8 @@ describe("runSidechatTurn", () => {
         senderName: "Maven",
       }),
     ]);
-    expect(harness.calls).toContain("settle:ready");
-    expect(harness.calls.filter((call) => call === "persist")).toHaveLength(1);
+    expect(harness.calls).toContain("complete:ready");
+    expect(harness.calls.filter((call) => call === "complete:ready")).toHaveLength(1);
     expect(harness.deltas).toEqual(["Working text that is not the draft."]);
     expect(harness.activities).toEqual([
       { label: "Look up account", phase: "start" },
@@ -363,7 +403,12 @@ describe("runSidechatTurn", () => {
     ]);
     expect(JSON.stringify(harness.activities)).not.toContain("private-tool-id");
     expect(JSON.stringify(harness.activities)).not.toContain("execution");
-    expect(harness.statuses).toContainEqual({ status: "ready", runId: "run-1" });
+    expect(harness.statuses).toContainEqual({
+      status: "ready",
+      runId: null,
+      revision: 5,
+      updatedAt: now.getTime(),
+    });
   });
 
   test("persists bounded ordinary text and settles idle without an artifact", async () => {
@@ -378,8 +423,13 @@ describe("runSidechatTurn", () => {
 
     expect(String(harness.persisted[0]?.content)).toHaveLength(5_000);
     expect(harness.persisted[0]).toMatchObject({ kind: "text", metadata: null });
-    expect(harness.calls).toContain("settle:idle");
-    expect(harness.statuses).toContainEqual({ status: "idle", runId: "run-1" });
+    expect(harness.calls).toContain("complete:idle");
+    expect(harness.statuses).toContainEqual({
+      status: "idle",
+      runId: null,
+      revision: 5,
+      updatedAt: now.getTime(),
+    });
   });
 
   test.each([
@@ -393,7 +443,12 @@ describe("runSidechatTurn", () => {
 
     expect(harness.persisted).toEqual([]);
     expect(harness.calls).toContain("settle:failed");
-    expect(harness.statuses).toContainEqual({ status: "failed", runId: "run-1" });
+    expect(harness.statuses).toContainEqual({
+      status: "failed",
+      runId: null,
+      revision: 5,
+      updatedAt: now.getTime(),
+    });
   });
 
   test("contains a stream rejection and does not persist its partial text", async () => {
@@ -415,8 +470,8 @@ describe("runSidechatTurn", () => {
 
     await runSidechatTurn(createOptions(harness.runtime));
 
-    expect(harness.persisted).toHaveLength(1);
-    expect(harness.calls).not.toContain("settle:idle");
+    expect(harness.persisted).toEqual([]);
+    expect(harness.calls).toContain("complete:idle");
     expect(harness.statuses).toEqual([]);
     expect(harness.calls.some((call) => call.startsWith("message:"))).toBe(false);
   });
@@ -426,7 +481,8 @@ describe("runSidechatTurn", () => {
 
     await runSidechatTurn(createOptions(harness.runtime));
 
-    expect(harness.calls).not.toContain("settle:idle");
+    expect(harness.persisted).toEqual([]);
+    expect(harness.calls).toContain("complete:idle");
     expect(harness.calls.some((call) => call.startsWith("message:"))).toBe(false);
     expect(harness.statuses).toEqual([]);
   });
@@ -438,11 +494,37 @@ describe("runSidechatTurn", () => {
 
       await runSidechatTurn(createOptions(harness.runtime));
 
-      expect(harness.persisted).toHaveLength(1);
-      expect(harness.calls).toContain("settle:idle");
+      expect(harness.persisted).toEqual([]);
+      expect(harness.calls).toContain("complete:idle");
       expect(harness.calls.some((call) => call.startsWith("message:")))
         .toBe(false);
       expect(harness.statuses).toEqual([]);
+    },
+  );
+
+  test("archive then unarchive cannot revive a stale completion or broadcast", async () => {
+    const harness = createHarness({ archiveThenUnarchiveBeforeCompletion: true });
+
+    await runSidechatTurn(createOptions(harness.runtime));
+
+    expect(harness.persisted).toEqual([]);
+    expect(harness.statuses).toEqual([]);
+    expect(harness.calls.some((call) => call.startsWith("message:"))).toBe(false);
+  });
+
+  test.each(["expiry", "archive"] as const)(
+    "an interrupted stream emits no stale status when %s wins cleanup",
+    async (settlementRace) => {
+      const harness = createHarness({
+        parts: [{ type: "abort" }],
+        settlementRace,
+      });
+
+      await runSidechatTurn(createOptions(harness.runtime));
+
+      expect(harness.persisted).toEqual([]);
+      expect(harness.statuses).toEqual([]);
+      expect(harness.calls.some((call) => call.startsWith("message:"))).toBe(false);
     },
   );
 });

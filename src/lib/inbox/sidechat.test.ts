@@ -494,6 +494,42 @@ describe("Sidechat optimistic and streaming reconciliation", () => {
     expect(committed.nextBefore).toBe("8000.fetched-latest-window");
     expect(committed.hasMore).toBe(true);
   });
+
+  test("a deferred history fetch cannot regress a newer live coordination revision", () => {
+    const committed = mergeSidechatHistorySnapshot(
+      {
+        messages: [],
+        hasMore: false,
+        nextBefore: null,
+        historyLoaded: true,
+        coordination: {
+          status: "ready",
+          runId: null,
+          revision: 8,
+          updatedAt: 8_000,
+        },
+      },
+      markSidechatHistoryFetchSnapshot({
+        messages: [],
+        hasMore: false,
+        nextBefore: null,
+        historyLoaded: true,
+        coordination: {
+          status: "working",
+          runId: "run-stale",
+          revision: 7,
+          updatedAt: 7_000,
+        },
+      }, 4),
+    );
+
+    expect(committed.coordination).toEqual({
+      status: "ready",
+      runId: null,
+      revision: 8,
+      updatedAt: 8_000,
+    });
+  });
 });
 
 describe("Sidechat QueryClient cache provenance", () => {

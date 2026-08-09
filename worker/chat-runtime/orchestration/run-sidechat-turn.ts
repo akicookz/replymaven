@@ -1,5 +1,6 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { type CustomerDetail } from "../../../shared/customer-types";
+import { type SidechatCoordinationSnapshot } from "../../../shared/ws-events";
 import {
   type ConversationRow,
   type GuidelineRow,
@@ -76,22 +77,27 @@ interface SidechatTurnChatService {
     conversationId: string,
     limit: number,
   ): Promise<SidechatMessagePage>;
-  addSidechatMavenMessage(input: {
+  completeSidechatRun(input: {
     projectId: string;
     conversationId: string;
     runId: string;
     content: string;
-    kind?: MessageRow["kind"];
-    metadata?: string | null;
-    senderName?: string | null;
-  }): Promise<MessageRow | null>;
-  settleSidechatRun(input: {
+    kind: MessageRow["kind"];
+    metadata: string | null;
+    senderName: string | null;
+    status: "idle" | "ready";
+    now: Date;
+  }): Promise<{
+    message: MessageRow;
+    coordination: SidechatCoordinationSnapshot;
+  } | null>;
+  settleSidechatRunWithSnapshot(input: {
     projectId: string;
     conversationId: string;
     runId: string;
     status: "idle" | "ready" | "failed" | "waiting_approval";
     now: Date;
-  }): Promise<boolean>;
+  }): Promise<SidechatCoordinationSnapshot | null>;
 }
 
 interface SidechatTurnProjectService {
@@ -159,8 +165,7 @@ export interface SidechatTurnRuntime {
     env: AppEnv,
     ctx: ExecutionContext,
     conversationId: string,
-    status: "idle" | "working" | "waiting_approval" | "ready" | "failed",
-    runId: string | null,
+    snapshot: SidechatCoordinationSnapshot,
   ): void;
   now(): Date;
 }
@@ -274,12 +279,7 @@ async function settleFailureIfCurrent(
   chatService: SidechatTurnChatService,
 ): Promise<void> {
   try {
-    const conversation = await chatService.getOperationalConversationById(
-      options.conversationId,
-      options.projectId,
-    );
-    if (!isCurrentRun(conversation, options.runId, runtime.now())) return;
-    const settled = await chatService.settleSidechatRun({
+    const settled = await chatService.settleSidechatRunWithSnapshot({
       projectId: options.projectId,
       conversationId: options.conversationId,
       runId: options.runId,
@@ -291,8 +291,7 @@ async function settleFailureIfCurrent(
         options.env,
         options.executionCtx,
         options.conversationId,
-        "failed",
-        options.runId,
+        settled,
       );
     }
   } catch {
@@ -492,18 +491,13 @@ export async function runSidechatTurn(
       return;
     }
 
-    const beforePersist = await chatService.getOperationalConversationById(
-      options.conversationId,
-      options.projectId,
-    );
-    if (!isCurrentRun(beforePersist, options.runId, runtime.now())) return;
-
     const finalContent = hasSafeDraft ? artifact.draft : ordinaryOutput!;
     const finalKind = hasSafeDraft ? "reply_draft" : "text";
     const finalMetadata = hasSafeDraft
       ? JSON.stringify({ draft: artifact.draft })
       : null;
-    const message = await chatService.addSidechatMavenMessage({
+    const finalStatus = hasSafeDraft ? "ready" : "idle";
+    const completion = await chatService.completeSidechatRun({
       projectId: options.projectId,
       conversationId: options.conversationId,
       runId: options.runId,
@@ -511,36 +505,21 @@ export async function runSidechatTurn(
       kind: finalKind,
       metadata: finalMetadata,
       senderName: "Maven",
-    });
-    if (!message) return;
-
-    const afterPersist = await chatService.getOperationalConversationById(
-      options.conversationId,
-      options.projectId,
-    );
-    if (!isCurrentRun(afterPersist, options.runId, runtime.now())) return;
-
-    const finalStatus = hasSafeDraft ? "ready" : "idle";
-    const settled = await chatService.settleSidechatRun({
-      projectId: options.projectId,
-      conversationId: options.conversationId,
-      runId: options.runId,
       status: finalStatus,
       now: runtime.now(),
     });
-    if (!settled) return;
+    if (!completion) return;
     runtime.broadcastMessage(
       options.env,
       options.executionCtx,
       options.conversationId,
-      message,
+      completion.message,
     );
     runtime.broadcastStatus(
       options.env,
       options.executionCtx,
       options.conversationId,
-      finalStatus,
-      options.runId,
+      completion.coordination,
     );
   } catch {
     await settleFailureIfCurrent(options, runtime, chatService);

@@ -3,9 +3,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { WebSocket as ReconnectingWebSocket } from "partysocket";
 import {
   compareMessagePositions,
+  selectNewerSidechatCoordinationSnapshot,
   type MessagePayload,
   type ServerEvent,
   type SidechatMessagePayload,
+  type SidechatCoordinationSnapshot,
   type SidechatStatus,
   type StableMessagePosition,
 } from "../../shared/ws-events";
@@ -33,6 +35,8 @@ interface ConversationDetailData {
     closeReason: string | null;
     sidechatStatus?: SidechatStatus;
     sidechatRunId?: string | null;
+    sidechatRevision?: number;
+    sidechatUpdatedAt?: string | null;
     lastActivityAt?: string | null;
     updatedAt: string;
     [key: string]: unknown;
@@ -46,6 +50,8 @@ interface ConversationsCacheData {
     id: string;
     sidechatStatus?: SidechatStatus;
     sidechatRunId?: string | null;
+    sidechatRevision?: number;
+    sidechatUpdatedAt?: string | null;
     [key: string]: unknown;
   }>;
   [key: string]: unknown;
@@ -60,6 +66,7 @@ export interface SidechatCacheMessage
 interface SidechatCacheData {
   messages: SidechatCacheMessage[];
   hasMore: boolean;
+  coordination?: SidechatCoordinationSnapshot;
   [key: string]: unknown;
 }
 
@@ -99,13 +106,6 @@ type SidechatEphemeralTerminalEvent = Extract<
   ServerEvent,
   { type: "sidechat:message" | "sidechat:status" }
 >;
-
-interface SidechatStatusSnapshot {
-  status: SidechatStatus;
-  runId: string | null;
-}
-
-export type SidechatSettledRunStore = ReadonlySet<string>;
 
 export function reduceConversationMessageEvent(
   state: ConversationRealtimeMessageState,
@@ -194,82 +194,78 @@ export function reduceSidechatEphemeralTerminalEvent(
 }
 
 export function reduceSidechatStatusSnapshot(
-  current: SidechatStatusSnapshot,
-  incoming: SidechatStatusSnapshot,
-): SidechatStatusSnapshot {
-  if (incoming.status === "working") return incoming;
-  if (!incoming.runId || current.runId !== incoming.runId) return current;
-  return { status: incoming.status, runId: null };
-}
-
-export function reduceSidechatSettledRunEvent(
-  old: SidechatSettledRunStore | undefined,
-  event: SidechatEphemeralTerminalEvent,
-): SidechatSettledRunStore {
-  if (
-    event.type !== "sidechat:status" ||
-    event.status === "working" ||
-    !event.runId
-  ) {
-    return old ?? new Set();
-  }
-  const next = new Set(old);
-  next.delete(event.runId);
-  next.add(event.runId);
-  while (next.size > MAX_SETTLED_RUNS) {
-    const oldest = next.values().next().value;
-    if (typeof oldest !== "string") break;
-    next.delete(oldest);
-  }
-  return next;
+  current: SidechatCoordinationSnapshot,
+  incoming: SidechatCoordinationSnapshot,
+): SidechatCoordinationSnapshot {
+  return selectNewerSidechatCoordinationSnapshot(current, incoming);
 }
 
 export function reduceSidechatAcceptedSnapshot(
-  current: SidechatStatusSnapshot,
-  acceptedRunId: string,
-  settledRuns: SidechatSettledRunStore | undefined,
-): SidechatStatusSnapshot {
-  if (settledRuns?.has(acceptedRunId)) return current;
-  return {
-    status: "working",
-    runId: acceptedRunId,
-  };
+  current: SidechatCoordinationSnapshot,
+  accepted: SidechatCoordinationSnapshot,
+): SidechatCoordinationSnapshot {
+  return reduceSidechatStatusSnapshot(current, accepted);
 }
 
 interface SidechatAcceptedConversationSnapshot {
   sidechatStatus?: SidechatStatus;
   sidechatRunId?: string | null;
   sidechatUpdatedAt?: string | null;
+  sidechatRevision?: number;
+}
+
+function conversationSidechatSnapshot(
+  conversation: SidechatAcceptedConversationSnapshot,
+): SidechatCoordinationSnapshot {
+  return {
+    status: conversation.sidechatStatus ?? "idle",
+    runId: conversation.sidechatRunId ?? null,
+    revision: conversation.sidechatRevision ?? 0,
+    updatedAt: conversation.sidechatUpdatedAt
+      ? Date.parse(conversation.sidechatUpdatedAt)
+      : null,
+  };
 }
 
 export function reduceSidechatAcceptedConversation<
   T extends SidechatAcceptedConversationSnapshot,
 >(
   current: T,
-  acceptedRunId: string,
-  settledRuns: SidechatSettledRunStore | undefined,
-  acceptedAt?: string,
+  accepted: SidechatCoordinationSnapshot,
 ): T {
-  const currentStatus = current.sidechatStatus ?? "idle";
-  const currentRunId = current.sidechatRunId ?? null;
-  const next = reduceSidechatAcceptedSnapshot(
-    { status: currentStatus, runId: currentRunId },
-    acceptedRunId,
-    settledRuns,
-  );
-  if (settledRuns?.has(acceptedRunId)) {
-    return current;
-  }
+  const currentSnapshot = conversationSidechatSnapshot(current);
+  const next = reduceSidechatAcceptedSnapshot(currentSnapshot, accepted);
+  if (next === currentSnapshot) return current;
   return {
     ...current,
     sidechatStatus: next.status,
     sidechatRunId: next.runId,
-    ...(acceptedAt === undefined ? {} : { sidechatUpdatedAt: acceptedAt }),
+    sidechatRevision: next.revision,
+    sidechatUpdatedAt: next.updatedAt === null
+      ? null
+      : new Date(next.updatedAt).toISOString(),
+  };
+}
+
+export function mergeConversationWithSidechatSnapshot<
+  T extends SidechatAcceptedConversationSnapshot,
+>(current: T, incoming: Partial<T>): T {
+  const merged = { ...current, ...incoming };
+  if (incoming.sidechatRevision === undefined) return merged;
+  const reconciled = reduceSidechatAcceptedConversation(
+    current,
+    conversationSidechatSnapshot(incoming),
+  );
+  return {
+    ...merged,
+    sidechatStatus: reconciled.sidechatStatus,
+    sidechatRunId: reconciled.sidechatRunId,
+    sidechatRevision: reconciled.sidechatRevision,
+    sidechatUpdatedAt: reconciled.sidechatUpdatedAt,
   };
 }
 
 const MAX_EPHEMERAL_RUNS = 8;
-const MAX_SETTLED_RUNS = 16;
 const MAX_EPHEMERAL_DELTA_LENGTH = 50_000;
 const MAX_EPHEMERAL_LABEL_LENGTH = 500;
 
@@ -578,37 +574,28 @@ export function useConversationWs(
           (old) => reduceSidechatEphemeralEvent(old, parsed),
         );
       } else if (parsed.type === "sidechat:status") {
+        let acceptedStatus = false;
         queryClient.setQueryData<ConversationDetailData | undefined>(
           ["conversation-detail", conversationId],
           (old) => {
             if (!old) return old;
-            const next = reduceSidechatStatusSnapshot(
-              {
-                status: old.conversation.sidechatStatus ?? "idle",
-                runId: old.conversation.sidechatRunId ?? null,
-              },
-              { status: parsed.status, runId: parsed.runId },
-            );
+            const current = conversationSidechatSnapshot(old.conversation);
+            const next = reduceSidechatStatusSnapshot(current, parsed);
+            if (next === current) return old;
+            acceptedStatus = true;
             return {
               ...old,
               conversation: {
                 ...old.conversation,
                 sidechatStatus: next.status,
                 sidechatRunId: next.runId,
+                sidechatRevision: next.revision,
+                sidechatUpdatedAt: next.updatedAt === null
+                  ? null
+                  : new Date(next.updatedAt).toISOString(),
               },
             };
           },
-        );
-        queryClient.setQueryData<SidechatEphemeralStore>(
-          ["sidechat-ephemeral", projectId, conversationId],
-          (old) => reduceSidechatEphemeralTerminalEvent(
-            old ?? new Map(),
-            parsed,
-          ),
-        );
-        queryClient.setQueryData<SidechatSettledRunStore>(
-          ["sidechat-settled-runs", projectId, conversationId],
-          (old) => reduceSidechatSettledRunEvent(old, parsed),
         );
         queryClient.setQueriesData<ConversationsCacheData>(
           { queryKey: ["conversations", projectId] },
@@ -618,22 +605,40 @@ export function useConversationWs(
               ...old,
               conversations: old.conversations.map((conversation) => {
                 if (conversation.id !== conversationId) return conversation;
-                const next = reduceSidechatStatusSnapshot(
-                  {
-                    status: conversation.sidechatStatus ?? "idle",
-                    runId: conversation.sidechatRunId ?? null,
-                  },
-                  { status: parsed.status, runId: parsed.runId },
+                const next = reduceSidechatAcceptedConversation(
+                  conversation,
+                  parsed,
                 );
-                return {
-                  ...conversation,
-                  sidechatStatus: next.status,
-                  sidechatRunId: next.runId,
-                };
+                if (next !== conversation) acceptedStatus = true;
+                return next;
               }),
             };
           },
         );
+        const detailConversation = queryClient.getQueryData<ConversationDetailData>(
+          ["conversation-detail", conversationId],
+        )?.conversation;
+        const cacheCoordination = detailConversation
+          ? conversationSidechatSnapshot(detailConversation)
+          : parsed;
+        queryClient.setQueryData<SidechatCacheData | undefined>(
+          ["sidechat", projectId, conversationId],
+          (old) => {
+            if (!old) return old;
+            const coordination = selectNewerSidechatCoordinationSnapshot(
+              old.coordination ?? null,
+              cacheCoordination,
+            );
+            if (coordination === old.coordination) return old;
+            return { ...old, coordination };
+          },
+        );
+        if (acceptedStatus && parsed.status !== "working") {
+          queryClient.setQueryData<SidechatEphemeralStore>(
+            ["sidechat-ephemeral", projectId, conversationId],
+            () => new Map(),
+          );
+        }
       }
     }
 

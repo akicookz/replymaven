@@ -43,6 +43,7 @@ export interface Conversation {
   sidechatStatus?: SidechatStatus;
   sidechatRunId?: string | null;
   sidechatUpdatedAt?: string | null;
+  sidechatRevision?: number;
 }
 
 export type MessageRole = "visitor" | "bot" | "agent" | "system";

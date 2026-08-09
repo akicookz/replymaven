@@ -6,6 +6,7 @@ import {
   compareMessagePositions,
   isSidechatServerEvent,
   type ServerEvent,
+  type SidechatCoordinationSnapshot,
   type StableMessagePosition,
 } from "../../shared/ws-events";
 import {
@@ -40,6 +41,10 @@ export interface ConversationReplayReader {
     conversationId: string,
     since: number,
   ): Promise<MessageRow[]>;
+  getSidechatCoordinationSnapshot(
+    conversationId: string,
+    projectId: string,
+  ): Promise<SidechatCoordinationSnapshot | null>;
 }
 
 export interface SocketAttachment {
@@ -197,6 +202,23 @@ export async function replayConversationMessages(
     } catch {
       return;
     }
+  }
+
+  const coordination = await reader.getSidechatCoordinationSnapshot(
+    attachment.conversationId,
+    attachment.projectId,
+  );
+  if (!coordination) return;
+  try {
+    ws.send(
+      JSON.stringify({
+        type: "sidechat:status",
+        conversationId: attachment.conversationId,
+        ...coordination,
+      } satisfies ServerEvent),
+    );
+  } catch {
+    // A disconnected socket cannot receive the authoritative snapshot.
   }
 }
 

@@ -1,5 +1,6 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, desc, and, gt, lt, lte, ne, isNull, inArray, isNotNull, notExists, or, like, sql, type SQL } from "drizzle-orm";
+import { eq, desc, and, gt, gte, lt, lte, ne, isNull, inArray, isNotNull, notExists, or, like, sql, type SQL } from "drizzle-orm";
+import { type SidechatCoordinationSnapshot } from "../../shared/ws-events";
 import {
   conversations,
   customerVisitors,
@@ -89,6 +90,10 @@ export interface ClaimSidechatRunInput {
 }
 
 export type ClaimSidechatStartRunResult = "claimed" | "existing" | "busy";
+export type ClaimSidechatStartRunWithSnapshotResult =
+  | { outcome: "claimed"; coordination: SidechatCoordinationSnapshot }
+  | { outcome: "existing" }
+  | { outcome: "busy" };
 
 export interface SettleSidechatRunInput {
   projectId: string;
@@ -98,7 +103,45 @@ export interface SettleSidechatRunInput {
   now: Date;
 }
 
+export interface CompleteSidechatRunInput extends SettleSidechatRunInput {
+  content: string;
+  kind: MessageRow["kind"];
+  metadata: string | null;
+  senderName: string | null;
+}
+
+export interface SidechatRunCompletion {
+  message: MessageRow;
+  coordination: SidechatCoordinationSnapshot;
+}
+
+type SidechatCoordinationRow = Pick<
+  ConversationRow,
+  "sidechatStatus" | "sidechatRunId" | "sidechatRevision" | "sidechatUpdatedAt"
+>;
+
+export function toSidechatCoordinationSnapshot(
+  row: SidechatCoordinationRow,
+): SidechatCoordinationSnapshot {
+  return {
+    status: row.sidechatStatus,
+    runId: row.sidechatRunId,
+    revision: row.sidechatRevision,
+    updatedAt: row.sidechatUpdatedAt?.getTime() ?? null,
+  };
+}
+
+function sidechatCoordinationSelection() {
+  return {
+    sidechatStatus: conversations.sidechatStatus,
+    sidechatRunId: conversations.sidechatRunId,
+    sidechatRevision: conversations.sidechatRevision,
+    sidechatUpdatedAt: conversations.sidechatUpdatedAt,
+  };
+}
+
 const EXTERNAL_ACTION_LEASE_MS = 2 * 60 * 1000;
+const SIDECHAT_UPDATE_LOOKBACK_MS = 1_000;
 
 export function buildConversationByIdQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
@@ -222,13 +265,23 @@ export function buildBulkConversationActionQuery(
   action: BulkConversationAction,
   now: Date = new Date(),
 ) {
-  const updates: Partial<ConversationRow> = { updatedAt: now };
+  const updates: {
+    [Key in keyof ConversationRow]?: ConversationRow[Key] | SQL;
+  } = { updatedAt: now };
   const eligibility: SQL[] = [];
 
   switch (action.action) {
     case "archive":
       updates.archivedAt = now;
       updates.purgeStartedAt = null;
+      updates.sidechatStatus = sql`case
+        when ${conversations.sidechatStatus} = 'working' then 'failed'
+        else ${conversations.sidechatStatus}
+      end`;
+      updates.sidechatRunId = null;
+      updates.sidechatLeaseExpiresAt = null;
+      updates.sidechatUpdatedAt = now;
+      updates.sidechatRevision = sql`${conversations.sidechatRevision} + 1`;
       eligibility.push(
         isNull(conversations.archivedAt),
         or(
@@ -946,6 +999,7 @@ export class ChatService {
         sidechatRunId: null,
         sidechatLeaseExpiresAt: null,
         sidechatUpdatedAt: now,
+        sidechatRevision: sql`${conversations.sidechatRevision} + 1`,
         updatedAt: sql`${conversations.updatedAt}`,
       })
       .where(
@@ -979,6 +1033,12 @@ export class ChatService {
   }
 
   async claimSidechatRun(input: ClaimSidechatRunInput): Promise<boolean> {
+    return (await this.claimSidechatRunWithSnapshot(input)) !== null;
+  }
+
+  async claimSidechatRunWithSnapshot(
+    input: ClaimSidechatRunInput,
+  ): Promise<SidechatCoordinationSnapshot | null> {
     const claimed = await this.db
       .update(conversations)
       .set({
@@ -986,6 +1046,7 @@ export class ChatService {
         sidechatRunId: input.runId,
         sidechatLeaseExpiresAt: input.leaseExpiresAt,
         sidechatUpdatedAt: input.now,
+        sidechatRevision: sql`${conversations.sidechatRevision} + 1`,
         updatedAt: sql`${conversations.updatedAt}`,
       })
       .where(
@@ -999,13 +1060,19 @@ export class ChatService {
           ),
         ),
       )
-      .returning({ id: conversations.id });
-    return claimed.length > 0;
+      .returning(sidechatCoordinationSelection());
+    return claimed[0] ? toSidechatCoordinationSnapshot(claimed[0]) : null;
   }
 
   async claimSidechatStartRun(
     input: ClaimSidechatRunInput,
   ): Promise<ClaimSidechatStartRunResult> {
+    return (await this.claimSidechatStartRunWithSnapshot(input)).outcome;
+  }
+
+  async claimSidechatStartRunWithSnapshot(
+    input: ClaimSidechatRunInput,
+  ): Promise<ClaimSidechatStartRunWithSnapshotResult> {
     const claimed = await this.db
       .update(conversations)
       .set({
@@ -1013,6 +1080,7 @@ export class ChatService {
         sidechatRunId: input.runId,
         sidechatLeaseExpiresAt: input.leaseExpiresAt,
         sidechatUpdatedAt: input.now,
+        sidechatRevision: sql`${conversations.sidechatRevision} + 1`,
         updatedAt: sql`${conversations.updatedAt}`,
       })
       .where(
@@ -1037,8 +1105,13 @@ export class ChatService {
           ),
         ),
       )
-      .returning({ id: conversations.id });
-    if (claimed.length > 0) return "claimed";
+      .returning(sidechatCoordinationSelection());
+    if (claimed[0]) {
+      return {
+        outcome: "claimed",
+        coordination: toSidechatCoordinationSnapshot(claimed[0]),
+      };
+    }
 
     const existing = await this.db
       .select({ id: messages.id })
@@ -1050,10 +1123,16 @@ export class ChatService {
         ),
       )
       .limit(1);
-    return existing.length > 0 ? "existing" : "busy";
+    return { outcome: existing.length > 0 ? "existing" : "busy" };
   }
 
   async settleSidechatRun(input: SettleSidechatRunInput): Promise<boolean> {
+    return (await this.settleSidechatRunWithSnapshot(input)) !== null;
+  }
+
+  async settleSidechatRunWithSnapshot(
+    input: SettleSidechatRunInput,
+  ): Promise<SidechatCoordinationSnapshot | null> {
     const settled = await this.db
       .update(conversations)
       .set({
@@ -1061,6 +1140,7 @@ export class ChatService {
         sidechatRunId: null,
         sidechatLeaseExpiresAt: null,
         sidechatUpdatedAt: input.now,
+        sidechatRevision: sql`${conversations.sidechatRevision} + 1`,
         updatedAt: sql`${conversations.updatedAt}`,
       })
       .where(
@@ -1074,8 +1154,81 @@ export class ChatService {
           gt(conversations.sidechatLeaseExpiresAt, input.now),
         ),
       )
-      .returning({ id: conversations.id });
-    return settled.length > 0;
+      .returning(sidechatCoordinationSelection());
+    return settled[0] ? toSidechatCoordinationSnapshot(settled[0]) : null;
+  }
+
+  async completeSidechatRun(
+    input: CompleteSidechatRunInput,
+  ): Promise<SidechatRunCompletion | null> {
+    const insertQuery = buildConditionalSidechatMessageQuery(
+      this.db,
+      {
+        id: crypto.randomUUID(),
+        projectId: input.projectId,
+        conversationId: input.conversationId,
+        runId: input.runId,
+        content: input.content,
+        kind: input.kind,
+        metadata: input.metadata,
+        senderName: input.senderName,
+        senderAvatar: null,
+        userId: null,
+        createdAt: input.now,
+      },
+      "bot",
+    );
+    const settleQuery = this.db
+      .update(conversations)
+      .set({
+        sidechatStatus: input.status,
+        sidechatRunId: null,
+        sidechatLeaseExpiresAt: null,
+        sidechatUpdatedAt: input.now,
+        sidechatRevision: sql`${conversations.sidechatRevision} + 1`,
+        updatedAt: sql`${conversations.updatedAt}`,
+      })
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.projectId, input.projectId),
+          isNull(conversations.archivedAt),
+          eq(conversations.sidechatStatus, "working"),
+          eq(conversations.sidechatRunId, input.runId),
+          isNotNull(conversations.sidechatLeaseExpiresAt),
+          gt(conversations.sidechatLeaseExpiresAt, input.now),
+        ),
+      )
+      .returning(sidechatCoordinationSelection());
+
+    // Cloudflare D1 executes batch() as one SQLite transaction. Both
+    // statements use the same exact-run predicate, so the committed result is
+    // either one private Maven row plus one settlement snapshot, or neither.
+    const [messageRows, coordinationRows] = await this.db.batch([
+      insertQuery,
+      settleQuery,
+    ] as const);
+    const message = messageRows[0];
+    const coordination = coordinationRows[0];
+    if (!message && !coordination) return null;
+    if (!message || !coordination) {
+      throw new Error("Inconsistent atomic Sidechat completion result");
+    }
+    return {
+      message,
+      coordination: toSidechatCoordinationSnapshot(coordination),
+    };
+  }
+
+  async getSidechatCoordinationSnapshot(
+    conversationId: string,
+    projectId: string,
+  ): Promise<SidechatCoordinationSnapshot | null> {
+    const conversation = await this.getOperationalConversationById(
+      conversationId,
+      projectId,
+    );
+    return conversation ? toSidechatCoordinationSnapshot(conversation) : null;
   }
 
   async runExternalActionIfOperational<T>(
@@ -1279,6 +1432,9 @@ export class ChatService {
     >
   > {
     const now = new Date();
+    const sidechatLookback = new Date(
+      Math.max(0, since.getTime() - SIDECHAT_UPDATE_LOOKBACK_MS),
+    );
     // Return the full sidebar-renderable shape (everything except the heavy
     // chatState JSON and the telegram thread id, neither of which the
     // dashboard sidebar consumes). The since filter still bounds the count;
@@ -1286,10 +1442,10 @@ export class ChatService {
     // row means brand-new conversations or off-page conversations can be
     // prepended into the loaded list, instead of being silently dropped.
     //
-    // Gate on updatedAt, not lastActivityAt: every mutation bumps updatedAt
-    // ($onUpdate), so a peer's snooze/flag/block reaches other dashboards'
-    // polls too — those don't touch lastActivityAt and used to stay invisible
-    // until a full refetch. Strict superset: activity bumps both columns.
+    // Public mutations are gated by updatedAt. Private coordination preserves
+    // that public activity clock and uses an inclusive one-second
+    // sidechatUpdatedAt lookback instead; sidechatRevision lets clients dedupe
+    // repeated rows without missing multiple transitions in one D1 second.
     const rows = await this.db
       .select({
         id: conversations.id,
@@ -1305,6 +1461,7 @@ export class ChatService {
         sidechatRunId: conversations.sidechatRunId,
         sidechatLeaseExpiresAt: conversations.sidechatLeaseExpiresAt,
         sidechatUpdatedAt: conversations.sidechatUpdatedAt,
+        sidechatRevision: conversations.sidechatRevision,
         lastActivityAt: conversations.lastActivityAt,
         visitorLastSeenAt: conversations.visitorLastSeenAt,
         visitorPresence: conversations.visitorPresence,
@@ -1322,10 +1479,21 @@ export class ChatService {
       .where(
         and(
           eq(conversations.projectId, projectId),
-          gt(conversations.updatedAt, since),
+          or(
+            gt(conversations.updatedAt, since),
+            gte(conversations.sidechatUpdatedAt, sidechatLookback),
+            and(
+              eq(conversations.sidechatStatus, "working"),
+              isNotNull(conversations.sidechatLeaseExpiresAt),
+              lte(conversations.sidechatLeaseExpiresAt, now),
+            ),
+          ),
         ),
       )
-      .orderBy(desc(conversations.updatedAt))
+      .orderBy(desc(sql`max(
+        ${conversations.updatedAt},
+        coalesce(${conversations.sidechatUpdatedAt}, 0)
+      )`))
       .limit(limit);
     const normalizedRows = await Promise.all(rows.map(async (row) => {
       if (
@@ -1353,6 +1521,7 @@ export class ChatService {
         sidechatRunId: current.sidechatRunId,
         sidechatLeaseExpiresAt: current.sidechatLeaseExpiresAt,
         sidechatUpdatedAt: current.sidechatUpdatedAt,
+        sidechatRevision: current.sidechatRevision,
       };
     }));
     return normalizedRows.filter((row) => row !== null);
@@ -2589,7 +2758,7 @@ export class ChatService {
           gt(conversations.sidechatLeaseExpiresAt, now),
         ),
       );
-    const [rows] = await this.db.batch([insertQuery, activityQuery]);
+    const [rows] = await this.db.batch([insertQuery, activityQuery] as const);
     return rows[0] ?? null;
   }
 

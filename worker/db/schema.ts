@@ -470,6 +470,7 @@ export const conversations = sqliteTable(
     sidechatRunId: text("sidechat_run_id"),
     sidechatLeaseExpiresAt: integer("sidechat_lease_expires_at", { mode: "timestamp" }),
     sidechatUpdatedAt: integer("sidechat_updated_at", { mode: "timestamp" }),
+    sidechatRevision: integer("sidechat_revision").notNull().default(0),
     chatState: text("chat_state"), // JSON string – AI runtime state (separate from metadata)
     lastActivityAt: integer("last_activity_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)

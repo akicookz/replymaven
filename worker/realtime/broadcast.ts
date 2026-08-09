@@ -6,7 +6,7 @@ import {
   type ServerEvent,
   type SidechatMessagePayload,
   type SidechatServerEvent,
-  type SidechatStatus,
+  type SidechatCoordinationSnapshot,
 } from "../../shared/ws-events";
 import { type MessageRow } from "../db";
 
@@ -132,6 +132,8 @@ export function sanitizeSidechatServerEvent(
         conversationId: event.conversationId,
         status: event.status,
         runId: event.runId,
+        revision: event.revision,
+        updatedAt: event.updatedAt,
       };
     default:
       throw new Error("Unsupported sidechat event");
@@ -243,14 +245,13 @@ export function broadcastSidechatStatus(
   env: AppEnv,
   ctx: ExecutionContext,
   conversationId: string,
-  status: SidechatStatus,
-  runId: string | null,
+  snapshot: SidechatCoordinationSnapshot,
 ): void {
   dispatch(
     env,
     ctx,
     conversationId,
-    { type: "sidechat:status", conversationId, status, runId },
+    { type: "sidechat:status", conversationId, ...snapshot },
     { audience: "agents" },
   );
 }

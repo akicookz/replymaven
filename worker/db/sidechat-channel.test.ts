@@ -47,6 +47,10 @@ describe("internal sidechat message channel persistence", () => {
     expect(conversationColumns.sidechatUpdatedAt?.name).toBe(
       "sidechat_updated_at",
     );
+    expect(conversationColumns.sidechatRevision?.name).toBe(
+      "sidechat_revision",
+    );
+    expect(conversationColumns.sidechatRevision?.default).toBe(0);
 
     const channelOrderIndex = messageIndexes.find(
       (index) => index.config.name === "idx_messages_conversation_channel_created",
@@ -98,5 +102,47 @@ describe("internal sidechat message channel persistence", () => {
       }>
     ).map((row) => row.name);
     expect(tableNames).not.toContain("sidechat_threads");
+  });
+
+  test("adds a zero revision to legacy sidechat coordination rows", async () => {
+    const db = new Database(":memory:");
+    db.exec(`CREATE TABLE conversations (
+      id text PRIMARY KEY NOT NULL,
+      sidechat_status text DEFAULT 'idle' NOT NULL,
+      sidechat_run_id text,
+      sidechat_lease_expires_at integer,
+      sidechat_updated_at integer,
+      archived_at integer
+    )`);
+    db.exec(`INSERT INTO conversations (
+      id, sidechat_status, sidechat_run_id,
+      sidechat_lease_expires_at, sidechat_updated_at
+    ) VALUES ('conversation-1', 'working', 'run-1', 10, 1)`);
+    db.exec(`INSERT INTO conversations (
+      id, sidechat_status, sidechat_run_id,
+      sidechat_lease_expires_at, sidechat_updated_at, archived_at
+    ) VALUES ('conversation-archived', 'working', 'run-stale', 10, 1, 2)`);
+
+    const migrationUrl = new URL(
+      "./drizzle/0064_sidechat_coordination_revision.sql",
+      import.meta.url,
+    );
+    const migration = await Bun.file(migrationUrl).text();
+    db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+
+    expect(
+      db.query("SELECT sidechat_revision FROM conversations WHERE id = ?")
+        .get("conversation-1"),
+    ).toEqual({ sidechat_revision: 0 });
+    expect(
+      db.query(`SELECT sidechat_status, sidechat_run_id,
+        sidechat_lease_expires_at, sidechat_revision
+        FROM conversations WHERE id = ?`).get("conversation-archived"),
+    ).toEqual({
+      sidechat_status: "failed",
+      sidechat_run_id: null,
+      sidechat_lease_expires_at: null,
+      sidechat_revision: 1,
+    });
   });
 });

@@ -40,6 +40,21 @@ export type SidechatStatus =
   | "ready"
   | "failed";
 
+export interface SidechatCoordinationSnapshot {
+  status: SidechatStatus;
+  runId: string | null;
+  revision: number;
+  updatedAt: number | null;
+}
+
+export function selectNewerSidechatCoordinationSnapshot(
+  current: SidechatCoordinationSnapshot | null,
+  incoming: SidechatCoordinationSnapshot,
+): SidechatCoordinationSnapshot {
+  if (!current || incoming.revision > current.revision) return incoming;
+  return current;
+}
+
 export interface ReplyDraftSidechatMessageMetadata {
   draft: string;
 }
@@ -80,6 +95,8 @@ export type SidechatServerEvent =
       conversationId: string;
       status: SidechatStatus;
       runId: string | null;
+      revision: number;
+      updatedAt: number | null;
     };
 
 export type ServerEvent =

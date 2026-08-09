@@ -32,7 +32,8 @@ function makeConversation(overrides: Partial<ConversationRow>): ConversationRow 
     customerId: null,
     visitorName: null, visitorEmail: null, status: "active", closeReason: null,
     telegramThreadId: null, metadata: null, sidechatStatus: "idle", sidechatRunId: null,
-    sidechatLeaseExpiresAt: null, sidechatUpdatedAt: null, chatState: null, lastActivityAt: now,
+    sidechatLeaseExpiresAt: null, sidechatUpdatedAt: null, sidechatRevision: 0,
+    chatState: null, lastActivityAt: now,
     visitorLastSeenAt: null, visitorPresence: "active", visitorLastOnlineAt: null,
     snoozedUntil: null, priority: "medium", assigneeId: null,
     archivedAt: null, purgeStartedAt: null, externalActionStartedAt: null,
@@ -132,6 +133,7 @@ function createConversationContinuityService(): {
     sidechat_run_id text,
     sidechat_lease_expires_at integer,
     sidechat_updated_at integer,
+    sidechat_revision integer DEFAULT 0 NOT NULL,
     chat_state text,
     last_activity_at integer DEFAULT (unixepoch()) NOT NULL,
     visitor_last_seen_at integer,
@@ -165,8 +167,16 @@ function createConversationContinuityService(): {
     read_at integer
   )`);
   const sqliteDb = drizzleSqlite(sqlite, { schema });
+  interface BatchQuery {
+    all(): unknown;
+  }
+  const runBatch = sqlite.transaction((queries: BatchQuery[]) =>
+    queries.map((query) => query.all()),
+  );
   Object.assign(sqliteDb, {
-    batch: async (queries: Array<PromiseLike<unknown>>) => Promise.all(queries),
+    async batch(queries: BatchQuery[]) {
+      return runBatch(queries);
+    },
   });
   const db = sqliteDb as unknown as DrizzleD1Database<Record<string, unknown>>;
   return {
@@ -251,6 +261,7 @@ function createDashboardStatsHarness(): {
     sidechat_run_id text,
     sidechat_lease_expires_at integer,
     sidechat_updated_at integer,
+    sidechat_revision integer DEFAULT 0 NOT NULL,
     chat_state text,
     last_activity_at integer DEFAULT (unixepoch()) NOT NULL,
     visitor_last_seen_at integer,
@@ -1004,6 +1015,196 @@ describe("ChatService sidechat run coordination", () => {
     });
   });
 
+  test("atomically inserts and settles one exact unexpired Sidechat completion", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const claimAt = new Date("2026-08-09T12:00:00.000Z");
+    const completedAt = new Date("2026-08-09T12:00:01.000Z");
+    expect(await service.claimSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-current",
+      now: claimAt,
+      leaseExpiresAt: new Date(claimAt.getTime() + 60_000),
+    })).toBe(true);
+
+    const completed = await service.completeSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-current",
+      status: "ready",
+      now: completedAt,
+      content: "Visitor-safe draft",
+      kind: "reply_draft",
+      metadata: '{"draft":"Visitor-safe draft"}',
+      senderName: "Maven",
+    });
+
+    expect(completed).toMatchObject({
+      message: {
+        role: "bot",
+        channel: "sidechat",
+        content: "Visitor-safe draft",
+        kind: "reply_draft",
+      },
+      coordination: {
+        status: "ready",
+        runId: null,
+        revision: 2,
+        updatedAt: completedAt.getTime(),
+      },
+    });
+    expect(sqlite.query(`SELECT sidechat_status, sidechat_run_id,
+      sidechat_lease_expires_at, sidechat_revision, updated_at
+      FROM conversations WHERE id = ?`).get(conversation.id)).toEqual({
+      sidechat_status: "ready",
+      sidechat_run_id: null,
+      sidechat_lease_expires_at: null,
+      sidechat_revision: 2,
+      updated_at: Math.floor(conversation.updatedAt.getTime() / 1_000),
+    });
+  });
+
+  test.each(["expiry", "archive", "takeover"] as const)(
+    "leaves zero Maven rows and zero old-run settlement when %s wins before completion",
+    async (race) => {
+      const { service, sqlite, conversation } = await createTranscriptHarness();
+      const claimAt = new Date("2026-08-09T12:00:00.000Z");
+      const expiresAt = new Date(claimAt.getTime() + 60_000);
+      expect(await service.claimSidechatRun({
+        projectId: conversation.projectId,
+        conversationId: conversation.id,
+        runId: "run-old",
+        now: claimAt,
+        leaseExpiresAt: expiresAt,
+      })).toBe(true);
+
+      let completionAt = new Date(claimAt.getTime() + 1_000);
+      if (race === "expiry") completionAt = expiresAt;
+      if (race === "archive") {
+        await service.bulkUpdateConversations(
+          conversation.projectId,
+          [conversation.id],
+          { action: "archive" },
+          completionAt,
+        );
+      }
+      if (race === "takeover") {
+        sqlite.query("UPDATE conversations SET sidechat_lease_expires_at = 1 WHERE id = ?")
+          .run(conversation.id);
+        expect(await service.claimSidechatRun({
+          projectId: conversation.projectId,
+          conversationId: conversation.id,
+          runId: "run-new",
+          now: completionAt,
+          leaseExpiresAt: new Date(completionAt.getTime() + 60_000),
+        })).toBe(true);
+      }
+
+      expect(await service.completeSidechatRun({
+        projectId: conversation.projectId,
+        conversationId: conversation.id,
+        runId: "run-old",
+        status: "ready",
+        now: completionAt,
+        content: "Must not survive",
+        kind: "reply_draft",
+        metadata: '{"draft":"Must not survive"}',
+        senderName: "Maven",
+      })).toBeNull();
+      expect(sqlite.query(`SELECT count(*) AS total FROM messages
+        WHERE conversation_id = ? AND channel = 'sidechat' AND role = 'bot'`)
+        .get(conversation.id)).toEqual({ total: 0 });
+      expect(sqlite.query(`SELECT sidechat_status, sidechat_run_id
+        FROM conversations WHERE id = ?`).get(conversation.id)).not.toEqual({
+        sidechat_status: "ready",
+        sidechat_run_id: null,
+      });
+    },
+  );
+
+  test("rolls back the Maven row when the batched settlement statement fails", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const claimAt = new Date("2026-08-09T12:00:00.000Z");
+    expect(await service.claimSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-current",
+      now: claimAt,
+      leaseExpiresAt: new Date(claimAt.getTime() + 60_000),
+    })).toBe(true);
+    sqlite.exec(`CREATE TRIGGER fail_sidechat_completion
+      BEFORE UPDATE ON conversations
+      WHEN OLD.id = '${conversation.id}' AND NEW.sidechat_status = 'ready'
+      BEGIN SELECT RAISE(ABORT, 'forced settlement failure'); END`);
+
+    await expect(service.completeSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-current",
+      status: "ready",
+      now: new Date(claimAt.getTime() + 1_000),
+      content: "Must roll back",
+      kind: "reply_draft",
+      metadata: '{"draft":"Must roll back"}',
+      senderName: "Maven",
+    })).rejects.toThrow("forced settlement failure");
+    expect(sqlite.query(`SELECT count(*) AS total FROM messages
+      WHERE conversation_id = ? AND channel = 'sidechat' AND role = 'bot'`)
+      .get(conversation.id)).toEqual({ total: 0 });
+    expect(sqlite.query(`SELECT sidechat_status, sidechat_run_id
+      FROM conversations WHERE id = ?`).get(conversation.id)).toEqual({
+      sidechat_status: "working",
+      sidechat_run_id: "run-current",
+    });
+  });
+
+  test("archive revocation survives unarchive and rejects the stale completion", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const claimAt = new Date("2026-08-09T12:00:00.000Z");
+    expect(await service.claimSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-revoked",
+      now: claimAt,
+      leaseExpiresAt: new Date(claimAt.getTime() + 60_000),
+    })).toBe(true);
+    await service.bulkUpdateConversations(
+      conversation.projectId,
+      [conversation.id],
+      { action: "archive" },
+      new Date(claimAt.getTime() + 1_000),
+    );
+    await service.bulkUpdateConversations(
+      conversation.projectId,
+      [conversation.id],
+      { action: "unarchive" },
+      new Date(claimAt.getTime() + 2_000),
+    );
+
+    expect(await service.completeSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-revoked",
+      status: "ready",
+      now: new Date(claimAt.getTime() + 3_000),
+      content: "Stale output",
+      kind: "text",
+      metadata: null,
+      senderName: "Maven",
+    })).toBeNull();
+    expect(sqlite.query(`SELECT archived_at, sidechat_status, sidechat_run_id,
+      sidechat_lease_expires_at, sidechat_revision FROM conversations WHERE id = ?`)
+      .get(conversation.id)).toEqual({
+      archived_at: null,
+      sidechat_status: "failed",
+      sidechat_run_id: null,
+      sidechat_lease_expires_at: null,
+      sidechat_revision: 2,
+    });
+    expect(sqlite.query("SELECT count(*) AS total FROM messages").get())
+      .toEqual({ total: 0 });
+  });
+
   test("settlement loses atomically to lease expiry and archival", async () => {
     const expired = await createTranscriptHarness();
     const claimAt = new Date("2026-08-09T12:00:00.000Z");
@@ -1124,6 +1325,47 @@ describe("ChatService sidechat run coordination", () => {
       sidechatStatus: "failed",
       sidechatRunId: null,
       sidechatLeaseExpiresAt: null,
+    });
+  });
+
+  test("incremental updates include same-second Sidechat-only revisions", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    sqlite.query(`UPDATE conversations SET
+      updated_at = 100, sidechat_status = 'ready', sidechat_run_id = NULL,
+      sidechat_lease_expires_at = NULL, sidechat_updated_at = 200,
+      sidechat_revision = 5 WHERE id = ?`).run(conversation.id);
+
+    const rows = await service.getConversationUpdatesSince(
+      conversation.projectId,
+      new Date(200_000),
+    );
+
+    expect(rows.find((row) => row.id === conversation.id)).toMatchObject({
+      sidechatStatus: "ready",
+      sidechatRunId: null,
+      sidechatUpdatedAt: new Date(200_000),
+      sidechatRevision: 5,
+      updatedAt: new Date(100_000),
+    });
+  });
+
+  test("incremental updates recover expired runs older than the poll cursor", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    sqlite.query(`UPDATE conversations SET
+      updated_at = 1, sidechat_status = 'working', sidechat_run_id = 'run-old',
+      sidechat_lease_expires_at = 1, sidechat_updated_at = 1,
+      sidechat_revision = 6 WHERE id = ?`).run(conversation.id);
+
+    const rows = await service.getConversationUpdatesSince(
+      conversation.projectId,
+      new Date(Date.now() - 1_000),
+    );
+
+    expect(rows.find((row) => row.id === conversation.id)).toMatchObject({
+      sidechatStatus: "failed",
+      sidechatRunId: null,
+      sidechatLeaseExpiresAt: null,
+      sidechatRevision: 7,
     });
   });
 
