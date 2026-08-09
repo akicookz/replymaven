@@ -216,8 +216,6 @@ export default function Composer(props: ComposerProps) {
       e.preventDefault();
       if (shiftTabIntent === "start_sidechat" && mode?.kind === "public") {
         mode.onStartSidechat();
-      } else if (shiftTabIntent === "legacy_compose") {
-        legacyOnCompose?.();
       }
       return;
     }

@@ -4,7 +4,7 @@ import type { MessageRole, SidechatMessageKind } from "./types";
 export type ChatPerspective = "public" | "sidechat";
 export type SidechatPaneMode = "desktop" | "compact" | "mobile";
 export type ComposerContract = "legacy" | ChatPerspective;
-export type ComposerShiftTabIntent = "legacy_compose" | "start_sidechat";
+export type ComposerShiftTabIntent = "start_sidechat";
 
 interface ComposerKeyboardInput {
   contract: ComposerContract;
@@ -95,7 +95,6 @@ export function deriveComposerShiftTabIntent(
     return null;
   }
   if (input.contract === "public") return "start_sidechat";
-  if (input.contract === "legacy" && input.hasDraft) return "legacy_compose";
   return null;
 }
 

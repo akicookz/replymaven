@@ -130,7 +130,7 @@ describe("composer keyboard intent", () => {
     ).toBe("start_sidechat");
   });
 
-  test("keeps the legacy Compose shortcut text-gated and private", () => {
+  test("never captures Shift+Tab for the legacy Compose contract", () => {
     expect(
       deriveComposerShiftTabIntent({
         ...baseShortcut,
@@ -144,7 +144,7 @@ describe("composer keyboard intent", () => {
         contract: "legacy",
         hasDraft: true,
       }),
-    ).toBe("legacy_compose");
+    ).toBeNull();
   });
 
   test("ignores composing, repeated, modified, and non-Shift+Tab events", () => {

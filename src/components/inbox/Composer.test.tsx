@@ -164,6 +164,34 @@ describe("Composer contracts", () => {
     expect(prevented).toBe(false);
   });
 
+  test("filled legacy mode leaves Shift+Tab untouched while Compose remains clickable", async () => {
+    let composeCalls = 0;
+    const { dom } = await renderNode(
+      <Composer
+        {...composerBaseProps()}
+        draft="Investigate this first"
+        onCompose={() => {
+          composeCalls += 1;
+        }}
+        composing={false}
+      />,
+    );
+    const textarea = dom.window.document.querySelector("textarea")!;
+    let prevented = false;
+    invokeTextareaKeyDown(textarea, shiftTabEvent(() => {
+      prevented = true;
+    }));
+    expect(composeCalls).toBe(0);
+    expect(prevented).toBe(false);
+
+    const composeButton = Array.from(
+      dom.window.document.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.includes("Compose"));
+    expect(composeButton).toBeDefined();
+    await act(async () => composeButton?.click());
+    expect(composeCalls).toBe(1);
+  });
+
   test("real public mode renders Start/Open and accepts empty unmodified Shift+Tab", async () => {
     let sidechatCalls = 0;
     const { dom } = await renderNode(
