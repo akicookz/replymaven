@@ -66,6 +66,8 @@ interface HttpExecutionOutcome {
   errorMessage: string | null;
 }
 
+type HttpAbortCause = "caller" | "timeout";
+
 const BLOCKED_HOST_PATTERNS = [
   /^localhost$/i,
   /^127\.\d+\.\d+\.\d+$/,
@@ -198,16 +200,38 @@ async function executeHttpToolWithOutcome(
 
   const timeout = toolDef.timeout ?? 10000;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  let abortCause: HttpAbortCause | null = null;
+
+  function abortExecution(cause: HttpAbortCause, reason?: unknown): void {
+    if (controller.signal.aborted) return;
+    abortCause = cause;
+    controller.abort(reason);
+  }
+
+  const timeoutId = setTimeout(
+    () => abortExecution("timeout", new DOMException("Timed out", "AbortError")),
+    timeout,
+  );
   let fetchStarted = false;
 
   function abortFromParent(): void {
-    controller.abort();
+    abortExecution("caller", abortSignal?.reason);
   }
   abortSignal?.addEventListener("abort", abortFromParent, { once: true });
-  if (abortSignal?.aborted) controller.abort();
+  if (abortSignal?.aborted) abortFromParent();
 
   try {
+    if (abortCause === "caller") {
+      return {
+        result: { error: "Tool execution cancelled by caller" },
+        attemptedFetch: false,
+        duration: Date.now() - startedAt,
+        httpStatus: null,
+        status: "error",
+        errorMessage: "Tool execution cancelled by caller",
+      };
+    }
+
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
@@ -317,7 +341,19 @@ async function executeHttpToolWithOutcome(
       };
     }
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
+    if (abortCause === "caller") {
+      const errorMessage = "Tool execution cancelled by caller";
+      return {
+        result: { error: errorMessage },
+        attemptedFetch: fetchStarted,
+        duration: Date.now() - startedAt,
+        httpStatus: null,
+        status: "error",
+        errorMessage,
+      };
+    }
+
+    if (abortCause === "timeout") {
       const errorMessage = `Tool execution timed out after ${timeout}ms`;
       return {
         result: { error: errorMessage },

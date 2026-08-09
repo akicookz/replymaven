@@ -93,4 +93,56 @@ describe("parsePendingContactReply", () => {
       remainingFields: ["name"],
     });
   });
+
+  test.each(["Reset Password", "Need More Help", "Please Continue"])(
+    "does not persist title-cased support language as a name: %s",
+    (message) => {
+      expect(parsePendingContactReply(message, ["name"])).toEqual({
+        visitorName: null,
+        visitorEmail: null,
+        contactDeclined: false,
+        remainingFields: ["name"],
+      });
+    },
+  );
+
+  test.each([
+    "Reset Password alice@example.com",
+    "Need More Help alice@example.com",
+    "Please Continue alice@example.com",
+  ])(
+    "does not persist title-cased support language before an email as a name: %s",
+    (message) => {
+      expect(parsePendingContactReply(message, ["name", "email"])).toEqual({
+        visitorName: null,
+        visitorEmail: "alice@example.com",
+        contactDeclined: false,
+        remainingFields: ["name"],
+      });
+    },
+  );
+
+  test.each(["I am locked out", "I am not sure"])(
+    "does not treat an ordinary I am statement as a name: %s",
+    (message) => {
+      expect(parsePendingContactReply(message, ["name"])).toEqual({
+        visitorName: null,
+        visitorEmail: null,
+        contactDeclined: false,
+        remainingFields: ["name"],
+      });
+    },
+  );
+
+  test.each([
+    "I don't want to reset my password",
+    "I will not continue until this is fixed",
+  ])("does not treat ordinary support intent as contact refusal: %s", (message) => {
+    expect(parsePendingContactReply(message, ["name", "email"])).toEqual({
+      visitorName: null,
+      visitorEmail: null,
+      contactDeclined: false,
+      remainingFields: ["name", "email"],
+    });
+  });
 });

@@ -269,3 +269,81 @@ The direct production build transformed 2,186 Worker/SSR modules and 3,271 clien
 ### Independent review and concerns
 
 The independent re-review traced the final implementation clean after the combined-email parser fix. No open Fix Round 1 code concern remains. The contact parser is intentionally conservative: lowercase names without a `Name:`/`My name is` style prefix remain pending rather than being inferred. The existing Vite large-chunk advisory remains unrelated. No deploy or push was performed.
+
+## Fix Round 2
+
+### Scoped changes
+
+- Tightened pending-contact parsing to require deterministic contact evidence. An unprefixed name is now one capitalized name token; multiword names require `Name:`/`Name is`/`My name is`. Generic `I am` statements are never name prefixes. Contact refusal requires a refusal verb or `continue without` clause whose object is explicitly contact details, information, email, or name.
+- Distinguished the first abort source in HTTP execution. An already-aborted caller returns `Tool execution cancelled by caller` before permit/fetch/audit. A caller abort after fetch starts creates exactly one error audit row and never uses timeout status/text. Only the executor timer produces `timeout` and `Tool execution timed out after ...`.
+
+### TDD evidence
+
+The parser and cancellation regressions were added before production changes:
+
+```sh
+bun test worker/chat-runtime/routing/pending-contact-reply.test.ts worker/chat-runtime/tools/build-maven-tool-registry.test.ts
+```
+
+RED result:
+
+```text
+39 pass
+12 fail
+90 expect() calls
+```
+
+The 12 failures were the six title-cased support phrases with/without email, two ordinary `I am` statements, two non-contact refusal phrases, and already-aborted/mid-flight caller cancellation both being reported as `Tool execution timed out after 30000ms`. The executor-timer control passed while RED, proving the regression distinguished the two sources rather than broadly disabling timeout behavior.
+
+GREEN result for the same command:
+
+```text
+51 pass
+0 fail
+98 expect() calls
+```
+
+Relevant contact/CAS/tool/audit/no-replay verification:
+
+```sh
+bun test worker/chat-runtime/routing/pending-contact-reply.test.ts worker/chat-runtime/tools/build-maven-tool-registry.test.ts worker/chat-runtime/tools/internal/request-team-help.test.ts worker/chat-runtime/orchestration/handle-widget-message-turn.test.ts worker/chat-runtime/orchestration/run-maven-turn.test.ts worker/services/chat-service.test.ts worker/services/tool-service.test.ts
+```
+
+```text
+180 pass
+0 fail
+559 expect() calls
+Ran 180 tests across 7 files.
+```
+
+Fresh broad verification:
+
+```sh
+bun test worker shared
+```
+
+```text
+343 pass
+0 fail
+1020 expect() calls
+Ran 343 tests across 47 files.
+```
+
+### Static verification
+
+All commands completed with exit code 0 and no diagnostics:
+
+```sh
+bun ./node_modules/typescript/bin/tsc -p tsconfig.worker.json --noEmit
+bun ./node_modules/typescript/bin/tsc -b --pretty false
+bun ./node_modules/eslint/bin/eslint.js worker/chat-runtime/routing/pending-contact-reply.test.ts worker/chat-runtime/routing/pending-contact-reply.ts worker/chat-runtime/tools/build-maven-tool-registry.test.ts worker/chat-runtime/tools/http-tool-executor.ts
+git diff --check
+```
+
+### Safety review and concerns
+
+- The legitimate full (`Alice, alice@example.com`), email-only partial, explicit short-name, explicit refusal, and two-turn request/resume/refusal paths remain covered. Contact updates still use the existing exact ownership CAS; this round changes only deterministic parsing.
+- `Reset Password`, `Need More Help`, and `Please Continue` stay ordinary support text with or without email. `I am locked out` and `I am not sure` stay ordinary support statements. Password/reset and wait-until-fixed intent do not set `contactDeclined`.
+- Abort cause is first-wins: a later caller abort cannot relabel an executor timeout and a later timer cannot relabel caller cancellation. Listener/timer cleanup remains in `finally`.
+- Already-aborted execution consumes no HTTP permit and creates no fetch or audit row. Mid-flight caller cancellation has one actual fetch and one error audit row. The executor timer retains one fetch, one timeout audit, and the existing timeout message. Tool commitment still suppresses provider fallback replay.
+- The parser is intentionally conservative: an unprefixed multiword name remains pending and should be supplied with an explicit name prefix. No model classification, planner branch, push, or deployment was added.

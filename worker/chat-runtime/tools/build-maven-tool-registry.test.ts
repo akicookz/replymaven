@@ -75,12 +75,14 @@ async function executeRegisteredTool(
   callbacks: {
     onStart?: (event: SafeToolActivity) => void;
     onFinish?: (event: SafeToolActivity) => void;
+    abortSignal?: AbortSignal;
   } = {},
 ): Promise<unknown> {
+  const { abortSignal, ...activityCallbacks } = callbacks;
   const { tools } = buildMavenToolRegistry({
     context,
     definitions: [definition],
-    ...callbacks,
+    ...activityCallbacks,
   });
   const registered = tools[definition.capability.modelName];
   if (!registered || typeof registered.execute !== "function") {
@@ -90,6 +92,7 @@ async function executeRegisteredTool(
   return registered.execute(input, {
     toolCallId: "test-call",
     messages: [],
+    abortSignal,
   });
 }
 
@@ -700,6 +703,188 @@ describe("createHttpToolDefinition", () => {
 
     expect(result).toMatchObject({ success: true, httpStatus: 200 });
     expect(fetchCount).toBe(1);
+  });
+
+  test("does not fetch or audit an already-aborted caller as a timeout", async () => {
+    let fetchCount = 0;
+    let permitCount = 0;
+    const auditRows: Array<Record<string, unknown>> = [];
+    const authoritative = createToolRow({ timeout: 30_000 });
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: authoritative,
+      toolService: {
+        async getAuthoritativeTool() {
+          return { ...authoritative };
+        },
+        async logExecution(data: Record<string, unknown>) {
+          auditRows.push(data);
+          return { id: "execution-aborted" };
+        },
+      },
+      encryptionKey: "00".repeat(32),
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches(
+            _conversationId: string,
+            _projectId: string,
+            _ownership: unknown,
+            action: () => Promise<unknown>,
+          ) {
+            return { executed: true, value: await action() };
+          },
+        },
+        acquireRateLimitPermit() {
+          permitCount += 1;
+          return true;
+        },
+      },
+    } as never);
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      throw new DOMException("Aborted", "AbortError");
+    };
+    const caller = new AbortController();
+    caller.abort(new DOMException("Visitor disconnected", "AbortError"));
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("public"),
+      { accountId: "account-1" },
+      { abortSignal: caller.signal },
+    );
+
+    expect(result).toEqual({ error: "Tool execution cancelled by caller" });
+    expect(fetchCount).toBe(0);
+    expect(permitCount).toBe(0);
+    expect(auditRows).toHaveLength(0);
+  });
+
+  test("audits one mid-flight caller cancellation as an error, not a timeout", async () => {
+    const auditRows: Array<Record<string, unknown>> = [];
+    const authoritative = createToolRow({ timeout: 30_000 });
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: authoritative,
+      toolService: {
+        async getAuthoritativeTool() {
+          return { ...authoritative };
+        },
+        async logExecution(data: Record<string, unknown>) {
+          auditRows.push(data);
+          return { id: "execution-cancelled" };
+        },
+      },
+      encryptionKey: "00".repeat(32),
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches(
+            _conversationId: string,
+            _projectId: string,
+            _ownership: unknown,
+            action: () => Promise<unknown>,
+          ) {
+            return { executed: true, value: await action() };
+          },
+        },
+        acquireRateLimitPermit: () => true,
+      },
+    } as never);
+    let markFetchStarted = () => {};
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    let fetchCount = 0;
+    globalThis.fetch = async (_input, init) => {
+      fetchCount += 1;
+      markFetchStarted();
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      });
+    };
+    const caller = new AbortController();
+
+    const execution = executeRegisteredTool(
+      definition,
+      createContext("public"),
+      { accountId: "account-1" },
+      { abortSignal: caller.signal },
+    );
+    await fetchStarted;
+    caller.abort(new DOMException("Visitor disconnected", "AbortError"));
+    const result = await execution;
+
+    expect(result).toEqual({ error: "Tool execution cancelled by caller" });
+    expect(fetchCount).toBe(1);
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({
+      status: "error",
+      httpStatus: null,
+      errorMessage: "Tool execution cancelled by caller",
+      output: { error: "Tool execution cancelled by caller" },
+    });
+    expect(JSON.stringify(auditRows[0])).not.toContain("timed out");
+    expect(JSON.stringify(auditRows[0])).not.toContain("30000ms");
+  });
+
+  test("retains executor timeout auditing for the executor timer", async () => {
+    const auditRows: Array<Record<string, unknown>> = [];
+    const authoritative = createToolRow({ timeout: 1 });
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: authoritative,
+      toolService: {
+        async getAuthoritativeTool() {
+          return { ...authoritative };
+        },
+        async logExecution(data: Record<string, unknown>) {
+          auditRows.push(data);
+          return { id: "execution-timeout" };
+        },
+      },
+      encryptionKey: "00".repeat(32),
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches(
+            _conversationId: string,
+            _projectId: string,
+            _ownership: unknown,
+            action: () => Promise<unknown>,
+          ) {
+            return { executed: true, value: await action() };
+          },
+        },
+        acquireRateLimitPermit: () => true,
+      },
+    } as never);
+    globalThis.fetch = async (_input, init) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      });
+    };
+
+    const result = await executeRegisteredTool(
+      definition,
+      createContext("public"),
+      { accountId: "account-1" },
+    );
+
+    expect(result).toEqual({ error: "Tool execution timed out after 1ms" });
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({
+      status: "timeout",
+      httpStatus: null,
+      errorMessage: "Tool execution timed out after 1ms",
+    });
   });
 
   test("does not constrain a sidechat HTTP execution with public ownership", async () => {
