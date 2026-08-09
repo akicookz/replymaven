@@ -117,6 +117,10 @@ export type MavenStreamPart =
     | { type: "finish-step"; finishReason: string }
     | { type: string; [key: string]: unknown };
 
+export type MavenArtifact =
+  | { type: "reply_draft"; draft: string }
+  | null;
+
 export interface SupportAgentResult {
   fullStream: AsyncIterable<MavenStreamPart>;
 }
@@ -505,9 +509,25 @@ export function toToolDefinition(tool: ToolRow): SupportToolDefinition {
 
 export function toSdkConversationMessages(
   conversationHistory: ConversationTurnMessage[],
+  channel: MavenChannel,
 ): ModelMessage[] {
-  return conversationHistory.map((message) => ({
-    role: message.role === "visitor" ? "user" : "assistant",
-    content: message.content,
-  }));
+  return conversationHistory.map((message) => {
+    if (channel === "public") {
+      if (message.role === "visitor") {
+        return { role: "user", content: message.content };
+      }
+      if (message.role === "bot" || message.role === "agent") {
+        return { role: "assistant", content: message.content };
+      }
+      throw new Error(`Invalid public conversation role: ${message.role}`);
+    }
+
+    if (message.role === "agent") {
+      return { role: "user", content: message.content };
+    }
+    if (message.role === "bot") {
+      return { role: "assistant", content: message.content };
+    }
+    throw new Error(`Invalid sidechat conversation role: ${message.role}`);
+  });
 }

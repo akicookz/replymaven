@@ -786,6 +786,117 @@ describe("runMavenTurn", () => {
     expect(JSON.stringify(fake.calls[0]?.tools)).not.toContain(
       "request_team_help",
     );
+    expect(JSON.stringify(fake.calls[0]?.tools)).toContain(
+      "present_reply_draft",
+    );
+  });
+
+  test("publishes the latest successful sidechat draft only after its stream is consumed", async () => {
+    const fake = createFakeModel([
+      createToolStep("present_reply_draft", "draft-1", {
+        draft: "First visitor-facing draft.",
+      }),
+      createToolStep("present_reply_draft", "draft-2", {
+        draft: "Final visitor-facing draft.",
+      }),
+      createTextStep("I prepared a reply draft for review."),
+    ]);
+    const dependencies = createDependencies({
+      model: fake.model,
+      calls: fake.calls,
+      httpTool: null,
+    });
+
+    const turn = await runMavenTurn({
+      context: {
+        ...createContext(),
+        channel: "sidechat",
+        actorUserId: "agent-1",
+      },
+      dependencies,
+      conversationHistory: [],
+      currentMessage: "Draft a reply for the visitor.",
+    });
+
+    for await (const part of turn.fullStream) {
+      void part;
+    }
+
+    expect(fake.calls).toHaveLength(3);
+    expect(turn.artifact).toEqual({
+      type: "reply_draft",
+      draft: "Final visitor-facing draft.",
+    });
+  });
+
+  test("keeps sidechat draft state local to each returned turn", async () => {
+    const fake = createFakeModel([
+      createToolStep("present_reply_draft", "draft-first-turn", {
+        draft: "Draft from the first turn.",
+      }),
+      createTextStep("First turn complete."),
+      createTextStep("Second turn has guidance only."),
+    ]);
+    const dependencies = createDependencies({
+      model: fake.model,
+      calls: fake.calls,
+      httpTool: null,
+    });
+    const context = {
+      ...createContext(),
+      channel: "sidechat" as const,
+      actorUserId: "agent-1",
+    };
+
+    const firstTurn = await runMavenTurn({
+      context,
+      dependencies,
+      conversationHistory: [],
+      currentMessage: "Draft a response.",
+    });
+    for await (const part of firstTurn.fullStream) {
+      void part;
+    }
+
+    const secondTurn = await runMavenTurn({
+      context,
+      dependencies,
+      conversationHistory: [],
+      currentMessage: "Investigate without drafting.",
+    });
+    for await (const part of secondTurn.fullStream) {
+      void part;
+    }
+
+    expect(firstTurn.artifact).toEqual({
+      type: "reply_draft",
+      draft: "Draft from the first turn.",
+    });
+    expect(secondTurn.artifact).toBeNull();
+  });
+
+  test("never exposes the sidechat draft tool in a public turn", async () => {
+    const fake = createFakeModel([createTextStep("Public answer.")]);
+    const dependencies = createDependencies({
+      model: fake.model,
+      calls: fake.calls,
+      httpTool: null,
+    });
+
+    const turn = await runMavenTurn({
+      context: createContext(),
+      dependencies,
+      conversationHistory: [],
+      currentMessage: "Please help.",
+    });
+    for await (const part of turn.fullStream) {
+      void part;
+    }
+
+    expect(JSON.stringify(fake.calls[0]?.tools)).not.toContain(
+      "present_reply_draft",
+    );
+    expect(turn.artifact).toBeNull();
   });
 
   test("searches repeatedly, calls HTTP, and composes final text in one agent loop", async () => {

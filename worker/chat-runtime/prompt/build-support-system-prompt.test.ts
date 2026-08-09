@@ -9,6 +9,13 @@ const settings = {
   agentName: "an engineer",
 };
 
+const sidechatReplyDraftDisclosure = `This is a private conversation with the human support agent. Use private customer
+context to reason, but never dump raw records, identifiers, internal links,
+metadata, credentials, tool arguments, or complete tool results. Mention only
+the minimum customer-safe fact needed in a proposed visitor reply. When a reply
+is ready, call present_reply_draft with exactly the text the visitor should see.
+Do not send it and do not claim the human approved it.`;
+
 test("RESOLVED machine token is unavailable for a human-owned AI turn", () => {
   const assisting = buildSupportSystemPrompt(settings, "Acme", "", "", {
     aiParticipation: "assist_until_agent",
@@ -83,6 +90,27 @@ test("adds the trusted Maven channel contract to the common prompt", () => {
   expect(sidechatPrompt).not.toContain("Your job is to help visitors");
   expect(sidechatPrompt).not.toContain("request_team_help");
   expect(sidechatPrompt).not.toContain("[RESOLVED]");
+});
+
+test("discloses structured reply drafts only in the private sidechat prompt", () => {
+  const sidechatPrompt = buildSupportSystemPrompt(settings, "Acme", "", "", {
+    channel: "sidechat",
+  });
+  const publicPrompt = buildSupportSystemPrompt(settings, "Acme", "", "", {
+    channel: "public",
+  });
+  const defaultPublicPrompt = buildSupportSystemPrompt(
+    settings,
+    "Acme",
+    "",
+    "",
+  );
+
+  expect(sidechatPrompt).toContain(sidechatReplyDraftDisclosure);
+  expect(publicPrompt).not.toContain(sidechatReplyDraftDisclosure);
+  expect(defaultPublicPrompt).not.toContain(sidechatReplyDraftDisclosure);
+  expect(publicPrompt).not.toContain("present_reply_draft");
+  expect(defaultPublicPrompt).not.toContain("present_reply_draft");
 });
 
 test("frames populated sidechat sections as private evidence for the human agent", () => {

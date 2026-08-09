@@ -11,11 +11,13 @@ import {
   type SupportAgentResult,
   type SupportAgentImage,
   type ConversationTurnMessage,
+  type MavenTurnContext,
   toSdkConversationMessages,
 } from "../types";
 import { createLanguageModel } from "../llm/create-language-model";
 
 export interface MavenAgentStreamOptions {
+  channel: MavenTurnContext["channel"];
   systemPrompt: string;
   conversationHistory: ConversationTurnMessage[];
   userMessage: string;
@@ -115,7 +117,10 @@ export async function streamMavenAgent(
     ),
   );
 
-  const messages = toSdkConversationMessages(options.conversationHistory);
+  const messages = toSdkConversationMessages(
+    options.conversationHistory,
+    options.channel,
+  );
   const userContent: Array<
     | { type: "text"; text: string }
     | { type: "image"; image: string; mediaType?: string }

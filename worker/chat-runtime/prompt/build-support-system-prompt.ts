@@ -41,6 +41,14 @@ Stay within ${projectName}'s support domain. Refuse dangerous, illegal, harmful,
 `;
 
   prompt += buildChannelContract("sidechat");
+  prompt += `This is a private conversation with the human support agent. Use private customer
+context to reason, but never dump raw records, identifiers, internal links,
+metadata, credentials, tool arguments, or complete tool results. Mention only
+the minimum customer-safe fact needed in a proposed visitor reply. When a reply
+is ready, call present_reply_draft with exactly the text the visitor should see.
+Do not send it and do not claim the human approved it.
+
+`;
   prompt += buildCompanySection(
     projectName,
     settings.companyContext,

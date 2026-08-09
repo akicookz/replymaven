@@ -17,6 +17,7 @@ import { getSourceReferenceDedupKey } from "../retrieval/build-rag-context";
 import { MavenStreamFailure } from "../streaming/maven-stream-failure";
 import {
   type ConversationTurnMessage,
+  type MavenArtifact,
   type MavenStreamPart,
   type MavenTurnContext,
   type SupportAgentImage,
@@ -28,6 +29,7 @@ import {
   type SafeToolActivity,
 } from "../tools/build-maven-tool-registry";
 import { createHttpToolDefinition } from "../tools/http-tool-executor";
+import { createPresentReplyDraftTool } from "../tools/internal/present-reply-draft";
 import { createRequestTeamHelpTool } from "../tools/internal/request-team-help";
 import { createSearchKnowledgeTool } from "../tools/internal/search-knowledge";
 
@@ -62,6 +64,7 @@ export interface MavenPublicToolDependencies {
 
 export interface MavenTurnResult {
   fullStream: AsyncIterable<MavenStreamPart>;
+  artifact: MavenArtifact;
   collectedSources: SourceReference[];
   toolActivity: SafeToolActivity[];
   httpExecutionIds: string[];
@@ -165,6 +168,7 @@ export async function runMavenTurn(options: {
   const collectedSourceKeys = new Set<string>();
   const toolActivity: SafeToolActivity[] = [];
   const httpExecutionIds: string[] = [];
+  let artifact: MavenArtifact = null;
   let visibleTextStarted = false;
   let toolExecutionCommitted = false;
 
@@ -222,6 +226,18 @@ export async function runMavenTurn(options: {
     }),
     ...httpDefinitions,
   ];
+  if (options.context.channel === "sidechat") {
+    definitions.splice(
+      1,
+      0,
+      createPresentReplyDraftTool({
+        context: options.context,
+        recordDraft(draft) {
+          artifact = { type: "reply_draft", draft };
+        },
+      }),
+    );
+  }
   if (options.context.channel === "public") {
     if (!publicDependencies) {
       throw new Error("Public Maven turns require public tool dependencies");
@@ -279,6 +295,7 @@ export async function runMavenTurn(options: {
           createModel: options.dependencies.createModel,
         },
         {
+          channel: options.context.channel,
           systemPrompt,
           conversationHistory: options.conversationHistory,
           userMessage: options.currentMessage,
@@ -304,6 +321,9 @@ export async function runMavenTurn(options: {
 
   return {
     fullStream: agentResult.fullStream,
+    get artifact(): MavenArtifact {
+      return artifact;
+    },
     collectedSources,
     toolActivity,
     httpExecutionIds,
