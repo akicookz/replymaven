@@ -5,6 +5,7 @@ import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { schema } from "../db";
 import {
   buildAiResolutionQuery,
+  buildAcceptedTeamRequestSummaryQuery,
   buildActiveConversationByVisitorQuery,
   buildBanSweepQuery,
   buildConditionalBotMessageQuery,
@@ -29,7 +30,8 @@ function makeConversation(overrides: Partial<ConversationRow>): ConversationRow 
     id: "conv-1", projectId: "project-1", visitorId: "visitor-1",
     customerId: null,
     visitorName: null, visitorEmail: null, status: "active", closeReason: null,
-    telegramThreadId: null, metadata: null, chatState: null, lastActivityAt: now,
+    telegramThreadId: null, metadata: null, sidechatStatus: "idle", sidechatRunId: null,
+    sidechatLeaseExpiresAt: null, sidechatUpdatedAt: null, chatState: null, lastActivityAt: now,
     visitorLastSeenAt: null, visitorPresence: "active", visitorLastOnlineAt: null,
     snoozedUntil: null, priority: "medium", assigneeId: null,
     archivedAt: null, purgeStartedAt: null, externalActionStartedAt: null,
@@ -53,6 +55,11 @@ function createDeferred(): Deferred {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function expectLegacyMessageProjection(sql: string, params: unknown[]): void {
+  expect(sql).toContain('null as "message_metadata"');
+  expect(params).toEqual(expect.arrayContaining(["public", "text"]));
 }
 
 class BarrierChatService extends ChatService {
@@ -107,6 +114,10 @@ function createConversationContinuityService(): {
     close_reason text,
     telegram_thread_id text,
     metadata text,
+    sidechat_status text DEFAULT 'idle' NOT NULL,
+    sidechat_run_id text,
+    sidechat_lease_expires_at integer,
+    sidechat_updated_at integer,
     chat_state text,
     last_activity_at integer DEFAULT (unixepoch()) NOT NULL,
     visitor_last_seen_at integer,
@@ -594,6 +605,7 @@ describe("ChatService ownership and atomic writes", () => {
     expect(sql).toContain('"conversations"."chat_state" = ?');
     expect(sql).toContain('"conversations"."archived_at" is null');
     expect(params).toEqual(expect.arrayContaining(["waiting_agent", '{"ownershipRevision":2}']));
+    expectLegacyMessageProjection(sql, params);
   });
 
   test("inserts visitor output only while the conversation is operational", () => {
@@ -613,6 +625,7 @@ describe("ChatService ownership and atomic writes", () => {
     expect(sql).toContain('"conversations"."project_id" = ?');
     expect(sql).toContain('"conversations"."archived_at" is null');
     expect(params).toEqual(expect.arrayContaining(["conv-1", "project-1"]));
+    expectLegacyMessageProjection(sql, params);
   });
 
   test("does not append system history after archival", () => {
@@ -629,6 +642,7 @@ describe("ChatService ownership and atomic writes", () => {
 
     expect(sql).toContain('"conversations"."archived_at" is null');
     expect(params).toContain("conv-1");
+    expectLegacyMessageProjection(sql, params);
   });
 
   test("does not append an agent reply after archival", () => {
@@ -646,6 +660,19 @@ describe("ChatService ownership and atomic writes", () => {
     expect(sql).toContain('"conversations"."project_id" = ?');
     expect(sql).toContain('"conversations"."archived_at" is null');
     expect(params).toEqual(expect.arrayContaining(["conv-1", "project-1"]));
+    expectLegacyMessageProjection(sql, params);
+  });
+
+  test("keeps team-request summaries in the legacy public text message shape", () => {
+    const { sql, params } = buildAcceptedTeamRequestSummaryQuery(
+      drizzle({} as never),
+      "conv-1",
+      "project-1",
+      "acceptance-1",
+      new Date("2026-08-01T00:00:00.000Z"),
+    ).toSQL();
+
+    expectLegacyMessageProjection(sql, params);
   });
 
   test("takes ownership and advances the JSON revision in one update", () => {
@@ -1546,7 +1573,7 @@ describe("ChatService tenant and AI ownership guards", () => {
     });
   });
 
-  test("includes customer identity in incremental inbox updates", async () => {
+  test("includes customer identity and sidechat coordination in incremental inbox updates", async () => {
     let selectedKeys: string[] = [];
     const db = {
       select: (projection: Record<string, unknown>) => {
@@ -1569,6 +1596,12 @@ describe("ChatService tenant and AI ownership guards", () => {
     );
 
     expect(selectedKeys).toContain("customerId");
+    expect(selectedKeys).toEqual(expect.arrayContaining([
+      "sidechatStatus",
+      "sidechatRunId",
+      "sidechatLeaseExpiresAt",
+      "sidechatUpdatedAt",
+    ]));
   });
 
   test("scopes needs-review rows and inbox counts to the current project", () => {
