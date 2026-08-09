@@ -1,8 +1,32 @@
 import { expect, test } from "bun:test";
+import type { MessageRow } from "../db";
 import type { AppEnv } from "../types";
-import { broadcastCustomerUpdated } from "./broadcast";
+import {
+  broadcastCustomerUpdated,
+  broadcastMessageNew,
+  broadcastSidechatActivity,
+  broadcastSidechatDelta,
+  broadcastSidechatMessage,
+  broadcastSidechatStatus,
+  sidechatMessageRowToPayload,
+} from "./broadcast";
+import {
+  broadcastEventToSockets,
+  replayConversationMessages,
+  type ConversationReplayReader,
+  type RealtimeSocket,
+  type SocketAttachment,
+} from "../durable-objects/conversation-do";
 
-test("broadcasts customer changes through the project customer room", async () => {
+interface BroadcastHarness {
+  env: AppEnv;
+  ctx: ExecutionContext;
+  roomNames: string[];
+  requests: Request[];
+  flush(): Promise<void>;
+}
+
+function createBroadcastHarness(): BroadcastHarness {
   const roomNames: string[] = [];
   const requests: Request[] = [];
   const pending: Promise<unknown>[] = [];
@@ -22,17 +46,78 @@ test("broadcasts customer changes through the project customer room", async () =
         };
       },
     },
-  } as unknown as AppEnv;
+  } as AppEnv;
   const ctx = {
     waitUntil(promise: Promise<unknown>) {
       pending.push(promise);
     },
-  } as unknown as ExecutionContext;
-  broadcastCustomerUpdated(env, ctx, "project-1", ["customer-1", "customer-2"]);
-  await Promise.all(pending);
+  } as ExecutionContext;
 
-  expect(roomNames).toEqual(["customer-project:project-1"]);
-  expect(await requests[0]?.json()).toEqual({
+  return {
+    env,
+    ctx,
+    roomNames,
+    requests,
+    async flush() {
+      await Promise.all(pending);
+    },
+  };
+}
+
+function createMessageRow(
+  overrides: Partial<MessageRow> = {},
+): MessageRow {
+  return {
+    id: "sidechat-message-1",
+    conversationId: "conversation-1",
+    role: "bot",
+    content: "Here is a private draft.",
+    channel: "sidechat",
+    kind: "reply_draft",
+    metadata: JSON.stringify({ draft: "Send this to the visitor." }),
+    imageUrl: null,
+    sources: null,
+    senderName: "Maven",
+    senderAvatar: null,
+    userId: null,
+    createdAt: new Date("2026-08-09T00:00:02.000Z"),
+    emailedAt: null,
+    deliveredAt: null,
+    readAt: null,
+    ...overrides,
+  };
+}
+
+function createSocket(
+  attachment: SocketAttachment,
+): RealtimeSocket & { sent: string[]; closes: string[] } {
+  const sent: string[] = [];
+  const closes: string[] = [];
+  return {
+    sent,
+    closes,
+    deserializeAttachment() {
+      return attachment;
+    },
+    send(payload: string) {
+      sent.push(payload);
+    },
+    close(_code: number, reason: string) {
+      closes.push(reason);
+    },
+  };
+}
+
+test("broadcasts customer changes through the project customer room", async () => {
+  const harness = createBroadcastHarness();
+  broadcastCustomerUpdated(harness.env, harness.ctx, "project-1", [
+    "customer-1",
+    "customer-2",
+  ]);
+  await harness.flush();
+
+  expect(harness.roomNames).toEqual(["customer-project:project-1"]);
+  expect(await harness.requests[0]?.json()).toEqual({
     event: {
       type: "customer:updated",
       projectId: "project-1",
@@ -41,4 +126,280 @@ test("broadcasts customer changes through the project customer room", async () =
     },
     audience: "agents",
   });
+});
+
+test("all sidechat broadcasters force the agent audience", async () => {
+  const harness = createBroadcastHarness();
+  const row = createMessageRow();
+
+  broadcastSidechatMessage(
+    harness.env,
+    harness.ctx,
+    "conversation-1",
+    row,
+  );
+  broadcastSidechatDelta(
+    harness.env,
+    harness.ctx,
+    "conversation-1",
+    "run-1",
+    "A safe partial response",
+  );
+  broadcastSidechatActivity(
+    harness.env,
+    harness.ctx,
+    "conversation-1",
+    "run-1",
+    "Looking up the order",
+    "start",
+  );
+  broadcastSidechatStatus(
+    harness.env,
+    harness.ctx,
+    "conversation-1",
+    "working",
+    "run-1",
+  );
+  await harness.flush();
+
+  const bodies = await Promise.all(
+    harness.requests.map(async (request) => request.json()),
+  );
+  expect(bodies.map((body) => body.audience)).toEqual([
+    "agents",
+    "agents",
+    "agents",
+    "agents",
+  ]);
+  expect(bodies.map((body) => body.event.type)).toEqual([
+    "sidechat:message",
+    "sidechat:delta",
+    "sidechat:activity",
+    "sidechat:status",
+  ]);
+  expect(bodies[0]?.event.message).toEqual({
+    id: "sidechat-message-1",
+    role: "bot",
+    content: "Here is a private draft.",
+    kind: "reply_draft",
+    metadata: { draft: "Send this to the visitor." },
+    senderName: "Maven",
+    createdAt: Date.parse("2026-08-09T00:00:02.000Z"),
+  });
+});
+
+test("sidechat payload conversion rejects unknown metadata keys", () => {
+  const unsafe = createMessageRow({
+    metadata: JSON.stringify({
+      draft: "Safe draft",
+      rawToolResult: { customerToken: "must-not-reach-browser" },
+    }),
+  });
+
+  expect(() => sidechatMessageRowToPayload(unsafe)).toThrow(
+    "Unsafe sidechat message metadata",
+  );
+});
+
+test("public message broadcasts reject sidechat rows", () => {
+  const harness = createBroadcastHarness();
+
+  expect(() =>
+    broadcastMessageNew(
+      harness.env,
+      harness.ctx,
+      "conversation-1",
+      createMessageRow(),
+    ),
+  ).toThrow("Cannot broadcast a non-public row as message:new");
+  expect(harness.requests).toEqual([]);
+});
+
+test("the DO excludes visitor sockets from sidechat live events", () => {
+  const visitor = createSocket({
+    kind: "visitor",
+    subjectId: "visitor-1",
+    conversationId: "conversation-1",
+    projectId: "project-1",
+    roomKind: "conversation",
+  });
+  const agent = createSocket({
+    kind: "agent",
+    subjectId: "agent-1",
+    conversationId: "conversation-1",
+    projectId: "project-1",
+    roomKind: "conversation",
+  });
+
+  broadcastEventToSockets([visitor, agent], {
+    event: {
+      type: "sidechat:delta",
+      conversationId: "conversation-1",
+      runId: "run-1",
+      delta: "Private",
+    },
+  });
+
+  expect(visitor.sent).toEqual([]);
+  expect(agent.sent).toHaveLength(1);
+  expect(JSON.parse(agent.sent[0] ?? "")).toEqual({
+    type: "sidechat:delta",
+    conversationId: "conversation-1",
+    runId: "run-1",
+    delta: "Private",
+  });
+});
+
+test("the DO broadcast boundary rejects unknown sidechat metadata", () => {
+  const agent = createSocket({
+    kind: "agent",
+    subjectId: "agent-1",
+    conversationId: "conversation-1",
+    projectId: "project-1",
+    roomKind: "conversation",
+  });
+  const unsafeBody = JSON.parse(
+    JSON.stringify({
+      event: {
+        type: "sidechat:message",
+        conversationId: "conversation-1",
+        message: {
+          id: "sidechat-message-1",
+          role: "bot",
+          content: "Private",
+          kind: "reply_draft",
+          metadata: {
+            draft: "Safe draft",
+            rawToolResult: "must-not-reach-browser",
+          },
+          senderName: "Maven",
+          createdAt: 1,
+        },
+      },
+    }),
+  );
+
+  expect(() => broadcastEventToSockets([agent], unsafeBody)).toThrow(
+    "Unsafe sidechat message metadata",
+  );
+  expect(agent.sent).toEqual([]);
+});
+
+test("visitor replay executes only the public query", async () => {
+  const calls: string[] = [];
+  const reader: ConversationReplayReader = {
+    async getMessageByIdForChannel(id, channel) {
+      calls.push(`cursor:${channel}:${id}`);
+      return {
+        id,
+        conversationId: "conversation-1",
+        createdAt: new Date("2026-08-09T00:00:00.000Z"),
+      };
+    },
+    async getPublicMessagesSince(_conversationId, since) {
+      calls.push(`public:${since}`);
+      return [
+        createMessageRow({
+          id: "public-2",
+          role: "visitor",
+          channel: "public",
+          kind: "text",
+          metadata: null,
+          content: "Public follow-up",
+        }),
+      ];
+    },
+    async getSidechatMessagesSince(_conversationId, since) {
+      calls.push(`sidechat:${since}`);
+      return [createMessageRow()];
+    },
+  };
+  const visitor = createSocket({
+    kind: "visitor",
+    subjectId: "visitor-1",
+    conversationId: "conversation-1",
+    projectId: "project-1",
+    roomKind: "conversation",
+  });
+
+  await replayConversationMessages(
+    visitor,
+    visitor.deserializeAttachment() as SocketAttachment,
+    {
+      lastPublicMessageId: "public-1",
+      lastSidechatMessageId: "sidechat-1",
+    },
+    reader,
+  );
+
+  expect(calls).toEqual([
+    "cursor:public:public-1",
+    `public:${Date.parse("2026-08-09T00:00:00.000Z")}`,
+  ]);
+  expect(visitor.sent.map((payload) => JSON.parse(payload).type)).toEqual([
+    "message:new",
+  ]);
+});
+
+test("agent replay uses independent public and sidechat cursors", async () => {
+  const calls: string[] = [];
+  const reader: ConversationReplayReader = {
+    async getMessageByIdForChannel(id, channel) {
+      calls.push(`cursor:${channel}:${id}`);
+      return {
+        id,
+        conversationId: "conversation-1",
+        createdAt: new Date(
+          channel === "public"
+            ? "2026-08-09T00:00:00.000Z"
+            : "2026-08-09T00:00:01.000Z",
+        ),
+      };
+    },
+    async getPublicMessagesSince(_conversationId, since) {
+      calls.push(`public:${since}`);
+      return [
+        createMessageRow({
+          id: "public-2",
+          role: "visitor",
+          channel: "public",
+          kind: "text",
+          metadata: null,
+          content: "Public follow-up",
+        }),
+      ];
+    },
+    async getSidechatMessagesSince(_conversationId, since) {
+      calls.push(`sidechat:${since}`);
+      return [createMessageRow()];
+    },
+  };
+  const agent = createSocket({
+    kind: "agent",
+    subjectId: "agent-1",
+    conversationId: "conversation-1",
+    projectId: "project-1",
+    roomKind: "conversation",
+  });
+
+  await replayConversationMessages(
+    agent,
+    agent.deserializeAttachment() as SocketAttachment,
+    {
+      lastPublicMessageId: "public-1",
+      lastSidechatMessageId: "sidechat-1",
+    },
+    reader,
+  );
+
+  expect(calls).toEqual([
+    "cursor:public:public-1",
+    `public:${Date.parse("2026-08-09T00:00:00.000Z")}`,
+    "cursor:sidechat:sidechat-1",
+    `sidechat:${Date.parse("2026-08-09T00:00:01.000Z")}`,
+  ]);
+  expect(agent.sent.map((payload) => JSON.parse(payload).type)).toEqual([
+    "message:new",
+    "sidechat:message",
+  ]);
 });

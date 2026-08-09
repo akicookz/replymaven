@@ -1,9 +1,44 @@
 import { drizzle } from "drizzle-orm/d1";
 import { ChatService } from "../services/chat-service";
 import { type AppEnv } from "../types";
-import { type ServerEvent, type MessagePayload } from "../../shared/ws-events";
+import { type MessageRow } from "../db";
+import {
+  isSidechatServerEvent,
+  type ServerEvent,
+  type MessagePayload,
+} from "../../shared/ws-events";
+import {
+  sanitizeSidechatServerEvent,
+  sidechatMessageRowToPayload,
+} from "../realtime/broadcast";
 
-interface SocketAttachment {
+export interface RealtimeSocket {
+  deserializeAttachment(): unknown;
+  send(payload: string): void;
+  close(code: number, reason: string): void;
+}
+
+export interface ResumeCursors {
+  lastPublicMessageId: string | null;
+  lastSidechatMessageId: string | null;
+}
+
+export interface ConversationReplayReader {
+  getMessageByIdForChannel(
+    id: string,
+    channel: "public" | "sidechat",
+  ): Promise<{ id: string; conversationId: string; createdAt: Date } | null>;
+  getPublicMessagesSince(
+    conversationId: string,
+    since: number,
+  ): Promise<MessageRow[]>;
+  getSidechatMessagesSince(
+    conversationId: string,
+    since: number,
+  ): Promise<MessageRow[]>;
+}
+
+export interface SocketAttachment {
   kind: "agent" | "visitor";
   subjectId: string;
   conversationId: string;
@@ -11,10 +46,124 @@ interface SocketAttachment {
   roomKind: "conversation" | "customer_project";
 }
 
-interface BroadcastBody {
+export interface BroadcastBody {
   event: ServerEvent;
   excludeSubjectId?: string;
   audience?: "agents";
+}
+
+export function broadcastEventToSockets(
+  sockets: RealtimeSocket[],
+  body: BroadcastBody,
+): void {
+  const event = isSidechatServerEvent(body.event)
+    ? sanitizeSidechatServerEvent(body.event)
+    : body.event;
+  const payload = JSON.stringify(event);
+  const agentOnly =
+    body.audience === "agents" || isSidechatServerEvent(event);
+
+  for (const ws of sockets) {
+    const attachment = ws.deserializeAttachment() as
+      | SocketAttachment
+      | undefined;
+    if (
+      body.excludeSubjectId &&
+      attachment?.subjectId === body.excludeSubjectId
+    ) {
+      continue;
+    }
+    if (agentOnly && attachment?.kind !== "agent") {
+      continue;
+    }
+    try {
+      ws.send(payload);
+      if (
+        event.type === "conversation:archived" &&
+        attachment?.kind === "visitor"
+      ) {
+        ws.close(1000, "conversation_archived");
+      }
+    } catch {
+      // Socket might be in a weird state — Cloudflare will clean it up.
+    }
+  }
+}
+
+export async function replayConversationMessages(
+  ws: RealtimeSocket,
+  attachment: SocketAttachment,
+  cursors: ResumeCursors,
+  reader: ConversationReplayReader,
+): Promise<void> {
+  let publicSince = 0;
+  if (cursors.lastPublicMessageId) {
+    const lastPublic = await reader.getMessageByIdForChannel(
+      cursors.lastPublicMessageId,
+      "public",
+    );
+    if (lastPublic?.conversationId === attachment.conversationId) {
+      publicSince = lastPublic.createdAt.getTime();
+    }
+  }
+
+  const publicRows = await reader.getPublicMessagesSince(
+    attachment.conversationId,
+    publicSince,
+  );
+  for (const row of publicRows) {
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "message:new",
+          conversationId: attachment.conversationId,
+          message: toMessagePayload(row),
+        } satisfies ServerEvent),
+      );
+    } catch {
+      // A disconnected socket cannot receive the remainder of replay.
+      return;
+    }
+  }
+
+  if (attachment.kind !== "agent") return;
+
+  let sidechatSince = 0;
+  if (cursors.lastSidechatMessageId) {
+    const lastSidechat = await reader.getMessageByIdForChannel(
+      cursors.lastSidechatMessageId,
+      "sidechat",
+    );
+    if (lastSidechat?.conversationId === attachment.conversationId) {
+      sidechatSince = lastSidechat.createdAt.getTime();
+    }
+  }
+
+  const sidechatRows = await reader.getSidechatMessagesSince(
+    attachment.conversationId,
+    sidechatSince,
+  );
+  for (const row of sidechatRows) {
+    let message;
+    try {
+      message = sidechatMessageRowToPayload(row);
+    } catch {
+      // Persisted private metadata must pass the same safe browser boundary as
+      // live broadcasts. A malformed row is not replayed.
+      continue;
+    }
+    try {
+      ws.send(
+        JSON.stringify({
+          type: "sidechat:message",
+          conversationId: attachment.conversationId,
+          message,
+        } satisfies ServerEvent),
+      );
+    } catch {
+      return;
+    }
+  }
 }
 
 function toMessagePayload(row: {
@@ -147,6 +296,10 @@ export class ConversationDO implements DurableObject {
     if (!parsed || typeof parsed !== "object") return;
     const msg = parsed as {
       type?: string;
+      lastPublicMessageId?: string | null;
+      lastSidechatMessageId?: string | null;
+      // Widget protocol compatibility. Visitor clients built before the
+      // sidechat cursor existed send this public-only cursor.
       lastMessageId?: string | null;
       state?: string;
       upToMessageId?: string;
@@ -158,7 +311,11 @@ export class ConversationDO implements DurableObject {
     }
 
     if (msg.type === "resume") {
-      await this.replayMissed(ws, msg.lastMessageId ?? null);
+      await this.replayMissed(ws, {
+        lastPublicMessageId:
+          msg.lastPublicMessageId ?? msg.lastMessageId ?? null,
+        lastSidechatMessageId: msg.lastSidechatMessageId ?? null,
+      });
       return;
     }
 
@@ -218,7 +375,7 @@ export class ConversationDO implements DurableObject {
 
   private async replayMissed(
     ws: WebSocket,
-    lastMessageId: string | null,
+    cursors: ResumeCursors,
   ): Promise<void> {
     const attachment = ws.deserializeAttachment() as
       | SocketAttachment
@@ -233,30 +390,7 @@ export class ConversationDO implements DurableObject {
       attachment.projectId,
     );
     if (!conversation) return;
-
-    let sinceMs = 0;
-    if (lastMessageId) {
-      const last = await chatService.getMessageByIdForChannel(
-        lastMessageId,
-        "public",
-      );
-      if (last && last.conversationId === attachment.conversationId) {
-        sinceMs = last.createdAt.getTime();
-      }
-    }
-
-    const missed = await chatService.getPublicMessagesSince(
-      attachment.conversationId,
-      sinceMs,
-    );
-
-    for (const row of missed) {
-      this.safeSend(ws, {
-        type: "message:new",
-        conversationId: attachment.conversationId,
-        message: toMessagePayload(row),
-      });
-    }
+    await replayConversationMessages(ws, attachment, cursors, chatService);
   }
 
   private async handleBroadcast(req: Request): Promise<Response> {
@@ -273,33 +407,7 @@ export class ConversationDO implements DurableObject {
       return new Response("Invalid JSON", { status: 400 });
     }
 
-    const payload = JSON.stringify(body.event);
-    const sockets = this.state.getWebSockets();
-    for (const ws of sockets) {
-      const attachment = ws.deserializeAttachment() as
-        | SocketAttachment
-        | undefined;
-      if (
-        body.excludeSubjectId &&
-        attachment?.subjectId === body.excludeSubjectId
-      ) {
-        continue;
-      }
-      if (body.audience === "agents" && attachment?.kind !== "agent") {
-        continue;
-      }
-      try {
-        ws.send(payload);
-        if (
-          body.event.type === "conversation:archived" &&
-          attachment?.kind === "visitor"
-        ) {
-          ws.close(1000, "conversation_archived");
-        }
-      } catch {
-        // Socket might be in a weird state — Cloudflare will clean it up.
-      }
-    }
+    broadcastEventToSockets(this.state.getWebSockets(), body);
 
     return new Response("ok");
   }
@@ -323,16 +431,10 @@ export class ConversationDO implements DurableObject {
   }
 
   private broadcastToAgents(event: ServerEvent): void {
-    const payload = JSON.stringify(event);
-    for (const ws of this.state.getWebSockets()) {
-      const att = ws.deserializeAttachment() as SocketAttachment | undefined;
-      if (att?.kind !== "agent") continue;
-      try {
-        ws.send(payload);
-      } catch {
-        // Socket might be in a weird state — Cloudflare will clean it up.
-      }
-    }
+    broadcastEventToSockets(this.state.getWebSockets(), {
+      event,
+      audience: "agents",
+    });
   }
 
   private safeSend(ws: WebSocket, event: ServerEvent): void {
