@@ -1,33 +1,119 @@
-import { streamText, ToolLoopAgent, stepCountIs, type ToolChoice } from "ai";
 import {
-  type AgentToolChoice,
+  ToolLoopAgent,
+  stepCountIs,
+  wrapLanguageModel,
+  type LanguageModel,
+  type LanguageModelMiddleware,
+  type ToolSet,
+} from "ai";
+import {
   type SupportAgentDependencies,
   type SupportAgentResult,
-  type SupportAgentStreamOptions,
+  type SupportAgentImage,
+  type ConversationTurnMessage,
   toSdkConversationMessages,
 } from "../types";
 import { createLanguageModel } from "../llm/create-language-model";
-import { buildToolRegistry } from "../tools/build-tool-registry";
 
-export async function streamSupportAgent(
-  dependencies: SupportAgentDependencies,
-  options: SupportAgentStreamOptions,
-): Promise<SupportAgentResult> {
-  const model = createLanguageModel(dependencies.modelConfig);
-  const toolRegistry = options.tools?.length
-    ? buildToolRegistry(options.tools)
-    : {};
-  const availableToolNames = Object.keys(toolRegistry);
+export interface MavenAgentStreamOptions {
+  systemPrompt: string;
+  conversationHistory: ConversationTurnMessage[];
+  userMessage: string;
+  image?: SupportAgentImage | null;
+  tools: ToolSet;
+  abortSignal?: AbortSignal;
+}
 
-  function toSdkToolChoice(
-    toolChoice: AgentToolChoice | undefined,
-  ): ToolChoice<Record<string, unknown>> {
-    if (availableToolNames.length === 0) {
-      return "none";
-    }
+type LanguageModelV3 = Extract<
+  LanguageModel,
+  { specificationVersion: "v3" }
+>;
 
-    return toolChoice ?? "auto";
+class ModelAttemptTerminationError extends Error {
+  constructor() {
+    super("Unable to stop failed model attempt safely");
+    this.name = "ModelAttemptTerminationError";
   }
+}
+
+function isLanguageModelV3(model: LanguageModel): model is LanguageModelV3 {
+  return typeof model === "object" &&
+    model !== null &&
+    model.specificationVersion === "v3";
+}
+
+function createTerminalProviderStream<
+  Part extends { type: string; error?: unknown },
+>(source: ReadableStream<Part>): ReadableStream<Part> {
+  const reader = source.getReader();
+  let terminal = false;
+
+  return new ReadableStream<Part>({
+    async pull(controller) {
+      try {
+        const next = await reader.read();
+        if (terminal) return;
+        if (next.done) {
+          terminal = true;
+          controller.close();
+          return;
+        }
+
+        if (next.value.type === "error") {
+          terminal = true;
+          const providerError = next.value.error;
+          try {
+            await reader.cancel(providerError);
+          } catch {
+            controller.error(new ModelAttemptTerminationError());
+            return;
+          }
+          controller.error(providerError);
+          return;
+        }
+
+        controller.enqueue(next.value);
+      } catch (error) {
+        terminal = true;
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      if (terminal) return;
+      terminal = true;
+      await reader.cancel(reason);
+    },
+  });
+}
+
+const terminalProviderErrorMiddleware: LanguageModelMiddleware = {
+  specificationVersion: "v3",
+  async wrapStream({ doStream }) {
+    const result = await doStream();
+    return {
+      ...result,
+      stream: createTerminalProviderStream(result.stream),
+    };
+  },
+};
+
+function guardProviderErrorParts(model: LanguageModel): LanguageModel {
+  if (!isLanguageModelV3(model)) return model;
+  return wrapLanguageModel({
+    model,
+    middleware: terminalProviderErrorMiddleware,
+  });
+}
+
+export async function streamMavenAgent(
+  dependencies: SupportAgentDependencies,
+  options: MavenAgentStreamOptions,
+): Promise<SupportAgentResult> {
+  const model = guardProviderErrorParts(
+    (dependencies.createModel ?? createLanguageModel)(
+      dependencies.modelConfig,
+    ),
+  );
 
   const messages = toSdkConversationMessages(options.conversationHistory);
   const userContent: Array<
@@ -44,45 +130,12 @@ export async function streamSupportAgent(
     });
   }
 
-  if (availableToolNames.length === 0) {
-    const result = streamText({
-      model,
-      system: options.systemPrompt,
-      messages: [...messages, { role: "user", content: userContent }],
-      abortSignal: options.abortSignal,
-      temperature: 0.3,
-      maxOutputTokens: 2048,
-    });
-
-    return {
-      fullStream: result.fullStream as SupportAgentResult["fullStream"],
-    };
-  }
-
   const agent = new ToolLoopAgent({
     model,
     instructions: options.systemPrompt,
-    tools: toolRegistry,
-    stopWhen: stepCountIs(3),
-    toolChoice: toSdkToolChoice(options.toolChoice),
-    prepareStep: options.prepareStep
-      ? (stepOptions) => {
-          const overrides = options.prepareStep?.({
-            stepNumber: stepOptions.stepNumber,
-            availableToolNames,
-          });
-          if (!overrides) return undefined;
-
-          const activeTools = overrides.activeTools?.filter((toolName) =>
-            availableToolNames.includes(toolName),
-          );
-
-          return {
-            toolChoice: toSdkToolChoice(overrides.toolChoice),
-            activeTools: activeTools as Array<keyof typeof toolRegistry> | undefined,
-          };
-        }
-      : undefined,
+    tools: options.tools,
+    stopWhen: stepCountIs(8),
+    toolChoice: Object.keys(options.tools).length ? "auto" : "none",
     temperature: 0.3,
     maxOutputTokens: 2048,
   });
@@ -90,28 +143,6 @@ export async function streamSupportAgent(
   const result = await agent.stream({
     messages: [...messages, { role: "user", content: userContent }],
     abortSignal: options.abortSignal,
-    experimental_onToolCallStart: options.onToolCallStart
-      ? (event) => {
-          const toolCall = event.toolCall;
-          options.onToolCallStart!({
-            toolName: String(toolCall.toolName),
-            input: toolCall.input as Record<string, unknown>,
-          });
-        }
-      : undefined,
-    experimental_onToolCallFinish: options.onToolCallFinish
-      ? (event) => {
-          const toolCall = event.toolCall;
-          options.onToolCallFinish!({
-            toolName: String(toolCall.toolName),
-            input: toolCall.input as Record<string, unknown>,
-            output: "output" in event ? event.output : null,
-            error: "error" in event ? event.error : null,
-            durationMs: event.durationMs,
-            success: event.success,
-          });
-        }
-      : undefined,
   });
 
   return {

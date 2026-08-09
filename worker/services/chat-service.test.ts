@@ -12,6 +12,7 @@ import {
   buildConditionalSystemMessageQuery,
   buildConditionalVisitorMessageQuery,
   buildHumanTakeoverQuery,
+  buildNewTeamRequestClaimQuery,
   buildInboxCountsQuery,
   buildBulkConversationActionQuery,
   buildConversationByIdQuery,
@@ -41,9 +42,46 @@ function makeUpdatingDb(): DrizzleD1Database<Record<string, unknown>> {
   return db as unknown as DrizzleD1Database<Record<string, unknown>>;
 }
 
+interface Deferred {
+  promise: Promise<void>;
+  resolve: () => void;
+}
+
+function createDeferred(): Deferred {
+  let resolve = (): void => undefined;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+class BarrierChatService extends ChatService {
+  constructor(
+    db: DrizzleD1Database<Record<string, unknown>>,
+    private readonly afterTeamRequestRead?: () => Promise<void>,
+    private readonly beforeMetadataPatch?: () => Promise<void>,
+    private readonly beforeTelegramThreadPersistence?: () => Promise<void>,
+  ) {
+    super(db);
+  }
+
+  protected override async afterNewTeamRequestAuthoritativeRead(): Promise<void> {
+    await this.afterTeamRequestRead?.();
+  }
+
+  protected override async beforeConversationMetadataPatch(): Promise<void> {
+    await this.beforeMetadataPatch?.();
+  }
+
+  protected override async beforeNewTeamRequestTelegramThreadPersistence(): Promise<void> {
+    await this.beforeTelegramThreadPersistence?.();
+  }
+}
+
 function createConversationContinuityService(): {
   service: ChatService;
   sqlite: Database;
+  db: DrizzleD1Database<Record<string, unknown>>;
 } {
   const sqlite = new Database(":memory:");
   sqlite.exec(`CREATE TABLE customers (
@@ -83,13 +121,68 @@ function createConversationContinuityService(): {
     created_at integer DEFAULT (unixepoch()) NOT NULL,
     updated_at integer DEFAULT (unixepoch()) NOT NULL
   )`);
-  const db = drizzleSqlite(sqlite, { schema });
+  const sqliteDb = drizzleSqlite(sqlite, { schema });
+  const db = sqliteDb as unknown as DrizzleD1Database<Record<string, unknown>>;
   return {
-    service: new ChatService(
-      db as unknown as DrizzleD1Database<Record<string, unknown>>,
-    ),
+    service: new ChatService(db),
     sqlite,
+    db,
   };
+}
+
+async function createAttemptedTeamRequest(
+  service: ChatService,
+): Promise<{ conversation: ConversationRow; acceptanceToken: string }> {
+  const created = await service.createConversation({
+    projectId: "project-1",
+    customerId: null,
+    visitorId: "visitor-1",
+    visitorName: "Alice",
+    visitorEmail: "alice@example.com",
+    metadata: null,
+  });
+  const claim = await service.claimNewTeamRequest(
+    created.id,
+    created.projectId,
+    "Visitor needs help.",
+  );
+  if (claim.status !== "claimed") {
+    throw new Error(`Expected a claimed team request, received ${claim.status}`);
+  }
+  const conversation = await service.getOperationalConversationById(
+    created.id,
+    created.projectId,
+  );
+  if (!conversation) throw new Error("Expected an operational conversation");
+  const acceptanceToken = JSON.parse(conversation.metadata ?? "{}")
+    .mavenTeamRequestAcceptanceToken as unknown;
+  if (typeof acceptanceToken !== "string") {
+    throw new Error("Expected a Maven acceptance token");
+  }
+  const attempted = await service.claimNewTeamRequestNotification(
+    conversation.id,
+    conversation.projectId,
+    acceptanceToken,
+  );
+  if (!attempted) throw new Error("Expected a notification attempt claim");
+  return { conversation, acceptanceToken };
+}
+
+function createTelegramPersistenceBarrier(
+  db: DrizzleD1Database<Record<string, unknown>>,
+) {
+  const ready = createDeferred();
+  const release = createDeferred();
+  const service = new BarrierChatService(
+    db,
+    undefined,
+    undefined,
+    async () => {
+      ready.resolve();
+      await release.promise;
+    },
+  );
+  return { ready, release, service };
 }
 
 function makeOwnershipDb(row: ConversationRow): {
@@ -127,6 +220,31 @@ function makeReopenDb(row: ConversationRow): {
 }
 
 describe("ChatService ownership and atomic writes", () => {
+  test("merges ordinary metadata patches against the live conversation", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: JSON.stringify({ source: "widget", country: "US" }),
+    });
+
+    const updated = await service.updateConversation(
+      conversation.id,
+      conversation.projectId,
+      { metadata: JSON.stringify({ country: "CA", campaign: "spring" }) },
+    );
+    const metadata = JSON.parse(updated?.metadata ?? "{}");
+
+    expect(metadata).toMatchObject({
+      source: "widget",
+      country: "CA",
+      campaign: "spring",
+    });
+  });
+
   test("reads archived conversation detail without making it operational", () => {
     const readable = buildConversationByIdQuery(
       drizzle({} as never),
@@ -165,6 +283,208 @@ describe("ChatService ownership and atomic writes", () => {
       Math.floor(leaseAt.getTime() / 1000),
       Math.floor(staleBefore.getTime() / 1000),
     ]));
+  });
+
+  test("adds exact status and raw chat-state ownership to an external-action lease", () => {
+    const leaseAt = new Date("2026-08-01T10:00:00.000Z");
+    const staleBefore = new Date("2026-08-01T09:58:00.000Z");
+    const buildOwnershipLease = buildExternalActionLeaseQuery as unknown as (
+      db: DrizzleD1Database<Record<string, unknown>>,
+      conversationId: string,
+      projectId: string,
+      leaseAt: Date,
+      staleBefore: Date,
+      ownership: { status: string; chatState: string | null },
+    ) => ReturnType<typeof buildExternalActionLeaseQuery>;
+    const { sql, params } = buildOwnershipLease(
+      drizzle({} as never),
+      "conv-1",
+      "project-1",
+      leaseAt,
+      staleBefore,
+      { status: "agent_replied", chatState: "{\"ownershipRevision\":4}" },
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."status" = ?');
+    expect(sql).toContain('"conversations"."chat_state" = ?');
+    expect(params).toEqual(expect.arrayContaining([
+      "agent_replied",
+      '{"ownershipRevision":4}',
+    ]));
+  });
+
+  test.each(["takeover", "close"])(
+    "an ownership-bound external action loses a prior %s race",
+    async (race) => {
+      const { service } = createConversationContinuityService();
+      const conversation = await service.createConversation({
+        projectId: "project-1",
+        customerId: null,
+        visitorId: "visitor-1",
+        visitorName: "Alice",
+        visitorEmail: "alice@example.com",
+        metadata: null,
+      });
+      const snapshot = {
+        status: conversation.status,
+        chatState: conversation.chatState,
+      };
+      if (race === "takeover") {
+        await service.takeHumanOwnership(conversation.id, conversation.projectId);
+      } else {
+        await service.updateConversationStatus(
+          conversation.id,
+          conversation.projectId,
+          "closed",
+          "resolved",
+        );
+      }
+      let actionCalled = false;
+      const ownershipService = service as unknown as {
+        runExternalActionIfOwnershipMatches<T>(
+          conversationId: string,
+          projectId: string,
+          ownership: typeof snapshot,
+          action: () => Promise<T>,
+        ): Promise<{ executed: boolean; value?: T }>;
+      };
+
+      const result = await ownershipService.runExternalActionIfOwnershipMatches(
+        conversation.id,
+        conversation.projectId,
+        snapshot,
+        async () => {
+          actionCalled = true;
+          return "sent";
+        },
+      );
+
+      expect(result).toEqual({ executed: false });
+      expect(actionCalled).toBe(false);
+    },
+  );
+
+  test("an explicit human-only invocation can lease its unchanged snapshot", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+    await service.takeHumanOwnership(conversation.id, conversation.projectId);
+    const humanOwned = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    if (!humanOwned) throw new Error("Expected a human-owned conversation");
+    const ownershipService = service as unknown as {
+      runExternalActionIfOwnershipMatches<T>(
+        conversationId: string,
+        projectId: string,
+        ownership: { status: string; chatState: string | null },
+        action: () => Promise<T>,
+      ): Promise<{ executed: boolean; value?: T }>;
+    };
+
+    const result = await ownershipService.runExternalActionIfOwnershipMatches(
+      humanOwned.id,
+      humanOwned.projectId,
+      { status: humanOwned.status, chatState: humanOwned.chatState },
+      async () => "sent",
+    );
+
+    expect(result).toEqual({ executed: true, value: "sent" });
+  });
+
+  test("atomically persists pending handoff contact against exact ownership", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: null,
+      visitorEmail: null,
+      metadata: null,
+    });
+    const pendingService = service as unknown as {
+      updatePendingTeamRequestContact(
+        conversationId: string,
+        projectId: string,
+        ownership: { status: string; chatState: string | null },
+        update: {
+          visitorName?: string;
+          visitorEmail?: string;
+          awaitingContactFields: Array<"name" | "email">;
+          contactDeclined?: boolean;
+        },
+      ): Promise<ConversationRow | null>;
+    };
+
+    const updated = await pendingService.updatePendingTeamRequestContact(
+      conversation.id,
+      conversation.projectId,
+      { status: conversation.status, chatState: conversation.chatState },
+      {
+        visitorName: "Alice",
+        visitorEmail: "alice@example.com",
+        awaitingContactFields: [],
+      },
+    );
+
+    expect(updated).toMatchObject({
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+    });
+    expect(JSON.parse(updated?.chatState ?? "{}")).toMatchObject({
+      awaitingContactFields: [],
+      contactDeclined: false,
+      aiParticipation: "continuous",
+    });
+  });
+
+  test("pending contact cannot write through a human takeover", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: null,
+      visitorEmail: null,
+      metadata: null,
+    });
+    await service.takeHumanOwnership(conversation.id, conversation.projectId);
+    const pendingService = service as unknown as {
+      updatePendingTeamRequestContact(
+        conversationId: string,
+        projectId: string,
+        ownership: { status: string; chatState: string | null },
+        update: {
+          visitorEmail?: string;
+          awaitingContactFields: Array<"name" | "email">;
+        },
+      ): Promise<ConversationRow | null>;
+    };
+
+    const updated = await pendingService.updatePendingTeamRequestContact(
+      conversation.id,
+      conversation.projectId,
+      { status: conversation.status, chatState: conversation.chatState },
+      {
+        visitorEmail: "alice@example.com",
+        awaitingContactFields: ["name"],
+      },
+    );
+
+    expect(updated).toBeNull();
+    const authoritative = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(authoritative?.visitorEmail).toBeNull();
+    expect(authoritative?.status).toBe("agent_replied");
   });
 
   test("does not run an external action when its conversation cannot be leased", async () => {
@@ -337,6 +657,791 @@ describe("ChatService ownership and atomic writes", () => {
     expect(sql).toContain("$.ownershipRevision");
     expect(sql).toContain('"conversations"."archived_at" is null');
     expect(params).toEqual(expect.arrayContaining(["agent_replied", "conv-1", "project-1"]));
+  });
+
+  test("claims a new team request only from one exact active AI-owned snapshot", () => {
+    const expectedChatState = JSON.stringify({
+      state: "active",
+      aiParticipation: "continuous",
+      ownershipRevision: 2,
+    });
+    const nextChatState = JSON.stringify({
+      state: "escalating",
+      aiParticipation: "assist_until_agent",
+      ownershipRevision: 3,
+    });
+    const { sql, params } = buildNewTeamRequestClaimQuery(
+      drizzle({} as never),
+      "conv-1",
+      "project-1",
+      expectedChatState,
+      nextChatState,
+      "Alice",
+      "alice@example.com",
+      {
+        acceptanceToken: "acceptance-1",
+        summary: "Visitor needs help.",
+        acceptedAt: "2026-08-09T00:00:00.000Z",
+        summaryMessageId: "summary-1",
+      },
+    ).toSQL();
+
+    expect(sql).toContain('"conversations"."project_id" = ?');
+    expect(sql).toContain('"conversations"."status" = ?');
+    expect(sql).toContain('"conversations"."chat_state" = ?');
+    expect(sql).toContain('"conversations"."archived_at" is null');
+    expect(sql).toContain('"conversations"."visitor_name" = ?');
+    expect(sql).toContain('"conversations"."visitor_email" = ?');
+    expect(sql).toContain("json_set");
+    expect(sql).toContain("$.mavenTeamRequestAcceptedAt");
+    expect(sql).toContain('returning "id"');
+    expect(params).toEqual(
+      expect.arrayContaining([
+        "waiting_agent",
+        nextChatState,
+        "conv-1",
+        "project-1",
+        "active",
+        expectedChatState,
+        "Alice",
+        "alice@example.com",
+      ]),
+    );
+    expect(params).not.toContain("agent_replied");
+  });
+
+  test("allows only the first concurrent new-team-request claim", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+
+    const claims = await Promise.all([
+      service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Visitor needs help.",
+      ),
+      service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Visitor needs help.",
+      ),
+    ]);
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+
+    expect(claims.map((claim) => claim.status).sort()).toEqual([
+      "already_requested",
+      "claimed",
+    ]);
+    expect(latest?.status).toBe("waiting_agent");
+    const metadata = JSON.parse(latest?.metadata ?? "{}");
+    expect(metadata.teamRequestSummary).toBe("Visitor needs help.");
+    expect(metadata.teamRequestSummaryPending).toBe(true);
+    expect(metadata.teamRequestNotificationState).toBe("pending");
+    expect(metadata.mavenTeamRequestAcceptedAt).toBeString();
+    expect(metadata.reviewSummaryMessageId).toBeString();
+  });
+
+  test("allows only one external notification attempt for an accepted request", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+    expect(
+      await service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Visitor needs help.",
+      ),
+    ).toEqual({ status: "claimed" });
+    const accepted = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const acceptanceToken = JSON.parse(accepted?.metadata ?? "{}")
+      .mavenTeamRequestAcceptanceToken as string;
+
+    const attempts = await Promise.all([
+      service.claimNewTeamRequestNotification(
+        conversation.id,
+        conversation.projectId,
+        acceptanceToken,
+      ),
+      service.claimNewTeamRequestNotification(
+        conversation.id,
+        conversation.projectId,
+        acceptanceToken,
+      ),
+    ]);
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const metadata = JSON.parse(latest?.metadata ?? "{}");
+
+    expect(attempts.sort()).toEqual([false, true]);
+    expect(metadata.teamRequestNotificationState).toBe("attempted");
+    expect(metadata.teamRequestNotificationAttemptedAt).toBeString();
+  });
+
+  test("rejects an active row whose authoritative state is human-owned", async () => {
+    const activeHuman = makeConversation({
+      status: "active",
+      chatState: JSON.stringify({
+        state: "agent_mode",
+        aiParticipation: "human_only",
+      }),
+    });
+    const { db, getUpdateCount } = makeOwnershipDb(activeHuman);
+
+    const claimed = await new ChatService(db).claimNewTeamRequest(
+      activeHuman.id,
+      activeHuman.projectId,
+      "Visitor needs help.",
+    );
+
+    expect(claimed).toEqual({ status: "already_requested" });
+    expect(getUpdateCount()).toBe(0);
+  });
+
+  test("contact cleared after the authoritative read prevents the ownership claim", async () => {
+    const { sqlite, db } = createConversationContinuityService();
+    const authoritativeRead = createDeferred();
+    const releaseClaim = createDeferred();
+    const service = new BarrierChatService(db, async () => {
+      authoritativeRead.resolve();
+      await releaseClaim.promise;
+    });
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+
+    const claimPromise = service.claimNewTeamRequest(
+      conversation.id,
+      conversation.projectId,
+      "Visitor needs help.",
+    );
+    await authoritativeRead.promise;
+    sqlite
+      .query("UPDATE conversations SET visitor_email = NULL WHERE id = ?")
+      .run(conversation.id);
+    releaseClaim.resolve();
+
+    const claim = await claimPromise;
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+
+    expect(claim).toEqual({
+      status: "contact_required",
+      requiredFields: ["email"],
+    });
+    expect(latest?.status).toBe("active");
+  });
+
+  test("an ordinary metadata patch cannot replay stale notification state", async () => {
+    const { service, db } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: JSON.stringify({ source: "widget" }),
+    });
+    expect(
+      await service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Visitor needs help.",
+      ),
+    ).toEqual({ status: "claimed" });
+    const accepted = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const acceptanceToken = JSON.parse(accepted?.metadata ?? "{}")
+      .mavenTeamRequestAcceptanceToken as string;
+
+    const staleWriterReady = createDeferred();
+    const releaseStaleWriter = createDeferred();
+    const staleWriter = new BarrierChatService(db, undefined, async () => {
+      staleWriterReady.resolve();
+      await releaseStaleWriter.promise;
+    });
+    const patchPromise = staleWriter.updateConversation(
+      conversation.id,
+      conversation.projectId,
+      {
+        metadata: JSON.stringify({ source: "dashboard", campaign: "spring" }),
+      },
+    );
+    await staleWriterReady.promise;
+    expect(
+      await service.claimNewTeamRequestNotification(
+        conversation.id,
+        conversation.projectId,
+        acceptanceToken,
+      ),
+    ).toBe(true);
+    releaseStaleWriter.resolve();
+    await patchPromise;
+
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const metadata = JSON.parse(latest?.metadata ?? "{}");
+    expect(metadata.teamRequestNotificationState).toBe("attempted");
+    expect(metadata.teamRequestSummaryPending).toBe(true);
+    expect(metadata.mavenTeamRequestAcceptedAt).toBeString();
+    expect(metadata.source).toBe("dashboard");
+    expect(metadata.campaign).toBe("spring");
+  });
+
+  const protectedAcceptanceFieldCases: Array<{
+    field:
+      | "teamRequestSummary"
+      | "reviewSummaryMessageId"
+      | "teamRequestSummaryPending"
+      | "teamRequestNotificationState"
+      | "teamRequestNotificationAttemptedAt"
+      | "mavenTeamRequestAcceptedAt"
+      | "mavenTeamRequestAcceptanceToken"
+      | "mavenTeamRequestTelegramThreadAcceptanceToken";
+    replacement: unknown;
+  }> = [
+    { field: "teamRequestSummary", replacement: "Forged summary." },
+    { field: "reviewSummaryMessageId", replacement: "forged-message" },
+    { field: "teamRequestSummaryPending", replacement: "false" },
+    { field: "teamRequestNotificationState", replacement: "attempted" },
+    {
+      field: "teamRequestNotificationAttemptedAt",
+      replacement: "2099-01-01T00:00:00.000Z",
+    },
+    {
+      field: "mavenTeamRequestAcceptedAt",
+      replacement: "2099-01-01T00:00:00.000Z",
+    },
+    {
+      field: "mavenTeamRequestAcceptanceToken",
+      replacement: "forged-generation",
+    },
+    {
+      field: "mavenTeamRequestTelegramThreadAcceptanceToken",
+      replacement: "forged-thread-generation",
+    },
+  ];
+
+  for (const { field, replacement } of protectedAcceptanceFieldCases) {
+    test(`generic metadata patches cannot replace ${field}`, async () => {
+      const { service } = createConversationContinuityService();
+      const conversation = await service.createConversation({
+        projectId: "project-1",
+        customerId: null,
+        visitorId: "visitor-1",
+        visitorName: "Alice",
+        visitorEmail: "alice@example.com",
+        metadata: JSON.stringify({ source: "widget" }),
+      });
+      expect(
+        await service.claimNewTeamRequest(
+          conversation.id,
+          conversation.projectId,
+          "Accepted summary.",
+        ),
+      ).toEqual({ status: "claimed" });
+      const accepted = await service.getOperationalConversationById(
+        conversation.id,
+        conversation.projectId,
+      );
+      const acceptedMetadata = JSON.parse(accepted?.metadata ?? "{}");
+
+      const updated = await service.updateConversation(
+        conversation.id,
+        conversation.projectId,
+        {
+          metadata: JSON.stringify({
+            [field]: replacement,
+            source: "dashboard",
+          }),
+        },
+      );
+      const metadata = JSON.parse(updated?.metadata ?? "{}");
+
+      expect(metadata[field]).toEqual(acceptedMetadata[field]);
+      expect(metadata.source).toBe("dashboard");
+    });
+  }
+
+  test("protected-only metadata patches leave metadata and updatedAt unchanged", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: JSON.stringify({ source: "widget" }),
+    });
+    sqlite
+      .query("UPDATE conversations SET updated_at = ? WHERE id = ?")
+      .run(946_684_800, conversation.id);
+    const before = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+
+    const updated = await service.updateConversation(
+      conversation.id,
+      conversation.projectId,
+      {
+        metadata: JSON.stringify({
+          teamRequestSummary: "Forged summary.",
+          reviewSummaryMessageId: "forged-message",
+          teamRequestSummaryPending: "false",
+          teamRequestNotificationState: "attempted",
+          teamRequestNotificationAttemptedAt:
+            "2099-01-01T00:00:00.000Z",
+          mavenTeamRequestAcceptedAt: "2099-01-01T00:00:00.000Z",
+          mavenTeamRequestAcceptanceToken: "forged-generation",
+          mavenTeamRequestTelegramThreadAcceptanceToken:
+            "forged-thread-generation",
+        }),
+      },
+    );
+
+    expect(updated?.metadata).toBe(before?.metadata);
+    expect(updated?.updatedAt).toEqual(before?.updatedAt);
+  });
+
+  test("trusted legacy escalation metadata remains writable outside generic patches", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: JSON.stringify({ source: "contact_form" }),
+    });
+
+    const started = await service.updateLegacyEscalationMetadata(
+      conversation.id,
+      conversation.projectId,
+      {
+        expectedMavenAcceptanceToken: null,
+        summary: "Legacy contact request.",
+        summaryMessageId: "legacy-summary-message",
+        escalatedAt: "2026-08-09T12:00:00.000Z",
+        summaryPending: true,
+      },
+    );
+    const completed = await service.updateLegacyEscalationMetadata(
+      conversation.id,
+      conversation.projectId,
+      {
+        expectedMavenAcceptanceToken: null,
+        summary: "Legacy contact request.",
+        summaryMessageId: "legacy-summary-message",
+        summaryPending: false,
+      },
+    );
+    const metadata = JSON.parse(completed?.metadata ?? "{}");
+
+    expect(started).not.toBeNull();
+    expect(metadata).toMatchObject({
+      source: "contact_form",
+      teamRequestSummary: "Legacy contact request.",
+      reviewSummaryMessageId: "legacy-summary-message",
+      escalatedAt: "2026-08-09T12:00:00.000Z",
+      teamRequestSummaryPending: false,
+    });
+  });
+
+  test("stale legacy escalation metadata loses to a fresh Maven acceptance token", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: JSON.stringify({ source: "widget" }),
+    });
+    expect(
+      await service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Accepted Maven summary.",
+      ),
+    ).toEqual({ status: "claimed" });
+    const accepted = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const acceptedMetadata = JSON.parse(accepted?.metadata ?? "{}");
+
+    const staleUpdate = await service.updateLegacyEscalationMetadata(
+      conversation.id,
+      conversation.projectId,
+      {
+        expectedMavenAcceptanceToken: null,
+        summary: "Stale legacy summary.",
+        summaryMessageId: "stale-legacy-message",
+        summaryPending: false,
+      },
+    );
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const metadata = JSON.parse(latest?.metadata ?? "{}");
+
+    expect(staleUpdate).toBeNull();
+    expect(metadata.teamRequestSummary).toBe("Accepted Maven summary.");
+    expect(metadata.reviewSummaryMessageId).toBe(
+      acceptedMetadata.reviewSummaryMessageId,
+    );
+    expect(metadata.teamRequestSummaryPending).toBe(true);
+    expect(metadata.teamRequestNotificationState).toBe("pending");
+  });
+
+  test("retained Maven history does not block a trusted legacy escalation after handback", async () => {
+    const { service } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+    expect(
+      await service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Earlier Maven summary.",
+      ),
+    ).toEqual({ status: "claimed" });
+    const accepted = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const acceptanceToken = JSON.parse(accepted?.metadata ?? "{}")
+      .mavenTeamRequestAcceptanceToken as string;
+    expect(
+      await service.transitionChatOwnership(
+        conversation.id,
+        conversation.projectId,
+        "ai_handed_back",
+      ),
+    ).toBe("active");
+
+    const updated = await service.updateLegacyEscalationMetadata(
+      conversation.id,
+      conversation.projectId,
+      {
+        expectedMavenAcceptanceToken: acceptanceToken,
+        summary: "Later contact-form summary.",
+        summaryMessageId: "later-contact-form-message",
+        escalatedAt: "2026-08-09T13:00:00.000Z",
+        summaryPending: true,
+      },
+    );
+    const metadata = JSON.parse(updated?.metadata ?? "{}");
+
+    expect(updated).not.toBeNull();
+    expect(metadata.mavenTeamRequestAcceptanceToken).toBe(acceptanceToken);
+    expect(metadata.teamRequestSummary).toBe("Later contact-form summary.");
+    expect(metadata.reviewSummaryMessageId).toBe(
+      "later-contact-form-message",
+    );
+    expect(metadata.teamRequestSummaryPending).toBe(true);
+  });
+
+  test("persists a returned Telegram thread only for the accepted request", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+    sqlite
+      .query("UPDATE conversations SET telegram_thread_id = ? WHERE id = ?")
+      .run("older-thread", conversation.id);
+    expect(
+      await service.claimNewTeamRequest(
+        conversation.id,
+        conversation.projectId,
+        "Visitor needs help.",
+      ),
+    ).toEqual({ status: "claimed" });
+    const accepted = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const acceptedMetadata = JSON.parse(accepted?.metadata ?? "{}");
+    const acceptanceToken =
+      acceptedMetadata.mavenTeamRequestAcceptanceToken as string;
+    expect(
+      await service.claimNewTeamRequestNotification(
+        conversation.id,
+        conversation.projectId,
+        acceptanceToken,
+      ),
+    ).toBe(true);
+
+    expect(
+      await service.persistNewTeamRequestTelegramThreadId(
+        conversation.id,
+        conversation.projectId,
+        "prior-acceptance",
+        "999",
+      ),
+    ).toBe(false);
+    expect(
+      await service.persistNewTeamRequestTelegramThreadId(
+        conversation.id,
+        conversation.projectId,
+        acceptanceToken,
+        "123",
+      ),
+    ).toBe(true);
+    expect(
+      await service.persistNewTeamRequestTelegramThreadId(
+        conversation.id,
+        conversation.projectId,
+        acceptanceToken,
+        "123",
+      ),
+    ).toBe(true);
+    expect(
+      await service.persistNewTeamRequestTelegramThreadId(
+        conversation.id,
+        conversation.projectId,
+        acceptanceToken,
+        "456",
+      ),
+    ).toBe(false);
+    expect(
+      (
+        await service.getOperationalConversationById(
+          conversation.id,
+          conversation.projectId,
+        )
+      )?.telegramThreadId,
+    ).toBe("123");
+  });
+
+  test("uses waiting-agent ownership fallback when persisting through malformed chat state", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    const { conversation, acceptanceToken } =
+      await createAttemptedTeamRequest(service);
+    sqlite
+      .query("UPDATE conversations SET chat_state = ? WHERE id = ?")
+      .run("{malformed", conversation.id);
+
+    const persisted = await service.persistNewTeamRequestTelegramThreadId(
+      conversation.id,
+      conversation.projectId,
+      acceptanceToken,
+      "new-thread",
+    );
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const metadata = JSON.parse(latest?.metadata ?? "{}");
+
+    expect(persisted).toBe(true);
+    expect(latest?.telegramThreadId).toBe("new-thread");
+    expect(metadata.mavenTeamRequestTelegramThreadAcceptanceToken).toBe(
+      acceptanceToken,
+    );
+  });
+
+  test("handback winning the Telegram thread persistence race prevents mutation", async () => {
+    const { service, db } = createConversationContinuityService();
+    const { conversation, acceptanceToken } =
+      await createAttemptedTeamRequest(service);
+
+    const barrier = createTelegramPersistenceBarrier(db);
+    const persistence = barrier.service.persistNewTeamRequestTelegramThreadId(
+      conversation.id,
+      conversation.projectId,
+      acceptanceToken,
+      "new-thread",
+    );
+    const firstEvent = await Promise.race([
+      barrier.ready.promise.then(() => "persistence_ready" as const),
+      persistence.then(() => "persistence_completed" as const),
+    ]);
+    expect(firstEvent).toBe("persistence_ready");
+
+    expect(
+      await service.transitionChatOwnership(
+        conversation.id,
+        conversation.projectId,
+        "ai_handed_back",
+      ),
+    ).toBe("active");
+    barrier.release.resolve();
+
+    expect(await persistence).toBe(false);
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(latest?.status).toBe("active");
+    expect(latest?.telegramThreadId).toBeNull();
+    expect(
+      JSON.parse(latest?.metadata ?? "{}")
+        .mavenTeamRequestTelegramThreadAcceptanceToken,
+    ).toBeUndefined();
+  });
+
+  test("takeover winning the Telegram thread persistence race prevents mutation", async () => {
+    const { service, db } = createConversationContinuityService();
+    const { conversation, acceptanceToken } =
+      await createAttemptedTeamRequest(service);
+    const barrier = createTelegramPersistenceBarrier(db);
+    const persistence = barrier.service.persistNewTeamRequestTelegramThreadId(
+      conversation.id,
+      conversation.projectId,
+      acceptanceToken,
+      "new-thread",
+    );
+    const firstEvent = await Promise.race([
+      barrier.ready.promise.then(() => "persistence_ready" as const),
+      persistence.then(() => "persistence_completed" as const),
+    ]);
+    expect(firstEvent).toBe("persistence_ready");
+
+    const ownership = await service.takeHumanOwnership(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(ownership?.status).toBe("agent_replied");
+    barrier.release.resolve();
+
+    expect(await persistence).toBe(false);
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(latest?.status).toBe("agent_replied");
+    expect(latest?.telegramThreadId).toBeNull();
+    expect(
+      JSON.parse(latest?.metadata ?? "{}")
+        .mavenTeamRequestTelegramThreadAcceptanceToken,
+    ).toBeUndefined();
+  });
+
+  test("human-only ownership prevents thread persistence while waiting status lags", async () => {
+    const { service, sqlite, db } = createConversationContinuityService();
+    const { conversation, acceptanceToken } =
+      await createAttemptedTeamRequest(service);
+
+    const barrier = createTelegramPersistenceBarrier(db);
+    const persistence = barrier.service.persistNewTeamRequestTelegramThreadId(
+      conversation.id,
+      conversation.projectId,
+      acceptanceToken,
+      "new-thread",
+    );
+    const firstEvent = await Promise.race([
+      barrier.ready.promise.then(() => "persistence_ready" as const),
+      persistence.then(() => "persistence_completed" as const),
+    ]);
+    expect(firstEvent).toBe("persistence_ready");
+
+    const acceptedState = JSON.parse(conversation.chatState ?? "{}");
+    sqlite
+      .query("UPDATE conversations SET chat_state = ? WHERE id = ?")
+      .run(
+        JSON.stringify({
+          ...acceptedState,
+          state: "agent_mode",
+          aiParticipation: "human_only",
+          ownershipRevision:
+            typeof acceptedState.ownershipRevision === "number"
+              ? acceptedState.ownershipRevision + 1
+              : 1,
+        }),
+        conversation.id,
+      );
+    barrier.release.resolve();
+
+    expect(await persistence).toBe(false);
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(latest?.status).toBe("waiting_agent");
+    expect(latest?.telegramThreadId).toBeNull();
+    expect(
+      JSON.parse(latest?.metadata ?? "{}")
+        .mavenTeamRequestTelegramThreadAcceptanceToken,
+    ).toBeUndefined();
+  });
+
+  test("trusted contactDeclined permits an atomic claim without saved contact", async () => {
+    const { service, sqlite } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: null,
+      visitorEmail: null,
+      metadata: null,
+    });
+    sqlite
+      .query("UPDATE conversations SET chat_state = ? WHERE id = ?")
+      .run(
+        JSON.stringify({
+          state: "active",
+          aiParticipation: "continuous",
+          contactDeclined: true,
+        }),
+        conversation.id,
+      );
+
+    const claim = await service.claimNewTeamRequest(
+      conversation.id,
+      conversation.projectId,
+      "Visitor needs help.",
+    );
+    const latest = await service.getOperationalConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+
+    expect(claim).toEqual({ status: "claimed" });
+    expect(latest?.status).toBe("waiting_agent");
   });
 });
 

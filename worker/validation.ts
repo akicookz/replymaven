@@ -564,12 +564,59 @@ export const submitContactFormSchema = z.object({
 
 // ─── Tools ────────────────────────────────────────────────────────────────────
 
-const toolParameterSchema = z.object({
+export type MavenChannel = "public" | "sidechat";
+export type MavenToolAccess = "read" | "write";
+
+export interface HttpToolPolicyInput {
+  allowedChannels: MavenChannel[];
+  access: MavenToolAccess;
+}
+
+export const RESERVED_MAVEN_TOOL_NAMES = [
+  "search_knowledge",
+  "request_team_help",
+] as const;
+
+export function isReservedMavenToolName(name: string): boolean {
+  return (RESERVED_MAVEN_TOOL_NAMES as readonly string[]).includes(name);
+}
+
+export const toolNameSchema = z
+  .string()
+  .min(1, "Name is required")
+  .max(100)
+  .regex(
+    /^[a-z][a-z0-9_]*$/,
+    "Must start with a letter and contain only lowercase letters, numbers, and underscores",
+  )
+  .refine(
+    (name) => !isReservedMavenToolName(name),
+    "This name is reserved for an internal Maven tool",
+  );
+
+export const toolDescriptionSchema = z
+  .string()
+  .min(1, "Description is required")
+  .max(500);
+
+export const toolAudienceSchema = z
+  .array(z.enum(["public", "sidechat"]))
+  .min(1)
+  .max(2)
+  .refine((values) => new Set(values).size === values.length, "Duplicate channel");
+
+export const toolParameterSchema = z.object({
   name: z.string().min(1, "Parameter name is required").max(100),
   type: z.enum(["string", "number", "boolean"]),
   description: z.string().max(500).default(""),
   required: z.boolean().default(true),
   enum: z.array(z.string().max(100)).max(20).optional(),
+});
+
+export const httpToolModelContractSchema = z.object({
+  name: toolNameSchema,
+  description: toolDescriptionSchema,
+  parameters: z.array(toolParameterSchema).max(10),
 });
 
 const responseMappingSchema = z
@@ -581,28 +628,23 @@ const responseMappingSchema = z
   .nullable();
 
 export const createToolSchema = z.object({
-  name: z
-    .string()
-    .min(1, "Name is required")
-    .max(100)
-    .regex(
-      /^[a-z][a-z0-9_]*$/,
-      "Must start with a letter and contain only lowercase letters, numbers, and underscores",
-    ),
+  name: toolNameSchema,
   displayName: z.string().min(1, "Display name is required").max(100),
-  description: z.string().min(1, "Description is required").max(500),
+  description: toolDescriptionSchema,
   endpoint: z.string().url("Must be a valid URL").max(2048),
   method: z.enum(["GET", "POST"]).default("POST"),
-  headers: z.record(z.string(), z.string().max(2048)).optional(),
+  headers: z.record(z.string(), z.string().max(2048)).optional().nullable(),
   parameters: z.array(toolParameterSchema).max(10).default([]),
   responseMapping: responseMappingSchema,
   enabled: z.boolean().default(true),
   timeout: z.number().int().min(1000).max(30000).default(10000),
+  allowedChannels: toolAudienceSchema.default(["public"]),
+  access: z.enum(["read", "write"]).default("read"),
 });
 
 export const updateToolSchema = z.object({
   displayName: z.string().min(1).max(100).optional(),
-  description: z.string().min(1).max(500).optional(),
+  description: toolDescriptionSchema.optional(),
   endpoint: z.string().url().max(2048).optional(),
   method: z.enum(["GET", "POST"]).optional(),
   headers: z.record(z.string(), z.string().max(2048)).optional().nullable(),
@@ -611,6 +653,8 @@ export const updateToolSchema = z.object({
   enabled: z.boolean().optional(),
   timeout: z.number().int().min(1000).max(30000).optional(),
   sortOrder: z.number().int().min(0).optional(),
+  allowedChannels: toolAudienceSchema.optional(),
+  access: z.enum(["read", "write"]).optional(),
 });
 
 export const testToolSchema = z.object({

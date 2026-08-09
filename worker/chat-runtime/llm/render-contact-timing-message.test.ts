@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { isRenderedContactTimingMessageValid } from "./render-contact-timing-message";
+import { type LanguageModel } from "ai";
+import {
+  isRenderedContactTimingMessageValid,
+  renderContactTimingMessage,
+} from "./render-contact-timing-message";
 
 const context = {
   workingHours: "Monday through Friday",
@@ -44,4 +48,66 @@ test("rejects unsupported precision and multiple response windows", () => {
       context,
     ),
   ).toBe(false);
+});
+
+test("forwards caller cancellation to the contact timing model", async () => {
+  let providerSignal: AbortSignal | undefined;
+  let rejectProvider: ((reason: unknown) => void) | undefined;
+  let resolveStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    resolveStarted = resolve;
+  });
+  const model = {
+    specificationVersion: "v3" as const,
+    provider: "test",
+    modelId: "contact-timing-test",
+    supportedUrls: {},
+    async doGenerate(options: { abortSignal?: AbortSignal }) {
+      providerSignal = options.abortSignal;
+      resolveStarted?.();
+      return new Promise<never>((_resolve, reject) => {
+        rejectProvider = reject;
+        options.abortSignal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("cancelled", "AbortError")),
+          { once: true },
+        );
+      });
+    },
+    async doStream() {
+      throw new Error("Unexpected streaming generation");
+    },
+  } as LanguageModel;
+  const abortController = new AbortController();
+  const pending = renderContactTimingMessage(
+    model,
+    {
+      nowMs: 0,
+      currentMessage: "I need a person",
+      workingHours: "Monday through Friday",
+      avgResponseTime: "2-4 hours",
+      companyContext: "Acme support",
+      visitorLocation: {
+        timezone: "UTC",
+        city: null,
+        region: null,
+        country: null,
+      },
+    },
+    {
+      throwOnModelError: true,
+      abortSignal: abortController.signal,
+    },
+  );
+
+  await started;
+  abortController.abort(new DOMException("visitor left", "AbortError"));
+  const providerWasAborted = providerSignal?.aborted === true;
+  if (!providerWasAborted) {
+    rejectProvider?.(new Error("test cleanup"));
+  }
+  await pending.catch(() => undefined);
+
+  expect(providerSignal).toBe(abortController.signal);
+  expect(providerWasAborted).toBe(true);
 });

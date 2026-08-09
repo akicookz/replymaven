@@ -617,6 +617,11 @@ export const tools = sqliteTable(
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
     timeout: integer("timeout").notNull().default(10000), // ms, max 30000
     sortOrder: integer("sort_order").notNull().default(0),
+    allowedChannels: text("allowed_channels").notNull().default('["public"]'),
+    access: text("access", { enum: ["read", "write"] })
+      .notNull()
+      .default("read"),
+    schemaFingerprint: text("schema_fingerprint").notNull().default("legacy-v1"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),
@@ -627,6 +632,7 @@ export const tools = sqliteTable(
   },
   (table) => [
     index("idx_tools_project").on(table.projectId),
+    index("idx_tools_project_enabled").on(table.projectId, table.enabled),
     uniqueIndex("idx_tools_project_name").on(table.projectId, table.name),
   ],
 );

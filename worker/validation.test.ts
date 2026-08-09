@@ -2,14 +2,54 @@ import { describe, expect, test } from "bun:test";
 import {
   bulkConversationActionSchema,
   conversationCustomerSchema,
+  createToolSchema,
   createCustomerSchema,
   customerListQuerySchema,
   customerIdentityTokenPayloadSchema,
   mergeCustomerSchema,
   signedWidgetIdentifySchema,
+  updateToolSchema,
   updateCustomerSchema,
 } from "./validation";
 import * as validation from "./validation";
+
+describe("tool audience validation", () => {
+  const validTool = {
+    name: "lookup_order",
+    displayName: "Look up order",
+    description: "Find an order by its reference number.",
+    endpoint: "https://api.example.com/orders",
+  };
+
+  test("defaults new HTTP tools to public read-only access", () => {
+    expect(createToolSchema.parse(validTool)).toMatchObject({
+      allowedChannels: ["public"],
+      access: "read",
+    });
+  });
+
+  test("accepts a preset create payload with no headers", () => {
+    expect(
+      createToolSchema.safeParse({ ...validTool, headers: null }).success,
+    ).toBe(true);
+  });
+
+  test("rejects empty and duplicate tool audiences", () => {
+    expect(() => updateToolSchema.parse({ allowedChannels: [] })).toThrow();
+    expect(() =>
+      updateToolSchema.parse({ allowedChannels: ["public", "public"] }),
+    ).toThrow();
+  });
+
+  test.each(["search_knowledge", "request_team_help"])(
+    "rejects the reserved internal Maven tool name %s",
+    (name) => {
+      expect(
+        createToolSchema.safeParse({ ...validTool, name }).success,
+      ).toBe(false);
+    },
+  );
+});
 
 describe("customer validation contracts", () => {
   test("exports every customer identity schema used by HTTP boundaries", () => {

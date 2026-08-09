@@ -19,22 +19,36 @@ interface UpdateConversationCall {
   projectId: string;
   data: { metadata?: string; visitorName?: string; visitorEmail?: string };
 }
+interface UpdateLegacyEscalationMetadataCall {
+  id: string;
+  projectId: string;
+  data: {
+    expectedMavenAcceptanceToken: string | null;
+    summary: string;
+    summaryMessageId: string;
+    escalatedAt?: string;
+    summaryPending?: boolean;
+  };
+}
 
 function makeChatService() {
   const calls = {
     addSystemMessage: [] as AddSystemMessageCall[],
     updateConversation: [] as UpdateConversationCall[],
+    updateLegacyEscalationMetadata:
+      [] as UpdateLegacyEscalationMetadataCall[],
   };
   const service = {
     addSystemMessage: async (
       conversationId: string,
       kind: string,
       content: string,
+      idempotencyKey?: string,
     ): Promise<MessageRow> => {
       calls.addSystemMessage.push({ conversationId, kind, content });
       const now = new Date();
       return {
-        id: "msg-review-1",
+        id: idempotencyKey ?? "msg-review-1",
         conversationId,
         role: "system",
         content,
@@ -55,6 +69,14 @@ function makeChatService() {
       data: UpdateConversationCall["data"],
     ) => {
       calls.updateConversation.push({ id, projectId, data });
+      return { id };
+    },
+    updateLegacyEscalationMetadata: async (
+      id: string,
+      projectId: string,
+      data: UpdateLegacyEscalationMetadataCall["data"],
+    ) => {
+      calls.updateLegacyEscalationMetadata.push({ id, projectId, data });
       return { id };
     },
     runExternalActionIfOperational: async (
@@ -126,7 +148,7 @@ describe("createEscalation - first escalation (created)", () => {
     const result = await createEscalation(params as never);
 
     expect(result.created).toBe(true);
-    expect(result.summaryMessageId).toBe("msg-review-1");
+    expect(result.summaryMessageId).toBeString();
     expect(calls.addSystemMessage).toHaveLength(1);
     expect(calls.addSystemMessage[0]).toMatchObject({
       conversationId: "conv-1",
@@ -134,10 +156,10 @@ describe("createEscalation - first escalation (created)", () => {
       content: "Visitor needs a refund on order 123.",
     });
     expect(broadcasts).toHaveLength(1);
-    expect(broadcasts[0].id).toBe("msg-review-1");
+    expect(broadcasts[0].id).toBe(result.summaryMessageId);
   });
 
-  test("preserves existing metadata keys (country/city/source)", async () => {
+  test("patches escalation fields without replaying unrelated metadata", async () => {
     const { params, calls } = baseParams({
       conversation: makeConversation({
         metadata: JSON.stringify({
@@ -151,11 +173,54 @@ describe("createEscalation - first escalation (created)", () => {
     const result = await createEscalation(params as never);
 
     expect(result.created).toBe(true);
-    const meta = JSON.parse(calls.updateConversation[0].data.metadata!);
-    expect(meta.country).toBe("US");
-    expect(meta.city).toBe("NYC");
-    expect(meta.source).toBe("widget");
-    expect(meta.reviewSummaryMessageId).toBe("msg-review-1");
+    const meta = calls.updateLegacyEscalationMetadata[0].data;
+    expect(meta).not.toHaveProperty("country");
+    expect(meta).not.toHaveProperty("city");
+    expect(meta).not.toHaveProperty("source");
+    expect(meta.summaryMessageId).toBe(result.summaryMessageId);
+  });
+
+  test("uses the dedicated non-Maven metadata path instead of the generic patch", async () => {
+    const { params, calls } = baseParams();
+
+    const result = await createEscalation(params as never);
+
+    expect(result.accepted).toBe(true);
+    expect(calls.updateConversation).toHaveLength(0);
+    expect(calls.updateLegacyEscalationMetadata).toHaveLength(2);
+    expect(calls.updateLegacyEscalationMetadata[0].data).toMatchObject({
+      expectedMavenAcceptanceToken: null,
+      summary: "Visitor needs a refund on order 123.",
+      summaryMessageId: result.summaryMessageId,
+      summaryPending: true,
+    });
+    expect(calls.updateLegacyEscalationMetadata[1].data).toEqual({
+      expectedMavenAcceptanceToken: null,
+      summary: "Visitor needs a refund on order 123.",
+      summaryMessageId: result.summaryMessageId,
+      summaryPending: false,
+    });
+  });
+
+  test("does not replay stale notification state in its metadata patch", async () => {
+    const { params, calls } = baseParams({
+      conversation: makeConversation({
+        metadata: JSON.stringify({
+          escalatedAt: "2026-08-09T00:00:00.000Z",
+          reviewSummaryMessageId: "msg-review-1",
+          teamRequestSummary: "Accepted summary.",
+          teamRequestSummaryPending: true,
+          teamRequestNotificationState: "pending",
+          mavenTeamRequestAcceptedAt: "2026-08-09T00:00:00.000Z",
+        }),
+      }),
+    });
+
+    await createEscalation(params as never);
+
+    const firstPatch = calls.updateLegacyEscalationMetadata[0].data;
+    expect(firstPatch).not.toHaveProperty("teamRequestNotificationState");
+    expect(firstPatch).not.toHaveProperty("mavenTeamRequestAcceptedAt");
   });
 
   test('treats the metadata literal "null" as absent instead of crashing', async () => {
@@ -166,9 +231,9 @@ describe("createEscalation - first escalation (created)", () => {
     const result = await createEscalation(params as never);
 
     expect(result.created).toBe(true);
-    const meta = JSON.parse(calls.updateConversation[0].data.metadata!);
+    const meta = calls.updateLegacyEscalationMetadata[0].data;
     expect(typeof meta.escalatedAt).toBe("string");
-    expect(meta.teamRequestSummary).toBe("Visitor needs a refund on order 123.");
+    expect(meta.summary).toBe("Visitor needs a refund on order 123.");
   });
 });
 
@@ -241,9 +306,9 @@ describe("createEscalation - telegram notification", () => {
     expect(tg.calls[0].params.isUpdate).toBe(false);
     expect(tg.calls[0].params.replyToMessageId).toBeUndefined();
     expect(tg.calls[0].params.conversationUrl).toBe(
-      "https://app.test/app/projects/project-1/conversations?filter=needs-you&id=conv-1&msg=msg-review-1",
+      `https://app.test/app/projects/project-1/conversations?filter=needs-you&id=conv-1&msg=${result.summaryMessageId}`,
     );
-    expect(result.summaryMessageId).toBe("msg-review-1");
+    expect(result.summaryMessageId).toBeString();
     expect(result.telegramThreadId).toBe("555");
   });
 
@@ -275,6 +340,7 @@ describe("createEscalation - telegram notification", () => {
     const unavailableChatService = {
       addSystemMessage: async () => null,
       updateConversation: async () => null,
+      updateLegacyEscalationMetadata: async () => null,
     } as unknown as ChatService;
     const { params } = baseParams({
       chatService: unavailableChatService,

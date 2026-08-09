@@ -24,8 +24,8 @@ function shouldThrowOnModelError(options?: AuxiliaryCallOptions): boolean {
   return options?.throwOnModelError === true;
 }
 
-// Turn classification lives in the planner (plan-next-action.ts) — the
-// planner's first step IS the classifier; there is no separate routing call.
+// Public turn decisions live in the unified Maven tool loop; there is no
+// separate model-based routing or classification call.
 
 const reformulateSearchQueriesSchema = z.object({
   queries: z.array(z.string().min(3).max(180)).min(1).max(3),

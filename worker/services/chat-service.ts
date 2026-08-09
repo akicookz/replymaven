@@ -13,6 +13,7 @@ import {
 import {
   applyChatOwnershipEvent,
   type ChatOwnershipEvent,
+  type ChatOwnershipSnapshot,
   type ConversationChatState,
   createInitialChatState,
   fallbackAiParticipationForStatus,
@@ -91,7 +92,19 @@ export function buildExternalActionLeaseQuery(
   projectId: string,
   leaseAt: Date,
   staleBefore: Date,
+  ownership?: ChatOwnershipSnapshot,
 ) {
+  const ownershipConditions = ownership
+    ? [
+        eq(
+          conversations.status,
+          ownership.status as ConversationRow["status"],
+        ),
+        ownership.chatState === null
+          ? isNull(conversations.chatState)
+          : eq(conversations.chatState, ownership.chatState),
+      ]
+    : [];
   return db
     .update(conversations)
     .set({
@@ -103,6 +116,7 @@ export function buildExternalActionLeaseQuery(
         eq(conversations.id, conversationId),
         eq(conversations.projectId, projectId),
         isNull(conversations.archivedAt),
+        ...ownershipConditions,
         or(
           isNull(conversations.externalActionStartedAt),
           lte(conversations.externalActionStartedAt, staleBefore),
@@ -391,7 +405,59 @@ export function buildConditionalSystemMessageQuery(
       ),
     );
 
-  return db.insert(messages).select(selectQuery).returning();
+  return db
+    .insert(messages)
+    .select(selectQuery)
+    .onConflictDoNothing()
+    .returning();
+}
+
+export function buildAcceptedTeamRequestSummaryQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+  projectId: string,
+  acceptanceToken: string,
+  createdAt: Date,
+) {
+  const selectQuery = db
+    .select({
+      id: sql<string>`json_extract(${conversations.metadata}, '$.reviewSummaryMessageId')`.as("id"),
+      conversationId: conversations.id,
+      role: sql<"system">`${"system"}`.as("role"),
+      content: sql<string>`json_extract(${conversations.metadata}, '$.teamRequestSummary')`.as("content"),
+      imageUrl: sql<null>`null`.as("image_url"),
+      sources: sql<string>`${JSON.stringify({ systemKind: "review_summary" })}`.as("sources"),
+      senderName: sql<null>`null`.as("sender_name"),
+      senderAvatar: sql<null>`null`.as("sender_avatar"),
+      userId: sql<null>`null`.as("user_id"),
+      createdAt: sql<Date>`${Math.floor(createdAt.getTime() / 1000)}`.as(
+        "created_at",
+      ),
+      emailedAt: sql<null>`null`.as("emailed_at"),
+      deliveredAt: sql<null>`null`.as("delivered_at"),
+      readAt: sql<null>`null`.as("read_at"),
+    })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+        eq(conversations.status, "waiting_agent"),
+        isNull(conversations.archivedAt),
+        sql`json_valid(${conversations.metadata})`,
+        sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestAcceptanceToken') = ${acceptanceToken}`,
+        sql`json_extract(${conversations.metadata}, '$.teamRequestSummaryPending') = 1`,
+        sql`json_type(${conversations.metadata}, '$.reviewSummaryMessageId') = 'text'`,
+        sql`json_type(${conversations.metadata}, '$.teamRequestSummary') = 'text'`,
+        sql`coalesce(json_extract(${conversations.chatState}, '$.aiParticipation'), 'assist_until_agent') <> 'human_only'`,
+      ),
+    );
+
+  return db
+    .insert(messages)
+    .select(selectQuery)
+    .onConflictDoNothing()
+    .returning();
 }
 
 export function buildConditionalBotMessageQuery(
@@ -466,6 +532,93 @@ export function buildHumanTakeoverQuery(
       status: conversations.status,
       chatState: conversations.chatState,
     });
+}
+
+export function buildNewTeamRequestClaimQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationId: string,
+  projectId: string,
+  expectedChatState: string | null,
+  nextChatState: string,
+  expectedVisitorName: string | null,
+  expectedVisitorEmail: string | null,
+  acceptance: {
+    acceptanceToken: string;
+    summary: string;
+    acceptedAt: string;
+    summaryMessageId: string;
+  },
+  enforceContactSnapshot = true,
+) {
+  const chatStateCondition =
+    expectedChatState === null
+      ? isNull(conversations.chatState)
+      : eq(conversations.chatState, expectedChatState);
+  const visitorNameCondition =
+    expectedVisitorName === null
+      ? isNull(conversations.visitorName)
+      : eq(conversations.visitorName, expectedVisitorName);
+  const visitorEmailCondition =
+    expectedVisitorEmail === null
+      ? isNull(conversations.visitorEmail)
+      : eq(conversations.visitorEmail, expectedVisitorEmail);
+  const validMetadata = sql`case when json_valid(${conversations.metadata}) then coalesce(${conversations.metadata}, '{}') else '{}' end`;
+  const nextMetadata = sql`json_set(
+    ${validMetadata},
+    '$.teamRequestSummary', ${acceptance.summary},
+    '$.escalatedAt', ${acceptance.acceptedAt},
+    '$.reviewSummaryMessageId', ${acceptance.summaryMessageId},
+    '$.teamRequestSummaryPending', json('true'),
+    '$.teamRequestNotificationState', 'pending',
+    '$.mavenTeamRequestAcceptedAt', ${acceptance.acceptedAt},
+    '$.mavenTeamRequestAcceptanceToken', ${acceptance.acceptanceToken}
+  )`;
+  return db
+    .update(conversations)
+    .set({
+      status: "waiting_agent",
+      chatState: nextChatState,
+      metadata: nextMetadata,
+    })
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        eq(conversations.projectId, projectId),
+        eq(conversations.status, "active"),
+        isNull(conversations.archivedAt),
+        chatStateCondition,
+        ...(enforceContactSnapshot
+          ? [visitorNameCondition, visitorEmailCondition]
+          : []),
+      ),
+    )
+    .returning({ id: conversations.id });
+}
+
+export type NewTeamRequestClaimResult =
+  | { status: "claimed" }
+  | { status: "already_requested" }
+  | {
+      status: "contact_required";
+      requiredFields: Array<"name" | "email">;
+    }
+  | { status: "unavailable" };
+
+export interface NewTeamRequestAcceptance {
+  acceptanceToken: string;
+  acceptedAt: string;
+  notificationState: string;
+  summary: string;
+  summaryMessageId: string;
+  summaryPending: boolean;
+}
+
+export interface LegacyEscalationMetadataUpdate {
+  expectedMavenAcceptanceToken: string | null;
+  summary: string;
+  summaryMessageId: string;
+  escalatedAt?: string;
+  summaryPending?: boolean;
 }
 
 // ─── Inbox tab predicates ────────────────────────────────────────────────────
@@ -608,6 +761,18 @@ export function buildAiResolutionQuery(
 export class ChatService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
 
+  protected async afterNewTeamRequestAuthoritativeRead(): Promise<void> {
+    // Test seam for exercising races between the authoritative read and CAS.
+  }
+
+  protected async beforeConversationMetadataPatch(): Promise<void> {
+    // Test seam for exercising a delayed metadata patch against a live row.
+  }
+
+  protected async beforeNewTeamRequestTelegramThreadPersistence(): Promise<void> {
+    // Test seam for exercising ownership races immediately before the CAS.
+  }
+
   // ─── Conversations ──────────────────────────────────────────────────────────
 
   async getConversationById(
@@ -639,6 +804,36 @@ export class ChatService {
       projectId,
       now,
       staleBefore,
+    );
+    if (leaseRows.length === 0) return { executed: false };
+
+    try {
+      return { executed: true, value: await action() };
+    } finally {
+      await buildExternalActionLeaseReleaseQuery(
+        this.db,
+        conversationId,
+        projectId,
+        now,
+      );
+    }
+  }
+
+  async runExternalActionIfOwnershipMatches<T>(
+    conversationId: string,
+    projectId: string,
+    ownership: ChatOwnershipSnapshot,
+    action: () => Promise<T>,
+    now: Date = new Date(),
+  ): Promise<ExternalActionResult<T>> {
+    const staleBefore = new Date(now.getTime() - EXTERNAL_ACTION_LEASE_MS);
+    const leaseRows = await buildExternalActionLeaseQuery(
+      this.db,
+      conversationId,
+      projectId,
+      now,
+      staleBefore,
+      ownership,
     );
     if (leaseRows.length === 0) return { executed: false };
 
@@ -1007,6 +1202,235 @@ export class ChatService {
     return updated.length > 0;
   }
 
+  async claimNewTeamRequest(
+    id: string,
+    projectId: string,
+    summary: string,
+  ): Promise<NewTeamRequestClaimResult> {
+    const conversation = await this.getOperationalConversationById(
+      id,
+      projectId,
+    );
+    if (!conversation) return { status: "unavailable" };
+
+    function classifyConversation(
+      row: ConversationRow,
+    ): Exclude<NewTeamRequestClaimResult, { status: "claimed" }> | null {
+      const state = parseChatState(row.chatState, {
+        fallbackAiParticipation: fallbackAiParticipationForStatus(row.status),
+      });
+      if (
+        row.status === "waiting_agent" ||
+        row.status === "agent_replied" ||
+        state.aiParticipation === "human_only"
+      ) {
+        return { status: "already_requested" };
+      }
+      if (row.status !== "active" || state.aiParticipation !== "continuous") {
+        return { status: "unavailable" };
+      }
+
+      const requiredFields: Array<"name" | "email"> = [];
+      if (!row.visitorName?.trim()) requiredFields.push("name");
+      if (!row.visitorEmail?.trim()) requiredFields.push("email");
+      if (requiredFields.length > 0 && !state.contactDeclined) {
+        return { status: "contact_required", requiredFields };
+      }
+      return null;
+    }
+
+    const currentClassification = classifyConversation(conversation);
+    if (currentClassification) return currentClassification;
+
+    await this.afterNewTeamRequestAuthoritativeRead();
+
+    const currentState = parseChatState(conversation.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    });
+    const nextState = applyChatOwnershipEvent(currentState, "team_requested");
+    const updated = await buildNewTeamRequestClaimQuery(
+      this.db,
+      id,
+      projectId,
+      conversation.chatState,
+      JSON.stringify(nextState),
+      conversation.visitorName,
+      conversation.visitorEmail,
+      {
+        acceptanceToken: crypto.randomUUID(),
+        summary: summary.trim() || "Visitor asked for team follow-up.",
+        acceptedAt: new Date().toISOString(),
+        summaryMessageId: crypto.randomUUID(),
+      },
+      !currentState.contactDeclined,
+    );
+    if (updated.length > 0) return { status: "claimed" };
+
+    const latest = await this.getOperationalConversationById(id, projectId);
+    if (!latest) return { status: "unavailable" };
+    return classifyConversation(latest) ?? { status: "unavailable" };
+  }
+
+  async claimNewTeamRequestNotification(
+    id: string,
+    projectId: string,
+    acceptanceToken: string,
+  ): Promise<boolean> {
+    const conversation = await this.getOperationalConversationById(
+      id,
+      projectId,
+    );
+    if (!conversation || conversation.status !== "waiting_agent") return false;
+
+    const chatState = parseChatState(conversation.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    });
+    if (chatState.aiParticipation === "human_only") return false;
+
+    let metadata: Record<string, unknown>;
+    try {
+      const parsed: unknown = conversation.metadata
+        ? JSON.parse(conversation.metadata)
+        : null;
+      if (!parsed || typeof parsed !== "object") return false;
+      metadata = parsed as Record<string, unknown>;
+    } catch {
+      return false;
+    }
+    if (
+      metadata.mavenTeamRequestAcceptanceToken !== acceptanceToken ||
+      typeof metadata.mavenTeamRequestAcceptedAt !== "string" ||
+      metadata.teamRequestNotificationState !== "pending"
+    ) {
+      return false;
+    }
+
+    const nextMetadata = JSON.stringify({
+      ...metadata,
+      teamRequestNotificationState: "attempted",
+      teamRequestNotificationAttemptedAt: new Date().toISOString(),
+    });
+    const updated = await this.db
+      .update(conversations)
+      .set({ metadata: nextMetadata })
+      .where(
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          eq(conversations.status, "waiting_agent"),
+          isNull(conversations.archivedAt),
+          conversation.chatState === null
+            ? isNull(conversations.chatState)
+            : eq(conversations.chatState, conversation.chatState),
+          conversation.metadata === null
+            ? isNull(conversations.metadata)
+            : eq(conversations.metadata, conversation.metadata),
+        ),
+      )
+      .returning({ id: conversations.id });
+    return updated.length > 0;
+  }
+
+  async getNewTeamRequestAcceptance(
+    id: string,
+    projectId: string,
+    acceptanceToken: string,
+  ): Promise<NewTeamRequestAcceptance | null> {
+    const conversation = await this.getOperationalConversationById(
+      id,
+      projectId,
+    );
+    if (!conversation || conversation.status !== "waiting_agent") return null;
+    const state = parseChatState(conversation.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        conversation.status,
+      ),
+    });
+    if (state.aiParticipation === "human_only") return null;
+
+    try {
+      const metadata: unknown = conversation.metadata
+        ? JSON.parse(conversation.metadata)
+        : null;
+      if (!metadata || typeof metadata !== "object") return null;
+      const record = metadata as Record<string, unknown>;
+      if (
+        record.mavenTeamRequestAcceptanceToken !== acceptanceToken ||
+        typeof record.mavenTeamRequestAcceptedAt !== "string" ||
+        typeof record.teamRequestSummary !== "string" ||
+        typeof record.reviewSummaryMessageId !== "string" ||
+        typeof record.teamRequestNotificationState !== "string"
+      ) {
+        return null;
+      }
+      return {
+        acceptanceToken,
+        acceptedAt: record.mavenTeamRequestAcceptedAt,
+        notificationState: record.teamRequestNotificationState,
+        summary: record.teamRequestSummary,
+        summaryMessageId: record.reviewSummaryMessageId,
+        summaryPending: record.teamRequestSummaryPending === true,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async addNewTeamRequestSummary(
+    id: string,
+    projectId: string,
+    acceptanceToken: string,
+  ): Promise<MessageRow | null> {
+    const rows = await buildAcceptedTeamRequestSummaryQuery(
+      this.db,
+      id,
+      projectId,
+      acceptanceToken,
+      new Date(),
+    );
+    return rows[0] ?? null;
+  }
+
+  async completeNewTeamRequestSummary(
+    id: string,
+    projectId: string,
+    acceptanceToken: string,
+  ): Promise<boolean> {
+    const updated = await this.db
+      .update(conversations)
+      .set({
+        metadata: sql`json_set(
+          ${conversations.metadata},
+          '$.teamRequestSummaryPending',
+          json('false')
+        )`,
+      })
+      .where(
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          eq(conversations.status, "waiting_agent"),
+          isNull(conversations.archivedAt),
+          sql`json_valid(${conversations.metadata})`,
+          sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestAcceptanceToken') = ${acceptanceToken}`,
+          sql`json_extract(${conversations.metadata}, '$.teamRequestSummaryPending') = 1`,
+          sql`coalesce(json_extract(${conversations.chatState}, '$.aiParticipation'), 'assist_until_agent') <> 'human_only'`,
+        ),
+      )
+      .returning({ id: conversations.id });
+    if (updated.length > 0) return true;
+    const current = await this.getNewTeamRequestAcceptance(
+      id,
+      projectId,
+      acceptanceToken,
+    );
+    return current?.summaryPending === false;
+  }
+
   async takeHumanOwnership(
     id: string,
     projectId: string,
@@ -1113,22 +1537,51 @@ export class ChatService {
       metadata?: string;
     },
   ): Promise<ConversationRow | null> {
-    const existing = await this.getOperationalConversationById(id, projectId);
-    if (!existing) return null;
-
     const updates: Record<string, unknown> = {};
+    let hasMutableMetadataPatch = false;
     if (data.visitorName !== undefined) updates.visitorName = data.visitorName;
     if (data.visitorEmail !== undefined) updates.visitorEmail = data.visitorEmail;
     if (data.metadata !== undefined) {
-      // Merge new metadata with existing metadata
-      const existingMeta = existing.metadata
-        ? JSON.parse(existing.metadata)
-        : {};
-      const newMeta = JSON.parse(data.metadata);
-      updates.metadata = JSON.stringify({ ...existingMeta, ...newMeta });
+      const metadataPatch: unknown = JSON.parse(data.metadata);
+      if (
+        !metadataPatch ||
+        typeof metadataPatch !== "object" ||
+        Array.isArray(metadataPatch)
+      ) {
+        throw new TypeError("Conversation metadata patch must be an object");
+      }
+      const mutableMetadataPatch = {
+        ...(metadataPatch as Record<string, unknown>),
+      };
+      delete mutableMetadataPatch.teamRequestSummary;
+      delete mutableMetadataPatch.reviewSummaryMessageId;
+      delete mutableMetadataPatch.teamRequestSummaryPending;
+      delete mutableMetadataPatch.teamRequestNotificationState;
+      delete mutableMetadataPatch.teamRequestNotificationAttemptedAt;
+      delete mutableMetadataPatch.mavenTeamRequestAcceptedAt;
+      delete mutableMetadataPatch.mavenTeamRequestAcceptanceToken;
+      delete mutableMetadataPatch.mavenTeamRequestTelegramThreadAcceptanceToken;
+      if (Object.keys(mutableMetadataPatch).length > 0) {
+        hasMutableMetadataPatch = true;
+        const serializedPatch = JSON.stringify(mutableMetadataPatch);
+        updates.metadata = sql`json_patch(
+          CASE
+            WHEN json_valid(COALESCE(${conversations.metadata}, '{}'))
+              THEN COALESCE(${conversations.metadata}, '{}')
+            ELSE '{}'
+          END,
+          ${serializedPatch}
+        )`;
+      }
     }
 
-    if (Object.keys(updates).length === 0) return existing;
+    if (Object.keys(updates).length === 0) {
+      return this.getOperationalConversationById(id, projectId);
+    }
+
+    if (hasMutableMetadataPatch) {
+      await this.beforeConversationMetadataPatch();
+    }
 
     await this.db
       .update(conversations)
@@ -1142,6 +1595,114 @@ export class ChatService {
       );
 
     return this.getOperationalConversationById(id, projectId);
+  }
+
+  async updateLegacyEscalationMetadata(
+    id: string,
+    projectId: string,
+    data: LegacyEscalationMetadataUpdate,
+  ): Promise<ConversationRow | null> {
+    const metadataPatch: Record<string, unknown> = {
+      teamRequestSummary: data.summary,
+      reviewSummaryMessageId: data.summaryMessageId,
+    };
+    if (data.escalatedAt !== undefined) {
+      metadataPatch.escalatedAt = data.escalatedAt;
+    }
+    if (data.summaryPending !== undefined) {
+      metadataPatch.teamRequestSummaryPending = data.summaryPending;
+    }
+    const serializedPatch = JSON.stringify(metadataPatch);
+    const validMetadata = sql`CASE
+      WHEN json_valid(COALESCE(${conversations.metadata}, '{}'))
+        THEN COALESCE(${conversations.metadata}, '{}')
+      ELSE '{}'
+    END`;
+    const acceptanceTokenCondition =
+      data.expectedMavenAcceptanceToken === null
+        ? sql`json_extract(${validMetadata}, '$.mavenTeamRequestAcceptanceToken') IS NULL`
+        : sql`json_extract(${validMetadata}, '$.mavenTeamRequestAcceptanceToken') = ${data.expectedMavenAcceptanceToken}`;
+    const updated = await this.db
+      .update(conversations)
+      .set({
+        metadata: sql`json_patch(${validMetadata}, ${serializedPatch})`,
+      })
+      .where(
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          isNull(conversations.archivedAt),
+          acceptanceTokenCondition,
+        ),
+      )
+      .returning();
+    return updated[0] ?? null;
+  }
+
+  async persistNewTeamRequestTelegramThreadId(
+    id: string,
+    projectId: string,
+    acceptanceToken: string,
+    threadId: string,
+  ): Promise<boolean> {
+    await this.beforeNewTeamRequestTelegramThreadPersistence();
+
+    const validChatState = sql`CASE
+      WHEN json_valid(COALESCE(${conversations.chatState}, '{}'))
+        THEN COALESCE(${conversations.chatState}, '{}')
+      ELSE '{}'
+    END`;
+    const updated = await this.db
+      .update(conversations)
+      .set({
+        telegramThreadId: threadId,
+        metadata: sql`json_set(
+          ${conversations.metadata},
+          '$.mavenTeamRequestTelegramThreadAcceptanceToken',
+          ${acceptanceToken}
+        )`,
+      })
+      .where(
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+          eq(conversations.status, "waiting_agent"),
+          isNull(conversations.archivedAt),
+          sql`json_valid(${conversations.metadata})`,
+          sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestAcceptanceToken') = ${acceptanceToken}`,
+          sql`json_extract(${conversations.metadata}, '$.teamRequestNotificationState') = 'attempted'`,
+          sql`coalesce(json_extract(${validChatState}, '$.aiParticipation'), 'assist_until_agent') <> 'human_only'`,
+          or(
+            sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestTelegramThreadAcceptanceToken') IS NULL`,
+            sql`json_extract(${conversations.metadata}, '$.mavenTeamRequestTelegramThreadAcceptanceToken') <> ${acceptanceToken}`,
+            isNull(conversations.telegramThreadId),
+            eq(conversations.telegramThreadId, threadId),
+          ),
+        ),
+      )
+      .returning({ id: conversations.id });
+    if (updated.length > 0) return true;
+
+    const current = await this.getOperationalConversationById(id, projectId);
+    if (!current || current.telegramThreadId !== threadId) return false;
+    try {
+      const metadata: unknown = current.metadata
+        ? JSON.parse(current.metadata)
+        : null;
+      return Boolean(
+        metadata &&
+          typeof metadata === "object" &&
+          (metadata as Record<string, unknown>)
+            .mavenTeamRequestAcceptanceToken ===
+            acceptanceToken &&
+          (metadata as Record<string, unknown>)
+            .teamRequestNotificationState === "attempted" &&
+          (metadata as Record<string, unknown>)
+            .mavenTeamRequestTelegramThreadAcceptanceToken === acceptanceToken,
+      );
+    } catch {
+      return false;
+    }
   }
 
   async updateTelegramThreadId(
@@ -1344,6 +1905,58 @@ export class ChatService {
     });
   }
 
+  async updatePendingTeamRequestContact(
+    conversationId: string,
+    projectId: string,
+    ownership: ChatOwnershipSnapshot,
+    update: {
+      visitorName?: string;
+      visitorEmail?: string;
+      awaitingContactFields: Array<"name" | "email">;
+      contactDeclined?: boolean;
+    },
+  ): Promise<ConversationRow | null> {
+    const currentState = parseChatState(ownership.chatState, {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(
+        ownership.status,
+      ),
+    });
+    const nextState: ConversationChatState = {
+      ...currentState,
+      awaitingContactFields: update.awaitingContactFields,
+      ...(update.contactDeclined === undefined
+        ? {}
+        : { contactDeclined: update.contactDeclined }),
+    };
+    const rows = await this.db
+      .update(conversations)
+      .set({
+        ...(update.visitorName === undefined
+          ? {}
+          : { visitorName: update.visitorName }),
+        ...(update.visitorEmail === undefined
+          ? {}
+          : { visitorEmail: update.visitorEmail }),
+        chatState: JSON.stringify(nextState),
+      })
+      .where(
+        and(
+          eq(conversations.id, conversationId),
+          eq(conversations.projectId, projectId),
+          eq(
+            conversations.status,
+            ownership.status as ConversationRow["status"],
+          ),
+          isNull(conversations.archivedAt),
+          ownership.chatState === null
+            ? isNull(conversations.chatState)
+            : eq(conversations.chatState, ownership.chatState),
+        ),
+      )
+      .returning();
+    return rows[0] ?? null;
+  }
+
   async saveChatState(
     conversationId: string,
     projectId: string,
@@ -1525,8 +2138,9 @@ export class ChatService {
     conversationId: string,
     kind: SystemEventKind,
     content: string,
+    idempotencyKey?: string,
   ): Promise<MessageRow | null> {
-    const id = crypto.randomUUID();
+    const id = idempotencyKey ?? crypto.randomUUID();
     const now = new Date();
     const sources = JSON.stringify({ systemKind: kind });
     const rows = await buildConditionalSystemMessageQuery(this.db, {

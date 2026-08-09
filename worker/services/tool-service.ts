@@ -7,8 +7,44 @@ import {
   type NewToolRow,
   type ToolExecutionRow,
 } from "../db";
+import {
+  isReservedMavenToolName,
+  toolAudienceSchema,
+  type MavenChannel,
+} from "../validation";
 
 // ─── Tool Service ─────────────────────────────────────────────────────────────
+
+type CreateToolInput = Omit<
+  NewToolRow,
+  "id" | "createdAt" | "updatedAt" | "allowedChannels"
+> & {
+  allowedChannels?: MavenChannel[];
+};
+
+type ToolUpdateInput = Partial<
+  Pick<
+    ToolRow,
+    | "displayName"
+    | "description"
+    | "endpoint"
+    | "method"
+    | "headers"
+    | "parameters"
+    | "responseMapping"
+    | "enabled"
+    | "timeout"
+    | "sortOrder"
+    | "access"
+    | "schemaFingerprint"
+  >
+> & {
+  allowedChannels?: MavenChannel[];
+};
+
+function serializeAllowedChannels(allowedChannels: unknown): string {
+  return JSON.stringify(toolAudienceSchema.parse(allowedChannels));
+}
 
 export class ToolService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
@@ -31,6 +67,26 @@ export class ToolService {
       .orderBy(tools.sortOrder);
   }
 
+  async getEnabledToolsForChannel(
+    projectId: string,
+    channel: MavenChannel,
+  ): Promise<ToolRow[]> {
+    const enabledTools = await this.getEnabledTools(projectId);
+
+    return enabledTools.filter((tool) => {
+      if (isReservedMavenToolName(tool.name)) return false;
+      let allowedChannels: unknown;
+      try {
+        allowedChannels = JSON.parse(tool.allowedChannels);
+      } catch {
+        return false;
+      }
+
+      const parsed = toolAudienceSchema.safeParse(allowedChannels);
+      return parsed.success && parsed.data.includes(channel);
+    });
+  }
+
   async getToolById(id: string, projectId: string): Promise<ToolRow | null> {
     const rows = await this.db
       .select()
@@ -38,6 +94,13 @@ export class ToolService {
       .where(and(eq(tools.id, id), eq(tools.projectId, projectId)))
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  async getAuthoritativeTool(
+    projectId: string,
+    toolId: string,
+  ): Promise<ToolRow | null> {
+    return this.getToolById(toolId, projectId);
   }
 
   async getToolByName(name: string, projectId: string): Promise<ToolRow | null> {
@@ -50,35 +113,37 @@ export class ToolService {
   }
 
   async createTool(
-    data: Omit<NewToolRow, "id" | "createdAt" | "updatedAt">,
+    data: CreateToolInput,
   ): Promise<ToolRow> {
+    if (isReservedMavenToolName(data.name)) {
+      throw new Error("This name is reserved for an internal Maven tool");
+    }
     const id = crypto.randomUUID();
-    await this.db.insert(tools).values({ id, ...data });
+    const { allowedChannels, ...toolData } = data;
+    await this.db.insert(tools).values({
+      id,
+      ...toolData,
+      ...(allowedChannels === undefined
+        ? {}
+        : { allowedChannels: serializeAllowedChannels(allowedChannels) }),
+    });
     return (await this.getToolById(id, data.projectId))!;
   }
 
   async updateTool(
     id: string,
     projectId: string,
-    updates: Partial<
-      Pick<
-        ToolRow,
-        | "displayName"
-        | "description"
-        | "endpoint"
-        | "method"
-        | "headers"
-        | "parameters"
-        | "responseMapping"
-        | "enabled"
-        | "timeout"
-        | "sortOrder"
-      >
-    >,
+    updates: ToolUpdateInput,
   ): Promise<ToolRow | null> {
+    const { allowedChannels, ...toolUpdates } = updates;
     await this.db
       .update(tools)
-      .set(updates)
+      .set({
+        ...toolUpdates,
+        ...(allowedChannels === undefined
+          ? {}
+          : { allowedChannels: serializeAllowedChannels(allowedChannels) }),
+      })
       .where(and(eq(tools.id, id), eq(tools.projectId, projectId)));
     return this.getToolById(id, projectId);
   }
@@ -166,18 +231,21 @@ export class ToolService {
   // ─── Message Linking ────────────────────────────────────────────────────────
 
   /**
-   * Link all unlinked tool executions for a conversation to a specific bot message.
+   * Link the named, still-unlinked executions to a specific bot message.
    * Called after the bot message is stored post-streaming.
    */
   async linkExecutionsToMessage(
+    executionIds: string[],
     conversationId: string,
     messageId: string,
   ): Promise<void> {
+    if (executionIds.length === 0) return;
     await this.db
       .update(toolExecutions)
       .set({ messageId })
       .where(
         and(
+          inArray(toolExecutions.id, executionIds),
           eq(toolExecutions.conversationId, conversationId),
           isNull(toolExecutions.messageId),
         ),

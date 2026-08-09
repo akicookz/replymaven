@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -65,6 +65,8 @@ interface Tool {
   enabled: boolean;
   timeout: number;
   sortOrder: number;
+  allowedChannels: ToolAudience[];
+  access: ToolAccess;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,7 +95,22 @@ interface ToolFormData {
   responseMapping: ResponseMapping;
   enabled: boolean;
   timeout: number;
+  allowedChannels: ToolAudience[];
+  access: ToolAccess;
 }
+
+type ToolAudience = "public" | "sidechat";
+type ToolAccess = "read" | "write";
+
+interface ToolPolicyValue {
+  allowedChannels: ToolAudience[];
+  access: ToolAccess;
+}
+
+const defaultToolPolicy: ToolPolicyValue = {
+  allowedChannels: ["public"],
+  access: "read",
+};
 
 const emptyForm: ToolFormData = {
   name: "",
@@ -106,6 +123,7 @@ const emptyForm: ToolFormData = {
   responseMapping: { resultPath: "", summaryTemplate: "" },
   enabled: true,
   timeout: 10000,
+  ...defaultToolPolicy,
 };
 
 // ─── Tool Presets ─────────────────────────────────────────────────────────────
@@ -128,7 +146,11 @@ interface ToolPreset {
   iconBg: string;
   iconColor: string;
   fields: PresetField[];
-  build: (values: Record<string, string>, existing: Tool | undefined) => Omit<ToolFormPayload, "enabled">;
+  build: (
+    values: Record<string, string>,
+    existing: Tool | undefined,
+    dirtyFields: ReadonlySet<string>,
+  ) => PresetToolPayload;
   extract: (tool: Tool) => Record<string, string>;
 }
 
@@ -143,7 +165,16 @@ interface ToolFormPayload {
   responseMapping: ResponseMapping | null;
   enabled: boolean;
   timeout: number;
+  allowedChannels: ToolAudience[];
+  access: ToolAccess;
 }
+
+type PresetToolPayload = Omit<
+  ToolFormPayload,
+  "enabled" | "allowedChannels" | "access" | "headers"
+> & {
+  headers?: Record<string, string> | null;
+};
 
 function webhookPreset(input: {
   name: string;
@@ -174,13 +205,13 @@ function webhookPreset(input: {
         help: input.help,
       },
     ],
-    build: (values) => ({
+    build: (values, existing) => ({
       name: input.name,
       displayName: input.label,
       description: input.description,
       endpoint: values.endpoint.trim(),
       method: input.method ?? "POST",
-      headers: null,
+      ...(!existing ? { headers: null } : {}),
       parameters: input.parameters,
       responseMapping: null,
       timeout: 10000,
@@ -284,7 +315,7 @@ const TOOL_PRESETS: ToolPreset[] = [
         multiline: true,
       },
     ],
-    build: (values) => {
+    build: (values, existing, dirtyFields) => {
       const headers: Record<string, string> = {};
       for (const line of (values.headers ?? "").split("\n")) {
         const idx = line.indexOf(":");
@@ -293,14 +324,13 @@ const TOOL_PRESETS: ToolPreset[] = [
         const value = line.slice(idx + 1).trim();
         if (name && value) headers[name] = value;
       }
-      return {
+      const payload: PresetToolPayload = {
         name: "check_order_status",
         displayName: "Check Order Status",
         description:
           "Look up the current status of an order by its ID. Use when a visitor asks where their order is or whether it shipped.",
         endpoint: values.endpoint.trim(),
         method: "GET",
-        headers: Object.keys(headers).length > 0 ? headers : null,
         parameters: [
           {
             name: "order_id",
@@ -312,12 +342,19 @@ const TOOL_PRESETS: ToolPreset[] = [
         responseMapping: null,
         timeout: 10000,
       };
+      if (!existing) {
+        payload.headers = Object.keys(headers).length > 0 ? headers : null;
+      } else if (
+        dirtyFields.has("headers") &&
+        Object.keys(headers).length > 0
+      ) {
+        payload.headers = headers;
+      }
+      return payload;
     },
     extract: (tool) => ({
       endpoint: tool.endpoint,
-      headers: Object.entries(tool.headers ?? {})
-        .map(([k, v]) => `${k}: ${v}`)
-        .join("\n"),
+      headers: "",
     }),
   },
   {
@@ -340,23 +377,15 @@ const TOOL_PRESETS: ToolPreset[] = [
         type: "password",
       },
     ],
-    build: (values, existing) => {
-      const token =
-        values.token.trim() ||
-        existing?.headers?.["Authorization"]?.replace(/^Bearer\s+/, "") ||
-        "";
-      return {
+    build: (values, existing, dirtyFields) => {
+      const token = values.token.trim();
+      const payload: PresetToolPayload = {
         name: "create_github_issue",
         displayName: "Create GitHub Issue",
         description:
           "Create a GitHub issue for a confirmed bug report. Use only when the visitor has described a reproducible problem the team should fix.",
         endpoint: `https://api.github.com/repos/${values.repo.trim()}/issues`,
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "User-Agent": "ReplyMaven-Bot",
-        },
         parameters: [
           {
             name: "title",
@@ -375,6 +404,14 @@ const TOOL_PRESETS: ToolPreset[] = [
         responseMapping: null,
         timeout: 10000,
       };
+      if (!existing || (dirtyFields.has("token") && token.length > 0)) {
+        payload.headers = {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "ReplyMaven-Bot",
+        };
+      }
+      return payload;
     },
     extract: (tool) => {
       const match = tool.endpoint.match(/repos\/(.+?)\/issues/);
@@ -386,6 +423,122 @@ const TOOL_PRESETS: ToolPreset[] = [
 const PRESET_NAMES = new Set(TOOL_PRESETS.map((p) => p.name));
 
 const TIMEOUT_OPTIONS = [5000, 10000, 15000, 20000, 30000];
+
+// ─── Tool Policy Controls ────────────────────────────────────────────────────
+
+function ToolPolicyFields({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: ToolPolicyValue;
+  onChange: (value: ToolPolicyValue) => void;
+  compact?: boolean;
+}) {
+  const id = useId();
+
+  function updateAudience(audience: ToolAudience, checked: boolean): void {
+    const allowedChannels = checked
+      ? Array.from(new Set([...value.allowedChannels, audience]))
+      : value.allowedChannels.filter((channel) => channel !== audience);
+    if (allowedChannels.length === 0) return;
+    onChange({ ...value, allowedChannels });
+  }
+
+  function renderAudienceRow(
+    audience: ToolAudience,
+    label: string,
+    description: string,
+  ) {
+    const checked = value.allowedChannels.includes(audience);
+    const isOnlyAudience = checked && value.allowedChannels.length === 1;
+    const switchId = `${id}-${audience}`;
+    return (
+      <label
+        key={audience}
+        htmlFor={switchId}
+        className="flex min-h-10 cursor-pointer items-center justify-between gap-4 rounded-lg px-1 py-1 select-none"
+      >
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-foreground">
+            {label}
+          </span>
+          <span className="block text-xs text-pretty text-muted-foreground">
+            {description}
+          </span>
+        </span>
+        <Switch
+          id={switchId}
+          aria-label={label}
+          checked={checked}
+          disabled={isOnlyAudience}
+          onCheckedChange={(nextChecked) =>
+            updateAudience(audience, nextChecked)
+          }
+          size="sm"
+          className="shrink-0"
+        />
+      </label>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "space-y-3",
+        compact ? "pt-1" : "rounded-xl bg-muted/20 p-4",
+      )}
+    >
+      <div>
+        <h3 className="text-sm font-semibold text-foreground">Availability</h3>
+        <p className="mt-0.5 text-xs text-pretty text-muted-foreground">
+          At least one audience must stay enabled.
+        </p>
+      </div>
+      <div className="space-y-1">
+        {renderAudienceRow(
+          "public",
+          "Available to visitors",
+          "Maven can use this in visitor conversations.",
+        )}
+        {renderAudienceRow(
+          "sidechat",
+          "Available in sidechat",
+          "Maven can use this while helping your team.",
+        )}
+      </div>
+      <div className="flex min-h-10 items-center justify-between gap-4 px-1 py-1">
+        <div className="min-w-0">
+          <label
+            htmlFor={`${id}-access`}
+            className="block text-sm font-medium text-foreground"
+          >
+            Access
+          </label>
+          <p className="text-xs text-pretty text-muted-foreground">
+            Choose whether this tool only reads data or can change it.
+          </p>
+        </div>
+        <Select
+          value={value.access}
+          onValueChange={(access: ToolAccess) => onChange({ ...value, access })}
+        >
+          <SelectTrigger
+            id={`${id}-access`}
+            aria-label="Access"
+            className="h-9 w-28 shrink-0 rounded-lg"
+          >
+            <SelectValue>{value.access === "write" ? "Write" : "Read"}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="read">Read</SelectItem>
+            <SelectItem value="write">Write</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
 
 // ─── Preset Tool Row ──────────────────────────────────────────────────────────
 
@@ -399,25 +552,43 @@ function PresetToolRow({
   projectId: string;
 }) {
   const queryClient = useQueryClient();
+  const panelId = useId();
   const [expanded, setExpanded] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [dirtyFields, setDirtyFields] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [policy, setPolicy] = useState<ToolPolicyValue>(defaultToolPolicy);
   const configured = !!tool;
 
   useEffect(() => {
-    if (tool) setValues(preset.extract(tool));
-    else setValues({});
+    if (tool) {
+      setValues(preset.extract(tool));
+      setPolicy({
+        allowedChannels: tool.allowedChannels,
+        access: tool.access,
+      });
+    } else {
+      setValues({});
+      setPolicy(defaultToolPolicy);
+    }
+    setDirtyFields(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool?.id, tool?.updatedAt]);
 
   const save = useMutation({
     mutationFn: async () => {
-      const payload = { ...preset.build(values, tool), enabled: tool?.enabled ?? true };
+      const payload = {
+        ...preset.build(values, tool, dirtyFields),
+        enabled: tool?.enabled ?? true,
+        ...policy,
+      };
       const res = await fetch(
         tool
           ? `/api/projects/${projectId}/tools/${tool.id}`
           : `/api/projects/${projectId}/tools`,
         {
-          method: tool ? "PUT" : "POST",
+          method: tool ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         },
@@ -429,6 +600,7 @@ function PresetToolRow({
       return res.json();
     },
     onSuccess: () => {
+      setDirtyFields(new Set());
       queryClient.invalidateQueries({ queryKey: ["tools", projectId] });
     },
   });
@@ -436,7 +608,7 @@ function PresetToolRow({
   const toggle = useMutation({
     mutationFn: async (enabled: boolean) => {
       const res = await fetch(`/api/projects/${projectId}/tools/${tool!.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
@@ -467,6 +639,15 @@ function PresetToolRow({
 
   const Icon = preset.icon;
 
+  function updateField(key: string, value: string): void {
+    setValues((current) => ({ ...current, [key]: value }));
+    setDirtyFields((current) => {
+      const next = new Set(current);
+      next.add(key);
+      return next;
+    });
+  }
+
   return (
     <div
       className={cn(
@@ -474,76 +655,83 @@ function PresetToolRow({
         configured ? "" : "border-2 border-dashed border-muted",
       )}
     >
-      <div
-        className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-center gap-2 shrink-0">
-          {expanded ? (
-            <ChevronDown className="w-4 h-4 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          )}
-          <div
-            className={cn(
-              "w-8 h-8 rounded-lg flex items-center justify-center",
-              configured ? preset.iconBg : "bg-muted",
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={() => setExpanded((current) => !current)}
+          className="flex min-h-14 min-w-0 flex-1 items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          <div className="flex items-center gap-2 shrink-0">
+            {expanded ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
             )}
-          >
-            <Icon
+            <div
               className={cn(
-                "w-4 h-4",
-                configured ? preset.iconColor : "text-muted-foreground",
+                "w-8 h-8 rounded-lg flex items-center justify-center",
+                configured ? preset.iconBg : "bg-muted",
               )}
-            />
+            >
+              <Icon
+                className={cn(
+                  "w-4 h-4",
+                  configured ? preset.iconColor : "text-muted-foreground",
+                )}
+              />
+            </div>
           </div>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium text-foreground truncate">
-              {preset.label}
-            </p>
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-              Preset
-            </Badge>
-            {!configured && (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 py-0 text-warning border-warning/30"
-              >
-                Not configured
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-foreground truncate">
+                {preset.label}
+              </p>
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                Preset
               </Badge>
-            )}
+              {!configured && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0 text-warning border-warning/30"
+                >
+                  Not configured
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground truncate">
+              {preset.blurb}
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground truncate">{preset.blurb}</p>
-        </div>
-        <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-          {configured && (
-            <>
+        </button>
+        {configured && (
+          <div className="flex shrink-0 items-center gap-1 pr-2 sm:gap-3 sm:pr-4">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg">
               <Switch
+                aria-label={`Enable ${preset.label}`}
                 checked={tool!.enabled}
+                className="relative after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
                 onCheckedChange={(checked) => toggle.mutate(checked)}
-                onClick={(e) => e.stopPropagation()}
                 size="sm"
               />
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  remove.mutate();
-                }}
-                disabled={remove.isPending}
-                className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive disabled:opacity-50"
-                title="Remove"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </>
-          )}
-        </div>
+            </span>
+            <button
+              type="button"
+              aria-label={`Remove ${preset.label}`}
+              onClick={() => remove.mutate()}
+              disabled={remove.isPending}
+              className="flex size-10 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10 disabled:opacity-50"
+              title="Remove"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {expanded && (
-        <div className="px-4 py-4 space-y-3 bg-muted/20">
+        <div id={panelId} className="px-4 py-4 space-y-3 bg-muted/20">
           {preset.fields.map((field) => (
             <div key={field.key} className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">
@@ -557,20 +745,20 @@ function PresetToolRow({
               {field.multiline ? (
                 <textarea
                   value={values[field.key] ?? ""}
-                  onChange={(e) =>
-                    setValues((prev) => ({ ...prev, [field.key]: e.target.value }))
-                  }
+                  onChange={(e) => updateField(field.key, e.target.value)}
                   rows={2}
-                  placeholder={field.placeholder}
+                  placeholder={
+                    configured && field.key === "headers"
+                      ? "Leave blank to keep the current headers"
+                      : field.placeholder
+                  }
                   className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               ) : (
                 <input
                   type={field.type ?? "text"}
                   value={values[field.key] ?? ""}
-                  onChange={(e) =>
-                    setValues((prev) => ({ ...prev, [field.key]: e.target.value }))
-                  }
+                  onChange={(e) => updateField(field.key, e.target.value)}
                   placeholder={
                     field.type === "password" && configured
                       ? "Leave blank to keep the current value"
@@ -584,6 +772,7 @@ function PresetToolRow({
               )}
             </div>
           ))}
+          <ToolPolicyFields value={policy} onChange={setPolicy} compact />
           {save.isError && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -635,6 +824,8 @@ export function ToolsPanel({
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ToolFormData>(emptyForm);
+  const [customHeadersDirty, setCustomHeadersDirty] = useState(false);
+  const [customHasStoredHeaders, setCustomHasStoredHeaders] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -858,11 +1049,15 @@ export function ToolsPanel({
     setShowForm(false);
     setEditingId(null);
     setForm(emptyForm);
+    setCustomHeadersDirty(false);
+    setCustomHasStoredHeaders(false);
     setFormError(null);
   }
 
 
   function startEdit(tool: Tool) {
+    setCustomHasStoredHeaders(Boolean(tool.headers && Object.keys(tool.headers).length > 0));
+    setCustomHeadersDirty(false);
     setEditingId(tool.id);
     setForm({
       name: tool.name,
@@ -870,13 +1065,13 @@ export function ToolsPanel({
       description: tool.description,
       endpoint: tool.endpoint,
       method: tool.method,
-      headers: tool.headers
-        ? Object.entries(tool.headers).map(([key, value]) => ({ key, value }))
-        : [],
+      headers: [],
       parameters: tool.parameters,
       responseMapping: tool.responseMapping ?? { resultPath: "", summaryTemplate: "" },
       enabled: tool.enabled,
       timeout: tool.timeout,
+      allowedChannels: tool.allowedChannels,
+      access: tool.access,
     });
     setFormError(null);
     setShowForm(true);
@@ -897,7 +1092,9 @@ export function ToolsPanel({
     e.preventDefault();
     setFormError(null);
     if (editingId) {
-      updateTool.mutate({ id: editingId, data: form });
+      const data: Partial<ToolFormData> = { ...form };
+      if (!customHeadersDirty) delete data.headers;
+      updateTool.mutate({ id: editingId, data });
     } else {
       createTool.mutate(form);
     }
@@ -928,6 +1125,7 @@ export function ToolsPanel({
   }
 
   function addHeader() {
+    setCustomHeadersDirty(true);
     setForm((prev) => ({
       ...prev,
       headers: [...prev.headers, { key: "", value: "" }],
@@ -935,6 +1133,7 @@ export function ToolsPanel({
   }
 
   function updateHeader(index: number, field: "key" | "value", value: string) {
+    setCustomHeadersDirty(true);
     setForm((prev) => ({
       ...prev,
       headers: prev.headers.map((h, i) => (i === index ? { ...h, [field]: value } : h)),
@@ -942,6 +1141,7 @@ export function ToolsPanel({
   }
 
   function removeHeader(index: number) {
+    setCustomHeadersDirty(true);
     setForm((prev) => ({
       ...prev,
       headers: prev.headers.filter((_, i) => i !== index),
@@ -1094,12 +1294,22 @@ export function ToolsPanel({
               </p>
             </div>
 
+            <ToolPolicyFields
+              value={{
+                allowedChannels: form.allowedChannels,
+                access: form.access,
+              }}
+              onChange={(policy) =>
+                setForm((current) => ({ ...current, ...policy }))
+              }
+            />
+
             {/* HTTP Config */}
             <div className="space-y-4 rounded-xl bg-muted/20 p-4">
               <h3 className="text-sm font-semibold text-foreground">HTTP Configuration</h3>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Endpoint</label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2 sm:flex-nowrap">
                   <div className="shrink-0">
                     <div className="flex h-[42px] rounded-xl border border-input bg-background overflow-hidden">
                       {(["POST", "GET"] as const).map((m) => (
@@ -1125,7 +1335,7 @@ export function ToolsPanel({
                     onChange={(e) => setForm((f) => ({ ...f, endpoint: e.target.value }))}
                     placeholder="https://api.example.com/orders/status"
                     required
-                    className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="order-3 w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring sm:order-none sm:min-w-0 sm:flex-1 sm:w-auto"
                   />
                   <Select
                     value={String(form.timeout)}
@@ -1164,7 +1374,15 @@ export function ToolsPanel({
                 </Button>
               </div>
               {form.headers.length === 0 && (
-                <p className="text-xs text-muted-foreground py-1">No custom headers. Add authentication or other headers above.</p>
+                <p className="text-xs text-muted-foreground py-1">
+                  {editingId && customHasStoredHeaders && !customHeadersDirty ? (
+                    <><strong className="font-semibold text-foreground">Saved headers are hidden.</strong> They will be kept unless you add replacements.</>
+                  ) : editingId && customHasStoredHeaders ? (
+                    <><strong className="font-semibold text-foreground">Saved headers will be removed.</strong> Add replacement headers to keep authentication configured.</>
+                  ) : (
+                    "No custom headers. Add authentication or other headers above."
+                  )}
+                </p>
               )}
               <div className="space-y-2">
                 {form.headers.map((header, i) => (

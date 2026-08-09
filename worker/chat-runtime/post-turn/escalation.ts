@@ -6,6 +6,10 @@ import { type MessageRow } from "../../db";
 import { logError, logInfo } from "../../observability";
 import { buildConversationDeepLink } from "../../lib/deep-links";
 
+export function buildTeamHelpUnavailableMessage(): string {
+  return "I couldn't forward that to the team just now. I can keep helping here, or you can try again in a moment.";
+}
+
 export function parseTelegramThreadId(
   value: string | null | undefined,
 ): number | undefined {
@@ -50,26 +54,73 @@ export async function createEscalation(params: {
   };
   executionCtx: ExecutionContext;
   broadcast: (message: MessageRow) => void;
+  acceptedTeamRequestToken?: string;
+  notifyExternalActions?: boolean;
+  claimExternalNotificationAttempt?: () => Promise<boolean>;
+  persistTelegramThreadId?: (threadId: string) => Promise<boolean>;
 }): Promise<{
   summary: string;
   summaryMessageId: string | null;
   telegramThreadId?: string;
   created: boolean;
+  accepted: boolean;
 }> {
-  const summary = params.summary.trim() || "Visitor asked for team follow-up.";
-
-  // First escalation vs repeat: a prior escalation leaves `escalatedAt` in the
-  // conversation metadata.
+  let summary = params.summary.trim() || "Visitor asked for team follow-up.";
   let existingMeta: Record<string, unknown> = {};
-  try {
-    const parsed = params.conversation.metadata
-      ? JSON.parse(params.conversation.metadata)
-      : {};
-    existingMeta = typeof parsed === "object" && parsed !== null ? parsed : {};
-  } catch {
-    /* ignore malformed metadata */
+  let created: boolean;
+  let summaryMessageId: string | null;
+  let summaryNeedsPersistence: boolean;
+  let legacyMavenAcceptanceToken: string | null = null;
+
+  if (params.acceptedTeamRequestToken) {
+    const acceptance = await params.chatService.getNewTeamRequestAcceptance(
+      params.conversation.id,
+      params.project.id,
+      params.acceptedTeamRequestToken,
+    );
+    if (!acceptance) {
+      return {
+        summary,
+        summaryMessageId: null,
+        created: false,
+        accepted: false,
+      };
+    }
+    summary =
+      acceptance.summary.trim() || "Visitor asked for team follow-up.";
+    summaryMessageId = acceptance.summaryMessageId;
+    summaryNeedsPersistence = acceptance.summaryPending;
+    created =
+      acceptance.summaryPending || acceptance.notificationState === "pending";
+  } else {
+    try {
+      const parsed = params.conversation.metadata
+        ? JSON.parse(params.conversation.metadata)
+        : {};
+      existingMeta =
+        typeof parsed === "object" && parsed !== null ? parsed : {};
+    } catch {
+      /* ignore malformed metadata */
+    }
+    legacyMavenAcceptanceToken =
+      typeof existingMeta.mavenTeamRequestAcceptanceToken === "string"
+        ? existingMeta.mavenTeamRequestAcceptanceToken
+        : null;
+    created =
+      typeof existingMeta.escalatedAt !== "string" ||
+      existingMeta.teamRequestSummaryPending === true ||
+      (typeof existingMeta.mavenTeamRequestAcceptedAt === "string" &&
+        existingMeta.teamRequestNotificationState === "pending");
+    summaryMessageId =
+      typeof existingMeta.reviewSummaryMessageId === "string"
+        ? existingMeta.reviewSummaryMessageId
+        : null;
+    summaryNeedsPersistence =
+      created ||
+      summaryMessageId === null ||
+      existingMeta.teamRequestSummaryPending === true;
+    summaryMessageId ??= crypto.randomUUID();
   }
-  const created = typeof existingMeta.escalatedAt !== "string";
 
   logInfo("escalation.started", {
     projectId: params.project.id,
@@ -84,43 +135,75 @@ export async function createEscalation(params: {
     created,
   });
 
-  // Post the agent-facing summary into the thread once, on first escalation.
-  let summaryMessageId: string | null =
-    typeof existingMeta.reviewSummaryMessageId === "string"
-      ? existingMeta.reviewSummaryMessageId
-      : null;
-  if (created) {
-    const row = await params.chatService.addSystemMessage(
-      params.conversation.id,
-      "review_summary",
-      summary,
-    );
-    if (row) {
-      summaryMessageId = row.id;
-      params.broadcast(row); // live dashboards render the callout immediately
+  if (!params.acceptedTeamRequestToken) {
+    const updatedConversation =
+      await params.chatService.updateLegacyEscalationMetadata(
+        params.conversation.id,
+        params.project.id,
+        {
+          expectedMavenAcceptanceToken: legacyMavenAcceptanceToken,
+          summary,
+          summaryMessageId,
+          escalatedAt:
+            typeof existingMeta.escalatedAt === "string"
+              ? existingMeta.escalatedAt
+              : new Date().toISOString(),
+          ...(summaryNeedsPersistence ? { summaryPending: true } : {}),
+        },
+      );
+    if (!updatedConversation) {
+      return {
+        summary,
+        summaryMessageId: null,
+        created: false,
+        accepted: false,
+      };
     }
   }
 
-  // Preserve existing metadata keys (country/city/source, etc.) — spread the
-  // parsed map so we never clobber them. `updateConversation` also re-merges
-  // against the stored row, but the spread keeps this write self-consistent.
-  const updatedConversation = await params.chatService.updateConversation(
-    params.conversation.id,
-    params.project.id,
-    {
-      metadata: JSON.stringify({
-        ...existingMeta,
-        teamRequestSummary: summary,
-        escalatedAt:
-          typeof existingMeta.escalatedAt === "string"
-            ? existingMeta.escalatedAt
-            : new Date().toISOString(),
-        ...(summaryMessageId ? { reviewSummaryMessageId: summaryMessageId } : {}),
-      }),
-    },
-  );
-  if (!updatedConversation) {
-    return { summary, summaryMessageId: null, created: false };
+  if (summaryNeedsPersistence) {
+    const row = params.acceptedTeamRequestToken
+      ? await params.chatService.addNewTeamRequestSummary(
+          params.conversation.id,
+          params.project.id,
+          params.acceptedTeamRequestToken,
+        )
+      : await params.chatService.addSystemMessage(
+          params.conversation.id,
+          "review_summary",
+          summary,
+          summaryMessageId,
+        );
+    if (row) {
+      params.broadcast(row);
+    }
+
+    const completed = params.acceptedTeamRequestToken
+      ? await params.chatService.completeNewTeamRequestSummary(
+          params.conversation.id,
+          params.project.id,
+          params.acceptedTeamRequestToken,
+        )
+      : Boolean(
+          await params.chatService.updateLegacyEscalationMetadata(
+            params.conversation.id,
+            params.project.id,
+            {
+              expectedMavenAcceptanceToken: legacyMavenAcceptanceToken,
+              summary,
+              summaryMessageId,
+              summaryPending: false,
+            },
+          ),
+        );
+    if (!completed) {
+      return {
+        summary,
+        summaryMessageId,
+        created: false,
+        accepted: false,
+      };
+    }
   }
   logInfo("escalation.conversation_updated", {
     projectId: params.project.id,
@@ -138,12 +221,16 @@ export async function createEscalation(params: {
 
   const isUpdate = !created;
 
-  let telegramThreadId: string | undefined;
-  if (
+  const hasTelegram = Boolean(
     params.telegramService &&
-    params.settings?.telegramBotToken &&
-    params.settings?.telegramChatId
-  ) {
+      params.settings?.telegramBotToken &&
+      params.settings?.telegramChatId,
+  );
+  const notificationsEnabled = params.notifyExternalActions !== false;
+  let externalActionsClaimed = false;
+
+  let telegramThreadId: string | undefined;
+  if (notificationsEnabled && hasTelegram) {
     try {
       const replyToMessageId = isUpdate
         ? parseTelegramThreadId(params.conversation.telegramThreadId)
@@ -152,26 +239,67 @@ export async function createEscalation(params: {
         .runExternalActionIfOperational(
           params.conversation.id,
           params.project.id,
-          () => params.telegramService!.notifyEscalation(
-            params.settings!.telegramBotToken!,
-            params.settings!.telegramChatId!,
-            {
-              visitorName: params.conversation.visitorName,
-              visitorEmail: params.conversation.visitorEmail,
-              summary,
-              conversationUrl,
-              conversationId: params.conversation.id,
-              isUpdate,
-              replyToMessageId,
-            },
-          ),
+          async () => {
+            externalActionsClaimed = params.claimExternalNotificationAttempt
+              ? await params.claimExternalNotificationAttempt()
+              : true;
+            if (!externalActionsClaimed) {
+              return { claimed: false, messageId: null };
+            }
+            const messageId = await params.telegramService!.notifyEscalation(
+              params.settings!.telegramBotToken!,
+              params.settings!.telegramChatId!,
+              {
+                visitorName: params.conversation.visitorName,
+                visitorEmail: params.conversation.visitorEmail,
+                summary,
+                conversationUrl,
+                conversationId: params.conversation.id,
+                isUpdate,
+                replyToMessageId,
+              },
+            );
+            return { claimed: true, messageId };
+          },
         );
-      const messageId = notification.value ?? null;
       if (!notification.executed) {
-        return { summary, summaryMessageId, created };
+        return { summary, summaryMessageId, created, accepted: true };
       }
+      if (!notification.value?.claimed) {
+        return { summary, summaryMessageId, created, accepted: true };
+      }
+      const messageId = notification.value.messageId ?? null;
       if (messageId) {
         telegramThreadId = String(messageId);
+        if (params.persistTelegramThreadId) {
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              const persisted = await params.persistTelegramThreadId(
+                telegramThreadId,
+              );
+              if (!persisted) {
+                logError(
+                  "escalation.telegram_thread_persistence_rejected",
+                  new Error("Telegram thread persistence was rejected"),
+                  {
+                    projectId: params.project.id,
+                    conversationId: params.conversation.id,
+                    telegramThreadId,
+                  },
+                );
+              }
+              break;
+            } catch (error) {
+              if (attempt === 1) {
+                logError("escalation.telegram_thread_persistence_failed", error, {
+                  projectId: params.project.id,
+                  conversationId: params.conversation.id,
+                  telegramThreadId,
+                });
+              }
+            }
+          }
+        }
       }
       logInfo("escalation.telegram_notified", {
         projectId: params.project.id,
@@ -188,7 +316,7 @@ export async function createEscalation(params: {
     }
   }
 
-  if (params.env.RESEND_API_KEY) {
+  if (notificationsEnabled && params.env.RESEND_API_KEY) {
     const emailService = new EmailService(params.env.RESEND_API_KEY);
     const ownerEmail = await params.projectService.getOwnerEmail(
       params.project.id,
@@ -205,16 +333,25 @@ export async function createEscalation(params: {
           .runExternalActionIfOperational(
             params.conversation.id,
             params.project.id,
-            () => emailService.sendEscalationNotification({
-              ownerEmail,
-              projectName,
-              visitorName: params.conversation.visitorName,
-              visitorEmail: params.conversation.visitorEmail,
-              visitorId: params.conversation.visitorId,
-              summary,
-              conversationUrl,
-              accentColor: null,
-            }),
+            async () => {
+              if (!hasTelegram) {
+                externalActionsClaimed =
+                  params.claimExternalNotificationAttempt
+                    ? await params.claimExternalNotificationAttempt()
+                    : true;
+              }
+              if (!externalActionsClaimed) return;
+              await emailService.sendEscalationNotification({
+                ownerEmail,
+                projectName,
+                visitorName: params.conversation.visitorName,
+                visitorEmail: params.conversation.visitorEmail,
+                visitorId: params.conversation.visitorId,
+                summary,
+                conversationUrl,
+                accentColor: null,
+              });
+            },
           )
           .catch((err) => {
             logError("escalation.email_failed", err, {
@@ -233,5 +370,11 @@ export async function createEscalation(params: {
     telegramThreadId: telegramThreadId ?? null,
   });
 
-  return { summary, summaryMessageId, telegramThreadId, created };
+  return {
+    summary,
+    summaryMessageId,
+    telegramThreadId,
+    created,
+    accepted: true,
+  };
 }
