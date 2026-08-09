@@ -817,7 +817,7 @@ const app = new Hono<HonoAppContext>()
     if (sinceParam) {
       const sinceTs = parseInt(sinceParam, 10);
       if (!isNaN(sinceTs)) {
-        const newMessages = await chatService.getMessagesSince(
+        const newMessages = await chatService.getPublicMessagesSince(
           conversationId,
           sinceTs,
         );
@@ -828,7 +828,7 @@ const app = new Hono<HonoAppContext>()
       }
     }
 
-    const msgs = await chatService.getMessages(conversationId);
+    const msgs = await chatService.getPublicMessages(conversationId);
     return c.json({
       messages: msgs,
       status: conversation.status,
@@ -878,11 +878,11 @@ const app = new Hono<HonoAppContext>()
     }
 
     if (deliveredUpTo) {
-      const ids = await chatService.markDeliveredUpTo(conversationId, deliveredUpTo);
+      const ids = await chatService.markPublicDeliveredUpTo(conversationId, deliveredUpTo);
       broadcastMessageStatus(c.env, c.executionCtx, conversationId, "delivered", ids);
     }
     if (readUpTo) {
-      const ids = await chatService.markReadUpTo(conversationId, readUpTo);
+      const ids = await chatService.markPublicReadUpTo(conversationId, readUpTo);
       broadcastMessageStatus(c.env, c.executionCtx, conversationId, "read", ids);
     }
 
@@ -1233,7 +1233,7 @@ const app = new Hono<HonoAppContext>()
       visitorName,
       visitorEmail,
     );
-    const formVisitorResult = await chatService.addVisitorMessageWithFirstTurn(
+    const formVisitorResult = await chatService.addPublicVisitorMessageWithFirstTurn(
       {
         conversationId: conversation.id,
         content: formMessage,
@@ -1626,7 +1626,7 @@ const app = new Hono<HonoAppContext>()
           }
 
           // Generate a bot response using the agent's instruction
-          const msgs = await chatService.getMessages(conversationId);
+          const msgs = await chatService.getPublicMessages(conversationId);
           const history = msgs
             .filter((m) => m.role !== "bot" || m.content)
             .slice(-20)
@@ -1648,7 +1648,7 @@ const app = new Hono<HonoAppContext>()
           );
 
           // Store the bot response as a message
-          const botMessage = await chatService.addBotMessageIfOwnershipMatches(
+          const botMessage = await chatService.addPublicBotMessageIfOwnershipMatches(
             {
               conversationId,
               content: responseText,
@@ -1714,7 +1714,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Normal agent reply — store and forward to visitor
-    const agentMessage = await chatService.addAgentMessageAndTakeOwnership(
+    const agentMessage = await chatService.addPublicAgentMessageAndTakeOwnership(
       {
         conversationId,
         content: message.text,
@@ -2329,7 +2329,10 @@ const app = new Hono<HonoAppContext>()
     > | null;
     let referencedAgentUserId: string | null = null;
     if (referencedMessageId) {
-      const sourceMessage = await chatService.getMessageById(referencedMessageId);
+      const sourceMessage = await chatService.getMessageByIdForChannel(
+        referencedMessageId,
+        "public",
+      );
       if (sourceMessage) {
         const conv = await chatService.getConversationById(
           sourceMessage.conversationId,
@@ -2357,7 +2360,7 @@ const app = new Hono<HonoAppContext>()
 
     // Per-conversation duplicate-content guard (defends against retries that
     // bypass the KV check, e.g. a different email_id with identical content).
-    const existingMessages = await chatService.getMessagesSince(
+    const existingMessages = await chatService.getPublicMessagesSince(
       conversation.id,
       Date.now() - 5 * 60 * 1000,
     );
@@ -2437,7 +2440,7 @@ const app = new Hono<HonoAppContext>()
 
     if (isVisitor) {
       // ─── Visitor reply branch ─────────────────────────────────────────
-      const inboundEmailMessage = await chatService.addMessage(
+      const inboundEmailMessage = await chatService.addPublicMessage(
         {
           conversationId: conversation.id,
           role: "visitor",
@@ -2521,7 +2524,7 @@ const app = new Hono<HonoAppContext>()
       let recipientUserId = referencedAgentUserId;
       if (!recipientUserId) {
         const fallback =
-          await chatService.getLatestEmailedAgentMessage(conversation.id);
+          await chatService.getLatestEmailedPublicAgentMessage(conversation.id);
         recipientUserId = fallback?.userId ?? null;
       }
       if (recipientUserId && c.env.RESEND_API_KEY) {
@@ -2568,7 +2571,7 @@ const app = new Hono<HonoAppContext>()
       }
     } else if (agentUser) {
       // ─── Agent reply branch (round-trip from agent's inbox) ───────────
-      const agentMessage = await chatService.addAgentMessageAndTakeOwnership(
+      const agentMessage = await chatService.addPublicAgentMessageAndTakeOwnership(
         {
           conversationId: conversation.id,
           content: cleanedText,
@@ -2582,7 +2585,10 @@ const app = new Hono<HonoAppContext>()
       if (!agentMessage) {
         return new Response("Conversation not found", { status: 404 });
       }
-      await chatService.markMessageAsEmailed(agentMessage.id);
+      await chatService.markPublicMessageAsEmailed(
+        conversation.id,
+        agentMessage.id,
+      );
       broadcastMessageNew(c.env, c.executionCtx, conversation.id, agentMessage);
       broadcastStatusChange(
         c.env,
@@ -6346,7 +6352,7 @@ const app = new Hono<HonoAppContext>()
     }
     const [counts, lastMsgMap] = await Promise.all([
       chatService.getInboxCounts(project.id),
-      chatService.getLastMessagesByConversationIds(convos.map((c) => c.id)),
+      chatService.getLastPublicMessagesByConversationIds(convos.map((c) => c.id)),
     ]);
     const conversationsWithPreview = convos.map((c) => ({
       ...c,
@@ -6390,7 +6396,7 @@ const app = new Hono<HonoAppContext>()
       chatService.getConversationUpdatesSince(project.id, new Date(since)),
       chatService.getConversationCounts(project.id),
     ]);
-    const lastMsgMap = await chatService.getLastMessagesByConversationIds(
+    const lastMsgMap = await chatService.getLastPublicMessagesByConversationIds(
       updates.map((u) => u.id),
     );
     const updatesWithPreview = updates.map((u) => ({
@@ -6494,7 +6500,7 @@ const app = new Hono<HonoAppContext>()
     const toolService = new ToolService(db);
     const banService = new VisitorBanService(db);
     const [{ messages: msgs, hasMore }, ban] = await Promise.all([
-      chatService.getRecentMessages(conversation.id, 25),
+      chatService.getRecentPublicMessages(conversation.id, 25),
       banService.isVisitorBanned(
         project.id,
         conversation.visitorId,
@@ -6570,7 +6576,7 @@ const app = new Hono<HonoAppContext>()
     );
     if (!conversation) return c.json({ error: "Not found" }, 404);
 
-    const { messages: msgs, hasMore } = await chatService.getMessagesBefore(
+    const { messages: msgs, hasMore } = await chatService.getPublicMessagesBefore(
       conversation.id,
       before,
       limit,
@@ -6662,7 +6668,7 @@ const app = new Hono<HonoAppContext>()
       await chatService.reopenConversation(conversation.id, project.id);
     }
 
-    const message = await chatService.addAgentMessageAndTakeOwnership(
+    const message = await chatService.addPublicAgentMessageAndTakeOwnership(
       {
         conversationId: conversation.id,
         content:
@@ -6683,7 +6689,7 @@ const app = new Hono<HonoAppContext>()
 
     // Emit "joined" once — only when picking up an escalated conversation for the first time
     if (conversation.status === "waiting_agent") {
-      await chatService.addSystemMessage(
+      await chatService.addPublicSystemMessage(
         conversation.id,
         "joined",
         `${user.name} joined the conversation`,
@@ -6746,7 +6752,7 @@ const app = new Hono<HonoAppContext>()
     // slice(-20) caps the transcript regardless.
     const [settings, { messages: recentMessages }] = await Promise.all([
       projectService.getSettings(project.id),
-      chatService.getRecentMessages(conversation.id, 25),
+      chatService.getRecentPublicMessages(conversation.id, 25),
     ]);
     const msgs = recentMessages.filter((m) => m.role !== "system");
 
@@ -6875,7 +6881,10 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "No visitor email address" }, 400);
     }
 
-    const message = await chatService.getMessageById(parsed.data.messageId);
+    const message = await chatService.getMessageByIdForChannel(
+      parsed.data.messageId,
+      "public",
+    );
     if (!message || message.conversationId !== conversation.id) {
       return c.json({ error: "Message not found" }, 404);
     }
@@ -6915,7 +6924,10 @@ const app = new Hono<HonoAppContext>()
             dashboardUrl: `https://replymaven.com/app/projects/${project.id}/conversations/${conversation.id}`,
             accentColor: widgetCfg?.primaryColor ?? null,
           });
-          await chatService.markMessageAsEmailed(message.id);
+          await chatService.markPublicMessageAsEmailed(
+            conversation.id,
+            message.id,
+          );
         },
       );
       if (!delivery.executed) {
@@ -6953,7 +6965,7 @@ const app = new Hono<HonoAppContext>()
       );
       if (!conversation) return c.json({ error: "Not found" }, 404);
 
-      const result = await chatService.deleteAgentMessage(convId, messageId);
+      const result = await chatService.deletePublicAgentMessage(convId, messageId);
       if (!result.deleted) {
         if (result.reason === "not_agent") {
           return c.json(
@@ -7032,7 +7044,7 @@ const app = new Hono<HonoAppContext>()
         })}`
         : "Snooze ended";
       await Promise.all(result.updatedIds.map((conversationId) =>
-        chatService.addSystemMessage(
+        chatService.addPublicSystemMessage(
           conversationId,
           until ? "snoozed" : "snooze_ended",
           content,
@@ -7169,10 +7181,10 @@ const app = new Hono<HonoAppContext>()
     const until = parsed.data.until ? new Date(parsed.data.until) : null;
     await chatService.setSnooze(convId, project.id, until);
     if (until) {
-      await chatService.addSystemMessage(convId, "snoozed",
+      await chatService.addPublicSystemMessage(convId, "snoozed",
         `Snoozed until ${until.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`);
     } else {
-      await chatService.addSystemMessage(convId, "snooze_ended", "Snooze ended");
+      await chatService.addPublicSystemMessage(convId, "snooze_ended", "Snooze ended");
     }
     return c.json({ ok: true });
   })

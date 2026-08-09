@@ -1004,7 +1004,13 @@ export class BillingService {
         ),
       })
       .from(conversations)
-      .leftJoin(messages, eq(messages.conversationId, conversations.id))
+      .leftJoin(
+        messages,
+        and(
+          eq(messages.conversationId, conversations.id),
+          eq(messages.channel, "public"),
+        ),
+      )
       .where(whereClause)
       .groupBy(conversations.id)
       .orderBy(orderExpr)

@@ -203,10 +203,10 @@ function createHandlerHarness(options?: {
     async reopenConversation() {
       return null;
     },
-    async getRecentMessages() {
+    async getRecentPublicMessages() {
       return { messages: [], hasMore: false };
     },
-    async addBotMessageIfOwnershipMatches(...args: unknown[]) {
+    async addPublicBotMessageIfOwnershipMatches(...args: unknown[]) {
       botInsertCalls.push(args);
       if (options?.botInsert) return options.botInsert(args);
       if (!options?.botInsertSucceeds) return null;

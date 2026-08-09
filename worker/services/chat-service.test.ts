@@ -3,15 +3,16 @@ import { Database } from "bun:sqlite";
 import { drizzle as drizzleSqlite } from "drizzle-orm/bun-sqlite";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { schema } from "../db";
+import { DashboardService } from "./dashboard-service";
 import {
   buildAiResolutionQuery,
-  buildAcceptedTeamRequestSummaryQuery,
+  buildAcceptedPublicTeamRequestSummaryQuery,
   buildActiveConversationByVisitorQuery,
   buildBanSweepQuery,
-  buildConditionalBotMessageQuery,
-  buildConditionalAgentMessageQuery,
-  buildConditionalSystemMessageQuery,
-  buildConditionalVisitorMessageQuery,
+  buildConditionalPublicBotMessageQuery,
+  buildConditionalPublicAgentMessageQuery,
+  buildConditionalPublicSystemMessageQuery,
+  buildConditionalPublicVisitorMessageQuery,
   buildHumanTakeoverQuery,
   buildNewTeamRequestClaimQuery,
   buildInboxCountsQuery,
@@ -85,6 +86,19 @@ class BarrierChatService extends ChatService {
   }
 }
 
+class SidechatReadBarrierService extends ChatService {
+  constructor(
+    db: DrizzleD1Database<Record<string, unknown>>,
+    private readonly afterExpiredLeaseRead: () => Promise<void>,
+  ) {
+    super(db);
+  }
+
+  protected override async afterExpiredSidechatLeaseRead(): Promise<void> {
+    await this.afterExpiredLeaseRead();
+  }
+}
+
 function createConversationContinuityService(): {
   service: ChatService;
   sqlite: Database;
@@ -132,7 +146,28 @@ function createConversationContinuityService(): {
     created_at integer DEFAULT (unixepoch()) NOT NULL,
     updated_at integer DEFAULT (unixepoch()) NOT NULL
   )`);
+  sqlite.exec(`CREATE TABLE messages (
+    id text PRIMARY KEY NOT NULL,
+    conversation_id text NOT NULL,
+    role text NOT NULL,
+    content text NOT NULL,
+    channel text DEFAULT 'public' NOT NULL,
+    kind text DEFAULT 'text' NOT NULL,
+    message_metadata text,
+    image_url text,
+    sources text,
+    sender_name text,
+    sender_avatar text,
+    user_id text,
+    created_at integer DEFAULT (unixepoch()) NOT NULL,
+    emailed_at integer,
+    delivered_at integer,
+    read_at integer
+  )`);
   const sqliteDb = drizzleSqlite(sqlite, { schema });
+  Object.assign(sqliteDb, {
+    batch: async (queries: Array<PromiseLike<unknown>>) => Promise.all(queries),
+  });
   const db = sqliteDb as unknown as DrizzleD1Database<Record<string, unknown>>;
   return {
     service: new ChatService(db),
@@ -140,6 +175,757 @@ function createConversationContinuityService(): {
     db,
   };
 }
+
+interface TranscriptMessageSeed {
+  id: string;
+  conversationId: string;
+  role: "visitor" | "bot" | "agent" | "system";
+  content: string;
+  channel: "public" | "sidechat";
+  createdAt: Date;
+  userId?: string | null;
+  emailedAt?: Date | null;
+}
+
+function seedTranscriptMessage(
+  sqlite: Database,
+  input: TranscriptMessageSeed,
+): void {
+  sqlite.query(`INSERT INTO messages (
+    id, conversation_id, role, content, channel, kind, user_id, created_at,
+    emailed_at
+  ) VALUES (?, ?, ?, ?, ?, 'text', ?, ?, ?)`)
+    .run(
+      input.id,
+      input.conversationId,
+      input.role,
+      input.content,
+      input.channel,
+      input.userId ?? null,
+      Math.floor(input.createdAt.getTime() / 1000),
+      input.emailedAt
+        ? Math.floor(input.emailedAt.getTime() / 1000)
+        : null,
+    );
+}
+
+async function createTranscriptHarness(): Promise<{
+  service: ChatService;
+  sqlite: Database;
+  conversation: ConversationRow;
+}> {
+  const { service, sqlite } = createConversationContinuityService();
+  const conversation = await service.createConversation({
+    projectId: "project-1",
+    customerId: null,
+    visitorId: "visitor-1",
+    visitorName: "Alice",
+    visitorEmail: "alice@example.com",
+    metadata: null,
+  });
+  return { service, sqlite, conversation };
+}
+
+function createDashboardStatsHarness(): {
+  service: DashboardService;
+  sqlite: Database;
+} {
+  const sqlite = new Database(":memory:");
+  sqlite.exec(`CREATE TABLE projects (
+    id text PRIMARY KEY NOT NULL,
+    user_id text NOT NULL
+  )`);
+  sqlite.exec(`CREATE TABLE conversations (
+    id text PRIMARY KEY NOT NULL,
+    project_id text NOT NULL,
+    customer_id text,
+    visitor_id text NOT NULL,
+    visitor_name text,
+    visitor_email text,
+    status text DEFAULT 'active' NOT NULL,
+    close_reason text,
+    telegram_thread_id text,
+    metadata text,
+    sidechat_status text DEFAULT 'idle' NOT NULL,
+    sidechat_run_id text,
+    sidechat_lease_expires_at integer,
+    sidechat_updated_at integer,
+    chat_state text,
+    last_activity_at integer DEFAULT (unixepoch()) NOT NULL,
+    visitor_last_seen_at integer,
+    visitor_presence text DEFAULT 'active',
+    visitor_last_online_at integer,
+    snoozed_until integer,
+    archived_at integer,
+    purge_started_at integer,
+    external_action_started_at integer,
+    priority text DEFAULT 'medium' NOT NULL,
+    assignee_id text,
+    created_at integer DEFAULT (unixepoch()) NOT NULL,
+    updated_at integer DEFAULT (unixepoch()) NOT NULL
+  )`);
+  sqlite.exec(`CREATE TABLE messages (
+    id text PRIMARY KEY NOT NULL,
+    conversation_id text NOT NULL,
+    role text NOT NULL,
+    content text NOT NULL,
+    channel text DEFAULT 'public' NOT NULL,
+    kind text DEFAULT 'text' NOT NULL,
+    message_metadata text,
+    image_url text,
+    sources text,
+    sender_name text,
+    sender_avatar text,
+    user_id text,
+    created_at integer DEFAULT (unixepoch()) NOT NULL,
+    emailed_at integer,
+    delivered_at integer,
+    read_at integer
+  )`);
+  sqlite.exec(`CREATE TABLE resources (
+    id text PRIMARY KEY NOT NULL,
+    project_id text NOT NULL,
+    source_article_id text
+  )`);
+  sqlite.exec(`CREATE TABLE help_articles (
+    id text PRIMARY KEY NOT NULL,
+    project_id text NOT NULL,
+    status text NOT NULL
+  )`);
+  const db = drizzleSqlite(sqlite, { schema });
+  return {
+    service: new DashboardService(
+      db as unknown as DrizzleD1Database<Record<string, unknown>>,
+    ),
+    sqlite,
+  };
+}
+
+describe("ChatService message channel isolation", () => {
+  test("public detail, pagination, replay, and preview exclude adjacent sidechat rows", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const origin = Date.parse("2026-08-09T00:00:00.000Z");
+    seedTranscriptMessage(sqlite, {
+      id: "public-1",
+      conversationId: conversation.id,
+      role: "visitor",
+      content: "Public question",
+      channel: "public",
+      createdAt: new Date(origin + 1_000),
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-1",
+      conversationId: conversation.id,
+      role: "agent",
+      content: "Private investigation",
+      channel: "sidechat",
+      createdAt: new Date(origin + 2_000),
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "public-2",
+      conversationId: conversation.id,
+      role: "bot",
+      content: "Public answer",
+      channel: "public",
+      createdAt: new Date(origin + 3_000),
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-2",
+      conversationId: conversation.id,
+      role: "bot",
+      content: "Private draft",
+      channel: "sidechat",
+      createdAt: new Date(origin + 4_000),
+    });
+
+    expect((await service.getPublicMessages(conversation.id)).map((row) => row.id))
+      .toEqual(["public-1", "public-2"]);
+    expect((await service.getRecentPublicMessages(conversation.id, 1))).toMatchObject({
+      messages: [{ id: "public-2" }],
+      hasMore: true,
+    });
+    expect((await service.getPublicMessagesBefore(
+      conversation.id,
+      new Date(origin + 5_000),
+      1,
+    ))).toMatchObject({
+      messages: [{ id: "public-2" }],
+      hasMore: true,
+    });
+    expect((await service.getPublicMessagesSince(conversation.id, origin)).map(
+      (row) => row.id,
+    )).toEqual(["public-1", "public-2"]);
+    expect(
+      (await service.getLastPublicMessagesByConversationIds([conversation.id]))
+        .get(conversation.id)?.id,
+    ).toBe("public-2");
+  });
+
+  test("public delivery and read receipts never mutate sidechat rows", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const origin = Date.parse("2026-08-09T00:00:00.000Z");
+    seedTranscriptMessage(sqlite, {
+      id: "public-agent",
+      conversationId: conversation.id,
+      role: "agent",
+      content: "Public reply",
+      channel: "public",
+      createdAt: new Date(origin + 1_000),
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-bot",
+      conversationId: conversation.id,
+      role: "bot",
+      content: "Private reply",
+      channel: "sidechat",
+      createdAt: new Date(origin + 2_000),
+    });
+
+    expect(await service.markPublicMessagesDelivered(
+      conversation.id,
+      new Date(origin + 3_000),
+    )).toEqual(["public-agent"]);
+    expect(await service.markPublicMessagesRead(
+      conversation.id,
+      new Date(origin + 3_000),
+    )).toEqual(["public-agent"]);
+    expect(
+      sqlite.query(
+        "SELECT delivered_at, read_at FROM messages WHERE id = ?",
+      ).get("sidechat-bot"),
+    ).toEqual({ delivered_at: null, read_at: null });
+  });
+
+  test("a sidechat cursor cannot advance public delivery receipts", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const origin = Date.parse("2026-08-09T00:00:00.000Z");
+    seedTranscriptMessage(sqlite, {
+      id: "public-agent",
+      conversationId: conversation.id,
+      role: "agent",
+      content: "Public reply",
+      channel: "public",
+      createdAt: new Date(origin + 1_000),
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-bot",
+      conversationId: conversation.id,
+      role: "bot",
+      content: "Private reply",
+      channel: "sidechat",
+      createdAt: new Date(origin + 2_000),
+    });
+
+    expect(await service.markPublicDeliveredUpTo(
+      conversation.id,
+      "sidechat-bot",
+    )).toEqual([]);
+    expect(await service.markPublicReadUpTo(
+      conversation.id,
+      "sidechat-bot",
+    )).toEqual([]);
+    expect(
+      sqlite.query(
+        "SELECT delivered_at, read_at FROM messages WHERE id = ?",
+      ).get("public-agent"),
+    ).toEqual({ delivered_at: null, read_at: null });
+  });
+
+  test("public emailed-message lookup and mutation exclude sidechat rows", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const origin = Date.parse("2026-08-09T00:00:00.000Z");
+    seedTranscriptMessage(sqlite, {
+      id: "public-emailed",
+      conversationId: conversation.id,
+      role: "agent",
+      content: "Public email",
+      channel: "public",
+      createdAt: new Date(origin + 1_000),
+      emailedAt: new Date(origin + 2_000),
+      userId: "agent-1",
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-emailed",
+      conversationId: conversation.id,
+      role: "agent",
+      content: "Private email-shaped row",
+      channel: "sidechat",
+      createdAt: new Date(origin + 3_000),
+      emailedAt: new Date(origin + 4_000),
+      userId: "agent-1",
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-unemailed",
+      conversationId: conversation.id,
+      role: "bot",
+      content: "Private draft",
+      channel: "sidechat",
+      createdAt: new Date(origin + 5_000),
+    });
+
+    expect((await service.getLatestEmailedPublicAgentMessage(conversation.id))?.id)
+      .toBe("public-emailed");
+    await service.markPublicMessageAsEmailed(
+      conversation.id,
+      "sidechat-unemailed",
+    );
+    expect(
+      sqlite.query("SELECT emailed_at FROM messages WHERE id = ?")
+        .get("sidechat-unemailed"),
+    ).toEqual({ emailed_at: null });
+  });
+
+  test("sidechat visitor-shaped rows do not affect public first-turn counts", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-invalid-visitor",
+      conversationId: conversation.id,
+      role: "visitor",
+      content: "Private malformed row",
+      channel: "sidechat",
+      createdAt: new Date("2026-08-09T00:00:01.000Z"),
+    });
+
+    expect(await service.hasPublicVisitorMessages(conversation.id)).toBe(false);
+    expect(await service.addPublicVisitorMessageWithFirstTurn(
+      {
+        conversationId: conversation.id,
+        content: "First public turn",
+      },
+      conversation.projectId,
+    )).toMatchObject({ isFirstVisitorTurn: true });
+  });
+
+  test("public agent deletion cannot delete or reorder from a sidechat row", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-agent",
+      conversationId: conversation.id,
+      role: "agent",
+      content: "Private note",
+      channel: "sidechat",
+      createdAt: new Date("2026-08-09T00:00:01.000Z"),
+    });
+
+    expect(await service.deletePublicAgentMessage(conversation.id, "sidechat-agent"))
+      .toEqual({ deleted: false, reason: "not_found" });
+    expect(
+      sqlite.query("SELECT id FROM messages WHERE id = ?").get("sidechat-agent"),
+    ).toEqual({ id: "sidechat-agent" });
+  });
+
+  test("public agent deletion scopes its lookup to the conversation", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const otherConversation = await service.createConversation({
+      projectId: conversation.projectId,
+      customerId: null,
+      visitorId: "visitor-2",
+      visitorName: "Bob",
+      visitorEmail: "bob@example.com",
+      metadata: null,
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "other-public-agent",
+      conversationId: otherConversation.id,
+      role: "agent",
+      content: "Another conversation",
+      channel: "public",
+      createdAt: new Date("2026-08-09T00:00:01.000Z"),
+    });
+
+    expect(
+      await service.deletePublicAgentMessage(
+        conversation.id,
+        "other-public-agent",
+      ),
+    ).toEqual({ deleted: false, reason: "not_found" });
+    expect(
+      sqlite.query("SELECT id FROM messages WHERE id = ?")
+        .get("other-public-agent"),
+    ).toEqual({ id: "other-public-agent" });
+  });
+
+  test("dashboard message totals count only public transcript rows", async () => {
+    const { service, sqlite } = createDashboardStatsHarness();
+    sqlite.query("INSERT INTO projects (id, user_id) VALUES (?, ?)")
+      .run("project-1", "user-1");
+    sqlite.query(`INSERT INTO conversations (
+      id, project_id, visitor_id, created_at, updated_at, last_activity_at
+    ) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run("conv-1", "project-1", "visitor-1", 1_786_233_600, 1_786_233_600, 1_786_233_600);
+    seedTranscriptMessage(sqlite, {
+      id: "public-1",
+      conversationId: "conv-1",
+      role: "visitor",
+      content: "Public",
+      channel: "public",
+      createdAt: new Date("2026-08-09T00:00:01.000Z"),
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-1",
+      conversationId: "conv-1",
+      role: "agent",
+      content: "Private",
+      channel: "sidechat",
+      createdAt: new Date("2026-08-09T00:00:02.000Z"),
+    });
+
+    expect((await service.getStats("user-1", "project-1")).totalMessages)
+      .toBe(1);
+  });
+
+  test("sidechat pagination and replay include only agent and Maven private rows", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const origin = Date.parse("2026-08-09T00:00:00.000Z");
+    seedTranscriptMessage(sqlite, {
+      id: "public-1",
+      conversationId: conversation.id,
+      role: "visitor",
+      content: "Public",
+      channel: "public",
+      createdAt: new Date(origin + 1_000),
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-agent",
+      conversationId: conversation.id,
+      role: "agent",
+      content: "Private question",
+      channel: "sidechat",
+      createdAt: new Date(origin + 2_000),
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-invalid-system",
+      conversationId: conversation.id,
+      role: "system",
+      content: "Malformed private system row",
+      channel: "sidechat",
+      createdAt: new Date(origin + 3_000),
+    });
+    seedTranscriptMessage(sqlite, {
+      id: "sidechat-bot",
+      conversationId: conversation.id,
+      role: "bot",
+      content: "Private answer",
+      channel: "sidechat",
+      createdAt: new Date(origin + 4_000),
+    });
+
+    expect(await service.getRecentSidechatMessages(
+      conversation.id,
+      1,
+    )).toMatchObject({
+      messages: [{ id: "sidechat-bot" }],
+      hasMore: true,
+    });
+    expect(await service.getSidechatMessagesBefore(
+      conversation.id,
+      new Date(origin + 5_000),
+      1,
+    )).toMatchObject({
+      messages: [{ id: "sidechat-bot" }],
+      hasMore: true,
+    });
+    expect((await service.getSidechatMessagesSince(
+      conversation.id,
+      origin,
+    )).map((row) => row.id)).toEqual(["sidechat-agent", "sidechat-bot"]);
+    expect(
+      await service.getMessageByIdForChannel(
+        "sidechat-invalid-system",
+        "sidechat",
+      ),
+    ).toBeNull();
+    expect(
+      await service.getMessageByIdForChannel("sidechat-bot", "sidechat"),
+    ).toMatchObject({ id: "sidechat-bot", role: "bot" });
+  });
+
+  test("sidechat writes require the active run and mutate only private activity", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const publicActivity = new Date("2026-08-08T10:00:00.000Z");
+    sqlite.query(`UPDATE conversations SET
+      status = 'agent_replied',
+      telegram_thread_id = 'telegram-1',
+      chat_state = '{"state":"agent_mode","aiParticipation":"human_only"}',
+      last_activity_at = ?,
+      visitor_last_seen_at = ?,
+      sidechat_status = 'working',
+      sidechat_run_id = 'run-1',
+      sidechat_lease_expires_at = ?
+      WHERE id = ?`)
+      .run(
+        Math.floor(publicActivity.getTime() / 1000),
+        Math.floor(publicActivity.getTime() / 1000),
+        Math.floor(Date.parse("2026-08-09T01:00:00.000Z") / 1000),
+        conversation.id,
+      );
+    const before = sqlite.query(`SELECT
+      status, telegram_thread_id, chat_state, last_activity_at,
+      visitor_last_seen_at, updated_at
+      FROM conversations WHERE id = ?`).get(conversation.id);
+    expect(await service.addSidechatHumanMessage({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-1",
+      content: "Investigate this privately",
+      userId: "agent-1",
+      senderName: "Agent",
+      senderAvatar: null,
+    })).toMatchObject({ role: "agent", channel: "sidechat" });
+    expect(await service.addSidechatMavenMessage({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-1",
+      content: "Suggested reply",
+      kind: "reply_draft",
+      metadata: JSON.stringify({ draft: "Suggested reply" }),
+      senderName: "Maven",
+    })).toMatchObject({ role: "bot", channel: "sidechat" });
+
+    const after = sqlite.query(`SELECT
+      status, telegram_thread_id, chat_state, last_activity_at,
+      visitor_last_seen_at, updated_at, sidechat_updated_at
+      FROM conversations WHERE id = ?`).get(conversation.id) as
+      Record<string, unknown>;
+    expect(after).toMatchObject(before as Record<string, unknown>);
+    expect(after.sidechat_updated_at).not.toBeNull();
+    expect(sqlite.query(`SELECT
+      role, channel, emailed_at, delivered_at, read_at
+      FROM messages ORDER BY created_at`).all()).toEqual([
+      {
+        role: "agent",
+        channel: "sidechat",
+        emailed_at: null,
+        delivered_at: null,
+        read_at: null,
+      },
+      {
+        role: "bot",
+        channel: "sidechat",
+        emailed_at: null,
+        delivered_at: null,
+        read_at: null,
+      },
+    ]);
+  });
+
+  test("sidechat writes reject archived conversations and stale run owners", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    sqlite.query(`UPDATE conversations SET
+      sidechat_status = 'working',
+      sidechat_run_id = 'run-current',
+      sidechat_lease_expires_at = ?,
+      archived_at = ?
+      WHERE id = ?`)
+      .run(1_786_237_200, 1_786_233_600, conversation.id);
+    expect(await service.addSidechatHumanMessage({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-current",
+      content: "Archived write",
+      userId: "agent-1",
+      senderName: "Agent",
+      senderAvatar: null,
+    })).toBeNull();
+    sqlite.query("UPDATE conversations SET archived_at = null WHERE id = ?")
+      .run(conversation.id);
+    expect(await service.addSidechatHumanMessage({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-stale",
+      content: "Stale write",
+      userId: "agent-1",
+      senderName: "Agent",
+      senderAvatar: null,
+    })).toBeNull();
+    expect(sqlite.query("SELECT count(*) AS total FROM messages").get())
+      .toEqual({ total: 0 });
+  });
+});
+
+describe("ChatService sidechat run coordination", () => {
+  test("only one concurrent claimant owns a sidechat run", async () => {
+    const { service, conversation } = await createTranscriptHarness();
+    const now = new Date();
+
+    const claims = await Promise.all([
+      service.claimSidechatRun({
+        projectId: conversation.projectId,
+        conversationId: conversation.id,
+        runId: "run-a",
+        now,
+        leaseExpiresAt: new Date(now.getTime() + 60_000),
+      }),
+      service.claimSidechatRun({
+        projectId: conversation.projectId,
+        conversationId: conversation.id,
+        runId: "run-b",
+        now,
+        leaseExpiresAt: new Date(now.getTime() + 60_000),
+      }),
+    ]);
+    expect(claims.toSorted()).toEqual([false, true]);
+    const claimed = await service.getConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(claimed).toMatchObject({
+      sidechatStatus: "working",
+      sidechatRunId: claims[0] ? "run-a" : "run-b",
+      sidechatLeaseExpiresAt: new Date(now.getTime() + 60_000),
+    });
+  });
+
+  test("claim requires an operational conversation with no unexpired lease", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const now = new Date();
+    sqlite.query(`UPDATE conversations SET
+      sidechat_status = 'working', sidechat_run_id = 'run-live',
+      sidechat_lease_expires_at = ? WHERE id = ?`)
+      .run(Math.floor((now.getTime() + 30_000) / 1000), conversation.id);
+    expect(await service.claimSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-blocked",
+      now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+    })).toBe(false);
+
+    sqlite.query("UPDATE conversations SET sidechat_lease_expires_at = ? WHERE id = ?")
+      .run(Math.floor((now.getTime() - 1_000) / 1000), conversation.id);
+    expect(await service.claimSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-recovered",
+      now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+    })).toBe(true);
+
+    sqlite.query(`UPDATE conversations SET
+      archived_at = ?, sidechat_lease_expires_at = ? WHERE id = ?`)
+      .run(
+        Math.floor(now.getTime() / 1000),
+        Math.floor((now.getTime() - 1_000) / 1000),
+        conversation.id,
+      );
+    expect(await service.claimSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-archived",
+      now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+    })).toBe(false);
+  });
+
+  test("only the current run can settle and only one concurrent settlement wins", async () => {
+    const { service, conversation } = await createTranscriptHarness();
+    const now = new Date();
+    expect(await service.claimSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-current",
+      now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+    })).toBe(true);
+    expect(await service.settleSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-stale",
+      status: "failed",
+    })).toBe(false);
+
+    const settlements = await Promise.all([
+      service.settleSidechatRun({
+        projectId: conversation.projectId,
+        conversationId: conversation.id,
+        runId: "run-current",
+        status: "ready",
+      }),
+      service.settleSidechatRun({
+        projectId: conversation.projectId,
+        conversationId: conversation.id,
+        runId: "run-current",
+        status: "failed",
+      }),
+    ]);
+    expect(settlements.toSorted()).toEqual([false, true]);
+    const settled = await service.getConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(settled).toMatchObject({
+      sidechatStatus: settlements[0] ? "ready" : "failed",
+      sidechatRunId: null,
+      sidechatLeaseExpiresAt: null,
+    });
+  });
+
+  test("reading an expired working lease normalizes it to failed", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const originalUpdatedAt = conversation.updatedAt.getTime();
+    sqlite.query(`UPDATE conversations SET
+      sidechat_status = 'working', sidechat_run_id = 'run-expired',
+      sidechat_lease_expires_at = 1 WHERE id = ?`)
+      .run(conversation.id);
+
+    expect(await service.getConversationById(
+      conversation.id,
+      conversation.projectId,
+    )).toMatchObject({
+      sidechatStatus: "failed",
+      sidechatRunId: null,
+      sidechatLeaseExpiresAt: null,
+      updatedAt: new Date(originalUpdatedAt),
+    });
+  });
+
+  test("expired-lease normalization cannot clobber a new claimant", async () => {
+    const { service, sqlite, db } = createConversationContinuityService();
+    const conversation = await service.createConversation({
+      projectId: "project-1",
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Alice",
+      visitorEmail: "alice@example.com",
+      metadata: null,
+    });
+    sqlite.query(`UPDATE conversations SET
+      sidechat_status = 'working', sidechat_run_id = 'run-expired',
+      sidechat_lease_expires_at = 1 WHERE id = ?`)
+      .run(conversation.id);
+    const ready = createDeferred();
+    const release = createDeferred();
+    const delayedReader = new SidechatReadBarrierService(db, async () => {
+      ready.resolve();
+      await release.promise;
+    });
+
+    const read = delayedReader.getConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    const firstEvent = await Promise.race([
+      ready.promise.then(() => "normalization_ready" as const),
+      read.then(() => "read_completed" as const),
+    ]);
+    expect(firstEvent).toBe("normalization_ready");
+    const now = new Date();
+    expect(await service.claimSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-new",
+      now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+    })).toBe(true);
+    release.resolve();
+
+    expect(await read).toMatchObject({
+      sidechatStatus: "working",
+      sidechatRunId: "run-new",
+      sidechatLeaseExpiresAt: new Date(now.getTime() + 60_000),
+    });
+  });
+});
 
 async function createAttemptedTeamRequest(
   service: ChatService,
@@ -594,7 +1380,7 @@ describe("ChatService ownership and atomic writes", () => {
   });
 
   test("inserts bot output only from the exact ownership snapshot", () => {
-    const { sql, params } = buildConditionalBotMessageQuery(drizzle({} as never), {
+    const { sql, params } = buildConditionalPublicBotMessageQuery(drizzle({} as never), {
       id: "bot-1", conversationId: "conv-1", projectId: "project-1",
       content: "Try reconnecting.", sources: null, senderName: "Maven",
       createdAt: new Date("2026-08-01T00:00:00.000Z"),
@@ -609,7 +1395,7 @@ describe("ChatService ownership and atomic writes", () => {
   });
 
   test("inserts visitor output only while the conversation is operational", () => {
-    const { sql, params } = buildConditionalVisitorMessageQuery(
+    const { sql, params } = buildConditionalPublicVisitorMessageQuery(
       drizzle({} as never),
       {
         id: "visitor-message-1",
@@ -629,7 +1415,7 @@ describe("ChatService ownership and atomic writes", () => {
   });
 
   test("does not append system history after archival", () => {
-    const { sql, params } = buildConditionalSystemMessageQuery(
+    const { sql, params } = buildConditionalPublicSystemMessageQuery(
       drizzle({} as never),
       {
         id: "system-1",
@@ -646,7 +1432,7 @@ describe("ChatService ownership and atomic writes", () => {
   });
 
   test("does not append an agent reply after archival", () => {
-    const { sql, params } = buildConditionalAgentMessageQuery(
+    const { sql, params } = buildConditionalPublicAgentMessageQuery(
       drizzle({} as never),
       {
         id: "agent-message-1",
@@ -664,7 +1450,7 @@ describe("ChatService ownership and atomic writes", () => {
   });
 
   test("keeps team-request summaries in the legacy public text message shape", () => {
-    const { sql, params } = buildAcceptedTeamRequestSummaryQuery(
+    const { sql, params } = buildAcceptedPublicTeamRequestSummaryQuery(
       drizzle({} as never),
       "conv-1",
       "project-1",

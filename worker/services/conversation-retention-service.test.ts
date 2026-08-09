@@ -32,29 +32,34 @@ describe("archived conversation retention", () => {
     ]));
   });
 
-  test("collects only conversation-scoped attachment keys", () => {
+  test("collects conversation-scoped attachment keys from both channels", () => {
     expect(collectOwnedUploadKeys("project-1", "conv-1", [
       {
+        channel: "public",
         role: "visitor",
         userId: null,
         imageUrl: "/api/uploads/project-1/chat-images/a.png",
       },
       {
+        channel: "sidechat",
         role: "agent",
         userId: "user-1",
         imageUrl: '["/api/uploads/project-1/conversation-attachments/conv-1/a.png","/api/uploads/project-1/conversation-attachments/conv-1/b.jpg"]',
       },
       {
+        channel: "public",
         role: "visitor",
         userId: null,
         imageUrl: "/api/uploads/project-2/chat-images/not-ours.png",
       },
       {
+        channel: "public",
         role: "agent",
         userId: "user-1",
         imageUrl: "/api/uploads/user-1/not-a-conversation-attachment.png",
       },
       {
+        channel: "public",
         role: "bot",
         userId: null,
         imageUrl: "/api/uploads/project-1/chat-images/not-owned-by-bot.png",
@@ -70,6 +75,7 @@ describe("archived conversation retention", () => {
     const store: ConversationRetentionStore = {
       claimExpired: async () => [],
       listMessageAttachments: async () => [{
+        channel: "sidechat",
         role: "agent",
         userId: "user-1",
         imageUrl: "/api/uploads/project-1/conversation-attachments/conv-1/a.png",
@@ -103,6 +109,7 @@ describe("archived conversation retention", () => {
     const store: ConversationRetentionStore = {
       claimExpired: async () => [],
       listMessageAttachments: async () => [{
+        channel: "sidechat",
         role: "agent",
         userId: "user-1",
         imageUrl: '["/api/uploads/project-1/conversation-attachments/conv-1/a.png","/api/uploads/project-1/conversation-attachments/conv-1/b.png"]',
@@ -141,6 +148,7 @@ describe("archived conversation retention", () => {
     const store: ConversationRetentionStore = {
       claimExpired: async () => [],
       listMessageAttachments: async () => [{
+        channel: "sidechat",
         role: "agent",
         userId: "user-1",
         imageUrl: "/api/uploads/project-1/conversation-attachments/conv-1/shared.png",

@@ -317,7 +317,7 @@ function createHarness(options: {
       }
       return { status: "claimed" as const };
     },
-    async addSystemMessage(
+    async addPublicSystemMessage(
       _conversationId: string,
       _kind: string,
       content: string,

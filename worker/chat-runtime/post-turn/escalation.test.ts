@@ -33,19 +33,19 @@ interface UpdateLegacyEscalationMetadataCall {
 
 function makeChatService() {
   const calls = {
-    addSystemMessage: [] as AddSystemMessageCall[],
+    addPublicSystemMessage: [] as AddSystemMessageCall[],
     updateConversation: [] as UpdateConversationCall[],
     updateLegacyEscalationMetadata:
       [] as UpdateLegacyEscalationMetadataCall[],
   };
   const service = {
-    addSystemMessage: async (
+    addPublicSystemMessage: async (
       conversationId: string,
       kind: string,
       content: string,
       idempotencyKey?: string,
     ): Promise<MessageRow> => {
-      calls.addSystemMessage.push({ conversationId, kind, content });
+      calls.addPublicSystemMessage.push({ conversationId, kind, content });
       const now = new Date();
       return {
         id: idempotencyKey ?? "msg-review-1",
@@ -149,8 +149,8 @@ describe("createEscalation - first escalation (created)", () => {
 
     expect(result.created).toBe(true);
     expect(result.summaryMessageId).toBeString();
-    expect(calls.addSystemMessage).toHaveLength(1);
-    expect(calls.addSystemMessage[0]).toMatchObject({
+    expect(calls.addPublicSystemMessage).toHaveLength(1);
+    expect(calls.addPublicSystemMessage[0]).toMatchObject({
       conversationId: "conv-1",
       kind: "review_summary",
       content: "Visitor needs a refund on order 123.",
@@ -253,7 +253,7 @@ describe("createEscalation - repeat escalation (already forwarded)", () => {
 
     expect(result.created).toBe(false);
     expect(result.summaryMessageId).toBe("msg-existing");
-    expect(calls.addSystemMessage).toHaveLength(0);
+    expect(calls.addPublicSystemMessage).toHaveLength(0);
     expect(broadcasts).toHaveLength(0);
   });
 });
@@ -338,7 +338,7 @@ describe("createEscalation - telegram notification", () => {
   test("does not notify after the conversation becomes unavailable", async () => {
     const tg = makeTelegramService();
     const unavailableChatService = {
-      addSystemMessage: async () => null,
+      addPublicSystemMessage: async () => null,
       updateConversation: async () => null,
       updateLegacyEscalationMetadata: async () => null,
     } as unknown as ChatService;

@@ -168,7 +168,7 @@ export async function createEscalation(params: {
           params.project.id,
           params.acceptedTeamRequestToken,
         )
-      : await params.chatService.addSystemMessage(
+      : await params.chatService.addPublicSystemMessage(
           params.conversation.id,
           "review_summary",
           summary,

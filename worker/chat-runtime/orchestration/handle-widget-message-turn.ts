@@ -464,7 +464,7 @@ export async function handleWidgetMessageTurn(
   let isFirstVisitorTurn = context.isFirstVisitorTurn ?? false;
   let visitorMessageOccurredAt = new Date();
   if (!context.visitorMessageAlreadySaved) {
-    const visitorResult = await chatService.addVisitorMessageWithFirstTurn(
+    const visitorResult = await chatService.addPublicVisitorMessageWithFirstTurn(
       {
         conversationId: context.conversationId,
         content: context.payload.content,
@@ -719,7 +719,7 @@ export async function handleWidgetMessageTurn(
 
   const [enabledGuidelines, recentHistory] = await Promise.all([
     guidelineService.getEnabledByProject(context.project.id),
-    chatService.getRecentMessages(context.conversationId, 11),
+    chatService.getRecentPublicMessages(context.conversationId, 11),
   ]);
   const parallelPrefetchedHistory = recentHistory.messages;
   markStage("ai_prefetch_done");
@@ -832,7 +832,7 @@ export async function handleWidgetMessageTurn(
       }
       currentStage = "save_bot_message";
       throwIfMavenTurnCancelled(turnAbortController.signal);
-      const botMessage = await chatService.addBotMessageIfOwnershipMatches(
+      const botMessage = await chatService.addPublicBotMessageIfOwnershipMatches(
         {
           conversationId: context.conversationId,
           content: cleanResponse,
@@ -1191,7 +1191,7 @@ export async function handleWidgetMessageTurn(
         finalText: fullResponse,
         abortSignal: turnAbortController.signal,
         persist: async () =>
-          chatService.addBotMessageIfOwnershipMatches(
+          chatService.addPublicBotMessageIfOwnershipMatches(
             {
               conversationId: context.conversationId,
               content: fullResponse,
@@ -1404,7 +1404,7 @@ export async function handleWidgetMessageTurn(
           if (outputPermission.allowed) {
             const fallbackMessage = context.contactAccepted.fallbackMessage;
             throwIfMavenTurnCancelled(turnAbortController.signal);
-            const botMessage = await chatService.addBotMessageIfOwnershipMatches(
+            const botMessage = await chatService.addPublicBotMessageIfOwnershipMatches(
               {
                 conversationId: context.conversationId,
                 content: fallbackMessage,

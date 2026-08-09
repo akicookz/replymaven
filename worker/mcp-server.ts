@@ -480,7 +480,7 @@ function registerGetConversationTool(
       );
       if (!conversation) throw new Error("Conversation not found");
 
-      const messages = await chatService.getMessages(conversation.id);
+      const messages = await chatService.getPublicMessages(conversation.id);
       const latestMessages = messages.slice(-(maxMessages ?? 50));
 
       return textResult({
@@ -531,7 +531,7 @@ function registerSendAgentReplyTool(
 
       const avatar = await getCurrentUserAvatar(context);
 
-      const message = await chatService.addAgentMessageAndTakeOwnership(
+      const message = await chatService.addPublicAgentMessageAndTakeOwnership(
         {
           conversationId: conversation.id,
           content: content.trim(),

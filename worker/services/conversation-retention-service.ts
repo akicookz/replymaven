@@ -30,6 +30,7 @@ export interface ClaimedConversation {
 }
 
 export interface MessageAttachmentSource {
+  channel: "public" | "sidechat";
   role: "visitor" | "bot" | "agent" | "system";
   userId: string | null;
   imageUrl: string | null;
@@ -158,8 +159,11 @@ class D1ConversationRetentionStore implements ConversationRetentionStore {
   async listMessageAttachments(
     conversationId: string,
   ): Promise<MessageAttachmentSource[]> {
+    // Intentionally all-channel: purging a conversation must remove attachments
+    // owned by both its public transcript and its private sidechat transcript.
     const rows = await this.db
       .select({
+        channel: messages.channel,
         role: messages.role,
         userId: messages.userId,
         imageUrl: messages.imageUrl,
@@ -173,6 +177,8 @@ class D1ConversationRetentionStore implements ConversationRetentionStore {
     key: string,
     conversationId: string,
   ): Promise<boolean> {
+    // Intentionally all-channel: a key referenced by either transcript of any
+    // other conversation remains owned and must not be removed from R2.
     const rows = await this.db
       .select({ imageUrl: messages.imageUrl })
       .from(messages)

@@ -20,6 +20,7 @@ import {
   mergeChatStateForPersistence,
   parseChatState,
 } from "../chat-runtime/types";
+import { type MavenChannel } from "../validation";
 
 export type SystemEventKind = "flagged" | "joined" | "snoozed" | "snooze_ended" | "drafted" | "review_summary";
 export type InboxFilter =
@@ -47,6 +48,46 @@ export interface BulkConversationActionResult {
 export interface ExternalActionResult<T> {
   executed: boolean;
   value?: T;
+}
+
+export interface MessagePage {
+  messages: MessageRow[];
+  hasMore: boolean;
+}
+
+export interface SidechatHumanMessageInput {
+  projectId: string;
+  conversationId: string;
+  runId: string;
+  content: string;
+  userId: string;
+  senderName: string;
+  senderAvatar: string | null;
+}
+
+export interface SidechatMavenMessageInput {
+  projectId: string;
+  conversationId: string;
+  runId: string;
+  content: string;
+  kind?: MessageRow["kind"];
+  metadata?: string | null;
+  senderName?: string | null;
+}
+
+export interface ClaimSidechatRunInput {
+  projectId: string;
+  conversationId: string;
+  runId: string;
+  now: Date;
+  leaseExpiresAt: Date;
+}
+
+export interface SettleSidechatRunInput {
+  projectId: string;
+  conversationId: string;
+  runId: string;
+  status: "idle" | "ready" | "failed" | "waiting_approval";
 }
 
 const EXTERNAL_ACTION_LEASE_MS = 2 * 60 * 1000;
@@ -262,7 +303,7 @@ export function buildNeedsReviewQuery(
     .limit(20);
 }
 
-function buildHasVisitorMessagesQuery(
+function buildHasPublicVisitorMessagesQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   conversationId: string,
 ) {
@@ -272,13 +313,14 @@ function buildHasVisitorMessagesQuery(
     .where(
       and(
         eq(messages.conversationId, conversationId),
+        eq(messages.channel, "public"),
         eq(messages.role, "visitor"),
       ),
     )
     .limit(1);
 }
 
-function buildVisitorMessageCountQuery(
+function buildPublicVisitorMessageCountQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   conversationId: string,
 ) {
@@ -288,6 +330,7 @@ function buildVisitorMessageCountQuery(
     .where(
       and(
         eq(messages.conversationId, conversationId),
+        eq(messages.channel, "public"),
         eq(messages.role, "visitor"),
       ),
     );
@@ -318,7 +361,7 @@ interface ConditionalOperationalMessageInput {
   createdAt: Date;
 }
 
-function buildConditionalOperationalMessageQuery(
+function buildConditionalPublicOperationalMessageQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   input: ConditionalOperationalMessageInput,
   role: "visitor" | "agent",
@@ -356,18 +399,72 @@ function buildConditionalOperationalMessageQuery(
   return db.insert(messages).select(selectQuery).returning();
 }
 
-export function buildConditionalVisitorMessageQuery(
+export function buildConditionalPublicVisitorMessageQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   input: ConditionalOperationalMessageInput,
 ) {
-  return buildConditionalOperationalMessageQuery(db, input, "visitor");
+  return buildConditionalPublicOperationalMessageQuery(db, input, "visitor");
 }
 
-export function buildConditionalAgentMessageQuery(
+export function buildConditionalPublicAgentMessageQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   input: ConditionalOperationalMessageInput,
 ) {
-  return buildConditionalOperationalMessageQuery(db, input, "agent");
+  return buildConditionalPublicOperationalMessageQuery(db, input, "agent");
+}
+
+interface ConditionalSidechatMessageInput {
+  id: string;
+  projectId: string;
+  conversationId: string;
+  runId: string;
+  content: string;
+  kind: MessageRow["kind"];
+  metadata: string | null;
+  senderName: string | null;
+  senderAvatar: string | null;
+  userId: string | null;
+  createdAt: Date;
+}
+
+function buildConditionalSidechatMessageQuery(
+  db: DrizzleD1Database<Record<string, unknown>>,
+  input: ConditionalSidechatMessageInput,
+  role: "agent" | "bot",
+) {
+  const selectQuery = db
+    .select({
+      id: sql<string>`${input.id}`.as("id"),
+      conversationId: conversations.id,
+      role: sql<"agent" | "bot">`${role}`.as("role"),
+      content: sql<string>`${input.content}`.as("content"),
+      channel: sql<"sidechat">`${"sidechat"}`.as("channel"),
+      kind: sql<MessageRow["kind"]>`${input.kind}`.as("kind"),
+      metadata: sql<string | null>`${input.metadata}`.as("message_metadata"),
+      imageUrl: sql<null>`null`.as("image_url"),
+      sources: sql<null>`null`.as("sources"),
+      senderName: sql<string | null>`${input.senderName}`.as("sender_name"),
+      senderAvatar: sql<string | null>`${input.senderAvatar}`.as("sender_avatar"),
+      userId: sql<string | null>`${input.userId}`.as("user_id"),
+      createdAt: sql<Date>`${Math.floor(input.createdAt.getTime() / 1000)}`.as(
+        "created_at",
+      ),
+      emailedAt: sql<null>`null`.as("emailed_at"),
+      deliveredAt: sql<null>`null`.as("delivered_at"),
+      readAt: sql<null>`null`.as("read_at"),
+    })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.id, input.conversationId),
+        eq(conversations.projectId, input.projectId),
+        isNull(conversations.archivedAt),
+        eq(conversations.sidechatStatus, "working"),
+        eq(conversations.sidechatRunId, input.runId),
+      ),
+    );
+
+  return db.insert(messages).select(selectQuery).returning();
 }
 
 interface ConditionalSystemMessageInput {
@@ -378,7 +475,7 @@ interface ConditionalSystemMessageInput {
   createdAt: Date;
 }
 
-export function buildConditionalSystemMessageQuery(
+export function buildConditionalPublicSystemMessageQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   input: ConditionalSystemMessageInput,
 ) {
@@ -418,7 +515,7 @@ export function buildConditionalSystemMessageQuery(
     .returning();
 }
 
-export function buildAcceptedTeamRequestSummaryQuery(
+export function buildAcceptedPublicTeamRequestSummaryQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   conversationId: string,
   projectId: string,
@@ -469,7 +566,7 @@ export function buildAcceptedTeamRequestSummaryQuery(
     .returning();
 }
 
-export function buildConditionalBotMessageQuery(
+export function buildConditionalPublicBotMessageQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   input: ConditionalBotMessageInput,
 ) {
@@ -785,6 +882,10 @@ export class ChatService {
     // Test seam for exercising ownership races immediately before the CAS.
   }
 
+  protected async afterExpiredSidechatLeaseRead(): Promise<void> {
+    // Test seam for exercising a new claim between an expired read and its CAS.
+  }
+
   // ─── Conversations ──────────────────────────────────────────────────────────
 
   async getConversationById(
@@ -792,7 +893,7 @@ export class ChatService {
     projectId: string,
   ): Promise<ConversationRow | null> {
     const rows = await buildConversationByIdQuery(this.db, id, projectId);
-    return rows[0] ?? null;
+    return this.normalizeExpiredSidechatLease(rows[0] ?? null, false);
   }
 
   async getOperationalConversationById(
@@ -800,7 +901,112 @@ export class ChatService {
     projectId: string,
   ): Promise<ConversationRow | null> {
     const rows = await buildOperationalConversationQuery(this.db, id, projectId);
-    return rows[0] ?? null;
+    return this.normalizeExpiredSidechatLease(rows[0] ?? null, true);
+  }
+
+  private async normalizeExpiredSidechatLease(
+    conversation: ConversationRow | null,
+    operationalOnly: boolean,
+    now: Date = new Date(),
+  ): Promise<ConversationRow | null> {
+    if (
+      !conversation ||
+      conversation.sidechatStatus !== "working" ||
+      !conversation.sidechatLeaseExpiresAt ||
+      conversation.sidechatLeaseExpiresAt.getTime() > now.getTime()
+    ) {
+      return conversation;
+    }
+
+    await this.afterExpiredSidechatLeaseRead();
+    const runCondition = conversation.sidechatRunId === null
+      ? isNull(conversations.sidechatRunId)
+      : eq(conversations.sidechatRunId, conversation.sidechatRunId);
+    const normalized = await this.db
+      .update(conversations)
+      .set({
+        sidechatStatus: "failed",
+        sidechatRunId: null,
+        sidechatLeaseExpiresAt: null,
+        sidechatUpdatedAt: now,
+        updatedAt: sql`${conversations.updatedAt}`,
+      })
+      .where(
+        and(
+          eq(conversations.id, conversation.id),
+          eq(conversations.projectId, conversation.projectId),
+          eq(conversations.sidechatStatus, "working"),
+          runCondition,
+          eq(
+            conversations.sidechatLeaseExpiresAt,
+            conversation.sidechatLeaseExpiresAt,
+          ),
+          lte(conversations.sidechatLeaseExpiresAt, now),
+        ),
+      )
+      .returning();
+    if (normalized[0]) return normalized[0];
+
+    const latest = operationalOnly
+      ? await buildOperationalConversationQuery(
+          this.db,
+          conversation.id,
+          conversation.projectId,
+        )
+      : await buildConversationByIdQuery(
+          this.db,
+          conversation.id,
+          conversation.projectId,
+        );
+    return latest[0] ?? null;
+  }
+
+  async claimSidechatRun(input: ClaimSidechatRunInput): Promise<boolean> {
+    const claimed = await this.db
+      .update(conversations)
+      .set({
+        sidechatStatus: "working",
+        sidechatRunId: input.runId,
+        sidechatLeaseExpiresAt: input.leaseExpiresAt,
+        sidechatUpdatedAt: input.now,
+        updatedAt: sql`${conversations.updatedAt}`,
+      })
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.projectId, input.projectId),
+          isNull(conversations.archivedAt),
+          or(
+            isNull(conversations.sidechatLeaseExpiresAt),
+            lte(conversations.sidechatLeaseExpiresAt, input.now),
+          ),
+        ),
+      )
+      .returning({ id: conversations.id });
+    return claimed.length > 0;
+  }
+
+  async settleSidechatRun(input: SettleSidechatRunInput): Promise<boolean> {
+    const now = new Date();
+    const settled = await this.db
+      .update(conversations)
+      .set({
+        sidechatStatus: input.status,
+        sidechatRunId: null,
+        sidechatLeaseExpiresAt: null,
+        sidechatUpdatedAt: now,
+        updatedAt: sql`${conversations.updatedAt}`,
+      })
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.projectId, input.projectId),
+          eq(conversations.sidechatStatus, "working"),
+          eq(conversations.sidechatRunId, input.runId),
+        ),
+      )
+      .returning({ id: conversations.id });
+    return settled.length > 0;
   }
 
   async runExternalActionIfOperational<T>(
@@ -1401,7 +1607,7 @@ export class ChatService {
     projectId: string,
     acceptanceToken: string,
   ): Promise<MessageRow | null> {
-    const rows = await buildAcceptedTeamRequestSummaryQuery(
+    const rows = await buildAcceptedPublicTeamRequestSummaryQuery(
       this.db,
       id,
       projectId,
@@ -2015,7 +2221,7 @@ export class ChatService {
   // Fetch the latest message for each given conversation. Returns a map keyed
   // by conversationId. Used by the dashboard sidebar to render a 1-line preview
   // under each visitor name.
-  async getLastMessagesByConversationIds(
+  async getLastPublicMessagesByConversationIds(
     conversationIds: string[],
   ): Promise<
     Map<
@@ -2050,9 +2256,11 @@ export class ChatService {
       .where(
         and(
           inArray(messages.conversationId, conversationIds),
+          eq(messages.channel, "public"),
           sql`${messages.createdAt} = (
             SELECT MAX(m2.created_at) FROM messages m2
             WHERE m2.conversation_id = ${messages.conversationId}
+              AND m2.channel = ${"public"}
           )`,
         ),
       );
@@ -2079,29 +2287,40 @@ export class ChatService {
     return map;
   }
 
-  async getMessages(conversationId: string): Promise<MessageRow[]> {
+  async getPublicMessages(conversationId: string): Promise<MessageRow[]> {
     return this.db
       .select()
       .from(messages)
-      .where(and(eq(messages.conversationId, conversationId), ne(messages.role, "system")))
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
+          ne(messages.role, "system"),
+        ),
+      )
       .orderBy(messages.createdAt);
   }
 
-  async hasVisitorMessages(conversationId: string): Promise<boolean> {
-    const rows = await buildHasVisitorMessagesQuery(this.db, conversationId);
+  async hasPublicVisitorMessages(conversationId: string): Promise<boolean> {
+    const rows = await buildHasPublicVisitorMessagesQuery(this.db, conversationId);
     return rows.length > 0;
   }
 
   // Paginated reads — used by the dashboard detail endpoint to avoid
   // shipping unbounded message history on every conversation click.
-  async getRecentMessages(
+  async getRecentPublicMessages(
     conversationId: string,
     limit = 30,
-  ): Promise<{ messages: MessageRow[]; hasMore: boolean }> {
+  ): Promise<MessagePage> {
     const rows = await this.db
       .select()
       .from(messages)
-      .where(eq(messages.conversationId, conversationId))
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
+        ),
+      )
       .orderBy(desc(messages.createdAt))
       .limit(limit + 1);
     const hasMore = rows.length > limit;
@@ -2110,17 +2329,18 @@ export class ChatService {
     return { messages: sliced.reverse(), hasMore };
   }
 
-  async getMessagesBefore(
+  async getPublicMessagesBefore(
     conversationId: string,
     beforeCreatedAt: Date,
     limit = 30,
-  ): Promise<{ messages: MessageRow[]; hasMore: boolean }> {
+  ): Promise<MessagePage> {
     const rows = await this.db
       .select()
       .from(messages)
       .where(
         and(
           eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
           lt(messages.createdAt, beforeCreatedAt),
         ),
       )
@@ -2131,7 +2351,7 @@ export class ChatService {
     return { messages: sliced.reverse(), hasMore };
   }
 
-  async getMessagesSince(
+  async getPublicMessagesSince(
     conversationId: string,
     since: number,
   ): Promise<MessageRow[]> {
@@ -2141,6 +2361,7 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
           ne(messages.role, "system"),
           gt(messages.createdAt, new Date(since)),
         ),
@@ -2148,9 +2369,124 @@ export class ChatService {
       .orderBy(messages.createdAt);
   }
 
+  async getRecentSidechatMessages(
+    conversationId: string,
+    limit = 30,
+  ): Promise<MessagePage> {
+    const rows = await this.db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.channel, "sidechat"),
+          inArray(messages.role, ["agent", "bot"]),
+        ),
+      )
+      .orderBy(desc(messages.createdAt))
+      .limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const sliced = hasMore ? rows.slice(0, limit) : rows;
+    return { messages: sliced.reverse(), hasMore };
+  }
+
+  async getSidechatMessagesBefore(
+    conversationId: string,
+    beforeCreatedAt: Date,
+    limit = 30,
+  ): Promise<MessagePage> {
+    const rows = await this.db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.channel, "sidechat"),
+          inArray(messages.role, ["agent", "bot"]),
+          lt(messages.createdAt, beforeCreatedAt),
+        ),
+      )
+      .orderBy(desc(messages.createdAt))
+      .limit(limit + 1);
+    const hasMore = rows.length > limit;
+    const sliced = hasMore ? rows.slice(0, limit) : rows;
+    return { messages: sliced.reverse(), hasMore };
+  }
+
+  async getSidechatMessagesSince(
+    conversationId: string,
+    since: number,
+  ): Promise<MessageRow[]> {
+    return this.db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.channel, "sidechat"),
+          inArray(messages.role, ["agent", "bot"]),
+          gt(messages.createdAt, new Date(since)),
+        ),
+      )
+      .orderBy(messages.createdAt);
+  }
+
+  async addSidechatHumanMessage(
+    input: SidechatHumanMessageInput,
+  ): Promise<MessageRow | null> {
+    return this.addSidechatMessage(input, "agent");
+  }
+
+  async addSidechatMavenMessage(
+    input: SidechatMavenMessageInput,
+  ): Promise<MessageRow | null> {
+    return this.addSidechatMessage(input, "bot");
+  }
+
+  private async addSidechatMessage(
+    input: SidechatHumanMessageInput | SidechatMavenMessageInput,
+    role: "agent" | "bot",
+  ): Promise<MessageRow | null> {
+    const now = new Date();
+    const insertQuery = buildConditionalSidechatMessageQuery(
+      this.db,
+      {
+        id: crypto.randomUUID(),
+        projectId: input.projectId,
+        conversationId: input.conversationId,
+        runId: input.runId,
+        content: input.content,
+        kind: "kind" in input ? input.kind ?? "text" : "text",
+        metadata: "metadata" in input ? input.metadata ?? null : null,
+        senderName: input.senderName ?? null,
+        senderAvatar: "senderAvatar" in input ? input.senderAvatar : null,
+        userId: "userId" in input ? input.userId : null,
+        createdAt: now,
+      },
+      role,
+    );
+    const activityQuery = this.db
+      .update(conversations)
+      .set({
+        sidechatUpdatedAt: now,
+        updatedAt: sql`${conversations.updatedAt}`,
+      })
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.projectId, input.projectId),
+          isNull(conversations.archivedAt),
+          eq(conversations.sidechatStatus, "working"),
+          eq(conversations.sidechatRunId, input.runId),
+        ),
+      );
+    const [rows] = await this.db.batch([insertQuery, activityQuery]);
+    return rows[0] ?? null;
+  }
+
   // Writes an internal system event message. Does NOT bump lastActivityAt so
   // snooze/flag actions don't reorder the conversation list.
-  async addSystemMessage(
+  async addPublicSystemMessage(
     conversationId: string,
     kind: SystemEventKind,
     content: string,
@@ -2159,7 +2495,7 @@ export class ChatService {
     const id = idempotencyKey ?? crypto.randomUUID();
     const now = new Date();
     const sources = JSON.stringify({ systemKind: kind });
-    const rows = await buildConditionalSystemMessageQuery(this.db, {
+    const rows = await buildConditionalPublicSystemMessageQuery(this.db, {
       id,
       conversationId,
       content,
@@ -2169,7 +2505,7 @@ export class ChatService {
     return rows[0] ?? null;
   }
 
-  async addMessage(
+  async addPublicMessage(
     data: Omit<NewMessageRow, "id" | "createdAt">,
     projectId: string,
   ): Promise<MessageRow | null> {
@@ -2177,7 +2513,7 @@ export class ChatService {
     const id = crypto.randomUUID();
     const now = new Date();
 
-    const insertQuery = buildConditionalOperationalMessageQuery(
+    const insertQuery = buildConditionalPublicOperationalMessageQuery(
       this.db,
       { id, projectId, createdAt: now, ...data },
       data.role,
@@ -2196,13 +2532,13 @@ export class ChatService {
     return insertedRows[0] ?? null;
   }
 
-  async addVisitorMessageWithFirstTurn(
+  async addPublicVisitorMessageWithFirstTurn(
     data: Omit<NewMessageRow, "id" | "createdAt" | "role">,
     projectId: string,
   ): Promise<{ message: MessageRow; isFirstVisitorTurn: boolean } | null> {
     const id = crypto.randomUUID();
     const now = new Date();
-    const insertQuery = buildConditionalVisitorMessageQuery(this.db, {
+    const insertQuery = buildConditionalPublicVisitorMessageQuery(this.db, {
       id,
       projectId,
       createdAt: now,
@@ -2218,7 +2554,7 @@ export class ChatService {
           isNull(conversations.archivedAt),
         ),
       );
-    const countQuery = buildVisitorMessageCountQuery(
+    const countQuery = buildPublicVisitorMessageCountQuery(
       this.db,
       data.conversationId,
     );
@@ -2236,7 +2572,7 @@ export class ChatService {
     };
   }
 
-  async addAgentMessageAndTakeOwnership(
+  async addPublicAgentMessageAndTakeOwnership(
     data: Omit<NewMessageRow, "id" | "createdAt" | "role">,
     projectId: string,
   ): Promise<MessageRow | null> {
@@ -2248,7 +2584,7 @@ export class ChatService {
       projectId,
       now,
     );
-    const insertQuery = buildConditionalAgentMessageQuery(this.db, {
+    const insertQuery = buildConditionalPublicAgentMessageQuery(this.db, {
       id,
       projectId,
       createdAt: now,
@@ -2258,7 +2594,7 @@ export class ChatService {
     return insertedRows[0] ?? null;
   }
 
-  async addBotMessageIfOwnershipMatches(
+  async addPublicBotMessageIfOwnershipMatches(
     data: Omit<NewMessageRow, "id" | "createdAt" | "role">,
     projectId: string,
     expected: {
@@ -2268,7 +2604,7 @@ export class ChatService {
   ): Promise<MessageRow | null> {
     const id = crypto.randomUUID();
     const now = new Date();
-    const rows = await buildConditionalBotMessageQuery(this.db, {
+    const rows = await buildConditionalPublicBotMessageQuery(this.db, {
       id,
       conversationId: data.conversationId,
       projectId,
@@ -2295,16 +2631,27 @@ export class ChatService {
     return botMessage;
   }
 
-  async getMessageById(messageId: string): Promise<MessageRow | null> {
+  async getMessageByIdForChannel(
+    messageId: string,
+    channel: MavenChannel,
+  ): Promise<MessageRow | null> {
     const rows = await this.db
       .select()
       .from(messages)
-      .where(eq(messages.id, messageId))
+      .where(
+        and(
+          eq(messages.id, messageId),
+          eq(messages.channel, channel),
+          channel === "sidechat"
+            ? inArray(messages.role, ["agent", "bot"])
+            : undefined,
+        ),
+      )
       .limit(1);
     return rows[0] ?? null;
   }
 
-  async getLatestEmailedAgentMessage(
+  async getLatestEmailedPublicAgentMessage(
     conversationId: string,
   ): Promise<MessageRow | null> {
     const rows = await this.db
@@ -2313,6 +2660,7 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
           eq(messages.role, "agent"),
           isNotNull(messages.emailedAt),
           isNotNull(messages.userId),
@@ -2323,17 +2671,26 @@ export class ChatService {
     return rows[0] ?? null;
   }
 
-  async markMessageAsEmailed(messageId: string): Promise<void> {
+  async markPublicMessageAsEmailed(
+    conversationId: string,
+    messageId: string,
+  ): Promise<void> {
     await this.db
       .update(messages)
       .set({ emailedAt: new Date() })
-      .where(eq(messages.id, messageId));
+      .where(
+        and(
+          eq(messages.id, messageId),
+          eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
+        ),
+      );
   }
 
   // Mark all outbound (agent/bot) messages in the conversation up to and
   // including `cutoff` that aren't already delivered. Returns the ids that
   // were newly marked (empty when there's nothing to do — keeps re-acks silent).
-  async markMessagesDelivered(
+  async markPublicMessagesDelivered(
     conversationId: string,
     cutoff: Date,
   ): Promise<string[]> {
@@ -2343,6 +2700,7 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
           inArray(messages.role, ["agent", "bot"]),
           isNull(messages.deliveredAt),
           lte(messages.createdAt, cutoff),
@@ -2353,14 +2711,20 @@ export class ChatService {
     await this.db
       .update(messages)
       .set({ deliveredAt: new Date() })
-      .where(inArray(messages.id, ids));
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
+          inArray(messages.id, ids),
+        ),
+      );
     return ids;
   }
 
   // Mark outbound messages up to `cutoff` as read. Read implies delivered, so
   // any of those still missing `deliveredAt` get it backfilled. Returns the
   // ids that were newly marked read.
-  async markMessagesRead(
+  async markPublicMessagesRead(
     conversationId: string,
     cutoff: Date,
   ): Promise<string[]> {
@@ -2370,6 +2734,7 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
           inArray(messages.role, ["agent", "bot"]),
           isNull(messages.readAt),
           lte(messages.createdAt, cutoff),
@@ -2381,32 +2746,45 @@ export class ChatService {
     await this.db
       .update(messages)
       .set({ readAt: now })
-      .where(inArray(messages.id, ids));
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
+          inArray(messages.id, ids),
+        ),
+      );
     await this.db
       .update(messages)
       .set({ deliveredAt: now })
-      .where(and(inArray(messages.id, ids), isNull(messages.deliveredAt)));
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
+          inArray(messages.id, ids),
+          isNull(messages.deliveredAt),
+        ),
+      );
     return ids;
   }
 
   // Resolve a widget-supplied "newest message id" to its createdAt (guarding
   // that it belongs to this conversation) and mark delivered up to it.
-  async markDeliveredUpTo(
+  async markPublicDeliveredUpTo(
     conversationId: string,
     upToMessageId: string,
   ): Promise<string[]> {
-    const m = await this.getMessageById(upToMessageId);
+    const m = await this.getMessageByIdForChannel(upToMessageId, "public");
     if (!m || m.conversationId !== conversationId) return [];
-    return this.markMessagesDelivered(conversationId, m.createdAt);
+    return this.markPublicMessagesDelivered(conversationId, m.createdAt);
   }
 
-  async markReadUpTo(
+  async markPublicReadUpTo(
     conversationId: string,
     upToMessageId: string,
   ): Promise<string[]> {
-    const m = await this.getMessageById(upToMessageId);
+    const m = await this.getMessageByIdForChannel(upToMessageId, "public");
     if (!m || m.conversationId !== conversationId) return [];
-    return this.markMessagesRead(conversationId, m.createdAt);
+    return this.markPublicMessagesRead(conversationId, m.createdAt);
   }
 
   // See buildInboxCountsQuery for the bucket semantics and why it's extracted.
@@ -2427,27 +2805,36 @@ export class ChatService {
   // conversation first. Only agent-role messages are deletable. Idempotent:
   // returns { deleted: false, reason: "not_found" } if the row is already gone,
   // letting the caller treat racing deletes as success.
-  async deleteAgentMessage(
+  async deletePublicAgentMessage(
     conversationId: string,
     messageId: string,
   ): Promise<{
     deleted: boolean;
-    reason?: "not_found" | "wrong_conversation" | "not_agent";
+    reason?: "not_found" | "not_agent";
     row?: MessageRow;
   }> {
     const rows = await this.db
       .select()
       .from(messages)
-      .where(eq(messages.id, messageId))
+      .where(
+        and(
+          eq(messages.id, messageId),
+          eq(messages.conversationId, conversationId),
+          eq(messages.channel, "public"),
+        ),
+      )
       .limit(1);
     const row = rows[0];
     if (!row) return { deleted: false, reason: "not_found" };
-    if (row.conversationId !== conversationId) {
-      return { deleted: false, reason: "wrong_conversation" };
-    }
     if (row.role !== "agent") return { deleted: false, reason: "not_agent" };
 
-    await this.db.delete(messages).where(eq(messages.id, messageId));
+    await this.db.delete(messages).where(
+      and(
+        eq(messages.id, messageId),
+        eq(messages.conversationId, conversationId),
+        eq(messages.channel, "public"),
+      ),
+    );
 
     // Recompute lastActivityAt so the conversation list re-orders correctly.
     // Falls back to the conversation's createdAt when no messages remain.
@@ -2456,7 +2843,8 @@ export class ChatService {
       .set({
         lastActivityAt: sql`COALESCE(
           (SELECT MAX(${messages.createdAt}) FROM ${messages}
-           WHERE ${messages.conversationId} = ${conversationId}),
+           WHERE ${messages.conversationId} = ${conversationId}
+             AND ${messages.channel} = ${"public"}),
           ${conversations.createdAt}
         )`,
       })

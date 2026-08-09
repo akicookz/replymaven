@@ -193,8 +193,8 @@ export class ConversationDO implements DurableObject {
       if (!conversation) return;
       const ids =
         msg.type === "delivered"
-          ? await chatService.markDeliveredUpTo(att.conversationId, msg.upToMessageId)
-          : await chatService.markReadUpTo(att.conversationId, msg.upToMessageId);
+          ? await chatService.markPublicDeliveredUpTo(att.conversationId, msg.upToMessageId)
+          : await chatService.markPublicReadUpTo(att.conversationId, msg.upToMessageId);
       if (ids.length === 0) return;
 
       this.broadcastToAgents({
@@ -236,13 +236,16 @@ export class ConversationDO implements DurableObject {
 
     let sinceMs = 0;
     if (lastMessageId) {
-      const last = await chatService.getMessageById(lastMessageId);
+      const last = await chatService.getMessageByIdForChannel(
+        lastMessageId,
+        "public",
+      );
       if (last && last.conversationId === attachment.conversationId) {
         sinceMs = last.createdAt.getTime();
       }
     }
 
-    const missed = await chatService.getMessagesSince(
+    const missed = await chatService.getPublicMessagesSince(
       attachment.conversationId,
       sinceMs,
     );
