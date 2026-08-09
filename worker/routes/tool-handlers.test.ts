@@ -438,6 +438,39 @@ describe("tool route boundary", () => {
     expect(service.tools[0]?.headers).toBe("encrypted-replacement");
   });
 
+  test("an omitted cleared preset replacement preserves authoritative credentials", async () => {
+    const original = makeTool({
+      name: "check_order_status",
+      headers: "encrypted-authoritative",
+    });
+    const service = new MemoryToolService([original]);
+    let encryptionCalls = 0;
+    const response = await handleUpdateToolRequest({
+      projectId: "project-1",
+      toolId: original.id,
+      role: "owner",
+      body: {
+        allowedChannels: ["public", "sidechat"],
+        access: "read",
+      },
+      toolService: service,
+      encryptHeaders: async () => {
+        encryptionCalls += 1;
+        return "unexpected";
+      },
+      maskStoredHeaders: async (headers) =>
+        headers ? { Authorization: "••••••••" } : null,
+    });
+
+    expect(response.status).toBe(200);
+    expect(encryptionCalls).toBe(0);
+    expect(service.updateCalls[0]).not.toHaveProperty("headers");
+    expect(service.tools[0]?.headers).toBe("encrypted-authoritative");
+    expect(await readJson(response)).toMatchObject({
+      headers: { Authorization: "••••••••" },
+    });
+  });
+
   test("recomputes fingerprints only for model-facing contract changes", async () => {
     const original = makeTool();
     const service = new MemoryToolService([original]);

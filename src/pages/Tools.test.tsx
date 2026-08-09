@@ -287,6 +287,31 @@ describe("Tools HTTP policy controls", () => {
     expect(unconfigured?.getAttribute("aria-expanded")).toBe("true");
   });
 
+  test("configured preset enabled switch has a named 40px target outside the expander", async () => {
+    const configuredLookup = makePresetTool({
+      name: "check_order_status",
+      displayName: "Check Order Status",
+      description: "Look up an order.",
+      endpoint: "https://api.example.com/orders",
+      method: "GET",
+    });
+    const { dom } = await renderTools([configuredLookup]);
+
+    await waitForText(dom, "HTTP Lookup");
+    const expander = findPresetExpander(dom, "HTTP Lookup");
+    const enabledSwitch = dom.window.document.querySelector<HTMLElement>(
+      '[role="switch"]',
+    );
+    const reservedHitArea = enabledSwitch?.parentElement;
+
+    expect(enabledSwitch?.getAttribute("aria-label")).toBe("Enable HTTP Lookup");
+    expect(expander?.contains(enabledSwitch ?? null)).toBe(false);
+    expect(reservedHitArea?.classList.contains("size-10")).toBe(true);
+    expect(enabledSwitch?.classList.contains("after:size-10")).toBe(true);
+    enabledSwitch?.focus();
+    expect(dom.window.document.activeElement).toBe(enabledSwitch);
+  });
+
   test.each([
     {
       label: "HTTP Lookup",
@@ -382,6 +407,39 @@ describe("Tools HTTP policy controls", () => {
     expect(request.body).toMatchObject({
       headers: { Authorization: "Bearer replacement" },
     });
+  });
+
+  test("configured HTTP Lookup keeps credentials after replacement text is cleared", async () => {
+    const lookup = makePresetTool({
+      name: "check_order_status",
+      displayName: "Check Order Status",
+      description: "Look up an order.",
+      endpoint: "https://api.example.com/orders",
+      method: "GET",
+      headers: { Authorization: "••••••••" },
+    });
+    const { dom, requests } = await renderTools([lookup]);
+    await expandPreset(dom, "HTTP Lookup");
+    const headers = dom.window.document.querySelector<HTMLTextAreaElement>(
+      'textarea[placeholder="Leave blank to keep the current headers"]',
+    );
+    expect(headers).not.toBeNull();
+    await setFieldValue(dom, headers!, "Authorization: Bearer replacement");
+    await setFieldValue(dom, headers!, "");
+    expect(headers?.value).toBe("");
+
+    const sidechatSwitch = dom.window.document.querySelector<HTMLElement>(
+      '[aria-label="Available in sidechat"]',
+    );
+    await act(async () => sidechatSwitch?.click());
+    const update = await waitForText(dom, "Update");
+    await act(async () => update.click());
+
+    const request = await waitForRequest(requests, "PATCH");
+    expect(request.body).toMatchObject({
+      allowedChannels: ["public", "sidechat"],
+    });
+    expect(request.body).not.toHaveProperty("headers");
   });
 
   test("configured GitHub credentials can still be explicitly replaced", async () => {

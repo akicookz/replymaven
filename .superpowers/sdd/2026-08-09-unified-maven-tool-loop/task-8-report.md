@@ -179,3 +179,73 @@ This review round is limited to the three official findings: masked credential p
 | `bun ./node_modules/vite/bin/vite.js build` | Exit 0; SSR and client builds completed. Wrangler emitted only the known sandbox `EPERM` warning for its user log file, and Vite retained the repository's existing large-chunk warning. |
 
 No unresolved Fix Round 1 concern remains. There was no push, deployment, MCP UI, sidechat UI, approval UI, or unrelated behavior change.
+
+## Fix Round 2 — keep preset credentials and controls safe
+
+This review round is limited to the two fresh findings: preserving configured HTTP Lookup credentials after replacement text is cleared, and making the configured preset enabled control named and safely targetable.
+
+### RED evidence and resolution
+
+The focused RED command exercised both UI failures and the authoritative server preservation boundary:
+
+```text
+bun test src/pages/Tools.test.tsx worker/routes/tool-handlers.test.ts --test-name-pattern 'replacement text is cleared|named 40px|omitted cleared'
+1 pass, 2 fail
+Expected the enabled switch name "Enable HTTP Lookup"; received null.
+Expected the cleared replacement PATCH to omit headers; received headers: null.
+```
+
+The server regression passed during RED because the authenticated route already preserves ciphertext when `headers` is omitted. The required production defect was therefore isolated to preset payload construction; no server behavior was broadened.
+
+- A configured HTTP Lookup now includes `headers` only when the parsed replacement contains at least one non-empty header. Typing a replacement and then clearing it omits the field, matching `Leave blank to keep the current headers`.
+- A new/unconfigured HTTP Lookup still sends `headers: null` for an empty create, preserving the existing create contract.
+- A non-empty configured replacement still sends the parsed header map and uses the existing encryption boundary.
+- The configured preset enabled switch has the contextual accessible name `Enable {preset label}`.
+- Its visible `size="sm"` track remains 24×14. A reserved 40×40 wrapper contains a 40×40 pseudo hit target on the actual switch, so the expander and delete targets do not overlap it.
+
+### Interface-polish before/after
+
+#### Credential interaction contract
+
+| Before | After |
+| --- | --- |
+| Clearing replacement text after typing still serialized `headers: null`, contradicting the blank-field promise and clearing authoritative credentials. | A cleared configured replacement omits `headers`; the route preserves authoritative ciphertext without another encryption call. |
+| Dirty state alone decided whether configured HTTP headers were submitted. | Dirty state plus at least one parsed non-empty header is required for replacement; new-preset empty creation retains its existing `headers: null` semantics. |
+
+#### Accessible naming and hit geometry
+
+| Before | After |
+| --- | --- |
+| The configured preset switch exposed only the generic `switch` role with no accessible name. | The existing primitive now exposes `Enable {preset label}`, giving screen-reader and test users the specific control purpose. |
+| The visible 24×14 switch was also its entire pointer target. | A 40×40 reserved wrapper and same-size pseudo target extend the actual switch hit area while leaving its visual track unchanged. |
+| Expander, enabled switch, and delete action were visually adjacent without measured target boundaries. | The 40px switch target stays inside its own flex item; its edge resolves to the named switch while the immediately adjacent point resolves to the expander. |
+
+#### Responsive restraint
+
+| Before | After |
+| --- | --- |
+| The new hit-area requirement had not been verified at the narrow breakpoint. | At 390×844 the row retains its existing typography, spacing, muted surface, small track, and delete treatment with no horizontal overflow. |
+| No new visual treatment was needed. | No label text, card, divider, badge, gradient, glow, animation, or second aesthetic was added. |
+
+### Fix Round 2 visual QA
+
+- Browser viewport: 390×844.
+- Widths: `bodyScrollWidth: 390`, `clientWidth: 390`, `scrollWidth: 390`.
+- Visible switch: 24×14; reserved wrapper: 40×40; computed pseudo target: 40×40.
+- The point two pixels inside the reserved edge resolved to role `switch` / name `Enable HTTP Lookup`; the adjacent point outside it resolved to the expanded preset button.
+- Keyboard Tab focus landed on role `switch` with accessible name `Enable HTTP Lookup`; the existing focus treatment remained visible without changing row density.
+- The brief-authorized fixture was deleted and the temporary Chrome viewport override was reset after inspection.
+
+### Fix Round 2 verification
+
+| Command | Result |
+| --- | --- |
+| `bun test worker/services/tool-service.test.ts worker/validation.test.ts worker/routes/tool-handlers.test.ts src/pages/Tools.test.tsx worker/chat-runtime/tools/build-maven-tool-registry.test.ts` | 88 pass, 0 fail, 266 assertions. |
+| `bun test worker shared` | 368 pass, 0 fail, 1103 assertions. |
+| `bun ./node_modules/typescript/bin/tsc -p tsconfig.worker.json --noEmit` | Exit 0. |
+| `bun ./node_modules/typescript/bin/tsc -b` | Exit 0. |
+| `bun ./node_modules/eslint/bin/eslint.js src/pages/Tools.tsx src/pages/Tools.test.tsx worker/routes/tool-handlers.test.ts` | Exit 0, no findings. |
+| `git diff --check` | Exit 0. |
+| `bun ./node_modules/vite/bin/vite.js build` | Exit 0; SSR and client builds completed. Wrangler emitted only the known sandbox `EPERM` warning for its user log file, and Vite retained the repository's existing large-chunk warning. |
+
+No unresolved Fix Round 2 concern remains. There was no push, deployment, MCP UI, sidechat UI, approval UI, or unrelated behavior change.

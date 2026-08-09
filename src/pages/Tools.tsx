@@ -342,8 +342,13 @@ const TOOL_PRESETS: ToolPreset[] = [
         responseMapping: null,
         timeout: 10000,
       };
-      if (!existing || dirtyFields.has("headers")) {
+      if (!existing) {
         payload.headers = Object.keys(headers).length > 0 ? headers : null;
+      } else if (
+        dirtyFields.has("headers") &&
+        Object.keys(headers).length > 0
+      ) {
+        payload.headers = headers;
       }
       return payload;
     },
@@ -702,11 +707,15 @@ function PresetToolRow({
         </button>
         {configured && (
           <div className="flex shrink-0 items-center gap-1 pr-2 sm:gap-3 sm:pr-4">
-            <Switch
-              checked={tool!.enabled}
-              onCheckedChange={(checked) => toggle.mutate(checked)}
-              size="sm"
-            />
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg">
+              <Switch
+                aria-label={`Enable ${preset.label}`}
+                checked={tool!.enabled}
+                className="relative after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
+                onCheckedChange={(checked) => toggle.mutate(checked)}
+                size="sm"
+              />
+            </span>
             <button
               type="button"
               aria-label={`Remove ${preset.label}`}
