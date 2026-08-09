@@ -562,6 +562,26 @@ export const submitContactFormSchema = z.object({
   streamAi: z.boolean().optional(),
 });
 
+// ─── Sidechat ────────────────────────────────────────────────────────────────
+export const sidechatMessageSchema = z
+  .object({
+    content: z.string().trim().min(1).max(5_000).optional(),
+  })
+  .strict();
+
+export const sidechatRetrySchema = z
+  .object({
+    messageId: z.string().trim().min(1).max(100),
+  })
+  .strict();
+
+export const sidechatHistoryQuerySchema = z
+  .object({
+    before: z.string().datetime().optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(40),
+  })
+  .strict();
+
 // ─── Tools ────────────────────────────────────────────────────────────────────
 
 export type MavenChannel = "public" | "sidechat";

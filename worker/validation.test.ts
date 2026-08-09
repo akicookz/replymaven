@@ -8,10 +8,59 @@ import {
   customerIdentityTokenPayloadSchema,
   mergeCustomerSchema,
   signedWidgetIdentifySchema,
+  sidechatHistoryQuerySchema,
+  sidechatMessageSchema,
+  sidechatRetrySchema,
   updateToolSchema,
   updateCustomerSchema,
 } from "./validation";
 import * as validation from "./validation";
+
+describe("sidechat validation contracts", () => {
+  test("trims an explicit private message and accepts an omitted server default", () => {
+    expect(sidechatMessageSchema.parse({ content: "  Help with this  " }))
+      .toEqual({ content: "Help with this" });
+    expect(sidechatMessageSchema.parse({})).toEqual({});
+  });
+
+  test("rejects empty, oversized, and untrusted sidechat message fields", () => {
+    for (const body of [
+      { content: "   " },
+      { content: "x".repeat(5_001) },
+      { content: "Help", metadata: { customerId: "customer-private" } },
+    ]) {
+      expect(sidechatMessageSchema.safeParse(body).success).toBe(false);
+    }
+  });
+
+  test("requires an exact retry message id payload", () => {
+    expect(sidechatRetrySchema.parse({ messageId: "  message-1  " }))
+      .toEqual({ messageId: "message-1" });
+    expect(sidechatRetrySchema.safeParse({ messageId: "" }).success)
+      .toBe(false);
+    expect(
+      sidechatRetrySchema.safeParse({
+        messageId: "message-1",
+        content: "visitor supplied override",
+      }).success,
+    ).toBe(false);
+  });
+
+  test("bounds sidechat history pagination and validates ISO cursors", () => {
+    expect(sidechatHistoryQuerySchema.parse({})).toEqual({ limit: 40 });
+    expect(
+      sidechatHistoryQuerySchema.parse({
+        before: "2026-08-09T12:00:00.000Z",
+        limit: "25",
+      }),
+    ).toEqual({ before: "2026-08-09T12:00:00.000Z", limit: 25 });
+    expect(
+      sidechatHistoryQuerySchema.safeParse({ before: "not-a-date" }).success,
+    ).toBe(false);
+    expect(sidechatHistoryQuerySchema.safeParse({ limit: "101" }).success)
+      .toBe(false);
+  });
+});
 
 describe("tool audience validation", () => {
   const validTool = {
