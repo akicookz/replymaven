@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { QueryClient } from "@tanstack/react-query";
 import {
   buildSidechatEntryPlan,
   clearSidechatEphemeralRun,
@@ -12,6 +13,7 @@ import {
   deriveSidechatPaneMode,
   deriveSidechatBusy,
   deriveSidechatStatusDot,
+  markSidechatHistoryFetchSnapshot,
   mergeSidechatHistoryMessages,
   mergeSidechatHistorySnapshot,
   reconcileSidechatMessages,
@@ -19,6 +21,24 @@ import {
   reduceSidechatOrchestratorState,
   transitionPublicDraftAfterSidechatAccept,
 } from "./sidechat";
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolvePromise: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve(value) {
+      resolvePromise?.(value);
+    },
+  };
+}
 
 describe("shared chat perspectives", () => {
   test("aligns public visitor messages as received and public replies as sent", () => {
@@ -392,12 +412,12 @@ describe("Sidechat optimistic and streaming reconciliation", () => {
         nextBefore: null,
         historyLoaded: false,
       },
-      {
+      markSidechatHistoryFetchSnapshot({
         messages: [fetched],
         hasMore: true,
         nextBefore: "1000.message-fetched",
         historyLoaded: true,
-      },
+      }, 1),
     );
 
     expect(committed.messages.map((message) => message.id)).toEqual([
@@ -429,12 +449,12 @@ describe("Sidechat optimistic and streaming reconciliation", () => {
         nextBefore: "500.older",
         historyLoaded: true,
       },
-      {
+      markSidechatHistoryFetchSnapshot({
         messages: [latest],
         hasMore: false,
         nextBefore: null,
         historyLoaded: true,
-      },
+      }, 2),
     );
     expect(committed.messages.map((message) => message.id)).toEqual([
       "older",
@@ -464,15 +484,255 @@ describe("Sidechat optimistic and streaming reconciliation", () => {
         nextBefore: null,
         historyLoaded: true,
       },
-      {
+      markSidechatHistoryFetchSnapshot({
         messages: [fetched],
         hasMore: true,
         nextBefore: "8000.fetched-latest-window",
         historyLoaded: true,
-      },
+      }, 3),
     );
     expect(committed.nextBefore).toBe("8000.fetched-latest-window");
     expect(committed.hasMore).toBe(true);
+  });
+});
+
+describe("Sidechat QueryClient cache provenance", () => {
+  type CacheMessage = {
+    id: string;
+    role: "visitor" | "bot" | "agent";
+    content: string;
+    createdAt: string;
+    _optimistic?: boolean;
+  };
+  type CacheSnapshot = {
+    messages: CacheMessage[];
+    hasMore: boolean;
+    nextBefore: string | null;
+    historyLoaded: boolean;
+  };
+  const queryKey = ["sidechat", "project-1", "conversation-1"] as const;
+
+  function createClient(): QueryClient {
+    return new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+  }
+
+  function structuralSharing(
+    current: unknown,
+    incoming: unknown,
+  ): unknown {
+    return mergeSidechatHistorySnapshot(
+      current as CacheSnapshot | undefined,
+      incoming as CacheSnapshot,
+    );
+  }
+
+  test("a live durable row arriving during fetch survives the server snapshot commit", async () => {
+    const queryClient = createClient();
+    const deferred = createDeferred<CacheSnapshot & {
+      __sidechatHistoryFetch: { generation: number };
+    }>();
+    const pending = queryClient.fetchQuery<CacheSnapshot>({
+      queryKey,
+      queryFn: () => deferred.promise,
+      structuralSharing,
+    });
+    queryClient.setQueryData<CacheSnapshot>(queryKey, {
+      messages: [{
+        id: "live",
+        role: "bot",
+        content: "Live",
+        createdAt: "2026-08-09T00:00:02.000Z",
+      }],
+      hasMore: false,
+      nextBefore: null,
+      historyLoaded: false,
+    });
+
+    deferred.resolve(markSidechatHistoryFetchSnapshot({
+      messages: [{
+        id: "fetched",
+        role: "agent",
+        content: "Fetched",
+        createdAt: "2026-08-09T00:00:01.000Z",
+      }],
+      hasMore: true,
+      nextBefore: "1000.fetched",
+      historyLoaded: true,
+    }, 4));
+    await pending;
+
+    expect(
+      queryClient.getQueryData<CacheSnapshot>(queryKey)?.messages.map(
+        (message) => message.id,
+      ),
+    ).toEqual(["fetched", "live"]);
+  });
+
+  test("a durable accepted row replaces its optimistic row without structural sharing restoring it", () => {
+    const queryClient = createClient();
+    queryClient.setQueryDefaults(queryKey, { structuralSharing });
+    const optimistic: CacheMessage = {
+      id: "optimistic-request",
+      role: "agent",
+      content: "Investigate",
+      createdAt: "2026-08-09T00:00:00.000Z",
+      _optimistic: true,
+    };
+    queryClient.setQueryData<CacheSnapshot>(queryKey, {
+      messages: [optimistic],
+      hasMore: false,
+      nextBefore: null,
+      historyLoaded: true,
+    });
+    queryClient.setQueryData<CacheSnapshot>(queryKey, (current) => ({
+      ...current!,
+      messages: reconcileSidechatMessages(current!.messages, {
+        id: "durable-request",
+        role: "agent",
+        content: "Investigate",
+        createdAt: "2026-08-09T00:00:00.100Z",
+      }),
+    }));
+
+    expect(
+      queryClient.getQueryData<CacheSnapshot>(queryKey)?.messages.map(
+        (message) => message.id,
+      ),
+    ).toEqual(["durable-request"]);
+  });
+
+  test("a failed optimistic row is removed and stays removed", () => {
+    const queryClient = createClient();
+    queryClient.setQueryDefaults(queryKey, { structuralSharing });
+    queryClient.setQueryData<CacheSnapshot>(queryKey, {
+      messages: [{
+        id: "optimistic-failed",
+        role: "agent",
+        content: "Will fail",
+        createdAt: "2026-08-09T00:00:00.000Z",
+        _optimistic: true,
+      }],
+      hasMore: false,
+      nextBefore: null,
+      historyLoaded: true,
+    });
+    queryClient.setQueryData<CacheSnapshot>(queryKey, (current) => ({
+      ...current!,
+      messages: current!.messages.filter(
+        (message) => message.id !== "optimistic-failed",
+      ),
+    }));
+
+    expect(queryClient.getQueryData<CacheSnapshot>(queryKey)?.messages).toEqual(
+      [],
+    );
+  });
+
+  test("a pagination merge authoritatively advances its cursor", () => {
+    const queryClient = createClient();
+    queryClient.setQueryDefaults(queryKey, { structuralSharing });
+    queryClient.setQueryData<CacheSnapshot>(queryKey, {
+      messages: [{
+        id: "latest",
+        role: "bot",
+        content: "Latest",
+        createdAt: "2026-08-09T00:00:00.000Z",
+      }],
+      hasMore: true,
+      nextBefore: "9000.latest",
+      historyLoaded: true,
+    });
+    queryClient.setQueryData<CacheSnapshot>(queryKey, (current) => ({
+      messages: mergeSidechatHistoryMessages(current!.messages, [{
+        id: "older",
+        role: "agent",
+        content: "Older",
+        createdAt: "2026-08-08T00:00:00.000Z",
+      }]),
+      hasMore: false,
+      nextBefore: null,
+      historyLoaded: true,
+    }));
+
+    expect(queryClient.getQueryData<CacheSnapshot>(queryKey)).toEqual({
+      messages: [
+        {
+          id: "older",
+          role: "agent",
+          content: "Older",
+          createdAt: "2026-08-08T00:00:00.000Z",
+        },
+        {
+          id: "latest",
+          role: "bot",
+          content: "Latest",
+          createdAt: "2026-08-09T00:00:00.000Z",
+        },
+      ],
+      hasMore: false,
+      nextBefore: null,
+      historyLoaded: true,
+    });
+  });
+
+  test("fetch merging de-duplicates IDs and preserves composite ordering", async () => {
+    const queryClient = createClient();
+    const duplicate: CacheMessage = {
+      id: "same",
+      role: "bot",
+      content: "Live version",
+      createdAt: "2026-08-09T00:00:01.000Z",
+    };
+    queryClient.setQueryData<CacheSnapshot>(queryKey, {
+      messages: [duplicate, {
+        id: "z-live",
+        role: "bot",
+        content: "Later",
+        createdAt: "2026-08-09T00:00:02.000Z",
+      }],
+      hasMore: false,
+      nextBefore: null,
+      historyLoaded: true,
+    });
+    await queryClient.fetchQuery<CacheSnapshot>({
+      queryKey,
+      queryFn: async () => markSidechatHistoryFetchSnapshot({
+        messages: [{
+          ...duplicate,
+          content: "Stale fetch version",
+        }, {
+          id: "a-fetched",
+          role: "agent",
+          content: "Earlier",
+          createdAt: "2026-08-09T00:00:00.000Z",
+        }],
+        hasMore: true,
+        nextBefore: "1000.a-fetched",
+        historyLoaded: true,
+      }, 5),
+      structuralSharing,
+      staleTime: 0,
+    });
+
+    expect(queryClient.getQueryData<CacheSnapshot>(queryKey)?.messages).toEqual([
+      {
+        id: "a-fetched",
+        role: "agent",
+        content: "Earlier",
+        createdAt: "2026-08-09T00:00:00.000Z",
+      },
+      duplicate,
+      {
+        id: "z-live",
+        role: "bot",
+        content: "Later",
+        createdAt: "2026-08-09T00:00:02.000Z",
+      },
+    ]);
   });
 });
 

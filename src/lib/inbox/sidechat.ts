@@ -99,6 +99,14 @@ export interface SidechatHistorySnapshot<
   historyLoaded: boolean;
 }
 
+export interface SidechatHistoryFetchSnapshot<
+  T extends ReconciliableSidechatMessage,
+> extends SidechatHistorySnapshot<T> {
+  __sidechatHistoryFetch: {
+    generation: number;
+  };
+}
+
 interface EphemeralRunValue {
   delta: string;
   activity: {
@@ -272,8 +280,19 @@ export function mergeSidechatHistorySnapshot<
   current: SidechatHistorySnapshot<T> | undefined,
   incoming: SidechatHistorySnapshot<T>,
 ): SidechatHistorySnapshot<T> {
-  if (!current) return incoming;
-  const incomingIds = new Set(incoming.messages.map((message) => message.id));
+  const fetchMarker = (
+    incoming as SidechatHistorySnapshot<T> &
+      Partial<SidechatHistoryFetchSnapshot<T>>
+  ).__sidechatHistoryFetch;
+  if (!fetchMarker) return incoming;
+  const fetched = {
+    messages: incoming.messages,
+    hasMore: incoming.hasMore,
+    nextBefore: incoming.nextBefore,
+    historyLoaded: incoming.historyLoaded,
+  };
+  if (!current) return fetched;
+  const incomingIds = new Set(fetched.messages.map((message) => message.id));
   const overlapsIncoming = current.messages.some((message) =>
     incomingIds.has(message.id)
   );
@@ -284,7 +303,7 @@ export function mergeSidechatHistorySnapshot<
         : earliest,
     null,
   );
-  const earliestIncoming = incoming.messages.reduce<T | null>(
+  const earliestIncoming = fetched.messages.reduce<T | null>(
     (earliest, message) =>
       !earliest || compareSidechatMessages(message, earliest) < 0
         ? message
@@ -301,15 +320,27 @@ export function mergeSidechatHistorySnapshot<
   return {
     messages: mergeSidechatHistoryMessages(
       current.messages,
-      incoming.messages,
+      fetched.messages,
     ),
     hasMore: preserveContiguousEarlierCursor
       ? current.hasMore
-      : incoming.hasMore,
+      : fetched.hasMore,
     nextBefore: preserveContiguousEarlierCursor
       ? current.nextBefore
-      : incoming.nextBefore,
+      : fetched.nextBefore,
     historyLoaded: true,
+  };
+}
+
+export function markSidechatHistoryFetchSnapshot<
+  T extends ReconciliableSidechatMessage,
+>(
+  snapshot: SidechatHistorySnapshot<T>,
+  generation: number,
+): SidechatHistoryFetchSnapshot<T> {
+  return {
+    ...snapshot,
+    __sidechatHistoryFetch: { generation },
   };
 }
 

@@ -14,6 +14,7 @@ import type {
 } from "../../shared/ws-events";
 import {
   reduceConversationMessageEvent,
+  reduceSidechatAcceptedConversation,
   reduceSidechatEphemeralEvent,
   reduceSidechatEphemeralTerminalEvent,
   reduceSidechatAcceptedSnapshot,
@@ -382,4 +383,49 @@ test("terminal then detail refetch then 202 cannot resurrect the completed run",
   })).toBe(
     settledRuns,
   );
+});
+
+test("terminal then detail refetch then delayed retry 202 cannot resurrect working", () => {
+  const terminalEvent = {
+    type: "sidechat:status" as const,
+    conversationId: "conversation-1",
+    status: "ready" as const,
+    runId: "run-retry-fast",
+  };
+  const settledRuns = reduceSidechatSettledRunEvent(undefined, terminalEvent);
+  const terminalDetail = {
+    id: "conversation-1",
+    sidechatStatus: "ready" as const,
+    sidechatRunId: null,
+  };
+  const refetchedDetail = {
+    ...terminalDetail,
+    sidechatUpdatedAt: "2026-08-10T00:00:02.000Z",
+  };
+
+  expect(
+    reduceSidechatAcceptedConversation(
+      terminalDetail,
+      "run-retry-fast",
+      settledRuns,
+    ),
+  ).toBe(terminalDetail);
+  expect(
+    reduceSidechatAcceptedConversation(
+      refetchedDetail,
+      "run-retry-fast",
+      settledRuns,
+    ),
+  ).toBe(refetchedDetail);
+  expect(
+    reduceSidechatAcceptedConversation(
+      refetchedDetail,
+      "run-retry-live",
+      settledRuns,
+    ),
+  ).toEqual({
+    ...refetchedDetail,
+    sidechatStatus: "working",
+    sidechatRunId: "run-retry-live",
+  });
 });

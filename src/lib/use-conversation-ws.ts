@@ -236,6 +236,38 @@ export function reduceSidechatAcceptedSnapshot(
   };
 }
 
+interface SidechatAcceptedConversationSnapshot {
+  sidechatStatus?: SidechatStatus;
+  sidechatRunId?: string | null;
+  sidechatUpdatedAt?: string | null;
+}
+
+export function reduceSidechatAcceptedConversation<
+  T extends SidechatAcceptedConversationSnapshot,
+>(
+  current: T,
+  acceptedRunId: string,
+  settledRuns: SidechatSettledRunStore | undefined,
+  acceptedAt?: string,
+): T {
+  const currentStatus = current.sidechatStatus ?? "idle";
+  const currentRunId = current.sidechatRunId ?? null;
+  const next = reduceSidechatAcceptedSnapshot(
+    { status: currentStatus, runId: currentRunId },
+    acceptedRunId,
+    settledRuns,
+  );
+  if (settledRuns?.has(acceptedRunId)) {
+    return current;
+  }
+  return {
+    ...current,
+    sidechatStatus: next.status,
+    sidechatRunId: next.runId,
+    ...(acceptedAt === undefined ? {} : { sidechatUpdatedAt: acceptedAt }),
+  };
+}
+
 const MAX_EPHEMERAL_RUNS = 8;
 const MAX_SETTLED_RUNS = 16;
 const MAX_EPHEMERAL_DELTA_LENGTH = 50_000;
