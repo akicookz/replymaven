@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import type { CustomerDetail } from "../../../shared/customer-types";
+import { deriveConversationInteractionState } from "@/lib/inbox/sidechat";
 import { cn } from "@/lib/utils";
 import ReadingHeader from "./ReadingHeader";
 import ChatThread from "./ChatThread";
@@ -76,6 +77,7 @@ export default function ReadingPane({
   highlightMessageId,
   className,
 }: ReadingPaneProps) {
+  const interaction = deriveConversationInteractionState(conversation.archivedAt);
   // The thread is its own scroll container now (header above / composer below
   // are flex siblings, never overlapping the thread). This both fixes messages
   // landing behind the composer and lets us pin the latest message into view.
@@ -230,7 +232,7 @@ export default function ReadingPane({
           conversation={conversation}
           loading={messagesLoading}
           onDeleteMessage={onDeleteMessage}
-          readOnly={Boolean(conversation.archivedAt)}
+          readOnly={!interaction.showMessageActions}
           searchQuery={query}
           activeMatchId={activeMatchId}
           highlightMessageId={highlightMessageId}
@@ -238,21 +240,14 @@ export default function ReadingPane({
       </div>
 
       {/* Composer — flex sibling below the thread (no longer overlaps it) */}
-      {!conversation.archivedAt && (
+      {interaction.showComposer && (
         <Composer
           draft={draft}
           setDraft={setDraft}
           onSend={onSend}
           onResolve={onResolve}
-          mode={{
-            kind: "public",
-            onStartSidechat: onCompose,
-            sidechatExists:
-              Boolean(conversation.sidechatUpdatedAt) ||
-              (conversation.sidechatStatus ?? "idle") !== "idle",
-            sidechatStatus: conversation.sidechatStatus ??
-              (composing ? "working" : "idle"),
-          }}
+          onCompose={onCompose}
+          composing={composing}
           convId={conversation.id}
         />
       )}

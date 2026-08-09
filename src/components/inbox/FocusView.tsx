@@ -4,6 +4,7 @@ import type { Conversation, Message } from "@/lib/inbox/types";
 import Composer from "@/components/inbox/Composer";
 import ChatThread from "@/components/inbox/ChatThread";
 import { countryFlag } from "@/lib/inbox/country-flag";
+import { deriveConversationInteractionState } from "@/lib/inbox/sidechat";
 
 interface FocusViewProps {
   conversation: Conversation;
@@ -16,6 +17,7 @@ interface FocusViewProps {
     opts?: { imageUrls?: string[]; asEmail?: boolean },
   ) => void;
   onResolve: (convId: string) => void;
+  onDeleteMessage: (messageId: string) => void;
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
   onCompose: () => void;
@@ -46,11 +48,13 @@ export default function FocusView({
   onExit,
   onSend,
   onResolve,
+  onDeleteMessage,
   draft,
   setDraft,
   onCompose,
   composing,
 }: FocusViewProps) {
+  const interaction = deriveConversationInteractionState(conversation.archivedAt);
   // Parse country from metadata JSON (guarded against malformed data)
   let country: string | null = null;
   try {
@@ -83,7 +87,7 @@ export default function FocusView({
       {/* Floating exit button — top-right */}
       <button
         type="button"
-        className="glass-button absolute top-[18px] right-[30px] z-10 flex h-[34px] items-center gap-[7px] rounded-[9px] px-[12px] text-[13px] text-ink-2 font-medium after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+        className="glass-button absolute top-[18px] right-[30px] z-10 flex h-[34px] shrink-0 items-center gap-[7px] rounded-[9px] px-[12px] text-[13px] text-ink-2 font-medium after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
         onClick={onExit}
       >
         Exit Focus
@@ -136,8 +140,10 @@ export default function FocusView({
 
                     {/* Status pill */}
                     <div className="glass-button flex items-center gap-[6px] rounded-full px-3 h-[28px] text-[12px] text-ink-3 font-medium flex-shrink-0">
-                      <span className="w-[7px] h-[7px] rounded-full bg-dot-green flex-shrink-0" />
-                      Open · {capitalize(priority)}
+                      {!interaction.readOnly && (
+                        <span className="w-[7px] h-[7px] rounded-full bg-dot-green flex-shrink-0" />
+                      )}
+                      {interaction.readOnly ? "Archived" : "Open"} · {capitalize(priority)}
                     </div>
                   </div>
                 </div>
@@ -146,28 +152,23 @@ export default function FocusView({
                 <ChatThread
                   messages={visible}
                   conversation={conversation}
-                  onDeleteMessage={() => undefined}
-                  readOnly
+                  onDeleteMessage={onDeleteMessage}
+                  readOnly={!interaction.showMessageActions}
                   contentClassName="!px-[28px] !pt-3 !pb-3"
                 />
 
                 {/* Composer — sticky bottom, floats over the thread (bleed) */}
-                <Composer
-                  draft={draft}
-                  setDraft={setDraft}
-                  onSend={onSend}
-                  onResolve={onResolve}
-                  mode={{
-                    kind: "public",
-                    onStartSidechat: onCompose,
-                    sidechatExists:
-                      Boolean(conversation.sidechatUpdatedAt) ||
-                      (conversation.sidechatStatus ?? "idle") !== "idle",
-                    sidechatStatus: conversation.sidechatStatus ??
-                      (composing ? "working" : "idle"),
-                  }}
-                  convId={conversation.id}
-                />
+                {interaction.showComposer && (
+                  <Composer
+                    draft={draft}
+                    setDraft={setDraft}
+                    onSend={onSend}
+                    onResolve={onResolve}
+                    onCompose={onCompose}
+                    composing={composing}
+                    convId={conversation.id}
+                  />
+                )}
               </div>
             </div>
           </div>

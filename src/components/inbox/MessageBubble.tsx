@@ -131,7 +131,7 @@ export default function MessageBubble({
         <div className="mt-1 flex min-h-10 items-center">
           <button
             type="button"
-            className="min-h-10 text-[12px] font-semibold text-brand-label underline-offset-4 hover:underline motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
+            className="min-h-10 shrink-0 whitespace-nowrap text-[12px] font-semibold text-brand-label underline-offset-4 hover:underline motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
             onClick={() => onAddToReply(draft)}
           >
             Add to reply
@@ -141,17 +141,17 @@ export default function MessageBubble({
     }
     if (actions.approveAlways && actions.approveOnce && onApprovalAction) {
       return (
-        <div className="mt-1 flex min-h-10 items-center gap-3">
+        <div className="mt-1 flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1">
           <button
             type="button"
-            className="min-h-10 text-[12px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
+            className="min-h-10 shrink-0 whitespace-nowrap text-[12px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
             onClick={() => onApprovalAction(message.id, "always")}
           >
             Always allow
           </button>
           <button
             type="button"
-            className="flex min-h-10 items-center text-[12px] font-semibold motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
+            className="flex min-h-10 shrink-0 items-center whitespace-nowrap text-[12px] font-semibold motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
             onClick={() => onApprovalAction(message.id, "once")}
           >
             <span className="rounded-[8px] bg-bubble-sent px-2.5 py-1.5 text-white">
@@ -201,7 +201,7 @@ export default function MessageBubble({
         {!isReceived && perspective === "public" && isAgent && !readOnly && (
           <button
             onClick={() => onDelete(message.id)}
-            className="absolute -left-10 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded opacity-0 text-ink-7 group-hover:opacity-100 hover:text-red-400 focus-visible:opacity-100 motion-safe:transition-[opacity,color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+            className="absolute -left-10 top-1/2 flex size-10 shrink-0 -translate-y-1/2 items-center justify-center rounded opacity-0 text-ink-7 group-hover:opacity-100 hover:text-red-400 focus-visible:opacity-100 motion-safe:transition-[opacity,color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
             aria-label="Delete message"
           >
             <Trash2 size={14} />

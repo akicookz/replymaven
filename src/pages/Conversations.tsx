@@ -1623,6 +1623,7 @@ function Conversations() {
         onExit={() => setView("split")}
         onSend={handleSend}
         onResolve={handleResolve}
+        onDeleteMessage={handleDeleteMessage}
         draft={draft}
         setDraft={setDraft}
         onCompose={handleCompose}

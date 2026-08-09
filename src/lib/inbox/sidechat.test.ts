@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   deriveAddToReplyIntent,
+  deriveComposerShiftTabIntent,
   deriveConversationInteractionState,
   deriveMessageActions,
   deriveMessagePresentation,
@@ -105,6 +106,74 @@ describe("public composer transitions", () => {
       send: false,
       keepSidechatOpen: true,
     });
+  });
+});
+
+describe("composer keyboard intent", () => {
+  const baseShortcut = {
+    key: "Tab",
+    shiftKey: true,
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    isComposing: false,
+    repeat: false,
+  };
+
+  test("starts real Sidechat from unmodified Shift+Tab even without text", () => {
+    expect(
+      deriveComposerShiftTabIntent({
+        ...baseShortcut,
+        contract: "public",
+        hasDraft: false,
+      }),
+    ).toBe("start_sidechat");
+  });
+
+  test("keeps the legacy Compose shortcut text-gated and private", () => {
+    expect(
+      deriveComposerShiftTabIntent({
+        ...baseShortcut,
+        contract: "legacy",
+        hasDraft: false,
+      }),
+    ).toBeNull();
+    expect(
+      deriveComposerShiftTabIntent({
+        ...baseShortcut,
+        contract: "legacy",
+        hasDraft: true,
+      }),
+    ).toBe("legacy_compose");
+  });
+
+  test("ignores composing, repeated, modified, and non-Shift+Tab events", () => {
+    const ignored = [
+      { isComposing: true },
+      { repeat: true },
+      { ctrlKey: true },
+      { metaKey: true },
+      { altKey: true },
+      { shiftKey: false },
+      { key: "Enter" },
+    ];
+    for (const override of ignored) {
+      expect(
+        deriveComposerShiftTabIntent({
+          ...baseShortcut,
+          contract: "public",
+          hasDraft: false,
+          ...override,
+        }),
+      ).toBeNull();
+    }
+    expect(
+      deriveComposerShiftTabIntent({
+        ...baseShortcut,
+        contract: "sidechat",
+        hasDraft: true,
+      }),
+    ).toBeNull();
   });
 });
 

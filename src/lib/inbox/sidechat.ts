@@ -3,6 +3,20 @@ import type { MessageRole, SidechatMessageKind } from "./types";
 
 export type ChatPerspective = "public" | "sidechat";
 export type SidechatPaneMode = "desktop" | "compact" | "mobile";
+export type ComposerContract = "legacy" | ChatPerspective;
+export type ComposerShiftTabIntent = "legacy_compose" | "start_sidechat";
+
+interface ComposerKeyboardInput {
+  contract: ComposerContract;
+  hasDraft: boolean;
+  key: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  isComposing: boolean;
+  repeat: boolean;
+}
 
 interface MessagePresentation {
   isReceived: boolean;
@@ -64,6 +78,25 @@ export function deriveMessagePresentation(
       ? "Maven · AI"
       : (senderName ?? "Agent");
   return { isReceived, senderLabel };
+}
+
+export function deriveComposerShiftTabIntent(
+  input: ComposerKeyboardInput,
+): ComposerShiftTabIntent | null {
+  if (
+    input.key !== "Tab" ||
+    !input.shiftKey ||
+    input.ctrlKey ||
+    input.metaKey ||
+    input.altKey ||
+    input.isComposing ||
+    input.repeat
+  ) {
+    return null;
+  }
+  if (input.contract === "public") return "start_sidechat";
+  if (input.contract === "legacy" && input.hasDraft) return "legacy_compose";
+  return null;
 }
 
 export function deriveMessageActions(
