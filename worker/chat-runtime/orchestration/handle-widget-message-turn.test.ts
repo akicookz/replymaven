@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
+import { type MessageRow } from "../../db";
 import { type SourceReference } from "../../services/resource-service";
 import {
   type MavenStreamPart,
@@ -55,17 +56,24 @@ function createSource(title: string): SourceReference {
   return { title, url: `https://example.com/${title}`, type: "webpage" };
 }
 
-function createPersistedBotMessage(content: string): Record<string, unknown> {
+function createPersistedBotMessage(content: string): MessageRow {
   return {
     id: "bot-message-1",
     conversationId: "conversation-1",
     role: "bot",
     content,
+    channel: "public",
+    kind: "text",
+    metadata: null,
     imageUrl: null,
     sources: null,
     senderName: "Maven",
     senderAvatar: null,
+    userId: null,
     createdAt: new Date(0),
+    emailedAt: null,
+    deliveredAt: null,
+    readAt: null,
   };
 }
 
@@ -137,6 +145,7 @@ interface HandlerHarness {
   runTurnCalls: unknown[];
   resolveCalls: string[];
   botInsertCalls: unknown[];
+  persistedBotMessages: MessageRow[];
   checkRateLimitCalls: unknown[][];
   linkCalls: unknown[][];
   usageIncrementCalls: unknown[][];
@@ -189,6 +198,7 @@ function createHandlerHarness(options?: {
   const runTurnCalls: unknown[] = [];
   const resolveCalls: string[] = [];
   const botInsertCalls: unknown[] = [];
+  const persistedBotMessages: MessageRow[] = [];
   const checkRateLimitCalls: unknown[][] = [];
   const linkCalls: unknown[][] = [];
   const usageIncrementCalls: unknown[][] = [];
@@ -211,10 +221,12 @@ function createHandlerHarness(options?: {
       if (options?.botInsert) return options.botInsert(args);
       if (!options?.botInsertSucceeds) return null;
       const message = args[0] as { content: string; sources?: string | null };
-      return {
+      const persistedMessage = {
         ...createPersistedBotMessage(message.content),
         sources: message.sources ?? null,
       };
+      persistedBotMessages.push(persistedMessage);
+      return persistedMessage;
     },
     async resolveConversationByAi() {
       resolveCalls.push("resolve");
@@ -530,6 +542,7 @@ function createHandlerHarness(options?: {
     runTurnCalls,
     resolveCalls,
     botInsertCalls,
+    persistedBotMessages,
     checkRateLimitCalls,
     linkCalls,
     usageIncrementCalls,
@@ -707,6 +720,7 @@ describe("widget handler Maven gates", () => {
 
     expect(harness.runTurnCalls).toHaveLength(0);
     expect(harness.checkRateLimitCalls).toHaveLength(0);
+    expect(harness.persistedBotMessages[0]?.channel).toBe("public");
     expect(body).toContain("unrelated general-purpose requests");
   });
 
@@ -1113,6 +1127,7 @@ describe("widget handler Maven gates", () => {
     await response.text();
     await Promise.all(harness.waitUntilCalls);
 
+    expect(harness.persistedBotMessages[0]?.channel).toBe("public");
     expect(harness.linkCalls).toEqual([
       [["execution-1"], "conversation-1", "bot-message-1"],
     ]);
