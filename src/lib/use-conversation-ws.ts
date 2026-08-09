@@ -10,6 +10,10 @@ import {
   type StableMessagePosition,
 } from "../../shared/ws-events";
 import { isImagePlaceholderContent } from "../../shared/message-images";
+import {
+  clearSidechatEphemeralRun,
+  reconcileSidechatMessages,
+} from "./inbox/sidechat";
 import { invalidateCustomerProjectQueries } from "./customers";
 
 export interface ConversationDetailMessage
@@ -50,6 +54,7 @@ interface ConversationsCacheData {
 export interface SidechatCacheMessage
   extends Omit<SidechatMessagePayload, "createdAt"> {
   createdAt: string;
+  _optimistic?: boolean;
 }
 
 interface SidechatCacheData {
@@ -134,19 +139,10 @@ export function reduceConversationMessageEvent(
 
   const incoming = event.message;
   const incomingMessage = toSidechatCacheMessage(incoming);
-  const nextMessages = [...state.sidechatMessages];
-  const existingIndex = nextMessages.findIndex(
-    (message) => message.id === incoming.id,
+  const nextMessages = reconcileSidechatMessages(
+    state.sidechatMessages,
+    incomingMessage,
   );
-  if (existingIndex >= 0) {
-    nextMessages[existingIndex] = {
-      ...nextMessages[existingIndex],
-      ...incomingMessage,
-    };
-  } else {
-    nextMessages.push(incomingMessage);
-  }
-  nextMessages.sort(compareCachedMessages);
   return {
     ...state,
     sidechatMessages: nextMessages,
@@ -441,6 +437,10 @@ export function useConversationWs(
           },
         );
       } else if (parsed.type === "sidechat:message") {
+        const activeRunId = queryClient.getQueryData<ConversationDetailData>([
+          "conversation-detail",
+          conversationId,
+        ])?.conversation.sidechatRunId ?? null;
         const publicMessages =
           queryClient.getQueryData<ConversationDetailData>([
             "conversation-detail",
@@ -466,6 +466,12 @@ export function useConversationWs(
             };
           },
         );
+        if (parsed.message.role === "bot") {
+          queryClient.setQueryData<SidechatEphemeralStore>(
+            ["sidechat-ephemeral", projectId, conversationId],
+            (old) => clearSidechatEphemeralRun(old ?? new Map(), activeRunId),
+          );
+        }
       } else if (parsed.type === "sidechat:delta") {
         queryClient.setQueryData<SidechatEphemeralStore>(
           ["sidechat-ephemeral", projectId, conversationId],
@@ -477,6 +483,10 @@ export function useConversationWs(
           (old) => reduceSidechatEphemeralEvent(old, parsed),
         );
       } else if (parsed.type === "sidechat:status") {
+        const previousRunId = queryClient.getQueryData<ConversationDetailData>([
+          "conversation-detail",
+          conversationId,
+        ])?.conversation.sidechatRunId ?? null;
         queryClient.setQueryData<ConversationDetailData | undefined>(
           ["conversation-detail", conversationId],
           (old) => {
@@ -491,6 +501,12 @@ export function useConversationWs(
             };
           },
         );
+        if (parsed.status !== "working") {
+          queryClient.setQueryData<SidechatEphemeralStore>(
+            ["sidechat-ephemeral", projectId, conversationId],
+            (old) => clearSidechatEphemeralRun(old ?? new Map(), previousRunId),
+          );
+        }
         queryClient.setQueriesData<ConversationsCacheData>(
           { queryKey: ["conversations", projectId] },
           (old) => {

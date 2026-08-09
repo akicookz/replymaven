@@ -88,15 +88,6 @@ import {
 import { createEscalation } from "./chat-runtime/post-turn/escalation";
 import { buildToolRegistry } from "./chat-runtime/tools/http-tool-executor";
 import { toToolDefinition } from "./chat-runtime/types";
-import {
-  createLanguageModel,
-  createModelRuntimeState,
-  runWithModelFallback,
-} from "./chat-runtime/llm/create-language-model";
-import { composeAgentDraft } from "./chat-runtime/llm/compose-agent-draft";
-import { runAiSearch } from "./chat-runtime/retrieval/run-ai-search";
-import { buildRetrievalQueries } from "./chat-runtime/retrieval/build-retrieval-queries";
-import { trimToCharBudget } from "./chat-runtime/prompt/sections";
 import { logError, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
@@ -190,7 +181,6 @@ import {
   updateGuidelineSchema,
   usageLogQuerySchema,
   sendMessageAsEmailSchema,
-  composeDraftSchema,
   snoozeSchema,
   prioritySchema,
   assignSchema,
@@ -6868,151 +6858,6 @@ const app = new Hono<HonoAppContext>()
     );
 
     return c.json(message, 201);
-  })
-  // ─── Compose draft: turn an agent's shorthand instruction into a
-  // tone-matched, visitor-language chat reply grounded in the project's
-  // knowledge base (no persistence) ──────────────────────────────────────────
-  .post("/api/projects/:id/conversations/:convId/compose-draft", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const ip = getClientIp(c);
-    if (
-      !checkRateLimit(
-        `compose-draft:${c.req.param("id")}:${user.id}:${ip}`,
-        30,
-        60_000,
-      )
-    ) {
-      return c.json({ error: "Rate limit exceeded" }, 429);
-    }
-
-    const body = await c.req.json();
-    const parsed = validate(composeDraftSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
-    const db = c.get("db");
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectById(c.req.param("id"));
-    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    const chatService = new ChatService(db);
-    const conversation = await chatService.getOperationalConversationById(
-      c.req.param("convId"),
-      project.id,
-    );
-    if (!conversation) {
-      return c.json({ error: "Not found" }, 404);
-    }
-
-    // Fetch 25 and drop system rows (review_summary etc. are internal-only —
-    // they must not leak into the visitor-facing composed reply); ~20
-    // conversational rows survive the filter, and the prompt builder's own
-    // slice(-20) caps the transcript regardless.
-    const [settings, { messages: recentMessages }] = await Promise.all([
-      projectService.getSettings(project.id),
-      chatService.getRecentPublicMessages(conversation.id, 25),
-    ]);
-    const msgs = recentMessages.filter((m) => m.role !== "system");
-
-    // Ground the reply in the knowledge base: search with the agent's
-    // instruction plus the visitor's latest message. Best-effort — a
-    // retrieval failure or empty result composes ungrounded, never 502s.
-    // faq/knowledgeBase contexts are used (not ragContext) because the
-    // latter prepends a low-confidence NOTE addressed to the support bot,
-    // which could bleed into the composed reply.
-    const lastVisitorMessage =
-      [...msgs].reverse().find((m) => m.role === "visitor")?.content ?? "";
-    let knowledgeContext = "";
-    // 15s cap: a slow/hung AI Search call must not pin the request — past it,
-    // compose proceeds ungrounded. (Measured: warm dev-proxy searches take
-    // 7-12s per query; prod native binding is faster.) The timer is cleared in
-    // finally so it doesn't dangle after retrieval wins the race.
-    let retrievalTimer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const retrieval = await Promise.race([
-        runAiSearch({
-          env: c.env,
-          db,
-          projectId: project.id,
-          queries: buildRetrievalQueries(
-            parsed.data.instruction,
-            lastVisitorMessage,
-          ),
-          // Single pass — the low-threshold broadening retry doubles latency
-          // for marginal gain, and compose keeps the agent waiting.
-          allowBroaderRetry: false,
-        }),
-        new Promise<null>((resolve) => {
-          retrievalTimer = setTimeout(() => resolve(null), 15_000);
-        }),
-      ]);
-      if (retrieval) {
-        // 12k budget: compose is a single scoped call, tighter than the full
-        // support prompt's MAX_RAG_CONTEXT_CHARS.
-        knowledgeContext = trimToCharBudget(
-          [retrieval.faqContext, retrieval.knowledgeBaseContext]
-            .filter(Boolean)
-            .join("\n\n"),
-          12_000,
-        );
-      } else {
-        logWarn("compose_draft.retrieval_timeout", {
-          projectId: project.id,
-          conversationId: conversation.id,
-        });
-      }
-    } catch (error) {
-      logWarn("compose_draft.retrieval_failed", {
-        projectId: project.id,
-        conversationId: conversation.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      if (retrievalTimer) clearTimeout(retrievalTimer);
-    }
-
-    const runtime = createModelRuntimeState({
-      model: c.env.AI_MODEL,
-      geminiApiKey: c.env.GEMINI_API_KEY,
-      openaiApiKey: c.env.OPENAI_API_KEY,
-    });
-
-    try {
-      const message = await runWithModelFallback({
-        runtime,
-        stage: "compose_agent_draft",
-        logContext: { projectId: project.id, conversationId: conversation.id },
-        operation: (activeConfig) =>
-          composeAgentDraft(
-            createLanguageModel(activeConfig),
-            {
-              instruction: parsed.data.instruction,
-              conversationHistory: msgs.map((m) => ({
-                role: m.role,
-                content: m.content,
-                createdAt:
-                  m.createdAt instanceof Date
-                    ? m.createdAt.toISOString()
-                    : undefined,
-              })),
-              settings,
-              knowledgeContext,
-            },
-            { throwOnModelError: true },
-          ),
-      });
-      if (!message) return c.json({ error: "compose_failed" }, 502);
-      return c.json({ message });
-    } catch (error) {
-      logError("compose_draft.failed", error, {
-        projectId: project.id,
-        conversationId: conversation.id,
-      });
-      return c.json({ error: "compose_failed" }, 502);
-    }
   })
   .post("/api/projects/:id/conversations/:convId/send-email", async (c) => {
     const user = c.get("user");

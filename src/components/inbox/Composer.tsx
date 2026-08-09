@@ -19,27 +19,25 @@ export type ComposerMode =
 interface ComposerBaseProps {
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
+  convId: string;
+  /** Monotonic command used by Add to reply to focus the public caret. */
+  focusRequest?: number;
+}
+
+interface PublicComposerProps extends ComposerBaseProps {
   onSend: (
     content?: string,
     opts?: { imageUrls?: string[] },
   ) => void;
   onResolve: (convId: string) => void;
-  convId: string;
+  mode: Extract<ComposerMode, { kind: "public" }>;
 }
 
-type ModernComposerProps = ComposerBaseProps & {
-  mode: ComposerMode;
-  onCompose?: never;
-  composing?: never;
-};
+interface SidechatComposerProps extends ComposerBaseProps {
+  mode: Extract<ComposerMode, { kind: "sidechat" }>;
+}
 
-type LegacyComposerProps = ComposerBaseProps & {
-  mode?: never;
-  onCompose: () => void;
-  composing: boolean;
-};
-
-export type ComposerProps = ModernComposerProps | LegacyComposerProps;
+export type ComposerProps = PublicComposerProps | SidechatComposerProps;
 
 // Mirrors /api/upload's allowlist and agentReplySchema's imageUrls cap.
 const ACCEPTED_IMAGE_TYPES = [
@@ -51,10 +49,14 @@ const ACCEPTED_IMAGE_TYPES = [
 const MAX_IMAGES = 6;
 
 export default function Composer(props: ComposerProps) {
-  const { draft, setDraft, onSend, onResolve, mode, convId } = props;
-  const legacyOnCompose = "onCompose" in props ? props.onCompose : undefined;
-  const legacyComposing = "composing" in props && props.composing;
-  const contract = mode?.kind ?? "legacy";
+  const {
+    draft,
+    setDraft,
+    mode,
+    convId,
+    focusRequest,
+  } = props;
+  const contract = mode.kind;
   const isPrivate = contract === "sidechat";
   const { projectId = "" } = useParams<{ projectId: string }>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -79,6 +81,15 @@ export default function Composer(props: ComposerProps) {
     ta.style.height = "auto";
     ta.style.height = `${ta.scrollHeight}px`;
   }, [draft]);
+
+  useLayoutEffect(() => {
+    if (focusRequest === undefined || mode?.kind !== "public") return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    const end = textarea.value.length;
+    textarea.setSelectionRange(end, end);
+  }, [focusRequest, mode?.kind]);
 
   // POST to /api/upload (field: "file") with one automatic retry — dev's
   // remote R2 binding (and real networks) hiccup transiently; a single retry
@@ -187,15 +198,15 @@ export default function Composer(props: ComposerProps) {
   }
 
   function send() {
-    if (mode?.kind === "sidechat") {
-      if (mode.working || !draft.trim()) return;
-      mode.onSendPrivate();
+    if (props.mode.kind === "sidechat") {
+      if (props.mode.working || !draft.trim()) return;
+      props.mode.onSendPrivate();
       return;
     }
-    if (legacyComposing) return;
+    if (!("onSend" in props)) return;
     if (uploadingCount > 0) return;
     if (!draft.trim() && pendingImages.length === 0) return;
-    onSend(draft || undefined, { imageUrls: pendingImages });
+    props.onSend(draft || undefined, { imageUrls: pendingImages });
     setPendingImages([]);
   }
 
@@ -225,12 +236,11 @@ export default function Composer(props: ComposerProps) {
     }
   }
 
-  const canSend = mode?.kind === "sidechat"
+  const canSend = mode.kind === "sidechat"
     ? draft.trim().length > 0 && !mode.working
     : (draft.trim().length > 0 || pendingImages.length > 0) &&
-      uploadingCount === 0 &&
-      !legacyComposing;
-  const publicSidechatLabel = mode?.kind === "public" && mode.sidechatExists
+      uploadingCount === 0;
+  const publicSidechatLabel = mode.kind === "public" && mode.sidechatExists
     ? "Open sidechat"
     : "Start sidechat";
 
@@ -296,12 +306,10 @@ export default function Composer(props: ComposerProps) {
           onKeyDown={handleKeyDown}
           placeholder={isPrivate
             ? "Ask Maven…"
-            : legacyComposing
-              ? "Composing…"
-              : "Reply…"}
+            : "Reply…"}
           rows={1}
-          disabled={mode?.kind === "sidechat" ? mode.working : legacyComposing}
-          className={`w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60${legacyComposing ? " animate-pulse" : ""}`}
+          disabled={mode.kind === "sidechat" ? mode.working : false}
+          className="w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60"
           style={{ fontSize: "14.5px", lineHeight: "1.5" }}
         />
 
@@ -325,7 +333,6 @@ export default function Composer(props: ComposerProps) {
                 type="button"
                 className="flex size-10 shrink-0 items-center justify-center text-ink-5 hover:text-ink-2 disabled:opacity-40 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={legacyComposing}
                 title="Attach images"
                 aria-label="Attach images"
               >
@@ -341,16 +348,16 @@ export default function Composer(props: ComposerProps) {
             data-composer-actions
             className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-x-[7px] gap-y-1"
           >
-            {mode?.kind === "public" && (
+            {props.mode.kind === "public" && "onResolve" in props && (
               <>
                 <button
                   type="button"
                   className="flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-ink-5 hover:text-ink-2 cursor-pointer motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
-                  onClick={mode.onStartSidechat}
+                  onClick={props.mode.onStartSidechat}
                   title={`${publicSidechatLabel} (Shift+Tab)`}
                 >
-                  {mode.sidechatExists && (
-                    <SidechatStatusDot status={mode.sidechatStatus} />
+                  {props.mode.sidechatExists && (
+                    <SidechatStatusDot status={props.mode.sidechatStatus} />
                   )}
                   {publicSidechatLabel}
                   <span className="keycap">⇧⇥</span>
@@ -359,38 +366,7 @@ export default function Composer(props: ComposerProps) {
                 <button
                   type="button"
                   className="flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-ink-5 hover:text-ink-2 cursor-pointer motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
-                  onClick={() => onResolve(convId)}
-                  title="Resolve conversation"
-                >
-                  Resolve
-                  <span className="keycap">E</span>
-                </button>
-              </>
-            )}
-
-            {contract === "legacy" && (
-              <>
-                <button
-                  type="button"
-                  className="flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-ink-5 hover:text-ink-2 disabled:opacity-40 cursor-pointer motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
-                  onClick={legacyOnCompose}
-                  disabled={legacyComposing || draft.trim().length === 0}
-                  title="Turn your instruction into a reply, grounded in your docs (Shift+Tab)"
-                >
-                  {legacyComposing ? (
-                    <span className="text-shimmer">Composing…</span>
-                  ) : (
-                    <>
-                      Compose
-                      <span className="keycap">⇧⇥</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  className="flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap text-[13px] text-ink-5 hover:text-ink-2 cursor-pointer motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
-                  onClick={() => onResolve(convId)}
+                  onClick={() => props.onResolve(convId)}
                   title="Resolve conversation"
                 >
                   Resolve

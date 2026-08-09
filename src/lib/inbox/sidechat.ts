@@ -1,9 +1,9 @@
 import type { SidechatStatus } from "../../../shared/ws-events";
-import type { MessageRole, SidechatMessageKind } from "./types";
+import type { Message, MessageRole, SidechatMessageKind } from "./types";
 
 export type ChatPerspective = "public" | "sidechat";
 export type SidechatPaneMode = "desktop" | "compact" | "mobile";
-export type ComposerContract = "legacy" | ChatPerspective;
+export type ComposerContract = ChatPerspective;
 export type ComposerShiftTabIntent = "start_sidechat";
 
 interface ComposerKeyboardInput {
@@ -32,7 +32,70 @@ interface MessageActions {
 interface PublicDraftAcceptanceInput {
   currentDraft: string;
   submittedDraft: string;
+  currentConversationId: string | null;
+  submittedConversationId: string;
   accepted: boolean;
+}
+
+export interface SidechatOrchestratorState {
+  isOpen: boolean;
+  conversationId: string | null;
+  acceptedRunIds: Readonly<Record<string, string>>;
+}
+
+export type SidechatOrchestratorEvent =
+  | { type: "open"; conversationId: string }
+  | { type: "close" }
+  | { type: "select_conversation"; conversationId: string | null }
+  | { type: "run_accepted"; conversationId: string; runId: string };
+
+interface SidechatEntryPlanInput {
+  sidechatExists: boolean;
+  publicDraft: string;
+}
+
+export type SidechatEntryPlan =
+  | {
+      label: "Open sidechat";
+      shouldSubmit: false;
+      body: null;
+      publicDraftSnapshot: null;
+    }
+  | {
+      label: "Start sidechat";
+      shouldSubmit: true;
+      body: { content?: string };
+      publicDraftSnapshot: string;
+    };
+
+export interface OptimisticSidechatMessage extends Message {
+  role: "agent";
+  channel: "sidechat";
+  kind: "text";
+  metadata: null;
+  _optimistic: true;
+}
+
+interface CreateOptimisticSidechatMessageInput {
+  id: string;
+  content: string;
+  createdAt: string;
+}
+
+interface ReconciliableSidechatMessage {
+  id: string;
+  role: MessageRole;
+  content: string;
+  createdAt: string;
+  _optimistic?: boolean;
+}
+
+interface EphemeralRunValue {
+  delta: string;
+  activity: {
+    label: string;
+    phase: "start" | "finish";
+  } | null;
 }
 
 interface AddToReplyIntent {
@@ -80,6 +143,130 @@ export function deriveMessagePresentation(
   return { isReceived, senderLabel };
 }
 
+export function createInitialSidechatOrchestratorState(
+  conversationId: string | null,
+): SidechatOrchestratorState {
+  return {
+    isOpen: false,
+    conversationId,
+    acceptedRunIds: {},
+  };
+}
+
+export function reduceSidechatOrchestratorState(
+  state: SidechatOrchestratorState,
+  event: SidechatOrchestratorEvent,
+): SidechatOrchestratorState {
+  switch (event.type) {
+    case "open":
+      return {
+        ...state,
+        isOpen: true,
+        conversationId: event.conversationId,
+      };
+    case "close":
+      return { ...state, isOpen: false };
+    case "select_conversation":
+      return {
+        ...state,
+        isOpen: event.conversationId === null ? false : state.isOpen,
+        conversationId: event.conversationId,
+      };
+    case "run_accepted":
+      return {
+        ...state,
+        acceptedRunIds: {
+          ...state.acceptedRunIds,
+          [event.conversationId]: event.runId,
+        },
+      };
+  }
+}
+
+export function buildSidechatEntryPlan(
+  input: SidechatEntryPlanInput,
+): SidechatEntryPlan {
+  if (input.sidechatExists) {
+    return {
+      label: "Open sidechat",
+      shouldSubmit: false,
+      body: null,
+      publicDraftSnapshot: null,
+    };
+  }
+  const content = input.publicDraft.trim();
+  return {
+    label: "Start sidechat",
+    shouldSubmit: true,
+    body: content ? { content } : {},
+    publicDraftSnapshot: input.publicDraft,
+  };
+}
+
+export function createOptimisticSidechatMessage(
+  input: CreateOptimisticSidechatMessageInput,
+): OptimisticSidechatMessage {
+  return {
+    id: input.id,
+    role: "agent",
+    content: input.content,
+    channel: "sidechat",
+    kind: "text",
+    metadata: null,
+    senderName: null,
+    createdAt: input.createdAt,
+    _optimistic: true,
+  };
+}
+
+function compareSidechatMessages(
+  left: ReconciliableSidechatMessage,
+  right: ReconciliableSidechatMessage,
+): number {
+  const timeDifference = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+  if (timeDifference !== 0) return timeDifference;
+  return left.id.localeCompare(right.id);
+}
+
+export function reconcileSidechatMessages<
+  T extends ReconciliableSidechatMessage,
+>(messages: T[], incoming: T): T[] {
+  const exactIndex = messages.findIndex((message) => message.id === incoming.id);
+  const optimisticIndex = incoming.role === "agent"
+    ? messages.findIndex(
+        (message) =>
+          message._optimistic === true &&
+          message.role === incoming.role &&
+          message.content === incoming.content,
+      )
+    : -1;
+  const replaceIndex = exactIndex >= 0 ? exactIndex : optimisticIndex;
+  const next = [...messages];
+  if (replaceIndex >= 0) next[replaceIndex] = incoming;
+  else next.push(incoming);
+  next.sort(compareSidechatMessages);
+  return next;
+}
+
+export function mergeSidechatHistoryMessages<
+  T extends ReconciliableSidechatMessage,
+>(current: T[], older: T[]): T[] {
+  const byId = new Map<string, T>();
+  for (const message of older) byId.set(message.id, message);
+  for (const message of current) byId.set(message.id, message);
+  return [...byId.values()].sort(compareSidechatMessages);
+}
+
+export function clearSidechatEphemeralRun<T extends EphemeralRunValue>(
+  store: ReadonlyMap<string, T>,
+  runId: string | null,
+): ReadonlyMap<string, T> {
+  if (!runId || !store.has(runId)) return store;
+  const next = new Map(store);
+  next.delete(runId);
+  return next;
+}
+
 export function deriveComposerShiftTabIntent(
   input: ComposerKeyboardInput,
 ): ComposerShiftTabIntent | null {
@@ -114,7 +301,13 @@ export function deriveMessageActions(
 export function transitionPublicDraftAfterSidechatAccept(
   input: PublicDraftAcceptanceInput,
 ): string {
-  if (input.accepted && input.currentDraft === input.submittedDraft) return "";
+  if (
+    input.accepted &&
+    input.currentConversationId === input.submittedConversationId &&
+    input.currentDraft === input.submittedDraft
+  ) {
+    return "";
+  }
   return input.currentDraft;
 }
 

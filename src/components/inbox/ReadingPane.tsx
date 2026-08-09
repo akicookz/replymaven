@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import type { CustomerDetail } from "../../../shared/customer-types";
 import { deriveConversationInteractionState } from "@/lib/inbox/sidechat";
+import type { SidechatStatus } from "../../../shared/ws-events";
 import { cn } from "@/lib/utils";
 import ReadingHeader from "./ReadingHeader";
 import ChatThread from "./ChatThread";
@@ -41,10 +42,10 @@ interface ReadingPaneProps {
   onDeleteMessage: (messageId: string) => void;
   /** Mobile: return to the conversation list (clears the selection). */
   onBack?: () => void;
-  /** Turn the composer's instruction into a tone-matched reply (Shift+Tab). */
-  onCompose: () => void;
-  /** True while a compose request is in flight. */
-  composing: boolean;
+  onStartSidechat: () => void;
+  sidechatExists: boolean;
+  sidechatStatus: SidechatStatus;
+  publicComposerFocusRequest: number;
   /** The message id targeted by a `?msg=` deep link — pulses the review-summary card. */
   highlightMessageId?: string | null;
   /** Responsive visibility overrides owned by the inbox orchestrator. */
@@ -72,8 +73,10 @@ export default function ReadingPane({
   onLinkCustomer,
   onDeleteMessage,
   onBack,
-  onCompose,
-  composing,
+  onStartSidechat,
+  sidechatExists,
+  sidechatStatus,
+  publicComposerFocusRequest,
   highlightMessageId,
   className,
 }: ReadingPaneProps) {
@@ -239,6 +242,18 @@ export default function ReadingPane({
         />
       </div>
 
+      {interaction.readOnly && sidechatExists && (
+        <div className="flex justify-end px-4 py-3 md:px-[30px]">
+          <button
+            type="button"
+            className="min-h-10 px-1 text-[13px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+            onClick={onStartSidechat}
+          >
+            Open sidechat
+          </button>
+        </div>
+      )}
+
       {/* Composer — flex sibling below the thread (no longer overlaps it) */}
       {interaction.showComposer && (
         <Composer
@@ -246,9 +261,14 @@ export default function ReadingPane({
           setDraft={setDraft}
           onSend={onSend}
           onResolve={onResolve}
-          onCompose={onCompose}
-          composing={composing}
           convId={conversation.id}
+          focusRequest={publicComposerFocusRequest}
+          mode={{
+            kind: "public",
+            onStartSidechat,
+            sidechatExists,
+            sidechatStatus,
+          }}
         />
       )}
 

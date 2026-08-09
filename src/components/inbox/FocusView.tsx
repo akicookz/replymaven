@@ -5,6 +5,8 @@ import Composer from "@/components/inbox/Composer";
 import ChatThread from "@/components/inbox/ChatThread";
 import { countryFlag } from "@/lib/inbox/country-flag";
 import { deriveConversationInteractionState } from "@/lib/inbox/sidechat";
+import { cn } from "@/lib/utils";
+import type { SidechatStatus } from "../../../shared/ws-events";
 
 interface FocusViewProps {
   conversation: Conversation;
@@ -20,8 +22,11 @@ interface FocusViewProps {
   onDeleteMessage: (messageId: string) => void;
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
-  onCompose: () => void;
-  composing: boolean;
+  onStartSidechat: () => void;
+  sidechatExists: boolean;
+  sidechatStatus: SidechatStatus;
+  publicComposerFocusRequest: number;
+  embedded?: boolean;
 }
 
 function initials(name: string | null): string {
@@ -51,8 +56,11 @@ export default function FocusView({
   onDeleteMessage,
   draft,
   setDraft,
-  onCompose,
-  composing,
+  onStartSidechat,
+  sidechatExists,
+  sidechatStatus,
+  publicComposerFocusRequest,
+  embedded = false,
 }: FocusViewProps) {
   const interaction = deriveConversationInteractionState(conversation.archivedAt);
   // Parse country from metadata JSON (guarded against malformed data)
@@ -83,7 +91,12 @@ export default function FocusView({
 
   return (
     // Fill the pane (escape Layout's p-4/md:p-8); `relative` anchors the exit btn.
-    <div className="relative -m-4 md:-m-8 h-screen overflow-hidden">
+    <div
+      className={cn(
+        "relative overflow-hidden",
+        embedded ? "h-full" : "-m-4 h-screen md:-m-8",
+      )}
+    >
       {/* Floating exit button — top-right */}
       <button
         type="button"
@@ -164,9 +177,14 @@ export default function FocusView({
                     setDraft={setDraft}
                     onSend={onSend}
                     onResolve={onResolve}
-                    onCompose={onCompose}
-                    composing={composing}
                     convId={conversation.id}
+                    focusRequest={publicComposerFocusRequest}
+                    mode={{
+                      kind: "public",
+                      onStartSidechat,
+                      sidechatExists,
+                      sidechatStatus,
+                    }}
                   />
                 )}
               </div>

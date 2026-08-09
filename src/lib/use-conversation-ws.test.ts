@@ -58,10 +58,11 @@ function createSidechatPayload(
   id: string,
   createdAt: number,
   content = id,
+  role: "agent" | "bot" = "bot",
 ): SidechatMessagePayload {
   return {
     id,
-    role: "bot",
+    role,
     content,
     kind: "text",
     metadata: null,
@@ -170,6 +171,37 @@ test("message reducer uses message IDs as the stable equal-time tie-breaker", ()
     id: "sidechat-z",
     createdAt: 2_000,
   });
+});
+
+test("sidechat delivery replaces its matching optimistic human row", () => {
+  const state = emptyState();
+  state.sidechatMessages = [
+    {
+      id: "optimistic-request-1",
+      role: "agent",
+      content: "Investigate order 42",
+      kind: "text",
+      metadata: null,
+      senderName: null,
+      createdAt: "2026-08-09T00:00:00.000Z",
+      _optimistic: true,
+    },
+  ];
+
+  const next = reduceConversationMessageEvent(state, {
+    type: "sidechat:message",
+    conversationId: "conversation-1",
+    message: createSidechatPayload(
+      "sidechat-message-1",
+      Date.parse("2026-08-09T00:00:00.100Z"),
+      "Investigate order 42",
+      "agent",
+    ),
+  });
+
+  expect(next.sidechatMessages).toHaveLength(1);
+  expect(next.sidechatMessages[0]?.id).toBe("sidechat-message-1");
+  expect(next.sidechatMessages[0]?._optimistic).toBeUndefined();
 });
 
 test("newer live delivery stays the cursor when an older deferred replay arrives", async () => {

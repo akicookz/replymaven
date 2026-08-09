@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildSidechatEntryPlan,
+  clearSidechatEphemeralRun,
+  createInitialSidechatOrchestratorState,
+  createOptimisticSidechatMessage,
   deriveAddToReplyIntent,
   deriveComposerShiftTabIntent,
   deriveConversationInteractionState,
@@ -7,6 +11,9 @@ import {
   deriveMessagePresentation,
   deriveSidechatPaneMode,
   deriveSidechatStatusDot,
+  mergeSidechatHistoryMessages,
+  reconcileSidechatMessages,
+  reduceSidechatOrchestratorState,
   transitionPublicDraftAfterSidechatAccept,
 } from "./sidechat";
 
@@ -75,6 +82,8 @@ describe("public composer transitions", () => {
       transitionPublicDraftAfterSidechatAccept({
         currentDraft: "Check the refund status",
         submittedDraft: "Check the refund status",
+        currentConversationId: "conversation-1",
+        submittedConversationId: "conversation-1",
         accepted: false,
       }),
     ).toBe("Check the refund status");
@@ -82,6 +91,8 @@ describe("public composer transitions", () => {
       transitionPublicDraftAfterSidechatAccept({
         currentDraft: "Check the refund status",
         submittedDraft: "Check the refund status",
+        currentConversationId: "conversation-1",
+        submittedConversationId: "conversation-1",
         accepted: true,
       }),
     ).toBe("");
@@ -92,9 +103,23 @@ describe("public composer transitions", () => {
       transitionPublicDraftAfterSidechatAccept({
         currentDraft: "A newer public reply",
         submittedDraft: "Check the refund status",
+        currentConversationId: "conversation-1",
+        submittedConversationId: "conversation-1",
         accepted: true,
       }),
     ).toBe("A newer public reply");
+  });
+
+  test("does not clear an identical draft after the agent switches conversations", () => {
+    expect(
+      transitionPublicDraftAfterSidechatAccept({
+        currentDraft: "Same words",
+        submittedDraft: "Same words",
+        currentConversationId: "conversation-2",
+        submittedConversationId: "conversation-1",
+        accepted: true,
+      }),
+    ).toBe("Same words");
   });
 
   test("Add to reply replaces exactly, focuses the caret at the end, and never sends", () => {
@@ -106,6 +131,241 @@ describe("public composer transitions", () => {
       send: false,
       keepSidechatOpen: true,
     });
+  });
+});
+
+describe("Sidechat orchestrator state", () => {
+  test("opens and closes the pane without cancelling an accepted run", () => {
+    let state = createInitialSidechatOrchestratorState("conversation-1");
+    state = reduceSidechatOrchestratorState(state, {
+      type: "open",
+      conversationId: "conversation-1",
+    });
+    state = reduceSidechatOrchestratorState(state, {
+      type: "run_accepted",
+      conversationId: "conversation-1",
+      runId: "run-1",
+    });
+    state = reduceSidechatOrchestratorState(state, { type: "close" });
+
+    expect(state).toEqual({
+      isOpen: false,
+      conversationId: "conversation-1",
+      acceptedRunIds: { "conversation-1": "run-1" },
+    });
+  });
+
+  test("switches an open pane to the selected conversation while the prior run continues", () => {
+    let state = createInitialSidechatOrchestratorState("conversation-1");
+    state = reduceSidechatOrchestratorState(state, {
+      type: "open",
+      conversationId: "conversation-1",
+    });
+    state = reduceSidechatOrchestratorState(state, {
+      type: "run_accepted",
+      conversationId: "conversation-1",
+      runId: "run-1",
+    });
+    state = reduceSidechatOrchestratorState(state, {
+      type: "select_conversation",
+      conversationId: "conversation-2",
+    });
+
+    expect(state).toEqual({
+      isOpen: true,
+      conversationId: "conversation-2",
+      acceptedRunIds: { "conversation-1": "run-1" },
+    });
+  });
+
+  test("closes when the selected conversation is cleared", () => {
+    let state = createInitialSidechatOrchestratorState("conversation-1");
+    state = reduceSidechatOrchestratorState(state, {
+      type: "open",
+      conversationId: "conversation-1",
+    });
+    state = reduceSidechatOrchestratorState(state, {
+      type: "select_conversation",
+      conversationId: null,
+    });
+
+    expect(state).toEqual({
+      isOpen: false,
+      conversationId: null,
+      acceptedRunIds: {},
+    });
+  });
+});
+
+describe("Sidechat entry planning", () => {
+  test("opens an existing private thread without submitting another turn", () => {
+    expect(
+      buildSidechatEntryPlan({
+        sidechatExists: true,
+        publicDraft: "Do not duplicate this",
+      }),
+    ).toEqual({
+      label: "Open sidechat",
+      shouldSubmit: false,
+      body: null,
+      publicDraftSnapshot: null,
+    });
+  });
+
+  test("starts with trimmed public text and retains the exact draft snapshot", () => {
+    expect(
+      buildSidechatEntryPlan({
+        sidechatExists: false,
+        publicDraft: "  Check the refund status  ",
+      }),
+    ).toEqual({
+      label: "Start sidechat",
+      shouldSubmit: true,
+      body: { content: "Check the refund status" },
+      publicDraftSnapshot: "  Check the refund status  ",
+    });
+  });
+
+  test("omits content when starting empty so the server supplies the trusted default", () => {
+    expect(
+      buildSidechatEntryPlan({
+        sidechatExists: false,
+        publicDraft: " \n ",
+      }),
+    ).toEqual({
+      label: "Start sidechat",
+      shouldSubmit: true,
+      body: {},
+      publicDraftSnapshot: " \n ",
+    });
+  });
+
+  test("preserves an in-flight public edit after the original draft is accepted", () => {
+    expect(
+      transitionPublicDraftAfterSidechatAccept({
+        currentDraft: "A newer public reply",
+        submittedDraft: "  Check the refund status  ",
+        currentConversationId: "conversation-1",
+        submittedConversationId: "conversation-1",
+        accepted: true,
+      }),
+    ).toBe("A newer public reply");
+    expect(
+      transitionPublicDraftAfterSidechatAccept({
+        currentDraft: "  Check the refund status  ",
+        submittedDraft: "  Check the refund status  ",
+        currentConversationId: "conversation-1",
+        submittedConversationId: "conversation-1",
+        accepted: true,
+      }),
+    ).toBe("");
+  });
+});
+
+describe("Sidechat optimistic and streaming reconciliation", () => {
+  test("replaces the matching optimistic private message with the accepted row", () => {
+    const optimistic = createOptimisticSidechatMessage({
+      id: "optimistic-request-1",
+      content: "Investigate order 42",
+      createdAt: "2026-08-09T00:00:00.000Z",
+    });
+    const accepted = {
+      id: "sidechat-message-1",
+      role: "agent" as const,
+      content: "Investigate order 42",
+      channel: "sidechat" as const,
+      kind: "text" as const,
+      metadata: null,
+      senderName: "Akbar",
+      createdAt: "2026-08-09T00:00:00.100Z",
+    };
+
+    expect(reconcileSidechatMessages([optimistic], accepted)).toEqual([
+      accepted,
+    ]);
+  });
+
+  test("does not reconcile an accepted private row into another conversation cache", () => {
+    const optimistic = createOptimisticSidechatMessage({
+      id: "optimistic-request-1",
+      content: "Conversation one",
+      createdAt: "2026-08-09T00:00:00.000Z",
+    });
+    const otherConversationMessage = {
+      id: "sidechat-message-2",
+      role: "agent" as const,
+      content: "Conversation two",
+      channel: "sidechat" as const,
+      kind: "text" as const,
+      metadata: null,
+      senderName: "Akbar",
+      createdAt: "2026-08-09T00:00:00.100Z",
+    };
+
+    expect(
+      reconcileSidechatMessages([optimistic], otherConversationMessage),
+    ).toEqual([optimistic, otherConversationMessage]);
+  });
+
+  test("removes the completed run's delta and activity when a durable reply replaces it", () => {
+    const store = new Map([
+      [
+        "run-1",
+        {
+          delta: "A partial private answer",
+          activity: { label: "Search knowledge", phase: "finish" as const },
+        },
+      ],
+      [
+        "run-2",
+        {
+          delta: "Another conversation-safe run",
+          activity: null,
+        },
+      ],
+    ]);
+
+    expect([
+      ...clearSidechatEphemeralRun(store, "run-1").entries(),
+    ]).toEqual([
+      [
+        "run-2",
+        {
+          delta: "Another conversation-safe run",
+          activity: null,
+        },
+      ],
+    ]);
+  });
+
+  test("merges older pages by the composite timestamp and id position", () => {
+    const current = [
+      {
+        id: "message-c",
+        role: "bot" as const,
+        content: "Newest",
+        createdAt: "2026-08-09T00:00:01.000Z",
+      },
+    ];
+    const older = [
+      {
+        id: "message-a",
+        role: "agent" as const,
+        content: "Same millisecond, first id",
+        createdAt: "2026-08-09T00:00:00.000Z",
+      },
+      {
+        id: "message-b",
+        role: "bot" as const,
+        content: "Same millisecond, second id",
+        createdAt: "2026-08-09T00:00:00.000Z",
+      },
+      current[0],
+    ];
+
+    expect(
+      mergeSidechatHistoryMessages(current, older).map((message) => message.id),
+    ).toEqual(["message-a", "message-b", "message-c"]);
   });
 });
 
@@ -130,24 +390,7 @@ describe("composer keyboard intent", () => {
     ).toBe("start_sidechat");
   });
 
-  test("never captures Shift+Tab for the legacy Compose contract", () => {
-    expect(
-      deriveComposerShiftTabIntent({
-        ...baseShortcut,
-        contract: "legacy",
-        hasDraft: false,
-      }),
-    ).toBeNull();
-    expect(
-      deriveComposerShiftTabIntent({
-        ...baseShortcut,
-        contract: "legacy",
-        hasDraft: true,
-      }),
-    ).toBeNull();
-  });
-
-  test("ignores composing, repeated, modified, and non-Shift+Tab events", () => {
+  test("ignores IME composition, repeats, modifiers, and other keys", () => {
     const ignored = [
       { isComposing: true },
       { repeat: true },

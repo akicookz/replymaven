@@ -16,7 +16,7 @@ import MessageImages from "./MessageImages";
 interface MessageBubbleProps {
   message: Message;
   conversation: Conversation;
-  onDelete: (messageId: string) => void;
+  onDelete?: (messageId: string) => void;
   readOnly?: boolean;
   /** This message matches the active in-conversation search query. */
   isMatch?: boolean;
@@ -198,7 +198,11 @@ export default function MessageBubble({
           )}
           {renderMessageActions()}
         </div>
-        {!isReceived && perspective === "public" && isAgent && !readOnly && (
+        {!isReceived &&
+          perspective === "public" &&
+          isAgent &&
+          !readOnly &&
+          onDelete && (
           <button
             onClick={() => onDelete(message.id)}
             className="absolute -left-10 top-1/2 flex size-10 shrink-0 -translate-y-1/2 items-center justify-center rounded opacity-0 text-ink-7 group-hover:opacity-100 hover:text-red-400 focus-visible:opacity-100 motion-safe:transition-[opacity,color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"

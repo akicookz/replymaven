@@ -1,7 +1,8 @@
-import { cn } from "@/lib/utils";
+import type { ReactNode } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ChatPerspective } from "@/lib/inbox/sidechat";
 import type { Conversation, Message } from "@/lib/inbox/types";
+import { cn } from "@/lib/utils";
 import MessageBubble from "./MessageBubble";
 import SystemPill from "./SystemPill";
 
@@ -10,7 +11,7 @@ interface ChatThreadProps {
   conversation: Conversation;
   /** True while the thread is loading for the first time → show bubble skeletons. */
   loading?: boolean;
-  onDeleteMessage: (messageId: string) => void;
+  onDeleteMessage?: (messageId: string) => void;
   /** Archived threads are view-only, including historical agent messages. */
   readOnly?: boolean;
   /** Lowercased in-conversation search query (empty when not searching). */
@@ -24,6 +25,9 @@ interface ChatThreadProps {
   onApprovalAction?: (messageId: string, mode: "always" | "once") => void;
   /** Optional inset override for layouts such as FocusView. */
   contentClassName?: string;
+  /** Optional controls/status rendered inside the same transcript flow. */
+  head?: ReactNode;
+  tail?: ReactNode;
 }
 
 // Placeholder bubbles shown while the conversation detail loads. Mirrors the
@@ -101,13 +105,16 @@ export default function ChatThread({
   onAddToReply,
   onApprovalAction,
   contentClassName,
+  head,
+  tail,
 }: ChatThreadProps) {
   const q = searchQuery ?? "";
   return (
-    <div className="min-h-full">
+    <div data-chat-thread className="min-h-full">
       {/* Full-bleed with the same 30px inset as the header/composer so bubbles
           align to the pane edges (not a centered narrow column). */}
       <div className={cn("px-4 md:px-[30px] pt-4 pb-[10px]", contentClassName)}>
+        {head}
         {loading && messages.length === 0 && <ChatThreadSkeleton />}
         {messages.map((message, i) => {
           const prev = messages[i - 1];
@@ -157,6 +164,7 @@ export default function ChatThread({
             </div>
           );
         })}
+        {tail}
       </div>
     </div>
   );

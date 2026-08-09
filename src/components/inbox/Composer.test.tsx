@@ -140,58 +140,6 @@ afterEach(async () => {
 });
 
 describe("Composer contracts", () => {
-  test("legacy onCompose never exposes Sidechat copy or captures empty Shift+Tab", async () => {
-    let composeCalls = 0;
-    const { dom } = await renderNode(
-      <Composer
-        {...composerBaseProps()}
-        onCompose={() => {
-          composeCalls += 1;
-        }}
-        composing={false}
-      />,
-    );
-    expect(dom.window.document.body.textContent).toContain("Compose");
-    expect(dom.window.document.body.textContent).not.toContain("Start sidechat");
-    expect(dom.window.document.body.textContent).not.toContain("Open sidechat");
-
-    const textarea = dom.window.document.querySelector("textarea")!;
-    let prevented = false;
-    invokeTextareaKeyDown(textarea, shiftTabEvent(() => {
-      prevented = true;
-    }));
-    expect(composeCalls).toBe(0);
-    expect(prevented).toBe(false);
-  });
-
-  test("filled legacy mode leaves Shift+Tab untouched while Compose remains clickable", async () => {
-    let composeCalls = 0;
-    const { dom } = await renderNode(
-      <Composer
-        {...composerBaseProps()}
-        draft="Investigate this first"
-        onCompose={() => {
-          composeCalls += 1;
-        }}
-        composing={false}
-      />,
-    );
-    const textarea = dom.window.document.querySelector("textarea")!;
-    let prevented = false;
-    invokeTextareaKeyDown(textarea, shiftTabEvent(() => {
-      prevented = true;
-    }));
-    expect(composeCalls).toBe(0);
-    expect(prevented).toBe(false);
-
-    const composeButton = Array.from(
-      dom.window.document.querySelectorAll<HTMLButtonElement>("button"),
-    ).find((button) => button.textContent?.includes("Compose"));
-    expect(composeButton).toBeDefined();
-    await act(async () => composeButton?.click());
-    expect(composeCalls).toBe(1);
-  });
-
   test("real public mode renders Start/Open and accepts empty unmodified Shift+Tab", async () => {
     let sidechatCalls = 0;
     const { dom } = await renderNode(
@@ -252,6 +200,34 @@ describe("Composer contracts", () => {
     );
     expect(sidechatButton?.classList.contains("whitespace-nowrap")).toBe(true);
   });
+
+  test("focuses the exact replaced public draft at its end without sending", async () => {
+    let sendCalls = 0;
+    const exactDraft = "Exact visitor-ready draft.";
+    const { dom } = await renderNode(
+      <Composer
+        {...composerBaseProps()}
+        draft={exactDraft}
+        onSend={() => {
+          sendCalls += 1;
+        }}
+        focusRequest={1}
+        mode={{
+          kind: "public",
+          onStartSidechat: () => undefined,
+          sidechatExists: true,
+          sidechatStatus: "ready",
+        }}
+      />,
+    );
+    const textarea = dom.window.document.querySelector("textarea")!;
+
+    expect(textarea.value).toBe(exactDraft);
+    expect(dom.window.document.activeElement).toBe(textarea);
+    expect(textarea.selectionStart).toBe(exactDraft.length);
+    expect(textarea.selectionEnd).toBe(exactDraft.length);
+    expect(sendCalls).toBe(0);
+  });
 });
 
 describe("archived FocusView", () => {
@@ -271,8 +247,10 @@ describe("archived FocusView", () => {
         }}
         draft=""
         setDraft={() => undefined}
-        onCompose={() => undefined}
-        composing={false}
+        onStartSidechat={() => undefined}
+        sidechatExists={false}
+        sidechatStatus="idle"
+        publicComposerFocusRequest={0}
       />,
     );
     expect(dom.window.document.querySelector("textarea")).toBeNull();
