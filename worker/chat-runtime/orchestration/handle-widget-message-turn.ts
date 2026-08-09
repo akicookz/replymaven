@@ -32,6 +32,10 @@ import {
 } from "../streaming/internal-tokens";
 import { MavenStreamFailure } from "../streaming/maven-stream-failure";
 import {
+  MavenTurnCancelled,
+  throwIfMavenTurnCancelled,
+} from "../streaming/maven-turn-cancelled";
+import {
   broadcastClosed,
   broadcastCustomerUpdated,
   broadcastMessageNew,
@@ -250,18 +254,23 @@ export async function streamPublicMavenTurn(options: {
   responseOpening: string;
   telemetry?: TurnTelemetry;
 }): Promise<PublicMavenStreamResult> {
+  const abortSignal = options.turnInput.dependencies.abortSignal;
+  throwIfMavenTurnCancelled(abortSignal);
   const turn: MavenTurnResult = await options.runTurn(options.turnInput);
+  throwIfMavenTurnCancelled(abortSignal);
   const stripState = createStreamingStripState();
   const detectedInternalTokens: InternalToken[] = [];
   let fullResponse = options.responseOpening;
 
   if (options.responseOpening && options.streamProtocolVersion === 2) {
+    throwIfMavenTurnCancelled(abortSignal);
     emitSseEvent(options.controller, options.encoder, {
       text: options.responseOpening,
     });
   }
 
   for await (const event of mapAgentEventsToSse(turn.fullStream)) {
+    throwIfMavenTurnCancelled(abortSignal);
     if ("status" in event) {
       emitStatusEvent(options.controller, options.encoder, event.status);
       continue;
@@ -279,6 +288,7 @@ export async function streamPublicMavenTurn(options: {
     }
   }
 
+  throwIfMavenTurnCancelled(abortSignal);
   const flushed = flushStreamingStripState(stripState);
   detectedInternalTokens.push(...flushed.tokens);
   if (flushed.emit) {
@@ -288,6 +298,7 @@ export async function streamPublicMavenTurn(options: {
     }
   }
 
+  throwIfMavenTurnCancelled(abortSignal);
   return {
     fullResponse,
     sources: turn.collectedSources,
@@ -793,8 +804,10 @@ export async function handleWidgetMessageTurn(
     async function emitAndSaveImmediateResponse(
       fullResponse: string,
     ): Promise<void> {
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       const cleanResponse = `${responseOpening}${stripInternalTokens(fullResponse)}`;
       const outputPermission = await getAiOutputPermission();
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       if (!outputPermission.allowed) {
         if (context.streamProtocolVersion === 2) {
           emitCompletedEvent(controller, encoder, {
@@ -809,6 +822,7 @@ export async function handleWidgetMessageTurn(
         return;
       }
       currentStage = "save_bot_message";
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       const botMessage = await chatService.addBotMessageIfOwnershipMatches(
         {
           conversationId: context.conversationId,
@@ -837,11 +851,13 @@ export async function handleWidgetMessageTurn(
         return;
       }
       persistedAiMessage = true;
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       if (context.streamProtocolVersion === 1) {
         emitSseEvent(controller, encoder, { finalText: cleanResponse });
       }
 
       // Broadcast to dashboard subscribers; exclude originator (gets it via SSE).
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       broadcastMessageNew(
         context.env,
         context.executionCtx,
@@ -868,6 +884,7 @@ export async function handleWidgetMessageTurn(
         });
       }
 
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       context.executionCtx.waitUntil(
         billingService
           .incrementMessageUsage(context.project.userId, ownerSub)
@@ -882,6 +899,7 @@ export async function handleWidgetMessageTurn(
           }),
       );
 
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       logInfo(
         "widget_turn.completed",
         buildWidgetTurnLogContext(context, turnId, {
@@ -1030,6 +1048,7 @@ export async function handleWidgetMessageTurn(
                 );
               },
               onTeamRequested() {
+                throwIfMavenTurnCancelled(turnAbortController.signal);
                 conversationStatusForTurn = "waiting_agent";
                 broadcastStatusChange(
                   context.env,
@@ -1039,6 +1058,7 @@ export async function handleWidgetMessageTurn(
                 );
               },
               broadcast(message) {
+                throwIfMavenTurnCancelled(turnAbortController.signal);
                 broadcastMessageNew(
                   context.env,
                   context.executionCtx,
@@ -1059,6 +1079,7 @@ export async function handleWidgetMessageTurn(
         responseOpening,
         telemetry,
       });
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       telemetry.loopMs = Date.now() - loopStartedAt;
       sourceReferences = streamedTurn.sources;
       eventState = {
@@ -1085,7 +1106,9 @@ export async function handleWidgetMessageTurn(
           ? conversationStatusForTurn
           : "active";
       let resolvedByThisTurn = false;
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       let outputPermission = await getAiOutputPermission();
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       if (
         eventState.detectedInternalTokens.includes("[RESOLVED]") &&
         !flaggedForReview &&
@@ -1093,6 +1116,7 @@ export async function handleWidgetMessageTurn(
         outputPermission.status === "active"
       ) {
         currentStage = "close_conversation";
+        throwIfMavenTurnCancelled(turnAbortController.signal);
         resolvedByThisTurn = await chatService.resolveConversationByAi(
           context.conversationId,
           context.project.id,
@@ -1117,6 +1141,7 @@ export async function handleWidgetMessageTurn(
         outputPermission = await getAiOutputPermission(resolvedByThisTurn);
       }
 
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       finalConversationStatus = outputPermission.status;
       if (!outputPermission.allowed) {
         fullResponse = "";
@@ -1130,6 +1155,7 @@ export async function handleWidgetMessageTurn(
       // the bot has nothing to add — skip the empty message entirely (no message
       // beats an empty bubble) while still emitting `done` so the widget finalizes.
       if (!fullResponse.trim()) {
+        throwIfMavenTurnCancelled(turnAbortController.signal);
         logInfo(
           "widget_turn.empty_bot_message_skipped",
           buildWidgetTurnLogContext(context, turnId, { flaggedForReview }),
@@ -1148,6 +1174,7 @@ export async function handleWidgetMessageTurn(
       }
 
       currentStage = "save_bot_message";
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       const botMessage = await persistGuardedAiOutput({
         controller,
         encoder,
@@ -1187,8 +1214,10 @@ export async function handleWidgetMessageTurn(
         },
       });
       if (!botMessage) return;
+      throwIfMavenTurnCancelled(turnAbortController.signal);
 
       if (resolvedByThisTurn) {
+        throwIfMavenTurnCancelled(turnAbortController.signal);
         broadcastStatusChange(
           context.env,
           context.executionCtx,
@@ -1202,6 +1231,7 @@ export async function handleWidgetMessageTurn(
           "bot_resolved",
         );
         if (settings?.telegramBotToken && settings.telegramChatId) {
+          throwIfMavenTurnCancelled(turnAbortController.signal);
           const telegramService = runtime.createTelegramService(context.db);
           const telegramBotToken = settings.telegramBotToken;
           const telegramChatId = settings.telegramChatId;
@@ -1232,6 +1262,7 @@ export async function handleWidgetMessageTurn(
       }
 
       // Broadcast to dashboard subscribers; exclude originator (gets it via SSE).
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       broadcastMessageNew(
         context.env,
         context.executionCtx,
@@ -1243,6 +1274,7 @@ export async function handleWidgetMessageTurn(
       const MAX_SOURCES = 3;
       const cappedSources = sourceReferences.slice(0, MAX_SOURCES);
 
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       if (context.streamProtocolVersion === 2) {
         emitCompletedEvent(controller, encoder, {
           protocolVersion: 2,
@@ -1259,6 +1291,7 @@ export async function handleWidgetMessageTurn(
         });
       }
 
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       context.executionCtx.waitUntil(
         billingService
           .incrementMessageUsage(context.project.userId, ownerSub)
@@ -1274,6 +1307,7 @@ export async function handleWidgetMessageTurn(
       );
 
       if (streamedTurn.httpExecutionIds.length > 0) {
+        throwIfMavenTurnCancelled(turnAbortController.signal);
         context.executionCtx.waitUntil(
           toolService
             .linkExecutionsToMessage(
@@ -1293,6 +1327,7 @@ export async function handleWidgetMessageTurn(
         );
       }
 
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       logInfo(
         "widget_turn.completed",
         buildWidgetTurnLogContext(context, turnId, {
@@ -1320,6 +1355,16 @@ export async function handleWidgetMessageTurn(
         }),
       );
     } catch (err) {
+      if (
+        err instanceof MavenTurnCancelled ||
+        turnAbortController.signal.aborted
+      ) {
+        logInfo(
+          "widget_turn.cancelled",
+          buildWidgetTurnLogContext(context, turnId, { stage: currentStage }),
+        );
+        return;
+      }
       logError(
         "widget_turn.failed",
         err,
@@ -1341,12 +1386,15 @@ export async function handleWidgetMessageTurn(
       if (
         context.contactAccepted &&
         !persistedAiMessage &&
+        !turnAbortController.signal.aborted &&
         !(err instanceof MavenStreamFailure)
       ) {
         try {
           const outputPermission = await getAiOutputPermission();
+          throwIfMavenTurnCancelled(turnAbortController.signal);
           if (outputPermission.allowed) {
             const fallbackMessage = context.contactAccepted.fallbackMessage;
+            throwIfMavenTurnCancelled(turnAbortController.signal);
             const botMessage = await chatService.addBotMessageIfOwnershipMatches(
               {
                 conversationId: context.conversationId,
@@ -1375,6 +1423,7 @@ export async function handleWidgetMessageTurn(
               return;
             }
             persistedAiMessage = true;
+            throwIfMavenTurnCancelled(turnAbortController.signal);
             broadcastMessageNew(
               context.env,
               context.executionCtx,
@@ -1383,6 +1432,7 @@ export async function handleWidgetMessageTurn(
               { excludeSubjectId: visitorIdForBroadcast },
             );
 
+            throwIfMavenTurnCancelled(turnAbortController.signal);
             if (context.streamProtocolVersion === 2) {
               emitCompletedEvent(controller, encoder, {
                 protocolVersion: 2,
@@ -1402,6 +1452,12 @@ export async function handleWidgetMessageTurn(
             return;
           }
         } catch (fallbackError) {
+          if (
+            fallbackError instanceof MavenTurnCancelled ||
+            turnAbortController.signal.aborted
+          ) {
+            return;
+          }
           logError(
             "widget_turn.contact_fallback_failed",
             fallbackError,
@@ -1410,6 +1466,7 @@ export async function handleWidgetMessageTurn(
         }
       }
 
+      throwIfMavenTurnCancelled(turnAbortController.signal);
       emitSseEvent(controller, encoder, { error: errorMessage });
     }
   }, {

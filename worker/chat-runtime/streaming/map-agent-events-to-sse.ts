@@ -6,6 +6,7 @@ import {
   type StreamingStripState,
 } from "./internal-tokens";
 import { MavenStreamFailure } from "./maven-stream-failure";
+import { MavenTurnCancelled } from "./maven-turn-cancelled";
 
 export interface AgentEventState {
   fullResponse: string;
@@ -49,6 +50,9 @@ export async function* mapAgentEventsToSse(
 ): AsyncGenerator<MavenBrowserEvent> {
   for await (const part of parts) {
     const type = readPartType(part);
+    if (type === "abort") {
+      throw new MavenTurnCancelled();
+    }
     if (type === "error") {
       throw new MavenStreamFailure();
     }

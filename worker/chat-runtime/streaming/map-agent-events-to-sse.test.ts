@@ -62,6 +62,38 @@ describe("SSE protocol envelopes", () => {
 });
 
 describe("Maven browser event mapping", () => {
+  test("terminalizes an AI SDK abort after tool activity and partial text", async () => {
+    const events: Record<string, unknown>[] = [];
+    const parts = [
+      {
+        type: "tool-call",
+        toolCallId: "call-1",
+        toolName: "lookup_account",
+        input: { accountId: "private-account" },
+      },
+      { type: "text-delta", id: "text-1", text: "Partial answer" },
+      { type: "abort", reason: "private disconnect reason" },
+    ];
+
+    async function collectEvents(): Promise<void> {
+      for await (const event of mapAgentEventsToSse(parts)) {
+        events.push(event);
+      }
+    }
+
+    await expect(collectEvents()).rejects.toThrow("The Maven turn was cancelled.");
+    expect(events).toEqual([
+      {
+        status: {
+          phase: "tool",
+          message: "Checking project information",
+        },
+      },
+      { text: "Partial answer" },
+    ]);
+    expect(JSON.stringify(events)).not.toContain("private disconnect reason");
+  });
+
   test("keeps text and generic tool status while dropping all private payloads", async () => {
     const privateParts = [
       {

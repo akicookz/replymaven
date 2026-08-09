@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
 import { type SourceReference } from "../../services/resource-service";
-import { type MavenStreamPart } from "../types";
+import {
+  type MavenStreamPart,
+  type MavenToolCapability,
+} from "../types";
 import { persistGuardedAiOutput } from "../post-turn/persist-guarded-ai-output";
 import { buildMavenToolRegistry } from "../tools/build-maven-tool-registry";
 import {
@@ -55,6 +59,7 @@ function createTurnRunner(options: {
   sources?: SourceReference[];
   activityCount?: number;
   error?: Error;
+  afterParts?: () => void;
 }): {
   calls: unknown[];
   runTurn: (input: unknown) => Promise<{
@@ -75,6 +80,7 @@ function createTurnRunner(options: {
       calls.push(input);
       async function* stream(): AsyncGenerator<MavenStreamPart> {
         yield* createMavenStream(options.parts);
+        options.afterParts?.();
         if (options.error) throw options.error;
       }
       return {
@@ -118,6 +124,8 @@ interface HandlerHarness {
   botInsertCalls: unknown[];
   checkRateLimitCalls: unknown[][];
   linkCalls: unknown[][];
+  usageIncrementCalls: unknown[][];
+  broadcastFetchCalls: Request[];
   waitUntilCalls: Promise<unknown>[];
   pendingContactUpdates: unknown[][];
   saveChatStateCalls: unknown[][];
@@ -142,6 +150,8 @@ function createHandlerHarness(options?: {
   executeTeamHelpDuringTurn?: boolean;
   pendingContactUpdateLosesToHuman?: boolean;
   contactAccepted?: boolean;
+  streamFactory?: (input: unknown) => AsyncIterable<MavenStreamPart>;
+  resolveSucceeds?: boolean;
 }): HandlerHarness {
   let conversation: Record<string, unknown> | null = {
     id: "conversation-1",
@@ -160,6 +170,8 @@ function createHandlerHarness(options?: {
   const botInsertCalls: unknown[] = [];
   const checkRateLimitCalls: unknown[][] = [];
   const linkCalls: unknown[][] = [];
+  const usageIncrementCalls: unknown[][] = [];
+  const broadcastFetchCalls: Request[] = [];
   const waitUntilCalls: Promise<unknown>[] = [];
   const pendingContactUpdates: unknown[][] = [];
   const saveChatStateCalls: unknown[][] = [];
@@ -191,6 +203,13 @@ function createHandlerHarness(options?: {
     },
     async resolveConversationByAi() {
       resolveCalls.push("resolve");
+      if (options?.resolveSucceeds) {
+        conversation = {
+          ...conversation,
+          status: "closed",
+        };
+        return true;
+      }
       conversation = {
         ...conversation,
         status: "agent_replied",
@@ -300,7 +319,9 @@ function createHandlerHarness(options?: {
         async checkMessageLimit() {
           return { allowed: true };
         },
-        async incrementMessageUsage() {},
+        async incrementMessageUsage(...args: unknown[]) {
+          usageIncrementCalls.push(args);
+        },
       };
     },
     createChatService() {
@@ -414,7 +435,7 @@ function createHandlerHarness(options?: {
         turnInput.dependencies.publicToolDependencies?.onTeamRequested();
       }
       return {
-        fullStream: createMavenStream(
+        fullStream: options?.streamFactory?.(input) ?? createMavenStream(
           options?.streamParts ?? [{ type: "text-delta", text: "Answer" }],
         ),
         collectedSources: [],
@@ -446,7 +467,12 @@ function createHandlerHarness(options?: {
           return name;
         },
         get() {
-          return { async fetch() { return new Response(null, { status: 204 }); } };
+          return {
+            async fetch(request: Request) {
+              broadcastFetchCalls.push(request);
+              return new Response(null, { status: 204 });
+            },
+          };
         },
       },
     },
@@ -490,6 +516,8 @@ function createHandlerHarness(options?: {
     botInsertCalls,
     checkRateLimitCalls,
     linkCalls,
+    usageIncrementCalls,
+    broadcastFetchCalls,
     waitUntilCalls,
     pendingContactUpdates,
     saveChatStateCalls,
@@ -711,6 +739,149 @@ describe("widget handler Maven gates", () => {
     expect(harness.botInsertCalls).toHaveLength(0);
     expect(body).toContain('"error":"The response stream failed."');
     expect(body).not.toContain('"completed"');
+  });
+
+  test("response cancellation terminalizes an SDK abort before persistence and post-turn effects", async () => {
+    let resolveToolStarted = () => {};
+    const toolStarted = new Promise<void>((resolve) => {
+      resolveToolStarted = resolve;
+    });
+    let resolveStreamClosed = () => {};
+    const streamClosed = new Promise<void>((resolve) => {
+      resolveStreamClosed = resolve;
+    });
+    const sdkToolController = new AbortController();
+    let turnSignal: AbortSignal | undefined;
+    const harness = createHandlerHarness({
+      contactAccepted: true,
+      botInsertSucceeds: true,
+      httpExecutionIds: ["execution-1"],
+      resolveSucceeds: true,
+      streamFactory(input) {
+        const turnInput = input as {
+          context: Parameters<typeof buildMavenToolRegistry>[0]["context"];
+          dependencies: { abortSignal?: AbortSignal };
+        };
+        turnSignal = turnInput.dependencies.abortSignal;
+        const capability: MavenToolCapability = {
+          id: "http-tool-1",
+          projectId: "project-1",
+          connectionId: null,
+          modelName: "lookup_account",
+          displayName: "Look up account",
+          source: "http",
+          allowedChannels: ["public"],
+          access: "read",
+          enabled: true,
+          schemaFingerprint: "schema-v1",
+        };
+        const registered = buildMavenToolRegistry({
+          context: turnInput.context,
+          abortSignal: turnSignal,
+          definitions: [
+            {
+              capability,
+              description: "Look up a customer account.",
+              inputSchema: z.object({ accountId: z.string() }),
+              async reauthorize() {
+                return capability;
+              },
+              async execute(_toolInput, { abortSignal }) {
+                resolveToolStarted();
+                if (!abortSignal?.aborted) {
+                  await new Promise<void>((resolve) => {
+                    abortSignal?.addEventListener("abort", () => resolve(), {
+                      once: true,
+                    });
+                  });
+                }
+                return { cancelled: true };
+              },
+            },
+          ],
+        }).tools.lookup_account;
+        if (!registered || typeof registered.execute !== "function") {
+          throw new Error("Expected an executable HTTP registry tool");
+        }
+        async function* stream(): AsyncGenerator<MavenStreamPart> {
+          try {
+            yield {
+              type: "tool-call",
+              toolCallId: "http-1",
+              toolName: "lookup_account",
+              input: { accountId: "private-account" },
+            };
+            const execution = registered.execute(
+              { accountId: "private-account" },
+              {
+                toolCallId: "http-1",
+                messages: [],
+                abortSignal: sdkToolController.signal,
+              },
+            );
+            yield {
+              type: "text-delta",
+              text: "Partial answer [RESOLVED]",
+            };
+            await execution;
+            yield {
+              type: "abort",
+              reason: "private disconnect reason",
+            };
+          } finally {
+            resolveStreamClosed();
+          }
+        }
+        return stream();
+      },
+    });
+
+    const response = await handleWidgetMessageTurn(
+      harness.context,
+      harness.runtime,
+    );
+    const reader = response.body?.getReader();
+    expect(reader).toBeDefined();
+    const decoder = new TextDecoder();
+    let browserFrames = "";
+    let resolveActivityReceived = () => {};
+    const activityReceived = new Promise<void>((resolve) => {
+      resolveActivityReceived = resolve;
+    });
+    let resolvePartialReceived = () => {};
+    const partialReceived = new Promise<void>((resolve) => {
+      resolvePartialReceived = resolve;
+    });
+    const readLoop = (async () => {
+      while (true) {
+        const next = await reader?.read();
+        if (!next || next.done) return;
+        browserFrames += decoder.decode(next.value, { stream: true });
+        if (browserFrames.includes("Checking project information")) {
+          resolveActivityReceived();
+        }
+        if (browserFrames.includes("Partial answer")) {
+          resolvePartialReceived();
+        }
+      }
+    })();
+
+    await Promise.all([toolStarted, activityReceived, partialReceived]);
+    const cancelReason = new DOMException("Visitor disconnected", "AbortError");
+    await reader?.cancel(cancelReason);
+    await Promise.all([readLoop, streamClosed]);
+    await Bun.sleep(0);
+    await Promise.all(harness.waitUntilCalls);
+
+    expect(turnSignal?.aborted).toBe(true);
+    expect(turnSignal?.reason).toBe(cancelReason);
+    expect(sdkToolController.signal.aborted).toBe(false);
+    expect(harness.botInsertCalls).toHaveLength(0);
+    expect(harness.resolveCalls).toHaveLength(0);
+    expect(harness.linkCalls).toHaveLength(0);
+    expect(harness.usageIncrementCalls).toHaveLength(0);
+    expect(harness.broadcastFetchCalls).toHaveLength(0);
+    expect(browserFrames).not.toContain("private disconnect reason");
   });
 
   test("tracks exact HTTP execution linkage through waitUntil", async () => {
@@ -1130,6 +1301,61 @@ describe("public Maven stream cutover", () => {
       { text: "Thanks — I saved your details. " },
       { text: "How else can I help?" },
     ]);
+  });
+
+  test("does not complete an opening-only response after an AI SDK abort", async () => {
+    const runner = createTurnRunner({
+      parts: [{ type: "abort", reason: "private disconnect reason" }],
+    });
+    const capture = createSseCapture();
+
+    await expect(
+      streamPublicMavenTurn({
+        runTurn: runner.runTurn as never,
+        turnInput: createTurnInput(),
+        controller: capture.controller,
+        encoder: capture.encoder,
+        streamProtocolVersion: 2,
+        responseOpening: "Thanks — I saved your details. ",
+      }),
+    ).rejects.toThrow("The Maven turn was cancelled.");
+
+    expect(capture.events).toEqual([
+      { text: "Thanks — I saved your details. " },
+    ]);
+    expect(JSON.stringify(capture.events)).not.toContain(
+      "private disconnect reason",
+    );
+  });
+
+  test("terminalizes when the authoritative signal aborts at completion", async () => {
+    const turnAbortController = new AbortController();
+    const runner = createTurnRunner({
+      parts: [{ type: "text-delta", text: "Partial answer" }],
+      afterParts() {
+        turnAbortController.abort(
+          new DOMException("Visitor disconnected", "AbortError"),
+        );
+      },
+    });
+    const capture = createSseCapture();
+    const turnInput = {
+      ...createTurnInput(),
+      dependencies: { abortSignal: turnAbortController.signal },
+    } as never;
+
+    await expect(
+      streamPublicMavenTurn({
+        runTurn: runner.runTurn as never,
+        turnInput,
+        controller: capture.controller,
+        encoder: capture.encoder,
+        streamProtocolVersion: 2,
+        responseOpening: "",
+      }),
+    ).rejects.toThrow("The Maven turn was cancelled.");
+
+    expect(capture.events).toEqual([{ text: "Partial answer" }]);
   });
 });
 
