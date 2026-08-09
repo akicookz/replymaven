@@ -482,7 +482,6 @@ export interface TurnTelemetry {
   loopMs?: number;
   composeMs?: number;
   verifierMs?: number;
-  plannerStepMs?: number[];
   retrievalMs?: number[];
   toolCallMs?: number[];
   modelCallCount?: number;

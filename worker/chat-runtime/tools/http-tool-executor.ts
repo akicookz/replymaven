@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { tool, type ToolSet } from "ai";
 import { type ToolRow } from "../../db";
-import { toolParameterSchema } from "../../validation";
+import {
+  httpToolModelContractSchema,
+  toolParameterSchema,
+} from "../../validation";
 import { type ChatService } from "../../services/chat-service";
 import {
   decryptHeaders,
@@ -20,6 +23,7 @@ import {
 } from "./tool-capability";
 
 type HttpToolParameter = z.infer<typeof toolParameterSchema>;
+type HttpToolModelContract = z.infer<typeof httpToolModelContractSchema>;
 
 interface AuthoritativeHttpToolStore {
   getAuthoritativeTool(
@@ -113,6 +117,22 @@ function parseHttpToolParameters(parameters: string): HttpToolParameter[] | null
   }
 }
 
+function parseHttpToolModelContract(
+  toolRow: ToolRow,
+): HttpToolModelContract | null {
+  try {
+    const parameters: unknown = JSON.parse(toolRow.parameters);
+    const result = httpToolModelContractSchema.safeParse({
+      name: toolRow.name,
+      description: toolRow.description,
+      parameters,
+    });
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
+
 function buildHttpInputSchema(parameters: string): z.ZodObject {
   const shape: Record<string, z.ZodType> = Object.create(null) as Record<
     string,
@@ -163,23 +183,19 @@ function toHttpExecutionDefinition(toolRow: ToolRow): SupportToolDefinition {
 async function toHttpCapability(
   toolRow: ToolRow,
 ): Promise<MavenToolCapability | null> {
-  const parameters = parseHttpToolParameters(toolRow.parameters);
-  if (!parameters) return null;
+  const contract = parseHttpToolModelContract(toolRow);
+  if (!contract) return null;
   return {
     id: toolRow.id,
     projectId: toolRow.projectId,
     connectionId: null,
-    modelName: toolRow.name,
+    modelName: contract.name,
     displayName: toolRow.displayName,
     source: "http",
     allowedChannels: parseAllowedChannels(toolRow.allowedChannels),
     access: toolRow.access,
     enabled: toolRow.enabled,
-    schemaFingerprint: await fingerprintHttpToolContract({
-      name: toolRow.name,
-      description: toolRow.description,
-      parameters,
-    }),
+    schemaFingerprint: await fingerprintHttpToolContract(contract),
   };
 }
 

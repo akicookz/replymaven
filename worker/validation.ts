@@ -581,6 +581,24 @@ export function isReservedMavenToolName(name: string): boolean {
   return (RESERVED_MAVEN_TOOL_NAMES as readonly string[]).includes(name);
 }
 
+export const toolNameSchema = z
+  .string()
+  .min(1, "Name is required")
+  .max(100)
+  .regex(
+    /^[a-z][a-z0-9_]*$/,
+    "Must start with a letter and contain only lowercase letters, numbers, and underscores",
+  )
+  .refine(
+    (name) => !isReservedMavenToolName(name),
+    "This name is reserved for an internal Maven tool",
+  );
+
+export const toolDescriptionSchema = z
+  .string()
+  .min(1, "Description is required")
+  .max(500);
+
 export const toolAudienceSchema = z
   .array(z.enum(["public", "sidechat"]))
   .min(1)
@@ -595,6 +613,12 @@ export const toolParameterSchema = z.object({
   enum: z.array(z.string().max(100)).max(20).optional(),
 });
 
+export const httpToolModelContractSchema = z.object({
+  name: toolNameSchema,
+  description: toolDescriptionSchema,
+  parameters: z.array(toolParameterSchema).max(10),
+});
+
 const responseMappingSchema = z
   .object({
     resultPath: z.string().max(200).optional(),
@@ -604,20 +628,9 @@ const responseMappingSchema = z
   .nullable();
 
 export const createToolSchema = z.object({
-  name: z
-    .string()
-    .min(1, "Name is required")
-    .max(100)
-    .regex(
-      /^[a-z][a-z0-9_]*$/,
-      "Must start with a letter and contain only lowercase letters, numbers, and underscores",
-    )
-    .refine(
-      (name) => !isReservedMavenToolName(name),
-      "This name is reserved for an internal Maven tool",
-    ),
+  name: toolNameSchema,
   displayName: z.string().min(1, "Display name is required").max(100),
-  description: z.string().min(1, "Description is required").max(500),
+  description: toolDescriptionSchema,
   endpoint: z.string().url("Must be a valid URL").max(2048),
   method: z.enum(["GET", "POST"]).default("POST"),
   headers: z.record(z.string(), z.string().max(2048)).optional().nullable(),
@@ -631,7 +644,7 @@ export const createToolSchema = z.object({
 
 export const updateToolSchema = z.object({
   displayName: z.string().min(1).max(100).optional(),
-  description: z.string().min(1).max(500).optional(),
+  description: toolDescriptionSchema.optional(),
   endpoint: z.string().url().max(2048).optional(),
   method: z.enum(["GET", "POST"]).optional(),
   headers: z.record(z.string(), z.string().max(2048)).optional().nullable(),

@@ -543,6 +543,44 @@ describe("createHttpToolDefinition", () => {
     expect(registry.tools.lookup_account).toBeUndefined();
   });
 
+  test.each([
+    ["invalid name", { name: "bad name" }],
+    ["empty description", { description: "" }],
+  ] as const)(
+    "does not register an HTTP tool with an %s",
+    async (_caseName, overrides) => {
+      const malformed = createToolRow(overrides);
+      const definition = await createHttpToolDefinition({
+        context: createContext("public"),
+        tool: malformed,
+        toolService: {
+          async getAuthoritativeTool() {
+            return malformed;
+          },
+          async logExecution() {
+            return { id: "execution-1" };
+          },
+        },
+        encryptionKey: "00".repeat(32),
+        publicExecution: {
+          chatService: {
+            async runExternalActionIfOwnershipMatches() {
+              throw new Error("Malformed tools must not execute");
+            },
+          },
+          acquireRateLimitPermit: () => true,
+        },
+      } as never);
+
+      const registry = buildMavenToolRegistry({
+        context: createContext("public"),
+        definitions: [definition],
+      });
+
+      expect(Object.keys(registry.tools)).toEqual([]);
+    },
+  );
+
   test("rejects a malformed authoritative contract before its side effect", async () => {
     let fetchCount = 0;
     const initial = createToolRow();
@@ -586,6 +624,55 @@ describe("createHttpToolDefinition", () => {
     ).toEqual({ error: "tool_unavailable" });
     expect(fetchCount).toBe(0);
   });
+
+  test.each([
+    ["invalid name", { name: "bad name" }],
+    ["empty description", { description: "" }],
+  ] as const)(
+    "rejects an authoritative contract with an %s before its side effect",
+    async (_caseName, overrides) => {
+      let fetchCount = 0;
+      const definition = await createHttpToolDefinition({
+        context: createContext("public"),
+        tool: createToolRow(),
+        toolService: {
+          async getAuthoritativeTool() {
+            return createToolRow(overrides);
+          },
+          async logExecution() {
+            return { id: "execution-1" };
+          },
+        },
+        encryptionKey: "00".repeat(32),
+        publicExecution: {
+          chatService: {
+            async runExternalActionIfOwnershipMatches(
+              _conversationId: string,
+              _projectId: string,
+              _ownership: unknown,
+              action: () => Promise<unknown>,
+            ) {
+              return { executed: true, value: await action() };
+            },
+          },
+          acquireRateLimitPermit: () => true,
+        },
+      } as never);
+      globalThis.fetch = async () => {
+        fetchCount += 1;
+        return Response.json({ ok: true });
+      };
+
+      expect(
+        await executeRegisteredTool(
+          definition,
+          createContext("public"),
+          { accountId: "account-1" },
+        ),
+      ).toEqual({ error: "tool_unavailable" });
+      expect(fetchCount).toBe(0);
+    },
+  );
 
   test.each(["takeover", "close"])(
     "does not fetch or audit when public ownership loses a %s race",
