@@ -361,6 +361,83 @@ describe("tool route boundary", () => {
     expect(ownerService.updateCalls[3]).not.toHaveProperty("access");
   });
 
+  test.each([
+    {
+      label: "HTTP Lookup",
+      tool: makeTool({
+        name: "check_order_status",
+        headers: "encrypted-lookup-credentials",
+      }),
+      stored: "encrypted-lookup-credentials",
+    },
+    {
+      label: "GitHub preset",
+      tool: makeTool({
+        name: "create_github_issue",
+        headers: "encrypted-github-credentials",
+      }),
+      stored: "encrypted-github-credentials",
+    },
+  ])(
+    "$label policy-only PATCH preserves authoritative credentials without encryption",
+    async ({ tool, stored }) => {
+      const service = new MemoryToolService([tool]);
+      let encryptionCalls = 0;
+      const response = await handleUpdateToolRequest({
+        projectId: "project-1",
+        toolId: tool.id,
+        role: "owner",
+        body: {
+          allowedChannels: ["public", "sidechat"],
+          access: "write",
+        },
+        toolService: service,
+        encryptHeaders: async () => {
+          encryptionCalls += 1;
+          return "unexpected";
+        },
+        maskStoredHeaders: async (headers) =>
+          headers ? { Authorization: "••••••••" } : null,
+      });
+
+      expect(response.status).toBe(200);
+      expect(encryptionCalls).toBe(0);
+      expect(service.updateCalls[0]).not.toHaveProperty("headers");
+      expect(service.tools[0]?.headers).toBe(stored);
+      expect(await readJson(response)).toMatchObject({
+        headers: { Authorization: "••••••••" },
+      });
+    },
+  );
+
+  test("an explicit credential replacement is encrypted and persisted", async () => {
+    const original = makeTool({ headers: "encrypted-original" });
+    const service = new MemoryToolService([original]);
+    const encryptedInputs: Record<string, string>[] = [];
+    const response = await handleUpdateToolRequest({
+      projectId: "project-1",
+      toolId: original.id,
+      role: "owner",
+      body: { headers: { Authorization: "Bearer replacement" } },
+      toolService: service,
+      encryptHeaders: async (headers) => {
+        encryptedInputs.push(headers);
+        return "encrypted-replacement";
+      },
+      maskStoredHeaders: async (headers) =>
+        headers ? { Authorization: "••••••••" } : null,
+    });
+
+    expect(response.status).toBe(200);
+    expect(encryptedInputs).toEqual([
+      { Authorization: "Bearer replacement" },
+    ]);
+    expect(service.updateCalls[0]).toMatchObject({
+      headers: "encrypted-replacement",
+    });
+    expect(service.tools[0]?.headers).toBe("encrypted-replacement");
+  });
+
   test("recomputes fingerprints only for model-facing contract changes", async () => {
     const original = makeTool();
     const service = new MemoryToolService([original]);
@@ -402,6 +479,100 @@ describe("tool route boundary", () => {
         "07308eb782c7d2e1a1dbfdb3428e6ad4f7859656591701bd1343b2fb068baa85",
     });
   });
+
+  test.each([
+    {
+      label: "custom tool",
+      tool: makeTool({
+        schemaFingerprint: "legacy-v1",
+        parameters: JSON.stringify([
+          {
+            name: "order_id",
+            type: "string",
+            description: "Order ID",
+            required: true,
+          },
+        ]),
+      }),
+      body: {
+        displayName: "Existing tool",
+        description: "Original description.",
+        endpoint: "https://api.example.com/original",
+        method: "POST",
+        headers: null,
+        parameters: [
+          {
+            required: true,
+            description: "Order ID",
+            type: "string",
+            name: "order_id",
+          },
+        ],
+        responseMapping: null,
+        enabled: true,
+        timeout: 10000,
+        allowedChannels: ["public"],
+        access: "read",
+      },
+    },
+    {
+      label: "preset tool",
+      tool: makeTool({
+        name: "create_github_issue",
+        displayName: "Create GitHub Issue",
+        description: "Create a GitHub issue.",
+        endpoint: "https://api.github.com/repos/acme/app/issues",
+        schemaFingerprint: "legacy-v1",
+        parameters: JSON.stringify([
+          {
+            name: "title",
+            type: "string",
+            description: "Issue title",
+            required: true,
+          },
+        ]),
+      }),
+      body: {
+        displayName: "Create GitHub Issue",
+        description: "Create a GitHub issue.",
+        endpoint: "https://api.github.com/repos/acme/app/issues",
+        method: "POST",
+        parameters: [
+          {
+            name: "title",
+            description: "Issue title",
+            required: true,
+            type: "string",
+          },
+        ],
+        responseMapping: null,
+        enabled: true,
+        timeout: 10000,
+        allowedChannels: ["public", "sidechat"],
+        access: "write",
+      },
+    },
+  ] as const)(
+    "preserves a $label fingerprint when a full PATCH repeats its authoritative contract",
+    async ({ tool, body }) => {
+      const service = new MemoryToolService([tool]);
+      const response = await handleUpdateToolRequest({
+        projectId: "project-1",
+        toolId: tool.id,
+        role: "owner",
+        body,
+        toolService: service,
+        encryptHeaders: storeHeaders,
+        maskStoredHeaders: noHeaders,
+      });
+
+      expect(response.status).toBe(200);
+      expect(await readJson(response)).toMatchObject({
+        schemaFingerprint: "legacy-v1",
+      });
+      expect(service.updateCalls[0]).not.toHaveProperty("schemaFingerprint");
+    },
+  );
 
   test("parameter changes replace the canonical fingerprint", async () => {
     const service = new MemoryToolService([

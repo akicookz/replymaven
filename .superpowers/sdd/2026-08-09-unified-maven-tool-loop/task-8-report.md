@@ -111,3 +111,71 @@ Documented narrow expansions beyond the two primary files:
 - `src/pages/Tools.test.tsx`: focused behavior/accessibility/responsive regression harness.
 
 Self-review confirmed no MCP connection UI, sidechat UI, approval UI, new route/page, deployment, push, new aesthetic, or unrelated feature change. No unresolved Task 8 concern remains. The local preview limitation and non-fatal build warnings are recorded above.
+
+## Fix Round 1 — preserve policy-only edits
+
+This review round is limited to the three official findings: masked credential preservation, authoritative contract-fingerprint preservation, and native keyboard expansion for preset rows.
+
+### Review findings and resolution
+
+| Finding | RED evidence | Resolution |
+| --- | --- | --- |
+| A configured HTTP Lookup or GitHub preset could submit masked bullets as replacement credentials during a policy-only save. | The corrected UI boundary suite failed because both PATCH bodies contained `headers`; HTTP Lookup also initialized its editable textarea with two masked header lines. | Preset state now tracks explicitly dirty credential fields. Existing policy-only saves omit `headers`; explicit HTTP header or GitHub token replacements still submit normally. HTTP Lookup shows an empty field with `Leave blank to keep the current headers`, so the client never attempts to recover or resubmit a secret. Route regressions prove omitted headers cause no encryption call and preserve the authoritative ciphertext. |
+| A full PATCH containing description/parameters identical to the authoritative row replaced an existing fingerprint such as `legacy-v1`. | `bun test worker/routes/tool-handlers.test.ts --test-name-pattern 'full PATCH repeats'` returned 0 pass / 2 fail: both cases expected `legacy-v1` but received newly computed canonical hashes. | The route now canonicalizes and compares the authoritative and candidate HTTP contracts. It writes a new fingerprint only for a semantic description/parameter change. Identical full custom/preset PATCHes and endpoint/header/timeout/enabled/audience/access-only edits preserve the persisted value; real contract edits recompute with the existing canonical utility. |
+| Preset expansion depended on a pointer-only clickable container with nested interactive controls. | UI semantics tests could not find a native expander button for either configured or unconfigured presets. | Each preset now has a real `button` with `aria-expanded` and `aria-controls`; enabled and delete controls are sibling actions, never nested inside it. Enter toggles the region and the contained focus ring remains visible. |
+
+### Credential and contract boundary evidence
+
+- Configured HTTP Lookup and GitHub policy-only PATCH requests omit the `headers` key entirely.
+- Explicit HTTP header replacement and explicit GitHub token replacement remain supported and are covered at the UI boundary.
+- Omitted-header route updates call encryption zero times, leave the authoritative encrypted string unchanged, and return the normal masked response.
+- Explicit replacement still encrypts and persists the new credentials.
+- Full custom and preset payloads whose parameter objects differ only in key order preserve `legacy-v1`; real description or semantic parameter changes recompute the canonical fingerprint.
+
+### Interface-polish before/after
+
+#### Native semantics, focus, and hit areas
+
+| Before | After |
+| --- | --- |
+| The whole preset heading was a pointer-clickable non-button container. | A native expander button owns expansion, Enter/Space behavior, `aria-expanded`, and `aria-controls`. |
+| Enabled and delete actions lived inside the clickable expansion ancestor. | Enabled and delete are sibling controls, eliminating nested interactive semantics and accidental expansion. |
+| The remove affordance used only small icon padding. | The same understated icon treatment now has a 40px target without changing the row’s visual density. |
+| Keyboard expansion had no dedicated focus boundary. | The expander uses the existing inset focus-ring language, contained to the actual button rather than the entire action row. |
+
+#### Credential clarity and information hierarchy
+
+| Before | After |
+| --- | --- |
+| Configured HTTP headers appeared as masked bullets inside an editable textarea. | The field stays empty and the placeholder explains that blank preserves current headers. |
+| Policy-only saves serialized masked display values as though they were new secrets. | An explicit dirty/unchanged contract omits unedited credential fields; only deliberate replacement sends credential data. |
+| Secret-display state and editable input state were conflated. | The API remains authoritative for stored credentials, while the UI exposes only replacement input and never attempts client-side recovery. |
+
+#### Responsive layout and restrained visual language
+
+| Before | After |
+| --- | --- |
+| The pointer-only row made expansion and actions one ambiguous interaction zone. | Expansion and row actions are optically aligned but behaviorally distinct, while preserving the existing muted surface, typography, spacing, and chevron. |
+| The reviewed markup had no verified narrow-width keyboard state. | At 390×844, the focused native expander and all HTTP controls remain reachable with `clientWidth: 390` and `scrollWidth: 390`. |
+| No additional treatment was required for the fix. | No new card stack, divider, gradient, glow, badge, animation, or assistant aesthetic was introduced. |
+
+### Visual QA
+
+- Desktop: configured preset preserves the existing compact row and expanded muted surface; focus remains on the real expander instead of wrapping enabled/delete actions.
+- Keyboard: browser inspection changed HTTP Lookup `aria-expanded` from `false` to `true` after Enter.
+- Mobile 390×844: `bodyScrollWidth: 390`, `clientWidth: 390`, `scrollWidth: 390`; focused element was the native `BUTTON`, with no horizontal overflow.
+- The brief-authorized frontend fixture was removed after inspection. No visual-QA fixture remains in the worktree.
+
+### Fix Round 1 verification
+
+| Command | Result |
+| --- | --- |
+| `bun test worker/services/tool-service.test.ts worker/validation.test.ts worker/routes/tool-handlers.test.ts src/pages/Tools.test.tsx worker/chat-runtime/tools/build-maven-tool-registry.test.ts` | 85 pass, 0 fail, 252 assertions. |
+| `bun test worker shared` | 367 pass, 0 fail, 1098 assertions. |
+| `bun ./node_modules/typescript/bin/tsc -p tsconfig.worker.json --noEmit` | Exit 0. |
+| `bun ./node_modules/typescript/bin/tsc -b` | Exit 0. |
+| `bun ./node_modules/eslint/bin/eslint.js src/pages/Tools.tsx src/pages/Tools.test.tsx worker/routes/tool-handlers.ts worker/routes/tool-handlers.test.ts` | Exit 0, no findings. |
+| `git diff --check` | Exit 0. |
+| `bun ./node_modules/vite/bin/vite.js build` | Exit 0; SSR and client builds completed. Wrangler emitted only the known sandbox `EPERM` warning for its user log file, and Vite retained the repository's existing large-chunk warning. |
+
+No unresolved Fix Round 1 concern remains. There was no push, deployment, MCP UI, sidechat UI, approval UI, or unrelated behavior change.

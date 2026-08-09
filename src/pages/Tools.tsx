@@ -149,7 +149,8 @@ interface ToolPreset {
   build: (
     values: Record<string, string>,
     existing: Tool | undefined,
-  ) => Omit<ToolFormPayload, "enabled" | "allowedChannels" | "access">;
+    dirtyFields: ReadonlySet<string>,
+  ) => PresetToolPayload;
   extract: (tool: Tool) => Record<string, string>;
 }
 
@@ -167,6 +168,13 @@ interface ToolFormPayload {
   allowedChannels: ToolAudience[];
   access: ToolAccess;
 }
+
+type PresetToolPayload = Omit<
+  ToolFormPayload,
+  "enabled" | "allowedChannels" | "access" | "headers"
+> & {
+  headers?: Record<string, string> | null;
+};
 
 function webhookPreset(input: {
   name: string;
@@ -197,13 +205,13 @@ function webhookPreset(input: {
         help: input.help,
       },
     ],
-    build: (values) => ({
+    build: (values, existing) => ({
       name: input.name,
       displayName: input.label,
       description: input.description,
       endpoint: values.endpoint.trim(),
       method: input.method ?? "POST",
-      headers: null,
+      ...(!existing ? { headers: null } : {}),
       parameters: input.parameters,
       responseMapping: null,
       timeout: 10000,
@@ -307,7 +315,7 @@ const TOOL_PRESETS: ToolPreset[] = [
         multiline: true,
       },
     ],
-    build: (values) => {
+    build: (values, existing, dirtyFields) => {
       const headers: Record<string, string> = {};
       for (const line of (values.headers ?? "").split("\n")) {
         const idx = line.indexOf(":");
@@ -316,14 +324,13 @@ const TOOL_PRESETS: ToolPreset[] = [
         const value = line.slice(idx + 1).trim();
         if (name && value) headers[name] = value;
       }
-      return {
+      const payload: PresetToolPayload = {
         name: "check_order_status",
         displayName: "Check Order Status",
         description:
           "Look up the current status of an order by its ID. Use when a visitor asks where their order is or whether it shipped.",
         endpoint: values.endpoint.trim(),
         method: "GET",
-        headers: Object.keys(headers).length > 0 ? headers : null,
         parameters: [
           {
             name: "order_id",
@@ -335,12 +342,14 @@ const TOOL_PRESETS: ToolPreset[] = [
         responseMapping: null,
         timeout: 10000,
       };
+      if (!existing || dirtyFields.has("headers")) {
+        payload.headers = Object.keys(headers).length > 0 ? headers : null;
+      }
+      return payload;
     },
     extract: (tool) => ({
       endpoint: tool.endpoint,
-      headers: Object.entries(tool.headers ?? {})
-        .map(([k, v]) => `${k}: ${v}`)
-        .join("\n"),
+      headers: "",
     }),
   },
   {
@@ -363,23 +372,15 @@ const TOOL_PRESETS: ToolPreset[] = [
         type: "password",
       },
     ],
-    build: (values, existing) => {
-      const token =
-        values.token.trim() ||
-        existing?.headers?.["Authorization"]?.replace(/^Bearer\s+/, "") ||
-        "";
-      return {
+    build: (values, existing, dirtyFields) => {
+      const token = values.token.trim();
+      const payload: PresetToolPayload = {
         name: "create_github_issue",
         displayName: "Create GitHub Issue",
         description:
           "Create a GitHub issue for a confirmed bug report. Use only when the visitor has described a reproducible problem the team should fix.",
         endpoint: `https://api.github.com/repos/${values.repo.trim()}/issues`,
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "User-Agent": "ReplyMaven-Bot",
-        },
         parameters: [
           {
             name: "title",
@@ -398,6 +399,14 @@ const TOOL_PRESETS: ToolPreset[] = [
         responseMapping: null,
         timeout: 10000,
       };
+      if (!existing || (dirtyFields.has("token") && token.length > 0)) {
+        payload.headers = {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "ReplyMaven-Bot",
+        };
+      }
+      return payload;
     },
     extract: (tool) => {
       const match = tool.endpoint.match(/repos\/(.+?)\/issues/);
@@ -538,8 +547,12 @@ function PresetToolRow({
   projectId: string;
 }) {
   const queryClient = useQueryClient();
+  const panelId = useId();
   const [expanded, setExpanded] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [dirtyFields, setDirtyFields] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [policy, setPolicy] = useState<ToolPolicyValue>(defaultToolPolicy);
   const configured = !!tool;
 
@@ -554,13 +567,14 @@ function PresetToolRow({
       setValues({});
       setPolicy(defaultToolPolicy);
     }
+    setDirtyFields(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool?.id, tool?.updatedAt]);
 
   const save = useMutation({
     mutationFn: async () => {
       const payload = {
-        ...preset.build(values, tool),
+        ...preset.build(values, tool, dirtyFields),
         enabled: tool?.enabled ?? true,
         ...policy,
       };
@@ -581,6 +595,7 @@ function PresetToolRow({
       return res.json();
     },
     onSuccess: () => {
+      setDirtyFields(new Set());
       queryClient.invalidateQueries({ queryKey: ["tools", projectId] });
     },
   });
@@ -619,6 +634,15 @@ function PresetToolRow({
 
   const Icon = preset.icon;
 
+  function updateField(key: string, value: string): void {
+    setValues((current) => ({ ...current, [key]: value }));
+    setDirtyFields((current) => {
+      const next = new Set(current);
+      next.add(key);
+      return next;
+    });
+  }
+
   return (
     <div
       className={cn(
@@ -626,76 +650,79 @@ function PresetToolRow({
         configured ? "" : "border-2 border-dashed border-muted",
       )}
     >
-      <div
-        className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-center gap-2 shrink-0">
-          {expanded ? (
-            <ChevronDown className="w-4 h-4 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          )}
-          <div
-            className={cn(
-              "w-8 h-8 rounded-lg flex items-center justify-center",
-              configured ? preset.iconBg : "bg-muted",
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={() => setExpanded((current) => !current)}
+          className="flex min-h-14 min-w-0 flex-1 items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          <div className="flex items-center gap-2 shrink-0">
+            {expanded ? (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
             )}
-          >
-            <Icon
+            <div
               className={cn(
-                "w-4 h-4",
-                configured ? preset.iconColor : "text-muted-foreground",
+                "w-8 h-8 rounded-lg flex items-center justify-center",
+                configured ? preset.iconBg : "bg-muted",
               )}
-            />
-          </div>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium text-foreground truncate">
-              {preset.label}
-            </p>
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-              Preset
-            </Badge>
-            {!configured && (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 py-0 text-warning border-warning/30"
-              >
-                Not configured
-              </Badge>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground truncate">{preset.blurb}</p>
-        </div>
-        <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-          {configured && (
-            <>
-              <Switch
-                checked={tool!.enabled}
-                onCheckedChange={(checked) => toggle.mutate(checked)}
-                onClick={(e) => e.stopPropagation()}
-                size="sm"
+            >
+              <Icon
+                className={cn(
+                  "w-4 h-4",
+                  configured ? preset.iconColor : "text-muted-foreground",
+                )}
               />
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  remove.mutate();
-                }}
-                disabled={remove.isPending}
-                className="p-1.5 rounded-lg hover:bg-destructive/10 text-destructive disabled:opacity-50"
-                title="Remove"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </>
-          )}
-        </div>
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-foreground truncate">
+                {preset.label}
+              </p>
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                Preset
+              </Badge>
+              {!configured && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0 text-warning border-warning/30"
+                >
+                  Not configured
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground truncate">
+              {preset.blurb}
+            </p>
+          </div>
+        </button>
+        {configured && (
+          <div className="flex shrink-0 items-center gap-1 pr-2 sm:gap-3 sm:pr-4">
+            <Switch
+              checked={tool!.enabled}
+              onCheckedChange={(checked) => toggle.mutate(checked)}
+              size="sm"
+            />
+            <button
+              type="button"
+              aria-label={`Remove ${preset.label}`}
+              onClick={() => remove.mutate()}
+              disabled={remove.isPending}
+              className="flex size-10 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10 disabled:opacity-50"
+              title="Remove"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {expanded && (
-        <div className="px-4 py-4 space-y-3 bg-muted/20">
+        <div id={panelId} className="px-4 py-4 space-y-3 bg-muted/20">
           {preset.fields.map((field) => (
             <div key={field.key} className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">
@@ -709,20 +736,20 @@ function PresetToolRow({
               {field.multiline ? (
                 <textarea
                   value={values[field.key] ?? ""}
-                  onChange={(e) =>
-                    setValues((prev) => ({ ...prev, [field.key]: e.target.value }))
-                  }
+                  onChange={(e) => updateField(field.key, e.target.value)}
                   rows={2}
-                  placeholder={field.placeholder}
+                  placeholder={
+                    configured && field.key === "headers"
+                      ? "Leave blank to keep the current headers"
+                      : field.placeholder
+                  }
                   className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               ) : (
                 <input
                   type={field.type ?? "text"}
                   value={values[field.key] ?? ""}
-                  onChange={(e) =>
-                    setValues((prev) => ({ ...prev, [field.key]: e.target.value }))
-                  }
+                  onChange={(e) => updateField(field.key, e.target.value)}
                   placeholder={
                     field.type === "password" && configured
                       ? "Leave blank to keep the current value"

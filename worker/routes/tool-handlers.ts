@@ -315,11 +315,19 @@ export async function handleUpdateToolRequest(
     parsed.data.description !== undefined ||
     parsed.data.parameters !== undefined
   ) {
-    updates.schemaFingerprint = await fingerprintHttpToolContract({
+    const authoritativeFingerprint = await fingerprintHttpToolContract({
+      name: current.name,
+      description: current.description,
+      parameters: parseParameters(current.parameters),
+    });
+    const candidateFingerprint = await fingerprintHttpToolContract({
       name: current.name,
       description: parsed.data.description ?? current.description,
       parameters: parsed.data.parameters ?? parseParameters(current.parameters),
     });
+    if (candidateFingerprint !== authoritativeFingerprint) {
+      updates.schemaFingerprint = candidateFingerprint;
+    }
   }
 
   const updated = await options.toolService.updateTool(
