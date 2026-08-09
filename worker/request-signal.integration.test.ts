@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { Miniflare } from "miniflare";
+import { readFile } from "node:fs/promises";
 import { unstable_readConfig } from "wrangler";
 
 const cleanupWorkers: Miniflare[] = [];
@@ -73,3 +74,25 @@ export default {
 
   expect(await pollAborted(workerUrl)).toBe(true);
 }, 30_000);
+
+test("Cloudflare dev tooling supports the current remote-binding preview protocol", async () => {
+  const wranglerPackage = JSON.parse(
+    await readFile("node_modules/wrangler/package.json", "utf8"),
+  ) as { version: string };
+  const vitePluginPackage = JSON.parse(
+    await readFile("node_modules/@cloudflare/vite-plugin/package.json", "utf8"),
+  ) as { version: string };
+  const [wranglerMajor, wranglerMinor] = wranglerPackage.version
+    .split(".")
+    .map(Number);
+  const [pluginMajor, pluginMinor] = vitePluginPackage.version
+    .split(".")
+    .map(Number);
+
+  expect(
+    wranglerMajor > 4 || (wranglerMajor === 4 && wranglerMinor >= 120),
+  ).toBe(true);
+  expect(pluginMajor > 1 || (pluginMajor === 1 && pluginMinor >= 51)).toBe(
+    true,
+  );
+});
