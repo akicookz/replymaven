@@ -212,9 +212,10 @@ function seedTranscriptMessage(
 async function createTranscriptHarness(): Promise<{
   service: ChatService;
   sqlite: Database;
+  db: DrizzleD1Database<Record<string, unknown>>;
   conversation: ConversationRow;
 }> {
-  const { service, sqlite } = createConversationContinuityService();
+  const { service, sqlite, db } = createConversationContinuityService();
   const conversation = await service.createConversation({
     projectId: "project-1",
     customerId: null,
@@ -223,7 +224,7 @@ async function createTranscriptHarness(): Promise<{
     visitorEmail: "alice@example.com",
     metadata: null,
   });
-  return { service, sqlite, conversation };
+  return { service, sqlite, db, conversation };
 }
 
 function createDashboardStatsHarness(): {
@@ -656,7 +657,7 @@ describe("ChatService message channel isolation", () => {
       .run(
         Math.floor(publicActivity.getTime() / 1000),
         Math.floor(publicActivity.getTime() / 1000),
-        Math.floor(Date.parse("2026-08-09T01:00:00.000Z") / 1000),
+        Math.floor((Date.now() + 5 * 60_000) / 1000),
         conversation.id,
       );
     const before = sqlite.query(`SELECT
@@ -740,6 +741,38 @@ describe("ChatService message channel isolation", () => {
     })).toBeNull();
     expect(sqlite.query("SELECT count(*) AS total FROM messages").get())
       .toEqual({ total: 0 });
+  });
+
+  test("matching expired sidechat runs cannot write messages or activity", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    sqlite.query(`UPDATE conversations SET
+      sidechat_status = 'working',
+      sidechat_run_id = 'run-expired',
+      sidechat_lease_expires_at = 1,
+      sidechat_updated_at = 100
+      WHERE id = ?`)
+      .run(conversation.id);
+
+    expect(await service.addSidechatHumanMessage({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-expired",
+      content: "Late private note",
+      userId: "agent-1",
+      senderName: "Agent",
+      senderAvatar: null,
+    })).toBeNull();
+    expect(await service.addSidechatMavenMessage({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-expired",
+      content: "Late private draft",
+    })).toBeNull();
+    expect(sqlite.query("SELECT count(*) AS total FROM messages").get())
+      .toEqual({ total: 0 });
+    expect(sqlite.query(`SELECT sidechat_updated_at
+      FROM conversations WHERE id = ?`).get(conversation.id))
+      .toEqual({ sidechat_updated_at: 100 });
   });
 });
 
@@ -877,6 +910,120 @@ describe("ChatService sidechat run coordination", () => {
       sidechatLeaseExpiresAt: null,
       updatedAt: new Date(originalUpdatedAt),
     });
+  });
+
+  test("project lists normalize expired working leases", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    sqlite.query(`UPDATE conversations SET
+      sidechat_status = 'working', sidechat_run_id = 'run-expired',
+      sidechat_lease_expires_at = 1 WHERE id = ?`)
+      .run(conversation.id);
+
+    const rows = await service.getConversationsByProject(
+      conversation.projectId,
+    );
+    expect(rows.find((row) => row.id === conversation.id)).toMatchObject({
+      sidechatStatus: "failed",
+      sidechatRunId: null,
+      sidechatLeaseExpiresAt: null,
+    });
+  });
+
+  test("incremental updates normalize expired working leases", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    sqlite.query(`UPDATE conversations SET
+      sidechat_status = 'working', sidechat_run_id = 'run-expired',
+      sidechat_lease_expires_at = 1 WHERE id = ?`)
+      .run(conversation.id);
+
+    const rows = await service.getConversationUpdatesSince(
+      conversation.projectId,
+      new Date(0),
+    );
+    expect(rows.find((row) => row.id === conversation.id)).toMatchObject({
+      sidechatStatus: "failed",
+      sidechatRunId: null,
+      sidechatLeaseExpiresAt: null,
+    });
+  });
+
+  test("project-list normalization cannot clobber a new claimant", async () => {
+    const { service, sqlite, db, conversation } = await createTranscriptHarness();
+    sqlite.query(`UPDATE conversations SET
+      sidechat_status = 'working', sidechat_run_id = 'run-expired',
+      sidechat_lease_expires_at = 1 WHERE id = ?`)
+      .run(conversation.id);
+    const ready = createDeferred();
+    const release = createDeferred();
+    const delayedReader = new SidechatReadBarrierService(db, async () => {
+      ready.resolve();
+      await release.promise;
+    });
+
+    const read = delayedReader.getConversationsByProject(
+      conversation.projectId,
+    );
+    const firstEvent = await Promise.race([
+      ready.promise.then(() => "normalization_ready" as const),
+      read.then(() => "read_completed" as const),
+    ]);
+    expect(firstEvent).toBe("normalization_ready");
+    const now = new Date();
+    expect(await service.claimSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-new",
+      now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+    })).toBe(true);
+    release.resolve();
+
+    expect((await read).find((row) => row.id === conversation.id))
+      .toMatchObject({
+        sidechatStatus: "working",
+        sidechatRunId: "run-new",
+        sidechatLeaseExpiresAt: new Date(now.getTime() + 60_000),
+      });
+  });
+
+  test("incremental-update normalization cannot clobber a new claimant", async () => {
+    const { service, sqlite, db, conversation } = await createTranscriptHarness();
+    sqlite.query(`UPDATE conversations SET
+      sidechat_status = 'working', sidechat_run_id = 'run-expired',
+      sidechat_lease_expires_at = 1 WHERE id = ?`)
+      .run(conversation.id);
+    const ready = createDeferred();
+    const release = createDeferred();
+    const delayedReader = new SidechatReadBarrierService(db, async () => {
+      ready.resolve();
+      await release.promise;
+    });
+
+    const read = delayedReader.getConversationUpdatesSince(
+      conversation.projectId,
+      new Date(0),
+    );
+    const firstEvent = await Promise.race([
+      ready.promise.then(() => "normalization_ready" as const),
+      read.then(() => "read_completed" as const),
+    ]);
+    expect(firstEvent).toBe("normalization_ready");
+    const now = new Date();
+    expect(await service.claimSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-new",
+      now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+    })).toBe(true);
+    release.resolve();
+
+    expect((await read).find((row) => row.id === conversation.id))
+      .toMatchObject({
+        sidechatStatus: "working",
+        sidechatRunId: "run-new",
+        sidechatLeaseExpiresAt: new Date(now.getTime() + 60_000),
+      });
   });
 
   test("expired-lease normalization cannot clobber a new claimant", async () => {

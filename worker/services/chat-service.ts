@@ -461,6 +461,7 @@ function buildConditionalSidechatMessageQuery(
         isNull(conversations.archivedAt),
         eq(conversations.sidechatStatus, "working"),
         eq(conversations.sidechatRunId, input.runId),
+        gt(conversations.sidechatLeaseExpiresAt, input.createdAt),
       ),
     );
 
@@ -1099,7 +1100,7 @@ export class ChatService {
       const matcher = or(nameMatch, emailMatch);
       if (matcher) conditions.push(matcher);
     }
-    return this.db
+    const rows = await this.db
       .select()
       .from(conversations)
       .where(and(...conditions))
@@ -1109,6 +1110,10 @@ export class ChatService {
       )
       .limit(limit)
       .offset(offset);
+    const normalizedRows = await Promise.all(
+      rows.map((row) => this.normalizeExpiredSidechatLease(row, false, now)),
+    );
+    return normalizedRows.filter((row) => row !== null);
   }
 
   async getConversationCounts(
@@ -1205,6 +1210,7 @@ export class ChatService {
       Omit<ConversationRow, "chatState" | "telegramThreadId">
     >
   > {
+    const now = new Date();
     // Return the full sidebar-renderable shape (everything except the heavy
     // chatState JSON and the telegram thread id, neither of which the
     // dashboard sidebar consumes). The since filter still bounds the count;
@@ -1253,7 +1259,35 @@ export class ChatService {
       )
       .orderBy(desc(conversations.updatedAt))
       .limit(limit);
-    return rows;
+    const normalizedRows = await Promise.all(rows.map(async (row) => {
+      if (
+        row.sidechatStatus !== "working" ||
+        !row.sidechatLeaseExpiresAt ||
+        row.sidechatLeaseExpiresAt.getTime() > now.getTime()
+      ) {
+        return row;
+      }
+
+      const currentRows = await buildConversationByIdQuery(
+        this.db,
+        row.id,
+        row.projectId,
+      );
+      const current = await this.normalizeExpiredSidechatLease(
+        currentRows[0] ?? null,
+        false,
+        now,
+      );
+      if (!current) return null;
+      return {
+        ...row,
+        sidechatStatus: current.sidechatStatus,
+        sidechatRunId: current.sidechatRunId,
+        sidechatLeaseExpiresAt: current.sidechatLeaseExpiresAt,
+        sidechatUpdatedAt: current.sidechatUpdatedAt,
+      };
+    }));
+    return normalizedRows.filter((row) => row !== null);
   }
 
   // See buildNeedsReviewQuery for the query semantics and why it's extracted.
@@ -2478,6 +2512,7 @@ export class ChatService {
           isNull(conversations.archivedAt),
           eq(conversations.sidechatStatus, "working"),
           eq(conversations.sidechatRunId, input.runId),
+          gt(conversations.sidechatLeaseExpiresAt, now),
         ),
       );
     const [rows] = await this.db.batch([insertQuery, activityQuery]);
