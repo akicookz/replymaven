@@ -288,9 +288,13 @@ export class ConversationDO implements DurableObject {
 
     if (roomKind === "conversation") {
       const db = drizzle(this.env.DB);
-      const conversation = await new ChatService(
-        db,
-      ).getOperationalConversationById(conversationId, projectId);
+      const chatService = new ChatService(db);
+      const conversation = kind === "agent"
+        ? await chatService.getConversationById(conversationId, projectId)
+        : await chatService.getOperationalConversationById(
+            conversationId,
+            projectId,
+          );
       if (!conversation) {
         return new Response("Conversation unavailable", { status: 410 });
       }
@@ -440,10 +444,15 @@ export class ConversationDO implements DurableObject {
 
     const db = drizzle(this.env.DB);
     const chatService = new ChatService(db);
-    const conversation = await chatService.getOperationalConversationById(
-      attachment.conversationId,
-      attachment.projectId,
-    );
+    const conversation = attachment.kind === "agent"
+      ? await chatService.getConversationById(
+          attachment.conversationId,
+          attachment.projectId,
+        )
+      : await chatService.getOperationalConversationById(
+          attachment.conversationId,
+          attachment.projectId,
+        );
     if (!conversation) return;
     await replayConversationMessages(ws, attachment, cursors, chatService);
   }

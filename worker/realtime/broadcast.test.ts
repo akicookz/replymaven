@@ -414,6 +414,51 @@ test("agent replay sends the authoritative Sidechat status after message replay"
   });
 });
 
+test("archived agent replay still sends coordination after private history", async () => {
+  const calls: string[] = [];
+  const reader: ConversationReplayReader = {
+    async getMessageByIdForChannel() {
+      return null;
+    },
+    async getPublicMessagesSince() {
+      return [];
+    },
+    async getSidechatMessagesSince() {
+      calls.push("archived-private-history");
+      return [createMessageRow()];
+    },
+    async getSidechatCoordinationSnapshot() {
+      calls.push("archived-coordination");
+      return {
+        status: "failed",
+        runId: null,
+        revision: 12,
+        updatedAt: Date.parse("2026-08-10T00:00:12.000Z"),
+      };
+    },
+  };
+  const agent = createSocket({
+    kind: "agent",
+    subjectId: "agent-1",
+    conversationId: "conversation-1",
+    projectId: "project-1",
+    roomKind: "conversation",
+  });
+
+  await replayConversationMessages(
+    agent,
+    agent.deserializeAttachment() as SocketAttachment,
+    { lastPublicMessageId: null, lastSidechatMessageId: null },
+    reader,
+  );
+
+  expect(calls).toEqual(["archived-private-history", "archived-coordination"]);
+  expect(agent.sent.map((payload) => JSON.parse(payload).type)).toEqual([
+    "sidechat:message",
+    "sidechat:status",
+  ]);
+});
+
 test("visitor replay fails closed when the public reader returns a private row", async () => {
   const reader: ConversationReplayReader = {
     async getMessageByIdForChannel() {

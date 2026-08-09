@@ -1224,7 +1224,7 @@ export class ChatService {
     conversationId: string,
     projectId: string,
   ): Promise<SidechatCoordinationSnapshot | null> {
-    const conversation = await this.getOperationalConversationById(
+    const conversation = await this.getConversationById(
       conversationId,
       projectId,
     );

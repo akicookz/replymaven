@@ -837,6 +837,34 @@ describe("ChatService message channel isolation", () => {
 });
 
 describe("ChatService sidechat run coordination", () => {
+  test("authoritative Sidechat coordination remains readable after archival", async () => {
+    const { service, conversation } = await createTranscriptHarness();
+    const now = new Date("2026-08-10T00:00:00.000Z");
+    expect(await service.claimSidechatRun({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: "run-archived-resume",
+      now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+    })).toBe(true);
+    await service.bulkUpdateConversations(
+      conversation.projectId,
+      [conversation.id],
+      { action: "archive" },
+      new Date(now.getTime() + 1_000),
+    );
+
+    expect(await service.getSidechatCoordinationSnapshot(
+      conversation.id,
+      conversation.projectId,
+    )).toEqual({
+      status: "failed",
+      runId: null,
+      revision: 2,
+      updatedAt: now.getTime() + 1_000,
+    });
+  });
+
   test("raw Sidechat classification reads do not normalize an expired lease", async () => {
     const { service, sqlite, conversation } = await createTranscriptHarness();
     sqlite.query(`UPDATE conversations SET

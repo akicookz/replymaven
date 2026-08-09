@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { QueryClient } from "@tanstack/react-query";
 import type { MessageRow } from "../../worker/db";
 import {
   broadcastEventToSockets,
@@ -20,6 +21,9 @@ import {
   reduceSidechatEphemeralTerminalEvent,
   reduceSidechatAcceptedSnapshot,
   reduceSidechatStatusSnapshot,
+  reconcileSidechatCoordinationQueryCaches,
+  selectAuthoritativeSidechatCoordinationFromCaches,
+  synchronizeSidechatCoordinationQueryCaches,
   type ConversationRealtimeMessageState,
   type SidechatEphemeralStore,
 } from "./use-conversation-ws";
@@ -519,5 +523,189 @@ test("terminal then detail refetch then delayed retry 202 cannot resurrect worki
     sidechatRunId: "run-retry-live",
     sidechatRevision: 9,
     sidechatUpdatedAt: "2026-08-10T00:00:09.000Z",
+  });
+});
+
+function seedCoordinationCaches(
+  queryClient: QueryClient,
+  snapshots: {
+    detail?: { revision: number; status: "working" | "ready" | "failed"; runId: string | null };
+    list?: { revision: number; status: "working" | "ready" | "failed"; runId: string | null };
+    history?: { revision: number; status: "working" | "ready" | "failed"; runId: string | null };
+  },
+): void {
+  if (snapshots.detail) {
+    queryClient.setQueryData(["conversation-detail", "conversation-1"], {
+      conversation: {
+        id: "conversation-1",
+        status: "active",
+        closeReason: null,
+        updatedAt: "2026-08-10T00:00:00.000Z",
+        sidechatStatus: snapshots.detail.status,
+        sidechatRunId: snapshots.detail.runId,
+        sidechatRevision: snapshots.detail.revision,
+        sidechatUpdatedAt: `2026-08-10T00:00:0${snapshots.detail.revision}.000Z`,
+      },
+      messages: [],
+    });
+  }
+  if (snapshots.list) {
+    queryClient.setQueryData(["conversations", "project-1", "all"], {
+      conversations: [{
+        id: "conversation-1",
+        sidechatStatus: snapshots.list.status,
+        sidechatRunId: snapshots.list.runId,
+        sidechatRevision: snapshots.list.revision,
+        sidechatUpdatedAt: `2026-08-10T00:00:0${snapshots.list.revision}.000Z`,
+      }],
+    });
+  }
+  if (snapshots.history) {
+    queryClient.setQueryData(["sidechat", "project-1", "conversation-1"], {
+      messages: [],
+      hasMore: false,
+      coordination: {
+        status: snapshots.history.status,
+        runId: snapshots.history.runId,
+        revision: snapshots.history.revision,
+        updatedAt: snapshots.history.revision * 1_000,
+      },
+    });
+  }
+}
+
+test("cross-cache max rejects an older terminal everywhere without clearing a newer run", () => {
+  const queryClient = new QueryClient();
+  seedCoordinationCaches(queryClient, {
+    detail: { revision: 7, status: "working", runId: "run-7" },
+    list: { revision: 9, status: "working", runId: "run-9" },
+    history: { revision: 7, status: "working", runId: "run-7" },
+  });
+  const ephemeral = new Map([
+    ["run-8", { delta: "old", activity: null }],
+    ["run-9", { delta: "new", activity: null }],
+  ]);
+  queryClient.setQueryData(
+    ["sidechat-ephemeral", "project-1", "conversation-1"],
+    ephemeral,
+  );
+
+  const result = reconcileSidechatCoordinationQueryCaches(
+    queryClient,
+    "project-1",
+    "conversation-1",
+    { status: "ready", runId: null, revision: 8, updatedAt: 8_000 },
+  );
+
+  expect(result.accepted).toBe(false);
+  expect(queryClient.getQueryData(["conversation-detail", "conversation-1"]))
+    .toMatchObject({ conversation: { sidechatRevision: 7, sidechatRunId: "run-7" } });
+  expect(queryClient.getQueryData(["conversations", "project-1", "all"]))
+    .toMatchObject({ conversations: [{ sidechatRevision: 9, sidechatRunId: "run-9" }] });
+  expect(queryClient.getQueryData(
+    ["sidechat-ephemeral", "project-1", "conversation-1"],
+  )).toBe(ephemeral);
+});
+
+test("poll terminal advances detail list and history and clears only the superseded run", () => {
+  const queryClient = new QueryClient();
+  seedCoordinationCaches(queryClient, {
+    detail: { revision: 7, status: "working", runId: "run-7" },
+    list: { revision: 7, status: "working", runId: "run-7" },
+    history: { revision: 7, status: "working", runId: "run-7" },
+  });
+  queryClient.setQueryData(
+    ["sidechat-ephemeral", "project-1", "conversation-1"],
+    new Map([
+      ["run-7", { delta: "completed", activity: null }],
+      ["run-9", { delta: "unrelated", activity: null }],
+    ]),
+  );
+
+  expect(reconcileSidechatCoordinationQueryCaches(
+    queryClient,
+    "project-1",
+    "conversation-1",
+    { status: "failed", runId: null, revision: 8, updatedAt: 8_000 },
+  ).accepted).toBe(true);
+
+  expect(queryClient.getQueryData(["conversation-detail", "conversation-1"]))
+    .toMatchObject({ conversation: { sidechatRevision: 8, sidechatStatus: "failed", sidechatRunId: null } });
+  expect(queryClient.getQueryData(["conversations", "project-1", "all"]))
+    .toMatchObject({ conversations: [{ sidechatRevision: 8, sidechatStatus: "failed", sidechatRunId: null }] });
+  expect(queryClient.getQueryData(["sidechat", "project-1", "conversation-1"]))
+    .toMatchObject({ coordination: { revision: 8, status: "failed", runId: null } });
+  expect([
+    ...(queryClient.getQueryData<SidechatEphemeralStore>(
+      ["sidechat-ephemeral", "project-1", "conversation-1"],
+    )?.keys() ?? []),
+  ]).toEqual(["run-9"]);
+});
+
+test("accepted live terminal clears its exact prior run and preserves another ephemeral run", () => {
+  const queryClient = new QueryClient();
+  seedCoordinationCaches(queryClient, {
+    detail: { revision: 7, status: "working", runId: "run-7" },
+  });
+  queryClient.setQueryData(
+    ["sidechat-ephemeral", "project-1", "conversation-1"],
+    new Map([
+      ["run-7", { delta: "completed", activity: null }],
+      ["run-9", { delta: "newer stream", activity: null }],
+    ]),
+  );
+
+  reconcileSidechatCoordinationQueryCaches(
+    queryClient,
+    "project-1",
+    "conversation-1",
+    { status: "ready", runId: null, revision: 8, updatedAt: 8_000 },
+  );
+
+  expect([
+    ...(queryClient.getQueryData<SidechatEphemeralStore>(
+      ["sidechat-ephemeral", "project-1", "conversation-1"],
+    )?.keys() ?? []),
+  ]).toEqual(["run-9"]);
+});
+
+test("unselected polling snapshot remains authoritative when stale detail and history later load", () => {
+  const queryClient = new QueryClient();
+  seedCoordinationCaches(queryClient, {
+    list: { revision: 9, status: "ready", runId: null },
+    detail: { revision: 7, status: "working", runId: "run-7" },
+    history: { revision: 8, status: "failed", runId: null },
+  });
+
+  expect(selectAuthoritativeSidechatCoordinationFromCaches(
+    queryClient,
+    "project-1",
+    "conversation-1",
+  )).toEqual({
+    status: "ready",
+    runId: null,
+    revision: 9,
+    updatedAt: Date.parse("2026-08-10T00:00:09.000Z"),
+  });
+
+  expect(synchronizeSidechatCoordinationQueryCaches(
+    queryClient,
+    "project-1",
+    "conversation-1",
+  )).toMatchObject({ revision: 9, status: "ready", runId: null });
+  expect(queryClient.getQueryData(["conversation-detail", "conversation-1"]))
+    .toMatchObject({
+      conversation: {
+        sidechatRevision: 9,
+        sidechatStatus: "ready",
+        sidechatRunId: null,
+      },
+    });
+  expect(queryClient.getQueryData([
+    "sidechat",
+    "project-1",
+    "conversation-1",
+  ])).toMatchObject({
+    coordination: { revision: 9, status: "ready", runId: null },
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { WebSocket as ReconnectingWebSocket } from "partysocket";
 import {
   compareMessagePositions,
@@ -214,7 +214,7 @@ interface SidechatAcceptedConversationSnapshot {
   sidechatRevision?: number;
 }
 
-function conversationSidechatSnapshot(
+export function sidechatCoordinationSnapshotFromConversation(
   conversation: SidechatAcceptedConversationSnapshot,
 ): SidechatCoordinationSnapshot {
   return {
@@ -227,13 +227,229 @@ function conversationSidechatSnapshot(
   };
 }
 
+function selectNewerCoordination(
+  current: SidechatCoordinationSnapshot | null,
+  candidate: SidechatCoordinationSnapshot | null,
+): SidechatCoordinationSnapshot | null {
+  return candidate
+    ? selectNewerSidechatCoordinationSnapshot(current, candidate)
+    : current;
+}
+
+export function selectAuthoritativeSidechatCoordinationFromCaches(
+  queryClient: QueryClient,
+  projectId: string | undefined,
+  conversationId: string,
+): SidechatCoordinationSnapshot | null {
+  if (!projectId) return null;
+  let authoritative: SidechatCoordinationSnapshot | null = null;
+  const detail = queryClient.getQueryData<ConversationDetailData>([
+    "conversation-detail",
+    conversationId,
+  ]);
+  if (detail) {
+    authoritative = selectNewerCoordination(
+      authoritative,
+      sidechatCoordinationSnapshotFromConversation(detail.conversation),
+    );
+  }
+  for (const [, page] of queryClient.getQueriesData<ConversationsCacheData>({
+    queryKey: ["conversations", projectId],
+  })) {
+    const conversation = page?.conversations.find(
+      (candidate) => candidate.id === conversationId,
+    );
+    if (conversation) {
+      authoritative = selectNewerCoordination(
+        authoritative,
+        sidechatCoordinationSnapshotFromConversation(conversation),
+      );
+    }
+  }
+  const sidechat = queryClient.getQueryData<SidechatCacheData>([
+    "sidechat",
+    projectId,
+    conversationId,
+  ]);
+  return selectNewerCoordination(authoritative, sidechat?.coordination ?? null);
+}
+
+export interface SidechatCoordinationReconciliationResult {
+  accepted: boolean;
+  coordination: SidechatCoordinationSnapshot;
+}
+
+function applySidechatCoordinationToQueryCaches(
+  queryClient: QueryClient,
+  projectId: string,
+  conversationId: string,
+  coordination: SidechatCoordinationSnapshot,
+): void {
+  queryClient.setQueryData<ConversationDetailData | undefined>(
+    ["conversation-detail", conversationId],
+    (old) => {
+      if (!old) return old;
+      const conversation = reduceSidechatAcceptedConversation(
+        old.conversation,
+        coordination,
+      );
+      return conversation === old.conversation
+        ? old
+        : { ...old, conversation };
+    },
+  );
+  queryClient.setQueriesData<ConversationsCacheData>(
+    { queryKey: ["conversations", projectId] },
+    (old) => {
+      if (!old) return old;
+      let changed = false;
+      const next = old.conversations.map((conversation) => {
+        if (conversation.id !== conversationId) return conversation;
+        const reconciled = reduceSidechatAcceptedConversation(
+          conversation,
+          coordination,
+        );
+        if (reconciled !== conversation) changed = true;
+        return reconciled;
+      });
+      return changed ? { ...old, conversations: next } : old;
+    },
+  );
+  queryClient.setQueryData<SidechatCacheData | undefined>(
+    ["sidechat", projectId, conversationId],
+    (old) => {
+      if (!old) return old;
+      const next = selectNewerSidechatCoordinationSnapshot(
+        old.coordination ?? null,
+        coordination,
+      );
+      return next === old.coordination ? old : { ...old, coordination: next };
+    },
+  );
+}
+
+function clearSupersededSidechatRun(
+  queryClient: QueryClient,
+  projectId: string,
+  conversationId: string,
+  runId: string | null,
+): void {
+  if (!runId) return;
+  queryClient.setQueryData<SidechatEphemeralStore>(
+    ["sidechat-ephemeral", projectId, conversationId],
+    (old) => clearSidechatEphemeralRun(old ?? new Map(), runId),
+  );
+}
+
+export function reconcileSidechatCoordinationQueryCaches(
+  queryClient: QueryClient,
+  projectId: string | undefined,
+  conversationId: string,
+  incoming: SidechatCoordinationSnapshot,
+): SidechatCoordinationReconciliationResult {
+  if (!projectId) return { accepted: false, coordination: incoming };
+  const authoritative = selectAuthoritativeSidechatCoordinationFromCaches(
+    queryClient,
+    projectId,
+    conversationId,
+  );
+  if (authoritative && incoming.revision <= authoritative.revision) {
+    return { accepted: false, coordination: authoritative };
+  }
+
+  applySidechatCoordinationToQueryCaches(
+    queryClient,
+    projectId,
+    conversationId,
+    incoming,
+  );
+
+  const supersededRunId = incoming.status !== "working" &&
+      authoritative?.status === "working"
+    ? authoritative.runId
+    : null;
+  clearSupersededSidechatRun(
+    queryClient,
+    projectId,
+    conversationId,
+    supersededRunId,
+  );
+  return { accepted: true, coordination: incoming };
+}
+
+export function synchronizeSidechatCoordinationQueryCaches(
+  queryClient: QueryClient,
+  projectId: string | undefined,
+  conversationId: string,
+): SidechatCoordinationSnapshot | null {
+  if (!projectId) return null;
+  const authoritative = selectAuthoritativeSidechatCoordinationFromCaches(
+    queryClient,
+    projectId,
+    conversationId,
+  );
+  if (!authoritative) return null;
+
+  const accepted = authoritative;
+  let supersededRunId: string | null = null;
+  let supersededRevision = -1;
+  function consider(candidate: SidechatCoordinationSnapshot | null): void {
+    if (
+      accepted.status !== "working" &&
+      candidate?.status === "working" &&
+      candidate.runId &&
+      candidate.revision < accepted.revision &&
+      candidate.revision > supersededRevision
+    ) {
+      supersededRunId = candidate.runId;
+      supersededRevision = candidate.revision;
+    }
+  }
+  const detail = queryClient.getQueryData<ConversationDetailData>([
+    "conversation-detail",
+    conversationId,
+  ]);
+  consider(detail
+    ? sidechatCoordinationSnapshotFromConversation(detail.conversation)
+    : null);
+  for (const [, page] of queryClient.getQueriesData<ConversationsCacheData>({
+    queryKey: ["conversations", projectId],
+  })) {
+    const conversation = page?.conversations.find(
+      (candidate) => candidate.id === conversationId,
+    );
+    consider(conversation
+      ? sidechatCoordinationSnapshotFromConversation(conversation)
+      : null);
+  }
+  consider(queryClient.getQueryData<SidechatCacheData>([
+    "sidechat",
+    projectId,
+    conversationId,
+  ])?.coordination ?? null);
+
+  applySidechatCoordinationToQueryCaches(
+    queryClient,
+    projectId,
+    conversationId,
+    accepted,
+  );
+  clearSupersededSidechatRun(
+    queryClient,
+    projectId,
+    conversationId,
+    supersededRunId,
+  );
+  return accepted;
+}
+
 export function reduceSidechatAcceptedConversation<
   T extends SidechatAcceptedConversationSnapshot,
 >(
   current: T,
   accepted: SidechatCoordinationSnapshot,
 ): T {
-  const currentSnapshot = conversationSidechatSnapshot(current);
+  const currentSnapshot = sidechatCoordinationSnapshotFromConversation(current);
   const next = reduceSidechatAcceptedSnapshot(currentSnapshot, accepted);
   if (next === currentSnapshot) return current;
   return {
@@ -254,7 +470,7 @@ export function mergeConversationWithSidechatSnapshot<
   if (incoming.sidechatRevision === undefined) return merged;
   const reconciled = reduceSidechatAcceptedConversation(
     current,
-    conversationSidechatSnapshot(incoming),
+    sidechatCoordinationSnapshotFromConversation(incoming),
   );
   return {
     ...merged,
@@ -371,6 +587,7 @@ export function useConversationWs(
   useEffect(() => {
     if (!projectId || !conversationId) return;
     const activeProjectId = projectId;
+    const activeConversationId = conversationId;
 
     let publicCursor = latestPublicMessageCursor(
       queryClient.getQueryData<ConversationDetailData>([
@@ -574,71 +791,12 @@ export function useConversationWs(
           (old) => reduceSidechatEphemeralEvent(old, parsed),
         );
       } else if (parsed.type === "sidechat:status") {
-        let acceptedStatus = false;
-        queryClient.setQueryData<ConversationDetailData | undefined>(
-          ["conversation-detail", conversationId],
-          (old) => {
-            if (!old) return old;
-            const current = conversationSidechatSnapshot(old.conversation);
-            const next = reduceSidechatStatusSnapshot(current, parsed);
-            if (next === current) return old;
-            acceptedStatus = true;
-            return {
-              ...old,
-              conversation: {
-                ...old.conversation,
-                sidechatStatus: next.status,
-                sidechatRunId: next.runId,
-                sidechatRevision: next.revision,
-                sidechatUpdatedAt: next.updatedAt === null
-                  ? null
-                  : new Date(next.updatedAt).toISOString(),
-              },
-            };
-          },
+        reconcileSidechatCoordinationQueryCaches(
+          queryClient,
+          activeProjectId,
+          activeConversationId,
+          parsed,
         );
-        queryClient.setQueriesData<ConversationsCacheData>(
-          { queryKey: ["conversations", projectId] },
-          (old) => {
-            if (!old) return old;
-            return {
-              ...old,
-              conversations: old.conversations.map((conversation) => {
-                if (conversation.id !== conversationId) return conversation;
-                const next = reduceSidechatAcceptedConversation(
-                  conversation,
-                  parsed,
-                );
-                if (next !== conversation) acceptedStatus = true;
-                return next;
-              }),
-            };
-          },
-        );
-        const detailConversation = queryClient.getQueryData<ConversationDetailData>(
-          ["conversation-detail", conversationId],
-        )?.conversation;
-        const cacheCoordination = detailConversation
-          ? conversationSidechatSnapshot(detailConversation)
-          : parsed;
-        queryClient.setQueryData<SidechatCacheData | undefined>(
-          ["sidechat", projectId, conversationId],
-          (old) => {
-            if (!old) return old;
-            const coordination = selectNewerSidechatCoordinationSnapshot(
-              old.coordination ?? null,
-              cacheCoordination,
-            );
-            if (coordination === old.coordination) return old;
-            return { ...old, coordination };
-          },
-        );
-        if (acceptedStatus && parsed.status !== "working") {
-          queryClient.setQueryData<SidechatEphemeralStore>(
-            ["sidechat-ephemeral", projectId, conversationId],
-            () => new Map(),
-          );
-        }
       }
     }
 
