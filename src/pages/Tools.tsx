@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -65,6 +65,8 @@ interface Tool {
   enabled: boolean;
   timeout: number;
   sortOrder: number;
+  allowedChannels: ToolAudience[];
+  access: ToolAccess;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,7 +95,22 @@ interface ToolFormData {
   responseMapping: ResponseMapping;
   enabled: boolean;
   timeout: number;
+  allowedChannels: ToolAudience[];
+  access: ToolAccess;
 }
+
+type ToolAudience = "public" | "sidechat";
+type ToolAccess = "read" | "write";
+
+interface ToolPolicyValue {
+  allowedChannels: ToolAudience[];
+  access: ToolAccess;
+}
+
+const defaultToolPolicy: ToolPolicyValue = {
+  allowedChannels: ["public"],
+  access: "read",
+};
 
 const emptyForm: ToolFormData = {
   name: "",
@@ -106,6 +123,7 @@ const emptyForm: ToolFormData = {
   responseMapping: { resultPath: "", summaryTemplate: "" },
   enabled: true,
   timeout: 10000,
+  ...defaultToolPolicy,
 };
 
 // ─── Tool Presets ─────────────────────────────────────────────────────────────
@@ -128,7 +146,10 @@ interface ToolPreset {
   iconBg: string;
   iconColor: string;
   fields: PresetField[];
-  build: (values: Record<string, string>, existing: Tool | undefined) => Omit<ToolFormPayload, "enabled">;
+  build: (
+    values: Record<string, string>,
+    existing: Tool | undefined,
+  ) => Omit<ToolFormPayload, "enabled" | "allowedChannels" | "access">;
   extract: (tool: Tool) => Record<string, string>;
 }
 
@@ -143,6 +164,8 @@ interface ToolFormPayload {
   responseMapping: ResponseMapping | null;
   enabled: boolean;
   timeout: number;
+  allowedChannels: ToolAudience[];
+  access: ToolAccess;
 }
 
 function webhookPreset(input: {
@@ -387,6 +410,122 @@ const PRESET_NAMES = new Set(TOOL_PRESETS.map((p) => p.name));
 
 const TIMEOUT_OPTIONS = [5000, 10000, 15000, 20000, 30000];
 
+// ─── Tool Policy Controls ────────────────────────────────────────────────────
+
+function ToolPolicyFields({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: ToolPolicyValue;
+  onChange: (value: ToolPolicyValue) => void;
+  compact?: boolean;
+}) {
+  const id = useId();
+
+  function updateAudience(audience: ToolAudience, checked: boolean): void {
+    const allowedChannels = checked
+      ? Array.from(new Set([...value.allowedChannels, audience]))
+      : value.allowedChannels.filter((channel) => channel !== audience);
+    if (allowedChannels.length === 0) return;
+    onChange({ ...value, allowedChannels });
+  }
+
+  function renderAudienceRow(
+    audience: ToolAudience,
+    label: string,
+    description: string,
+  ) {
+    const checked = value.allowedChannels.includes(audience);
+    const isOnlyAudience = checked && value.allowedChannels.length === 1;
+    const switchId = `${id}-${audience}`;
+    return (
+      <label
+        key={audience}
+        htmlFor={switchId}
+        className="flex min-h-10 cursor-pointer items-center justify-between gap-4 rounded-lg px-1 py-1 select-none"
+      >
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-foreground">
+            {label}
+          </span>
+          <span className="block text-xs text-pretty text-muted-foreground">
+            {description}
+          </span>
+        </span>
+        <Switch
+          id={switchId}
+          aria-label={label}
+          checked={checked}
+          disabled={isOnlyAudience}
+          onCheckedChange={(nextChecked) =>
+            updateAudience(audience, nextChecked)
+          }
+          size="sm"
+          className="shrink-0"
+        />
+      </label>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "space-y-3",
+        compact ? "pt-1" : "rounded-xl bg-muted/20 p-4",
+      )}
+    >
+      <div>
+        <h3 className="text-sm font-semibold text-foreground">Availability</h3>
+        <p className="mt-0.5 text-xs text-pretty text-muted-foreground">
+          At least one audience must stay enabled.
+        </p>
+      </div>
+      <div className="space-y-1">
+        {renderAudienceRow(
+          "public",
+          "Available to visitors",
+          "Maven can use this in visitor conversations.",
+        )}
+        {renderAudienceRow(
+          "sidechat",
+          "Available in sidechat",
+          "Maven can use this while helping your team.",
+        )}
+      </div>
+      <div className="flex min-h-10 items-center justify-between gap-4 px-1 py-1">
+        <div className="min-w-0">
+          <label
+            htmlFor={`${id}-access`}
+            className="block text-sm font-medium text-foreground"
+          >
+            Access
+          </label>
+          <p className="text-xs text-pretty text-muted-foreground">
+            Choose whether this tool only reads data or can change it.
+          </p>
+        </div>
+        <Select
+          value={value.access}
+          onValueChange={(access: ToolAccess) => onChange({ ...value, access })}
+        >
+          <SelectTrigger
+            id={`${id}-access`}
+            aria-label="Access"
+            className="h-9 w-28 shrink-0 rounded-lg"
+          >
+            <SelectValue>{value.access === "write" ? "Write" : "Read"}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="read">Read</SelectItem>
+            <SelectItem value="write">Write</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
+
 // ─── Preset Tool Row ──────────────────────────────────────────────────────────
 
 function PresetToolRow({
@@ -401,23 +540,36 @@ function PresetToolRow({
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [policy, setPolicy] = useState<ToolPolicyValue>(defaultToolPolicy);
   const configured = !!tool;
 
   useEffect(() => {
-    if (tool) setValues(preset.extract(tool));
-    else setValues({});
+    if (tool) {
+      setValues(preset.extract(tool));
+      setPolicy({
+        allowedChannels: tool.allowedChannels,
+        access: tool.access,
+      });
+    } else {
+      setValues({});
+      setPolicy(defaultToolPolicy);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool?.id, tool?.updatedAt]);
 
   const save = useMutation({
     mutationFn: async () => {
-      const payload = { ...preset.build(values, tool), enabled: tool?.enabled ?? true };
+      const payload = {
+        ...preset.build(values, tool),
+        enabled: tool?.enabled ?? true,
+        ...policy,
+      };
       const res = await fetch(
         tool
           ? `/api/projects/${projectId}/tools/${tool.id}`
           : `/api/projects/${projectId}/tools`,
         {
-          method: tool ? "PUT" : "POST",
+          method: tool ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         },
@@ -436,7 +588,7 @@ function PresetToolRow({
   const toggle = useMutation({
     mutationFn: async (enabled: boolean) => {
       const res = await fetch(`/api/projects/${projectId}/tools/${tool!.id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
@@ -584,6 +736,7 @@ function PresetToolRow({
               )}
             </div>
           ))}
+          <ToolPolicyFields value={policy} onChange={setPolicy} compact />
           {save.isError && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -877,6 +1030,8 @@ export function ToolsPanel({
       responseMapping: tool.responseMapping ?? { resultPath: "", summaryTemplate: "" },
       enabled: tool.enabled,
       timeout: tool.timeout,
+      allowedChannels: tool.allowedChannels,
+      access: tool.access,
     });
     setFormError(null);
     setShowForm(true);
@@ -1094,12 +1249,22 @@ export function ToolsPanel({
               </p>
             </div>
 
+            <ToolPolicyFields
+              value={{
+                allowedChannels: form.allowedChannels,
+                access: form.access,
+              }}
+              onChange={(policy) =>
+                setForm((current) => ({ ...current, ...policy }))
+              }
+            />
+
             {/* HTTP Config */}
             <div className="space-y-4 rounded-xl bg-muted/20 p-4">
               <h3 className="text-sm font-semibold text-foreground">HTTP Configuration</h3>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">Endpoint</label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2 sm:flex-nowrap">
                   <div className="shrink-0">
                     <div className="flex h-[42px] rounded-xl border border-input bg-background overflow-hidden">
                       {(["POST", "GET"] as const).map((m) => (
@@ -1125,7 +1290,7 @@ export function ToolsPanel({
                     onChange={(e) => setForm((f) => ({ ...f, endpoint: e.target.value }))}
                     placeholder="https://api.example.com/orders/status"
                     required
-                    className="flex-1 px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="order-3 w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring sm:order-none sm:min-w-0 sm:flex-1 sm:w-auto"
                   />
                   <Select
                     value={String(form.timeout)}

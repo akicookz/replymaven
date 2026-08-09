@@ -28,6 +28,12 @@ describe("tool audience validation", () => {
     });
   });
 
+  test("accepts a preset create payload with no headers", () => {
+    expect(
+      createToolSchema.safeParse({ ...validTool, headers: null }).success,
+    ).toBe(true);
+  });
+
   test("rejects empty and duplicate tool audiences", () => {
     expect(() => updateToolSchema.parse({ allowedChannels: [] })).toThrow();
     expect(() =>

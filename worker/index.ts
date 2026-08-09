@@ -122,6 +122,11 @@ import {
   serializeProjectSettings,
 } from "./routes/customer-handlers";
 import {
+  handleCreateToolRequest,
+  handleListToolsRequest,
+  handleUpdateToolRequest,
+} from "./routes/tool-handlers";
+import {
   handleCustomerProjectWsUpgrade,
   handleDashboardWsUpgrade,
   handleWidgetWsUpgrade,
@@ -163,8 +168,6 @@ import {
   updateConversationPublicSchema,
   updateTicketConfigSchema,
   submitContactFormSchema,
-  createToolSchema,
-  updateToolSchema,
   testToolSchema,
   createCheckoutSchema,
   inviteTeamMemberSchema,
@@ -363,6 +366,21 @@ function validate<T>(
   if (result.success) return { success: true, data: result.data as T };
   const message = result.error?.issues?.[0]?.message ?? "Validation failed";
   return { success: false, error: message };
+}
+
+async function maskStoredToolHeaders(
+  headers: string | null,
+  encryptionKey: string,
+): Promise<Record<string, string> | null> {
+  if (!headers) return null;
+  try {
+    const decrypted = isEncrypted(headers)
+      ? await decryptHeaders(headers, encryptionKey)
+      : (JSON.parse(headers) as Record<string, string>);
+    return maskHeaders(decrypted);
+  } catch {
+    return null;
+  }
 }
 
 function isConversationStale(
@@ -4505,33 +4523,11 @@ const app = new Hono<HonoAppContext>()
 
     const toolService = new ToolService(db);
     const projectTools = await toolService.getTools(project.id);
-
-    // Decrypt and mask headers for each tool (never expose raw secrets)
-    const toolsWithMaskedHeaders = await Promise.all(
-      projectTools.map(async (t) => {
-        let maskedHeaders: Record<string, string> | null = null;
-        if (t.headers) {
-          try {
-            const decrypted = isEncrypted(t.headers)
-              ? await decryptHeaders(t.headers, c.env.ENCRYPTION_KEY)
-              : (JSON.parse(t.headers) as Record<string, string>);
-            maskedHeaders = maskHeaders(decrypted);
-          } catch {
-            maskedHeaders = null;
-          }
-        }
-        return {
-          ...t,
-          parameters: JSON.parse(t.parameters),
-          headers: maskedHeaders,
-          responseMapping: t.responseMapping
-            ? JSON.parse(t.responseMapping)
-            : null,
-        };
-      }),
-    );
-
-    return c.json(toolsWithMaskedHeaders);
+    return handleListToolsRequest({
+      tools: projectTools,
+      maskStoredHeaders: async (headers) =>
+        maskStoredToolHeaders(headers, c.env.ENCRYPTION_KEY),
+    });
   })
 
   .post("/api/projects/:id/tools", async (c) => {
@@ -4558,68 +4554,17 @@ const app = new Hono<HonoAppContext>()
     }
 
     const body = await c.req.json();
-    const parsed = validate(createToolSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
     const toolService = new ToolService(db);
-
-    // Enforce max 20 tools per project
-    const count = await toolService.getToolCount(project.id);
-    if (count >= 20) {
-      return c.json({ error: "Maximum 20 tools per project" }, 400);
-    }
-
-    // Check for duplicate name
-    const existing = await toolService.getToolByName(
-      parsed.data.name,
-      project.id,
-    );
-    if (existing) {
-      return c.json({ error: "A tool with this name already exists" }, 400);
-    }
-
-    // Encrypt headers if provided (contains auth tokens, API keys)
-    let encryptedHeaders: string | null = null;
-    if (parsed.data.headers && Object.keys(parsed.data.headers).length > 0) {
-      encryptedHeaders = await encryptHeaders(
-        parsed.data.headers,
-        c.env.ENCRYPTION_KEY,
-      );
-    }
-
-    const created = await toolService.createTool({
+    return handleCreateToolRequest({
       projectId: project.id,
-      name: parsed.data.name,
-      displayName: parsed.data.displayName,
-      description: parsed.data.description,
-      endpoint: parsed.data.endpoint,
-      method: parsed.data.method,
-      headers: encryptedHeaders,
-      parameters: JSON.stringify(parsed.data.parameters),
-      responseMapping: parsed.data.responseMapping
-        ? JSON.stringify(parsed.data.responseMapping)
-        : null,
-      enabled: parsed.data.enabled,
-      timeout: parsed.data.timeout,
+      role: c.get("activeRole") ?? "member",
+      body,
+      toolService,
+      encryptHeaders: async (headers) =>
+        encryptHeaders(headers, c.env.ENCRYPTION_KEY),
+      maskStoredHeaders: async (headers) =>
+        maskStoredToolHeaders(headers, c.env.ENCRYPTION_KEY),
     });
-
-    // Return masked headers to frontend (never expose raw values)
-    const maskedHeaders =
-      parsed.data.headers && Object.keys(parsed.data.headers).length > 0
-        ? maskHeaders(parsed.data.headers)
-        : null;
-
-    return c.json(
-      {
-        ...created,
-        parameters: JSON.parse(created.parameters),
-        headers: maskedHeaders,
-        responseMapping: created.responseMapping
-          ? JSON.parse(created.responseMapping)
-          : null,
-      },
-      201,
-    );
   })
 
   .patch("/api/projects/:id/tools/:toolId", async (c) => {
@@ -4634,72 +4579,17 @@ const app = new Hono<HonoAppContext>()
     }
 
     const body = await c.req.json();
-    const parsed = validate(updateToolSchema, body);
-    if (!parsed.success) return c.json({ error: parsed.error }, 400);
-
     const toolService = new ToolService(db);
-
-    // Build the update object, JSON-stringifying complex fields
-    const updates: Record<string, unknown> = {};
-    if (parsed.data.displayName !== undefined)
-      updates.displayName = parsed.data.displayName;
-    if (parsed.data.description !== undefined)
-      updates.description = parsed.data.description;
-    if (parsed.data.endpoint !== undefined)
-      updates.endpoint = parsed.data.endpoint;
-    if (parsed.data.method !== undefined) updates.method = parsed.data.method;
-    if (parsed.data.headers !== undefined) {
-      if (parsed.data.headers && Object.keys(parsed.data.headers).length > 0) {
-        updates.headers = await encryptHeaders(
-          parsed.data.headers,
-          c.env.ENCRYPTION_KEY,
-        );
-      } else {
-        updates.headers = null;
-      }
-    }
-    if (parsed.data.parameters !== undefined) {
-      updates.parameters = JSON.stringify(parsed.data.parameters);
-    }
-    if (parsed.data.responseMapping !== undefined) {
-      updates.responseMapping = parsed.data.responseMapping
-        ? JSON.stringify(parsed.data.responseMapping)
-        : null;
-    }
-    if (parsed.data.enabled !== undefined)
-      updates.enabled = parsed.data.enabled;
-    if (parsed.data.timeout !== undefined)
-      updates.timeout = parsed.data.timeout;
-    if (parsed.data.sortOrder !== undefined)
-      updates.sortOrder = parsed.data.sortOrder;
-
-    const updated = await toolService.updateTool(
-      c.req.param("toolId"),
-      project.id,
-      updates,
-    );
-    if (!updated) return c.json({ error: "Not found" }, 404);
-
-    // Decrypt headers for masking in the response
-    let maskedResponseHeaders: Record<string, string> | null = null;
-    if (updated.headers) {
-      try {
-        const decrypted = isEncrypted(updated.headers)
-          ? await decryptHeaders(updated.headers, c.env.ENCRYPTION_KEY)
-          : (JSON.parse(updated.headers) as Record<string, string>);
-        maskedResponseHeaders = maskHeaders(decrypted);
-      } catch {
-        maskedResponseHeaders = null;
-      }
-    }
-
-    return c.json({
-      ...updated,
-      parameters: JSON.parse(updated.parameters),
-      headers: maskedResponseHeaders,
-      responseMapping: updated.responseMapping
-        ? JSON.parse(updated.responseMapping)
-        : null,
+    return handleUpdateToolRequest({
+      projectId: project.id,
+      toolId: c.req.param("toolId"),
+      role: c.get("activeRole") ?? "member",
+      body,
+      toolService,
+      encryptHeaders: async (headers) =>
+        encryptHeaders(headers, c.env.ENCRYPTION_KEY),
+      maskStoredHeaders: async (headers) =>
+        maskStoredToolHeaders(headers, c.env.ENCRYPTION_KEY),
     });
   })
 

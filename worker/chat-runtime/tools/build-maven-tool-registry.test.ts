@@ -405,6 +405,52 @@ describe("buildMavenToolRegistry", () => {
 });
 
 describe("createHttpToolDefinition", () => {
+  test("uses the persisted HTTP contract fingerprint for stale-call checks", async () => {
+    let fetchCount = 0;
+    const initial = createToolRow({ schemaFingerprint: "stored-contract-v1" });
+    const toolService = {
+      async getAuthoritativeTool(): Promise<ToolRow | null> {
+        return createToolRow({ schemaFingerprint: "stored-contract-v2" });
+      },
+      async logExecution() {
+        return { id: "execution-1" };
+      },
+    };
+    globalThis.fetch = async () => {
+      fetchCount += 1;
+      return Response.json({ ok: true });
+    };
+    const definition = await createHttpToolDefinition({
+      context: createContext("public"),
+      tool: initial,
+      toolService,
+      encryptionKey: "00".repeat(32),
+      publicExecution: {
+        chatService: {
+          async runExternalActionIfOwnershipMatches(
+            _conversationId: string,
+            _projectId: string,
+            _ownership: unknown,
+            action: () => Promise<unknown>,
+          ) {
+            return { executed: true, value: await action() };
+          },
+        },
+        acquireRateLimitPermit: () => true,
+      },
+    } as never);
+
+    expect(definition.capability.schemaFingerprint).toBe("stored-contract-v1");
+    expect(
+      await executeRegisteredTool(
+        definition,
+        createContext("public"),
+        { accountId: "account-1" },
+      ),
+    ).toEqual({ error: "tool_schema_changed" });
+    expect(fetchCount).toBe(0);
+  });
+
   test.each(["takeover", "close"])(
     "does not fetch or audit when public ownership loses a %s race",
     async () => {

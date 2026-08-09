@@ -14,7 +14,6 @@ import {
 } from "../types";
 import {
   authorizeCapability,
-  fingerprintJsonSchema,
   parseAllowedChannels,
 } from "./tool-capability";
 
@@ -172,9 +171,7 @@ async function toHttpCapability(
     allowedChannels: parseAllowedChannels(toolRow.allowedChannels),
     access: toolRow.access,
     enabled: toolRow.enabled,
-    schemaFingerprint: await fingerprintJsonSchema(
-      parseHttpToolParameters(toolRow.parameters),
-    ),
+    schemaFingerprint: toolRow.schemaFingerprint,
   };
 }
 

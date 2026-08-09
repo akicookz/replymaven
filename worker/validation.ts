@@ -620,7 +620,7 @@ export const createToolSchema = z.object({
   description: z.string().min(1, "Description is required").max(500),
   endpoint: z.string().url("Must be a valid URL").max(2048),
   method: z.enum(["GET", "POST"]).default("POST"),
-  headers: z.record(z.string(), z.string().max(2048)).optional(),
+  headers: z.record(z.string(), z.string().max(2048)).optional().nullable(),
   parameters: z.array(toolParameterSchema).max(10).default([]),
   responseMapping: responseMappingSchema,
   enabled: z.boolean().default(true),

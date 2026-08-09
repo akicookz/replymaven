@@ -30,7 +30,9 @@
   "include": ["src", "shared"],
   "exclude": [
     "src/**/*.test.ts",
+    "src/**/*.test.tsx",
     "src/**/*.spec.ts",
+    "src/**/*.spec.tsx",
     "shared/**/*.test.ts",
     "shared/**/*.spec.ts"
   ]

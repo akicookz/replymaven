@@ -36,6 +36,18 @@ export async function fingerprintJsonSchema(schema: unknown): Promise<string> {
     .join("");
 }
 
+export async function fingerprintHttpToolContract(input: {
+  name: string;
+  description: string;
+  parameters: unknown;
+}): Promise<string> {
+  return fingerprintJsonSchema({
+    name: input.name,
+    description: input.description,
+    parameters: input.parameters,
+  });
+}
+
 export function parseAllowedChannels(raw: string): MavenChannel[] {
   try {
     const parsed = toolAudienceSchema.safeParse(JSON.parse(raw));
