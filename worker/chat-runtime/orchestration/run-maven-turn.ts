@@ -168,7 +168,8 @@ export async function runMavenTurn(options: {
   const collectedSourceKeys = new Set<string>();
   const toolActivity: SafeToolActivity[] = [];
   const httpExecutionIds: string[] = [];
-  let artifact: MavenArtifact = null;
+  let pendingArtifact: MavenArtifact = null;
+  let publishedArtifact: MavenArtifact = null;
   let visibleTextStarted = false;
   let toolExecutionCommitted = false;
 
@@ -233,7 +234,7 @@ export async function runMavenTurn(options: {
       createPresentReplyDraftTool({
         context: options.context,
         recordDraft(draft) {
-          artifact = { type: "reply_draft", draft };
+          pendingArtifact = { type: "reply_draft", draft };
         },
       }),
     );
@@ -289,6 +290,7 @@ export async function runMavenTurn(options: {
       toolExecutionCommitted,
     }),
     operation: async (activeConfig) => {
+      pendingArtifact = null;
       const result = await (options.dependencies.streamAgent ?? streamMavenAgent)(
         {
           modelConfig: activeConfig,
@@ -319,10 +321,35 @@ export async function runMavenTurn(options: {
     },
   });
 
+  async function* publishArtifactAfterCompletion(): AsyncGenerator<MavenStreamPart> {
+    let completedNaturally = false;
+    let aborted = false;
+
+    try {
+      for await (const part of agentResult.fullStream) {
+        if (part.type === "abort") {
+          aborted = true;
+        }
+        yield part;
+      }
+      completedNaturally = true;
+    } finally {
+      const completedArtifact = pendingArtifact;
+      pendingArtifact = null;
+      if (
+        completedNaturally &&
+        !aborted &&
+        !options.dependencies.abortSignal?.aborted
+      ) {
+        publishedArtifact = completedArtifact;
+      }
+    }
+  }
+
   return {
-    fullStream: agentResult.fullStream,
+    fullStream: publishArtifactAfterCompletion(),
     get artifact(): MavenArtifact {
-      return artifact;
+      return publishedArtifact;
     },
     collectedSources,
     toolActivity,
