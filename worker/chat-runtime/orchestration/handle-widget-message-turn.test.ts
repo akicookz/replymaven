@@ -565,13 +565,19 @@ describe("widget handler Maven gates", () => {
     await response.text();
 
     expect(harness.runTurnCalls).toHaveLength(1);
-    expect(
-      (
-        harness.runTurnCalls[0] as {
-          dependencies: { abortSignal?: AbortSignal };
-        }
-      ).dependencies.abortSignal,
-    ).toBe(abortController.signal);
+    const turnSignal = (
+      harness.runTurnCalls[0] as {
+        dependencies: { abortSignal?: AbortSignal };
+      }
+    ).dependencies.abortSignal;
+    expect(turnSignal).toBeDefined();
+    expect(turnSignal).not.toBe(abortController.signal);
+    expect(turnSignal?.aborted).toBe(false);
+
+    const reason = new DOMException("Visitor disconnected", "AbortError");
+    abortController.abort(reason);
+    expect(turnSignal?.aborted).toBe(true);
+    expect(turnSignal?.reason).toBe(reason);
   });
 
   test("does not consume the HTTP execution limit for a text-only Maven turn", async () => {

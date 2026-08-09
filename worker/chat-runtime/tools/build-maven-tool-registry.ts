@@ -23,8 +23,18 @@ export interface MavenToolRegistryResult {
 interface MavenToolRegistryOptions {
   context: MavenTurnContext;
   definitions: MavenToolDefinition[];
+  abortSignal?: AbortSignal;
   onStart?: (event: SafeToolActivity) => void;
   onFinish?: (event: SafeToolActivity) => void;
+}
+
+function combineAbortSignals(
+  turnSignal: AbortSignal | undefined,
+  toolSignal: AbortSignal | undefined,
+): AbortSignal | undefined {
+  if (!turnSignal) return toolSignal;
+  if (!toolSignal || turnSignal === toolSignal) return turnSignal;
+  return AbortSignal.any([turnSignal, toolSignal]);
 }
 
 function isPublicMcpTool(
@@ -121,7 +131,12 @@ export function buildMavenToolRegistry(
             ) {
               result = { error: "tool_schema_changed" };
             } else {
-              result = await definition.execute(input, { abortSignal });
+              result = await definition.execute(input, {
+                abortSignal: combineAbortSignals(
+                  options.abortSignal,
+                  abortSignal,
+                ),
+              });
             }
           }
 

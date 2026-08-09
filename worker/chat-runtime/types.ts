@@ -11,11 +11,6 @@ import { type SourceReference } from "../services/resource-service";
 import { type MavenChannel, type MavenToolAccess } from "../validation";
 
 export type GroundingConfidence = "high" | "low" | "none";
-export type AgentToolChoice =
-  | "auto"
-  | "none"
-  | "required"
-  | { type: "tool"; toolName: string };
 
 export interface ConversationTurnMessage {
   role: "visitor" | "bot" | "agent";
@@ -41,37 +36,6 @@ export interface SupportToolDefinition {
   responseMapping: string | null;
   enabled: boolean;
   timeout: number;
-}
-
-export interface ToolCallLifecycleInfo {
-  toolName: string;
-  input: Record<string, unknown>;
-}
-
-export interface ToolCallFinishInfo extends ToolCallLifecycleInfo {
-  output: unknown;
-  error: unknown;
-  durationMs: number;
-  success: boolean;
-}
-
-export interface SupportAgentStreamOptions {
-  systemPrompt: string;
-  conversationHistory: ConversationTurnMessage[];
-  userMessage: string;
-  image?: SupportAgentImage | null;
-  tools?: SupportToolDefinition[];
-  toolChoice?: AgentToolChoice;
-  prepareStep?: (options: {
-    stepNumber: number;
-    availableToolNames: string[];
-  }) => {
-    toolChoice?: AgentToolChoice;
-    activeTools?: string[];
-  } | undefined;
-  abortSignal?: AbortSignal;
-  onToolCallStart?: (info: ToolCallLifecycleInfo) => void;
-  onToolCallFinish?: (info: ToolCallFinishInfo) => void;
 }
 
 export interface SupportPromptOptions {
@@ -505,14 +469,6 @@ export interface WidgetMessageTurnContext {
 
 export interface WidgetMessageTurnResult {
   response: Response;
-}
-
-export interface AgentTurnArtifacts {
-  conversationHistory: ConversationTurnMessage[];
-  systemPrompt: string;
-  groundingConfidence: GroundingConfidence;
-  sourceReferences: SourceReference[];
-  searchQueries: string[];
 }
 
 export interface TurnTelemetry {

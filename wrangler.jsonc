@@ -3,7 +3,7 @@
   "name": "replymaven",
   "main": "worker/index.ts",
   "compatibility_date": "2025-05-24",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
   "account_id": "35bc7a4522237728214ba9d54c36002e",
   "assets": {
     "binding": "ASSETS",

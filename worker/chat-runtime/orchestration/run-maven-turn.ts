@@ -247,6 +247,7 @@ export async function runMavenTurn(options: {
   const registry = buildMavenToolRegistry({
     context: options.context,
     definitions,
+    abortSignal: options.dependencies.abortSignal,
     onStart(activity) {
       toolExecutionCommitted = true;
       collectActivity(activity);

@@ -128,6 +128,56 @@ function createToolRow(overrides: Partial<ToolRow> = {}): ToolRow {
 }
 
 describe("buildMavenToolRegistry", () => {
+  test("propagates turn cancellation when the SDK tool signal remains live", async () => {
+    const turn = new AbortController();
+    const sdkTool = new AbortController();
+    let markStarted = () => {};
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const definition = createDefinition({
+      async execute(_input, { abortSignal }) {
+        markStarted();
+        if (abortSignal?.aborted) return { cancelled: true };
+        return new Promise((resolve) => {
+          abortSignal?.addEventListener(
+            "abort",
+            () => resolve({ cancelled: true }),
+            { once: true },
+          );
+        });
+      },
+    });
+    const { tools } = buildMavenToolRegistry({
+      context: createContext("public"),
+      definitions: [definition],
+      abortSignal: turn.signal,
+    });
+    const registered = tools.check_order;
+    if (!registered || typeof registered.execute !== "function") {
+      throw new Error("Expected an executable registry tool");
+    }
+
+    const execution = registered.execute(
+      { orderId: "order-1" },
+      {
+        toolCallId: "test-call",
+        messages: [],
+        abortSignal: sdkTool.signal,
+      },
+    );
+    await started;
+    turn.abort(new DOMException("Visitor disconnected", "AbortError"));
+
+    expect(
+      await Promise.race([
+        execution,
+        Bun.sleep(50).then(() => ({ timedOut: true })),
+      ]),
+    ).toEqual({ cancelled: true });
+    expect(sdkTool.signal.aborted).toBe(false);
+  });
+
   test.each(["http", "mcp"] as const)(
     "omits a standalone reserved %s definition",
     (source) => {

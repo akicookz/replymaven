@@ -86,7 +86,7 @@ import {
   markContactAiUnavailable,
 } from "./chat-runtime/contact-support/contact-support";
 import { createEscalation } from "./chat-runtime/post-turn/escalation";
-import { buildToolRegistry } from "./chat-runtime/tools/build-tool-registry";
+import { buildToolRegistry } from "./chat-runtime/tools/http-tool-executor";
 import { toToolDefinition } from "./chat-runtime/types";
 import {
   createLanguageModel,

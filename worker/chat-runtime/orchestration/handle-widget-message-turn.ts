@@ -747,6 +747,19 @@ export async function handleWidgetMessageTurn(
       buildContactFallbackMessage(responseOpening);
   }
 
+  const turnAbortController = new AbortController();
+  function abortTurn(reason: unknown): void {
+    if (turnAbortController.signal.aborted) return;
+    turnAbortController.abort(reason);
+  }
+  function abortFromInboundRequest(): void {
+    abortTurn(context.abortSignal?.reason);
+  }
+  context.abortSignal?.addEventListener("abort", abortFromInboundRequest, {
+    once: true,
+  });
+  if (context.abortSignal?.aborted) abortFromInboundRequest();
+
   return createWidgetSseResponse(async (controller, encoder) => {
     const telemetry: TurnTelemetry = {
       startedAt,
@@ -984,7 +997,7 @@ export async function handleWidgetMessageTurn(
               workingHours: null,
               avgResponseTime: null,
             },
-            abortSignal: context.abortSignal,
+            abortSignal: turnAbortController.signal,
             promptOptions: {
               guidelines: enabledGuidelines.map((guideline) => ({
                 condition: guideline.condition,
@@ -1399,5 +1412,7 @@ export async function handleWidgetMessageTurn(
 
       emitSseEvent(controller, encoder, { error: errorMessage });
     }
+  }, {
+    onCancel: abortTurn,
   });
 }
