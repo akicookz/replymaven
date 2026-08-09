@@ -46,17 +46,29 @@ describe("sidechat validation contracts", () => {
     ).toBe(false);
   });
 
-  test("bounds sidechat history pagination and validates ISO cursors", () => {
+  test("bounds sidechat history pagination and validates composite cursors", () => {
+    const cursorTime = Date.parse("2026-08-09T12:00:00.000Z");
     expect(sidechatHistoryQuerySchema.parse({})).toEqual({ limit: 40 });
     expect(
       sidechatHistoryQuerySchema.parse({
-        before: "2026-08-09T12:00:00.000Z",
+        before: `${cursorTime}.sidechat-message-1`,
         limit: "25",
       }),
-    ).toEqual({ before: "2026-08-09T12:00:00.000Z", limit: 25 });
+    ).toEqual({
+      before: {
+        createdAt: new Date(cursorTime),
+        id: "sidechat-message-1",
+      },
+      limit: 25,
+    });
     expect(
-      sidechatHistoryQuerySchema.safeParse({ before: "not-a-date" }).success,
+      sidechatHistoryQuerySchema.safeParse({
+        before: "2026-08-09T12:00:00.000Z",
+      }).success,
     ).toBe(false);
+    expect(sidechatHistoryQuerySchema.safeParse({
+      before: `${cursorTime}.unsafe.id`,
+    }).success).toBe(false);
     expect(sidechatHistoryQuerySchema.safeParse({ limit: "101" }).success)
       .toBe(false);
   });

@@ -70,6 +70,7 @@ class MemorySidechatService implements SidechatHandlerService {
   conversation = makeConversation();
   messages: MessageRow[] = [];
   calls: string[] = [];
+  settlementTimes: Array<Date | undefined> = [];
   allowClaim = true;
 
   async getConversationById(): Promise<TestConversation> {
@@ -99,10 +100,12 @@ class MemorySidechatService implements SidechatHandlerService {
 
   async getSidechatMessagesBefore(
     _conversationId: string,
-    _before: Date,
+    before: Date | { createdAt: Date; id: string },
     limit: number,
   ): Promise<{ messages: MessageRow[]; hasMore: boolean }> {
-    this.calls.push(`before:${limit}`);
+    this.calls.push(before instanceof Date
+      ? `legacy-before:${limit}`
+      : `before:${before.createdAt.toISOString()}:${before.id}:${limit}`);
     return { messages: this.messages.slice(-limit), hasMore: false };
   }
 
@@ -121,9 +124,19 @@ class MemorySidechatService implements SidechatHandlerService {
   async settleSidechatRun(input: {
     runId: string;
     status: "idle" | "ready" | "failed" | "waiting_approval";
+    now?: Date;
   }): Promise<boolean> {
     this.calls.push(`settle:${input.status}`);
+    this.settlementTimes.push(input.now);
     if (this.conversation.sidechatRunId !== input.runId) return false;
+    if (
+      !input.now ||
+      this.conversation.archivedAt ||
+      !this.conversation.sidechatLeaseExpiresAt ||
+      this.conversation.sidechatLeaseExpiresAt.getTime() <= input.now.getTime()
+    ) {
+      return false;
+    }
     this.conversation.sidechatStatus = input.status;
     this.conversation.sidechatRunId = null;
     this.conversation.sidechatLeaseExpiresAt = null;
@@ -256,6 +269,40 @@ describe("sidechat history and acceptance", () => {
     expect(JSON.stringify(body)).not.toContain("avatar.png");
   });
 
+  test("round-trips a stable composite cursor for tied history rows", async () => {
+    const service = new MemorySidechatService();
+    service.messages = [
+      makeMessage({ id: "tie-d" }),
+      makeMessage({ id: "tie-e" }),
+    ];
+    service.getRecentSidechatMessages = async () => ({
+      messages: service.messages,
+      hasMore: true,
+    });
+
+    const first = await handleGetSidechatHistory({
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      query: { limit: "2" },
+      service,
+    });
+    const firstBody = await readJson(first);
+    const expectedCursor = `${now.getTime()}.tie-d`;
+    expect(firstBody.nextBefore).toBe(expectedCursor);
+
+    const second = await handleGetSidechatHistory({
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      query: { before: expectedCursor, limit: "2" },
+      service,
+    });
+
+    expect(second.status).toBe(200);
+    expect(service.calls).toContain(
+      `before:${now.toISOString()}:tie-d:2`,
+    );
+  });
+
   test("rejects archived writes without claiming or inserting", async () => {
     const service = new MemorySidechatService();
     service.conversation = makeConversation({ archivedAt: now });
@@ -357,11 +404,50 @@ describe("sidechat history and acceptance", () => {
     expect(options.background).toEqual([]);
   });
 
-  test("settles the exact run when broadcast acceptance fails", async () => {
+  test.each(["message", "status"] as const)(
+    "returns durable acceptance and retries without duplicating after %s broadcast fails",
+    async (failedBroadcast) => {
+      const service = new MemorySidechatService();
+      const options = createMutationOptions(service);
+      if (failedBroadcast === "message") {
+        options.broadcastMessage = () => {
+          throw new Error("message broadcast unavailable");
+        };
+      } else {
+        options.broadcastStatus = () => {
+          throw new Error("status broadcast unavailable");
+        };
+      }
+
+      const response = await handleCreateSidechatMessage({
+        ...options,
+        body: { content: "Keep this private" },
+      });
+
+      expect(response.status).toBe(202);
+      expect(service.calls).toContain("settle:failed");
+      expect(service.conversation.sidechatStatus).toBe("failed");
+      expect(service.messages).toHaveLength(1);
+      expect(options.background).toEqual([]);
+
+      options.broadcastMessage = () => {};
+      options.broadcastStatus = () => {};
+      const retry = await handleRetrySidechatTurn({
+        ...options,
+        body: { messageId: "sidechat-human-1" },
+      });
+
+      expect(retry.status).toBe(202);
+      expect(service.messages).toHaveLength(1);
+      await Promise.all(options.background);
+    },
+  );
+
+  test("returns 202 and marks the durable row retryable when waitUntil registration fails", async () => {
     const service = new MemorySidechatService();
     const options = createMutationOptions(service);
-    options.broadcastMessage = () => {
-      throw new Error("broadcast unavailable");
+    options.scheduleBackground = () => {
+      throw new Error("waitUntil unavailable");
     };
 
     const response = await handleCreateSidechatMessage({
@@ -369,11 +455,38 @@ describe("sidechat history and acceptance", () => {
       body: { content: "Keep this private" },
     });
 
-    expect(response.status).toBe(500);
-    expect(service.calls).toContain("settle:failed");
+    expect(response.status).toBe(202);
+    expect(service.messages).toHaveLength(1);
     expect(service.conversation.sidechatStatus).toBe("failed");
-    expect(options.background).toEqual([]);
+    expect(service.calls).toContain("settle:failed");
   });
+
+  test.each(["expiry", "archive"] as const)(
+    "cleanup cannot settle after %s wins the acceptance race",
+    async (winner) => {
+      const service = new MemorySidechatService();
+      const options = createMutationOptions(service);
+      options.broadcastMessage = () => {
+        if (winner === "expiry") {
+          service.conversation.sidechatLeaseExpiresAt = now;
+        } else {
+          service.conversation.archivedAt = now;
+        }
+        throw new Error(`${winner} won`);
+      };
+
+      const response = await handleCreateSidechatMessage({
+        ...options,
+        body: { content: "Already durable" },
+      });
+
+      expect(response.status).toBe(202);
+      expect(service.messages).toHaveLength(1);
+      expect(service.settlementTimes).toEqual([now]);
+      expect(service.conversation.sidechatStatus).toBe("working");
+      expect(options.events).not.toContain("broadcast:failed");
+    },
+  );
 
   test("contains a background rejection and releases the matching run", async () => {
     const service = new MemorySidechatService();

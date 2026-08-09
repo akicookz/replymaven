@@ -90,6 +90,7 @@ interface SidechatTurnChatService {
     conversationId: string;
     runId: string;
     status: "idle" | "ready" | "failed" | "waiting_approval";
+    now: Date;
   }): Promise<boolean>;
 }
 
@@ -283,6 +284,7 @@ async function settleFailureIfCurrent(
       conversationId: options.conversationId,
       runId: options.runId,
       status: "failed",
+      now: runtime.now(),
     });
     if (settled) {
       runtime.broadcastStatus(
@@ -524,6 +526,7 @@ export async function runSidechatTurn(
       conversationId: options.conversationId,
       runId: options.runId,
       status: finalStatus,
+      now: runtime.now(),
     });
     if (!settled) return;
     runtime.broadcastMessage(

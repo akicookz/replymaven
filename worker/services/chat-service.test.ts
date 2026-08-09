@@ -620,7 +620,7 @@ describe("ChatService message channel isolation", () => {
     });
     expect(await service.getSidechatMessagesBefore(
       conversation.id,
-      new Date(origin + 5_000),
+      { createdAt: new Date(origin + 5_000), id: "cursor" },
       1,
     )).toMatchObject({
       messages: [{ id: "sidechat-bot" }],
@@ -639,6 +639,55 @@ describe("ChatService message channel isolation", () => {
     expect(
       await service.getMessageByIdForChannel("sidechat-bot", "sidechat"),
     ).toMatchObject({ id: "sidechat-bot", role: "bot" });
+  });
+
+  test("sidechat pagination is lossless across equal-second rows", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const tiedAt = new Date("2026-08-09T00:00:02.000Z");
+    for (const id of ["tie-a", "tie-b", "tie-c", "tie-d", "tie-e"]) {
+      seedTranscriptMessage(sqlite, {
+        id,
+        conversationId: conversation.id,
+        role: id.endsWith("a") || id.endsWith("c") || id.endsWith("e")
+          ? "agent"
+          : "bot",
+        content: id,
+        channel: "sidechat",
+        createdAt: tiedAt,
+      });
+    }
+
+    const newest = await service.getRecentSidechatMessages(conversation.id, 2);
+    expect(newest.messages.map((row) => row.id)).toEqual(["tie-d", "tie-e"]);
+    expect(newest.hasMore).toBe(true);
+
+    const middle = await service.getSidechatMessagesBefore(
+      conversation.id,
+      { createdAt: tiedAt, id: "tie-d" },
+      2,
+    );
+    expect(middle.messages.map((row) => row.id)).toEqual(["tie-b", "tie-c"]);
+    expect(middle.hasMore).toBe(true);
+
+    const oldest = await service.getSidechatMessagesBefore(
+      conversation.id,
+      { createdAt: tiedAt, id: "tie-b" },
+      2,
+    );
+    expect(oldest.messages.map((row) => row.id)).toEqual(["tie-a"]);
+    expect(oldest.hasMore).toBe(false);
+
+    expect([
+      ...oldest.messages,
+      ...middle.messages,
+      ...newest.messages,
+    ].map((row) => row.id)).toEqual([
+      "tie-a",
+      "tie-b",
+      "tie-c",
+      "tie-d",
+      "tie-e",
+    ]);
   });
 
   test("sidechat writes require the active run and mutate only private activity", async () => {
@@ -865,6 +914,7 @@ describe("ChatService sidechat run coordination", () => {
       conversationId: conversation.id,
       runId: "run-stale",
       status: "failed",
+      now,
     })).toBe(false);
 
     const settlements = await Promise.all([
@@ -873,12 +923,14 @@ describe("ChatService sidechat run coordination", () => {
         conversationId: conversation.id,
         runId: "run-current",
         status: "ready",
+        now,
       }),
       service.settleSidechatRun({
         projectId: conversation.projectId,
         conversationId: conversation.id,
         runId: "run-current",
         status: "failed",
+        now,
       }),
     ]);
     expect(settlements.toSorted()).toEqual([false, true]);
@@ -891,6 +943,75 @@ describe("ChatService sidechat run coordination", () => {
       sidechatRunId: null,
       sidechatLeaseExpiresAt: null,
     });
+  });
+
+  test("settlement loses atomically to lease expiry and archival", async () => {
+    const expired = await createTranscriptHarness();
+    const claimAt = new Date("2026-08-09T12:00:00.000Z");
+    const expiresAt = new Date(claimAt.getTime() + 60_000);
+    expect(await expired.service.claimSidechatRun({
+      projectId: expired.conversation.projectId,
+      conversationId: expired.conversation.id,
+      runId: "run-expiring",
+      now: claimAt,
+      leaseExpiresAt: expiresAt,
+    })).toBe(true);
+
+    expect(await expired.service.settleSidechatRun({
+      projectId: expired.conversation.projectId,
+      conversationId: expired.conversation.id,
+      runId: "run-expiring",
+      status: "ready",
+      now: expiresAt,
+    })).toBe(false);
+    expect(expired.sqlite.query(`SELECT sidechat_status, sidechat_run_id
+      FROM conversations WHERE id = ?`).get(expired.conversation.id)).toEqual({
+      sidechat_status: "working",
+      sidechat_run_id: "run-expiring",
+    });
+
+    const archived = await createTranscriptHarness();
+    expect(await archived.service.claimSidechatRun({
+      projectId: archived.conversation.projectId,
+      conversationId: archived.conversation.id,
+      runId: "run-archived",
+      now: claimAt,
+      leaseExpiresAt: expiresAt,
+    })).toBe(true);
+    archived.sqlite.query("UPDATE conversations SET archived_at = ? WHERE id = ?")
+      .run(Math.floor((claimAt.getTime() + 1_000) / 1_000), archived.conversation.id);
+
+    expect(await archived.service.settleSidechatRun({
+      projectId: archived.conversation.projectId,
+      conversationId: archived.conversation.id,
+      runId: "run-archived",
+      status: "failed",
+      now: new Date(claimAt.getTime() + 1_000),
+    })).toBe(false);
+    expect(archived.sqlite.query(`SELECT sidechat_status, sidechat_run_id
+      FROM conversations WHERE id = ?`).get(archived.conversation.id)).toEqual({
+      sidechat_status: "working",
+      sidechat_run_id: "run-archived",
+    });
+
+    const leaseCleared = await createTranscriptHarness();
+    expect(await leaseCleared.service.claimSidechatRun({
+      projectId: leaseCleared.conversation.projectId,
+      conversationId: leaseCleared.conversation.id,
+      runId: "run-without-lease",
+      now: claimAt,
+      leaseExpiresAt: expiresAt,
+    })).toBe(true);
+    leaseCleared.sqlite.query(
+      "UPDATE conversations SET sidechat_lease_expires_at = NULL WHERE id = ?",
+    ).run(leaseCleared.conversation.id);
+    expect(await leaseCleared.service.settleSidechatRun({
+      projectId: leaseCleared.conversation.projectId,
+      conversationId: leaseCleared.conversation.id,
+      runId: "run-without-lease",
+      status: "failed",
+      now: claimAt,
+    })).toBe(false);
   });
 
   test("reading an expired working lease normalizes it to failed", async () => {

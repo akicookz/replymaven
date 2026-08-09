@@ -55,6 +55,11 @@ export interface MessagePage {
   hasMore: boolean;
 }
 
+export interface SidechatMessageCursor {
+  createdAt: Date;
+  id: string;
+}
+
 export interface SidechatHumanMessageInput {
   projectId: string;
   conversationId: string;
@@ -88,6 +93,7 @@ export interface SettleSidechatRunInput {
   conversationId: string;
   runId: string;
   status: "idle" | "ready" | "failed" | "waiting_approval";
+  now: Date;
 }
 
 const EXTERNAL_ACTION_LEASE_MS = 2 * 60 * 1000;
@@ -988,22 +994,24 @@ export class ChatService {
   }
 
   async settleSidechatRun(input: SettleSidechatRunInput): Promise<boolean> {
-    const now = new Date();
     const settled = await this.db
       .update(conversations)
       .set({
         sidechatStatus: input.status,
         sidechatRunId: null,
         sidechatLeaseExpiresAt: null,
-        sidechatUpdatedAt: now,
+        sidechatUpdatedAt: input.now,
         updatedAt: sql`${conversations.updatedAt}`,
       })
       .where(
         and(
           eq(conversations.id, input.conversationId),
           eq(conversations.projectId, input.projectId),
+          isNull(conversations.archivedAt),
           eq(conversations.sidechatStatus, "working"),
           eq(conversations.sidechatRunId, input.runId),
+          isNotNull(conversations.sidechatLeaseExpiresAt),
+          gt(conversations.sidechatLeaseExpiresAt, input.now),
         ),
       )
       .returning({ id: conversations.id });
@@ -2417,7 +2425,7 @@ export class ChatService {
           inArray(messages.role, ["agent", "bot"]),
         ),
       )
-      .orderBy(desc(messages.createdAt))
+      .orderBy(desc(messages.createdAt), desc(messages.id))
       .limit(limit + 1);
     const hasMore = rows.length > limit;
     const sliced = hasMore ? rows.slice(0, limit) : rows;
@@ -2426,7 +2434,7 @@ export class ChatService {
 
   async getSidechatMessagesBefore(
     conversationId: string,
-    beforeCreatedAt: Date,
+    before: SidechatMessageCursor,
     limit = 30,
   ): Promise<MessagePage> {
     const rows = await this.db
@@ -2437,10 +2445,16 @@ export class ChatService {
           eq(messages.conversationId, conversationId),
           eq(messages.channel, "sidechat"),
           inArray(messages.role, ["agent", "bot"]),
-          lt(messages.createdAt, beforeCreatedAt),
+          or(
+            lt(messages.createdAt, before.createdAt),
+            and(
+              eq(messages.createdAt, before.createdAt),
+              lt(messages.id, before.id),
+            ),
+          ),
         ),
       )
-      .orderBy(desc(messages.createdAt))
+      .orderBy(desc(messages.createdAt), desc(messages.id))
       .limit(limit + 1);
     const hasMore = rows.length > limit;
     const sliced = hasMore ? rows.slice(0, limit) : rows;

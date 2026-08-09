@@ -34,7 +34,7 @@ export interface SidechatHandlerService {
   ): Promise<{ messages: MessageRow[]; hasMore: boolean }>;
   getSidechatMessagesBefore(
     conversationId: string,
-    before: Date,
+    before: { createdAt: Date; id: string },
     limit: number,
   ): Promise<{ messages: MessageRow[]; hasMore: boolean }>;
   claimSidechatRun(input: {
@@ -49,6 +49,7 @@ export interface SidechatHandlerService {
     conversationId: string;
     runId: string;
     status: "idle" | "ready" | "failed" | "waiting_approval";
+    now: Date;
   }): Promise<boolean>;
   addSidechatHumanMessage(input: {
     projectId: string;
@@ -119,7 +120,7 @@ export async function handleGetSidechatHistory(options: {
   const page = parsed.data.before
     ? await options.service.getSidechatMessagesBefore(
         conversation.id,
-        new Date(parsed.data.before),
+        parsed.data.before,
         parsed.data.limit,
       )
     : await options.service.getRecentSidechatMessages(
@@ -127,9 +128,13 @@ export async function handleGetSidechatHistory(options: {
         parsed.data.limit,
       );
 
+  const oldestMessage = page.messages[0];
   return Response.json({
     messages: page.messages.map(sidechatMessageRowToPayload),
     hasMore: page.hasMore,
+    nextBefore: page.hasMore && oldestMessage
+      ? `${oldestMessage.createdAt.getTime()}.${oldestMessage.id}`
+      : null,
   });
 }
 
@@ -165,6 +170,7 @@ async function settleFailedRun(
       conversationId: options.conversationId,
       runId,
       status: "failed",
+      now: options.now(),
     });
     if (settled && broadcast) {
       try {
@@ -212,17 +218,20 @@ async function claimRun(
   });
 }
 
-function scheduleContainedTurn(
+function createContainedTurn(
   options: SidechatMutationOptions,
   message: MessageRow,
   runId: string,
-): void {
-  const background = Promise.resolve()
-    .then(() => options.runTurn({ message, runId }))
+  registration: { active: boolean },
+): Promise<void> {
+  return Promise.resolve()
+    .then(() => {
+      if (!registration.active) return;
+      return options.runTurn({ message, runId });
+    })
     .catch(async () => {
       await settleFailedRun(options, runId, true);
     });
-  options.scheduleBackground(background);
 }
 
 async function acceptClaimedRun(
@@ -231,18 +240,34 @@ async function acceptClaimedRun(
   runId: string,
   broadcastMessage: boolean,
 ): Promise<Response> {
-  try {
-    if (broadcastMessage) options.broadcastMessage(message);
-    options.broadcastStatus("working", runId);
-    scheduleContainedTurn(options, message, runId);
-  } catch {
-    await settleFailedRun(options, runId, true);
-    return errorResponse("sidechat_acceptance_failed", 500);
-  }
-  return Response.json(
+  const acceptedResponse = Response.json(
     { message: sidechatMessageRowToPayload(message), runId },
     { status: 202 },
   );
+
+  try {
+    if (broadcastMessage) options.broadcastMessage(message);
+    options.broadcastStatus("working", runId);
+  } catch {
+    await settleFailedRun(options, runId, true);
+    return acceptedResponse;
+  }
+
+  const registration = { active: false };
+  const background = createContainedTurn(
+    options,
+    message,
+    runId,
+    registration,
+  );
+  try {
+    options.scheduleBackground(background);
+    registration.active = true;
+  } catch {
+    await background;
+    await settleFailedRun(options, runId, true);
+  }
+  return acceptedResponse;
 }
 
 export async function handleCreateSidechatMessage(

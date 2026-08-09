@@ -575,9 +575,32 @@ export const sidechatRetrySchema = z
   })
   .strict();
 
+const sidechatHistoryCursorSchema = z
+  .string()
+  .max(117)
+  .regex(/^\d{1,16}\.[A-Za-z0-9_-]{1,100}$/u, "Invalid sidechat cursor")
+  .transform((value) => {
+    const separator = value.indexOf(".");
+    return {
+      timestamp: Number(value.slice(0, separator)),
+      id: value.slice(separator + 1),
+    };
+  })
+  .refine(
+    ({ timestamp }) =>
+      Number.isSafeInteger(timestamp) &&
+      timestamp >= 0 &&
+      !Number.isNaN(new Date(timestamp).getTime()),
+    "Invalid sidechat cursor",
+  )
+  .transform(({ timestamp, id }) => ({
+    createdAt: new Date(timestamp),
+    id,
+  }));
+
 export const sidechatHistoryQuerySchema = z
   .object({
-    before: z.string().datetime().optional(),
+    before: sidechatHistoryCursorSchema.optional(),
     limit: z.coerce.number().int().min(1).max(100).default(40),
   })
   .strict();

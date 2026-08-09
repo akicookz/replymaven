@@ -76,6 +76,7 @@ interface HarnessOptions {
   insertResult?: MessageRow | null;
   takeoverBeforeInsert?: boolean;
   takeoverAfterInsert?: boolean;
+  settlementRace?: "expiry" | "archive";
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -101,6 +102,8 @@ function createHarness(options: HarnessOptions = {}) {
       createdAt: new Date(now.getTime() - (45 - index) * 1_000),
     }));
   let activeRun = true;
+  let archivedAt: Date | null = null;
+  let leaseExpiresAt = new Date(now.getTime() + 60_000);
 
   const service = {
     async getOperationalConversationById() {
@@ -113,12 +116,10 @@ function createHarness(options: HarnessOptions = {}) {
         visitorEmail: "snapshot@example.com",
         status: "waiting_agent" as const,
         chatState: '{"aiParticipation":"human_only"}',
-        archivedAt: null,
+        archivedAt,
         sidechatStatus: activeRun ? "working" as const : "failed" as const,
         sidechatRunId: activeRun ? "run-1" : null,
-        sidechatLeaseExpiresAt: activeRun
-          ? new Date(now.getTime() + 60_000)
-          : null,
+        sidechatLeaseExpiresAt: activeRun ? leaseExpiresAt : null,
       };
     },
     async getRecentPublicMessages(_id: string, limit: number) {
@@ -148,9 +149,17 @@ function createHarness(options: HarnessOptions = {}) {
       if (options.takeoverAfterInsert) activeRun = false;
       return message;
     },
-    async settleSidechatRun(input: { status: string }) {
+    async settleSidechatRun(input: { status: string; now: Date }) {
       calls.push(`settle:${input.status}`);
       if (!activeRun) return false;
+      if (options.settlementRace === "expiry") leaseExpiresAt = input.now;
+      if (options.settlementRace === "archive") archivedAt = input.now;
+      if (
+        archivedAt ||
+        leaseExpiresAt.getTime() <= input.now.getTime()
+      ) {
+        return false;
+      }
       activeRun = false;
       return true;
     },
@@ -421,4 +430,19 @@ describe("runSidechatTurn", () => {
     expect(harness.calls.some((call) => call.startsWith("message:"))).toBe(false);
     expect(harness.statuses).toEqual([]);
   });
+
+  test.each(["expiry", "archive"] as const)(
+    "does not publish when %s wins between revalidation and settlement",
+    async (settlementRace) => {
+      const harness = createHarness({ settlementRace });
+
+      await runSidechatTurn(createOptions(harness.runtime));
+
+      expect(harness.persisted).toHaveLength(1);
+      expect(harness.calls).toContain("settle:idle");
+      expect(harness.calls.some((call) => call.startsWith("message:")))
+        .toBe(false);
+      expect(harness.statuses).toEqual([]);
+    },
+  );
 });
