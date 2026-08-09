@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { serializeMessageImageUrls } from "../../shared/message-images";
 import {
   reconcileSidechatCoordinationQueryCaches,
+  mergeConversationDetailFetchWithSidechatAuthority,
   reduceSidechatAcceptedConversation,
   mergeConversationWithSidechatSnapshot,
   selectAuthoritativeSidechatCoordinationFromCaches,
@@ -681,32 +682,13 @@ function Conversations() {
     // Detail is kept fresh in real time by useConversationWs; cache 60s so
     // revisiting a conversation is instant.
     staleTime: 1000 * 60,
-    structuralSharing: (current, incoming) => {
-      const previous = current as ConversationDetail | undefined;
-      const fetched = incoming as ConversationDetail;
-      if (!previous) return fetched;
-      const merged = {
-        ...fetched,
-        conversation: mergeConversationWithSidechatSnapshot(
-          previous.conversation,
-          fetched.conversation,
-        ),
-      };
-      const authoritative = selectAuthoritativeSidechatCoordinationFromCaches(
+    structuralSharing: (current, incoming) =>
+      mergeConversationDetailFetchWithSidechatAuthority(
         queryClient,
         projectId,
-        fetched.conversation.id,
-      );
-      return authoritative
-        ? {
-            ...merged,
-            conversation: reduceSidechatAcceptedConversation(
-              merged.conversation,
-              authoritative,
-            ),
-          }
-        : merged;
-    },
+        current as ConversationDetail | undefined,
+        incoming as ConversationDetail,
+      ),
   });
 
   useEffect(() => {

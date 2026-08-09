@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import type { MessageRow } from "../../worker/db";
 import {
   broadcastEventToSockets,
@@ -16,6 +16,7 @@ import type {
 import {
   reduceConversationMessageEvent,
   mergeConversationWithSidechatSnapshot,
+  mergeConversationDetailFetchWithSidechatAuthority,
   reduceSidechatAcceptedConversation,
   reduceSidechatEphemeralEvent,
   reduceSidechatEphemeralTerminalEvent,
@@ -708,4 +709,103 @@ test("unselected polling snapshot remains authoritative when stale detail and hi
   ])).toMatchObject({
     coordination: { revision: 9, status: "ready", runId: null },
   });
+});
+
+interface DetailCommitFixture {
+  conversation: {
+    id: string;
+    status: string;
+    closeReason: string | null;
+    updatedAt: string;
+    visitorName: string;
+    sidechatStatus: "idle" | "working" | "ready" | "failed";
+    sidechatRunId: string | null;
+    sidechatRevision: number;
+    sidechatUpdatedAt: string | null;
+  };
+  messages: Array<{ id: string; content: string }>;
+  marker: string;
+}
+
+function createFetchedDetail(revision: number): DetailCommitFixture {
+  return {
+    conversation: {
+      id: "conversation-1",
+      status: "active",
+      closeReason: null,
+      updatedAt: "2026-08-10T00:00:07.000Z",
+      visitorName: "Fetched visitor",
+      sidechatStatus: revision === 0 ? "idle" : "ready",
+      sidechatRunId: null,
+      sidechatRevision: revision,
+      sidechatUpdatedAt: revision === 0
+        ? null
+        : `2026-08-10T00:00:0${revision}.000Z`,
+    },
+    messages: [{ id: "public-1", content: "Fetched transcript" }],
+    marker: "fetched-detail",
+  };
+}
+
+test("first deferred detail commit exposes the cached global revision without a stale render", async () => {
+  const queryClient = new QueryClient();
+  seedCoordinationCaches(queryClient, {
+    list: { revision: 9, status: "working", runId: "run-9" },
+    history: { revision: 9, status: "working", runId: "run-9" },
+  });
+  const deferred = createDeferred<DetailCommitFixture>();
+  const observedRevisions: number[] = [];
+  const observer = new QueryObserver<DetailCommitFixture>(queryClient, {
+    queryKey: ["conversation-detail", "conversation-1"],
+    queryFn: async () => deferred.promise,
+    structuralSharing: (current, incoming) =>
+      mergeConversationDetailFetchWithSidechatAuthority(
+        queryClient,
+        "project-1",
+        current,
+        incoming,
+      ),
+  });
+  const unsubscribe = observer.subscribe((result) => {
+    if (result.data) {
+      observedRevisions.push(result.data.conversation.sidechatRevision);
+    }
+  });
+
+  const pending = observer.refetch();
+  deferred.resolve(createFetchedDetail(7));
+  await pending;
+  unsubscribe();
+
+  expect(observedRevisions).toEqual([9]);
+  expect(queryClient.getQueryData<DetailCommitFixture>([
+    "conversation-detail",
+    "conversation-1",
+  ])).toEqual({
+    conversation: {
+      id: "conversation-1",
+      status: "active",
+      closeReason: null,
+      updatedAt: "2026-08-10T00:00:07.000Z",
+      visitorName: "Fetched visitor",
+      sidechatStatus: "working",
+      sidechatRunId: "run-9",
+      sidechatRevision: 9,
+      sidechatUpdatedAt: "2026-08-10T00:00:09.000Z",
+    },
+    messages: [{ id: "public-1", content: "Fetched transcript" }],
+    marker: "fetched-detail",
+  });
+});
+
+test("first detail commit keeps fetched legacy coordination when no authority is cached", () => {
+  for (const revision of [0, 7]) {
+    const fetched = createFetchedDetail(revision);
+    expect(mergeConversationDetailFetchWithSidechatAuthority(
+      new QueryClient(),
+      "project-1",
+      undefined,
+      fetched,
+    )).toBe(fetched);
+  }
 });

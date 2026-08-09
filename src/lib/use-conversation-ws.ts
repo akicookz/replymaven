@@ -481,6 +481,39 @@ export function mergeConversationWithSidechatSnapshot<
   };
 }
 
+export function mergeConversationDetailFetchWithSidechatAuthority<
+  TConversation extends SidechatAcceptedConversationSnapshot & { id: string },
+  TDetail extends { conversation: TConversation },
+>(
+  queryClient: QueryClient,
+  projectId: string | undefined,
+  current: TDetail | undefined,
+  fetched: TDetail,
+): TDetail {
+  const merged: TDetail = current
+    ? {
+        ...fetched,
+        conversation: mergeConversationWithSidechatSnapshot(
+          current.conversation,
+          fetched.conversation,
+        ),
+      }
+    : fetched;
+  const authoritative = selectAuthoritativeSidechatCoordinationFromCaches(
+    queryClient,
+    projectId,
+    fetched.conversation.id,
+  );
+  if (!authoritative) return merged;
+  const conversation = reduceSidechatAcceptedConversation(
+    merged.conversation,
+    authoritative,
+  );
+  return conversation === merged.conversation
+    ? merged
+    : { ...merged, conversation };
+}
+
 const MAX_EPHEMERAL_RUNS = 8;
 const MAX_EPHEMERAL_DELTA_LENGTH = 50_000;
 const MAX_EPHEMERAL_LABEL_LENGTH = 500;
