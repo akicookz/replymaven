@@ -3,14 +3,18 @@ import { ChatService } from "../services/chat-service";
 import { type AppEnv } from "../types";
 import { type MessageRow } from "../db";
 import {
+  compareMessagePositions,
   isSidechatServerEvent,
   type ServerEvent,
-  type MessagePayload,
+  type StableMessagePosition,
 } from "../../shared/ws-events";
 import {
+  messageRowToPayload,
   sanitizeSidechatServerEvent,
   sidechatMessageRowToPayload,
 } from "../realtime/broadcast";
+
+const REPLAY_INCLUSIVE_LOOKBACK_MS = 1_000;
 
 export interface RealtimeSocket {
   deserializeAttachment(): unknown;
@@ -97,27 +101,46 @@ export async function replayConversationMessages(
   reader: ConversationReplayReader,
 ): Promise<void> {
   let publicSince = 0;
+  let publicCursor: StableMessagePosition | null = null;
   if (cursors.lastPublicMessageId) {
     const lastPublic = await reader.getMessageByIdForChannel(
       cursors.lastPublicMessageId,
       "public",
     );
     if (lastPublic?.conversationId === attachment.conversationId) {
-      publicSince = lastPublic.createdAt.getTime();
+      publicCursor = {
+        id: lastPublic.id,
+        createdAt: lastPublic.createdAt.getTime(),
+      };
+      publicSince = Math.max(
+        0,
+        publicCursor.createdAt - REPLAY_INCLUSIVE_LOOKBACK_MS,
+      );
     }
   }
 
-  const publicRows = await reader.getPublicMessagesSince(
-    attachment.conversationId,
-    publicSince,
+  const publicRows = replayRowsAfterCursor(
+    await reader.getPublicMessagesSince(
+      attachment.conversationId,
+      publicSince,
+    ),
+    publicCursor,
   );
   for (const row of publicRows) {
+    let message;
+    try {
+      message = messageRowToPayload(row);
+    } catch {
+      // The replay query is not trusted as an audience boundary. A private or
+      // malformed row must never be converted into a public event.
+      continue;
+    }
     try {
       ws.send(
         JSON.stringify({
           type: "message:new",
           conversationId: attachment.conversationId,
-          message: toMessagePayload(row),
+          message,
         } satisfies ServerEvent),
       );
     } catch {
@@ -129,19 +152,30 @@ export async function replayConversationMessages(
   if (attachment.kind !== "agent") return;
 
   let sidechatSince = 0;
+  let sidechatCursor: StableMessagePosition | null = null;
   if (cursors.lastSidechatMessageId) {
     const lastSidechat = await reader.getMessageByIdForChannel(
       cursors.lastSidechatMessageId,
       "sidechat",
     );
     if (lastSidechat?.conversationId === attachment.conversationId) {
-      sidechatSince = lastSidechat.createdAt.getTime();
+      sidechatCursor = {
+        id: lastSidechat.id,
+        createdAt: lastSidechat.createdAt.getTime(),
+      };
+      sidechatSince = Math.max(
+        0,
+        sidechatCursor.createdAt - REPLAY_INCLUSIVE_LOOKBACK_MS,
+      );
     }
   }
 
-  const sidechatRows = await reader.getSidechatMessagesSince(
-    attachment.conversationId,
-    sidechatSince,
+  const sidechatRows = replayRowsAfterCursor(
+    await reader.getSidechatMessagesSince(
+      attachment.conversationId,
+      sidechatSince,
+    ),
+    sidechatCursor,
   );
   for (const row of sidechatRows) {
     let message;
@@ -166,26 +200,25 @@ export async function replayConversationMessages(
   }
 }
 
-function toMessagePayload(row: {
-  id: string;
-  role: "visitor" | "bot" | "agent" | "system";
-  content: string;
-  imageUrl: string | null;
-  sources: string | null;
-  senderName: string | null;
-  senderAvatar: string | null;
-  createdAt: Date;
-}): MessagePayload {
-  return {
-    id: row.id,
-    role: row.role,
-    content: row.content,
-    imageUrl: row.imageUrl,
-    sources: row.sources,
-    senderName: row.senderName,
-    senderAvatar: row.senderAvatar,
-    createdAt: row.createdAt.getTime(),
-  };
+function replayRowsAfterCursor(
+  rows: MessageRow[],
+  cursor: StableMessagePosition | null,
+): MessageRow[] {
+  return rows
+    .filter((row) => {
+      if (!cursor) return true;
+      const createdAt = row.createdAt.getTime();
+      return (
+        createdAt > cursor.createdAt ||
+        (createdAt === cursor.createdAt && row.id !== cursor.id)
+      );
+    })
+    .sort((left, right) =>
+      compareMessagePositions(
+        { id: left.id, createdAt: left.createdAt.getTime() },
+        { id: right.id, createdAt: right.createdAt.getTime() },
+      ),
+    );
 }
 
 export class ConversationDO implements DurableObject {

@@ -334,11 +334,96 @@ test("visitor replay executes only the public query", async () => {
 
   expect(calls).toEqual([
     "cursor:public:public-1",
-    `public:${Date.parse("2026-08-09T00:00:00.000Z")}`,
+    `public:${Date.parse("2026-08-08T23:59:59.000Z")}`,
   ]);
   expect(visitor.sent.map((payload) => JSON.parse(payload).type)).toEqual([
     "message:new",
   ]);
+});
+
+test("visitor replay fails closed when the public reader returns a private row", async () => {
+  const reader: ConversationReplayReader = {
+    async getMessageByIdForChannel() {
+      return null;
+    },
+    async getPublicMessagesSince() {
+      return [createMessageRow()];
+    },
+    async getSidechatMessagesSince() {
+      throw new Error("visitor replay must not query sidechat");
+    },
+  };
+  const visitor = createSocket({
+    kind: "visitor",
+    subjectId: "visitor-1",
+    conversationId: "conversation-1",
+    projectId: "project-1",
+    roomKind: "conversation",
+  });
+
+  await replayConversationMessages(
+    visitor,
+    visitor.deserializeAttachment() as SocketAttachment,
+    { lastPublicMessageId: null, lastSidechatMessageId: null },
+    reader,
+  );
+
+  expect(visitor.sent).toEqual([]);
+});
+
+test("public replay includes rows after a same-second cursor", async () => {
+  const cursorAt = new Date("2026-08-09T00:00:01.000Z");
+  const rows = [
+    createMessageRow({
+      id: "public-z",
+      role: "visitor",
+      channel: "public",
+      kind: "text",
+      metadata: null,
+      content: "Already seen",
+      createdAt: cursorAt,
+    }),
+    createMessageRow({
+      id: "public-a",
+      role: "bot",
+      channel: "public",
+      kind: "text",
+      metadata: null,
+      content: "Same-second follow-up",
+      createdAt: cursorAt,
+    }),
+  ];
+  const reader: ConversationReplayReader = {
+    async getMessageByIdForChannel() {
+      return rows[0] ?? null;
+    },
+    async getPublicMessagesSince(_conversationId, since) {
+      return rows.filter((row) => row.createdAt.getTime() > since);
+    },
+    async getSidechatMessagesSince() {
+      throw new Error("visitor replay must not query sidechat");
+    },
+  };
+  const visitor = createSocket({
+    kind: "visitor",
+    subjectId: "visitor-1",
+    conversationId: "conversation-1",
+    projectId: "project-1",
+    roomKind: "conversation",
+  });
+
+  await replayConversationMessages(
+    visitor,
+    visitor.deserializeAttachment() as SocketAttachment,
+    { lastPublicMessageId: "public-z", lastSidechatMessageId: null },
+    reader,
+  );
+
+  expect(
+    visitor.sent.map(
+      (payload) => JSON.parse(payload).message.id as string,
+    ),
+  ).toEqual(["public-a"]);
 });
 
 test("agent replay uses independent public and sidechat cursors", async () => {
@@ -394,12 +479,63 @@ test("agent replay uses independent public and sidechat cursors", async () => {
 
   expect(calls).toEqual([
     "cursor:public:public-1",
-    `public:${Date.parse("2026-08-09T00:00:00.000Z")}`,
+    `public:${Date.parse("2026-08-08T23:59:59.000Z")}`,
     "cursor:sidechat:sidechat-1",
-    `sidechat:${Date.parse("2026-08-09T00:00:01.000Z")}`,
+    `sidechat:${Date.parse("2026-08-09T00:00:00.000Z")}`,
   ]);
   expect(agent.sent.map((payload) => JSON.parse(payload).type)).toEqual([
     "message:new",
     "sidechat:message",
   ]);
+});
+
+test("sidechat replay includes rows after a same-second cursor", async () => {
+  const cursorAt = new Date("2026-08-09T00:00:01.000Z");
+  const sidechatRows = [
+    createMessageRow({
+      id: "sidechat-z",
+      content: "Already seen",
+      kind: "text",
+      metadata: null,
+      createdAt: cursorAt,
+    }),
+    createMessageRow({
+      id: "sidechat-a",
+      content: "Same-second follow-up",
+      kind: "text",
+      metadata: null,
+      createdAt: cursorAt,
+    }),
+  ];
+  const reader: ConversationReplayReader = {
+    async getMessageByIdForChannel(_id, channel) {
+      return channel === "sidechat" ? (sidechatRows[0] ?? null) : null;
+    },
+    async getPublicMessagesSince() {
+      return [];
+    },
+    async getSidechatMessagesSince(_conversationId, since) {
+      return sidechatRows.filter((row) => row.createdAt.getTime() > since);
+    },
+  };
+  const agent = createSocket({
+    kind: "agent",
+    subjectId: "agent-1",
+    conversationId: "conversation-1",
+    projectId: "project-1",
+    roomKind: "conversation",
+  });
+
+  await replayConversationMessages(
+    agent,
+    agent.deserializeAttachment() as SocketAttachment,
+    { lastPublicMessageId: null, lastSidechatMessageId: "sidechat-z" },
+    reader,
+  );
+
+  expect(
+    agent.sent.map(
+      (payload) => JSON.parse(payload).message.id as string,
+    ),
+  ).toEqual(["sidechat-a"]);
 });

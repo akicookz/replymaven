@@ -17,6 +17,22 @@ export interface MessagePayload {
   createdAt: number;
 }
 
+export interface StableMessagePosition {
+  id: string;
+  createdAt: number;
+}
+
+export function compareMessagePositions(
+  left: StableMessagePosition,
+  right: StableMessagePosition,
+): number {
+  if (left.createdAt !== right.createdAt) {
+    return left.createdAt < right.createdAt ? -1 : 1;
+  }
+  if (left.id === right.id) return 0;
+  return left.id < right.id ? -1 : 1;
+}
+
 export type SidechatStatus =
   | "idle"
   | "working"

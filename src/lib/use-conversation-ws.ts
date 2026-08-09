@@ -2,15 +2,19 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { WebSocket as ReconnectingWebSocket } from "partysocket";
 import {
+  compareMessagePositions,
   type MessagePayload,
   type ServerEvent,
   type SidechatMessagePayload,
   type SidechatStatus,
+  type StableMessagePosition,
 } from "../../shared/ws-events";
 import { isImagePlaceholderContent } from "../../shared/message-images";
 import { invalidateCustomerProjectQueries } from "./customers";
 
-interface ConversationDetailMessage extends MessagePayload {
+export interface ConversationDetailMessage
+  extends Omit<MessagePayload, "createdAt"> {
+  createdAt: string;
   toolExecutions?: unknown[];
   emailedAt?: string | null;
   userId?: string | null;
@@ -43,7 +47,7 @@ interface ConversationsCacheData {
   [key: string]: unknown;
 }
 
-interface SidechatCacheMessage
+export interface SidechatCacheMessage
   extends Omit<SidechatMessagePayload, "createdAt"> {
   createdAt: string;
 }
@@ -67,6 +71,110 @@ export type SidechatEphemeralStore = ReadonlyMap<
   SidechatEphemeralRun
 >;
 
+export type MessageResumeCursor = StableMessagePosition;
+
+export interface ConversationRealtimeMessageState {
+  publicMessages: ConversationDetailMessage[];
+  sidechatMessages: SidechatCacheMessage[];
+  publicCursor: MessageResumeCursor | null;
+  sidechatCursor: MessageResumeCursor | null;
+}
+
+type ConversationMessageEvent = Extract<
+  ServerEvent,
+  { type: "message:new" | "sidechat:message" }
+>;
+
+type SidechatEphemeralEvent = Extract<
+  ServerEvent,
+  { type: "sidechat:delta" | "sidechat:activity" }
+>;
+
+export function reduceConversationMessageEvent(
+  state: ConversationRealtimeMessageState,
+  event: ConversationMessageEvent,
+): ConversationRealtimeMessageState {
+  if (event.type === "message:new") {
+    const incoming = event.message;
+    const incomingMessage = toIsoMessage(incoming);
+    const optimisticIndex = state.publicMessages.findIndex(
+      (message) =>
+        (
+          message as ConversationDetailMessage & {
+            _optimistic?: boolean;
+          }
+        )._optimistic &&
+        message.role === incoming.role &&
+        (message.content === incoming.content ||
+          (!message.content &&
+            isImagePlaceholderContent(incoming.content))) &&
+        Boolean(message.imageUrl) === Boolean(incoming.imageUrl),
+    );
+    const nextMessages = [...state.publicMessages];
+    const existingIndex = nextMessages.findIndex(
+      (message) => message.id === incoming.id,
+    );
+    if (optimisticIndex >= 0) {
+      nextMessages[optimisticIndex] = incomingMessage;
+    } else if (existingIndex >= 0) {
+      nextMessages[existingIndex] = {
+        ...nextMessages[existingIndex],
+        ...incomingMessage,
+      };
+    } else {
+      nextMessages.push(incomingMessage);
+    }
+    nextMessages.sort(compareCachedMessages);
+    return {
+      ...state,
+      publicMessages: nextMessages,
+      publicCursor: advanceCursor(state.publicCursor, incoming),
+    };
+  }
+
+  const incoming = event.message;
+  const incomingMessage = toSidechatCacheMessage(incoming);
+  const nextMessages = [...state.sidechatMessages];
+  const existingIndex = nextMessages.findIndex(
+    (message) => message.id === incoming.id,
+  );
+  if (existingIndex >= 0) {
+    nextMessages[existingIndex] = {
+      ...nextMessages[existingIndex],
+      ...incomingMessage,
+    };
+  } else {
+    nextMessages.push(incomingMessage);
+  }
+  nextMessages.sort(compareCachedMessages);
+  return {
+    ...state,
+    sidechatMessages: nextMessages,
+    sidechatCursor: advanceCursor(state.sidechatCursor, incoming),
+  };
+}
+
+export function reduceSidechatEphemeralEvent(
+  old: SidechatEphemeralStore | undefined,
+  event: SidechatEphemeralEvent,
+): SidechatEphemeralStore {
+  if (event.type === "sidechat:delta") {
+    return nextEphemeralStore(old, event.runId, (current) => ({
+      ...current,
+      delta: `${current.delta}${event.delta}`.slice(
+        -MAX_EPHEMERAL_DELTA_LENGTH,
+      ),
+    }));
+  }
+  return nextEphemeralStore(old, event.runId, (current) => ({
+    ...current,
+    activity: {
+      label: event.label.slice(0, MAX_EPHEMERAL_LABEL_LENGTH),
+      phase: event.phase,
+    },
+  }));
+}
+
 const MAX_EPHEMERAL_RUNS = 8;
 const MAX_EPHEMERAL_DELTA_LENGTH = 50_000;
 const MAX_EPHEMERAL_LABEL_LENGTH = 500;
@@ -80,7 +188,7 @@ function toIsoMessage(message: MessagePayload): ConversationDetailMessage {
   return {
     ...message,
     // Dashboard renders ISO strings; the wire format is epoch ms.
-    createdAt: new Date(message.createdAt).toISOString() as unknown as number,
+    createdAt: new Date(message.createdAt).toISOString(),
     toolExecutions: [],
   };
 }
@@ -94,16 +202,57 @@ function toSidechatCacheMessage(
   };
 }
 
-function latestPublicMessageId(
+function latestPublicMessageCursor(
   detail: ConversationDetailData | undefined,
-): string | null {
-  return detail?.messages.at(-1)?.id ?? null;
+): MessageResumeCursor | null {
+  return latestMessageCursor(detail?.messages);
 }
 
-function latestSidechatMessageId(
+function latestSidechatMessageCursor(
   sidechat: SidechatCacheData | undefined,
-): string | null {
-  return sidechat?.messages.at(-1)?.id ?? null;
+): MessageResumeCursor | null {
+  return latestMessageCursor(sidechat?.messages);
+}
+
+function latestMessageCursor(
+  messages: Array<{ id: string; createdAt: string }> | undefined,
+): MessageResumeCursor | null {
+  let latest: MessageResumeCursor | null = null;
+  for (const message of messages ?? []) {
+    const candidate = cachedMessagePosition(message);
+    latest = advanceCursor(latest, candidate);
+  }
+  return latest;
+}
+
+function cachedMessagePosition(message: {
+  id: string;
+  createdAt: string;
+}): StableMessagePosition {
+  return {
+    id: message.id,
+    createdAt: Date.parse(message.createdAt),
+  };
+}
+
+function compareCachedMessages(
+  left: { id: string; createdAt: string },
+  right: { id: string; createdAt: string },
+): number {
+  return compareMessagePositions(
+    cachedMessagePosition(left),
+    cachedMessagePosition(right),
+  );
+}
+
+function advanceCursor(
+  current: MessageResumeCursor | null,
+  candidate: StableMessagePosition,
+): MessageResumeCursor {
+  if (!current || compareMessagePositions(candidate, current) > 0) {
+    return { id: candidate.id, createdAt: candidate.createdAt };
+  }
+  return current;
 }
 
 function nextEphemeralStore(
@@ -133,13 +282,13 @@ export function useConversationWs(
     if (!projectId || !conversationId) return;
     const activeProjectId = projectId;
 
-    let lastSeenPublicMessageId = latestPublicMessageId(
+    let publicCursor = latestPublicMessageCursor(
       queryClient.getQueryData<ConversationDetailData>([
         "conversation-detail",
         conversationId,
       ]),
     );
-    let lastSeenSidechatMessageId = latestSidechatMessageId(
+    let sidechatCursor = latestSidechatMessageCursor(
       queryClient.getQueryData<SidechatCacheData>([
         "sidechat",
         projectId,
@@ -155,8 +304,8 @@ export function useConversationWs(
       socket.send(
         JSON.stringify({
           type: "resume",
-          lastPublicMessageId: lastSeenPublicMessageId,
-          lastSidechatMessageId: lastSeenSidechatMessageId,
+          lastPublicMessageId: publicCursor?.id ?? null,
+          lastSidechatMessageId: sidechatCursor?.id ?? null,
         }),
       );
     }
@@ -171,37 +320,27 @@ export function useConversationWs(
       if (!parsed) return;
 
       if (parsed.type === "message:new") {
-        const incoming = parsed.message;
-        lastSeenPublicMessageId = incoming.id;
+        const sidechatMessages =
+          queryClient.getQueryData<SidechatCacheData>([
+            "sidechat",
+            projectId,
+            conversationId,
+          ])?.messages ?? [];
         queryClient.setQueryData<ConversationDetailData | undefined>(
           ["conversation-detail", conversationId],
           (old) => {
             if (!old) return old;
-            const optimisticIdx = old.messages.findIndex(
-              (m) =>
-                (m as ConversationDetailMessage & { _optimistic?: boolean })
-                  ._optimistic &&
-                m.role === incoming.role &&
-                // Image-only sends go up with empty content; the server
-                // stores a "Sent an image"/"Sent images" placeholder.
-                (m.content === incoming.content ||
-                  (!m.content &&
-                    isImagePlaceholderContent(incoming.content))) &&
-                Boolean(m.imageUrl) === Boolean(incoming.imageUrl),
+            const next = reduceConversationMessageEvent(
+              {
+                publicMessages: old.messages,
+                sidechatMessages,
+                publicCursor,
+                sidechatCursor,
+              },
+              parsed,
             );
-            const dedupeIdx = old.messages.findIndex(
-              (m) => m.id === incoming.id,
-            );
-            const next = [...old.messages];
-            const replacement = toIsoMessage(incoming);
-            if (optimisticIdx >= 0) {
-              next[optimisticIdx] = replacement;
-            } else if (dedupeIdx >= 0) {
-              next[dedupeIdx] = { ...next[dedupeIdx], ...replacement };
-            } else {
-              next.push(replacement);
-            }
-            return { ...old, messages: next };
+            publicCursor = next.publicCursor;
+            return { ...old, messages: next.publicMessages };
           },
         );
       } else if (parsed.type === "message:deleted") {
@@ -302,28 +441,27 @@ export function useConversationWs(
           },
         );
       } else if (parsed.type === "sidechat:message") {
-        const incoming = parsed.message;
-        lastSeenSidechatMessageId = incoming.id;
+        const publicMessages =
+          queryClient.getQueryData<ConversationDetailData>([
+            "conversation-detail",
+            conversationId,
+          ])?.messages ?? [];
         queryClient.setQueryData<SidechatCacheData>(
           ["sidechat", projectId, conversationId],
           (old) => {
-            const messages = old?.messages ?? [];
-            const incomingMessage = toSidechatCacheMessage(incoming);
-            const existingIndex = messages.findIndex(
-              (message) => message.id === incoming.id,
+            const next = reduceConversationMessageEvent(
+              {
+                publicMessages,
+                sidechatMessages: old?.messages ?? [],
+                publicCursor,
+                sidechatCursor,
+              },
+              parsed,
             );
-            const nextMessages = [...messages];
-            if (existingIndex >= 0) {
-              nextMessages[existingIndex] = {
-                ...nextMessages[existingIndex],
-                ...incomingMessage,
-              };
-            } else {
-              nextMessages.push(incomingMessage);
-            }
+            sidechatCursor = next.sidechatCursor;
             return {
               ...old,
-              messages: nextMessages,
+              messages: next.sidechatMessages,
               hasMore: old?.hasMore ?? false,
             };
           },
@@ -331,25 +469,12 @@ export function useConversationWs(
       } else if (parsed.type === "sidechat:delta") {
         queryClient.setQueryData<SidechatEphemeralStore>(
           ["sidechat-ephemeral", projectId, conversationId],
-          (old) =>
-            nextEphemeralStore(old, parsed.runId, (current) => ({
-              ...current,
-              delta: `${current.delta}${parsed.delta}`.slice(
-                -MAX_EPHEMERAL_DELTA_LENGTH,
-              ),
-            })),
+          (old) => reduceSidechatEphemeralEvent(old, parsed),
         );
       } else if (parsed.type === "sidechat:activity") {
         queryClient.setQueryData<SidechatEphemeralStore>(
           ["sidechat-ephemeral", projectId, conversationId],
-          (old) =>
-            nextEphemeralStore(old, parsed.runId, (current) => ({
-              ...current,
-              activity: {
-                label: parsed.label.slice(0, MAX_EPHEMERAL_LABEL_LENGTH),
-                phase: parsed.phase,
-              },
-            })),
+          (old) => reduceSidechatEphemeralEvent(old, parsed),
         );
       } else if (parsed.type === "sidechat:status") {
         queryClient.setQueryData<ConversationDetailData | undefined>(
