@@ -213,6 +213,26 @@ describe("Composer contracts", () => {
     expect(sidechatButton?.classList.contains("whitespace-nowrap")).toBe(true);
   });
 
+  test("keeps the shared composer keyboard focus visibly inside the glass shell", async () => {
+    const { dom } = await renderNode(
+      <Composer
+        draft=""
+        setDraft={() => undefined}
+        convId="conversation-1"
+        mode={{
+          kind: "sidechat",
+          onSendPrivate: () => undefined,
+          working: false,
+        }}
+      />,
+    );
+    const textarea = dom.window.document.querySelector("textarea");
+    expect(textarea?.classList.contains("focus-visible:outline-2")).toBe(true);
+    expect(textarea?.classList.contains("focus-visible:outline-solid")).toBe(true);
+    expect(textarea?.classList.contains("focus-visible:outline-offset-2")).toBe(true);
+    expect(textarea?.classList.contains("focus-visible:outline-ring/70")).toBe(true);
+  });
+
   test("focuses only on new Add-to-reply commands, including repeated commands", async () => {
     let sendCalls = 0;
     const exactDraft = "Exact visitor-ready draft.";

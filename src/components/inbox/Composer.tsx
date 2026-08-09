@@ -318,7 +318,7 @@ export default function Composer(props: ComposerProps) {
             : "Reply…"}
           rows={1}
           disabled={mode.kind === "sidechat" ? mode.working : false}
-          className="w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60"
+          className="w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring/70"
           style={{ fontSize: "14.5px", lineHeight: "1.5" }}
         />
 
