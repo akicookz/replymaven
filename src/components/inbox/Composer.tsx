@@ -60,6 +60,7 @@ export default function Composer(props: ComposerProps) {
   const isPrivate = contract === "sidechat";
   const { projectId = "" } = useParams<{ projectId: string }>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const previousFocusRequest = useRef(focusRequest);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [uploadingCount, setUploadingCount] = useState(0);
@@ -83,13 +84,21 @@ export default function Composer(props: ComposerProps) {
   }, [draft]);
 
   useLayoutEffect(() => {
-    if (focusRequest === undefined || mode?.kind !== "public") return;
+    const previous = previousFocusRequest.current;
+    previousFocusRequest.current = focusRequest;
+    if (
+      focusRequest === undefined ||
+      focusRequest === previous ||
+      mode.kind !== "public"
+    ) {
+      return;
+    }
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.focus();
     const end = textarea.value.length;
     textarea.setSelectionRange(end, end);
-  }, [focusRequest, mode?.kind]);
+  }, [focusRequest, mode.kind]);
 
   // POST to /api/upload (field: "file") with one automatic retry — dev's
   // remote R2 binding (and real networks) hiccup transiently; a single retry

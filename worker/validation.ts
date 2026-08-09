@@ -561,6 +561,7 @@ export const submitContactFormSchema = z.object({
 export const sidechatMessageSchema = z
   .object({
     content: z.string().trim().min(1).max(5_000).optional(),
+    startOnlyIfEmpty: z.boolean().optional(),
   })
   .strict();
 

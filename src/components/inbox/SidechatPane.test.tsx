@@ -18,6 +18,7 @@ async function flush(): Promise<void> {
 }
 
 async function renderPane(options?: {
+  open?: boolean;
   archived?: boolean;
   status?: "idle" | "working" | "waiting_approval" | "ready" | "failed";
   messages?: Message[];
@@ -48,6 +49,7 @@ async function renderPane(options?: {
     root.render(
       <MemoryRouter>
         <SidechatPane
+          open={options?.open ?? true}
           conversation={makeConversation(options?.archived ?? false)}
           customerFirstName="Ada"
           messages={options?.messages ?? []}
@@ -147,8 +149,58 @@ describe("SidechatPane layout", () => {
     ]);
     expect(controls.every((button) => button.classList.contains("min-h-10")))
       .toBe(true);
+    expect(controls.every((button) => button.classList.contains("min-w-10")))
+      .toBe(true);
     expect(controls.every((button) => button.querySelector("svg") === null))
       .toBe(true);
+  });
+
+  test("keeps a transitionable shell mounted while open state interpolates", async () => {
+    const { dom, root } = await renderPane({ open: false });
+    const pane = dom.window.document.querySelector<HTMLElement>(
+      "[data-sidechat-pane]",
+    )!;
+    expect(pane.getAttribute("aria-hidden")).toBe("true");
+    expect(pane.hasAttribute("inert")).toBe(true);
+    expect(pane.classList.contains("w-0")).toBe(true);
+    expect(pane.classList.contains("opacity-0")).toBe(true);
+    expect(pane.classList.contains("translate-x-3")).toBe(true);
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <SidechatPane
+            open
+            conversation={makeConversation(false)}
+            customerFirstName="Ada"
+            messages={[]}
+            loading={false}
+            draft=""
+            setDraft={() => undefined}
+            status="idle"
+            runId={null}
+            continuation={null}
+            hasMore={false}
+            loadingEarlier={false}
+            onLoadEarlier={() => undefined}
+            onSendPrivate={() => undefined}
+            onRetry={() => undefined}
+            onAddToReply={() => undefined}
+            onClose={() => undefined}
+          />
+        </MemoryRouter>,
+      );
+      await flush();
+    });
+    const openedPane = dom.window.document.querySelector<HTMLElement>(
+      "[data-sidechat-pane]",
+    )!;
+    expect(openedPane).toBe(pane);
+    expect(openedPane.getAttribute("aria-hidden")).toBe("false");
+    expect(openedPane.hasAttribute("inert")).toBe(false);
+    expect(openedPane.classList.contains("w-full")).toBe(true);
+    expect(openedPane.classList.contains("opacity-100")).toBe(true);
+    expect(openedPane.classList.contains("translate-x-0")).toBe(true);
   });
 
   test("keeps working delta and activity in the shared thread flow", async () => {

@@ -10,9 +10,12 @@ import {
   deriveMessageActions,
   deriveMessagePresentation,
   deriveSidechatPaneMode,
+  deriveSidechatBusy,
   deriveSidechatStatusDot,
   mergeSidechatHistoryMessages,
+  mergeSidechatHistorySnapshot,
   reconcileSidechatMessages,
+  resolveSidechatStartAfterHistory,
   reduceSidechatOrchestratorState,
   transitionPublicDraftAfterSidechatAccept,
 } from "./sidechat";
@@ -367,6 +370,121 @@ describe("Sidechat optimistic and streaming reconciliation", () => {
       mergeSidechatHistoryMessages(current, older).map((message) => message.id),
     ).toEqual(["message-a", "message-b", "message-c"]);
   });
+
+  test("merges a live row delivered during a deferred history fetch at commit time", () => {
+    const live = {
+      id: "message-live",
+      role: "bot" as const,
+      content: "Delivered while GET was pending",
+      createdAt: "2026-08-09T00:00:02.000Z",
+    };
+    const fetched = {
+      id: "message-fetched",
+      role: "agent" as const,
+      content: "Fetched history",
+      createdAt: "2026-08-09T00:00:01.000Z",
+    };
+
+    const committed = mergeSidechatHistorySnapshot(
+      {
+        messages: [live],
+        hasMore: false,
+        nextBefore: null,
+        historyLoaded: false,
+      },
+      {
+        messages: [fetched],
+        hasMore: true,
+        nextBefore: "1000.message-fetched",
+        historyLoaded: true,
+      },
+    );
+
+    expect(committed.messages.map((message) => message.id)).toEqual([
+      "message-fetched",
+      "message-live",
+    ]);
+    expect(committed.hasMore).toBe(true);
+    expect(committed.nextBefore).toBe("1000.message-fetched");
+    expect(committed.historyLoaded).toBe(true);
+  });
+
+  test("preserves an already paginated cursor when latest history refetches", () => {
+    const older = {
+      id: "older",
+      role: "agent" as const,
+      content: "Older page",
+      createdAt: "2026-08-08T00:00:00.000Z",
+    };
+    const latest = {
+      id: "latest",
+      role: "bot" as const,
+      content: "Latest page",
+      createdAt: "2026-08-09T00:00:00.000Z",
+    };
+    const committed = mergeSidechatHistorySnapshot(
+      {
+        messages: [older, latest],
+        hasMore: true,
+        nextBefore: "500.older",
+        historyLoaded: true,
+      },
+      {
+        messages: [latest],
+        hasMore: false,
+        nextBefore: null,
+        historyLoaded: true,
+      },
+    );
+    expect(committed.messages.map((message) => message.id)).toEqual([
+      "older",
+      "latest",
+    ]);
+    expect(committed.nextBefore).toBe("500.older");
+    expect(committed.hasMore).toBe(true);
+  });
+
+  test("uses the fetched cursor to fill a non-overlapping cache gap", () => {
+    const cached = {
+      id: "cached-old-window",
+      role: "agent" as const,
+      content: "Old cached window",
+      createdAt: "2026-08-01T00:00:00.000Z",
+    };
+    const fetched = {
+      id: "fetched-latest-window",
+      role: "bot" as const,
+      content: "Latest fetched window",
+      createdAt: "2026-08-09T00:00:00.000Z",
+    };
+    const committed = mergeSidechatHistorySnapshot(
+      {
+        messages: [cached],
+        hasMore: false,
+        nextBefore: null,
+        historyLoaded: true,
+      },
+      {
+        messages: [fetched],
+        hasMore: true,
+        nextBefore: "8000.fetched-latest-window",
+        historyLoaded: true,
+      },
+    );
+    expect(committed.nextBefore).toBe("8000.fetched-latest-window");
+    expect(committed.hasMore).toBe(true);
+  });
+});
+
+describe("Sidechat start history gate", () => {
+  test("waits for the open pane's fetch before deciding to submit", () => {
+    expect(resolveSidechatStartAfterHistory(false, 0)).toBe("wait");
+  });
+
+  test("opens fetched existing history and submits only a fetched empty thread", () => {
+    expect(resolveSidechatStartAfterHistory(true, 1)).toBe("open_existing");
+    expect(resolveSidechatStartAfterHistory(true, 0)).toBe("submit");
+  });
 });
 
 describe("composer keyboard intent", () => {
@@ -421,6 +539,10 @@ describe("composer keyboard intent", () => {
 });
 
 describe("Sidechat pane and read-only state", () => {
+  test("treats a pending retry as busy", () => {
+    expect(deriveSidechatBusy("failed", false, true)).toBe(true);
+    expect(deriveSidechatBusy("idle", false, false)).toBe(false);
+  });
   test("uses the exact desktop, compact, and mobile breakpoints", () => {
     expect(deriveSidechatPaneMode(1536)).toBe("desktop");
     expect(deriveSidechatPaneMode(1535)).toBe("compact");

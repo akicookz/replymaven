@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { JSDOM } from "jsdom";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import Composer from "./Composer";
+import FocusSidechatLayout from "./FocusSidechatLayout";
 import FocusView from "./FocusView";
 
 interface RenderResult {
@@ -91,6 +92,17 @@ function invokeTextareaKeyDown(
     onKeyDown?: (keyboardEvent: TestKeyboardEvent) => void;
   };
   props.onKeyDown?.(event);
+}
+
+function invokeFileChange(input: HTMLInputElement, files: File[]): void {
+  const propsKey = Object.keys(input).find((key) =>
+    key.startsWith("__reactProps$"),
+  );
+  if (!propsKey) throw new Error("React file input props were not attached");
+  const props = Reflect.get(input, propsKey) as {
+    onChange?: (event: { target: { files: File[]; value: string } }) => void;
+  };
+  props.onChange?.({ target: { files, value: "" } });
 }
 
 function shiftTabEvent(onPreventDefault: () => void): TestKeyboardEvent {
@@ -201,32 +213,118 @@ describe("Composer contracts", () => {
     expect(sidechatButton?.classList.contains("whitespace-nowrap")).toBe(true);
   });
 
-  test("focuses the exact replaced public draft at its end without sending", async () => {
+  test("focuses only on new Add-to-reply commands, including repeated commands", async () => {
     let sendCalls = 0;
     const exactDraft = "Exact visitor-ready draft.";
-    const { dom } = await renderNode(
-      <Composer
-        {...composerBaseProps()}
-        draft={exactDraft}
-        onSend={() => {
-          sendCalls += 1;
-        }}
-        focusRequest={1}
-        mode={{
-          kind: "public",
-          onStartSidechat: () => undefined,
-          sidechatExists: true,
-          sidechatStatus: "ready",
-        }}
-      />,
-    );
+    const { dom, root } = await renderNode(null);
+    function composer(focusRequest: number, key = "composer") {
+      return (
+        <MemoryRouter>
+          <Composer
+            key={key}
+            {...composerBaseProps()}
+            draft={exactDraft}
+            onSend={() => {
+              sendCalls += 1;
+            }}
+            focusRequest={focusRequest}
+            mode={{
+              kind: "public",
+              onStartSidechat: () => undefined,
+              sidechatExists: true,
+              sidechatStatus: "ready",
+            }}
+          />
+        </MemoryRouter>
+      );
+    }
+    await act(async () => root.render(composer(0)));
     const textarea = dom.window.document.querySelector("textarea")!;
 
     expect(textarea.value).toBe(exactDraft);
+    expect(dom.window.document.activeElement).not.toBe(textarea);
+
+    await act(async () => root.render(composer(1)));
     expect(dom.window.document.activeElement).toBe(textarea);
     expect(textarea.selectionStart).toBe(exactDraft.length);
     expect(textarea.selectionEnd).toBe(exactDraft.length);
+
+    textarea.blur();
+    await act(async () => root.render(composer(2)));
+    expect(dom.window.document.activeElement).toBe(textarea);
+
+    textarea.blur();
+    await act(async () => root.render(composer(2, "remounted-composer")));
+    expect(dom.window.document.activeElement).not.toBe(
+      dom.window.document.querySelector("textarea"),
+    );
     expect(sendCalls).toBe(0);
+  });
+
+  test("keeps the public Composer instance and staged attachment through pane open and close", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => Response.json({
+      url: "/api/uploads/staged.png",
+    });
+    const { dom, root } = await renderNode(null);
+    function layout(sidechatOpen: boolean) {
+      return (
+        <MemoryRouter>
+          <FocusSidechatLayout
+            sidechatOpen={sidechatOpen}
+            focusView={(
+              <Composer
+                {...composerBaseProps()}
+                mode={{
+                  kind: "public",
+                  onStartSidechat: () => undefined,
+                  sidechatExists: sidechatOpen,
+                  sidechatStatus: "idle",
+                }}
+              />
+            )}
+            sidechatPane={<aside data-test-sidechat />}
+          />
+        </MemoryRouter>
+      );
+    }
+
+    try {
+      await act(async () => root.render(layout(false)));
+      const initialTextarea = dom.window.document.querySelector("textarea")!;
+      const input = dom.window.document.querySelector<HTMLInputElement>(
+        'input[type="file"]',
+      )!;
+      await act(async () => {
+        invokeFileChange(input, [
+          new dom.window.File(["image"], "staged.png", {
+            type: "image/png",
+          }),
+        ]);
+        await flush();
+      });
+      expect(
+        dom.window.document.querySelector<HTMLImageElement>(
+          'img[src="/api/uploads/staged.png"]',
+        ),
+      ).not.toBeNull();
+
+      await act(async () => root.render(layout(true)));
+      expect(dom.window.document.querySelector("textarea")).toBe(
+        initialTextarea,
+      );
+      expect(dom.window.document.querySelector('img[alt="attachment"]')).not
+        .toBeNull();
+
+      await act(async () => root.render(layout(false)));
+      expect(dom.window.document.querySelector("textarea")).toBe(
+        initialTextarea,
+      );
+      expect(dom.window.document.querySelector('img[alt="attachment"]')).not
+        .toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 

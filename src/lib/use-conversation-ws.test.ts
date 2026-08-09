@@ -15,6 +15,10 @@ import type {
 import {
   reduceConversationMessageEvent,
   reduceSidechatEphemeralEvent,
+  reduceSidechatEphemeralTerminalEvent,
+  reduceSidechatAcceptedSnapshot,
+  reduceSidechatSettledRunEvent,
+  reduceSidechatStatusSnapshot,
   type ConversationRealtimeMessageState,
   type SidechatEphemeralStore,
 } from "./use-conversation-ws";
@@ -295,4 +299,87 @@ test("ephemeral reducer bounds run count, delta length, and activity labels", ()
   expect(store.has("run-1")).toBe(false);
   expect(store.get("run-9")?.delta).toHaveLength(50_000);
   expect(store.get("run-9")?.activity?.label).toHaveLength(500);
+});
+
+test("a delayed old durable row cannot clear a newer run's ephemeral state", () => {
+  const store = new Map([
+    ["run-old", { delta: "Old partial", activity: null }],
+    ["run-new", { delta: "New partial", activity: null }],
+  ]);
+  const afterOldRow = reduceSidechatEphemeralTerminalEvent(store, {
+    type: "sidechat:message",
+    conversationId: "conversation-1",
+    message: createSidechatPayload("old-durable", 3_000),
+  });
+  expect(afterOldRow).toBe(store);
+  expect(afterOldRow.has("run-new")).toBe(true);
+
+  const afterOldTerminal = reduceSidechatEphemeralTerminalEvent(
+    afterOldRow,
+    {
+      type: "sidechat:status",
+      conversationId: "conversation-1",
+      status: "ready",
+      runId: "run-old",
+    },
+  );
+  expect([...afterOldTerminal.keys()]).toEqual(["run-new"]);
+});
+
+test("a delayed old terminal status cannot replace the active newer run", () => {
+  expect(
+    reduceSidechatStatusSnapshot(
+      { status: "working", runId: "run-new" },
+      { status: "ready", runId: "run-old" },
+    ),
+  ).toEqual({ status: "working", runId: "run-new" });
+  expect(
+    reduceSidechatStatusSnapshot(
+      { status: "working", runId: "run-new" },
+      { status: "ready", runId: "run-new" },
+    ),
+  ).toEqual({ status: "ready", runId: null });
+});
+
+test("terminal then detail refetch then 202 cannot resurrect the completed run", () => {
+  const terminalEvent = {
+    type: "sidechat:status" as const,
+    conversationId: "conversation-1",
+    status: "ready" as const,
+    runId: "run-fast",
+  };
+  const settledRuns = reduceSidechatSettledRunEvent(undefined, terminalEvent);
+  const terminal = reduceSidechatStatusSnapshot(
+    { status: "working", runId: "run-fast" },
+    terminalEvent,
+  );
+  const refetchedWithoutClientMarkers = {
+    status: terminal.status,
+    runId: terminal.runId,
+  };
+  expect(
+    reduceSidechatAcceptedSnapshot(
+      refetchedWithoutClientMarkers,
+      "run-fast",
+      settledRuns,
+    ),
+  ).toEqual(refetchedWithoutClientMarkers);
+  expect(
+    reduceSidechatAcceptedSnapshot(
+      refetchedWithoutClientMarkers,
+      "run-next",
+      settledRuns,
+    ),
+  ).toEqual({
+    status: "working",
+    runId: "run-next",
+  });
+  expect([...settledRuns]).toEqual(["run-fast"]);
+  expect(reduceSidechatSettledRunEvent(settledRuns, {
+    type: "sidechat:message",
+    conversationId: "conversation-1",
+    message: createSidechatPayload("durable", 4_000),
+  })).toBe(
+    settledRuns,
+  );
 });

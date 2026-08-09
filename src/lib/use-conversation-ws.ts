@@ -95,6 +95,18 @@ type SidechatEphemeralEvent = Extract<
   { type: "sidechat:delta" | "sidechat:activity" }
 >;
 
+type SidechatEphemeralTerminalEvent = Extract<
+  ServerEvent,
+  { type: "sidechat:message" | "sidechat:status" }
+>;
+
+interface SidechatStatusSnapshot {
+  status: SidechatStatus;
+  runId: string | null;
+}
+
+export type SidechatSettledRunStore = ReadonlySet<string>;
+
 export function reduceConversationMessageEvent(
   state: ConversationRealtimeMessageState,
   event: ConversationMessageEvent,
@@ -171,7 +183,61 @@ export function reduceSidechatEphemeralEvent(
   }));
 }
 
+export function reduceSidechatEphemeralTerminalEvent(
+  old: SidechatEphemeralStore,
+  event: SidechatEphemeralTerminalEvent,
+): SidechatEphemeralStore {
+  if (event.type !== "sidechat:status" || event.status === "working") {
+    return old;
+  }
+  return clearSidechatEphemeralRun(old, event.runId);
+}
+
+export function reduceSidechatStatusSnapshot(
+  current: SidechatStatusSnapshot,
+  incoming: SidechatStatusSnapshot,
+): SidechatStatusSnapshot {
+  if (incoming.status === "working") return incoming;
+  if (!incoming.runId || current.runId !== incoming.runId) return current;
+  return { status: incoming.status, runId: null };
+}
+
+export function reduceSidechatSettledRunEvent(
+  old: SidechatSettledRunStore | undefined,
+  event: SidechatEphemeralTerminalEvent,
+): SidechatSettledRunStore {
+  if (
+    event.type !== "sidechat:status" ||
+    event.status === "working" ||
+    !event.runId
+  ) {
+    return old ?? new Set();
+  }
+  const next = new Set(old);
+  next.delete(event.runId);
+  next.add(event.runId);
+  while (next.size > MAX_SETTLED_RUNS) {
+    const oldest = next.values().next().value;
+    if (typeof oldest !== "string") break;
+    next.delete(oldest);
+  }
+  return next;
+}
+
+export function reduceSidechatAcceptedSnapshot(
+  current: SidechatStatusSnapshot,
+  acceptedRunId: string,
+  settledRuns: SidechatSettledRunStore | undefined,
+): SidechatStatusSnapshot {
+  if (settledRuns?.has(acceptedRunId)) return current;
+  return {
+    status: "working",
+    runId: acceptedRunId,
+  };
+}
+
 const MAX_EPHEMERAL_RUNS = 8;
+const MAX_SETTLED_RUNS = 16;
 const MAX_EPHEMERAL_DELTA_LENGTH = 50_000;
 const MAX_EPHEMERAL_LABEL_LENGTH = 500;
 
@@ -437,10 +503,6 @@ export function useConversationWs(
           },
         );
       } else if (parsed.type === "sidechat:message") {
-        const activeRunId = queryClient.getQueryData<ConversationDetailData>([
-          "conversation-detail",
-          conversationId,
-        ])?.conversation.sidechatRunId ?? null;
         const publicMessages =
           queryClient.getQueryData<ConversationDetailData>([
             "conversation-detail",
@@ -466,12 +528,13 @@ export function useConversationWs(
             };
           },
         );
-        if (parsed.message.role === "bot") {
-          queryClient.setQueryData<SidechatEphemeralStore>(
-            ["sidechat-ephemeral", projectId, conversationId],
-            (old) => clearSidechatEphemeralRun(old ?? new Map(), activeRunId),
-          );
-        }
+        queryClient.setQueryData<SidechatEphemeralStore>(
+          ["sidechat-ephemeral", projectId, conversationId],
+          (old) => reduceSidechatEphemeralTerminalEvent(
+            old ?? new Map(),
+            parsed,
+          ),
+        );
       } else if (parsed.type === "sidechat:delta") {
         queryClient.setQueryData<SidechatEphemeralStore>(
           ["sidechat-ephemeral", projectId, conversationId],
@@ -483,45 +546,59 @@ export function useConversationWs(
           (old) => reduceSidechatEphemeralEvent(old, parsed),
         );
       } else if (parsed.type === "sidechat:status") {
-        const previousRunId = queryClient.getQueryData<ConversationDetailData>([
-          "conversation-detail",
-          conversationId,
-        ])?.conversation.sidechatRunId ?? null;
         queryClient.setQueryData<ConversationDetailData | undefined>(
           ["conversation-detail", conversationId],
           (old) => {
             if (!old) return old;
+            const next = reduceSidechatStatusSnapshot(
+              {
+                status: old.conversation.sidechatStatus ?? "idle",
+                runId: old.conversation.sidechatRunId ?? null,
+              },
+              { status: parsed.status, runId: parsed.runId },
+            );
             return {
               ...old,
               conversation: {
                 ...old.conversation,
-                sidechatStatus: parsed.status,
-                sidechatRunId: parsed.runId,
+                sidechatStatus: next.status,
+                sidechatRunId: next.runId,
               },
             };
           },
         );
-        if (parsed.status !== "working") {
-          queryClient.setQueryData<SidechatEphemeralStore>(
-            ["sidechat-ephemeral", projectId, conversationId],
-            (old) => clearSidechatEphemeralRun(old ?? new Map(), previousRunId),
-          );
-        }
+        queryClient.setQueryData<SidechatEphemeralStore>(
+          ["sidechat-ephemeral", projectId, conversationId],
+          (old) => reduceSidechatEphemeralTerminalEvent(
+            old ?? new Map(),
+            parsed,
+          ),
+        );
+        queryClient.setQueryData<SidechatSettledRunStore>(
+          ["sidechat-settled-runs", projectId, conversationId],
+          (old) => reduceSidechatSettledRunEvent(old, parsed),
+        );
         queryClient.setQueriesData<ConversationsCacheData>(
           { queryKey: ["conversations", projectId] },
           (old) => {
             if (!old) return old;
             return {
               ...old,
-              conversations: old.conversations.map((conversation) =>
-                conversation.id === conversationId
-                  ? {
-                      ...conversation,
-                      sidechatStatus: parsed.status,
-                      sidechatRunId: parsed.runId,
-                    }
-                  : conversation,
-              ),
+              conversations: old.conversations.map((conversation) => {
+                if (conversation.id !== conversationId) return conversation;
+                const next = reduceSidechatStatusSnapshot(
+                  {
+                    status: conversation.sidechatStatus ?? "idle",
+                    runId: conversation.sidechatRunId ?? null,
+                  },
+                  { status: parsed.status, runId: parsed.runId },
+                );
+                return {
+                  ...conversation,
+                  sidechatStatus: next.status,
+                  sidechatRunId: next.runId,
+                };
+              }),
             };
           },
         );

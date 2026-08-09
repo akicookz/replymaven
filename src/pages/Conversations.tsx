@@ -23,8 +23,10 @@ import type {
 import { cn } from "@/lib/utils";
 import { serializeMessageImageUrls } from "../../shared/message-images";
 import {
+  reduceSidechatAcceptedSnapshot,
   useConversationWs,
   type SidechatEphemeralStore,
+  type SidechatSettledRunStore,
 } from "@/lib/use-conversation-ws";
 import { useCustomerWs } from "@/lib/use-customer-ws";
 import { passesInboxFilter, type InboxFilter, type InboxSort } from "@/lib/inbox/filters";
@@ -50,14 +52,18 @@ import {
   createInitialSidechatOrchestratorState,
   createOptimisticSidechatMessage,
   deriveAddToReplyIntent,
+  deriveSidechatBusy,
   mergeSidechatHistoryMessages,
+  mergeSidechatHistorySnapshot,
   reconcileSidechatMessages,
   reduceSidechatOrchestratorState,
+  resolveSidechatStartAfterHistory,
   transitionPublicDraftAfterSidechatAccept,
 } from "@/lib/inbox/sidechat";
 import MessageList from "@/components/inbox/MessageList";
 import ReadingPane from "@/components/inbox/ReadingPane";
 import FocusView from "@/components/inbox/FocusView";
+import FocusSidechatLayout from "@/components/inbox/FocusSidechatLayout";
 import SidechatPane from "@/components/inbox/SidechatPane";
 import CustomerFormDialog from "@/components/customers/CustomerFormDialog";
 import CustomerPickerDialog from "@/components/customers/CustomerPickerDialog";
@@ -130,6 +136,7 @@ interface SidechatCacheData {
   messages: Message[];
   hasMore: boolean;
   nextBefore: string | null;
+  historyLoaded: boolean;
 }
 
 interface SidechatHistoryResponse {
@@ -139,9 +146,18 @@ interface SidechatHistoryResponse {
 }
 
 interface SidechatAcceptedResponse {
+  outcome: "accepted";
   message: SidechatMessagePayload;
   runId: string;
 }
+
+interface SidechatExistingResponse {
+  outcome: "existing";
+}
+
+type SidechatSubmitResponse =
+  | SidechatAcceptedResponse
+  | SidechatExistingResponse;
 
 interface SidechatSubmission {
   conversationId: string;
@@ -149,6 +165,12 @@ interface SidechatSubmission {
   draftSource: "public" | "sidechat";
   draftSnapshot: string;
   optimisticId: string | null;
+  startOnlyIfEmpty?: boolean;
+}
+
+interface SidechatStartIntent {
+  conversationId: string;
+  publicDraftSnapshot: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -254,6 +276,8 @@ function Conversations() {
   );
   const [pendingSidechatConversationIds, setPendingSidechatConversationIds] =
     useState<Set<string>>(new Set());
+  const [sidechatStartIntent, setSidechatStartIntent] =
+    useState<SidechatStartIntent | null>(null);
   const [sidechatState, dispatchSidechat] = useReducer(
     reduceSidechatOrchestratorState,
     searchParams.get("id"),
@@ -593,6 +617,8 @@ function Conversations() {
   const {
     data: sidechatData,
     isLoading: sidechatLoading,
+    isFetching: sidechatFetching,
+    isSuccess: sidechatHistorySucceeded,
   } = useQuery<SidechatCacheData>({
     queryKey: ["sidechat", projectId, sidechatConversationId],
     queryFn: async () => {
@@ -605,10 +631,16 @@ function Conversations() {
         messages: data.messages.map(toSidechatMessage),
         hasMore: data.hasMore,
         nextBefore: data.nextBefore,
+        historyLoaded: true,
       };
     },
     enabled: Boolean(projectId && sidechatConversationId),
     retry: 1,
+    structuralSharing: (current, incoming) =>
+      mergeSidechatHistorySnapshot(
+        current as SidechatCacheData | undefined,
+        incoming as SidechatCacheData,
+      ),
   });
   const { data: sidechatEphemeral } = useQuery<SidechatEphemeralStore>({
     queryKey: ["sidechat-ephemeral", projectId, sidechatConversationId],
@@ -720,26 +752,32 @@ function Conversations() {
   });
 
   const submitSidechatMessage = useMutation<
-    SidechatAcceptedResponse,
+    SidechatSubmitResponse,
     Error,
     SidechatSubmission
   >({
-    mutationFn: async ({ conversationId, content }) => {
+    mutationFn: async ({ conversationId, content, startOnlyIfEmpty }) => {
       const res = await fetch(
         `/api/projects/${projectId}/conversations/${conversationId}/sidechat/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(content === undefined ? {} : { content }),
+          body: JSON.stringify({
+            ...(content === undefined ? {} : { content }),
+            ...(startOnlyIfEmpty ? { startOnlyIfEmpty: true } : {}),
+          }),
         },
       );
-      if (res.status !== 202) {
-        const body = (await res.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(body?.error ?? "Sidechat request was not accepted");
+      const body = (await res.json().catch(() => null)) as
+        | SidechatSubmitResponse
+        | { outcome?: "busy"; error?: string }
+        | null;
+      if (res.status === 200 && body?.outcome === "existing") return body;
+      if (res.status !== 202 || body?.outcome !== "accepted") {
+        const error = body && "error" in body ? body.error : undefined;
+        throw new Error(error ?? "Sidechat request was not accepted");
       }
-      return res.json() as Promise<SidechatAcceptedResponse>;
+      return body;
     },
     onMutate: async (variables) => {
       setPendingSidechatConversationIds((current) => {
@@ -763,6 +801,7 @@ function Conversations() {
         messages: reconcileSidechatMessages(old?.messages ?? [], optimistic),
         hasMore: old?.hasMore ?? false,
         nextBefore: old?.nextBefore ?? null,
+        historyLoaded: old?.historyLoaded ?? false,
       }));
     },
     onSuccess: (data, variables) => {
@@ -771,7 +810,16 @@ function Conversations() {
         projectId,
         variables.conversationId,
       ] as const;
+      if (data.outcome === "existing") {
+        void queryClient.invalidateQueries({ queryKey });
+        return;
+      }
       const acceptedMessage = toSidechatMessage(data.message);
+      const settledRuns = queryClient.getQueryData<SidechatSettledRunStore>([
+        "sidechat-settled-runs",
+        projectId,
+        variables.conversationId,
+      ]);
       queryClient.setQueryData<SidechatCacheData>(queryKey, (old) => ({
         messages: reconcileSidechatMessages(
           old?.messages ?? [],
@@ -779,31 +827,54 @@ function Conversations() {
         ),
         hasMore: old?.hasMore ?? false,
         nextBefore: old?.nextBefore ?? null,
+        historyLoaded: old?.historyLoaded ?? false,
       }));
       queryClient.setQueryData<ConversationDetail | undefined>(
         ["conversation-detail", variables.conversationId],
-        (old) => old
-          ? {
-              ...old,
-              conversation: {
-                ...old.conversation,
-                sidechatStatus: "working",
-                sidechatRunId: data.runId,
-                sidechatUpdatedAt: acceptedMessage.createdAt,
-              },
-            }
-          : old,
-      );
-      setLoadedConversations((current) => current.map((conversation) =>
-        conversation.id === variables.conversationId
-          ? {
-              ...conversation,
-              sidechatStatus: "working",
-              sidechatRunId: data.runId,
+        (old) => {
+          if (!old) return old;
+          const cached = old.conversation;
+          const next = reduceSidechatAcceptedSnapshot(
+            {
+              status: cached.sidechatStatus ?? "idle",
+              runId: cached.sidechatRunId ?? null,
+            },
+            data.runId,
+            settledRuns,
+          );
+          return {
+            ...old,
+            conversation: {
+              ...old.conversation,
+              sidechatStatus: next.status,
+              sidechatRunId: next.runId,
               sidechatUpdatedAt: acceptedMessage.createdAt,
-            }
-          : conversation
-      ));
+            },
+          };
+        },
+      );
+      const acceptedDetail = queryClient.getQueryData<ConversationDetail>([
+        "conversation-detail",
+        variables.conversationId,
+      ]);
+      setLoadedConversations((current) => current.map((conversation) => {
+        if (conversation.id !== variables.conversationId) return conversation;
+        const cached = acceptedDetail?.conversation ?? conversation;
+        const next = reduceSidechatAcceptedSnapshot(
+          {
+            status: cached.sidechatStatus ?? "idle",
+            runId: cached.sidechatRunId ?? null,
+          },
+          data.runId,
+          settledRuns,
+        );
+        return {
+          ...conversation,
+          sidechatStatus: next.status,
+          sidechatRunId: next.runId,
+          sidechatUpdatedAt: acceptedMessage.createdAt,
+        };
+      }));
       dispatchSidechat({
         type: "run_accepted",
         conversationId: variables.conversationId,
@@ -887,6 +958,7 @@ function Conversations() {
               ),
               hasMore: data.hasMore,
               nextBefore: data.nextBefore,
+              historyLoaded: true,
             }
           : old,
       );
@@ -1535,11 +1607,6 @@ function Conversations() {
       (selectedConvo && pendingSidechatConversationIds.has(selectedConvo)) ||
       (selectedConvo && sidechatState.acceptedRunIds[selectedConvo]),
   );
-  const sidechatBusy = Boolean(
-    selectedConvo &&
-      (sidechatStatus === "working" ||
-        pendingSidechatConversationIds.has(selectedConvo)),
-  );
   const sidechatLoadingEarlier = Boolean(
     selectedConvo &&
       loadEarlierSidechat.isPending &&
@@ -1549,6 +1616,13 @@ function Conversations() {
     selectedConvo &&
       retrySidechatTurn.isPending &&
       retrySidechatTurn.variables?.conversationId === selectedConvo,
+  );
+  const sidechatBusy = Boolean(
+    selectedConvo && deriveSidechatBusy(
+      sidechatStatus,
+      pendingSidechatConversationIds.has(selectedConvo),
+      sidechatRetrying,
+    ),
   );
   const visibleSidechatStatus: SidechatStatus = sidechatBusy
     ? "working"
@@ -1562,6 +1636,48 @@ function Conversations() {
   const customerFirstName = (
     selectedCustomer?.name ?? selected?.visitorName ?? ""
   ).trim().split(/\s+/u)[0] || null;
+
+  useEffect(() => {
+    if (!sidechatStartIntent) return;
+    if (
+      sidechatStartIntent.conversationId !== selectedConvo ||
+      !sidechatState.isOpen
+    ) {
+      setSidechatStartIntent(null);
+      return;
+    }
+    const resolution = resolveSidechatStartAfterHistory(
+      sidechatHistorySucceeded && !sidechatFetching,
+      sidechatData?.messages.length ?? 0,
+    );
+    if (resolution === "wait") return;
+    setSidechatStartIntent(null);
+    if (resolution === "open_existing" || selected?.archivedAt) return;
+
+    const plan = buildSidechatEntryPlan({
+      sidechatExists: false,
+      publicDraft: sidechatStartIntent.publicDraftSnapshot,
+    });
+    if (!plan.shouldSubmit) return;
+    const content = plan.body.content;
+    submitSidechatMessage.mutate({
+      conversationId: sidechatStartIntent.conversationId,
+      ...(content === undefined ? {} : { content }),
+      draftSource: "public",
+      draftSnapshot: plan.publicDraftSnapshot,
+      optimisticId: null,
+      startOnlyIfEmpty: true,
+    });
+  }, [
+    selected?.archivedAt,
+    selectedConvo,
+    sidechatData?.messages.length,
+    sidechatFetching,
+    sidechatHistorySucceeded,
+    sidechatStartIntent,
+    sidechatState.isOpen,
+    submitSidechatMessage,
+  ]);
 
   const setCustomerMutation = useMutation({
     mutationFn: (options: {
@@ -1695,23 +1811,13 @@ function Conversations() {
   function handleStartSidechat(): void {
     if (!selectedConvo) return;
     const conversationId = selectedConvo;
-    const plan = buildSidechatEntryPlan({
-      sidechatExists,
-      publicDraft: draft,
-    });
     if (selected?.archivedAt && !sidechatExists) return;
     dispatchSidechat({ type: "open", conversationId });
     if (selected?.archivedAt) return;
-    if (!plan.shouldSubmit || sidechatBusy) return;
-    const content = plan.body.content;
-    submitSidechatMessage.mutate({
+    if (sidechatExists || sidechatBusy) return;
+    setSidechatStartIntent({
       conversationId,
-      ...(content === undefined ? {} : { content }),
-      draftSource: "public",
-      draftSnapshot: plan.publicDraftSnapshot,
-      optimisticId: content
-        ? `optimistic-sidechat-${crypto.randomUUID()}`
-        : null,
+      publicDraftSnapshot: draft,
     });
   }
 
@@ -2052,8 +2158,10 @@ function Conversations() {
   ]);
 
   // ── Render ────────────────────────────────────────────────────────────────
-  const sidechatPane = selected && sidechatState.isOpen ? (
+  const sidechatOpen = Boolean(selected && sidechatState.isOpen);
+  const sidechatPane = selected ? (
     <SidechatPane
+      open={sidechatOpen}
       conversation={selected}
       customerFirstName={customerFirstName}
       messages={sidechatMessages}
@@ -2090,17 +2198,15 @@ function Conversations() {
         sidechatExists={sidechatExists}
         sidechatStatus={visibleSidechatStatus}
         publicComposerFocusRequest={publicComposerFocusRequest}
-        embedded={Boolean(sidechatPane)}
+        embedded
       />
     );
-    if (!sidechatPane) return focusView;
     return (
-      <div className="-m-4 flex h-screen min-w-0 overflow-hidden md:-m-8">
-        <div className="hidden min-w-0 flex-1 md:block">
-          {focusView}
-        </div>
-        {sidechatPane}
-      </div>
+      <FocusSidechatLayout
+        sidechatOpen={sidechatOpen}
+        focusView={focusView}
+        sidechatPane={sidechatPane}
+      />
     );
   }
 
@@ -2137,7 +2243,7 @@ function Conversations() {
         // Mobile: collapse the list once a conversation is open so the chat +
         // composer take the full screen (desktop keeps the split).
         className={cn(
-          sidechatPane
+          sidechatOpen
             ? "hidden min-[1536px]:flex"
             : selectedConvo && selectedIds.size === 0
               ? "hidden md:flex"
@@ -2176,7 +2282,7 @@ function Conversations() {
           publicComposerFocusRequest={publicComposerFocusRequest}
           className={cn(
             selectedIds.size > 0 && "hidden md:flex",
-            sidechatPane && "hidden md:flex",
+            sidechatOpen && "hidden md:flex",
           )}
           // `?msg=` deep-link scroll+pulse target.
           highlightMessageId={highlightMsgId}

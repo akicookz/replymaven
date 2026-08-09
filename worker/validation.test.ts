@@ -21,6 +21,9 @@ describe("sidechat validation contracts", () => {
     expect(sidechatMessageSchema.parse({ content: "  Help with this  " }))
       .toEqual({ content: "Help with this" });
     expect(sidechatMessageSchema.parse({})).toEqual({});
+    expect(sidechatMessageSchema.parse({ startOnlyIfEmpty: true })).toEqual({
+      startOnlyIfEmpty: true,
+    });
   });
 
   test("rejects empty, oversized, and untrusted sidechat message fields", () => {
@@ -28,6 +31,7 @@ describe("sidechat validation contracts", () => {
       { content: "   " },
       { content: "x".repeat(5_001) },
       { content: "Help", metadata: { customerId: "customer-private" } },
+      { startOnlyIfEmpty: "true" },
     ]) {
       expect(sidechatMessageSchema.safeParse(body).success).toBe(false);
     }

@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, desc, and, gt, lt, lte, ne, isNull, inArray, isNotNull, or, like, sql, type SQL } from "drizzle-orm";
+import { eq, desc, and, gt, lt, lte, ne, isNull, inArray, isNotNull, notExists, or, like, sql, type SQL } from "drizzle-orm";
 import {
   conversations,
   customerVisitors,
@@ -87,6 +87,8 @@ export interface ClaimSidechatRunInput {
   now: Date;
   leaseExpiresAt: Date;
 }
+
+export type ClaimSidechatStartRunResult = "claimed" | "existing" | "busy";
 
 export interface SettleSidechatRunInput {
   projectId: string;
@@ -903,6 +905,14 @@ export class ChatService {
     return this.normalizeExpiredSidechatLease(rows[0] ?? null, false);
   }
 
+  async getSidechatConversationById(
+    id: string,
+    projectId: string,
+  ): Promise<ConversationRow | null> {
+    const rows = await buildConversationByIdQuery(this.db, id, projectId);
+    return rows[0] ?? null;
+  }
+
   async getOperationalConversationById(
     id: string,
     projectId: string,
@@ -991,6 +1001,56 @@ export class ChatService {
       )
       .returning({ id: conversations.id });
     return claimed.length > 0;
+  }
+
+  async claimSidechatStartRun(
+    input: ClaimSidechatRunInput,
+  ): Promise<ClaimSidechatStartRunResult> {
+    const claimed = await this.db
+      .update(conversations)
+      .set({
+        sidechatStatus: "working",
+        sidechatRunId: input.runId,
+        sidechatLeaseExpiresAt: input.leaseExpiresAt,
+        sidechatUpdatedAt: input.now,
+        updatedAt: sql`${conversations.updatedAt}`,
+      })
+      .where(
+        and(
+          eq(conversations.id, input.conversationId),
+          eq(conversations.projectId, input.projectId),
+          isNull(conversations.archivedAt),
+          or(
+            isNull(conversations.sidechatLeaseExpiresAt),
+            lte(conversations.sidechatLeaseExpiresAt, input.now),
+          ),
+          notExists(
+            this.db
+              .select({ id: messages.id })
+              .from(messages)
+              .where(
+                and(
+                  eq(messages.conversationId, input.conversationId),
+                  eq(messages.channel, "sidechat"),
+                ),
+              ),
+          ),
+        ),
+      )
+      .returning({ id: conversations.id });
+    if (claimed.length > 0) return "claimed";
+
+    const existing = await this.db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, input.conversationId),
+          eq(messages.channel, "sidechat"),
+        ),
+      )
+      .limit(1);
+    return existing.length > 0 ? "existing" : "busy";
   }
 
   async settleSidechatRun(input: SettleSidechatRunInput): Promise<boolean> {

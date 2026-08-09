@@ -90,6 +90,15 @@ interface ReconciliableSidechatMessage {
   _optimistic?: boolean;
 }
 
+export interface SidechatHistorySnapshot<
+  T extends ReconciliableSidechatMessage,
+> {
+  messages: T[];
+  hasMore: boolean;
+  nextBefore: string | null;
+  historyLoaded: boolean;
+}
+
 interface EphemeralRunValue {
   delta: string;
   activity: {
@@ -257,6 +266,61 @@ export function mergeSidechatHistoryMessages<
   return [...byId.values()].sort(compareSidechatMessages);
 }
 
+export function mergeSidechatHistorySnapshot<
+  T extends ReconciliableSidechatMessage,
+>(
+  current: SidechatHistorySnapshot<T> | undefined,
+  incoming: SidechatHistorySnapshot<T>,
+): SidechatHistorySnapshot<T> {
+  if (!current) return incoming;
+  const incomingIds = new Set(incoming.messages.map((message) => message.id));
+  const overlapsIncoming = current.messages.some((message) =>
+    incomingIds.has(message.id)
+  );
+  const earliestCurrent = current.messages.reduce<T | null>(
+    (earliest, message) =>
+      !earliest || compareSidechatMessages(message, earliest) < 0
+        ? message
+        : earliest,
+    null,
+  );
+  const earliestIncoming = incoming.messages.reduce<T | null>(
+    (earliest, message) =>
+      !earliest || compareSidechatMessages(message, earliest) < 0
+        ? message
+        : earliest,
+    null,
+  );
+  const preserveContiguousEarlierCursor = Boolean(
+    current.historyLoaded &&
+      overlapsIncoming &&
+      earliestCurrent &&
+      earliestIncoming &&
+      compareSidechatMessages(earliestCurrent, earliestIncoming) < 0,
+  );
+  return {
+    messages: mergeSidechatHistoryMessages(
+      current.messages,
+      incoming.messages,
+    ),
+    hasMore: preserveContiguousEarlierCursor
+      ? current.hasMore
+      : incoming.hasMore,
+    nextBefore: preserveContiguousEarlierCursor
+      ? current.nextBefore
+      : incoming.nextBefore,
+    historyLoaded: true,
+  };
+}
+
+export function resolveSidechatStartAfterHistory(
+  historyReady: boolean,
+  messageCount: number,
+): "wait" | "open_existing" | "submit" {
+  if (!historyReady) return "wait";
+  return messageCount > 0 ? "open_existing" : "submit";
+}
+
 export function clearSidechatEphemeralRun<T extends EphemeralRunValue>(
   store: ReadonlyMap<string, T>,
   runId: string | null,
@@ -326,6 +390,14 @@ export function deriveSidechatPaneMode(viewportWidth: number): SidechatPaneMode 
   if (viewportWidth >= 1536) return "desktop";
   if (viewportWidth >= 768) return "compact";
   return "mobile";
+}
+
+export function deriveSidechatBusy(
+  status: SidechatStatus,
+  submitting: boolean,
+  retrying: boolean,
+): boolean {
+  return status === "working" || submitting || retrying;
 }
 
 export function deriveConversationInteractionState(

@@ -826,6 +826,65 @@ describe("ChatService message channel isolation", () => {
 });
 
 describe("ChatService sidechat run coordination", () => {
+  test("raw Sidechat classification reads do not normalize an expired lease", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    sqlite.query(`UPDATE conversations SET
+      sidechat_status = 'working', sidechat_run_id = 'run-expired',
+      sidechat_lease_expires_at = 1 WHERE id = ?`)
+      .run(conversation.id);
+
+    expect(await service.getSidechatConversationById(
+      conversation.id,
+      conversation.projectId,
+    )).toMatchObject({
+      sidechatStatus: "working",
+      sidechatRunId: "run-expired",
+      sidechatLeaseExpiresAt: new Date(1_000),
+    });
+    expect(sqlite.query(`SELECT sidechat_status, sidechat_run_id
+      FROM conversations WHERE id = ?`).get(conversation.id)).toEqual({
+      sidechat_status: "working",
+      sidechat_run_id: "run-expired",
+    });
+  });
+
+  test("atomically claims only one empty-thread start and reports existing after the durable row", async () => {
+    const { service, conversation } = await createTranscriptHarness();
+    const now = new Date();
+    const input = (runId: string) => ({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId,
+      now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+    });
+
+    const claims = await Promise.all([
+      service.claimSidechatStartRun(input("run-a")),
+      service.claimSidechatStartRun(input("run-b")),
+    ]);
+    expect(claims.toSorted()).toEqual(["busy", "claimed"]);
+    const claimedRunId = claims[0] === "claimed" ? "run-a" : "run-b";
+    expect(await service.addSidechatHumanMessage({
+      projectId: conversation.projectId,
+      conversationId: conversation.id,
+      runId: claimedRunId,
+      content: "Only one initial turn",
+      userId: "agent-1",
+      senderName: "Agent",
+      senderAvatar: null,
+    })).not.toBeNull();
+
+    expect(await service.claimSidechatStartRun(input("run-c"))).toBe(
+      "existing",
+    );
+    const current = await service.getConversationById(
+      conversation.id,
+      conversation.projectId,
+    );
+    expect(current?.sidechatRunId).toBe(claimedRunId);
+  });
+
   test("only one concurrent claimant owns a sidechat run", async () => {
     const { service, conversation } = await createTranscriptHarness();
     const now = new Date();

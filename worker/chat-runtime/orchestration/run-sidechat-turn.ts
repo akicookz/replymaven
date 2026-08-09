@@ -292,7 +292,7 @@ async function settleFailureIfCurrent(
         options.executionCtx,
         options.conversationId,
         "failed",
-        null,
+        options.runId,
       );
     }
   } catch {
@@ -540,7 +540,7 @@ export async function runSidechatTurn(
       options.executionCtx,
       options.conversationId,
       finalStatus,
-      null,
+      options.runId,
     );
   } catch {
     await settleFailureIfCurrent(options, runtime, chatService);

@@ -363,7 +363,7 @@ describe("runSidechatTurn", () => {
     ]);
     expect(JSON.stringify(harness.activities)).not.toContain("private-tool-id");
     expect(JSON.stringify(harness.activities)).not.toContain("execution");
-    expect(harness.statuses).toContainEqual({ status: "ready", runId: null });
+    expect(harness.statuses).toContainEqual({ status: "ready", runId: "run-1" });
   });
 
   test("persists bounded ordinary text and settles idle without an artifact", async () => {
@@ -379,7 +379,7 @@ describe("runSidechatTurn", () => {
     expect(String(harness.persisted[0]?.content)).toHaveLength(5_000);
     expect(harness.persisted[0]).toMatchObject({ kind: "text", metadata: null });
     expect(harness.calls).toContain("settle:idle");
-    expect(harness.statuses).toContainEqual({ status: "idle", runId: null });
+    expect(harness.statuses).toContainEqual({ status: "idle", runId: "run-1" });
   });
 
   test.each([
@@ -393,7 +393,7 @@ describe("runSidechatTurn", () => {
 
     expect(harness.persisted).toEqual([]);
     expect(harness.calls).toContain("settle:failed");
-    expect(harness.statuses).toContainEqual({ status: "failed", runId: null });
+    expect(harness.statuses).toContainEqual({ status: "failed", runId: "run-1" });
   });
 
   test("contains a stream rejection and does not persist its partial text", async () => {

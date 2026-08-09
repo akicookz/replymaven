@@ -90,6 +90,11 @@ class MemorySidechatService implements SidechatHandlerService {
     return this.conversation;
   }
 
+  async getSidechatConversationById(): Promise<TestConversation> {
+    this.calls.push("conversation");
+    return this.conversation;
+  }
+
   async getRecentSidechatMessages(
     _conversationId: string,
     limit: number,
@@ -119,6 +124,24 @@ class MemorySidechatService implements SidechatHandlerService {
     this.conversation.sidechatRunId = input.runId;
     this.conversation.sidechatLeaseExpiresAt = input.leaseExpiresAt;
     return true;
+  }
+
+  async claimSidechatStartRun(input: {
+    runId: string;
+    leaseExpiresAt: Date;
+  }): Promise<"claimed" | "existing" | "busy"> {
+    this.calls.push("claim-start");
+    if (this.messages.length > 0) return "existing";
+    if (
+      !this.allowClaim ||
+      (this.conversation.sidechatLeaseExpiresAt?.getTime() ?? 0) > now.getTime()
+    ) {
+      return "busy";
+    }
+    this.conversation.sidechatStatus = "working";
+    this.conversation.sidechatRunId = input.runId;
+    this.conversation.sidechatLeaseExpiresAt = input.leaseExpiresAt;
+    return "claimed";
   }
 
   async settleSidechatRun(input: {
@@ -332,6 +355,83 @@ describe("sidechat history and acceptance", () => {
     expect(service.calls).toEqual(["conversation", "claim"]);
     expect(service.messages).toEqual([]);
     expect(options.events).toEqual([]);
+  });
+
+  test("opens an existing thread without inserting or mutating its status", async () => {
+    const service = new MemorySidechatService();
+    service.messages = [makeMessage()];
+    service.conversation = makeConversation({
+      sidechatStatus: "ready",
+      sidechatRunId: null,
+    });
+    const options = createMutationOptions(service);
+
+    const response = await handleCreateSidechatMessage({
+      ...options,
+      body: { content: "Do not duplicate", startOnlyIfEmpty: true },
+    });
+    const body = await readJson(response);
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ outcome: "existing" });
+    expect(service.calls).toEqual(["conversation", "claim-start"]);
+    expect(service.messages).toHaveLength(1);
+    expect(service.conversation.sidechatStatus).toBe("ready");
+    expect(options.events).toEqual([]);
+  });
+
+  test("existing start classification does not normalize an expired run status", async () => {
+    const expiredAt = new Date(now.getTime() - 1);
+    const service = new MemorySidechatService();
+    service.messages = [makeMessage()];
+    service.conversation = makeConversation({
+      sidechatStatus: "working",
+      sidechatRunId: "run-expired",
+      sidechatLeaseExpiresAt: expiredAt,
+    });
+    const options = createMutationOptions(service);
+
+    const response = await handleCreateSidechatMessage({
+      ...options,
+      body: { startOnlyIfEmpty: true },
+    });
+
+    expect(response.status).toBe(200);
+    expect(service.conversation).toMatchObject({
+      sidechatStatus: "working",
+      sidechatRunId: "run-expired",
+      sidechatLeaseExpiresAt: expiredAt,
+    });
+    expect(service.calls).toEqual(["conversation", "claim-start"]);
+  });
+
+  test("atomically admits only one cross-client start request", async () => {
+    const service = new MemorySidechatService();
+    const firstOptions = createMutationOptions(service);
+    const secondOptions = createMutationOptions(service);
+    secondOptions.createRunId = () => "run-2";
+
+    const responses = await Promise.all([
+      handleCreateSidechatMessage({
+        ...firstOptions,
+        body: { content: "First start", startOnlyIfEmpty: true },
+      }),
+      handleCreateSidechatMessage({
+        ...secondOptions,
+        body: { content: "Second start", startOnlyIfEmpty: true },
+      }),
+    ]);
+    const bodies = await Promise.all(responses.map(readJson));
+
+    expect(responses.map((response) => response.status).toSorted()).toEqual([
+      202,
+      409,
+    ]);
+    expect(bodies.map((body) => body.outcome).toSorted()).toEqual([
+      "accepted",
+      "busy",
+    ]);
+    expect(service.messages).toHaveLength(1);
   });
 
   test("persists and broadcasts private acceptance before returning 202", async () => {

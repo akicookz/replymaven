@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { SidechatStatus } from "../../../shared/ws-events";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import { deriveConversationInteractionState } from "@/lib/inbox/sidechat";
+import { cn } from "@/lib/utils";
 import ChatThread from "./ChatThread";
 import Composer from "./Composer";
 
@@ -15,6 +16,7 @@ interface SidechatContinuation {
 }
 
 interface SidechatPaneProps {
+  open: boolean;
   conversation: Conversation;
   customerFirstName: string | null;
   messages: Message[];
@@ -34,6 +36,7 @@ interface SidechatPaneProps {
 }
 
 export default function SidechatPane({
+  open,
   conversation,
   customerFirstName,
   messages,
@@ -97,7 +100,14 @@ export default function SidechatPane({
     <aside
       data-sidechat-pane
       aria-label="Private Sidechat"
-      className="glass-reading flex h-full w-full min-w-0 shrink-0 flex-col overflow-hidden opacity-100 transform-gpu transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none md:w-[min(380px,42vw)] min-[1536px]:w-[400px]"
+      aria-hidden={!open}
+      inert={open ? undefined : true}
+      className={cn(
+        "glass-reading flex h-full min-w-0 shrink-0 transform-gpu flex-col overflow-hidden transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+        open
+          ? "w-full translate-x-0 opacity-100 md:w-[min(380px,42vw)] min-[1536px]:w-[400px]"
+          : "pointer-events-none w-0 translate-x-3 opacity-0",
+      )}
     >
       <header className="glass-bar flex min-h-[64px] items-center gap-3 px-4 py-3">
         <div className="min-w-0 flex-1">
@@ -111,7 +121,7 @@ export default function SidechatPane({
         <button
           data-sidechat-dismiss
           type="button"
-          className="flex min-h-10 shrink-0 items-center px-1 text-[13px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96] md:hidden"
+          className="flex min-h-10 min-w-10 shrink-0 items-center justify-center px-1 text-[13px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96] md:hidden"
           onClick={onClose}
         >
           Back
@@ -119,7 +129,7 @@ export default function SidechatPane({
         <button
           data-sidechat-dismiss
           type="button"
-          className="hidden min-h-10 shrink-0 items-center px-1 text-[13px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96] md:flex"
+          className="hidden min-h-10 min-w-10 shrink-0 items-center justify-center px-1 text-[13px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96] md:flex"
           onClick={onClose}
         >
           Close

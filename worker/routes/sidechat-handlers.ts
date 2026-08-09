@@ -28,6 +28,10 @@ export interface SidechatHandlerService {
     conversationId: string,
     projectId: string,
   ): Promise<SidechatConversationRecord | null>;
+  getSidechatConversationById(
+    conversationId: string,
+    projectId: string,
+  ): Promise<SidechatConversationRecord | null>;
   getRecentSidechatMessages(
     conversationId: string,
     limit: number,
@@ -44,6 +48,13 @@ export interface SidechatHandlerService {
     now: Date;
     leaseExpiresAt: Date;
   }): Promise<boolean>;
+  claimSidechatStartRun(input: {
+    projectId: string;
+    conversationId: string;
+    runId: string;
+    now: Date;
+    leaseExpiresAt: Date;
+  }): Promise<"claimed" | "existing" | "busy">;
   settleSidechatRun(input: {
     projectId: string;
     conversationId: string;
@@ -174,7 +185,7 @@ async function settleFailedRun(
     });
     if (settled && broadcast) {
       try {
-        options.broadcastStatus("failed", null);
+        options.broadcastStatus("failed", runId);
       } catch {
         // The exact run is already released; realtime is best-effort here.
       }
@@ -186,11 +197,17 @@ async function settleFailedRun(
 
 async function getWritableConversation(
   options: SidechatMutationOptions,
+  preserveSidechatLease = false,
 ): Promise<SidechatConversationRecord | Response> {
-  const conversation = await options.service.getConversationById(
-    options.conversationId,
-    options.projectId,
-  );
+  const conversation = preserveSidechatLease
+    ? await options.service.getSidechatConversationById(
+        options.conversationId,
+        options.projectId,
+      )
+    : await options.service.getConversationById(
+        options.conversationId,
+        options.projectId,
+      );
   if (!conversation) return errorResponse("not_found", 404);
   if (conversation.archivedAt) {
     return errorResponse("conversation_archived", 410);
@@ -241,7 +258,11 @@ async function acceptClaimedRun(
   broadcastMessage: boolean,
 ): Promise<Response> {
   const acceptedResponse = Response.json(
-    { message: sidechatMessageRowToPayload(message), runId },
+    {
+      outcome: "accepted",
+      message: sidechatMessageRowToPayload(message),
+      runId,
+    },
     { status: 202 },
   );
 
@@ -277,12 +298,36 @@ export async function handleCreateSidechatMessage(
   if (!parsed.success) {
     return errorResponse(firstValidationError(parsed), 400);
   }
-  const conversation = await getWritableConversation(options);
+  const conversation = await getWritableConversation(
+    options,
+    parsed.data.startOnlyIfEmpty === true,
+  );
   if (isResponse(conversation)) return conversation;
 
   const runId = options.createRunId();
-  if (!(await claimRun(options, runId))) {
-    return errorResponse("sidechat_busy", 409);
+  if (parsed.data.startOnlyIfEmpty) {
+    const claimTime = options.now();
+    const outcome = await options.service.claimSidechatStartRun({
+      projectId: options.projectId,
+      conversationId: options.conversationId,
+      runId,
+      now: claimTime,
+      leaseExpiresAt: new Date(claimTime.getTime() + SIDECHAT_RUN_LEASE_MS),
+    });
+    if (outcome === "existing") {
+      return Response.json({ outcome: "existing" });
+    }
+    if (outcome === "busy") {
+      return Response.json(
+        { outcome: "busy", error: "sidechat_busy" },
+        { status: 409 },
+      );
+    }
+  } else if (!(await claimRun(options, runId))) {
+    return Response.json(
+      { outcome: "busy", error: "sidechat_busy" },
+      { status: 409 },
+    );
   }
 
   let content = parsed.data.content;
