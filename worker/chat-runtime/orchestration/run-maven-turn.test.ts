@@ -750,9 +750,9 @@ describe("runMavenTurn", () => {
       void part;
     }
 
-    expect(JSON.stringify(fake.calls[0]?.tools)).not.toContain(
-      "present_reply_draft",
-    );
+    const publicTools = JSON.stringify(fake.calls[0]?.tools);
+    expect(publicTools).toContain("request_team_help");
+    expect(publicTools).toContain("search_knowledge");
     expect("artifact" in turn).toBe(false);
   });
 

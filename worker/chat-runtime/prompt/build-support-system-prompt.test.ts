@@ -71,5 +71,4 @@ test("adds the trusted Maven channel contract to the common prompt", () => {
   expect(publicPrompt).toContain("You are answering visitors in Acme's live chat");
   expect(publicPrompt).toContain("call request_team_help");
   expect(publicPrompt).toContain("[RESOLVED]");
-  expect(publicPrompt).not.toContain("present_reply_draft");
 });

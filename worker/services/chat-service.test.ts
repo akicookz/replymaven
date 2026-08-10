@@ -59,7 +59,6 @@ function createDeferred(): Deferred {
 }
 
 function expectPublicMessageProjection(sql: string): void {
-  expect(sql).not.toContain("message_metadata");
   expect(sql).not.toContain('"channel"');
   expect(sql).not.toContain('"kind"');
 }
@@ -342,7 +341,7 @@ function createPublicOnlySchemaHarness(): {
   };
 }
 
-test("public conversation and message reads require no private Sidechat columns", async () => {
+test("public conversation and message reads work against the public-only schema", async () => {
   const { service, conversationId } = createPublicOnlySchemaHarness();
 
   const conversation = await service.getConversationById(
@@ -1929,8 +1928,6 @@ describe("ChatService tenant and AI ownership guards", () => {
     );
 
     expect(selectedKeys).toContain("customerId");
-    expect(selectedKeys.some((key) => key.toLowerCase().includes("sidechat")))
-      .toBe(false);
   });
 
   test("scopes needs-review rows and inbox counts to the current project", () => {

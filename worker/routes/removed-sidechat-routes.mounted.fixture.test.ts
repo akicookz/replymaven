@@ -57,29 +57,7 @@ if (process.env.REMOVED_SIDECHAT_ROUTES_FIXTURE === "1") {
   }));
 
   mock.module("../services/chat-service", () => ({
-    ChatService: class ChatService {
-      async getConversationById() {
-        return {
-          id: "conversation-1",
-          projectId: "project-1",
-          customerId: null,
-          visitorName: "Visitor",
-          archivedAt: null,
-          status: "active",
-          chatState: null,
-          lastActivityAt: new Date("2026-08-10T00:00:00.000Z"),
-          sidechatStatus: "idle",
-          sidechatRunId: null,
-          sidechatLeaseExpiresAt: null,
-          sidechatUpdatedAt: null,
-          sidechatRevision: 0,
-        };
-      }
-
-      async getRecentSidechatMessages() {
-        return { messages: [], hasMore: false };
-      }
-    },
+    ChatService: class ChatService {},
   }));
 
   mock.module("../services/billing-service", () => ({

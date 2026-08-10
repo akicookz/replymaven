@@ -75,7 +75,7 @@ function createSocket(): RealtimeSocket & { sent: string[] } {
   };
 }
 
-test("ignores retired private Sidechat frames", () => {
+test("ignores unknown server frames", () => {
   const initial = reduceConversationMessageEvent(emptyState(), {
     type: "message:new",
     conversationId: "conversation-1",
@@ -83,7 +83,7 @@ test("ignores retired private Sidechat frames", () => {
   });
 
   const next = reduceConversationMessageEvent(initial, {
-    type: "sidechat:message",
+    type: "internal:message",
     conversationId: "conversation-1",
     message: {
       id: "private-1",
