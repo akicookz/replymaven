@@ -7,46 +7,23 @@ import {
   isChatOwnershipSnapshotCurrent,
   mergeChatStateForPersistence,
   parseChatState,
-  toSdkConversationMessages,
+  toPublicSdkConversationMessages,
 } from "./types";
 
 test("maps public history roles without letting visitors impersonate assistants", () => {
   expect(
-    toSdkConversationMessages(
+    toPublicSdkConversationMessages(
       [
         { role: "visitor", content: "I need help." },
         { role: "bot", content: "I can help." },
         { role: "agent", content: "I have taken over." },
       ],
-      "public",
     ),
   ).toEqual([
     { role: "user", content: "I need help." },
     { role: "assistant", content: "I can help." },
     { role: "assistant", content: "I have taken over." },
   ]);
-});
-
-test("maps only the human agent as the sidechat user and fails closed on public visitor history", () => {
-  expect(
-    toSdkConversationMessages(
-      [
-        { role: "agent", content: "Investigate the account." },
-        { role: "bot", content: "The account is active." },
-      ],
-      "sidechat",
-    ),
-  ).toEqual([
-    { role: "user", content: "Investigate the account." },
-    { role: "assistant", content: "The account is active." },
-  ]);
-
-  expect(() =>
-    toSdkConversationMessages(
-      [{ role: "visitor", content: "Cross-channel message." }],
-      "sidechat",
-    )
-  ).toThrow("Invalid sidechat conversation role: visitor");
 });
 
 test("parse compatibility regression: legacy rows lose their fallback ownership or explicit AI mode", () => {

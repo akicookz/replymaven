@@ -103,7 +103,6 @@ describe("streamMavenAgent", () => {
         createModel: () => fake.model,
       },
       {
-        channel: "public",
         systemPrompt: "Be helpful.",
         conversationHistory: [],
         userMessage: "Hello",
@@ -129,7 +128,6 @@ describe("streamMavenAgent", () => {
         createModel: () => fake.model,
       },
       {
-        channel: "public",
         systemPrompt: "Be helpful.",
         conversationHistory: [],
         userMessage: "Hello",
@@ -164,7 +162,6 @@ describe("streamMavenAgent", () => {
         createModel: () => fake.model,
       },
       {
-        channel: "public",
         systemPrompt: "Use the tool.",
         conversationHistory: [],
         userMessage: "Keep going",

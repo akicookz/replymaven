@@ -1156,46 +1156,6 @@ describe("createHttpToolDefinition", () => {
     });
   });
 
-  test("does not constrain a sidechat HTTP execution with public ownership", async () => {
-    let fetchCount = 0;
-    const authoritative = createToolRow({
-      allowedChannels: '["sidechat"]',
-    });
-    const toolService = {
-      async getAuthoritativeTool(): Promise<ToolRow | null> {
-        return { ...authoritative };
-      },
-      async logExecution() {
-        return { id: "execution-sidechat" };
-      },
-    };
-    globalThis.fetch = async () => {
-      fetchCount += 1;
-      return Response.json({ ok: true });
-    };
-    const options = {
-      context: createContext("sidechat"),
-      tool: authoritative,
-      toolService,
-      encryptionKey: "00".repeat(32),
-    };
-    Object.defineProperty(options, "publicExecution", {
-      get() {
-        throw new Error("sidechat read public ownership fence");
-      },
-    });
-    const definition = await createHttpToolDefinition(options as never);
-
-    const result = await executeRegisteredTool(
-      definition,
-      createContext("sidechat"),
-      { accountId: "account-1" },
-    );
-
-    expect(result).toMatchObject({ success: true });
-    expect(fetchCount).toBe(1);
-  });
-
   test("reloads authority and decrypts headers only for an authorized execution", async () => {
     const encryptionKey = "00".repeat(32);
     const encryptedHeaders = await encryptHeaders(

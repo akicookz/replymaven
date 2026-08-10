@@ -98,8 +98,6 @@ import {
   broadcastConversationUpdated,
   broadcastMessageDeleted,
   broadcastMessageNew,
-  broadcastSidechatMessage,
-  broadcastSidechatStatus,
   broadcastStatusChange,
   broadcastMessageStatus,
 } from "./realtime/broadcast";
@@ -119,14 +117,6 @@ import {
   handleListToolsRequest,
   handleUpdateToolRequest,
 } from "./routes/tool-handlers";
-import {
-  canAccessSidechatProject,
-  handleCreateSidechatMessage,
-  handleGetSidechatHistory,
-  handleRetrySidechatTurn,
-  type SidechatMutationOptions,
-} from "./routes/sidechat-handlers";
-import { runSidechatTurn } from "./chat-runtime/orchestration/run-sidechat-turn";
 import {
   handleCustomerProjectWsUpgrade,
   handleDashboardWsUpgrade,
@@ -566,89 +556,6 @@ async function canAccessCustomerProject(
     projectId,
   );
   return project?.userId === effectiveUserId;
-}
-
-async function canAccessSidechatRouteProject(
-  c: Context<HonoAppContext>,
-  projectId: string,
-): Promise<boolean> {
-  const user = c.get("user");
-  if (!user) return false;
-  const project = await new ProjectService(c.get("db")).getProjectById(
-    projectId,
-  );
-  if (!project) return false;
-  return canAccessSidechatProject({
-    authenticatedUserId: user.id,
-    effectiveUserId: c.get("effectiveUserId"),
-    role: c.get("activeRole"),
-    accessAllProjects: c.get("activeAccessAllProjects"),
-    projectIds: c.get("activeProjectIds"),
-    project,
-  });
-}
-
-function createSidechatMutationOptions(options: {
-  c: Context<HonoAppContext>;
-  projectId: string;
-  conversationId: string;
-  body: unknown;
-  actor: { userId: string; name: string; avatarUrl: string | null };
-}): SidechatMutationOptions {
-  const { c, projectId, conversationId } = options;
-  const db = c.get("db");
-  const service = new ChatService(db);
-  return {
-    projectId,
-    conversationId,
-    actor: options.actor,
-    body: options.body,
-    service,
-    now() {
-      return new Date();
-    },
-    createRunId() {
-      return crypto.randomUUID();
-    },
-    async getCanonicalCustomerName(currentProjectId, customerId) {
-      const customer = await new CustomerService(db).getCustomerDetail(
-        currentProjectId,
-        customerId,
-      );
-      return customer?.name ?? null;
-    },
-    broadcastMessage(message) {
-      broadcastSidechatMessage(
-        c.env,
-        c.executionCtx,
-        conversationId,
-        message,
-      );
-    },
-    broadcastStatus(snapshot) {
-      broadcastSidechatStatus(
-        c.env,
-        c.executionCtx,
-        conversationId,
-        snapshot,
-      );
-    },
-    runTurn({ message, runId }) {
-      return runSidechatTurn({
-        projectId,
-        conversationId,
-        humanMessageId: message.id,
-        runId,
-        actorUserId: options.actor.userId,
-        db,
-        env: c.env,
-        executionCtx: c.executionCtx,
-      });
-    },
-    scheduleBackground(promise) {
-      c.executionCtx.waitUntil(promise);
-    },
-  };
 }
 
 function broadcastCustomerConversationChanges(
@@ -6520,73 +6427,6 @@ const app = new Hono<HonoAppContext>()
   })
   .get("/api/projects/:id/conversations/:convId/ws", (c) =>
     handleDashboardWsUpgrade(c),
-  )
-  .get("/api/projects/:id/conversations/:convId/sidechat", async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-    const projectId = c.req.param("id");
-    if (!(await canAccessSidechatRouteProject(c, projectId))) {
-      return c.json({ error: "Not found" }, 404);
-    }
-    return handleGetSidechatHistory({
-      projectId,
-      conversationId: c.req.param("convId"),
-      query: c.req.query(),
-      service: new ChatService(c.get("db")),
-    });
-  })
-  .post(
-    "/api/projects/:id/conversations/:convId/sidechat/messages",
-    async (c) => {
-      const user = c.get("user");
-      if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-      const projectId = c.req.param("id");
-      if (!(await canAccessSidechatRouteProject(c, projectId))) {
-        return c.json({ error: "Not found" }, 404);
-      }
-      const body = await c.req.json().catch(() => null);
-      return handleCreateSidechatMessage(
-        createSidechatMutationOptions({
-          c,
-          projectId,
-          conversationId: c.req.param("convId"),
-          body,
-          actor: {
-            userId: user.id,
-            name: user.name?.trim() || "You",
-            avatarUrl: user.image ?? null,
-          },
-        }),
-      );
-    },
-  )
-  .post(
-    "/api/projects/:id/conversations/:convId/sidechat/retry",
-    async (c) => {
-      const user = c.get("user");
-      if (!user) return c.json({ error: "Unauthorized" }, 401);
-
-      const projectId = c.req.param("id");
-      if (!(await canAccessSidechatRouteProject(c, projectId))) {
-        return c.json({ error: "Not found" }, 404);
-      }
-      const body = await c.req.json().catch(() => null);
-      return handleRetrySidechatTurn(
-        createSidechatMutationOptions({
-          c,
-          projectId,
-          conversationId: c.req.param("convId"),
-          body,
-          actor: {
-            userId: user.id,
-            name: user.name?.trim() || "You",
-            avatarUrl: user.image ?? null,
-          },
-        }),
-      );
-    },
   )
   .get("/api/projects/:id/conversations/:convId", async (c) => {
     const user = c.get("user");

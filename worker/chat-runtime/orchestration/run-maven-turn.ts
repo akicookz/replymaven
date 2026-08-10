@@ -17,7 +17,6 @@ import { getSourceReferenceDedupKey } from "../retrieval/build-rag-context";
 import { MavenStreamFailure } from "../streaming/maven-stream-failure";
 import {
   type ConversationTurnMessage,
-  type MavenArtifact,
   type MavenStreamPart,
   type MavenTurnContext,
   type SupportAgentImage,
@@ -29,7 +28,6 @@ import {
   type SafeToolActivity,
 } from "../tools/build-maven-tool-registry";
 import { createHttpToolDefinition } from "../tools/http-tool-executor";
-import { createPresentReplyDraftTool } from "../tools/internal/present-reply-draft";
 import { createRequestTeamHelpTool } from "../tools/internal/request-team-help";
 import { createSearchKnowledgeTool } from "../tools/internal/search-knowledge";
 
@@ -45,11 +43,11 @@ export interface MavenTurnDependencies {
   toolService: ToolService;
   projectName: string;
   settings: SupportPromptSettings;
-  promptOptions?: Omit<SupportPromptOptions, "channel">;
+  promptOptions?: SupportPromptOptions;
   ragContext?: string;
   conversationSummary?: string | null;
   abortSignal?: AbortSignal;
-  publicToolDependencies?: MavenPublicToolDependencies;
+  publicToolDependencies: MavenPublicToolDependencies;
 }
 
 export interface MavenPublicToolDependencies {
@@ -64,7 +62,6 @@ export interface MavenPublicToolDependencies {
 
 export interface MavenTurnResult {
   fullStream: AsyncIterable<MavenStreamPart>;
-  artifact: MavenArtifact;
   collectedSources: SourceReference[];
   toolActivity: SafeToolActivity[];
   httpExecutionIds: string[];
@@ -148,17 +145,13 @@ async function primeAgentStream(options: {
   return { fullStream: replayPrimedStream() };
 }
 
-function requirePublicToolDependencies(
-  dependencies: MavenTurnDependencies,
-): MavenPublicToolDependencies {
-  if (!dependencies.publicToolDependencies) {
-    throw new Error("Public Maven turns require public tool dependencies");
-  }
-  return dependencies.publicToolDependencies;
-}
+export type PublicMavenTurnContext = MavenTurnContext & {
+  channel: "public";
+  actorUserId: null;
+};
 
 export async function runMavenTurn(options: {
-  context: MavenTurnContext;
+  context: PublicMavenTurnContext;
   dependencies: MavenTurnDependencies;
   conversationHistory: ConversationTurnMessage[];
   currentMessage: string;
@@ -168,8 +161,6 @@ export async function runMavenTurn(options: {
   const collectedSourceKeys = new Set<string>();
   const toolActivity: SafeToolActivity[] = [];
   const httpExecutionIds: string[] = [];
-  let pendingArtifact: MavenArtifact = null;
-  let publishedArtifact: MavenArtifact = null;
   let visibleTextStarted = false;
   let toolExecutionCommitted = false;
 
@@ -189,9 +180,7 @@ export async function runMavenTurn(options: {
     toolActivity.push(activity);
   }
 
-  const publicDependencies = options.context.channel === "public"
-    ? requirePublicToolDependencies(options.dependencies)
-    : undefined;
+  const publicDependencies = options.dependencies.publicToolDependencies;
   const httpTools = await options.dependencies.toolService.getEnabledToolsForChannel(
     options.context.projectId,
     options.context.channel,
@@ -206,15 +195,11 @@ export async function runMavenTurn(options: {
         collectExecutionId(id) {
           httpExecutionIds.push(id);
         },
-        ...(publicDependencies
-          ? {
-              publicExecution: {
-                chatService: publicDependencies.chatService,
-                acquireRateLimitPermit:
-                  publicDependencies.acquireHttpRateLimitPermit,
-              },
-            }
-          : {}),
+        publicExecution: {
+          chatService: publicDependencies.chatService,
+          acquireRateLimitPermit:
+            publicDependencies.acquireHttpRateLimitPermit,
+        },
       }),
     ),
   );
@@ -227,40 +212,23 @@ export async function runMavenTurn(options: {
     }),
     ...httpDefinitions,
   ];
-  if (options.context.channel === "sidechat") {
-    definitions.splice(
-      1,
-      0,
-      createPresentReplyDraftTool({
-        context: options.context,
-        recordDraft(draft) {
-          pendingArtifact = { type: "reply_draft", draft };
-        },
-      }),
-    );
-  }
-  if (options.context.channel === "public") {
-    if (!publicDependencies) {
-      throw new Error("Public Maven turns require public tool dependencies");
-    }
-    definitions.splice(
-      1,
-      0,
-      createRequestTeamHelpTool({
-        context: options.context,
-        chatService: publicDependencies.chatService,
-        projectService: publicDependencies.projectService,
-        telegramService: publicDependencies.telegramService,
-        env: {
-          BETTER_AUTH_URL: options.dependencies.env.BETTER_AUTH_URL,
-          RESEND_API_KEY: options.dependencies.env.RESEND_API_KEY,
-        },
-        executionCtx: publicDependencies.executionCtx,
-        onTeamRequested: publicDependencies.onTeamRequested,
-        broadcast: publicDependencies.broadcast,
-      }),
-    );
-  }
+  definitions.splice(
+    1,
+    0,
+    createRequestTeamHelpTool({
+      context: options.context,
+      chatService: publicDependencies.chatService,
+      projectService: publicDependencies.projectService,
+      telegramService: publicDependencies.telegramService,
+      env: {
+        BETTER_AUTH_URL: options.dependencies.env.BETTER_AUTH_URL,
+        RESEND_API_KEY: options.dependencies.env.RESEND_API_KEY,
+      },
+      executionCtx: publicDependencies.executionCtx,
+      onTeamRequested: publicDependencies.onTeamRequested,
+      broadcast: publicDependencies.broadcast,
+    }),
+  );
   const registry = buildMavenToolRegistry({
     context: options.context,
     definitions,
@@ -276,10 +244,7 @@ export async function runMavenTurn(options: {
     options.dependencies.projectName,
     options.dependencies.ragContext ?? "",
     options.dependencies.conversationSummary ?? null,
-    {
-      ...options.dependencies.promptOptions,
-      channel: options.context.channel,
-    },
+    options.dependencies.promptOptions,
   );
   const agentResult = await runWithModelFallback({
     runtime: options.dependencies.modelRuntime,
@@ -290,14 +255,12 @@ export async function runMavenTurn(options: {
       toolExecutionCommitted,
     }),
     operation: async (activeConfig) => {
-      pendingArtifact = null;
       const result = await (options.dependencies.streamAgent ?? streamMavenAgent)(
         {
           modelConfig: activeConfig,
           createModel: options.dependencies.createModel,
         },
         {
-          channel: options.context.channel,
           systemPrompt,
           conversationHistory: options.conversationHistory,
           userMessage: options.currentMessage,
@@ -321,36 +284,8 @@ export async function runMavenTurn(options: {
     },
   });
 
-  async function* publishArtifactAfterCompletion(): AsyncGenerator<MavenStreamPart> {
-    let completedNaturally = false;
-    let aborted = false;
-
-    try {
-      for await (const part of agentResult.fullStream) {
-        if (part.type === "abort") {
-          aborted = true;
-        }
-        yield part;
-      }
-      completedNaturally = true;
-    } finally {
-      const completedArtifact = pendingArtifact;
-      pendingArtifact = null;
-      if (
-        completedNaturally &&
-        !aborted &&
-        !options.dependencies.abortSignal?.aborted
-      ) {
-        publishedArtifact = completedArtifact;
-      }
-    }
-  }
-
   return {
-    fullStream: publishArtifactAfterCompletion(),
-    get artifact(): MavenArtifact {
-      return publishedArtifact;
-    },
+    fullStream: agentResult.fullStream,
     collectedSources,
     toolActivity,
     httpExecutionIds,

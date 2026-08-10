@@ -13,9 +13,9 @@ import {
 import {
   type MavenToolCapability,
   type MavenToolDefinition,
-  type MavenTurnContext,
   type SupportToolDefinition,
 } from "../types";
+import { type PublicMavenTurnContext } from "../orchestration/run-maven-turn";
 import {
   authorizeCapability,
   fingerprintHttpToolContract,
@@ -48,11 +48,11 @@ interface PublicHttpExecutionOptions {
 }
 
 interface CreateHttpToolDefinitionOptions {
-  context: MavenTurnContext;
+  context: PublicMavenTurnContext;
   tool: ToolRow;
   toolService: AuthoritativeHttpToolStore;
   encryptionKey: string;
-  publicExecution?: PublicHttpExecutionOptions;
+  publicExecution: PublicHttpExecutionOptions;
   collectExecutionId?(id: string): void;
 }
 
@@ -448,9 +448,7 @@ export async function createHttpToolDefinition(
           executableDefinition,
           params,
           abortSignal,
-          options.context.channel === "public"
-            ? options.publicExecution?.acquireRateLimitPermit
-            : undefined,
+          options.publicExecution.acquireRateLimitPermit,
         );
         if (!outcome.attemptedFetch) return outcome.result;
 
@@ -477,12 +475,6 @@ export async function createHttpToolDefinition(
         return outcome.result;
       }
 
-      if (options.context.channel !== "public") {
-        return executeAndAudit();
-      }
-      if (!options.publicExecution) {
-        return { error: "conversation_ownership_changed" };
-      }
       const leased =
         await options.publicExecution.chatService.runExternalActionIfOwnershipMatches(
           options.context.conversationId,

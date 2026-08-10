@@ -8,10 +8,10 @@ import { type ToolService } from "../../services/tool-service";
 import { type AppEnv } from "../../types";
 import { createModelRuntimeState } from "../llm/create-language-model";
 import { mapAgentEventsToSse } from "../streaming/map-agent-events-to-sse";
-import { type MavenStreamPart, type MavenTurnContext } from "../types";
 import {
   runMavenTurn,
   type MavenTurnDependencies,
+  type PublicMavenTurnContext,
 } from "./run-maven-turn";
 
 interface ModelCall {
@@ -147,76 +147,6 @@ function createFakeModel(
   return { model, calls };
 }
 
-function createControlledDraftStreamAgent(options: {
-  drafts: string[];
-  terminal: "complete" | "abort";
-}): NonNullable<MavenTurnDependencies["streamAgent"]> {
-  async function streamDraftAgent(_modelDependencies, streamOptions) {
-    const draftTool = streamOptions.tools.present_reply_draft;
-    if (!draftTool || typeof draftTool.execute !== "function") {
-      throw new Error("Expected present_reply_draft tool");
-    }
-
-    let step = 0;
-    const fullStream: AsyncIterable<MavenStreamPart> = {
-      [Symbol.asyncIterator](): AsyncIterator<MavenStreamPart> {
-        return {
-          async next(): Promise<IteratorResult<MavenStreamPart>> {
-            if (step === 0) {
-              step += 1;
-              for (const [index, draft] of options.drafts.entries()) {
-                await draftTool.execute(
-                  { draft },
-                  {
-                    toolCallId: `controlled-draft-${index}`,
-                    messages: [],
-                  },
-                );
-              }
-              return {
-                done: false,
-                value: {
-                  type: "tool-result",
-                  toolCallId: "controlled-draft-result",
-                  toolName: "present_reply_draft",
-                  output: { accepted: true },
-                },
-              };
-            }
-
-            if (step === 1) {
-              step += 1;
-              if (options.terminal === "abort") {
-                return {
-                  done: false,
-                  value: {
-                    type: "abort",
-                    reason: "private abort reason",
-                  },
-                };
-              }
-              return {
-                done: false,
-                value: { type: "finish-step", finishReason: "stop" },
-              };
-            }
-
-            return { done: true, value: undefined };
-          },
-          async return(): Promise<IteratorResult<MavenStreamPart>> {
-            step = 2;
-            return { done: true, value: undefined };
-          },
-        };
-      },
-    };
-
-    return { fullStream };
-  }
-
-  return streamDraftAgent;
-}
-
 function createFailingModel(
   message: string,
 ): { model: LanguageModel; calls: ModelCall[] } {
@@ -313,7 +243,7 @@ function createErrorThenDelayedToolModel(): {
   };
 }
 
-function createContext(): MavenTurnContext {
+function createContext(): PublicMavenTurnContext {
   return {
     channel: "public",
     projectId: "project-1",
@@ -802,294 +732,7 @@ describe("runMavenTurn", () => {
     expect(dependencies.modelRuntime.hasUsedFallback).toBe(false);
   });
 
-  test("sidechat does not read or construct public team-help dependencies", async () => {
-    const fake = createFakeModel([createTextStep("Private guidance.")]);
-    const dependencies = createDependencies({
-      model: fake.model,
-      calls: fake.calls,
-      httpTool: null,
-    });
-    Object.defineProperties(dependencies, {
-      publicToolDependencies: {
-        get() {
-          throw new Error("sidechat read publicToolDependencies");
-        },
-      },
-      chatService: {
-        get() {
-          throw new Error("sidechat read chatService");
-        },
-      },
-      projectService: {
-        get() {
-          throw new Error("sidechat read projectService");
-        },
-      },
-      onTeamRequested: {
-        get() {
-          throw new Error("sidechat captured onTeamRequested");
-        },
-      },
-      broadcast: {
-        get() {
-          throw new Error("sidechat captured broadcast");
-        },
-      },
-    });
-
-    const turn = await runMavenTurn({
-      context: {
-        ...createContext(),
-        channel: "sidechat",
-        actorUserId: "agent-1",
-      },
-      dependencies,
-      conversationHistory: [],
-      currentMessage: "Help me investigate this case.",
-    });
-    const browserEvents: Record<string, unknown>[] = [];
-    for await (const event of mapAgentEventsToSse(turn.fullStream)) {
-      browserEvents.push(event);
-    }
-
-    expect(browserEvents).toEqual([{ text: "Private guidance." }]);
-    expect(JSON.stringify(fake.calls[0]?.tools)).not.toContain(
-      "request_team_help",
-    );
-    expect(JSON.stringify(fake.calls[0]?.tools)).toContain(
-      "present_reply_draft",
-    );
-  });
-
-  test("publishes the latest successful sidechat draft only after its stream is consumed", async () => {
-    const fake = createFakeModel([
-      createToolStep("present_reply_draft", "draft-1", {
-        draft: "First visitor-facing draft.",
-      }),
-      createToolStep("present_reply_draft", "draft-2", {
-        draft: "Final visitor-facing draft.",
-      }),
-      createTextStep("I prepared a reply draft for review."),
-    ]);
-    const dependencies = createDependencies({
-      model: fake.model,
-      calls: fake.calls,
-      httpTool: null,
-    });
-
-    const turn = await runMavenTurn({
-      context: {
-        ...createContext(),
-        channel: "sidechat",
-        actorUserId: "agent-1",
-      },
-      dependencies,
-      conversationHistory: [],
-      currentMessage: "Draft a reply for the visitor.",
-    });
-
-    for await (const part of turn.fullStream) {
-      void part;
-    }
-
-    expect(fake.calls).toHaveLength(3);
-    expect(turn.artifact).toEqual({
-      type: "reply_draft",
-      draft: "Final visitor-facing draft.",
-    });
-  });
-
-  test("keeps executed drafts pending until natural stream exhaustion", async () => {
-    const fake = createFakeModel([createTextStep("Unused model output.")]);
-    const dependencies = createDependencies({
-      model: fake.model,
-      calls: fake.calls,
-      httpTool: null,
-    });
-    dependencies.streamAgent = createControlledDraftStreamAgent({
-      drafts: ["First pending draft.", "Final pending draft."],
-      terminal: "complete",
-    });
-
-    const turn = await runMavenTurn({
-      context: {
-        ...createContext(),
-        channel: "sidechat",
-        actorUserId: "agent-1",
-      },
-      dependencies,
-      conversationHistory: [],
-      currentMessage: "Prepare a draft.",
-    });
-
-    expect(turn.artifact).toBeNull();
-    const iterator = turn.fullStream[Symbol.asyncIterator]();
-    expect((await iterator.next()).value?.type).toBe("tool-result");
-    expect(turn.artifact).toBeNull();
-    while (!(await iterator.next()).done) {
-      expect(turn.artifact).toBeNull();
-    }
-
-    expect(turn.artifact).toEqual({
-      type: "reply_draft",
-      draft: "Final pending draft.",
-    });
-  });
-
-  test("discards a draft when the provider fails after tool execution without retrying", async () => {
-    const primary = createFakeModel([
-      createToolStep("present_reply_draft", "draft-before-error", {
-        draft: "Draft from failed primary attempt.",
-      }),
-      new Error("provider unavailable after draft"),
-    ]);
-    const fallback = createFakeModel([createTextStep("Fallback guidance.")]);
-    const dependencies = createDependencies({
-      model: primary.model,
-      calls: primary.calls,
-      httpTool: null,
-    });
-    dependencies.modelRuntime = createModelRuntimeState({
-      model: "gpt-primary",
-      geminiApiKey: "gemini-key",
-      openaiApiKey: "openai-key",
-    });
-    dependencies.createModel = (config) =>
-      config.model === "gpt-primary" ? primary.model : fallback.model;
-
-    const turn = await runMavenTurn({
-      context: {
-        ...createContext(),
-        channel: "sidechat",
-        actorUserId: "agent-1",
-      },
-      dependencies,
-      conversationHistory: [],
-      currentMessage: "Prepare a draft.",
-    });
-
-    async function consumeFailedStream(): Promise<void> {
-      for await (const part of turn.fullStream) {
-        void part;
-      }
-    }
-
-    await expect(consumeFailedStream()).rejects.toThrow(
-      "The response stream failed.",
-    );
-    expect(turn.artifact).toBeNull();
-    expect(primary.calls).toHaveLength(2);
-    expect(fallback.calls).toHaveLength(0);
-    expect(dependencies.modelRuntime.hasUsedFallback).toBe(false);
-  });
-
-  test("discards a draft when the SDK stream aborts after tool execution", async () => {
-    const fake = createFakeModel([createTextStep("Unused model output.")]);
-    const dependencies = createDependencies({
-      model: fake.model,
-      calls: fake.calls,
-      httpTool: null,
-    });
-    dependencies.streamAgent = createControlledDraftStreamAgent({
-      drafts: ["Draft before SDK abort."],
-      terminal: "abort",
-    });
-
-    const turn = await runMavenTurn({
-      context: {
-        ...createContext(),
-        channel: "sidechat",
-        actorUserId: "agent-1",
-      },
-      dependencies,
-      conversationHistory: [],
-      currentMessage: "Prepare a draft.",
-    });
-    const partTypes: string[] = [];
-    for await (const part of turn.fullStream) {
-      partTypes.push(part.type);
-    }
-
-    expect(partTypes).toEqual(["tool-result", "abort"]);
-    expect(turn.artifact).toBeNull();
-  });
-
-  test("discards a draft when the consumer returns before stream exhaustion", async () => {
-    const fake = createFakeModel([createTextStep("Unused model output.")]);
-    const dependencies = createDependencies({
-      model: fake.model,
-      calls: fake.calls,
-      httpTool: null,
-    });
-    dependencies.streamAgent = createControlledDraftStreamAgent({
-      drafts: ["Draft before consumer cancellation."],
-      terminal: "complete",
-    });
-
-    const turn = await runMavenTurn({
-      context: {
-        ...createContext(),
-        channel: "sidechat",
-        actorUserId: "agent-1",
-      },
-      dependencies,
-      conversationHistory: [],
-      currentMessage: "Prepare a draft.",
-    });
-    const iterator = turn.fullStream[Symbol.asyncIterator]();
-    expect((await iterator.next()).value?.type).toBe("tool-result");
-    await iterator.return?.();
-
-    expect(turn.artifact).toBeNull();
-  });
-
-  test("keeps sidechat draft state local to each returned turn", async () => {
-    const fake = createFakeModel([
-      createToolStep("present_reply_draft", "draft-first-turn", {
-        draft: "Draft from the first turn.",
-      }),
-      createTextStep("First turn complete."),
-      createTextStep("Second turn has guidance only."),
-    ]);
-    const dependencies = createDependencies({
-      model: fake.model,
-      calls: fake.calls,
-      httpTool: null,
-    });
-    const context = {
-      ...createContext(),
-      channel: "sidechat" as const,
-      actorUserId: "agent-1",
-    };
-
-    const firstTurn = await runMavenTurn({
-      context,
-      dependencies,
-      conversationHistory: [],
-      currentMessage: "Draft a response.",
-    });
-    for await (const part of firstTurn.fullStream) {
-      void part;
-    }
-
-    const secondTurn = await runMavenTurn({
-      context,
-      dependencies,
-      conversationHistory: [],
-      currentMessage: "Investigate without drafting.",
-    });
-    for await (const part of secondTurn.fullStream) {
-      void part;
-    }
-
-    expect(firstTurn.artifact).toEqual({
-      type: "reply_draft",
-      draft: "Draft from the first turn.",
-    });
-    expect(secondTurn.artifact).toBeNull();
-  });
-
-  test("never exposes the sidechat draft tool in a public turn", async () => {
+  test("returns only the public turn surface", async () => {
     const fake = createFakeModel([createTextStep("Public answer.")]);
     const dependencies = createDependencies({
       model: fake.model,
@@ -1110,7 +753,7 @@ describe("runMavenTurn", () => {
     expect(JSON.stringify(fake.calls[0]?.tools)).not.toContain(
       "present_reply_draft",
     );
-    expect(turn.artifact).toBeNull();
+    expect("artifact" in turn).toBe(false);
   });
 
   test("searches repeatedly, calls HTTP, and composes final text in one agent loop", async () => {

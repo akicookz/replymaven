@@ -39,7 +39,6 @@ export interface SupportToolDefinition {
 }
 
 export interface SupportPromptOptions {
-  channel?: MavenChannel;
   guidelines?: Array<{ condition: string; instruction: string }>;
   agentHandbackInstructions?: string | null;
   pageContext?: Record<string, string>;
@@ -116,10 +115,6 @@ export type MavenStreamPart =
       }
     | { type: "finish-step"; finishReason: string }
     | { type: string; [key: string]: unknown };
-
-export type MavenArtifact =
-  | { type: "reply_draft"; draft: string }
-  | null;
 
 export interface SupportAgentResult {
   fullStream: AsyncIterable<MavenStreamPart>;
@@ -507,27 +502,16 @@ export function toToolDefinition(tool: ToolRow): SupportToolDefinition {
   };
 }
 
-export function toSdkConversationMessages(
+export function toPublicSdkConversationMessages(
   conversationHistory: ConversationTurnMessage[],
-  channel: MavenChannel,
 ): ModelMessage[] {
   return conversationHistory.map((message) => {
-    if (channel === "public") {
-      if (message.role === "visitor") {
-        return { role: "user", content: message.content };
-      }
-      if (message.role === "bot" || message.role === "agent") {
-        return { role: "assistant", content: message.content };
-      }
-      throw new Error(`Invalid public conversation role: ${message.role}`);
-    }
-
-    if (message.role === "agent") {
+    if (message.role === "visitor") {
       return { role: "user", content: message.content };
     }
-    if (message.role === "bot") {
+    if (message.role === "bot" || message.role === "agent") {
       return { role: "assistant", content: message.content };
     }
-    throw new Error(`Invalid sidechat conversation role: ${message.role}`);
+    throw new Error(`Invalid public conversation role: ${message.role}`);
   });
 }

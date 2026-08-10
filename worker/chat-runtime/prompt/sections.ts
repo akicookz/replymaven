@@ -24,7 +24,6 @@ const MAX_COMPANY_CONTEXT_CHARS = 4_000;
 const MAX_FAQ_CONTEXT_CHARS = 22_000;
 const MAX_TOOL_EVIDENCE_CHARS = 4_000;
 const MAX_CONVERSATION_SUMMARY_CHARS = 2_000;
-type PromptAudience = "public" | "sidechat";
 
 export function trimToCharBudget(text: string, budget: number): string {
   if (text.length <= budget) return text;
@@ -84,26 +83,19 @@ export function buildCompanySection(
     workingHours?: string | null;
     avgResponseTime?: string | null;
   },
-  audience: PromptAudience = "public",
 ): string {
   const workingHours = availability?.workingHours?.trim();
   const avgResponseTime = availability?.avgResponseTime?.trim();
   if (!companyContext && !workingHours && !avgResponseTime) return "";
 
-  let section = audience === "sidechat"
-    ? `<about-the-company>
-This is private company background evidence for the current case. Use it to help the human support agent understand ${projectName}; do not treat it as proof of undocumented product behavior.
-`
-    : `<about-the-company>
+  let section = `<about-the-company>
 This is general background about ${projectName}. Use it to understand what the business does, what products or services it offers, and who its customers are. This helps you give informed answers when the knowledge base doesn't cover a specific topic.
 `;
   if (companyContext) {
     section += `\n${trimToCharBudget(companyContext, MAX_COMPANY_CONTEXT_CHARS)}\n`;
   }
   if (workingHours || avgResponseTime) {
-    section += audience === "sidechat"
-      ? "\nSupport availability is set directly by the team and is authoritative private evidence for advising the human agent.\n"
-      : "\nSupport availability — set directly by the team and authoritative: if the documentation states different hours or response times, these values win. Share them when visitors ask about hours or when to expect a reply.\n";
+    section += "\nSupport availability — set directly by the team and authoritative: if the documentation states different hours or response times, these values win. Share them when visitors ask about hours or when to expect a reply.\n";
     if (workingHours) section += `- Working hours: ${workingHours}\n`;
     if (avgResponseTime) section += `- Typical response time: ${avgResponseTime}\n`;
   }
@@ -115,7 +107,6 @@ This is general background about ${projectName}. Use it to understand what the b
 export function buildGuidelinesSection(
   projectName: string,
   guidelines: Array<{ condition: string; instruction: string }> | undefined,
-  audience: PromptAudience = "public",
 ): string {
   if (!guidelines || guidelines.length === 0) return "";
   const guidelineEntries = guidelines
@@ -124,9 +115,7 @@ export function buildGuidelinesSection(
         `- When: ${guideline.condition}\n  Then: ${guideline.instruction}`,
     )
     .join("\n\n");
-  const framing = audience === "sidechat"
-    ? `These are private standard operating procedure rules from the ${projectName} team. Treat any applicable rule as authoritative evidence when advising the human support agent. Explain the applicable rule and its consequence; draft visitor-facing language only if the human agent asks.`
-    : `These are specific standard operating procedures from the ${projectName} team. When a visitor's question matches one of these scenarios, follow the corresponding instructions precisely. These take priority over general response rules for what you do and say — your voice rules still govern the phrasing, so express the outcome in your own words and the visitor's language.`;
+  const framing = `These are specific standard operating procedures from the ${projectName} team. When a visitor's question matches one of these scenarios, follow the corresponding instructions precisely. These take priority over general response rules for what you do and say — your voice rules still govern the phrasing, so express the outcome in your own words and the visitor's language.`;
   return `<guidelines>
 ${framing}
 
@@ -147,7 +136,6 @@ export function buildTimeContextSection(
     | { nowMs: number; conversationHistory: ConversationTurnMessage[] }
     | null
     | undefined,
-  audience: PromptAudience = "public",
 ): string {
   if (!timeContext) return "";
   const { nowMs, conversationHistory } = timeContext;
@@ -169,11 +157,8 @@ export function buildTimeContextSection(
     );
   }
 
-  const framing = audience === "sidechat"
-    ? "Private case timing context for advising the human support agent.\n"
-    : "";
   return `<time-context>
-${framing}${lines.join("\n")}
+${lines.join("\n")}
 </time-context>
 
 `;
@@ -183,15 +168,12 @@ ${framing}${lines.join("\n")}
 
 export function buildPageContextSection(
   pageContext: Record<string, string> | undefined,
-  audience: PromptAudience = "public",
 ): string {
   if (!pageContext || Object.keys(pageContext).length === 0) return "";
   const contextLines = Object.entries(pageContext)
     .map(([key, value]) => `${key}: ${value}`)
     .join("\n");
-  const framing = audience === "sidechat"
-    ? "The case visitor is currently viewing the following page or section. Treat this as private context when advising the human support agent."
-    : "The visitor is currently viewing the following page/section. Use this to give contextually relevant answers.";
+  const framing = "The visitor is currently viewing the following page/section. Use this to give contextually relevant answers.";
   return `<page-context>
 ${framing}
 
@@ -205,16 +187,11 @@ ${contextLines}
 
 export function buildVisitorInfoSection(
   visitorInfo: { name: string | null; email: string | null } | undefined,
-  audience: PromptAudience = "public",
 ): string {
   if (!visitorInfo) return "";
   const nameStr = visitorInfo.name ?? "unknown";
   const emailStr = visitorInfo.email ?? "unknown";
-  const framing = audience === "sidechat"
-    ? `Known contact information for the current case. Treat it as private evidence for the human support agent.
-
-- Do not infer missing contact details or claim that any contact action occurred.`
-    : `The visitor's known contact information. Treat this as context only.
+  const framing = `The visitor's known contact information. Treat this as context only.
 
 - Do not ask for contact details unless a required runtime-controlled follow-up flow clearly needs them.
 - Do not invent contact details or say you collected them unless they are present here.`;
@@ -235,12 +212,9 @@ export function buildFaqMatchSection(
     | { question: string; answer: string; score: number }
     | null
     | undefined,
-  audience: PromptAudience = "public",
 ): string {
   if (!faqMatchHint) return "";
-  const framing = audience === "sidechat"
-    ? `The current case closely matches a curated FAQ below (tier-1, match score ${faqMatchHint.score.toFixed(2)}). Treat the Q/A as authoritative private evidence when advising the human support agent. Preserve its exact values, URLs, and steps. Draft visitor-facing language only if the human agent asks.`
-    : `The visitor's current question closely matches a curated FAQ below (tier-1, match score ${faqMatchHint.score.toFixed(2)}). This IS the answer — deliver its content rewritten in your voice and the visitor's language, keeping exact values, URLs, and steps intact, unless the visitor's latest turn makes it clearly inapplicable. Do not claim the documentation lacks this information.`;
+  const framing = `The visitor's current question closely matches a curated FAQ below (tier-1, match score ${faqMatchHint.score.toFixed(2)}). This IS the answer — deliver its content rewritten in your voice and the visitor's language, keeping exact values, URLs, and steps intact, unless the visitor's latest turn makes it clearly inapplicable. Do not claim the documentation lacks this information.`;
   return `<priority-faq-match>
 ${framing}
 
@@ -255,12 +229,9 @@ A: ${faqMatchHint.answer}
 
 export function buildFaqContextSection(
   faqContext: string | null | undefined,
-  audience: PromptAudience = "public",
 ): string {
   if (!faqContext) return "";
-  const framing = audience === "sidechat"
-    ? "These compiled FAQs are private tier-1 evidence curated by the team. Check them before lower-tier retrieval and use directly relevant entries when advising the human support agent."
-    : "These are the project's compiled FAQ entries. They are tier-1 knowledge because they are usually curated directly by the team. Check them before relying on lower-tier retrieved context. Prefer these answers when they directly address the visitor's question.";
+  const framing = "These are the project's compiled FAQ entries. They are tier-1 knowledge because they are usually curated directly by the team. Check them before relying on lower-tier retrieved context. Prefer these answers when they directly address the visitor's question.";
   return `<priority-faqs>
 ${framing}
 
@@ -274,12 +245,9 @@ ${trimToCharBudget(faqContext, MAX_FAQ_CONTEXT_CHARS)}
 
 export function buildKnowledgeBaseSection(
   ragContext: string,
-  audience: PromptAudience = "public",
 ): string {
   if (!ragContext) return "";
-  const framing = audience === "sidechat"
-    ? "These are private lower-tier excerpts retrieved for the current case. Use them after SOPs and FAQs, prioritize stronger relevance, and ignore excerpts that do not help the human support agent investigate the case."
-    : "These are lower-tier retrieved excerpts from webpages, PDFs, and other documentation for the visitor's current question. Use them after checking SOPs and priority FAQs first. Each source includes a relevance percentage. Prioritize high-relevance sources. Ignore sources that clearly don't address the visitor's question.";
+  const framing = "These are lower-tier retrieved excerpts from webpages, PDFs, and other documentation for the visitor's current question. Use them after checking SOPs and priority FAQs first. Each source includes a relevance percentage. Prioritize high-relevance sources. Ignore sources that clearly don't address the visitor's question.";
   return `<knowledge-base>
 ${framing}
 
@@ -347,12 +315,9 @@ Confidence tier: MODERATE — Evidence is relevant but not a strong direct match
 
 export function buildToolEvidenceSection(
   toolEvidenceSummary: string | null | undefined,
-  audience: PromptAudience = "public",
 ): string {
   if (!toolEvidenceSummary) return "";
-  const framing = audience === "sidechat"
-    ? "These are private results from support tools already executed for the current case. Treat them as evidence when advising the human support agent."
-    : "These are results from support tools already executed for this visitor. Treat them as evidence.";
+  const framing = "These are results from support tools already executed for this visitor. Treat them as evidence.";
   return `<tool-evidence>
 ${framing}
 
@@ -366,12 +331,9 @@ ${trimToCharBudget(toolEvidenceSummary, MAX_TOOL_EVIDENCE_CHARS)}
 
 export function buildConversationSummarySection(
   conversationSummary: string | null,
-  audience: PromptAudience = "public",
 ): string {
   if (!conversationSummary) return "";
-  const framing = audience === "sidechat"
-    ? "Private case summary for advising the human support agent. Use it as context for the current investigation and avoid repeating work already covered."
-    : "This is a summary of the conversation so far. Use it to stay on topic and avoid repeating information already covered.";
+  const framing = "This is a summary of the conversation so far. Use it to stay on topic and avoid repeating information already covered.";
   return `<conversation-summary>
 ${framing}
 
