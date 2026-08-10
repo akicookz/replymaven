@@ -4,7 +4,6 @@ import {
   useRef,
   useMemo,
   useCallback,
-  useReducer,
 } from "react";
 import type { SetStateAction } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
@@ -22,17 +21,7 @@ import type {
 } from "../../shared/customer-types";
 import { cn } from "@/lib/utils";
 import { serializeMessageImageUrls } from "../../shared/message-images";
-import {
-  reconcileSidechatCoordinationQueryCaches,
-  mergeConversationDetailFetchWithSidechatAuthority,
-  reduceSidechatAcceptedConversation,
-  mergeConversationWithSidechatSnapshot,
-  selectAuthoritativeSidechatCoordinationFromCaches,
-  sidechatCoordinationSnapshotFromConversation,
-  synchronizeSidechatCoordinationQueryCaches,
-  useConversationWs,
-  type SidechatEphemeralStore,
-} from "@/lib/use-conversation-ws";
+import { useConversationWs } from "@/lib/use-conversation-ws";
 import { useCustomerWs } from "@/lib/use-customer-ws";
 import { passesInboxFilter, type InboxFilter, type InboxSort } from "@/lib/inbox/filters";
 import {
@@ -53,18 +42,7 @@ import type {
   LastMessagePreview,
 } from "@/lib/inbox/types";
 import {
-  buildSidechatEntryPlan,
-  createInitialSidechatOrchestratorState,
-  createOptimisticSidechatMessage,
   deriveAddToReplyIntent,
-  deriveSidechatBusy,
-  markSidechatHistoryFetchSnapshot,
-  mergeSidechatHistoryMessages,
-  mergeSidechatHistorySnapshot,
-  reconcileSidechatMessages,
-  reduceSidechatOrchestratorState,
-  resolveSidechatStartAfterHistory,
-  transitionPublicDraftAfterSidechatAccept,
 } from "@/lib/inbox/sidechat";
 import MessageList from "@/components/inbox/MessageList";
 import ReadingPane from "@/components/inbox/ReadingPane";
@@ -79,12 +57,6 @@ import {
   fetchCustomer,
   setConversationCustomer,
 } from "@/lib/customers";
-import {
-  selectNewerSidechatCoordinationSnapshot,
-  type SidechatCoordinationSnapshot,
-  type SidechatMessagePayload,
-  type SidechatStatus,
-} from "../../shared/ws-events";
 
 // ─── Wire shapes (orchestrator-local) ──────────────────────────────────────────
 
@@ -117,10 +89,6 @@ interface ConversationUpdate {
   createdAt: string;
   updatedAt: string;
   lastMessage?: LastMessagePreview | null;
-  sidechatStatus?: SidechatStatus;
-  sidechatRunId?: string | null;
-  sidechatUpdatedAt?: string | null;
-  sidechatRevision?: number;
 }
 
 interface ConversationUpdatesResponse {
@@ -142,50 +110,6 @@ interface ConversationDetail {
 interface BulkConversationMutationInput {
   conversationIds: string[];
   action: BulkConversationAction;
-}
-
-interface SidechatCacheData {
-  messages: Message[];
-  hasMore: boolean;
-  nextBefore: string | null;
-  historyLoaded: boolean;
-  coordination?: SidechatCoordinationSnapshot;
-}
-
-interface SidechatHistoryResponse {
-  messages: SidechatMessagePayload[];
-  hasMore: boolean;
-  nextBefore: string | null;
-  coordination: SidechatCoordinationSnapshot;
-}
-
-interface SidechatAcceptedResponse {
-  outcome: "accepted";
-  message: SidechatMessagePayload;
-  runId: string;
-  coordination: SidechatCoordinationSnapshot;
-}
-
-interface SidechatExistingResponse {
-  outcome: "existing";
-}
-
-type SidechatSubmitResponse =
-  | SidechatAcceptedResponse
-  | SidechatExistingResponse;
-
-interface SidechatSubmission {
-  conversationId: string;
-  content?: string;
-  draftSource: "public" | "sidechat";
-  draftSnapshot: string;
-  optimisticId: string | null;
-  startOnlyIfEmpty?: boolean;
-}
-
-interface SidechatStartIntent {
-  conversationId: string;
-  publicDraftSnapshot: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -254,14 +178,6 @@ function patchConversationForBulkAction(
   }
 }
 
-function toSidechatMessage(payload: SidechatMessagePayload): Message {
-  return {
-    ...payload,
-    channel: "sidechat",
-    createdAt: new Date(payload.createdAt).toISOString(),
-  };
-}
-
 // Per-project localStorage key for the client-side "read" overlay. There is no
 // server read-state on conversations (unread is the lastMessage===visitor
 // heuristic), so "mark all as read" is stored locally as a per-conversation
@@ -282,21 +198,11 @@ function Conversations() {
   const [selectedConvo, setSelectedConvo] = useState<string | null>(
     searchParams.get("id"),
   );
-  const selectedConvoRef = useRef(selectedConvo);
-  selectedConvoRef.current = selectedConvo;
   const [draft, setDraft] = useState("");
   const [publicComposerFocusRequest, setPublicComposerFocusRequest] = useState(0);
+  const [sidechatOpen, setSidechatOpen] = useState(false);
   const [sidechatDrafts, setSidechatDrafts] = useState<Record<string, string>>(
     {},
-  );
-  const [pendingSidechatConversationIds, setPendingSidechatConversationIds] =
-    useState<Set<string>>(new Set());
-  const [sidechatStartIntent, setSidechatStartIntent] =
-    useState<SidechatStartIntent | null>(null);
-  const [sidechatState, dispatchSidechat] = useReducer(
-    reduceSidechatOrchestratorState,
-    searchParams.get("id"),
-    createInitialSidechatOrchestratorState,
   );
   const view = searchParams.get("focus") === "true" ? "focus" : "split";
   const setView = useCallback(
@@ -339,13 +245,6 @@ function Conversations() {
       setSearchParams(next, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedConvo]);
-
-  useEffect(() => {
-    dispatchSidechat({
-      type: "select_conversation",
-      conversationId: selectedConvo,
-    });
   }, [selectedConvo]);
 
   // One-shot deep-link target from ?msg= (Telegram/email/ping links). Cleared
@@ -505,31 +404,7 @@ function Conversations() {
     // placeholders, so a filter switch shows skeletons (over the cleared list)
     // rather than briefly re-displaying the previous filter's rows.
     if (!convosPage || isPlaceholderData) return;
-    const authoritativeById = new Map<string, SidechatCoordinationSnapshot>();
-    for (const conversation of convosPage.conversations) {
-      const authoritative = synchronizeSidechatCoordinationQueryCaches(
-        queryClient,
-        projectId,
-        conversation.id,
-      );
-      if (authoritative) authoritativeById.set(conversation.id, authoritative);
-    }
-    setLoadedConversations((current) => {
-      const currentById = new Map(current.map((conversation) => [
-        conversation.id,
-        conversation,
-      ]));
-      return convosPage.conversations.map((conversation) => {
-        const existing = currentById.get(conversation.id);
-        const merged = existing
-          ? mergeConversationWithSidechatSnapshot(existing, conversation)
-          : conversation;
-        const authoritative = authoritativeById.get(conversation.id);
-        return authoritative
-          ? reduceSidechatAcceptedConversation(merged, authoritative)
-          : merged;
-      });
-    });
+    setLoadedConversations(convosPage.conversations);
     if (convosPage.serverTime) setServerTimeBaseline(convosPage.serverTime);
     if (projectId) {
       queryClient.setQueryData(["inbox-counts", projectId], convosPage.counts);
@@ -568,18 +443,6 @@ function Conversations() {
     // next full refetch. Rows NOT in the delta are left alone.
     const nowMs = Date.now();
 
-    const authoritativeById = new Map<string, SidechatCoordinationSnapshot>();
-    for (const update of updatesData.updates) {
-      if (update.sidechatRevision === undefined) continue;
-      const reconciled = reconcileSidechatCoordinationQueryCaches(
-        queryClient,
-        projectId,
-        update.id,
-        sidechatCoordinationSnapshotFromConversation(update),
-      );
-      authoritativeById.set(update.id, reconciled.coordination);
-    }
-
     const updateMap = new Map(updatesData.updates.map((u) => [u.id, u]));
 
     setLoadedConversations((prev) => {
@@ -595,11 +458,7 @@ function Conversations() {
         }
         changed = true;
         updateMap.delete(c.id);
-        let merged = mergeConversationWithSidechatSnapshot(c, u);
-        const authoritative = authoritativeById.get(c.id);
-        if (authoritative) {
-          merged = reduceSidechatAcceptedConversation(merged, authoritative);
-        }
+        const merged = { ...c, ...u } as Conversation;
         if (passesInboxFilter(filter, merged, nowMs)) next.push(merged);
       }
 
@@ -607,13 +466,7 @@ function Conversations() {
         if (seen.has(u.id)) continue;
         if (!passesInboxFilter(filter, u, nowMs)) continue;
         changed = true;
-        const authoritative = authoritativeById.get(u.id);
-        next.push(authoritative
-          ? reduceSidechatAcceptedConversation(
-              u as Conversation,
-              authoritative,
-            )
-          : u as Conversation);
+        next.push(u as Conversation);
       }
 
       if (!changed) return prev;
@@ -637,23 +490,13 @@ function Conversations() {
             patched.push(c);
             continue;
           }
-          let merged = mergeConversationWithSidechatSnapshot(c, u);
-          const authoritative = authoritativeById.get(c.id);
-          if (authoritative) {
-            merged = reduceSidechatAcceptedConversation(merged, authoritative);
-          }
+          const merged = { ...c, ...u } as Conversation;
           if (passesInboxFilter(filter, merged, nowMs)) patched.push(merged);
         }
         for (const u of updatesData.updates) {
           if (seen.has(u.id)) continue;
           if (!passesInboxFilter(filter, u, nowMs)) continue;
-          const authoritative = authoritativeById.get(u.id);
-          patched.push(authoritative
-            ? reduceSidechatAcceptedConversation(
-                u as Conversation,
-                authoritative,
-              )
-            : u as Conversation);
+          patched.push(u as Conversation);
         }
         patched.sort((a, b) => getActivityMs(b) - getActivityMs(a));
         return { ...old, conversations: patched };
@@ -682,99 +525,8 @@ function Conversations() {
     // Detail is kept fresh in real time by useConversationWs; cache 60s so
     // revisiting a conversation is instant.
     staleTime: 1000 * 60,
-    structuralSharing: (current, incoming) =>
-      mergeConversationDetailFetchWithSidechatAuthority(
-        queryClient,
-        projectId,
-        current as ConversationDetail | undefined,
-        incoming as ConversationDetail,
-      ),
+    structuralSharing: true,
   });
-
-  useEffect(() => {
-    if (!convoDetail?.conversation.id) return;
-    const authoritative = synchronizeSidechatCoordinationQueryCaches(
-      queryClient,
-      projectId,
-      convoDetail.conversation.id,
-    );
-    if (!authoritative) return;
-    setLoadedConversations((current) => current.map((conversation) =>
-      conversation.id === convoDetail.conversation.id
-        ? reduceSidechatAcceptedConversation(conversation, authoritative)
-        : conversation
-    ));
-  }, [convoDetail?.conversation, projectId, queryClient]);
-
-  const sidechatFetchGenerationRef = useRef(0);
-  const sidechatConversationId = sidechatState.isOpen ? selectedConvo : null;
-  const {
-    data: sidechatData,
-    isLoading: sidechatLoading,
-    isFetching: sidechatFetching,
-    isSuccess: sidechatHistorySucceeded,
-  } = useQuery<SidechatCacheData>({
-    queryKey: ["sidechat", projectId, sidechatConversationId],
-    queryFn: async () => {
-      const generation = ++sidechatFetchGenerationRef.current;
-      const res = await fetch(
-        `/api/projects/${projectId}/conversations/${sidechatConversationId}/sidechat`,
-      );
-      if (!res.ok) throw new Error("Failed to load Sidechat");
-      const data = (await res.json()) as SidechatHistoryResponse;
-      return markSidechatHistoryFetchSnapshot({
-        messages: data.messages.map(toSidechatMessage),
-        hasMore: data.hasMore,
-        nextBefore: data.nextBefore,
-        historyLoaded: true,
-        coordination: data.coordination,
-      }, generation);
-    },
-    enabled: Boolean(projectId && sidechatConversationId),
-    retry: 1,
-    structuralSharing: (current, incoming) => {
-      const merged = mergeSidechatHistorySnapshot(
-        current as SidechatCacheData | undefined,
-        incoming as SidechatCacheData,
-      );
-      const authoritative = sidechatConversationId
-        ? selectAuthoritativeSidechatCoordinationFromCaches(
-            queryClient,
-            projectId,
-            sidechatConversationId,
-          )
-        : null;
-      return authoritative
-        ? {
-            ...merged,
-            coordination: selectNewerSidechatCoordinationSnapshot(
-              merged.coordination ?? null,
-              authoritative,
-            ),
-          }
-        : merged;
-    },
-  });
-  const { data: sidechatEphemeral } = useQuery<SidechatEphemeralStore>({
-    queryKey: ["sidechat-ephemeral", projectId, sidechatConversationId],
-    queryFn: async () => new Map(),
-    enabled: false,
-  });
-
-  useEffect(() => {
-    if (!sidechatConversationId || !sidechatData?.coordination) return;
-    const coordination = synchronizeSidechatCoordinationQueryCaches(
-      queryClient,
-      projectId,
-      sidechatConversationId,
-    );
-    if (!coordination) return;
-    setLoadedConversations((current) => current.map((conversation) =>
-      conversation.id === sidechatConversationId
-        ? reduceSidechatAcceptedConversation(conversation, coordination)
-        : conversation
-    ));
-  }, [projectId, queryClient, sidechatConversationId, sidechatData?.coordination]);
 
   // Reset the composer draft when switching conversations.
   useEffect(() => {
@@ -877,242 +629,6 @@ function Conversations() {
         queryKey: ["conversations", projectId],
       });
     },
-  });
-
-  const submitSidechatMessage = useMutation<
-    SidechatSubmitResponse,
-    Error,
-    SidechatSubmission
-  >({
-    mutationFn: async ({ conversationId, content, startOnlyIfEmpty }) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/conversations/${conversationId}/sidechat/messages`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...(content === undefined ? {} : { content }),
-            ...(startOnlyIfEmpty ? { startOnlyIfEmpty: true } : {}),
-          }),
-        },
-      );
-      const body = (await res.json().catch(() => null)) as
-        | SidechatSubmitResponse
-        | { outcome?: "busy"; error?: string }
-        | null;
-      if (res.status === 200 && body?.outcome === "existing") return body;
-      if (res.status !== 202 || body?.outcome !== "accepted") {
-        const error = body && "error" in body ? body.error : undefined;
-        throw new Error(error ?? "Sidechat request was not accepted");
-      }
-      return body;
-    },
-    onMutate: async (variables) => {
-      setPendingSidechatConversationIds((current) => {
-        const next = new Set(current);
-        next.add(variables.conversationId);
-        return next;
-      });
-      const queryKey = [
-        "sidechat",
-        projectId,
-        variables.conversationId,
-      ] as const;
-      await queryClient.cancelQueries({ queryKey });
-      if (!variables.optimisticId || variables.content === undefined) return;
-      const optimistic = createOptimisticSidechatMessage({
-        id: variables.optimisticId,
-        content: variables.content,
-        createdAt: new Date().toISOString(),
-      });
-      queryClient.setQueryData<SidechatCacheData>(queryKey, (old) => ({
-        messages: reconcileSidechatMessages(old?.messages ?? [], optimistic),
-        hasMore: old?.hasMore ?? false,
-        nextBefore: old?.nextBefore ?? null,
-        historyLoaded: old?.historyLoaded ?? false,
-        coordination: old?.coordination,
-      }));
-    },
-    onSuccess: (data, variables) => {
-      const queryKey = [
-        "sidechat",
-        projectId,
-        variables.conversationId,
-      ] as const;
-      if (data.outcome === "existing") {
-        void queryClient.invalidateQueries({ queryKey });
-        return;
-      }
-      const acceptedMessage = toSidechatMessage(data.message);
-      const reconciliation = reconcileSidechatCoordinationQueryCaches(
-        queryClient,
-        projectId,
-        variables.conversationId,
-        data.coordination,
-      );
-      queryClient.setQueryData<SidechatCacheData>(queryKey, (old) => ({
-        messages: reconcileSidechatMessages(
-          old?.messages ?? [],
-          acceptedMessage,
-        ),
-        hasMore: old?.hasMore ?? false,
-        nextBefore: old?.nextBefore ?? null,
-        historyLoaded: old?.historyLoaded ?? false,
-        coordination: reconciliation.coordination,
-      }));
-      setLoadedConversations((current) => current.map((conversation) => {
-        if (conversation.id !== variables.conversationId) return conversation;
-        return reduceSidechatAcceptedConversation(
-          conversation,
-          reconciliation.coordination,
-        );
-      }));
-      dispatchSidechat({
-        type: "run_accepted",
-        conversationId: variables.conversationId,
-        runId: data.runId,
-      });
-
-      if (variables.draftSource === "public") {
-        setDraft((current) => transitionPublicDraftAfterSidechatAccept({
-          currentDraft: current,
-          submittedDraft: variables.draftSnapshot,
-          currentConversationId: selectedConvoRef.current,
-          submittedConversationId: variables.conversationId,
-          accepted: true,
-        }));
-      } else {
-        setSidechatDrafts((current) => {
-          const currentDraft = current[variables.conversationId] ?? "";
-          const nextDraft = transitionPublicDraftAfterSidechatAccept({
-            currentDraft,
-            submittedDraft: variables.draftSnapshot,
-            currentConversationId: variables.conversationId,
-            submittedConversationId: variables.conversationId,
-            accepted: true,
-          });
-          if (nextDraft === currentDraft) return current;
-          return { ...current, [variables.conversationId]: nextDraft };
-        });
-      }
-    },
-    onError: (error, variables) => {
-      if (variables.optimisticId) {
-        queryClient.setQueryData<SidechatCacheData | undefined>(
-          ["sidechat", projectId, variables.conversationId],
-          (old) => old
-            ? {
-                ...old,
-                messages: old.messages.filter(
-                  (message) => message.id !== variables.optimisticId,
-                ),
-              }
-            : old,
-        );
-      }
-      toast.error(error.message || "Sidechat request failed");
-    },
-    onSettled: (_data, _error, variables) => {
-      setPendingSidechatConversationIds((current) => {
-        const next = new Set(current);
-        next.delete(variables.conversationId);
-        return next;
-      });
-    },
-  });
-
-  const loadEarlierSidechat = useMutation({
-    mutationFn: async ({
-      conversationId,
-      before,
-    }: {
-      conversationId: string;
-      before: string;
-    }) => {
-      const params = new URLSearchParams({ before, limit: "40" });
-      const res = await fetch(
-        `/api/projects/${projectId}/conversations/${conversationId}/sidechat?${params.toString()}`,
-      );
-      if (!res.ok) throw new Error("Failed to load earlier Sidechat messages");
-      return {
-        conversationId,
-        data: (await res.json()) as SidechatHistoryResponse,
-      };
-    },
-    onSuccess: ({ conversationId, data }) => {
-      const reconciliation = reconcileSidechatCoordinationQueryCaches(
-        queryClient,
-        projectId,
-        conversationId,
-        data.coordination,
-      );
-      queryClient.setQueryData<SidechatCacheData | undefined>(
-        ["sidechat", projectId, conversationId],
-        (old) => old
-          ? {
-              messages: mergeSidechatHistoryMessages(
-                old.messages,
-                data.messages.map(toSidechatMessage),
-              ),
-              hasMore: data.hasMore,
-              nextBefore: data.nextBefore,
-              historyLoaded: true,
-              coordination: reconciliation.coordination,
-            }
-          : old,
-      );
-    },
-    onError: (error: Error) => toast.error(error.message),
-  });
-
-  const retrySidechatTurn = useMutation({
-    mutationFn: async ({
-      conversationId,
-      messageId,
-    }: {
-      conversationId: string;
-      messageId: string;
-    }) => {
-      const res = await fetch(
-        `/api/projects/${projectId}/conversations/${conversationId}/sidechat/retry`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messageId }),
-        },
-      );
-      if (res.status !== 202) {
-        const body = (await res.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(body?.error ?? "Sidechat retry was not accepted");
-      }
-      return {
-        conversationId,
-        data: (await res.json()) as SidechatAcceptedResponse,
-      };
-    },
-    onSuccess: ({ conversationId, data }) => {
-      const reconciliation = reconcileSidechatCoordinationQueryCaches(
-        queryClient,
-        projectId,
-        conversationId,
-        data.coordination,
-      );
-      setLoadedConversations((current) => current.map((conversation) => {
-        if (conversation.id !== conversationId) return conversation;
-        return reduceSidechatAcceptedConversation(
-          conversation,
-          reconciliation.coordination,
-        );
-      }));
-      dispatchSidechat({
-        type: "run_accepted",
-        conversationId,
-        runId: data.runId,
-      });
-    },
-    onError: (error: Error) => toast.error(error.message),
   });
 
   const closeConversation = useMutation({
@@ -1687,87 +1203,12 @@ function Conversations() {
     enabled: Boolean(projectId && selectedCustomerId),
   });
 
-  const sidechatMessages = sidechatData?.messages ?? [];
-  const sidechatStatus: SidechatStatus = selected?.sidechatStatus ?? "idle";
-  const sidechatRunId = selected?.sidechatRunId ?? null;
-  const sidechatExists = Boolean(
-    sidechatMessages.length > 0 ||
-      selected?.sidechatUpdatedAt ||
-      sidechatStatus !== "idle" ||
-      (selectedConvo && pendingSidechatConversationIds.has(selectedConvo)) ||
-      (selectedConvo && sidechatState.acceptedRunIds[selectedConvo]),
-  );
-  const sidechatLoadingEarlier = Boolean(
-    selectedConvo &&
-      loadEarlierSidechat.isPending &&
-      loadEarlierSidechat.variables?.conversationId === selectedConvo,
-  );
-  const sidechatRetrying = Boolean(
-    selectedConvo &&
-      retrySidechatTurn.isPending &&
-      retrySidechatTurn.variables?.conversationId === selectedConvo,
-  );
-  const sidechatBusy = Boolean(
-    selectedConvo && deriveSidechatBusy(
-      sidechatStatus,
-      pendingSidechatConversationIds.has(selectedConvo),
-      sidechatRetrying,
-    ),
-  );
-  const visibleSidechatStatus: SidechatStatus = sidechatBusy
-    ? "working"
-    : sidechatStatus;
-  const sidechatContinuation = sidechatRunId
-    ? sidechatEphemeral?.get(sidechatRunId) ?? null
-    : null;
   const sidechatDraft = selectedConvo
     ? sidechatDrafts[selectedConvo] ?? ""
     : "";
   const customerFirstName = (
     selectedCustomer?.name ?? selected?.visitorName ?? ""
   ).trim().split(/\s+/u)[0] || null;
-
-  useEffect(() => {
-    if (!sidechatStartIntent) return;
-    if (
-      sidechatStartIntent.conversationId !== selectedConvo ||
-      !sidechatState.isOpen
-    ) {
-      setSidechatStartIntent(null);
-      return;
-    }
-    const resolution = resolveSidechatStartAfterHistory(
-      sidechatHistorySucceeded && !sidechatFetching,
-      sidechatData?.messages.length ?? 0,
-    );
-    if (resolution === "wait") return;
-    setSidechatStartIntent(null);
-    if (resolution === "open_existing" || selected?.archivedAt) return;
-
-    const plan = buildSidechatEntryPlan({
-      sidechatExists: false,
-      publicDraft: sidechatStartIntent.publicDraftSnapshot,
-    });
-    if (!plan.shouldSubmit) return;
-    const content = plan.body.content;
-    submitSidechatMessage.mutate({
-      conversationId: sidechatStartIntent.conversationId,
-      ...(content === undefined ? {} : { content }),
-      draftSource: "public",
-      draftSnapshot: plan.publicDraftSnapshot,
-      optimisticId: null,
-      startOnlyIfEmpty: true,
-    });
-  }, [
-    selected?.archivedAt,
-    selectedConvo,
-    sidechatData?.messages.length,
-    sidechatFetching,
-    sidechatHistorySucceeded,
-    sidechatStartIntent,
-    sidechatState.isOpen,
-    submitSidechatMessage,
-  ]);
 
   const setCustomerMutation = useMutation({
     mutationFn: (options: {
@@ -1900,65 +1341,11 @@ function Conversations() {
 
   function handleStartSidechat(): void {
     if (!selectedConvo) return;
-    const conversationId = selectedConvo;
-    if (selected?.archivedAt && !sidechatExists) return;
-    dispatchSidechat({ type: "open", conversationId });
-    if (selected?.archivedAt) return;
-    if (sidechatExists || sidechatBusy) return;
-    setSidechatStartIntent({
-      conversationId,
-      publicDraftSnapshot: draft,
-    });
-  }
-
-  function handleSendPrivate(): void {
-    if (!selectedConvo || selected?.archivedAt || sidechatBusy) return;
-    const content = sidechatDraft.trim();
-    if (!content) return;
-    submitSidechatMessage.mutate({
-      conversationId: selectedConvo,
-      content,
-      draftSource: "sidechat",
-      draftSnapshot: sidechatDraft,
-      optimisticId: `optimistic-sidechat-${crypto.randomUUID()}`,
-    });
-  }
-
-  function handleRetrySidechat(): void {
-    if (
-      !selectedConvo ||
-      selected?.archivedAt ||
-      sidechatBusy ||
-      sidechatRetrying
-    ) {
-      return;
-    }
-    const lastHumanMessage = [...sidechatMessages]
-      .reverse()
-      .find((message) => message.role === "agent");
-    if (!lastHumanMessage) return;
-    retrySidechatTurn.mutate({
-      conversationId: selectedConvo,
-      messageId: lastHumanMessage.id,
-    });
-  }
-
-  function handleLoadEarlierSidechat(): void {
-    if (
-      !selectedConvo ||
-      !sidechatData?.nextBefore ||
-      sidechatLoadingEarlier
-    ) {
-      return;
-    }
-    loadEarlierSidechat.mutate({
-      conversationId: selectedConvo,
-      before: sidechatData.nextBefore,
-    });
+    setSidechatOpen(true);
   }
 
   function handleCloseSidechat(): void {
-    dispatchSidechat({ type: "close" });
+    setSidechatOpen(false);
   }
 
   function handleAddToReply(sidechatReplyDraft: string): void {
@@ -2248,24 +1635,14 @@ function Conversations() {
   ]);
 
   // ── Render ────────────────────────────────────────────────────────────────
-  const sidechatOpen = Boolean(selected && sidechatState.isOpen);
   const sidechatPane = selected ? (
     <SidechatPane
       open={sidechatOpen}
       conversation={selected}
       customerFirstName={customerFirstName}
-      messages={sidechatMessages}
-      loading={sidechatLoading}
+      messages={[]}
       draft={sidechatDraft}
       setDraft={setSelectedSidechatDraft}
-      status={visibleSidechatStatus}
-      runId={sidechatRunId}
-      continuation={sidechatContinuation}
-      hasMore={sidechatData?.hasMore ?? false}
-      loadingEarlier={sidechatLoadingEarlier}
-      onLoadEarlier={handleLoadEarlierSidechat}
-      onSendPrivate={handleSendPrivate}
-      onRetry={handleRetrySidechat}
       onAddToReply={handleAddToReply}
       onClose={handleCloseSidechat}
     />
@@ -2285,8 +1662,7 @@ function Conversations() {
         draft={draft}
         setDraft={setDraft}
         onStartSidechat={handleStartSidechat}
-        sidechatExists={sidechatExists}
-        sidechatStatus={visibleSidechatStatus}
+        sidechatOpen={sidechatOpen}
         publicComposerFocusRequest={publicComposerFocusRequest}
         embedded
       />
@@ -2368,8 +1744,6 @@ function Conversations() {
           onBack={() => setSelectedConvo(null)}
           onStartSidechat={handleStartSidechat}
           sidechatOpen={sidechatOpen}
-          sidechatExists={sidechatExists}
-          sidechatStatus={visibleSidechatStatus}
           publicComposerFocusRequest={publicComposerFocusRequest}
           className={cn(
             selectedIds.size > 0 && "hidden md:flex",

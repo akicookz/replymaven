@@ -20,9 +20,7 @@ async function flush(): Promise<void> {
 async function renderPane(options?: {
   open?: boolean;
   archived?: boolean;
-  status?: "idle" | "working" | "waiting_approval" | "ready" | "failed";
   messages?: Message[];
-  onSendPrivate?: () => void;
   onAddToReply?: (draft: string) => void;
   onClose?: () => void;
 }) {
@@ -53,22 +51,8 @@ async function renderPane(options?: {
           conversation={makeConversation(options?.archived ?? false)}
           customerFirstName="Ada"
           messages={options?.messages ?? []}
-          loading={false}
           draft=""
           setDraft={() => undefined}
-          status={options?.status ?? "idle"}
-          runId={options?.status === "working" ? "run-1" : null}
-          continuation={options?.status === "working"
-            ? {
-                delta: "A partial private answer",
-                activity: { label: "Searching knowledge", phase: "start" },
-              }
-            : null}
-          hasMore={false}
-          loadingEarlier={false}
-          onLoadEarlier={() => undefined}
-          onSendPrivate={options?.onSendPrivate ?? (() => undefined)}
-          onRetry={() => undefined}
           onAddToReply={options?.onAddToReply ?? (() => undefined)}
           onClose={options?.onClose ?? (() => undefined)}
         />
@@ -174,17 +158,8 @@ describe("SidechatPane layout", () => {
             conversation={makeConversation(false)}
             customerFirstName="Ada"
             messages={[]}
-            loading={false}
             draft=""
             setDraft={() => undefined}
-            status="idle"
-            runId={null}
-            continuation={null}
-            hasMore={false}
-            loadingEarlier={false}
-            onLoadEarlier={() => undefined}
-            onSendPrivate={() => undefined}
-            onRetry={() => undefined}
             onAddToReply={() => undefined}
             onClose={() => undefined}
           />
@@ -203,36 +178,33 @@ describe("SidechatPane layout", () => {
     expect(openedPane.classList.contains("translate-x-0")).toBe(true);
   });
 
-  test("keeps working delta and activity in the shared thread flow", async () => {
-    const { dom } = await renderPane({ status: "working" });
-    const thread = dom.window.document.querySelector("[data-chat-thread]");
-    expect(thread?.textContent).toContain("A partial private answer");
-    expect(thread?.textContent).toContain("Searching knowledge");
-    expect(dom.window.document.querySelector("[data-sidechat-activity]")).not
-      .toBeNull();
+  test("shows the disconnected runtime state without inventing activity", async () => {
+    const { dom } = await renderPane();
+    expect(dom.window.document.querySelector(
+      "[data-sidechat-runtime-unavailable]",
+    )?.textContent).toContain("runtime is not connected");
+    expect(dom.window.document.body.textContent).not.toContain("Searching");
+    expect(dom.window.document.querySelector("textarea")?.disabled).toBe(true);
   });
 
   test("forwards the exact reply draft without closing or sending", async () => {
     const replyDraft: Message = {
       id: "sidechat-draft-1",
       role: "bot",
-      channel: "sidechat",
-      kind: "reply_draft",
       content: "Rendered explanation",
-      metadata: { draft: "Exact visitor-ready draft.\nKeep this line." },
+      presentationAction: {
+        type: "add_to_reply",
+        draft: "Exact visitor-ready draft.\nKeep this line.",
+      },
       senderName: "Maven",
       createdAt: "2026-08-09T00:00:00.000Z",
     };
     let addedDraft: string | null = null;
     let closeCalls = 0;
-    let sendCalls = 0;
     const { dom } = await renderPane({
       messages: [replyDraft],
       onAddToReply: (value) => {
         addedDraft = value;
-      },
-      onSendPrivate: () => {
-        sendCalls += 1;
       },
       onClose: () => {
         closeCalls += 1;
@@ -247,7 +219,6 @@ describe("SidechatPane layout", () => {
 
     expect(addedDraft).toBe("Exact visitor-ready draft.\nKeep this line.");
     expect(closeCalls).toBe(0);
-    expect(sendCalls).toBe(0);
     expect(dom.window.document.querySelector("[data-sidechat-pane]")).not
       .toBeNull();
     expect(dom.window.document.querySelector("textarea")).not.toBeNull();
@@ -257,16 +228,16 @@ describe("SidechatPane layout", () => {
     const replyDraft: Message = {
       id: "sidechat-draft-1",
       role: "bot",
-      channel: "sidechat",
-      kind: "reply_draft",
       content: "Exact customer-facing draft",
-      metadata: { draft: "Exact customer-facing draft" },
+      presentationAction: {
+        type: "add_to_reply",
+        draft: "Exact customer-facing draft",
+      },
       senderName: "Maven",
       createdAt: "2026-08-09T00:00:00.000Z",
     };
     const { dom } = await renderPane({
       archived: true,
-      status: "failed",
       messages: [replyDraft],
     });
 

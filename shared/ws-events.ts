@@ -33,72 +33,6 @@ export function compareMessagePositions(
   return left.id < right.id ? -1 : 1;
 }
 
-export type SidechatStatus =
-  | "idle"
-  | "working"
-  | "waiting_approval"
-  | "ready"
-  | "failed";
-
-export interface SidechatCoordinationSnapshot {
-  status: SidechatStatus;
-  runId: string | null;
-  revision: number;
-  updatedAt: number | null;
-}
-
-export function selectNewerSidechatCoordinationSnapshot(
-  current: SidechatCoordinationSnapshot | null,
-  incoming: SidechatCoordinationSnapshot,
-): SidechatCoordinationSnapshot {
-  if (!current || incoming.revision > current.revision) return incoming;
-  return current;
-}
-
-export interface ReplyDraftSidechatMessageMetadata {
-  draft: string;
-}
-
-export type SafeSidechatMessageMetadata = ReplyDraftSidechatMessageMetadata;
-
-export interface SidechatMessagePayload {
-  id: string;
-  role: "agent" | "bot";
-  content: string;
-  kind: "text" | "reply_draft" | "approval";
-  metadata: SafeSidechatMessageMetadata | null;
-  senderName: string | null;
-  createdAt: number;
-}
-
-export type SidechatServerEvent =
-  | {
-      type: "sidechat:message";
-      conversationId: string;
-      message: SidechatMessagePayload;
-    }
-  | {
-      type: "sidechat:delta";
-      conversationId: string;
-      runId: string;
-      delta: string;
-    }
-  | {
-      type: "sidechat:activity";
-      conversationId: string;
-      runId: string;
-      label: string;
-      phase: "start" | "finish";
-    }
-  | {
-      type: "sidechat:status";
-      conversationId: string;
-      status: SidechatStatus;
-      runId: string | null;
-      revision: number;
-      updatedAt: number | null;
-    };
-
 export type ServerEvent =
   | { type: "message:new"; conversationId: string; message: MessagePayload }
   | {
@@ -140,24 +74,12 @@ export type ServerEvent =
       messageIds: string[];
       at: number;
     }
-  | { type: "pong"; t: number }
-  | SidechatServerEvent;
+  | { type: "pong"; t: number };
 
 export type ClientEvent =
   | { type: "ping"; t: number }
-  | {
-      type: "resume";
-      lastPublicMessageId: string | null;
-      lastSidechatMessageId: string | null;
-    }
   | { type: "resume"; lastMessageId: string | null }
   | { type: "delivered"; upToMessageId: string }
   | { type: "read"; upToMessageId: string };
 
 export type WsEvent = ServerEvent | ClientEvent;
-
-export function isSidechatServerEvent(
-  event: ServerEvent,
-): event is SidechatServerEvent {
-  return event.type.startsWith("sidechat:");
-}

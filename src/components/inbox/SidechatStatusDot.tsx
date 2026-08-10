@@ -1,9 +1,11 @@
-import { deriveSidechatStatusDot } from "@/lib/inbox/sidechat";
+import {
+  deriveSidechatStatusDot,
+  type SidechatPresentationStatus,
+} from "@/lib/inbox/sidechat";
 import { cn } from "@/lib/utils";
-import type { SidechatStatus } from "../../../shared/ws-events";
 
 interface SidechatStatusDotProps {
-  status: SidechatStatus;
+  status: SidechatPresentationStatus;
   className?: string;
 }
 

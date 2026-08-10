@@ -80,7 +80,7 @@ export default function MessageBubble({
   const rootSpacing = showHeader ? "mb-3" : "-mt-2 mb-3";
   const actions = deriveMessageActions(
     perspective,
-    message.kind ?? "text",
+    message.presentationAction,
     readOnly,
   );
   const status = !isReceived && perspective === "public"
@@ -125,7 +125,9 @@ export default function MessageBubble({
   }
 
   function renderMessageActions() {
-    const draft = message.metadata?.draft ?? message.content;
+    const draft = message.presentationAction?.type === "add_to_reply"
+      ? message.presentationAction.draft
+      : message.content;
     if (actions.addToReply && onAddToReply) {
       return (
         <div className="mt-1 flex min-h-10 items-center">

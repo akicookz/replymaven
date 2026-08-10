@@ -3,7 +3,6 @@ import type { Dispatch, SetStateAction } from "react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import type { CustomerDetail } from "../../../shared/customer-types";
 import { deriveConversationInteractionState } from "@/lib/inbox/sidechat";
-import type { SidechatStatus } from "../../../shared/ws-events";
 import { cn } from "@/lib/utils";
 import ReadingHeader from "./ReadingHeader";
 import ChatThread from "./ChatThread";
@@ -45,8 +44,6 @@ interface ReadingPaneProps {
   onStartSidechat: () => void;
   /** Sidechat currently constrains this pane in the shared split layout. */
   sidechatOpen: boolean;
-  sidechatExists: boolean;
-  sidechatStatus: SidechatStatus;
   publicComposerFocusRequest: number;
   /** The message id targeted by a `?msg=` deep link — pulses the review-summary card. */
   highlightMessageId?: string | null;
@@ -77,8 +74,6 @@ export default function ReadingPane({
   onBack,
   onStartSidechat,
   sidechatOpen,
-  sidechatExists,
-  sidechatStatus,
   publicComposerFocusRequest,
   highlightMessageId,
   className,
@@ -246,7 +241,7 @@ export default function ReadingPane({
         />
       </div>
 
-      {interaction.readOnly && sidechatExists && (
+      {interaction.readOnly && sidechatOpen && (
         <div className="flex justify-end px-4 py-3 md:px-[30px]">
           <button
             type="button"
@@ -270,8 +265,7 @@ export default function ReadingPane({
           mode={{
             kind: "public",
             onStartSidechat,
-            sidechatExists,
-            sidechatStatus,
+            sidechatOpen,
           }}
         />
       )}

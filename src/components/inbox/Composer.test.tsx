@@ -164,8 +164,7 @@ describe("Composer contracts", () => {
           onStartSidechat: () => {
             sidechatCalls += 1;
           },
-          sidechatExists: false,
-          sidechatStatus: "idle",
+          sidechatOpen: false,
         }}
       />,
     );
@@ -188,8 +187,7 @@ describe("Composer contracts", () => {
         mode={{
           kind: "public",
           onStartSidechat: () => undefined,
-          sidechatExists: true,
-          sidechatStatus: "ready",
+          sidechatOpen: true,
         }}
       />,
     );
@@ -223,8 +221,7 @@ describe("Composer contracts", () => {
         convId="conversation-1"
         mode={{
           kind: "sidechat",
-          onSendPrivate: () => undefined,
-          working: false,
+          disabled: true,
         }}
       />,
     );
@@ -253,8 +250,7 @@ describe("Composer contracts", () => {
             mode={{
               kind: "public",
               onStartSidechat: () => undefined,
-              sidechatExists: true,
-              sidechatStatus: "ready",
+              sidechatOpen: true,
             }}
           />
         </MemoryRouter>
@@ -300,8 +296,7 @@ describe("Composer contracts", () => {
                 mode={{
                   kind: "public",
                   onStartSidechat: () => undefined,
-                  sidechatExists: sidechatOpen,
-                  sidechatStatus: "idle",
+                  sidechatOpen,
                 }}
               />
             )}
@@ -379,8 +374,6 @@ describe("ReadingPane constrained header", () => {
             onDeleteMessage={() => undefined}
             onStartSidechat={() => undefined}
             sidechatOpen={sidechatOpen}
-            sidechatExists={sidechatOpen}
-            sidechatStatus="ready"
             publicComposerFocusRequest={0}
           />
         </QueryClientProvider>
@@ -429,8 +422,7 @@ describe("archived FocusView", () => {
         draft=""
         setDraft={() => undefined}
         onStartSidechat={() => undefined}
-        sidechatExists={false}
-        sidechatStatus="idle"
+        sidechatOpen={false}
         publicComposerFocusRequest={0}
       />,
     );

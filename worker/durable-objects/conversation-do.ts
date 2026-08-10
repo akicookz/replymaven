@@ -18,7 +18,7 @@ export interface RealtimeSocket {
 }
 
 export interface ResumeCursors {
-  lastPublicMessageId: string | null;
+  lastMessageId: string | null;
 }
 
 export interface ConversationReplayReader {
@@ -88,9 +88,9 @@ export async function replayConversationMessages(
 ): Promise<void> {
   let publicSince = 0;
   let publicCursor: StableMessagePosition | null = null;
-  if (cursors.lastPublicMessageId) {
+  if (cursors.lastMessageId) {
     const lastPublic = await reader.getPublicMessageById(
-      cursors.lastPublicMessageId,
+      cursors.lastMessageId,
     );
     if (lastPublic?.conversationId === attachment.conversationId) {
       publicCursor = {
@@ -269,7 +269,6 @@ export class ConversationDO implements DurableObject {
     if (!parsed || typeof parsed !== "object") return;
     const msg = parsed as {
       type?: string;
-      lastPublicMessageId?: string | null;
       lastMessageId?: string | null;
       state?: string;
       upToMessageId?: string;
@@ -282,8 +281,7 @@ export class ConversationDO implements DurableObject {
 
     if (msg.type === "resume") {
       await this.replayMissed(ws, {
-        lastPublicMessageId:
-          msg.lastPublicMessageId ?? msg.lastMessageId ?? null,
+        lastMessageId: msg.lastMessageId ?? null,
       });
       return;
     }

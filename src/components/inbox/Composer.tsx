@@ -4,17 +4,14 @@ import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Paperclip, ArrowUp, X, Loader2, ImagePlus } from "lucide-react";
 import { deriveComposerShiftTabIntent } from "@/lib/inbox/sidechat";
-import SidechatStatusDot from "./SidechatStatusDot";
-import type { SidechatStatus } from "../../../shared/ws-events";
 
 export type ComposerMode =
   | {
       kind: "public";
       onStartSidechat: () => void;
-      sidechatExists: boolean;
-      sidechatStatus: SidechatStatus;
+      sidechatOpen: boolean;
     }
-  | { kind: "sidechat"; onSendPrivate: () => void; working: boolean };
+  | { kind: "sidechat"; disabled: true };
 
 interface ComposerBaseProps {
   draft: string;
@@ -208,8 +205,6 @@ export default function Composer(props: ComposerProps) {
 
   function send() {
     if (props.mode.kind === "sidechat") {
-      if (props.mode.working || !draft.trim()) return;
-      props.mode.onSendPrivate();
       return;
     }
     if (!("onSend" in props)) return;
@@ -246,10 +241,10 @@ export default function Composer(props: ComposerProps) {
   }
 
   const canSend = mode.kind === "sidechat"
-    ? draft.trim().length > 0 && !mode.working
+    ? false
     : (draft.trim().length > 0 || pendingImages.length > 0) &&
       uploadingCount === 0;
-  const publicSidechatLabel = mode.kind === "public" && mode.sidechatExists
+  const publicSidechatLabel = mode.kind === "public" && mode.sidechatOpen
     ? "Open sidechat"
     : "Start sidechat";
 
@@ -317,7 +312,7 @@ export default function Composer(props: ComposerProps) {
             ? "Ask Maven…"
             : "Reply…"}
           rows={1}
-          disabled={mode.kind === "sidechat" ? mode.working : false}
+          disabled={mode.kind === "sidechat"}
           className="w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring/70"
           style={{ fontSize: "14.5px", lineHeight: "1.5" }}
         />
@@ -365,9 +360,6 @@ export default function Composer(props: ComposerProps) {
                   onClick={props.mode.onStartSidechat}
                   title={`${publicSidechatLabel} (Shift+Tab)`}
                 >
-                  {props.mode.sidechatExists && (
-                    <SidechatStatusDot status={props.mode.sidechatStatus} />
-                  )}
                   {publicSidechatLabel}
                   <span className="keycap">⇧⇥</span>
                 </button>

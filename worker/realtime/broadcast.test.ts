@@ -202,7 +202,7 @@ test("public replay includes equal-second peers after the cursor", async () => {
   await replayConversationMessages(
     socket,
     agentAttachment(),
-    { lastPublicMessageId: cursor.id },
+    { lastMessageId: cursor.id },
     reader,
   );
 
