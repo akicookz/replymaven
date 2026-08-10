@@ -61,7 +61,8 @@ These files may continue to contain the literal `sidechat` only as a configured 
 ### Task 1: Remove every executable Sidechat server path
 
 **Files:**
-- Create: `worker/chat-runtime/sidechat-runtime-absence.test.ts`
+- Create: `worker/routes/removed-sidechat-routes.integration.test.ts`
+- Create: `worker/routes/removed-sidechat-routes.mounted.fixture.test.ts`
 - Delete: `worker/chat-runtime/orchestration/run-sidechat-turn.ts`
 - Delete: `worker/chat-runtime/orchestration/run-sidechat-turn.test.ts`
 - Delete: `worker/chat-runtime/tools/internal/present-reply-draft.ts`
@@ -89,51 +90,49 @@ These files may continue to contain the literal `sidechat` only as a configured 
 - Consumes: Existing public `runMavenTurn`, `MavenTurnContext`, public tool dependencies, and `MavenChannel` tool policy.
 - Produces: A public-only Maven execution boundary; generic tool-policy authorization remains, but no production caller can execute a private Sidechat turn.
 
-- [ ] **Step 1: Write the failing executable-surface absence test**
+- [ ] **Step 1: Write failing behavior tests for the removed route and public result shape**
 
-Create a Bun test that fails on the current tree for the exact runtime files and symbols:
+Create an isolated mounted-Worker fixture using the existing Cloudflare module shims and authenticated owner session. Call the real Hono app at all three legacy paths:
 
 ```ts
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, test } from "bun:test";
+const paths = [
+  "/api/projects/project-1/conversations/conversation-1/sidechat",
+  "/api/projects/project-1/conversations/conversation-1/sidechat/messages",
+  "/api/projects/project-1/conversations/conversation-1/sidechat/retry",
+];
 
-const root = resolve(import.meta.dir, "../..");
-
-function source(path: string): string {
-  return readFileSync(resolve(root, path), "utf8");
+for (const path of paths) {
+  const response = await workerModule.default.fetch(
+    new Request(`https://app.test${path}`, {
+      method: path.endsWith("/sidechat") ? "GET" : "POST",
+      headers: { "x-test-user": "owner-1", "content-type": "application/json" },
+      body: path.endsWith("/sidechat") ? undefined : "{}",
+    }),
+    createEnv(),
+    createExecutionContext(),
+  );
+  expect(response.status).toBe(404);
 }
-
-describe("Sidechat executable runtime absence", () => {
-  test("has no custom turn runner, route handler, or reply-draft tool", () => {
-    for (const path of [
-      "worker/chat-runtime/orchestration/run-sidechat-turn.ts",
-      "worker/routes/sidechat-handlers.ts",
-      "worker/chat-runtime/tools/internal/present-reply-draft.ts",
-    ]) {
-      expect(existsSync(resolve(root, path))).toBe(false);
-    }
-  });
-
-  test("does not mount custom Sidechat routes or runtime branches", () => {
-    expect(source("worker/index.ts")).not.toContain("/sidechat");
-    expect(source("worker/chat-runtime/orchestration/run-maven-turn.ts"))
-      .not.toMatch(/present_reply_draft|MavenArtifact|channel === ["']sidechat["']/u);
-    expect(source("worker/chat-runtime/prompt/build-support-system-prompt.ts"))
-      .not.toMatch(/buildSidechatSupportSystemPrompt|Channel: sidechat/u);
-  });
-});
 ```
 
-- [ ] **Step 2: Run the test and capture RED**
+Add a public `runMavenTurn` regression to the existing real runner harness:
 
-Run:
+```ts
+const result = await runMavenTurn(createPublicOptions());
+expect("artifact" in result).toBe(false);
+```
+
+These tests catch two real regressions: remounting the old authenticated API and leaking the private reply-draft artifact through the public runtime result.
+
+- [ ] **Step 2: Run the tests and capture RED**
 
 ```bash
-bun test worker/chat-runtime/sidechat-runtime-absence.test.ts
+bun test \
+  worker/routes/removed-sidechat-routes.integration.test.ts \
+  worker/chat-runtime/orchestration/run-maven-turn.test.ts
 ```
 
-Expected: FAIL because all three runtime files exist and the Worker mounts `/sidechat` routes.
+Expected: FAIL because the owner receives a non-404 response from the mounted custom route and `MavenTurnResult` currently exposes `artifact`.
 
 - [ ] **Step 3: Delete Sidechat routes, validation, scheduling, and broadcasts from the Worker entrypoint**
 
@@ -208,7 +207,7 @@ Run:
 
 ```bash
 bun test \
-  worker/chat-runtime/sidechat-runtime-absence.test.ts \
+  worker/routes/removed-sidechat-routes.integration.test.ts \
   worker/chat-runtime/orchestration/run-maven-turn.test.ts \
   worker/chat-runtime/orchestration/handle-widget-message-turn.test.ts \
   worker/chat-runtime/agents/support-agent.test.ts \
@@ -232,7 +231,6 @@ git commit -m "refactor: remove custom sidechat execution runtime"
 ### Task 2: Remove Sidechat D1 persistence and ChatService lifecycle
 
 **Files:**
-- Create: `worker/db/sidechat-runtime-absence.test.ts`
 - Delete: `worker/db/drizzle/0063_internal_sidechat_channel.sql`
 - Delete: `worker/db/drizzle/0064_sidechat_coordination_revision.sql`
 - Delete: `worker/db/drizzle/meta/0063_snapshot.json`
@@ -259,59 +257,31 @@ git commit -m "refactor: remove custom sidechat execution runtime"
 - Consumes: Public-only execution from Task 1 and the existing pre-Sidechat D1 tables.
 - Produces: Public-only `messages` rows and public-only conversation services without custom channel/lifecycle columns.
 
-- [ ] **Step 1: Write the failing schema and service absence test**
+- [ ] **Step 1: Write a failing public-schema compatibility test**
+
+Add a focused ChatService harness whose real SQLite `conversations` and `messages` tables contain every public column but none of the custom Sidechat columns. Seed one conversation and one visitor message, then exercise the real service:
 
 ```ts
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, test } from "bun:test";
-import { getTableColumns } from "drizzle-orm";
-import { conversations, messages } from "./schema";
-import { ChatService } from "../services/chat-service";
+test("public conversation and message reads require no private Sidechat columns", async () => {
+  const { service, conversationId } = createPublicOnlySchemaHarness();
 
-const root = resolve(import.meta.dir, "../..");
+  const conversation = await service.getConversationById(conversationId);
+  const messages = await service.getPublicMessages(conversationId);
 
-describe("Sidechat D1 runtime absence", () => {
-  test("does not define custom Sidechat columns", () => {
-    const conversationColumns = getTableColumns(conversations);
-    const messageColumns = getTableColumns(messages);
-    for (const key of [
-      "sidechatStatus", "sidechatRunId", "sidechatLeaseExpiresAt",
-      "sidechatUpdatedAt", "sidechatRevision",
-    ]) expect(conversationColumns).not.toHaveProperty(key);
-    for (const key of ["channel", "kind", "metadata"]) {
-      expect(messageColumns).not.toHaveProperty(key);
-    }
-  });
-
-  test("ends the checked-in D1 migration sequence at 0062", () => {
-    expect(existsSync(resolve(root, "worker/db/drizzle/0063_internal_sidechat_channel.sql")))
-      .toBe(false);
-    expect(existsSync(resolve(root, "worker/db/drizzle/0064_sidechat_coordination_revision.sql")))
-      .toBe(false);
-    const journal = JSON.parse(readFileSync(
-      resolve(root, "worker/db/drizzle/meta/_journal.json"), "utf8",
-    )) as { entries: Array<{ tag: string }> };
-    expect(journal.entries.at(-1)?.tag).toBe("0062_maven_tool_audiences");
-  });
-
-  test("does not expose custom Sidechat lifecycle methods", () => {
-    for (const name of [
-      "claimSidechatRun", "claimSidechatStartRun", "settleSidechatRun",
-      "completeSidechatRun", "getSidechatCoordinationSnapshot",
-      "addSidechatHumanMessage", "addSidechatMavenMessage",
-    ]) expect(name in ChatService.prototype).toBe(false);
-  });
+  expect(conversation?.id).toBe(conversationId);
+  expect(messages.map((message) => message.content)).toEqual(["Hello"]);
 });
 ```
+
+The hand-written fixture must derive its columns from migration `0062`, not from the current Drizzle schema. This catches any public query that still selects or filters Sidechat lifecycle/message columns.
 
 - [ ] **Step 2: Run the test and capture RED**
 
 ```bash
-bun test worker/db/sidechat-runtime-absence.test.ts
+bun test worker/services/chat-service.test.ts -t "requires no private Sidechat columns"
 ```
 
-Expected: FAIL on schema columns, migrations, journal, and ChatService methods.
+Expected: FAIL with SQLite `no such column` from the current Sidechat-aware public query.
 
 - [ ] **Step 3: Delete migrations and restore the migration journal to 0062**
 
@@ -385,7 +355,6 @@ Remove Sidechat columns from SQLite fixtures. Rewrite public row assertions to m
 
 ```bash
 bun test \
-  worker/db/sidechat-runtime-absence.test.ts \
   worker/services/chat-service.test.ts \
   worker/services/billing-service.test.ts \
   worker/services/conversation-retention-service.test.ts \
@@ -432,35 +401,43 @@ git commit -m "refactor: remove sidechat persistence lifecycle"
 - Consumes: Public-only realtime and D1 services from Task 2.
 - Produces: Public-only dashboard WebSocket state plus local Sidechat pane visibility/draft state; no Sidechat network/cache layer.
 
-- [ ] **Step 1: Write failing client transport-absence tests**
+- [ ] **Step 1: Write failing client transport behavior tests**
 
-Add assertions to `src/lib/use-conversation-ws.test.ts` that the shared resume event has only the public cursor and that no Sidechat cache is touched:
+Use the real conversation reducer with one public message already present, then feed the retired private event as an unknown server frame. The clean client must ignore it rather than mutating any transcript or cursor:
 
 ```ts
-test("keeps dashboard realtime public-only", () => {
-  const resume: ClientEvent = { type: "resume", lastMessageId: "message-1" };
-  expect(resume).toEqual({ type: "resume", lastMessageId: "message-1" });
-  expect(JSON.stringify(resume)).not.toContain("sidechat");
-});
+test("ignores retired private Sidechat frames", () => {
+  const initial = reduceConversationMessageEvent(emptyPublicState(), {
+    type: "message:new",
+    conversationId: "conversation-1",
+    message: createPublicPayload("public-1", 1_000),
+  });
 
-test("does not export Sidechat realtime reducers", async () => {
-  const module = await import("./use-conversation-ws");
-  for (const name of [
-    "reduceSidechatEphemeralEvent",
-    "reduceSidechatStatusSnapshot",
-    "reconcileSidechatCoordinationQueryCaches",
-  ]) expect(name in module).toBe(false);
+  const next = reduceConversationMessageEvent(initial, {
+    type: "sidechat:message",
+    conversationId: "conversation-1",
+    message: {
+      id: "private-1",
+      role: "bot",
+      content: "private",
+      createdAt: 2_000,
+    },
+  } as unknown as ServerEvent);
+
+  expect(next).toEqual(initial);
 });
 ```
 
-Add a static assertion that `Conversations.tsx` contains none of:
+In the real socket harness, capture the JSON sent after `open` and assert the exact public resume frame:
 
 ```ts
-[
-  '["sidechat",', '["sidechat-ephemeral",', '/sidechat/messages',
-  '/sidechat/retry', 'sidechatRunId', 'sidechatRevision',
-]
+expect(sentFrames[0]).toEqual({
+  type: "resume",
+  lastMessageId: "public-1",
+});
 ```
+
+These tests catch a private event being accepted by the public dashboard client and a private cursor leaking into reconnect protocol state.
 
 - [ ] **Step 2: Run tests and capture RED**
 
@@ -740,7 +717,6 @@ git commit -m "refactor: keep sidechat presentation shell only"
 ### Task 5: Delete obsolete architecture documents and enforce the clean-slate sweep
 
 **Files:**
-- Create: `worker/sidechat-clean-slate.test.ts`
 - Delete: `docs/superpowers/specs/2026-08-07-private-sidechat-mcp-actions-design.md`
 - Delete: `docs/superpowers/plans/2026-08-09-internal-sidechat-channel.md`
 - Delete: `docs/superpowers/plans/2026-08-09-generic-mcp-connections.md`
@@ -754,83 +730,13 @@ git commit -m "refactor: keep sidechat presentation shell only"
 
 **Interfaces:**
 - Consumes: Completed source cleanup from Tasks 1–4.
-- Produces: A repository-level negative regression guard and an audited list of allowed remaining Sidechat references.
+- Produces: An audited list of allowed remaining Sidechat references. Human documentation is verified by review and repository commands, not a brittle source-grep unit test.
 
-- [ ] **Step 1: Write the failing repository sweep test before deleting stale docs**
-
-```ts
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, test } from "bun:test";
-
-const root = resolve(import.meta.dir, "..");
-const forbidden = [
-  /runSidechatTurn/u,
-  /sidechatRunId|sidechatLeaseExpiresAt|sidechatRevision/u,
-  /SidechatCoordinationSnapshot/u,
-  /sidechat:(?:message|delta|activity|status)/u,
-  /present_reply_draft/u,
-  /\/sidechat\/(?:messages|retry)/u,
-  /sidechat_status|sidechat_run_id|sidechat_lease_expires_at|sidechat_revision/u,
-  /message_metadata|idx_messages_conversation_channel_created/u,
-];
-
-function trackedTextPaths(): string[] {
-  const result = Bun.spawnSync(["git", "ls-files"], { cwd: root });
-  if (result.exitCode !== 0) throw new Error("Unable to list tracked files");
-  const extensions = new Set([".ts", ".tsx", ".sql", ".json", ".jsonc", ".md"]);
-  return new TextDecoder()
-    .decode(result.stdout)
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((path) => resolve(root, path))
-    .filter((path) => extensions.has(path.slice(path.lastIndexOf("."))));
-}
-
-describe("Sidechat clean-slate repository boundary", () => {
-  test("contains no custom runtime lifecycle symbols", () => {
-    const exempt = new Set([
-      resolve(root, "docs/superpowers/specs/2026-08-10-sidechat-runtime-clean-slate-design.md"),
-      resolve(root, "docs/superpowers/plans/2026-08-10-sidechat-runtime-clean-slate.md"),
-      resolve(root, "worker/sidechat-clean-slate.test.ts"),
-    ]);
-    const leaks = trackedTextPaths()
-      .filter((path) => !exempt.has(path))
-      .flatMap((path) => {
-        const text = readFileSync(path, "utf8");
-        return forbidden.some((pattern) => pattern.test(text)) ? [path] : [];
-      });
-    expect(leaks).toEqual([]);
-  });
-
-  test("retains the tool policy and presentation boundaries", () => {
-    expect(readFileSync(resolve(root, "worker/validation.ts"), "utf8"))
-      .toContain('z.enum(["public", "sidechat"])');
-    for (const path of [
-      "src/components/inbox/SidechatPane.tsx",
-      "src/components/inbox/FocusSidechatLayout.tsx",
-      "src/components/inbox/SidechatStatusDot.tsx",
-    ]) expect(existsSync(resolve(root, path))).toBe(true);
-  });
-});
-```
-
-This deliberately scans tracked text files only, so user-owned untracked work and binary evidence are not read or deleted.
-
-- [ ] **Step 2: Run the sweep test and capture RED**
-
-```bash
-bun test worker/sidechat-clean-slate.test.ts
-```
-
-Expected: FAIL because obsolete tracked plans/reports still describe the removed lifecycle.
-
-- [ ] **Step 3: Delete obsolete architecture documents**
+- [ ] **Step 1: Delete obsolete architecture documents**
 
 Delete the old private Sidechat design, its implementation plan, the MCP plans built on that runtime, and the unified-loop plan/reports that prescribe private prompt/runtime behavior. Git history remains the archive. Preserve the approved clean-slate design/plan and visual evidence images.
 
-- [ ] **Step 4: Run exact production and tracked-document sweeps**
+- [ ] **Step 2: Run exact production and tracked-document sweeps**
 
 Run:
 
@@ -840,7 +746,7 @@ rg -n \
   worker src shared docs .superpowers \
   --glob '!docs/superpowers/specs/2026-08-10-sidechat-runtime-clean-slate-design.md' \
   --glob '!docs/superpowers/plans/2026-08-10-sidechat-runtime-clean-slate.md' \
-  --glob '!worker/sidechat-clean-slate.test.ts'
+  --glob '!worker/routes/removed-sidechat-routes.mounted.fixture.test.ts'
 ```
 
 Expected: no matches.
@@ -851,16 +757,17 @@ Then classify every remaining literal `sidechat`:
 rg -n -i 'sidechat|side chat' worker src shared docs .superpowers \
   --glob '!docs/superpowers/specs/2026-08-10-sidechat-runtime-clean-slate-design.md' \
   --glob '!docs/superpowers/plans/2026-08-10-sidechat-runtime-clean-slate.md' \
-  --glob '!worker/sidechat-clean-slate.test.ts'
+  --glob '!worker/routes/removed-sidechat-routes.mounted.fixture.test.ts'
 ```
 
 Every match must be one of:
 
 - dormant tool-policy audience/configuration;
 - presentation component/type/test/copy;
+- the isolated regression proving the three retired custom HTTP routes remain `404`;
 - no match in backend persistence, runtime, realtime, route, or client cache code.
 
-- [ ] **Step 5: Run the complete automated verification matrix**
+- [ ] **Step 3: Run the complete automated verification matrix**
 
 ```bash
 bun test
@@ -895,7 +802,7 @@ node ./node_modules/vite/bin/vite.js build
 
 Expected: all branch-owned tests/typechecks/changed-file lint/build checks pass. Record pre-existing unrelated full-lint findings separately.
 
-- [ ] **Step 6: Review the entire cleanup diff for accidental public regressions**
+- [ ] **Step 4: Review the entire cleanup diff for accidental public regressions**
 
 Review:
 
@@ -916,14 +823,14 @@ Explicitly confirm:
 - no `0063`/`0064` migration or snapshot remains;
 - no inline Compose route or UI returned.
 
-- [ ] **Step 7: Commit the sweep and stale-document removal**
+- [ ] **Step 5: Commit the sweep and stale-document removal**
 
 ```bash
-git add worker/sidechat-clean-slate.test.ts docs/superpowers .superpowers/sdd/2026-08-09-unified-maven-tool-loop
+git add docs/superpowers .superpowers/sdd/2026-08-09-unified-maven-tool-loop
 git commit -m "chore: enforce sidechat clean slate"
 ```
 
-- [ ] **Step 8: Produce the post-cleanup rescan report**
+- [ ] **Step 6: Produce the post-cleanup rescan report**
 
 Write `docs/superpowers/reviews/2026-08-10-sidechat-clean-slate-review.md` containing:
 
