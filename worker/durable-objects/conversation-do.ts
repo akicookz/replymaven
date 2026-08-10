@@ -4,16 +4,10 @@ import { type AppEnv } from "../types";
 import { type MessageRow } from "../db";
 import {
   compareMessagePositions,
-  isSidechatServerEvent,
   type ServerEvent,
-  type SidechatCoordinationSnapshot,
   type StableMessagePosition,
 } from "../../shared/ws-events";
-import {
-  messageRowToPayload,
-  sanitizeSidechatServerEvent,
-  sidechatMessageRowToPayload,
-} from "../realtime/broadcast";
+import { messageRowToPayload } from "../realtime/broadcast";
 
 const REPLAY_INCLUSIVE_LOOKBACK_MS = 1_000;
 
@@ -25,26 +19,16 @@ export interface RealtimeSocket {
 
 export interface ResumeCursors {
   lastPublicMessageId: string | null;
-  lastSidechatMessageId: string | null;
 }
 
 export interface ConversationReplayReader {
-  getMessageByIdForChannel(
+  getPublicMessageById(
     id: string,
-    channel: "public" | "sidechat",
   ): Promise<{ id: string; conversationId: string; createdAt: Date } | null>;
   getPublicMessagesSince(
     conversationId: string,
     since: number,
   ): Promise<MessageRow[]>;
-  getSidechatMessagesSince(
-    conversationId: string,
-    since: number,
-  ): Promise<MessageRow[]>;
-  getSidechatCoordinationSnapshot(
-    conversationId: string,
-    projectId: string,
-  ): Promise<SidechatCoordinationSnapshot | null>;
 }
 
 export interface SocketAttachment {
@@ -65,12 +49,9 @@ export function broadcastEventToSockets(
   sockets: RealtimeSocket[],
   body: BroadcastBody,
 ): void {
-  const event = isSidechatServerEvent(body.event)
-    ? sanitizeSidechatServerEvent(body.event)
-    : body.event;
+  const event = body.event;
   const payload = JSON.stringify(event);
-  const agentOnly =
-    body.audience === "agents" || isSidechatServerEvent(event);
+  const agentOnly = body.audience === "agents";
 
   for (const ws of sockets) {
     const attachment = ws.deserializeAttachment() as
@@ -108,9 +89,8 @@ export async function replayConversationMessages(
   let publicSince = 0;
   let publicCursor: StableMessagePosition | null = null;
   if (cursors.lastPublicMessageId) {
-    const lastPublic = await reader.getMessageByIdForChannel(
+    const lastPublic = await reader.getPublicMessageById(
       cursors.lastPublicMessageId,
-      "public",
     );
     if (lastPublic?.conversationId === attachment.conversationId) {
       publicCursor = {
@@ -154,72 +134,6 @@ export async function replayConversationMessages(
     }
   }
 
-  if (attachment.kind !== "agent") return;
-
-  let sidechatSince = 0;
-  let sidechatCursor: StableMessagePosition | null = null;
-  if (cursors.lastSidechatMessageId) {
-    const lastSidechat = await reader.getMessageByIdForChannel(
-      cursors.lastSidechatMessageId,
-      "sidechat",
-    );
-    if (lastSidechat?.conversationId === attachment.conversationId) {
-      sidechatCursor = {
-        id: lastSidechat.id,
-        createdAt: lastSidechat.createdAt.getTime(),
-      };
-      sidechatSince = Math.max(
-        0,
-        sidechatCursor.createdAt - REPLAY_INCLUSIVE_LOOKBACK_MS,
-      );
-    }
-  }
-
-  const sidechatRows = replayRowsAfterCursor(
-    await reader.getSidechatMessagesSince(
-      attachment.conversationId,
-      sidechatSince,
-    ),
-    sidechatCursor,
-  );
-  for (const row of sidechatRows) {
-    let message;
-    try {
-      message = sidechatMessageRowToPayload(row);
-    } catch {
-      // Persisted private metadata must pass the same safe browser boundary as
-      // live broadcasts. A malformed row is not replayed.
-      continue;
-    }
-    try {
-      ws.send(
-        JSON.stringify({
-          type: "sidechat:message",
-          conversationId: attachment.conversationId,
-          message,
-        } satisfies ServerEvent),
-      );
-    } catch {
-      return;
-    }
-  }
-
-  const coordination = await reader.getSidechatCoordinationSnapshot(
-    attachment.conversationId,
-    attachment.projectId,
-  );
-  if (!coordination) return;
-  try {
-    ws.send(
-      JSON.stringify({
-        type: "sidechat:status",
-        conversationId: attachment.conversationId,
-        ...coordination,
-      } satisfies ServerEvent),
-    );
-  } catch {
-    // A disconnected socket cannot receive the authoritative snapshot.
-  }
 }
 
 function replayRowsAfterCursor(
@@ -356,9 +270,6 @@ export class ConversationDO implements DurableObject {
     const msg = parsed as {
       type?: string;
       lastPublicMessageId?: string | null;
-      lastSidechatMessageId?: string | null;
-      // Widget protocol compatibility. Visitor clients built before the
-      // sidechat cursor existed send this public-only cursor.
       lastMessageId?: string | null;
       state?: string;
       upToMessageId?: string;
@@ -373,7 +284,6 @@ export class ConversationDO implements DurableObject {
       await this.replayMissed(ws, {
         lastPublicMessageId:
           msg.lastPublicMessageId ?? msg.lastMessageId ?? null,
-        lastSidechatMessageId: msg.lastSidechatMessageId ?? null,
       });
       return;
     }

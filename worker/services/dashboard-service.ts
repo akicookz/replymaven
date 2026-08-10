@@ -61,13 +61,10 @@ export class DashboardService {
         eq(messages.conversationId, conversations.id),
       )
       .where(
-        and(
-          sql`${conversations.projectId} IN (${sql.join(
-            projectIds.map((id) => sql`${id}`),
-            sql`, `,
-          )})`,
-          eq(messages.channel, "public"),
-        ),
+        sql`${conversations.projectId} IN (${sql.join(
+          projectIds.map((id) => sql`${id}`),
+          sql`, `,
+        )})`,
       );
 
     // External sources only — article mirrors are counted as articles below

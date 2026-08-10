@@ -29,7 +29,6 @@ function createUsageLogHarness(): {
     conversation_id text NOT NULL,
     role text NOT NULL,
     content text NOT NULL,
-    channel text DEFAULT 'public' NOT NULL,
     created_at integer DEFAULT (unixepoch()) NOT NULL
   )`);
   const db = drizzleSqlite(sqlite, { schema });
@@ -51,8 +50,8 @@ function createUsageLogHarness(): {
   };
 }
 
-describe("BillingService message channel isolation", () => {
-  test("usage logs count only public bot messages", async () => {
+describe("BillingService message usage", () => {
+  test("usage logs count bot messages", async () => {
     const { service, sqlite } = createUsageLogHarness();
     sqlite.query("INSERT INTO projects (id, user_id, name) VALUES (?, ?, ?)")
       .run("project-1", "user-1", "Support");
@@ -61,13 +60,9 @@ describe("BillingService message channel isolation", () => {
     ) VALUES (?, ?, ?, ?, 'active', unixepoch())`)
       .run("conv-1", "project-1", "Alice", "alice@example.com");
     sqlite.query(`INSERT INTO messages (
-      id, conversation_id, role, content, channel, created_at
-    ) VALUES (?, ?, 'bot', ?, ?, unixepoch())`)
-      .run("public-bot", "conv-1", "Public answer", "public");
-    sqlite.query(`INSERT INTO messages (
-      id, conversation_id, role, content, channel, created_at
-    ) VALUES (?, ?, 'bot', ?, ?, unixepoch())`)
-      .run("sidechat-bot", "conv-1", "Private analysis", "sidechat");
+      id, conversation_id, role, content, created_at
+    ) VALUES (?, ?, 'bot', ?, unixepoch())`)
+      .run("public-bot", "conv-1", "Public answer");
 
     const result = await service.getUsageLog("user-1", null, {
       limit: 25,

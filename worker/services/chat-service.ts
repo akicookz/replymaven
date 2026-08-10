@@ -1,6 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, desc, and, gt, gte, lt, lte, ne, isNull, inArray, isNotNull, notExists, or, like, sql, type SQL } from "drizzle-orm";
-import { type SidechatCoordinationSnapshot } from "../../shared/ws-events";
+import { eq, desc, and, gt, lt, lte, ne, isNull, inArray, isNotNull, or, like, sql, type SQL } from "drizzle-orm";
 import {
   conversations,
   customerVisitors,
@@ -21,7 +20,6 @@ import {
   mergeChatStateForPersistence,
   parseChatState,
 } from "../chat-runtime/types";
-import { type MavenChannel } from "../validation";
 
 export type SystemEventKind = "flagged" | "joined" | "snoozed" | "snooze_ended" | "drafted" | "review_summary";
 export type InboxFilter =
@@ -56,92 +54,7 @@ export interface MessagePage {
   hasMore: boolean;
 }
 
-export interface SidechatMessageCursor {
-  createdAt: Date;
-  id: string;
-}
-
-export interface SidechatHumanMessageInput {
-  projectId: string;
-  conversationId: string;
-  runId: string;
-  content: string;
-  userId: string;
-  senderName: string;
-  senderAvatar: string | null;
-}
-
-export interface SidechatMavenMessageInput {
-  projectId: string;
-  conversationId: string;
-  runId: string;
-  content: string;
-  kind?: MessageRow["kind"];
-  metadata?: string | null;
-  senderName?: string | null;
-}
-
-export interface ClaimSidechatRunInput {
-  projectId: string;
-  conversationId: string;
-  runId: string;
-  now: Date;
-  leaseExpiresAt: Date;
-}
-
-export type ClaimSidechatStartRunResult = "claimed" | "existing" | "busy";
-export type ClaimSidechatStartRunWithSnapshotResult =
-  | { outcome: "claimed"; coordination: SidechatCoordinationSnapshot }
-  | { outcome: "existing" }
-  | { outcome: "busy" };
-
-export interface SettleSidechatRunInput {
-  projectId: string;
-  conversationId: string;
-  runId: string;
-  status: "idle" | "ready" | "failed" | "waiting_approval";
-  now: Date;
-}
-
-export interface CompleteSidechatRunInput extends SettleSidechatRunInput {
-  content: string;
-  kind: MessageRow["kind"];
-  metadata: string | null;
-  senderName: string | null;
-}
-
-export interface SidechatRunCompletion {
-  message: MessageRow;
-  coordination: SidechatCoordinationSnapshot;
-}
-
-type SidechatCoordinationRow = Pick<
-  ConversationRow,
-  "sidechatStatus" | "sidechatRunId" | "sidechatRevision" | "sidechatUpdatedAt"
->;
-
-export function toSidechatCoordinationSnapshot(
-  row: SidechatCoordinationRow,
-): SidechatCoordinationSnapshot {
-  return {
-    status: row.sidechatStatus,
-    runId: row.sidechatRunId,
-    revision: row.sidechatRevision,
-    updatedAt: row.sidechatUpdatedAt?.getTime() ?? null,
-  };
-}
-
-function sidechatCoordinationSelection() {
-  return {
-    sidechatStatus: conversations.sidechatStatus,
-    sidechatRunId: conversations.sidechatRunId,
-    sidechatRevision: conversations.sidechatRevision,
-    sidechatUpdatedAt: conversations.sidechatUpdatedAt,
-  };
-}
-
 const EXTERNAL_ACTION_LEASE_MS = 2 * 60 * 1000;
-const SIDECHAT_UPDATE_LOOKBACK_MS = 1_000;
 
 export function buildConversationByIdQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
@@ -274,14 +187,6 @@ export function buildBulkConversationActionQuery(
     case "archive":
       updates.archivedAt = now;
       updates.purgeStartedAt = null;
-      updates.sidechatStatus = sql`case
-        when ${conversations.sidechatStatus} = 'working' then 'failed'
-        else ${conversations.sidechatStatus}
-      end`;
-      updates.sidechatRunId = null;
-      updates.sidechatLeaseExpiresAt = null;
-      updates.sidechatUpdatedAt = now;
-      updates.sidechatRevision = sql`${conversations.sidechatRevision} + 1`;
       eligibility.push(
         isNull(conversations.archivedAt),
         or(
@@ -374,7 +279,6 @@ function buildHasPublicVisitorMessagesQuery(
     .where(
       and(
         eq(messages.conversationId, conversationId),
-        eq(messages.channel, "public"),
         eq(messages.role, "visitor"),
       ),
     )
@@ -391,7 +295,6 @@ function buildPublicVisitorMessageCountQuery(
     .where(
       and(
         eq(messages.conversationId, conversationId),
-        eq(messages.channel, "public"),
         eq(messages.role, "visitor"),
       ),
     );
@@ -433,9 +336,6 @@ function buildConditionalPublicOperationalMessageQuery(
       conversationId: conversations.id,
       role: sql<"visitor" | "agent">`${role}`.as("role"),
       content: sql<string>`${input.content}`.as("content"),
-      channel: sql<"public">`${"public"}`.as("channel"),
-      kind: sql<"text">`${"text"}`.as("kind"),
-      metadata: sql<null>`null`.as("message_metadata"),
       imageUrl: sql<string | null>`${input.imageUrl ?? null}`.as("image_url"),
       sources: sql<string | null>`${input.sources ?? null}`.as("sources"),
       senderName: sql<string | null>`${input.senderName ?? null}`.as("sender_name"),
@@ -474,61 +374,6 @@ export function buildConditionalPublicAgentMessageQuery(
   return buildConditionalPublicOperationalMessageQuery(db, input, "agent");
 }
 
-interface ConditionalSidechatMessageInput {
-  id: string;
-  projectId: string;
-  conversationId: string;
-  runId: string;
-  content: string;
-  kind: MessageRow["kind"];
-  metadata: string | null;
-  senderName: string | null;
-  senderAvatar: string | null;
-  userId: string | null;
-  createdAt: Date;
-}
-
-function buildConditionalSidechatMessageQuery(
-  db: DrizzleD1Database<Record<string, unknown>>,
-  input: ConditionalSidechatMessageInput,
-  role: "agent" | "bot",
-) {
-  const selectQuery = db
-    .select({
-      id: sql<string>`${input.id}`.as("id"),
-      conversationId: conversations.id,
-      role: sql<"agent" | "bot">`${role}`.as("role"),
-      content: sql<string>`${input.content}`.as("content"),
-      channel: sql<"sidechat">`${"sidechat"}`.as("channel"),
-      kind: sql<MessageRow["kind"]>`${input.kind}`.as("kind"),
-      metadata: sql<string | null>`${input.metadata}`.as("message_metadata"),
-      imageUrl: sql<null>`null`.as("image_url"),
-      sources: sql<null>`null`.as("sources"),
-      senderName: sql<string | null>`${input.senderName}`.as("sender_name"),
-      senderAvatar: sql<string | null>`${input.senderAvatar}`.as("sender_avatar"),
-      userId: sql<string | null>`${input.userId}`.as("user_id"),
-      createdAt: sql<Date>`${Math.floor(input.createdAt.getTime() / 1000)}`.as(
-        "created_at",
-      ),
-      emailedAt: sql<null>`null`.as("emailed_at"),
-      deliveredAt: sql<null>`null`.as("delivered_at"),
-      readAt: sql<null>`null`.as("read_at"),
-    })
-    .from(conversations)
-    .where(
-      and(
-        eq(conversations.id, input.conversationId),
-        eq(conversations.projectId, input.projectId),
-        isNull(conversations.archivedAt),
-        eq(conversations.sidechatStatus, "working"),
-        eq(conversations.sidechatRunId, input.runId),
-        gt(conversations.sidechatLeaseExpiresAt, input.createdAt),
-      ),
-    );
-
-  return db.insert(messages).select(selectQuery).returning();
-}
-
 interface ConditionalSystemMessageInput {
   id: string;
   conversationId: string;
@@ -547,9 +392,6 @@ export function buildConditionalPublicSystemMessageQuery(
       conversationId: conversations.id,
       role: sql<"system">`${"system"}`.as("role"),
       content: sql<string>`${input.content}`.as("content"),
-      channel: sql<"public">`${"public"}`.as("channel"),
-      kind: sql<"text">`${"text"}`.as("kind"),
-      metadata: sql<null>`null`.as("message_metadata"),
       imageUrl: sql<null>`null`.as("image_url"),
       sources: sql<string>`${input.sources}`.as("sources"),
       senderName: sql<null>`null`.as("sender_name"),
@@ -590,9 +432,6 @@ export function buildAcceptedPublicTeamRequestSummaryQuery(
       conversationId: conversations.id,
       role: sql<"system">`${"system"}`.as("role"),
       content: sql<string>`json_extract(${conversations.metadata}, '$.teamRequestSummary')`.as("content"),
-      channel: sql<"public">`${"public"}`.as("channel"),
-      kind: sql<"text">`${"text"}`.as("kind"),
-      metadata: sql<null>`null`.as("message_metadata"),
       imageUrl: sql<null>`null`.as("image_url"),
       sources: sql<string>`${JSON.stringify({ systemKind: "review_summary" })}`.as("sources"),
       senderName: sql<null>`null`.as("sender_name"),
@@ -642,9 +481,6 @@ export function buildConditionalPublicBotMessageQuery(
       conversationId: conversations.id,
       role: sql<"bot">`${"bot"}`.as("role"),
       content: sql<string>`${input.content}`.as("content"),
-      channel: sql<"public">`${"public"}`.as("channel"),
-      kind: sql<"text">`${"text"}`.as("kind"),
-      metadata: sql<null>`null`.as("message_metadata"),
       imageUrl: sql<null>`null`.as("image_url"),
       sources: sql<string | null>`${input.sources}`.as("sources"),
       senderName: sql<string | null>`${input.senderName}`.as("sender_name"),
@@ -944,21 +780,9 @@ export class ChatService {
     // Test seam for exercising ownership races immediately before the CAS.
   }
 
-  protected async afterExpiredSidechatLeaseRead(): Promise<void> {
-    // Test seam for exercising a new claim between an expired read and its CAS.
-  }
-
   // ─── Conversations ──────────────────────────────────────────────────────────
 
   async getConversationById(
-    id: string,
-    projectId: string,
-  ): Promise<ConversationRow | null> {
-    const rows = await buildConversationByIdQuery(this.db, id, projectId);
-    return this.normalizeExpiredSidechatLease(rows[0] ?? null, false);
-  }
-
-  async getSidechatConversationById(
     id: string,
     projectId: string,
   ): Promise<ConversationRow | null> {
@@ -971,264 +795,7 @@ export class ChatService {
     projectId: string,
   ): Promise<ConversationRow | null> {
     const rows = await buildOperationalConversationQuery(this.db, id, projectId);
-    return this.normalizeExpiredSidechatLease(rows[0] ?? null, true);
-  }
-
-  private async normalizeExpiredSidechatLease(
-    conversation: ConversationRow | null,
-    operationalOnly: boolean,
-    now: Date = new Date(),
-  ): Promise<ConversationRow | null> {
-    if (
-      !conversation ||
-      conversation.sidechatStatus !== "working" ||
-      !conversation.sidechatLeaseExpiresAt ||
-      conversation.sidechatLeaseExpiresAt.getTime() > now.getTime()
-    ) {
-      return conversation;
-    }
-
-    await this.afterExpiredSidechatLeaseRead();
-    const runCondition = conversation.sidechatRunId === null
-      ? isNull(conversations.sidechatRunId)
-      : eq(conversations.sidechatRunId, conversation.sidechatRunId);
-    const normalized = await this.db
-      .update(conversations)
-      .set({
-        sidechatStatus: "failed",
-        sidechatRunId: null,
-        sidechatLeaseExpiresAt: null,
-        sidechatUpdatedAt: now,
-        sidechatRevision: sql`${conversations.sidechatRevision} + 1`,
-        updatedAt: sql`${conversations.updatedAt}`,
-      })
-      .where(
-        and(
-          eq(conversations.id, conversation.id),
-          eq(conversations.projectId, conversation.projectId),
-          eq(conversations.sidechatStatus, "working"),
-          runCondition,
-          eq(
-            conversations.sidechatLeaseExpiresAt,
-            conversation.sidechatLeaseExpiresAt,
-          ),
-          lte(conversations.sidechatLeaseExpiresAt, now),
-        ),
-      )
-      .returning();
-    if (normalized[0]) return normalized[0];
-
-    const latest = operationalOnly
-      ? await buildOperationalConversationQuery(
-          this.db,
-          conversation.id,
-          conversation.projectId,
-        )
-      : await buildConversationByIdQuery(
-          this.db,
-          conversation.id,
-          conversation.projectId,
-        );
-    return latest[0] ?? null;
-  }
-
-  async claimSidechatRun(input: ClaimSidechatRunInput): Promise<boolean> {
-    return (await this.claimSidechatRunWithSnapshot(input)) !== null;
-  }
-
-  async claimSidechatRunWithSnapshot(
-    input: ClaimSidechatRunInput,
-  ): Promise<SidechatCoordinationSnapshot | null> {
-    const claimed = await this.db
-      .update(conversations)
-      .set({
-        sidechatStatus: "working",
-        sidechatRunId: input.runId,
-        sidechatLeaseExpiresAt: input.leaseExpiresAt,
-        sidechatUpdatedAt: input.now,
-        sidechatRevision: sql`${conversations.sidechatRevision} + 1`,
-        updatedAt: sql`${conversations.updatedAt}`,
-      })
-      .where(
-        and(
-          eq(conversations.id, input.conversationId),
-          eq(conversations.projectId, input.projectId),
-          isNull(conversations.archivedAt),
-          or(
-            isNull(conversations.sidechatLeaseExpiresAt),
-            lte(conversations.sidechatLeaseExpiresAt, input.now),
-          ),
-        ),
-      )
-      .returning(sidechatCoordinationSelection());
-    return claimed[0] ? toSidechatCoordinationSnapshot(claimed[0]) : null;
-  }
-
-  async claimSidechatStartRun(
-    input: ClaimSidechatRunInput,
-  ): Promise<ClaimSidechatStartRunResult> {
-    return (await this.claimSidechatStartRunWithSnapshot(input)).outcome;
-  }
-
-  async claimSidechatStartRunWithSnapshot(
-    input: ClaimSidechatRunInput,
-  ): Promise<ClaimSidechatStartRunWithSnapshotResult> {
-    const claimed = await this.db
-      .update(conversations)
-      .set({
-        sidechatStatus: "working",
-        sidechatRunId: input.runId,
-        sidechatLeaseExpiresAt: input.leaseExpiresAt,
-        sidechatUpdatedAt: input.now,
-        sidechatRevision: sql`${conversations.sidechatRevision} + 1`,
-        updatedAt: sql`${conversations.updatedAt}`,
-      })
-      .where(
-        and(
-          eq(conversations.id, input.conversationId),
-          eq(conversations.projectId, input.projectId),
-          isNull(conversations.archivedAt),
-          or(
-            isNull(conversations.sidechatLeaseExpiresAt),
-            lte(conversations.sidechatLeaseExpiresAt, input.now),
-          ),
-          notExists(
-            this.db
-              .select({ id: messages.id })
-              .from(messages)
-              .where(
-                and(
-                  eq(messages.conversationId, input.conversationId),
-                  eq(messages.channel, "sidechat"),
-                ),
-              ),
-          ),
-        ),
-      )
-      .returning(sidechatCoordinationSelection());
-    if (claimed[0]) {
-      return {
-        outcome: "claimed",
-        coordination: toSidechatCoordinationSnapshot(claimed[0]),
-      };
-    }
-
-    const existing = await this.db
-      .select({ id: messages.id })
-      .from(messages)
-      .where(
-        and(
-          eq(messages.conversationId, input.conversationId),
-          eq(messages.channel, "sidechat"),
-        ),
-      )
-      .limit(1);
-    return { outcome: existing.length > 0 ? "existing" : "busy" };
-  }
-
-  async settleSidechatRun(input: SettleSidechatRunInput): Promise<boolean> {
-    return (await this.settleSidechatRunWithSnapshot(input)) !== null;
-  }
-
-  async settleSidechatRunWithSnapshot(
-    input: SettleSidechatRunInput,
-  ): Promise<SidechatCoordinationSnapshot | null> {
-    const settled = await this.db
-      .update(conversations)
-      .set({
-        sidechatStatus: input.status,
-        sidechatRunId: null,
-        sidechatLeaseExpiresAt: null,
-        sidechatUpdatedAt: input.now,
-        sidechatRevision: sql`${conversations.sidechatRevision} + 1`,
-        updatedAt: sql`${conversations.updatedAt}`,
-      })
-      .where(
-        and(
-          eq(conversations.id, input.conversationId),
-          eq(conversations.projectId, input.projectId),
-          isNull(conversations.archivedAt),
-          eq(conversations.sidechatStatus, "working"),
-          eq(conversations.sidechatRunId, input.runId),
-          isNotNull(conversations.sidechatLeaseExpiresAt),
-          gt(conversations.sidechatLeaseExpiresAt, input.now),
-        ),
-      )
-      .returning(sidechatCoordinationSelection());
-    return settled[0] ? toSidechatCoordinationSnapshot(settled[0]) : null;
-  }
-
-  async completeSidechatRun(
-    input: CompleteSidechatRunInput,
-  ): Promise<SidechatRunCompletion | null> {
-    const insertQuery = buildConditionalSidechatMessageQuery(
-      this.db,
-      {
-        id: crypto.randomUUID(),
-        projectId: input.projectId,
-        conversationId: input.conversationId,
-        runId: input.runId,
-        content: input.content,
-        kind: input.kind,
-        metadata: input.metadata,
-        senderName: input.senderName,
-        senderAvatar: null,
-        userId: null,
-        createdAt: input.now,
-      },
-      "bot",
-    );
-    const settleQuery = this.db
-      .update(conversations)
-      .set({
-        sidechatStatus: input.status,
-        sidechatRunId: null,
-        sidechatLeaseExpiresAt: null,
-        sidechatUpdatedAt: input.now,
-        sidechatRevision: sql`${conversations.sidechatRevision} + 1`,
-        updatedAt: sql`${conversations.updatedAt}`,
-      })
-      .where(
-        and(
-          eq(conversations.id, input.conversationId),
-          eq(conversations.projectId, input.projectId),
-          isNull(conversations.archivedAt),
-          eq(conversations.sidechatStatus, "working"),
-          eq(conversations.sidechatRunId, input.runId),
-          isNotNull(conversations.sidechatLeaseExpiresAt),
-          gt(conversations.sidechatLeaseExpiresAt, input.now),
-        ),
-      )
-      .returning(sidechatCoordinationSelection());
-
-    // Cloudflare D1 executes batch() as one SQLite transaction. Both
-    // statements use the same exact-run predicate, so the committed result is
-    // either one private Maven row plus one settlement snapshot, or neither.
-    const [messageRows, coordinationRows] = await this.db.batch([
-      insertQuery,
-      settleQuery,
-    ] as const);
-    const message = messageRows[0];
-    const coordination = coordinationRows[0];
-    if (!message && !coordination) return null;
-    if (!message || !coordination) {
-      throw new Error("Inconsistent atomic Sidechat completion result");
-    }
-    return {
-      message,
-      coordination: toSidechatCoordinationSnapshot(coordination),
-    };
-  }
-
-  async getSidechatCoordinationSnapshot(
-    conversationId: string,
-    projectId: string,
-  ): Promise<SidechatCoordinationSnapshot | null> {
-    const conversation = await this.getConversationById(
-      conversationId,
-      projectId,
-    );
-    return conversation ? toSidechatCoordinationSnapshot(conversation) : null;
+    return rows[0] ?? null;
   }
 
   async runExternalActionIfOperational<T>(
@@ -1331,10 +898,7 @@ export class ChatService {
       )
       .limit(limit)
       .offset(offset);
-    const normalizedRows = await Promise.all(
-      rows.map((row) => this.normalizeExpiredSidechatLease(row, false, now)),
-    );
-    return normalizedRows.filter((row) => row !== null);
+    return rows;
   }
 
   async getConversationCounts(
@@ -1431,10 +995,6 @@ export class ChatService {
       Omit<ConversationRow, "chatState" | "telegramThreadId">
     >
   > {
-    const now = new Date();
-    const sidechatLookback = new Date(
-      Math.max(0, since.getTime() - SIDECHAT_UPDATE_LOOKBACK_MS),
-    );
     // Return the full sidebar-renderable shape (everything except the heavy
     // chatState JSON and the telegram thread id, neither of which the
     // dashboard sidebar consumes). The since filter still bounds the count;
@@ -1442,11 +1002,7 @@ export class ChatService {
     // row means brand-new conversations or off-page conversations can be
     // prepended into the loaded list, instead of being silently dropped.
     //
-    // Public mutations are gated by updatedAt. Private coordination preserves
-    // that public activity clock and uses an inclusive one-second
-    // sidechatUpdatedAt lookback instead; sidechatRevision lets clients dedupe
-    // repeated rows without missing multiple transitions in one D1 second.
-    const rows = await this.db
+    return this.db
       .select({
         id: conversations.id,
         projectId: conversations.projectId,
@@ -1457,11 +1013,6 @@ export class ChatService {
         status: conversations.status,
         closeReason: conversations.closeReason,
         metadata: conversations.metadata,
-        sidechatStatus: conversations.sidechatStatus,
-        sidechatRunId: conversations.sidechatRunId,
-        sidechatLeaseExpiresAt: conversations.sidechatLeaseExpiresAt,
-        sidechatUpdatedAt: conversations.sidechatUpdatedAt,
-        sidechatRevision: conversations.sidechatRevision,
         lastActivityAt: conversations.lastActivityAt,
         visitorLastSeenAt: conversations.visitorLastSeenAt,
         visitorPresence: conversations.visitorPresence,
@@ -1479,52 +1030,11 @@ export class ChatService {
       .where(
         and(
           eq(conversations.projectId, projectId),
-          or(
-            gt(conversations.updatedAt, since),
-            gte(conversations.sidechatUpdatedAt, sidechatLookback),
-            and(
-              eq(conversations.sidechatStatus, "working"),
-              isNotNull(conversations.sidechatLeaseExpiresAt),
-              lte(conversations.sidechatLeaseExpiresAt, now),
-            ),
-          ),
+          gt(conversations.updatedAt, since),
         ),
       )
-      .orderBy(desc(sql`max(
-        ${conversations.updatedAt},
-        coalesce(${conversations.sidechatUpdatedAt}, 0)
-      )`))
+      .orderBy(desc(conversations.updatedAt))
       .limit(limit);
-    const normalizedRows = await Promise.all(rows.map(async (row) => {
-      if (
-        row.sidechatStatus !== "working" ||
-        !row.sidechatLeaseExpiresAt ||
-        row.sidechatLeaseExpiresAt.getTime() > now.getTime()
-      ) {
-        return row;
-      }
-
-      const currentRows = await buildConversationByIdQuery(
-        this.db,
-        row.id,
-        row.projectId,
-      );
-      const current = await this.normalizeExpiredSidechatLease(
-        currentRows[0] ?? null,
-        false,
-        now,
-      );
-      if (!current) return null;
-      return {
-        ...row,
-        sidechatStatus: current.sidechatStatus,
-        sidechatRunId: current.sidechatRunId,
-        sidechatLeaseExpiresAt: current.sidechatLeaseExpiresAt,
-        sidechatUpdatedAt: current.sidechatUpdatedAt,
-        sidechatRevision: current.sidechatRevision,
-      };
-    }));
-    return normalizedRows.filter((row) => row !== null);
   }
 
   // See buildNeedsReviewQuery for the query semantics and why it's extracted.
@@ -2527,11 +2037,9 @@ export class ChatService {
       .where(
         and(
           inArray(messages.conversationId, conversationIds),
-          eq(messages.channel, "public"),
           sql`${messages.createdAt} = (
             SELECT MAX(m2.created_at) FROM messages m2
             WHERE m2.conversation_id = ${messages.conversationId}
-              AND m2.channel = ${"public"}
           )`,
         ),
       );
@@ -2565,7 +2073,6 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
           ne(messages.role, "system"),
         ),
       )
@@ -2586,12 +2093,7 @@ export class ChatService {
     const rows = await this.db
       .select()
       .from(messages)
-      .where(
-        and(
-          eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
-        ),
-      )
+      .where(eq(messages.conversationId, conversationId))
       .orderBy(desc(messages.createdAt))
       .limit(limit + 1);
     const hasMore = rows.length > limit;
@@ -2611,7 +2113,6 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
           lt(messages.createdAt, beforeCreatedAt),
         ),
       )
@@ -2632,134 +2133,11 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
           ne(messages.role, "system"),
           gt(messages.createdAt, new Date(since)),
         ),
       )
       .orderBy(messages.createdAt);
-  }
-
-  async getRecentSidechatMessages(
-    conversationId: string,
-    limit = 30,
-  ): Promise<MessagePage> {
-    const rows = await this.db
-      .select()
-      .from(messages)
-      .where(
-        and(
-          eq(messages.conversationId, conversationId),
-          eq(messages.channel, "sidechat"),
-          inArray(messages.role, ["agent", "bot"]),
-        ),
-      )
-      .orderBy(desc(messages.createdAt), desc(messages.id))
-      .limit(limit + 1);
-    const hasMore = rows.length > limit;
-    const sliced = hasMore ? rows.slice(0, limit) : rows;
-    return { messages: sliced.reverse(), hasMore };
-  }
-
-  async getSidechatMessagesBefore(
-    conversationId: string,
-    before: SidechatMessageCursor,
-    limit = 30,
-  ): Promise<MessagePage> {
-    const rows = await this.db
-      .select()
-      .from(messages)
-      .where(
-        and(
-          eq(messages.conversationId, conversationId),
-          eq(messages.channel, "sidechat"),
-          inArray(messages.role, ["agent", "bot"]),
-          or(
-            lt(messages.createdAt, before.createdAt),
-            and(
-              eq(messages.createdAt, before.createdAt),
-              lt(messages.id, before.id),
-            ),
-          ),
-        ),
-      )
-      .orderBy(desc(messages.createdAt), desc(messages.id))
-      .limit(limit + 1);
-    const hasMore = rows.length > limit;
-    const sliced = hasMore ? rows.slice(0, limit) : rows;
-    return { messages: sliced.reverse(), hasMore };
-  }
-
-  async getSidechatMessagesSince(
-    conversationId: string,
-    since: number,
-  ): Promise<MessageRow[]> {
-    return this.db
-      .select()
-      .from(messages)
-      .where(
-        and(
-          eq(messages.conversationId, conversationId),
-          eq(messages.channel, "sidechat"),
-          inArray(messages.role, ["agent", "bot"]),
-          gt(messages.createdAt, new Date(since)),
-        ),
-      )
-      .orderBy(messages.createdAt);
-  }
-
-  async addSidechatHumanMessage(
-    input: SidechatHumanMessageInput,
-  ): Promise<MessageRow | null> {
-    return this.addSidechatMessage(input, "agent");
-  }
-
-  async addSidechatMavenMessage(
-    input: SidechatMavenMessageInput,
-  ): Promise<MessageRow | null> {
-    return this.addSidechatMessage(input, "bot");
-  }
-
-  private async addSidechatMessage(
-    input: SidechatHumanMessageInput | SidechatMavenMessageInput,
-    role: "agent" | "bot",
-  ): Promise<MessageRow | null> {
-    const now = new Date();
-    const insertQuery = buildConditionalSidechatMessageQuery(
-      this.db,
-      {
-        id: crypto.randomUUID(),
-        projectId: input.projectId,
-        conversationId: input.conversationId,
-        runId: input.runId,
-        content: input.content,
-        kind: "kind" in input ? input.kind ?? "text" : "text",
-        metadata: "metadata" in input ? input.metadata ?? null : null,
-        senderName: input.senderName ?? null,
-        senderAvatar: "senderAvatar" in input ? input.senderAvatar : null,
-        userId: "userId" in input ? input.userId : null,
-        createdAt: now,
-      },
-      role,
-    );
-    const activityQuery = this.db
-      .update(conversations)
-      .set({
-        sidechatUpdatedAt: now,
-        updatedAt: sql`${conversations.updatedAt}`,
-      })
-      .where(
-        and(
-          eq(conversations.id, input.conversationId),
-          eq(conversations.projectId, input.projectId),
-          isNull(conversations.archivedAt),
-          eq(conversations.sidechatStatus, "working"),
-          eq(conversations.sidechatRunId, input.runId),
-          gt(conversations.sidechatLeaseExpiresAt, now),
-        ),
-      );
-    const [rows] = await this.db.batch([insertQuery, activityQuery] as const);
-    return rows[0] ?? null;
   }
 
   // Writes an internal system event message. Does NOT bump lastActivityAt so
@@ -2909,22 +2287,11 @@ export class ChatService {
     return botMessage;
   }
 
-  async getMessageByIdForChannel(
-    messageId: string,
-    channel: MavenChannel,
-  ): Promise<MessageRow | null> {
+  async getPublicMessageById(messageId: string): Promise<MessageRow | null> {
     const rows = await this.db
       .select()
       .from(messages)
-      .where(
-        and(
-          eq(messages.id, messageId),
-          eq(messages.channel, channel),
-          channel === "sidechat"
-            ? inArray(messages.role, ["agent", "bot"])
-            : undefined,
-        ),
-      )
+      .where(eq(messages.id, messageId))
       .limit(1);
     return rows[0] ?? null;
   }
@@ -2938,7 +2305,6 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
           eq(messages.role, "agent"),
           isNotNull(messages.emailedAt),
           isNotNull(messages.userId),
@@ -2960,7 +2326,6 @@ export class ChatService {
         and(
           eq(messages.id, messageId),
           eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
         ),
       );
   }
@@ -2978,7 +2343,6 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
           inArray(messages.role, ["agent", "bot"]),
           isNull(messages.deliveredAt),
           lte(messages.createdAt, cutoff),
@@ -2992,7 +2356,6 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
           inArray(messages.id, ids),
         ),
       );
@@ -3012,7 +2375,6 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
           inArray(messages.role, ["agent", "bot"]),
           isNull(messages.readAt),
           lte(messages.createdAt, cutoff),
@@ -3027,7 +2389,6 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
           inArray(messages.id, ids),
         ),
       );
@@ -3037,7 +2398,6 @@ export class ChatService {
       .where(
         and(
           eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
           inArray(messages.id, ids),
           isNull(messages.deliveredAt),
         ),
@@ -3051,7 +2411,7 @@ export class ChatService {
     conversationId: string,
     upToMessageId: string,
   ): Promise<string[]> {
-    const m = await this.getMessageByIdForChannel(upToMessageId, "public");
+    const m = await this.getPublicMessageById(upToMessageId);
     if (!m || m.conversationId !== conversationId) return [];
     return this.markPublicMessagesDelivered(conversationId, m.createdAt);
   }
@@ -3060,7 +2420,7 @@ export class ChatService {
     conversationId: string,
     upToMessageId: string,
   ): Promise<string[]> {
-    const m = await this.getMessageByIdForChannel(upToMessageId, "public");
+    const m = await this.getPublicMessageById(upToMessageId);
     if (!m || m.conversationId !== conversationId) return [];
     return this.markPublicMessagesRead(conversationId, m.createdAt);
   }
@@ -3098,7 +2458,6 @@ export class ChatService {
         and(
           eq(messages.id, messageId),
           eq(messages.conversationId, conversationId),
-          eq(messages.channel, "public"),
         ),
       )
       .limit(1);
@@ -3110,7 +2469,6 @@ export class ChatService {
       and(
         eq(messages.id, messageId),
         eq(messages.conversationId, conversationId),
-        eq(messages.channel, "public"),
       ),
     );
 
@@ -3121,8 +2479,7 @@ export class ChatService {
       .set({
         lastActivityAt: sql`COALESCE(
           (SELECT MAX(${messages.createdAt}) FROM ${messages}
-           WHERE ${messages.conversationId} = ${conversationId}
-             AND ${messages.channel} = ${"public"}),
+           WHERE ${messages.conversationId} = ${conversationId}),
           ${conversations.createdAt}
         )`,
       })

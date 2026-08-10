@@ -462,15 +462,6 @@ export const conversations = sqliteTable(
     }),
     telegramThreadId: text("telegram_thread_id"),
     metadata: text("metadata"), // JSON string
-    sidechatStatus: text("sidechat_status", {
-      enum: ["idle", "working", "waiting_approval", "ready", "failed"],
-    })
-      .notNull()
-      .default("idle"),
-    sidechatRunId: text("sidechat_run_id"),
-    sidechatLeaseExpiresAt: integer("sidechat_lease_expires_at", { mode: "timestamp" }),
-    sidechatUpdatedAt: integer("sidechat_updated_at", { mode: "timestamp" }),
-    sidechatRevision: integer("sidechat_revision").notNull().default(0),
     chatState: text("chat_state"), // JSON string – AI runtime state (separate from metadata)
     lastActivityAt: integer("last_activity_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
@@ -551,13 +542,6 @@ export const messages = sqliteTable(
       .references(() => conversations.id, { onDelete: "cascade" }),
     role: text("role", { enum: ["visitor", "bot", "agent", "system"] }).notNull(),
     content: text("content").notNull(),
-    channel: text("channel", { enum: ["public", "sidechat"] })
-      .notNull()
-      .default("public"),
-    kind: text("kind", { enum: ["text", "reply_draft", "approval"] })
-      .notNull()
-      .default("text"),
-    metadata: text("message_metadata"),
     imageUrl: text("image_url"),
     sources: text("sources"), // JSON string of RAG source references
     senderName: text("sender_name"),
@@ -574,11 +558,6 @@ export const messages = sqliteTable(
   },
   (table) => [
     index("idx_messages_conversation").on(table.conversationId),
-    index("idx_messages_conversation_channel_created").on(
-      table.conversationId,
-      table.channel,
-      table.createdAt,
-    ),
     index("idx_messages_created").on(table.createdAt),
   ],
 );

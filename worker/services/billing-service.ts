@@ -1006,10 +1006,7 @@ export class BillingService {
       .from(conversations)
       .leftJoin(
         messages,
-        and(
-          eq(messages.conversationId, conversations.id),
-          eq(messages.channel, "public"),
-        ),
+        eq(messages.conversationId, conversations.id),
       )
       .where(whereClause)
       .groupBy(conversations.id)

@@ -442,20 +442,6 @@
       "when": 1786205342238,
       "tag": "0062_maven_tool_audiences",
       "breakpoints": true
-    },
-    {
-      "idx": 63,
-      "version": "6",
-      "when": 1786280579845,
-      "tag": "0063_internal_sidechat_channel",
-      "breakpoints": true
-    },
-    {
-      "idx": 64,
-      "version": "6",
-      "when": 1786307242765,
-      "tag": "0064_sidechat_coordination_revision",
-      "breakpoints": true
     }
   ]
 }

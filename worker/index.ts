@@ -2319,9 +2319,8 @@ const app = new Hono<HonoAppContext>()
     > | null;
     let referencedAgentUserId: string | null = null;
     if (referencedMessageId) {
-      const sourceMessage = await chatService.getMessageByIdForChannel(
+      const sourceMessage = await chatService.getPublicMessageById(
         referencedMessageId,
-        "public",
       );
       if (sourceMessage) {
         const conv = await chatService.getConversationById(
@@ -6726,9 +6725,8 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "No visitor email address" }, 400);
     }
 
-    const message = await chatService.getMessageByIdForChannel(
+    const message = await chatService.getPublicMessageById(
       parsed.data.messageId,
-      "public",
     );
     if (!message || message.conversationId !== conversation.id) {
       return c.json({ error: "Message not found" }, 404);
