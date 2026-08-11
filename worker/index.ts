@@ -123,6 +123,14 @@ import {
   handleGetSidechatSummaries,
   type SidechatRouteActor,
 } from "./routes/sidechat-agent-handlers";
+import {
+  handleConnectProjectMcp,
+  handleDisconnectProjectMcp,
+  handleGetProjectMcp,
+  handleMcpOAuthCallback,
+  handleRefreshProjectMcp,
+  handleUpdateProjectMcpPolicy,
+} from "./routes/project-mcp-handlers";
 import { authorizeSidechatAgentRouteRequest } from "./agents/sidechat/agent-auth";
 import { MavenProjectAgent } from "./agents/sidechat/maven-project-agent";
 import {
@@ -585,6 +593,23 @@ function broadcastCustomerChanges(
   broadcastCustomerUpdated(c.env, c.executionCtx, projectId, customerIds);
 }
 
+function getSidechatRouteActor(
+  c: Context<HonoAppContext>,
+): SidechatRouteActor | null {
+  const user = c.get("user");
+  const effectiveUserId = c.get("effectiveUserId");
+  const role = c.get("activeRole");
+  return user && effectiveUserId && role
+    ? {
+        userId: user.id,
+        effectiveUserId,
+        role,
+        accessAllProjects: c.get("activeAccessAllProjects"),
+        projectIds: c.get("activeProjectIds"),
+      }
+    : null;
+}
+
 const app = new Hono<HonoAppContext>()
   // ─── Global CORS ────────────────────────────────────────────────────────────
   .use("*", cors())
@@ -625,6 +650,21 @@ const app = new Hono<HonoAppContext>()
       },
     });
     return response ?? c.json({ error: "not_found" }, 404);
+  })
+  // Native MCP OAuth callbacks do not carry a dashboard session. The Agents
+  // SDK validates the one-time OAuth state inside the exact project Agent.
+  .all("/api/sidechat/mcp/oauth/:projectId", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`sidechat-mcp-oauth:${ip}`, 30, 60_000)) {
+      return c.json({ error: "rate_limited" }, 429);
+    }
+    const projectId = c.req.param("projectId");
+    return handleMcpOAuthCallback({
+      projectId,
+      request: c.req.raw,
+      getParent: () =>
+        getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+    });
   })
   // ─── Static SPA fallback ───────────────────────────────────────────────────
   // /help/* is reserved for the helpdesk feature (see helpdesk-render/).
@@ -2744,19 +2784,7 @@ const app = new Hono<HonoAppContext>()
   .post(
     "/api/projects/:projectId/conversations/:conversationId/sidechat/session",
     async (c) => {
-      const user = c.get("user");
-      const effectiveUserId = c.get("effectiveUserId");
-      const role = c.get("activeRole");
-      const actor: SidechatRouteActor | null =
-        user && effectiveUserId && role
-          ? {
-              userId: user.id,
-              effectiveUserId,
-              role,
-              accessAllProjects: c.get("activeAccessAllProjects"),
-              projectIds: c.get("activeProjectIds"),
-            }
-          : null;
+      const actor = getSidechatRouteActor(c);
       const projectId = c.req.param("projectId");
       return handleCreateSidechatSession({
         actor,
@@ -2771,19 +2799,7 @@ const app = new Hono<HonoAppContext>()
     },
   )
   .get("/api/projects/:projectId/sidechat/summaries", async (c) => {
-    const user = c.get("user");
-    const effectiveUserId = c.get("effectiveUserId");
-    const role = c.get("activeRole");
-    const actor: SidechatRouteActor | null =
-      user && effectiveUserId && role
-        ? {
-            userId: user.id,
-            effectiveUserId,
-            role,
-            accessAllProjects: c.get("activeAccessAllProjects"),
-            projectIds: c.get("activeProjectIds"),
-          }
-        : null;
+    const actor = getSidechatRouteActor(c);
     const projectId = c.req.param("projectId");
     return handleGetSidechatSummaries({
       actor,
@@ -2794,6 +2810,78 @@ const app = new Hono<HonoAppContext>()
         getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
     });
   })
+
+  // ─── Native Sidechat MCP connections ─────────────────────────────────────
+  .get("/api/projects/:projectId/sidechat/mcp/connections", async (c) => {
+    const actor = getSidechatRouteActor(c);
+    const projectId = c.req.param("projectId");
+    return handleGetProjectMcp({
+      actor,
+      projectId,
+      projectService: new ProjectService(c.get("db")),
+      getParent: () =>
+        getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+    });
+  })
+  .post("/api/projects/:projectId/sidechat/mcp/connections", async (c) => {
+    const actor = getSidechatRouteActor(c);
+    const projectId = c.req.param("projectId");
+    return handleConnectProjectMcp({
+      actor,
+      projectId,
+      request: c.req.raw,
+      callbackHost: c.env.BETTER_AUTH_URL,
+      projectService: new ProjectService(c.get("db")),
+      getParent: () =>
+        getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+    });
+  })
+  .post(
+    "/api/projects/:projectId/sidechat/mcp/connections/:connectionId/refresh",
+    async (c) => {
+      const actor = getSidechatRouteActor(c);
+      const projectId = c.req.param("projectId");
+      return handleRefreshProjectMcp({
+        actor,
+        projectId,
+        connectionId: c.req.param("connectionId"),
+        projectService: new ProjectService(c.get("db")),
+        getParent: () =>
+          getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+      });
+    },
+  )
+  .patch(
+    "/api/projects/:projectId/sidechat/mcp/connections/:connectionId/tools",
+    async (c) => {
+      const actor = getSidechatRouteActor(c);
+      const projectId = c.req.param("projectId");
+      return handleUpdateProjectMcpPolicy({
+        actor,
+        projectId,
+        connectionId: c.req.param("connectionId"),
+        request: c.req.raw,
+        projectService: new ProjectService(c.get("db")),
+        getParent: () =>
+          getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+      });
+    },
+  )
+  .delete(
+    "/api/projects/:projectId/sidechat/mcp/connections/:connectionId",
+    async (c) => {
+      const actor = getSidechatRouteActor(c);
+      const projectId = c.req.param("projectId");
+      return handleDisconnectProjectMcp({
+        actor,
+        projectId,
+        connectionId: c.req.param("connectionId"),
+        projectService: new ProjectService(c.get("db")),
+        getParent: () =>
+          getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+      });
+    },
+  )
 
   // ─── MCP OAuth + Server ───────────────────────────────────────────────────
   .post("/api/mcp/register", handleMcpClientRegistration)

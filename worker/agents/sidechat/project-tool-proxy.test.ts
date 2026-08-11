@@ -60,18 +60,38 @@ function executionRequest(
   };
 }
 
+function mcpDescriptor(
+  overrides: Partial<SidechatToolDescriptor> = {},
+): SidechatToolDescriptor {
+  return {
+    connectionId: "mcp-example-123",
+    toolName: "find_customer",
+    exposedName: "tool_mcpexample123_find_customer",
+    displayName: "Find customer",
+    description: "Find a customer through MCP.",
+    inputSchema: { type: "object" },
+    catalogFingerprint: "b".repeat(64),
+    audience: "sidechat",
+    access: "read",
+    enabled: true,
+    ...overrides,
+  };
+}
+
 function executionDependencies(overrides: Record<string, unknown> = {}) {
   return {
     isRegisteredSidechat: mock(() => true),
     getConversation: mock(async () => ({ archivedAt: null })),
     canActorAccessProject: mock(async () => true),
     getAuthoritativeHttpTool: mock(async () => toolRow()),
+    getAuthoritativeMcpTool: mock(async () => null),
     runKnowledgeSearch: mock(async () => ({ found: true, context: "Answer" })),
     runExternalAction: mock(async (action: () => Promise<unknown>) => ({
       executed: true,
       value: await action(),
     })),
     executeHttpTool: mock(async () => ({ success: true, data: { id: "customer-1" } })),
+    executeMcpTool: mock(async () => ({ content: [] })),
     writeAudit: mock((metadata: SidechatToolAuditMetadata) => metadata && undefined),
     ...overrides,
   };
@@ -166,6 +186,70 @@ describe("Sidechat project tool descriptors", () => {
 });
 
 describe("Sidechat project tool execution", () => {
+  test("executes an enabled MCP read only inside the conversation action lease", async () => {
+    const descriptor = mcpDescriptor();
+    const executeMcpTool = mock(async () => ({
+      content: [{ type: "text", text: "private customer context" }],
+    }));
+    const runExternalAction = mock(async (action: () => Promise<unknown>) => ({
+      executed: true,
+      value: await action(),
+    }));
+    const result = await executeSidechatProjectTool({
+      projectId: "project-1",
+      request: executionRequest(descriptor, { input: { externalId: "cus_1" } }),
+      dependencies: executionDependencies({
+        getAuthoritativeMcpTool: mock(async () => descriptor),
+        executeMcpTool,
+        runExternalAction,
+      }),
+    });
+
+    expect(result).toMatchObject({
+      status: "completed",
+      safeActivity: "Find customer · Done",
+    });
+    expect(runExternalAction).toHaveBeenCalledTimes(1);
+    expect(executeMcpTool).toHaveBeenCalledWith(
+      "mcp-example-123",
+      "find_customer",
+      { externalId: "cus_1" },
+    );
+  });
+
+  test("does not execute MCP writes or stale catalog authority", async () => {
+    const writeDescriptor = mcpDescriptor({ access: "write" });
+    const executeMcpTool = mock(async () => ({ content: [] }));
+    const write = await executeSidechatProjectTool({
+      projectId: "project-1",
+      request: executionRequest(writeDescriptor),
+      dependencies: executionDependencies({
+        getAuthoritativeMcpTool: mock(async () => writeDescriptor),
+        executeMcpTool,
+      }),
+    });
+    const stale = await executeSidechatProjectTool({
+      projectId: "project-1",
+      request: executionRequest(mcpDescriptor(), {
+        catalogFingerprint: "c".repeat(64),
+      }),
+      dependencies: executionDependencies({
+        getAuthoritativeMcpTool: mock(async () => mcpDescriptor()),
+        executeMcpTool,
+      }),
+    });
+
+    expect(write).toMatchObject({
+      status: "unavailable",
+      errorCode: "approval_required",
+    });
+    expect(stale).toMatchObject({
+      status: "denied",
+      errorCode: "tool_authority_changed",
+    });
+    expect(executeMcpTool).not.toHaveBeenCalled();
+  });
+
   test("defines a parent-local audit table with metadata columns only", () => {
     const queries: string[] = [];
     const values: unknown[][] = [];

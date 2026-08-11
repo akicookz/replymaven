@@ -22,6 +22,10 @@ import {
 } from "./agent-auth";
 import { MavenProjectAgent } from "./maven-project-agent";
 import {
+  createPrivateToolChunkFilter,
+  sanitizePrivateMessageForPersistence,
+} from "./private-tool-payload";
+import {
   createReplyDraftTool,
   persistCompletedReplyDraft,
 } from "./reply-draft-tool";
@@ -199,10 +203,19 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
               );
             },
           });
+          const shouldForward = createPrivateToolChunkFilter();
           writer.merge(
-            result.toUIMessageStream<SidechatUIMessage>({
-              sendReasoning: false,
-            }),
+            result
+              .toUIMessageStream<SidechatUIMessage>({
+                sendReasoning: false,
+              })
+              .pipeThrough(
+                new TransformStream({
+                  transform(chunk, controller) {
+                    if (shouldForward(chunk)) controller.enqueue(chunk);
+                  },
+                }),
+              ),
           );
         } catch {
           await parentForFailure?.updateSidechatSummary(
@@ -240,6 +253,12 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
       await parent.updateSidechatSummary(conversationId, "failed");
       throw error;
     }
+  }
+
+  protected override sanitizeMessageForPersistence(
+    message: UIMessage,
+  ): UIMessage {
+    return sanitizePrivateMessageForPersistence(message);
   }
 
   // Internal Durable Object RPC for retention/recovery verification. It is not

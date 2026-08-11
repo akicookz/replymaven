@@ -656,6 +656,110 @@ export const testToolSchema = z.object({
   params: z.record(z.string(), z.unknown()),
 });
 
+// ─── Sidechat MCP connections ────────────────────────────────────────────────
+
+export const mcpAuthModeSchema = z.enum([
+  "oauth",
+  "bearer",
+  "headers",
+  "none",
+]);
+
+export const createProjectMcpConnectionSchema = z
+  .object({
+    presetKey: z
+      .enum(["posthog", "stripe", "slack", "attio", "linear"])
+      .optional(),
+    name: z.string().trim().min(1).max(100).optional(),
+    url: z.string().trim().min(1).max(2048).optional(),
+    authMode: mcpAuthModeSchema,
+    bearerToken: z.string().min(1).max(8192).optional(),
+    headers: z.record(z.string().min(1).max(200), z.string().max(8192)).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.presetKey && (value.name || value.url)) {
+      context.addIssue({
+        code: "custom",
+        message: "Preset MCP connections cannot override the name or URL",
+      });
+    }
+    if (!value.presetKey && (!value.name || !value.url)) {
+      context.addIssue({
+        code: "custom",
+        message: "Custom MCP connections require a name and URL",
+      });
+    }
+    if (value.authMode === "bearer" && !value.bearerToken) {
+      context.addIssue({
+        code: "custom",
+        path: ["bearerToken"],
+        message: "Bearer token is required",
+      });
+    }
+    if (value.authMode !== "bearer" && value.bearerToken) {
+      context.addIssue({
+        code: "custom",
+        path: ["bearerToken"],
+        message: "Bearer token does not match the selected auth mode",
+      });
+    }
+    if (
+      value.authMode === "headers" &&
+      (!value.headers || Object.keys(value.headers).length === 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["headers"],
+        message: "At least one header is required",
+      });
+    }
+    if (value.authMode !== "headers" && value.headers) {
+      context.addIssue({
+        code: "custom",
+        path: ["headers"],
+        message: "Headers do not match the selected auth mode",
+      });
+    }
+    if (value.headers && Object.keys(value.headers).length > 20) {
+      context.addIssue({
+        code: "custom",
+        path: ["headers"],
+        message: "Too many headers",
+      });
+    }
+  });
+
+export const updateProjectMcpPolicySchema = z
+  .object({
+    tools: z
+      .array(
+        z
+          .object({
+            toolName: z.string().min(1).max(200),
+            catalogFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+            enabled: z.boolean(),
+            access: z.enum(["read", "write"]),
+          })
+          .strict(),
+      )
+      .max(200),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const names = new Set<string>();
+    for (const [index, tool] of value.tools.entries()) {
+      if (names.has(tool.toolName)) {
+        context.addIssue({
+          code: "custom",
+          path: ["tools", index, "toolName"],
+          message: "Duplicate MCP tool policy",
+        });
+      }
+      names.add(tool.toolName);
+    }
+  });
+
 // ─── Billing ──────────────────────────────────────────────────────────────────
 
 export const createCheckoutSchema = z.object({
