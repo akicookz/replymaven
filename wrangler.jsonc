@@ -62,12 +62,20 @@
         "name": "CONVERSATION_DO",
         "class_name": "ConversationDO",
       },
+      {
+        "name": "MAVEN_PROJECT_AGENT",
+        "class_name": "MavenProjectAgent",
+      },
     ],
   },
   "migrations": [
     {
       "tag": "v1-conversation-do",
       "new_sqlite_classes": ["ConversationDO"],
+    },
+    {
+      "tag": "v2-maven-project-agent",
+      "new_sqlite_classes": ["MavenProjectAgent"],
     },
   ],
   "queues": {

@@ -1,4 +1,4 @@
-import { createMcpHandler } from "agents/mcp";
+import { createLegacyMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type Context } from "hono";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
@@ -77,7 +77,7 @@ export async function handleMcpRequest(
     ...context,
   });
 
-  return createMcpHandler(server, {
+  return createLegacyMcpHandler(server, {
     route: "/api/mcp",
     authContext: {
       props: {

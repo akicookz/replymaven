@@ -28,7 +28,12 @@ function logTestWidgetUrl(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), cloudflare(), tailwindcss(), logTestWidgetUrl()],
+  plugins: [
+    react(),
+    cloudflare({ remoteBindings: false }),
+    tailwindcss(),
+    logTestWidgetUrl(),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

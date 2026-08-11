@@ -7,9 +7,10 @@
 		"dev": "vite",
 		"build": "tsc -b && vite build",
 		"lint": "eslint .",
+		"test:agents": "vitest run --config vitest.config.ts",
 		"preview": "bun run build && vite preview",
 		"deploy": "bun run build && wrangler deploy",
-		"cf-typegen": "wrangler types",
+		"cf-typegen": "wrangler types --strict-vars=false --include-runtime=false",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate:dev": "bun run wrangler d1 migrations apply --local DB",
 		"db:migrate:prod": "bun run wrangler d1 migrations apply --remote DB",
@@ -22,9 +23,12 @@
 	"dependencies": {
 		"@ai-sdk/google": "^3.0.31",
 		"@ai-sdk/openai": "^3.0.34",
+		"@ai-sdk/react": "3.0.249",
+		"@cloudflare/ai-chat": "0.5.0",
 		"@dnd-kit/core": "^6.3.1",
 		"@dnd-kit/sortable": "^10.0.0",
 		"@dnd-kit/utilities": "^3.2.2",
+		"@modelcontextprotocol/client": "2.0.0-beta.5",
 		"@modelcontextprotocol/sdk": "1.29.0",
 		"@radix-ui/react-avatar": "^1.1.10",
 		"@radix-ui/react-collapsible": "^1.1.11",
@@ -55,7 +59,7 @@
 		"@tiptap/react": "^3.23.6",
 		"@tiptap/starter-kit": "^3.23.6",
 		"@tiptap/suggestion": "^3.23.6",
-		"agents": "0.16.2",
+		"agents": "0.20.0",
 		"ai": "^6.0.101",
 		"better-auth": "~1.4.18",
 		"better-auth-cloudflare": "^0.2.9",
@@ -89,6 +93,7 @@
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "^1.51.1",
+		"@cloudflare/vitest-pool-workers": "^0.21.0",
 		"@cloudflare/workers-types": "4.20260305.0",
 		"@eslint/js": "^9.25.0",
 		"@tanstack/react-query-devtools": "^5.77.0",
@@ -109,6 +114,7 @@
 		"typescript": "~5.8.3",
 		"typescript-eslint": "^8.30.1",
 		"vite": "^6.3.5",
+		"vitest": "^4.1.0",
 		"wrangler": "^4.120.0"
 	}
 }

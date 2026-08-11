@@ -1,6 +1,7 @@
 import { type User, type Session } from "better-auth";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { type SubscriptionRow } from "./db/schema";
+import { type CrawlMessage } from "./services/crawl-service";
 
 // ─── Plan Types ───────────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ export interface AppEnv extends Env {
   CONVERSATIONS_CACHE: KVNamespace;
   AI: Ai;
   CRAWL_QUEUE: Queue<CrawlMessage>;
-  CONVERSATION_DO: DurableObjectNamespace;
+  SIDECHAT_TOKEN_SECRET: string;
   INTERNAL_BROADCAST_SECRET: string;
 }
 

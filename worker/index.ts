@@ -10,7 +10,7 @@ import {
   type HelpCategoryRow,
 } from "./db/schema";
 import { createAuth } from "./auth";
-import { type HonoAppContext, type Plan } from "./types";
+import { type AppEnv, type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
 import { WidgetService } from "./services/widget-service";
 import { getAssignableUsers } from "./services/assignable-users";
@@ -133,6 +133,8 @@ import {
   handleMcpTokenRevocation,
 } from "./mcp-oauth";
 export { ConversationDO } from "./durable-objects/conversation-do";
+export { MavenProjectAgent } from "./agents/sidechat/maven-project-agent";
+export { MavenChatAgent } from "./agents/sidechat/maven-chat-agent";
 import {
   createProjectSchema,
   updateProjectSchema,
@@ -484,7 +486,7 @@ async function buildContextSourceFromResources(
 
 async function fetchWebsiteMarkdownWithBrowserApi(
   websiteUrl: string,
-  env: Env,
+  env: AppEnv,
 ): Promise<string | null> {
   try {
     const browserApiBase = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/browser-rendering`;
@@ -7532,7 +7534,7 @@ const MAX_CRAWL_ATTEMPTS = 3;
 
 async function handleQueue(
   batch: MessageBatch<CrawlMessage>,
-  env: Env,
+  env: AppEnv,
 ): Promise<void> {
   const db = drizzle(env.DB);
 
@@ -7575,7 +7577,7 @@ async function handleQueue(
 
 // ─── Scheduled Retention ─────────────────────────────────────────────────────
 
-async function runArchivedConversationRetention(env: Env): Promise<void> {
+async function runArchivedConversationRetention(env: AppEnv): Promise<void> {
   const db = drizzle(env.DB);
   const now = new Date();
   const batchSize = 50;
@@ -7606,7 +7608,7 @@ async function runArchivedConversationRetention(env: Env): Promise<void> {
 
 function handleScheduled(
   _controller: ScheduledController,
-  env: Env,
+  env: AppEnv,
   ctx: ExecutionContext,
 ): void {
   ctx.waitUntil(runArchivedConversationRetention(env));
