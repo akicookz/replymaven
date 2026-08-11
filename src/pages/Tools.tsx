@@ -36,6 +36,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { MobileMenuButton } from "@/components/PageHeader";
+import McpConnections from "@/components/tools/McpConnections";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1214,6 +1215,8 @@ export function ToolsPanel({
           )}
         </div>
       </div>
+
+      {!showLogs && <McpConnections projectId={projectId} />}
 
       {/* Tool limit warning */}
       {!showLogs && (tools?.length ?? 0) >= 20 && (

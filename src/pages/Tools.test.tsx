@@ -164,6 +164,9 @@ async function renderTools(tools: Record<string, unknown>[] = []): Promise<Rende
     if (method === "GET" && url.endsWith("/tools")) {
       return Response.json(tools);
     }
+    if (method === "GET" && url.endsWith("/sidechat/mcp/connections")) {
+      return Response.json({ canManage: true, presets: [], connections: [] });
+    }
     if (method === "PATCH" && url.includes("/tools/")) {
       return Response.json({ ok: true });
     }
