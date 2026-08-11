@@ -1,9 +1,14 @@
 import { Agent, type Connection, type ConnectionContext } from "agents";
+import { drizzle } from "drizzle-orm/d1";
 import type {
   MavenProjectState,
+  SidechatCustomerContext,
   SidechatStatus,
   SidechatSummary,
+  SidechatToolDescriptor,
 } from "../../../shared/sidechat-agent";
+import { buildCustomerByIdQuery } from "../../services/customer-service";
+import { ChatService } from "../../services/chat-service";
 import { type AppEnv } from "../../types";
 import {
   authorizeSubAgentRequest,
@@ -11,6 +16,7 @@ import {
   toSidechatChildName,
 } from "./agent-auth";
 import { MavenChatAgent } from "./maven-chat-agent";
+import { buildSidechatContext } from "./sidechat-context";
 
 function upsertSidechatSummary(
   state: MavenProjectState,
@@ -84,6 +90,60 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       ),
     );
     return true;
+  }
+
+  async getSidechatContext(
+    childName: string,
+    conversationId: string,
+  ): Promise<SidechatCustomerContext> {
+    this.assertRegisteredSidechat(childName, conversationId);
+    const db = drizzle(this.env.DB);
+    const chatService = new ChatService(db);
+    return buildSidechatContext({
+      projectId: this.name,
+      conversationId,
+      dependencies: {
+        getConversation(id, projectId) {
+          return chatService.getConversationById(id, projectId);
+        },
+        async getCustomer(projectId, customerId) {
+          const rows = await buildCustomerByIdQuery(
+            db,
+            projectId,
+            customerId,
+          );
+          return rows[0] ?? null;
+        },
+        getRecentPublicMessages(id, limit) {
+          return chatService.getRecentPublicMessages(id, limit);
+        },
+      },
+    });
+  }
+
+  async getSidechatToolDescriptors(
+    childName: string,
+    conversationId: string,
+  ): Promise<SidechatToolDescriptor[]> {
+    this.assertRegisteredSidechat(childName, conversationId);
+    // Task 5 replaces this empty native boundary with project-authorized
+    // descriptor projection. The child never reads project tools directly.
+    return [];
+  }
+
+  private assertRegisteredSidechat(
+    childName: string,
+    conversationId: string,
+  ): void {
+    const expectedChildName = toSidechatChildName(conversationId);
+    const summary = this.state.sidechats[conversationId];
+    if (
+      childName !== expectedChildName ||
+      summary?.childName !== childName ||
+      !this.hasSubAgent(MavenChatAgent, childName)
+    ) {
+      throw new Error("Sidechat is not registered");
+    }
   }
 
   override shouldConnectionBeReadonly(): boolean {

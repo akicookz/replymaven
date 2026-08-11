@@ -383,6 +383,25 @@ describe("ChatService public transcript behavior", () => {
     ).toBe("public-3");
   });
 
+  test("selects equal-second recent rows by a stable message-id tie break", async () => {
+    const { service, sqlite, conversation } = await createTranscriptHarness();
+    const tiedAt = new Date("2026-08-09T00:00:01.000Z");
+    for (const id of ["tied-a", "tied-c", "tied-b"]) {
+      seedTranscriptMessage(sqlite, {
+        id,
+        conversationId: conversation.id,
+        role: "visitor",
+        content: id,
+        createdAt: tiedAt,
+      });
+    }
+
+    expect(await service.getRecentPublicMessages(conversation.id, 2)).toMatchObject({
+      messages: [{ id: "tied-b" }, { id: "tied-c" }],
+      hasMore: true,
+    });
+  });
+
   test("updates delivery, read, and email state on public messages", async () => {
     const { service, sqlite, conversation } = await createTranscriptHarness();
     const origin = Date.parse("2026-08-09T00:00:00.000Z");
