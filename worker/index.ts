@@ -1,4 +1,5 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
+import { getAgentByName, routeAgentRequest } from "agents";
 import { cors } from "hono/cors";
 import { except } from "hono/combine";
 import { drizzle } from "drizzle-orm/d1";
@@ -118,6 +119,13 @@ import {
   handleUpdateToolRequest,
 } from "./routes/tool-handlers";
 import {
+  handleCreateSidechatSession,
+  handleGetSidechatSummaries,
+  type SidechatRouteActor,
+} from "./routes/sidechat-agent-handlers";
+import { authorizeSidechatAgentRouteRequest } from "./agents/sidechat/agent-auth";
+import { MavenProjectAgent } from "./agents/sidechat/maven-project-agent";
+import {
   handleCustomerProjectWsUpgrade,
   handleDashboardWsUpgrade,
   handleWidgetWsUpgrade,
@@ -133,7 +141,7 @@ import {
   handleMcpTokenRevocation,
 } from "./mcp-oauth";
 export { ConversationDO } from "./durable-objects/conversation-do";
-export { MavenProjectAgent } from "./agents/sidechat/maven-project-agent";
+export { MavenProjectAgent };
 export { MavenChatAgent } from "./agents/sidechat/maven-chat-agent";
 import {
   createProjectSchema,
@@ -596,6 +604,27 @@ const app = new Hono<HonoAppContext>()
   .on(["POST", "GET"], "/api/auth/*", (c) => {
     const auth = createAuth(c.env, c.req.raw.cf as CfProperties);
     return auth.handler(c.req.raw);
+  })
+  // ─── Native Sidechat Agent routing ────────────────────────────────────────
+  // The signed two-minute session token is verified before the parent Agent
+  // or any registered child facet is woken. Both HTTP and WebSocket requests
+  // pass through the same exact route/claim matcher.
+  .all("/agents/*", async (c) => {
+    const response = await routeAgentRequest(c.req.raw, c.env, {
+      onBeforeConnect(request) {
+        return authorizeSidechatAgentRouteRequest(
+          request,
+          c.env.SIDECHAT_TOKEN_SECRET,
+        );
+      },
+      onBeforeRequest(request) {
+        return authorizeSidechatAgentRouteRequest(
+          request,
+          c.env.SIDECHAT_TOKEN_SECRET,
+        );
+      },
+    });
+    return response ?? c.json({ error: "not_found" }, 404);
   })
   // ─── Static SPA fallback ───────────────────────────────────────────────────
   // /help/* is reserved for the helpdesk feature (see helpdesk-render/).
@@ -2709,6 +2738,61 @@ const app = new Hono<HonoAppContext>()
     }
 
     await next();
+  })
+
+  // ─── Native Sidechat sessions ─────────────────────────────────────────────
+  .post(
+    "/api/projects/:projectId/conversations/:conversationId/sidechat/session",
+    async (c) => {
+      const user = c.get("user");
+      const effectiveUserId = c.get("effectiveUserId");
+      const role = c.get("activeRole");
+      const actor: SidechatRouteActor | null =
+        user && effectiveUserId && role
+          ? {
+              userId: user.id,
+              effectiveUserId,
+              role,
+              accessAllProjects: c.get("activeAccessAllProjects"),
+              projectIds: c.get("activeProjectIds"),
+            }
+          : null;
+      const projectId = c.req.param("projectId");
+      return handleCreateSidechatSession({
+        actor,
+        projectId,
+        conversationId: c.req.param("conversationId"),
+        secret: c.env.SIDECHAT_TOKEN_SECRET,
+        projectService: new ProjectService(c.get("db")),
+        chatService: new ChatService(c.get("db")),
+        getParent: () =>
+          getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+      });
+    },
+  )
+  .get("/api/projects/:projectId/sidechat/summaries", async (c) => {
+    const user = c.get("user");
+    const effectiveUserId = c.get("effectiveUserId");
+    const role = c.get("activeRole");
+    const actor: SidechatRouteActor | null =
+      user && effectiveUserId && role
+        ? {
+            userId: user.id,
+            effectiveUserId,
+            role,
+            accessAllProjects: c.get("activeAccessAllProjects"),
+            projectIds: c.get("activeProjectIds"),
+          }
+        : null;
+    const projectId = c.req.param("projectId");
+    return handleGetSidechatSummaries({
+      actor,
+      projectId,
+      secret: c.env.SIDECHAT_TOKEN_SECRET,
+      projectService: new ProjectService(c.get("db")),
+      getParent: () =>
+        getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+    });
   })
 
   // ─── MCP OAuth + Server ───────────────────────────────────────────────────

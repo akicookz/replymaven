@@ -2,13 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "replymaven",
   "main": "worker/index.ts",
-  "compatibility_date": "2025-05-24",
+  "compatibility_date": "2026-08-08",
   "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
   "account_id": "35bc7a4522237728214ba9d54c36002e",
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/help/*", "/.well-known/*"],
+    "run_worker_first": ["/api/*", "/agents/*", "/help/*", "/.well-known/*"],
   },
   "observability": {
     "enabled": true,

@@ -5,6 +5,15 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       remoteBindings: false,
+      additionalExports: {
+        MavenChatAgent: "DurableObject",
+      },
+      miniflare: {
+        bindings: {
+          SIDECHAT_TOKEN_SECRET:
+            "native-sidechat-workerd-test-secret-32-bytes",
+        },
+      },
       wrangler: {
         configPath: "./wrangler.jsonc",
       },
