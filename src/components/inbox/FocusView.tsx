@@ -4,7 +4,10 @@ import type { Conversation, Message } from "@/lib/inbox/types";
 import Composer from "@/components/inbox/Composer";
 import ChatThread from "@/components/inbox/ChatThread";
 import { countryFlag } from "@/lib/inbox/country-flag";
-import { deriveConversationInteractionState } from "@/lib/inbox/sidechat";
+import {
+  deriveConversationInteractionState,
+  type SidechatPresentationStatus,
+} from "@/lib/inbox/sidechat";
 import { cn } from "@/lib/utils";
 
 interface FocusViewProps {
@@ -23,6 +26,8 @@ interface FocusViewProps {
   setDraft: Dispatch<SetStateAction<string>>;
   onStartSidechat: () => void;
   sidechatOpen: boolean;
+  sidechatExists: boolean;
+  sidechatStatus: SidechatPresentationStatus;
   publicComposerFocusRequest: number;
   embedded?: boolean;
 }
@@ -56,6 +61,8 @@ export default function FocusView({
   setDraft,
   onStartSidechat,
   sidechatOpen,
+  sidechatExists,
+  sidechatStatus,
   publicComposerFocusRequest,
   embedded = false,
 }: FocusViewProps) {
@@ -180,6 +187,8 @@ export default function FocusView({
                       kind: "public",
                       onStartSidechat,
                       sidechatOpen,
+                      sidechatExists,
+                      sidechatStatus,
                     }}
                   />
                 )}

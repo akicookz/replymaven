@@ -2,6 +2,10 @@ import type {
   MessagePresentationAction,
   MessageRole,
 } from "./types";
+import type {
+  MavenProjectState,
+  SidechatSummary,
+} from "../../../shared/sidechat-agent";
 
 export type ChatPerspective = "public" | "sidechat";
 export type SidechatPresentationStatus =
@@ -43,7 +47,8 @@ interface AddToReplyIntent {
   focusPublicComposer: true;
   caret: "end";
   send: false;
-  keepSidechatOpen: true;
+  keepSidechatOpen: boolean;
+  focusTiming: "immediate" | "after_pane_close";
 }
 
 interface ConversationInteractionState {
@@ -118,15 +123,93 @@ export function deriveMessageActions(
   };
 }
 
-export function deriveAddToReplyIntent(draft: string): AddToReplyIntent {
+export function deriveAddToReplyIntent(
+  draft: string,
+  viewportWidth = 1_536,
+): AddToReplyIntent {
+  const mobile = viewportWidth < 768;
   return {
     draft,
     draftMode: "replace",
     focusPublicComposer: true,
     caret: "end",
     send: false,
-    keepSidechatOpen: true,
+    keepSidechatOpen: !mobile,
+    focusTiming: mobile ? "after_pane_close" : "immediate",
   };
+}
+
+interface AcceptedPublicDraftInput {
+  transferConversationId: string;
+  selectedConversationId: string | null;
+  capturedText: string;
+  currentText: string;
+}
+
+interface SidechatEntryInput {
+  archived: boolean;
+  exists: boolean;
+  conversationId: string;
+  messageId: string;
+  publicDraft: string;
+}
+
+interface SidechatEntryPlan {
+  open: true;
+  transfer: {
+    conversationId: string;
+    messageId: string;
+    textSnapshot: string;
+    submitted: false;
+  } | null;
+}
+
+export function shouldClearAcceptedPublicDraft(
+  input: AcceptedPublicDraftInput,
+): boolean {
+  return input.transferConversationId === input.selectedConversationId &&
+    input.capturedText === input.currentText;
+}
+
+export function planSidechatEntry(
+  input: SidechatEntryInput,
+): SidechatEntryPlan | null {
+  if (input.archived && !input.exists) return null;
+  return {
+    open: true,
+    transfer: input.exists
+      ? null
+      : {
+          conversationId: input.conversationId,
+          messageId: input.messageId,
+          textSnapshot: input.publicDraft,
+          submitted: false,
+        },
+  };
+}
+
+export function mergeSidechatSummaryStatuses(
+  seeded: SidechatSummary[],
+  live: MavenProjectState | undefined,
+): Record<string, SidechatPresentationStatus> {
+  const latest: Record<string, SidechatSummary> = {};
+  for (const summary of seeded) {
+    const current = latest[summary.conversationId];
+    if (!current || summary.updatedAt >= current.updatedAt) {
+      latest[summary.conversationId] = summary;
+    }
+  }
+  for (const summary of Object.values(live?.sidechats ?? {})) {
+    const current = latest[summary.conversationId];
+    if (!current || summary.updatedAt >= current.updatedAt) {
+      latest[summary.conversationId] = summary;
+    }
+  }
+  const statuses: Record<string, SidechatPresentationStatus> = {};
+  for (const summary of Object.values(latest)) {
+    statuses[summary.conversationId] = summary.status;
+  }
+  return statuses;
 }
 
 export function deriveSidechatPaneMode(viewportWidth: number): SidechatPaneMode {

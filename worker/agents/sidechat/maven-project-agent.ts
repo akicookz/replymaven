@@ -41,23 +41,41 @@ function upsertSidechatSummary(
 
 export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   initialState: MavenProjectState = { sidechats: {} };
+  private readonly sidechatRegistrationLocks = new Map<string, Promise<void>>();
 
   async registerSidechat(
     conversationId: string,
   ): Promise<{ childName: string; created: boolean }> {
-    const childName = toSidechatChildName(conversationId);
-    const created = !this.hasSubAgent(MavenChatAgent, childName);
-    await this.subAgent(MavenChatAgent, childName);
-    const existing = this.state.sidechats[conversationId];
-    this.setState(
-      upsertSidechatSummary(
-        this.state,
-        conversationId,
-        childName,
-        existing?.status ?? "idle",
-      ),
-    );
-    return { childName, created };
+    const previousRegistration =
+      this.sidechatRegistrationLocks.get(conversationId) ?? Promise.resolve();
+    let releaseRegistration = (): void => undefined;
+    const registrationComplete = new Promise<void>((resolve) => {
+      releaseRegistration = resolve;
+    });
+    const lock = previousRegistration.then(() => registrationComplete);
+    this.sidechatRegistrationLocks.set(conversationId, lock);
+
+    await previousRegistration;
+    try {
+      const childName = toSidechatChildName(conversationId);
+      const created = !this.hasSubAgent(MavenChatAgent, childName);
+      await this.subAgent(MavenChatAgent, childName);
+      const existing = this.state.sidechats[conversationId];
+      this.setState(
+        upsertSidechatSummary(
+          this.state,
+          conversationId,
+          childName,
+          existing?.status ?? "idle",
+        ),
+      );
+      return { childName, created };
+    } finally {
+      releaseRegistration();
+      if (this.sidechatRegistrationLocks.get(conversationId) === lock) {
+        this.sidechatRegistrationLocks.delete(conversationId);
+      }
+    }
   }
 
   async getSidechatRegistration(

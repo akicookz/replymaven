@@ -2,7 +2,9 @@ import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { countryFlag } from "@/lib/inbox/country-flag";
 import type { Conversation } from "@/lib/inbox/types";
+import type { SidechatPresentationStatus } from "@/lib/inbox/sidechat";
 import PresenceDot from "./PresenceDot";
+import SidechatStatusDot from "./SidechatStatusDot";
 
 interface ConversationRowProps {
   conversation: Conversation;
@@ -10,6 +12,7 @@ interface ConversationRowProps {
   /** Heuristic: lastMessage.role === "visitor" → visitor awaiting reply */
   isUnread: boolean;
   onSelect: (id: string, options: { shiftKey: boolean }) => void;
+  sidechatStatus?: SidechatPresentationStatus;
 }
 
 function formatTime(isoString: string): string {
@@ -31,6 +34,7 @@ export default function ConversationRow({
   isSelected,
   isUnread,
   onSelect,
+  sidechatStatus = "idle",
 }: ConversationRowProps) {
   // Derive country from metadata JSON — guard parse errors so a malformed
   // value doesn't crash the list.
@@ -129,6 +133,10 @@ export default function ConversationRow({
             />
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            <SidechatStatusDot
+              status={sidechatStatus}
+              className={isSelected ? "ring-1 ring-white/70" : undefined}
+            />
             {isResolved && (
               <Check
                 size={13}

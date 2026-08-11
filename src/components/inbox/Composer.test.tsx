@@ -222,6 +222,8 @@ describe("Composer contracts", () => {
         mode={{
           kind: "sidechat",
           disabled: true,
+          busy: false,
+          onSend: () => undefined,
         }}
       />,
     );
@@ -374,6 +376,8 @@ describe("ReadingPane constrained header", () => {
             onDeleteMessage={() => undefined}
             onStartSidechat={() => undefined}
             sidechatOpen={sidechatOpen}
+            sidechatExists={sidechatOpen}
+            sidechatStatus={sidechatOpen ? "working" : "idle"}
             publicComposerFocusRequest={0}
           />
         </QueryClientProvider>
@@ -423,6 +427,8 @@ describe("archived FocusView", () => {
         setDraft={() => undefined}
         onStartSidechat={() => undefined}
         sidechatOpen={false}
+        sidechatExists
+        sidechatStatus="ready"
         publicComposerFocusRequest={0}
       />,
     );

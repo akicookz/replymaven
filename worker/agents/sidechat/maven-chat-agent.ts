@@ -49,6 +49,25 @@ export function buildTurnAcceptedPart(messageId: string) {
   };
 }
 
+export function readSubmittedUiMessageId(
+  body: Record<string, unknown> | undefined,
+  messages: UIMessage[],
+): string | null {
+  const submittedMessageId = body?.submittedMessageId;
+  if (
+    typeof submittedMessageId !== "string" ||
+    submittedMessageId.length === 0 ||
+    submittedMessageId.length > 200
+  ) {
+    return null;
+  }
+  const submittedMessageExists = messages.some(
+    (message) =>
+      message.role === "user" && message.id === submittedMessageId,
+  );
+  return submittedMessageExists ? submittedMessageId : null;
+}
+
 export function selectSidechatModelMessages(
   messages: UIMessage[],
 ): UIMessage[] {
@@ -113,6 +132,10 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
     }
 
     const conversationId = conversationIdFromChildName(this.name);
+    const submittedMessageId = readSubmittedUiMessageId(
+      options.body,
+      this.messages,
+    );
     const directParent = this.parentPath.at(-1);
     if (
       claims.conversationId !== conversationId ||
@@ -129,7 +152,9 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
         return "The Sidechat response failed.";
       },
       execute: async ({ writer }) => {
-        writer.write(buildTurnAcceptedPart(options.requestId));
+        if (submittedMessageId) {
+          writer.write(buildTurnAcceptedPart(submittedMessageId));
+        }
         let parentForFailure: SidechatStatusUpdater | null = null;
         try {
           const parent = await this.parentAgent(MavenProjectAgent);

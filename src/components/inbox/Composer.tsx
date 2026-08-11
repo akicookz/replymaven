@@ -3,15 +3,27 @@ import type { Dispatch, SetStateAction } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Paperclip, ArrowUp, X, Loader2, ImagePlus } from "lucide-react";
-import { deriveComposerShiftTabIntent } from "@/lib/inbox/sidechat";
+import {
+  deriveComposerShiftTabIntent,
+  type SidechatPresentationStatus,
+} from "@/lib/inbox/sidechat";
+import SidechatStatusDot from "./SidechatStatusDot";
 
 export type ComposerMode =
   | {
       kind: "public";
       onStartSidechat: () => void;
       sidechatOpen: boolean;
+      sidechatExists?: boolean;
+      sidechatStatus?: SidechatPresentationStatus;
     }
-  | { kind: "sidechat"; disabled: true };
+  | {
+      kind: "sidechat";
+      disabled: boolean;
+      busy: boolean;
+      onSend: (text: string) => void;
+      onStop?: () => void;
+    };
 
 interface ComposerBaseProps {
   draft: string;
@@ -205,6 +217,10 @@ export default function Composer(props: ComposerProps) {
 
   function send() {
     if (props.mode.kind === "sidechat") {
+      const text = draft.trim();
+      if (!text || props.mode.disabled || props.mode.busy) return;
+      props.mode.onSend(text);
+      setDraft("");
       return;
     }
     if (!("onSend" in props)) return;
@@ -241,10 +257,11 @@ export default function Composer(props: ComposerProps) {
   }
 
   const canSend = mode.kind === "sidechat"
-    ? false
+    ? !mode.disabled && !mode.busy && draft.trim().length > 0
     : (draft.trim().length > 0 || pendingImages.length > 0) &&
       uploadingCount === 0;
-  const publicSidechatLabel = mode.kind === "public" && mode.sidechatOpen
+  const publicSidechatLabel = mode.kind === "public" &&
+      (mode.sidechatOpen || mode.sidechatExists)
     ? "Open sidechat"
     : "Start sidechat";
 
@@ -312,7 +329,7 @@ export default function Composer(props: ComposerProps) {
             ? "Ask Maven…"
             : "Reply…"}
           rows={1}
-          disabled={mode.kind === "sidechat"}
+          disabled={mode.kind === "sidechat" && mode.disabled}
           className="w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring/70"
           style={{ fontSize: "14.5px", lineHeight: "1.5" }}
         />
@@ -360,6 +377,9 @@ export default function Composer(props: ComposerProps) {
                   onClick={props.mode.onStartSidechat}
                   title={`${publicSidechatLabel} (Shift+Tab)`}
                 >
+                  {props.mode.sidechatStatus && (
+                    <SidechatStatusDot status={props.mode.sidechatStatus} />
+                  )}
                   {publicSidechatLabel}
                   <span className="keycap">⇧⇥</span>
                 </button>
@@ -374,6 +394,18 @@ export default function Composer(props: ComposerProps) {
                   <span className="keycap">E</span>
                 </button>
               </>
+            )}
+
+            {props.mode.kind === "sidechat" &&
+              props.mode.busy &&
+              props.mode.onStop && (
+              <button
+                type="button"
+                className="flex min-h-10 shrink-0 items-center whitespace-nowrap text-[12px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+                onClick={props.mode.onStop}
+              >
+                Stop
+              </button>
             )}
 
             {/* Send button */}

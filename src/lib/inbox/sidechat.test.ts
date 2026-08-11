@@ -114,6 +114,11 @@ describe("Sidechat presentation helpers", () => {
       caret: "end",
       send: false,
       keepSidechatOpen: true,
+      focusTiming: "immediate",
+    });
+    expect(deriveAddToReplyIntent("Exact draft", 390)).toMatchObject({
+      keepSidechatOpen: false,
+      focusTiming: "after_pane_close",
     });
   });
 

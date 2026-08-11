@@ -1,9 +1,13 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { Conversation, Message } from "@/lib/inbox/types";
-import { deriveConversationInteractionState } from "@/lib/inbox/sidechat";
+import {
+  deriveConversationInteractionState,
+  type SidechatPresentationStatus,
+} from "@/lib/inbox/sidechat";
 import { cn } from "@/lib/utils";
 import ChatThread from "./ChatThread";
 import Composer from "./Composer";
+import SidechatStatusDot from "./SidechatStatusDot";
 
 interface SidechatPaneProps {
   open: boolean;
@@ -14,6 +18,18 @@ interface SidechatPaneProps {
   setDraft: Dispatch<SetStateAction<string>>;
   onAddToReply: (draft: string) => void;
   onClose: () => void;
+  status: "submitted" | "streaming" | "ready" | "error";
+  presentationStatus?: SidechatPresentationStatus;
+  error: Error | undefined;
+  safeActivity: string | null;
+  onSend: (text: string) => void;
+  onStop: () => void;
+  onRetry: () => void;
+  onApproval: (
+    approvalId: string,
+    mode: "always" | "once",
+  ) => void;
+  composerDisabled?: boolean;
 }
 
 export default function SidechatPane({
@@ -25,11 +41,31 @@ export default function SidechatPane({
   setDraft,
   onAddToReply,
   onClose,
+  status,
+  presentationStatus = "idle",
+  error,
+  safeActivity,
+  onSend,
+  onStop,
+  onRetry,
+  onApproval,
+  composerDisabled = false,
 }: SidechatPaneProps) {
   const interaction = deriveConversationInteractionState(conversation.archivedAt);
   const contextSubject = customerFirstName
     ? `${customerFirstName}'s`
     : "this conversation's";
+  const busy = status === "submitted" || status === "streaming";
+
+  function handleApprovalAction(
+    messageId: string,
+    mode: "always" | "once",
+  ): void {
+    const message = messages.find((candidate) => candidate.id === messageId);
+    const action = message?.presentationAction;
+    if (action?.type !== "approval") return;
+    onApproval(action.approvalId, mode);
+  }
 
   return (
     <aside
@@ -46,9 +82,12 @@ export default function SidechatPane({
     >
       <header className="glass-bar flex min-h-[64px] items-center gap-3 px-4 py-3">
         <div className="min-w-0 flex-1">
-          <h2 className="text-balance text-[15px] font-semibold leading-tight text-ink-1">
-            Sidechat
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-balance text-[15px] font-semibold leading-tight text-ink-1">
+              Sidechat
+            </h2>
+            <SidechatStatusDot status={presentationStatus} />
+          </div>
           <p className="mt-0.5 break-words text-pretty text-[12px] leading-snug text-ink-6">
             Private · Maven has {contextSubject} context
           </p>
@@ -78,14 +117,29 @@ export default function SidechatPane({
           conversation={conversation}
           readOnly={!interaction.showMessageActions}
           onAddToReply={onAddToReply}
+          onApprovalAction={handleApprovalAction}
           contentClassName="!px-4 !pt-3 !pb-3"
           tail={(
-            <p
-              data-sidechat-runtime-unavailable
-              className="my-3 text-pretty text-[12px] leading-normal text-ink-6"
-            >
-              Sidechat runtime is not connected in this development build.
-            </p>
+            <div className="my-3 min-h-10 text-pretty text-[12px] leading-normal text-ink-6">
+              {safeActivity && (
+                <p data-sidechat-safe-activity>{safeActivity}</p>
+              )}
+              {!safeActivity && busy && (
+                <p data-sidechat-working>Maven is working…</p>
+              )}
+              {status === "error" && error && (
+                <div className="flex min-h-10 items-center gap-3">
+                  <span>Sidechat could not finish.</span>
+                  <button
+                    type="button"
+                    className="min-h-10 shrink-0 font-semibold text-ink-3 underline-offset-4 hover:underline motion-safe:transition-transform motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+                    onClick={onRetry}
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         />
       </div>
@@ -95,7 +149,13 @@ export default function SidechatPane({
           draft={draft}
           setDraft={setDraft}
           convId={conversation.id}
-          mode={{ kind: "sidechat", disabled: true }}
+          mode={{
+            kind: "sidechat",
+            disabled: composerDisabled,
+            busy,
+            onSend,
+            onStop,
+          }}
         />
       )}
     </aside>

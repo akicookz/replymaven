@@ -22,6 +22,7 @@ import type {
   Conversation,
   InboxCounts,
 } from "@/lib/inbox/types";
+import type { SidechatPresentationStatus } from "@/lib/inbox/sidechat";
 import { cn } from "@/lib/utils";
 import { useMobileSidebar } from "@/lib/mobile-sidebar";
 import {
@@ -70,6 +71,7 @@ interface MessageListProps {
   /** Extra classes for the root (used to hide the list on mobile when a
    *  conversation is open). */
   className?: string;
+  sidechatStatuses?: Readonly<Record<string, SidechatPresentationStatus>>;
 }
 
 // Filter-appropriate noun for the "N <noun> · M unread" subtitle.
@@ -128,6 +130,7 @@ export default function MessageList({
   onMarkAllRead,
   onRefresh,
   className,
+  sidechatStatuses = {},
 }: MessageListProps) {
   // Controlled so the overflow actions can close the menu after firing.
   const [moreOpen, setMoreOpen] = useState(false);
@@ -435,6 +438,7 @@ export default function MessageList({
               : conv.id === selectedId}
             isUnread={isUnread(conv)}
             onSelect={onSelect}
+            sidechatStatus={sidechatStatuses[conv.id] ?? "idle"}
           />
         ))}
 

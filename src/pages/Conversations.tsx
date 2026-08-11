@@ -5,7 +5,7 @@ import {
   useMemo,
   useCallback,
 } from "react";
-import type { SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
   useQuery,
@@ -19,6 +19,11 @@ import type {
   CustomerListItem,
   ConversationCustomerResponse,
 } from "../../shared/customer-types";
+import type {
+  MavenProjectState,
+  SidechatSessionResponse,
+  SidechatSummarySessionResponse,
+} from "../../shared/sidechat-agent";
 import { cn } from "@/lib/utils";
 import { serializeMessageImageUrls } from "../../shared/message-images";
 import { useConversationWs } from "@/lib/use-conversation-ws";
@@ -43,7 +48,22 @@ import type {
 } from "@/lib/inbox/types";
 import {
   deriveAddToReplyIntent,
+  mergeSidechatSummaryStatuses,
+  planSidechatEntry,
+  type SidechatPresentationStatus,
 } from "@/lib/inbox/sidechat";
+import {
+  planInitialSidechatSubmission,
+  planFailedSidechatRetry,
+  reduceAcceptedSidechatTransfer,
+  deriveNativeSidechatUiStatus,
+  isSidechatSessionUsable,
+  useSidechatAgent,
+  useSidechatParentState,
+  useSidechatSession,
+  useSidechatSummarySession,
+  type PendingSidechatTransfer,
+} from "@/hooks/use-sidechat-agent";
 import MessageList from "@/components/inbox/MessageList";
 import ReadingPane from "@/components/inbox/ReadingPane";
 import FocusView from "@/components/inbox/FocusView";
@@ -110,6 +130,168 @@ interface ConversationDetail {
 interface BulkConversationMutationInput {
   conversationIds: string[];
   action: BulkConversationAction;
+}
+
+interface SidechatParentStateBridgeProps {
+  session: SidechatSummarySessionResponse;
+  onState: (state: MavenProjectState | undefined) => void;
+}
+
+function SidechatParentStateBridge({
+  session,
+  onState,
+}: SidechatParentStateBridgeProps) {
+  const state = useSidechatParentState(session);
+  useEffect(() => onState(state), [onState, state]);
+  return null;
+}
+
+interface NativeSidechatPaneProps {
+  open: boolean;
+  conversation: Conversation;
+  customerFirstName: string | null;
+  session: SidechatSessionResponse;
+  transfer: PendingSidechatTransfer | null;
+  draft: string;
+  setDraft: Dispatch<SetStateAction<string>>;
+  onSubmissionStarted: (messageId: string) => void;
+  onInitialSubmissionSkipped: (messageId: string) => void;
+  onTurnAccepted: (messageId: string) => void;
+  onAddToReply: (draft: string) => void;
+  onClose: () => void;
+}
+
+function NativeSidechatPane({
+  open,
+  conversation,
+  customerFirstName,
+  session,
+  transfer,
+  draft,
+  setDraft,
+  onSubmissionStarted,
+  onInitialSubmissionSkipped,
+  onTurnAccepted,
+  onAddToReply,
+  onClose,
+}: NativeSidechatPaneProps) {
+  const attemptedMessageIds = useRef(new Set<string>());
+  const [safeActivity, setSafeActivity] = useState<string | null>(null);
+  const sidechat = useSidechatAgent({
+    session,
+    onTurnAccepted,
+    onSafeActivity(activity) {
+      setSafeActivity(activity.status === "started" ? activity.label : null);
+    },
+  });
+  const trustedDefault = customerFirstName
+    ? `Help me respond to ${customerFirstName}.`
+    : "Help me respond to this conversation.";
+  const sendSidechatMessage = sidechat.send;
+
+  useEffect(() => {
+    if (
+      !transfer ||
+      transfer.conversationId !== conversation.id ||
+      transfer.submitted ||
+      attemptedMessageIds.current.has(transfer.messageId)
+    ) {
+      return;
+    }
+    const submission = planInitialSidechatSubmission({
+      session,
+      messageId: transfer.messageId,
+      publicTextSnapshot: transfer.textSnapshot,
+      trustedDefault,
+    });
+    if (!submission) {
+      onInitialSubmissionSkipped(transfer.messageId);
+      return;
+    }
+    attemptedMessageIds.current.add(submission.messageId);
+    onSubmissionStarted(submission.messageId);
+    void sendSidechatMessage(submission.text, submission.messageId).catch(() => {
+      // useAgentChat exposes the sanitized failure through `error`; the
+      // captured public draft remains until the matching acceptance arrives.
+    });
+  }, [
+    conversation.id,
+    onInitialSubmissionSkipped,
+    onSubmissionStarted,
+    session,
+    sendSidechatMessage,
+    transfer,
+    trustedDefault,
+  ]);
+
+  const hasApproval = sidechat.messages.some(
+    (message) => message.presentationAction?.type === "approval",
+  );
+  const hasReplyDraft = sidechat.messages.some(
+    (message) => message.presentationAction?.type === "add_to_reply",
+  );
+  const sidechatUiStatus = deriveNativeSidechatUiStatus({
+    status: sidechat.status,
+    isServerStreaming: sidechat.isServerStreaming,
+    isRecovering: sidechat.isRecovering,
+  });
+  const presentationStatus: SidechatPresentationStatus =
+    sidechatUiStatus === "error"
+      ? "failed"
+      : sidechatUiStatus === "streaming"
+        ? "working"
+        : hasApproval
+          ? "waiting_approval"
+          : hasReplyDraft
+            ? "ready"
+            : "idle";
+
+  return (
+    <SidechatPane
+      open={open}
+      conversation={conversation}
+      customerFirstName={customerFirstName}
+      messages={sidechat.messages}
+      draft={draft}
+      setDraft={setDraft}
+      onAddToReply={onAddToReply}
+      onClose={onClose}
+      status={sidechatUiStatus}
+      presentationStatus={presentationStatus}
+      error={sidechat.error}
+      safeActivity={safeActivity}
+      onSend={(text) => {
+        setSafeActivity(null);
+        void sidechat.send(text).catch(() => undefined);
+      }}
+      onStop={() => {
+        void sidechat.stop();
+      }}
+      onRetry={() => {
+        setSafeActivity(null);
+        const retryPlan = planFailedSidechatRetry({
+          transfer,
+          persistedMessageIds: new Set(
+            sidechat.nativeMessages.map((message) => message.id),
+          ),
+          trustedDefault,
+        });
+        if (retryPlan.kind === "resubmit") {
+          void sidechat.send(retryPlan.text, retryPlan.messageId).catch(
+            () => undefined,
+          );
+          return;
+        }
+        if (retryPlan.acceptedMessageId) {
+          onTurnAccepted(retryPlan.acceptedMessageId);
+        }
+        void sidechat.retry().catch(() => undefined);
+      }}
+      onApproval={(approvalId) => {
+        void sidechat.approve(approvalId, true).catch(() => undefined);
+      }}
+    />
+  );
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -200,10 +382,17 @@ function Conversations() {
   );
   const [draft, setDraft] = useState("");
   const [publicComposerFocusRequest, setPublicComposerFocusRequest] = useState(0);
+  const [focusPublicComposerAfterClose, setFocusPublicComposerAfterClose] =
+    useState(false);
   const [sidechatOpen, setSidechatOpen] = useState(false);
   const [sidechatDrafts, setSidechatDrafts] = useState<Record<string, string>>(
     {},
   );
+  const [pendingSidechatTransfer, setPendingSidechatTransfer] =
+    useState<PendingSidechatTransfer | null>(null);
+  const [liveSidechatState, setLiveSidechatState] =
+    useState<MavenProjectState | undefined>();
+  const sidechatSummarySession = useSidechatSummarySession(projectId);
   const view = searchParams.get("focus") === "true" ? "focus" : "split";
   const setView = useCallback(
     (nextView: "split" | "focus") => {
@@ -219,6 +408,22 @@ function Conversations() {
     },
     [setSearchParams],
   );
+  const handleSidechatParentState = useCallback(
+    (state: MavenProjectState | undefined) => {
+      setLiveSidechatState(state);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    setLiveSidechatState(undefined);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (sidechatOpen || !focusPublicComposerAfterClose) return;
+    setFocusPublicComposerAfterClose(false);
+    setPublicComposerFocusRequest((request) => request + 1);
+  }, [focusPublicComposerAfterClose, sidechatOpen]);
   // List sort order + "unread only" filter, surfaced by the list's sort/filter
   // control. Both apply client-side over the loaded page.
   const [sort, setSort] = useState<InboxSort>("newest");
@@ -1209,6 +1414,23 @@ function Conversations() {
   const customerFirstName = (
     selectedCustomer?.name ?? selected?.visitorName ?? ""
   ).trim().split(/\s+/u)[0] || null;
+  const sidechatStatuses = useMemo(() => {
+    return mergeSidechatSummaryStatuses(
+      sidechatSummarySession.data?.summaries ?? [],
+      liveSidechatState,
+    );
+  }, [liveSidechatState, sidechatSummarySession.data?.summaries]);
+  const selectedSidechatStatus = selected
+    ? sidechatStatuses[selected.id] ?? "idle"
+    : "idle";
+  const selectedSidechatExists = selected
+    ? selected.id in sidechatStatuses
+    : false;
+  const sidechatSession = useSidechatSession({
+    projectId,
+    conversationId: selected?.id ?? null,
+    enabled: sidechatOpen && Boolean(selected),
+  });
 
   const setCustomerMutation = useMutation({
     mutationFn: (options: {
@@ -1340,8 +1562,17 @@ function Conversations() {
   }
 
   function handleStartSidechat(): void {
-    if (!selectedConvo) return;
-    setSidechatOpen(true);
+    if (!selectedConvo || !selected) return;
+    const entry = planSidechatEntry({
+      archived: Boolean(selected.archivedAt),
+      exists: selectedSidechatExists,
+      conversationId: selectedConvo,
+      messageId: crypto.randomUUID(),
+      publicDraft: draft,
+    });
+    if (!entry) return;
+    setPendingSidechatTransfer(entry.transfer);
+    setSidechatOpen(entry.open);
   }
 
   function handleCloseSidechat(): void {
@@ -1350,10 +1581,43 @@ function Conversations() {
 
   function handleAddToReply(sidechatReplyDraft: string): void {
     if (selected?.archivedAt) return;
-    const intent = deriveAddToReplyIntent(sidechatReplyDraft);
+    const intent = deriveAddToReplyIntent(
+      sidechatReplyDraft,
+      typeof window === "undefined" ? 1_536 : window.innerWidth,
+    );
     setDraft(intent.draft);
-    if (intent.focusPublicComposer) {
+    if (!intent.keepSidechatOpen) {
+      setSidechatOpen(false);
+      setFocusPublicComposerAfterClose(true);
+    } else if (intent.focusPublicComposer) {
       setPublicComposerFocusRequest((request) => request + 1);
+    }
+  }
+
+  function handleSidechatSubmissionStarted(messageId: string): void {
+    setPendingSidechatTransfer((current) =>
+      current?.messageId === messageId
+        ? { ...current, submitted: true }
+        : current,
+    );
+  }
+
+  function handleInitialSidechatSubmissionSkipped(messageId: string): void {
+    setPendingSidechatTransfer((current) =>
+      current?.messageId === messageId ? null : current,
+    );
+  }
+
+  function handleSidechatTurnAccepted(messageId: string): void {
+    const result = reduceAcceptedSidechatTransfer({
+      transfer: pendingSidechatTransfer,
+      acceptedMessageId: messageId,
+      selectedConversationId: selectedConvo,
+      currentPublicDraft: draft,
+    });
+    if (result.nextDraft !== draft) setDraft(result.nextDraft);
+    if (result.transfer !== pendingSidechatTransfer) {
+      setPendingSidechatTransfer(result.transfer);
     }
   }
 
@@ -1635,18 +1899,53 @@ function Conversations() {
   ]);
 
   // ── Render ────────────────────────────────────────────────────────────────
-  const sidechatPane = selected ? (
-    <SidechatPane
-      open={sidechatOpen}
-      conversation={selected}
-      customerFirstName={customerFirstName}
-      messages={[]}
-      draft={sidechatDraft}
-      setDraft={setSelectedSidechatDraft}
-      onAddToReply={handleAddToReply}
-      onClose={handleCloseSidechat}
-    />
-  ) : null;
+  const matchingSidechatSession = selected &&
+      sidechatSession.data?.childName === `sc_${selected.id}` &&
+      isSidechatSessionUsable(sidechatSession.data)
+    ? sidechatSession.data
+    : null;
+  const sidechatPane = selected
+    ? matchingSidechatSession
+      ? (
+        <NativeSidechatPane
+          open={sidechatOpen}
+          conversation={selected}
+          customerFirstName={customerFirstName}
+          session={matchingSidechatSession}
+          transfer={pendingSidechatTransfer}
+          draft={sidechatDraft}
+          setDraft={setSelectedSidechatDraft}
+          onSubmissionStarted={handleSidechatSubmissionStarted}
+          onInitialSubmissionSkipped={handleInitialSidechatSubmissionSkipped}
+          onTurnAccepted={handleSidechatTurnAccepted}
+          onAddToReply={handleAddToReply}
+          onClose={handleCloseSidechat}
+        />
+      )
+      : (
+        <SidechatPane
+          open={sidechatOpen}
+          conversation={selected}
+          customerFirstName={customerFirstName}
+          messages={[]}
+          draft={sidechatDraft}
+          setDraft={setSelectedSidechatDraft}
+          onAddToReply={handleAddToReply}
+          onClose={handleCloseSidechat}
+          status={sidechatSession.error ? "error" : "submitted"}
+          presentationStatus={sidechatSession.error ? "failed" : "working"}
+          error={sidechatSession.error ?? undefined}
+          safeActivity={sidechatSession.error ? null : "Connecting…"}
+          onSend={() => undefined}
+          onStop={() => undefined}
+          onRetry={() => {
+            void sidechatSession.refetch();
+          }}
+          onApproval={() => undefined}
+          composerDisabled
+        />
+      )
+    : null;
 
   if (view === "focus" && selected && !selected.archivedAt) {
     const focusView = (
@@ -1663,16 +1962,26 @@ function Conversations() {
         setDraft={setDraft}
         onStartSidechat={handleStartSidechat}
         sidechatOpen={sidechatOpen}
+        sidechatExists={selectedSidechatExists}
+        sidechatStatus={selectedSidechatStatus}
         publicComposerFocusRequest={publicComposerFocusRequest}
         embedded
       />
     );
     return (
-      <FocusSidechatLayout
-        sidechatOpen={sidechatOpen}
-        focusView={focusView}
-        sidechatPane={sidechatPane}
-      />
+      <>
+        {sidechatSummarySession.data && (
+          <SidechatParentStateBridge
+            session={sidechatSummarySession.data}
+            onState={handleSidechatParentState}
+          />
+        )}
+        <FocusSidechatLayout
+          sidechatOpen={sidechatOpen}
+          focusView={focusView}
+          sidechatPane={sidechatPane}
+        />
+      </>
     );
   }
 
@@ -1706,6 +2015,7 @@ function Conversations() {
         onUnreadOnlyChange={setUnreadOnly}
         onMarkAllRead={handleMarkAllRead}
         onRefresh={handleRefresh}
+        sidechatStatuses={sidechatStatuses}
         // Mobile: collapse the list once a conversation is open so the chat +
         // composer take the full screen (desktop keeps the split).
         className={cn(
@@ -1744,6 +2054,8 @@ function Conversations() {
           onBack={() => setSelectedConvo(null)}
           onStartSidechat={handleStartSidechat}
           sidechatOpen={sidechatOpen}
+          sidechatExists={selectedSidechatExists}
+          sidechatStatus={selectedSidechatStatus}
           publicComposerFocusRequest={publicComposerFocusRequest}
           className={cn(
             selectedIds.size > 0 && "hidden md:flex",
@@ -1758,6 +2070,12 @@ function Conversations() {
         </div>
       )}
       {sidechatPane}
+      {sidechatSummarySession.data && (
+        <SidechatParentStateBridge
+          session={sidechatSummarySession.data}
+          onState={handleSidechatParentState}
+        />
+      )}
 
       <CustomerFormDialog
         projectId={projectId!}

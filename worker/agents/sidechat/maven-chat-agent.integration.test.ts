@@ -152,8 +152,8 @@ describe("native MavenChatAgent transcript", () => {
       fakeAgent as never,
       async () => undefined,
       {
-        requestId: "submitted-message-42",
-        body: { token },
+        requestId: "transport-request-42",
+        body: { token, submittedMessageId: "submitted-message-42" },
       },
     );
     const body = await response.text();
@@ -161,16 +161,18 @@ describe("native MavenChatAgent transcript", () => {
     expect(response.status).toBe(200);
     expect(body).toContain('"type":"data-turn-accepted"');
     expect(body).toContain('"messageId":"submitted-message-42"');
+    expect(body).not.toContain('"messageId":"transport-request-42"');
     expect(body).toContain("Working draft");
     expect(summaryStatuses).toEqual(["working"]);
 
     failContext = true;
+    fakeAgent.messages = [userMessage("submitted-message-43", "Try again")];
     const failedResponse = await MavenChatAgent.prototype.onChatMessage.call(
       fakeAgent as never,
       async () => undefined,
       {
-        requestId: "submitted-message-43",
-        body: { token },
+        requestId: "transport-request-43",
+        body: { token, submittedMessageId: "submitted-message-43" },
       },
     );
     const failedBody = await failedResponse.text();
@@ -178,6 +180,18 @@ describe("native MavenChatAgent transcript", () => {
     expect(failedBody).toContain('"messageId":"submitted-message-43"');
     expect(failedBody).toContain("The Sidechat response failed.");
     expect(summaryStatuses).toEqual(["working", "working", "failed"]);
+
+    failContext = false;
+    const mismatchedResponse = await MavenChatAgent.prototype.onChatMessage.call(
+      fakeAgent as never,
+      async () => undefined,
+      {
+        requestId: "transport-request-44",
+        body: { token, submittedMessageId: "not-the-current-user-message" },
+      },
+    );
+    const mismatchedBody = await mismatchedResponse.text();
+    expect(mismatchedBody).not.toContain('"type":"data-turn-accepted"');
   });
 
   nativeTest(

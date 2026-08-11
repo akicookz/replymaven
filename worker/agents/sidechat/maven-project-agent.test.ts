@@ -99,6 +99,30 @@ describe("MavenProjectAgent child registry", () => {
     expect(agent.state).toEqual({ sidechats: {} });
   });
 
+  test("reports only one newly-created child across concurrent starts", async () => {
+    const agent = createAgent();
+    let registered = false;
+    let releaseCreation: (() => void) | undefined;
+    const creationGate = new Promise<void>((resolve) => {
+      releaseCreation = resolve;
+    });
+    agent.hasSubAgent = mock(() => registered);
+    agent.subAgent = mock(async () => {
+      await creationGate;
+      registered = true;
+      return {};
+    });
+
+    const first = agent.registerSidechat("conversation-1");
+    const second = agent.registerSidechat("conversation-1");
+    releaseCreation?.();
+
+    expect(await Promise.all([first, second])).toEqual([
+      { childName: "sc_conversation-1", created: true },
+      { childName: "sc_conversation-1", created: false },
+    ]);
+  });
+
   test("returns 404 for a guessed child without invoking subAgent", async () => {
     const agent = createAgent();
     const response = await agent.onBeforeSubAgent(

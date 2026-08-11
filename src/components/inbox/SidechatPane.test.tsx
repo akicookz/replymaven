@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { JSDOM } from "jsdom";
@@ -13,8 +13,49 @@ interface RenderResult {
 
 const rendered: RenderResult[] = [];
 
+interface PaneHarnessProps {
+  options?: Parameters<typeof renderPane>[0];
+}
+
+function PaneHarness({ options }: PaneHarnessProps) {
+  const [draft, setDraft] = useState("");
+  return (
+    <SidechatPane
+      open={options?.open ?? true}
+      conversation={makeConversation(options?.archived ?? false)}
+      customerFirstName="Ada"
+      messages={options?.messages ?? []}
+      draft={draft}
+      setDraft={setDraft}
+      onAddToReply={options?.onAddToReply ?? (() => undefined)}
+      onClose={options?.onClose ?? (() => undefined)}
+      status={options?.status ?? "ready"}
+      error={options?.status === "error" ? new Error("failed") : undefined}
+      safeActivity={options?.safeActivity ?? null}
+      onSend={options?.onSend ?? (() => undefined)}
+      onStop={options?.onStop ?? (() => undefined)}
+      onRetry={options?.onRetry ?? (() => undefined)}
+      onApproval={() => undefined}
+    />
+  );
+}
+
 async function flush(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function invokeTextareaChange(
+  textarea: HTMLTextAreaElement,
+  value: string,
+): void {
+  const propsKey = Object.keys(textarea).find((key) =>
+    key.startsWith("__reactProps$"),
+  );
+  if (!propsKey) throw new Error("React textarea props were not attached");
+  const props = Reflect.get(textarea, propsKey) as {
+    onChange?: (event: { target: { value: string } }) => void;
+  };
+  props.onChange?.({ target: { value } });
 }
 
 async function renderPane(options?: {
@@ -23,6 +64,11 @@ async function renderPane(options?: {
   messages?: Message[];
   onAddToReply?: (draft: string) => void;
   onClose?: () => void;
+  status?: "submitted" | "streaming" | "ready" | "error";
+  safeActivity?: string | null;
+  onSend?: (text: string) => void;
+  onStop?: () => void;
+  onRetry?: () => void;
 }) {
   const dom = new JSDOM(
     '<!doctype html><html><body><div id="root"></div></body></html>',
@@ -46,16 +92,7 @@ async function renderPane(options?: {
   await act(async () => {
     root.render(
       <MemoryRouter>
-        <SidechatPane
-          open={options?.open ?? true}
-          conversation={makeConversation(options?.archived ?? false)}
-          customerFirstName="Ada"
-          messages={options?.messages ?? []}
-          draft=""
-          setDraft={() => undefined}
-          onAddToReply={options?.onAddToReply ?? (() => undefined)}
-          onClose={options?.onClose ?? (() => undefined)}
-        />
+        <PaneHarness options={options} />
       </MemoryRouter>,
     );
     await flush();
@@ -153,16 +190,7 @@ describe("SidechatPane layout", () => {
     await act(async () => {
       root.render(
         <MemoryRouter>
-          <SidechatPane
-            open
-            conversation={makeConversation(false)}
-            customerFirstName="Ada"
-            messages={[]}
-            draft=""
-            setDraft={() => undefined}
-            onAddToReply={() => undefined}
-            onClose={() => undefined}
-          />
+          <PaneHarness options={{ open: true }} />
         </MemoryRouter>,
       );
       await flush();
@@ -178,13 +206,49 @@ describe("SidechatPane layout", () => {
     expect(openedPane.classList.contains("translate-x-0")).toBe(true);
   });
 
-  test("shows the disconnected runtime state without inventing activity", async () => {
-    const { dom } = await renderPane();
+  test("uses live native state without the disconnected placeholder", async () => {
+    const { dom } = await renderPane({
+      status: "streaming",
+      safeActivity: "Stripe · Checking subscription",
+    });
     expect(dom.window.document.querySelector(
       "[data-sidechat-runtime-unavailable]",
-    )?.textContent).toContain("runtime is not connected");
-    expect(dom.window.document.body.textContent).not.toContain("Searching");
-    expect(dom.window.document.querySelector("textarea")?.disabled).toBe(true);
+    )).toBeNull();
+    expect(dom.window.document.body.textContent).toContain(
+      "Stripe · Checking subscription",
+    );
+    expect(dom.window.document.querySelector("textarea")?.disabled).toBe(false);
+    expect(dom.window.document.body.textContent).toContain("Stop");
+  });
+
+  test("submits private text and exposes a compact retry after failure", async () => {
+    let submitted = "";
+    let retries = 0;
+    const { dom } = await renderPane({
+      status: "error",
+      onSend: (text) => {
+        submitted = text;
+      },
+      onRetry: () => {
+        retries += 1;
+      },
+    });
+    const textarea = dom.window.document.querySelector("textarea")!;
+    await act(async () => {
+      invokeTextareaChange(textarea, "Check the renewal date");
+      await flush();
+    });
+    const send = dom.window.document.querySelector<HTMLButtonElement>(
+      '[aria-label="Send to Maven"]',
+    );
+    await act(async () => send?.click());
+    expect(submitted).toBe("Check the renewal date");
+
+    const retry = Array.from(
+      dom.window.document.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent === "Retry");
+    await act(async () => retry?.click());
+    expect(retries).toBe(1);
   });
 
   test("forwards the exact reply draft without closing or sending", async () => {

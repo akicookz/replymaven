@@ -41,7 +41,11 @@ export interface Conversation {
 export type MessageRole = "visitor" | "bot" | "agent" | "system";
 export type MessagePresentationAction =
   | { type: "add_to_reply"; draft: string }
-  | { type: "approval" };
+  | {
+      type: "approval";
+      approvalId: string;
+      toolCallId: string;
+    };
 
 export interface Message {
   id: string;
