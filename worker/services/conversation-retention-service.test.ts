@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import {
   buildClaimExpiredArchivesQuery,
   collectOwnedUploadKeys,
+  purgeClaimedConversations,
   purgeOneClaimedConversation,
   type ConversationRetentionStore,
 } from "./conversation-retention-service";
@@ -67,6 +68,7 @@ describe("archived conversation retention", () => {
 
   test("does not delete database rows when attachment cleanup fails", async () => {
     let databaseDeleteCalled = false;
+    let sidechatCleanupCalled = false;
     const store: ConversationRetentionStore = {
       claimExpired: async () => [],
       listMessageAttachments: async () => [{
@@ -94,7 +96,78 @@ describe("archived conversation retention", () => {
         projectId: "project-1",
         purgeStartedAt: new Date("2026-08-01T00:00:00.000Z"),
       },
+      async () => {
+        sidechatCleanupCalled = true;
+      },
     )).rejects.toThrow("R2 unavailable");
+    expect(sidechatCleanupCalled).toBe(true);
+    expect(databaseDeleteCalled).toBe(false);
+  });
+
+  test("leaves uploads and database rows intact when native cleanup fails", async () => {
+    const events: string[] = [];
+    const store: ConversationRetentionStore = {
+      claimExpired: async () => [],
+      listMessageAttachments: async () => [{
+        role: "agent",
+        userId: "user-1",
+        imageUrl: "/api/uploads/project-1/conversation-attachments/conv-1/a.png",
+      }],
+      isUploadKeyReferencedElsewhere: async () => false,
+      deleteClaimedConversation: async () => {
+        events.push("database");
+        return true;
+      },
+    };
+    const uploads = {
+      delete: async () => {
+        events.push("r2");
+      },
+    } as unknown as R2Bucket;
+
+    await expect(purgeOneClaimedConversation(
+      store,
+      uploads,
+      {
+        id: "conv-1",
+        projectId: "project-1",
+        purgeStartedAt: new Date("2026-08-01T00:00:00.000Z"),
+      },
+      async (projectId, conversationId) => {
+        events.push(`sidechat:${projectId}:${conversationId}`);
+        throw new Error("native cleanup unavailable");
+      },
+    )).rejects.toThrow("native cleanup unavailable");
+    expect(events).toEqual(["sidechat:project-1:conv-1"]);
+  });
+
+  test("counts native cleanup failures and leaves the purge claim for retry", async () => {
+    let databaseDeleteCalled = false;
+    const claimed = {
+      id: "conv-1",
+      projectId: "project-1",
+      purgeStartedAt: new Date("2026-08-01T00:00:00.000Z"),
+    };
+    const store: ConversationRetentionStore = {
+      claimExpired: async () => [claimed],
+      listMessageAttachments: async () => [],
+      isUploadKeyReferencedElsewhere: async () => false,
+      deleteClaimedConversation: async () => {
+        databaseDeleteCalled = true;
+        return true;
+      },
+    };
+
+    const result = await purgeClaimedConversations(
+      store,
+      { delete: async () => undefined } as unknown as R2Bucket,
+      [claimed],
+      async () => {
+        throw new Error("native cleanup unavailable");
+      },
+    );
+
+    expect(result).toEqual({ claimed: 1, deleted: 0, failed: 1 });
     expect(databaseDeleteCalled).toBe(false);
   });
 
@@ -127,10 +200,14 @@ describe("archived conversation retention", () => {
         projectId: "project-1",
         purgeStartedAt: new Date("2026-08-01T00:00:00.000Z"),
       },
+      async (projectId, conversationId) => {
+        events.push(`sidechat:${projectId}:${conversationId}`);
+      },
     );
 
     expect(deleted).toBe(true);
     expect(events).toEqual([
+      "sidechat:project-1:conv-1",
       "r2:project-1/conversation-attachments/conv-1/a.png,project-1/conversation-attachments/conv-1/b.png",
       "database",
     ]);
@@ -166,9 +243,12 @@ describe("archived conversation retention", () => {
         projectId: "project-1",
         purgeStartedAt: new Date("2026-08-01T00:00:00.000Z"),
       },
+      async (projectId, conversationId) => {
+        events.push(`sidechat:${projectId}:${conversationId}`);
+      },
     );
 
     expect(deleted).toBe(true);
-    expect(events).toEqual(["database"]);
+    expect(events).toEqual(["sidechat:project-1:conv-1", "database"]);
   });
 });

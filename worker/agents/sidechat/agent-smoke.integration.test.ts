@@ -3,6 +3,19 @@
 const isBunTest = "Bun" in globalThis;
 const nativeTest = isBunTest ? test.skip : test;
 
+async function seedOperationalConversation(
+  database: D1Database,
+  projectId: string,
+  conversationId: string,
+): Promise<void> {
+  await database.exec("CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, customer_id TEXT, visitor_id TEXT NOT NULL, visitor_name TEXT, visitor_email TEXT, status TEXT NOT NULL, close_reason TEXT, telegram_thread_id TEXT, metadata TEXT, chat_state TEXT, last_activity_at INTEGER, visitor_last_seen_at INTEGER, visitor_presence TEXT, visitor_last_online_at INTEGER, snoozed_until INTEGER, archived_at INTEGER, purge_started_at INTEGER, external_action_started_at INTEGER, priority TEXT, assignee_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);");
+  await database.prepare(`
+    INSERT OR REPLACE INTO conversations (
+      id, project_id, visitor_id, status, created_at, updated_at
+    ) VALUES (?, ?, ?, 'active', unixepoch(), unixepoch())
+  `).bind(conversationId, projectId, `visitor-${conversationId}`).run();
+}
+
 describe("native Sidechat Agent registration", () => {
   nativeTest(
     "exposes only the project parent binding and both Agent classes",
@@ -18,6 +31,7 @@ describe("native Sidechat Agent registration", () => {
       expect(MavenChatAgent.name).toBe("MavenChatAgent");
       expect(MavenProjectAgent.name).toBe("MavenProjectAgent");
     },
+    30_000,
   );
 
   nativeTest("instantiates the project parent binding", async () => {
@@ -115,6 +129,7 @@ describe("native Sidechat Agent registration", () => {
     const parent = env.MAVEN_PROJECT_AGENT.get(
       env.MAVEN_PROJECT_AGENT.idFromName(parentName),
     );
+    await seedOperationalConversation(env.DB, parentName, conversationId);
     await parent.registerSidechat(conversationId);
     const issuedAt = Math.floor(Date.now() / 1_000);
     const token = await signSidechatToken(

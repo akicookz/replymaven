@@ -133,6 +133,7 @@ import {
   handleUpdateProjectMcpPolicy,
   handleRevokeProjectToolAlwaysAllow,
 } from "./routes/project-mcp-handlers";
+import { deleteProjectWithNativeCleanup } from "./routes/project-cleanup";
 import { authorizeSidechatAgentRouteRequest } from "./agents/sidechat/agent-auth";
 import { MavenProjectAgent } from "./agents/sidechat/maven-project-agent";
 import {
@@ -4268,10 +4269,24 @@ const app = new Hono<HonoAppContext>()
     const effectiveUserId = c.get("effectiveUserId") ?? user.id;
     const db = c.get("db");
     const service = new ProjectService(db);
-    const deleted = await service.deleteProject(
-      c.req.param("id"),
-      effectiveUserId,
-    );
+    const projectId = c.req.param("id");
+    let deleted: boolean;
+    try {
+      deleted = await deleteProjectWithNativeCleanup({
+        projectId,
+        ownerId: effectiveUserId,
+        projectService: service,
+        async destroyParent() {
+          const parent = await getAgentByName(
+            c.env.MAVEN_PROJECT_AGENT,
+            projectId,
+          );
+          await parent.destroyProjectData();
+        },
+      });
+    } catch {
+      return c.json({ error: "Project cleanup failed" }, 502);
+    }
     if (!deleted) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true });
   })
@@ -7081,6 +7096,15 @@ const app = new Hono<HonoAppContext>()
           conversationId,
           actionAt,
         );
+        try {
+          const parent = await getAgentByName(
+            c.env.MAVEN_PROJECT_AGENT,
+            project.id,
+          );
+          await parent.enforceSidechatArchive(conversationId);
+        } catch {
+          console.error("Native Sidechat archive enforcement failed");
+        }
       }
     }
 
@@ -7796,6 +7820,13 @@ async function runArchivedConversationRetention(env: AppEnv): Promise<void> {
     const result = await purgeExpiredArchivedConversations(
       db,
       env.UPLOADS,
+      async (projectId, conversationId) => {
+        const parent = await getAgentByName(
+          env.MAVEN_PROJECT_AGENT,
+          projectId,
+        );
+        await parent.destroySidechat(conversationId);
+      },
       now,
       batchSize,
     );

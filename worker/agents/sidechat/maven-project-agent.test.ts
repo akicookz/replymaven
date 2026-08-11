@@ -55,6 +55,7 @@ function createAgent(): InstanceType<typeof MavenProjectAgent> & {
   state: unknown;
   hasSubAgent: ReturnType<typeof mock>;
   subAgent: ReturnType<typeof mock>;
+  deleteSubAgent: ReturnType<typeof mock>;
 } {
   const agent = new MavenProjectAgent({} as never, {
     SIDECHAT_TOKEN_SECRET: secret,
@@ -62,6 +63,8 @@ function createAgent(): InstanceType<typeof MavenProjectAgent> & {
   agent.state = agent.initialState;
   agent.hasSubAgent = mock(() => false);
   agent.subAgent = mock(async () => ({}));
+  agent.deleteSubAgent = mock(async () => undefined);
+  agent.isSidechatOperational = mock(async () => true);
   return agent;
 }
 
@@ -152,5 +155,86 @@ describe("MavenProjectAgent child registry", () => {
     expect(result).toBeInstanceOf(Request);
     expect((result as Request).headers.get("upgrade")).toBe("websocket");
     expect((result as Request).headers.get("sec-websocket-key")).toBe("key");
+  });
+
+  test("rejects a stale writable reconnect after the conversation is archived", async () => {
+    const agent = createAgent();
+    agent.hasSubAgent = mock(() => true);
+    agent.isSidechatOperational = mock(async () => false);
+    const token = await signSidechatToken(childClaims(), secret);
+    const result = await agent.onBeforeSubAgent(
+      new Request(
+        `https://app.test/agents/parent/sub/child/sc_conversation-1?token=${token}`,
+      ),
+      { className: "MavenChatAgent", name: "sc_conversation-1" },
+    );
+
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(409);
+  });
+
+  test("keeps the registry summary when native child deletion fails", async () => {
+    const agent = createAgent();
+    agent.state = {
+      sidechats: {
+        "conversation-1": {
+          conversationId: "conversation-1",
+          childName: "sc_conversation-1",
+          status: "idle",
+          updatedAt: 1,
+        },
+      },
+    };
+    agent.hasSubAgent = mock(() => true);
+    agent.deleteSubAgent = mock(async () => {
+      throw new Error("native delete failed");
+    });
+
+    await expect(agent.destroySidechat("conversation-1")).rejects.toThrow(
+      "native delete failed",
+    );
+    expect(agent.state).toEqual({
+      sidechats: {
+        "conversation-1": expect.objectContaining({
+          childName: "sc_conversation-1",
+        }),
+      },
+    });
+  });
+
+  test("removes children and MCP transports before destroying project storage", async () => {
+    const agent = createAgent() as ReturnType<typeof createAgent> & {
+      listSubAgents: ReturnType<typeof mock>;
+      getMcpServers: ReturnType<typeof mock>;
+      removeMcpServer: ReturnType<typeof mock>;
+      destroy: ReturnType<typeof mock>;
+    };
+    const events: string[] = [];
+    agent.listSubAgents = mock(() => [
+      { className: "MavenChatAgent", name: "sc_a", createdAt: 1 },
+      { className: "MavenChatAgent", name: "sc_b", createdAt: 2 },
+    ]);
+    agent.deleteSubAgent = mock(async (_class, name: string) => {
+      events.push(`child:${name}`);
+    });
+    agent.getMcpServers = mock(() => ({
+      servers: { "mcp-1": {}, "mcp-2": {} },
+    }));
+    agent.removeMcpServer = mock(async (id: string) => {
+      events.push(`mcp:${id}`);
+    });
+    agent.destroy = mock(async () => {
+      events.push("destroy");
+    });
+
+    await agent.destroyProjectData();
+
+    expect(events).toEqual([
+      "child:sc_a",
+      "child:sc_b",
+      "mcp:mcp-1",
+      "mcp:mcp-2",
+      "destroy",
+    ]);
   });
 });

@@ -186,6 +186,9 @@ describe("native MavenChatAgent transcript", () => {
       },
       async parentAgent() {
         return {
+          async isSidechatOperational() {
+            return true;
+          },
           async updateSidechatSummary(
             _conversationId: string,
             status: string,
@@ -250,6 +253,67 @@ describe("native MavenChatAgent transcript", () => {
     expect(mismatchedBody).not.toContain('"type":"data-turn-accepted"');
   });
 
+  nativeTest("rejects a previously-issued submit token after archive", async () => {
+    const [{ MavenChatAgent }, { signSidechatToken }] = await Promise.all([
+      import("./maven-chat-agent"),
+      import("./agent-auth"),
+    ]);
+    const now = Math.floor(Date.now() / 1_000);
+    const secret = "native-sidechat-archive-test-secret-32-bytes";
+    const token = await signSidechatToken({
+      userId: "user-1",
+      effectiveUserId: "owner-1",
+      projectId: "project-1",
+      parentName: "project-1",
+      role: "owner",
+      iat: now,
+      exp: now + 120,
+      aud: "replymaven-sidechat",
+      v: 1,
+      scope: "child",
+      conversationId: "conversation-1",
+      childName: "sc_conversation-1",
+      canSubmit: true,
+      canApproveOnce: true,
+      canAlwaysAllow: true,
+    }, secret);
+    let modelCreated = false;
+    const fakeAgent = {
+      name: "sc_conversation-1",
+      parentPath: [{ className: "MavenProjectAgent", name: "project-1" }],
+      env: { SIDECHAT_TOKEN_SECRET: secret },
+      messages: [userMessage("archived-message", "Do not run")],
+      async persistMessages(messages: UIMessage[]) {
+        fakeAgent.messages = messages;
+      },
+      createSidechatLanguageModel() {
+        modelCreated = true;
+        return createTextModel("Should never run");
+      },
+      async parentAgent() {
+        return {
+          async isSidechatOperational() {
+            return false;
+          },
+        };
+      },
+    };
+
+    const response = await MavenChatAgent.prototype.onChatMessage.call(
+      fakeAgent as never,
+      async () => undefined,
+      {
+        requestId: "archived-request",
+        body: { token, submittedMessageId: "archived-message" },
+      },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.text()).resolves.toBe("");
+    expect(fakeAgent.messages).toEqual([]);
+    expect(modelCreated).toBe(false);
+  });
+
   nativeTest(
     "publishes a draft only on completed response and projects terminal status",
     async () => {
@@ -277,6 +341,9 @@ describe("native MavenChatAgent transcript", () => {
         },
         async parentAgent() {
           return {
+            async isSidechatOperational() {
+              return true;
+            },
             async updateSidechatSummary(
               _conversationId: string,
               status: string,
@@ -337,6 +404,86 @@ describe("native MavenChatAgent transcript", () => {
       expect(statuses).toEqual(["ready", "waiting_approval", "failed"]);
     },
   );
+
+  nativeTest("does not publish a completed draft after archive wins the race", async () => {
+    const { MavenChatAgent } = await import("./maven-chat-agent");
+    const completedMessage = {
+      id: "assistant-archived",
+      role: "assistant",
+      parts: [{
+        type: "tool-present_reply_draft",
+        toolCallId: "draft-archived",
+        state: "output-available",
+        input: { text: "Stale draft" },
+        output: { accepted: true },
+      }],
+    } as UIMessage;
+    const persisted: UIMessage[][] = [];
+    const statuses: string[] = [];
+    const fakeAgent = {
+      name: "sc_conversation-1",
+      messages: [completedMessage],
+      async persistMessages(messages: UIMessage[]) {
+        persisted.push(messages);
+      },
+      async parentAgent() {
+        return {
+          async isSidechatOperational() {
+            return false;
+          },
+          async updateSidechatSummary(
+            _conversationId: string,
+            status: string,
+          ) {
+            statuses.push(status);
+            return true;
+          },
+        };
+      },
+    };
+    const lifecycle = MavenChatAgent.prototype as unknown as {
+      onChatResponse(result: {
+        message: UIMessage;
+        requestId: string;
+        continuation: boolean;
+        status: "completed" | "error" | "aborted";
+      }): Promise<void>;
+    };
+
+    await lifecycle.onChatResponse.call(fakeAgent, {
+      message: completedMessage,
+      requestId: "archived-complete",
+      continuation: false,
+      status: "completed",
+    });
+
+    expect(persisted).toEqual([]);
+    expect(statuses).toEqual([]);
+  });
+
+  nativeTest("aborts active work and closes existing connections on archive", async () => {
+    const { MavenChatAgent } = await import("./maven-chat-agent");
+    const events: string[] = [];
+    const fakeAgent = {
+      abortAllRequests(reason: string) {
+        events.push(`abort:${reason}`);
+      },
+      getConnections() {
+        return [{
+          close(code: number, reason: string) {
+            events.push(`close:${code}:${reason}`);
+          },
+        }];
+      },
+    };
+
+    await MavenChatAgent.prototype.enforceArchive.call(fakeAgent as never);
+
+    expect(events).toEqual([
+      "abort:Conversation archived",
+      "close:4003:Conversation archived",
+    ]);
+  });
 
   nativeTest(
     "persists private messages in the native child across a fresh stub",

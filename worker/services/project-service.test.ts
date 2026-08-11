@@ -54,3 +54,24 @@ describe("customer identity secret rotation", () => {
     expect(Object.keys(stored ?? {})).toEqual(["customerIdentitySecret"]);
   });
 });
+
+describe("project deletion", () => {
+  test("keeps ownership verification inside ProjectService", async () => {
+    const deletedProjects: string[] = [];
+    const db = {
+      delete: () => ({
+        where: async () => {
+          deletedProjects.push("project-1");
+        },
+      }),
+    };
+    const service = new ProjectService(db as never);
+    service.getProjectById = async () => ({
+      id: "project-1",
+      userId: "owner-1",
+    } as never);
+
+    await expect(service.deleteProject("project-1", "owner-2")).resolves.toBe(false);
+    expect(deletedProjects).toEqual([]);
+  });
+});

@@ -145,6 +145,15 @@ function upsertSidechatSummary(
   };
 }
 
+function removeSidechatSummary(
+  state: MavenProjectState,
+  conversationId: string,
+): MavenProjectState {
+  const sidechats = { ...state.sidechats };
+  delete sidechats[conversationId];
+  return { ...state, sidechats };
+}
+
 export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   initialState: MavenProjectState = { sidechats: {} };
   private readonly sidechatRegistrationLocks = new Map<string, Promise<void>>();
@@ -192,6 +201,26 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     return this.hasSubAgent(MavenChatAgent, childName) ? { childName } : null;
   }
 
+  async destroySidechat(conversationId: string): Promise<void> {
+    const childName = toSidechatChildName(conversationId);
+    if (this.hasSubAgent(MavenChatAgent, childName)) {
+      await this.deleteSubAgent(MavenChatAgent, childName);
+    }
+    if (this.state.sidechats[conversationId]) {
+      this.setState(removeSidechatSummary(this.state, conversationId));
+    }
+  }
+
+  async destroyProjectData(): Promise<void> {
+    for (const child of this.listSubAgents(MavenChatAgent)) {
+      await this.deleteSubAgent(MavenChatAgent, child.name);
+    }
+    for (const serverId of Object.keys(this.getMcpServers().servers)) {
+      await this.removeMcpServer(serverId);
+    }
+    await this.destroy();
+  }
+
   async getSidechatSummaries(): Promise<SidechatSummary[]> {
     return Object.values(this.state.sidechats)
       .filter((summary) =>
@@ -215,6 +244,28 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       ),
     );
     return true;
+  }
+
+  async isSidechatOperational(
+    childName: string,
+    conversationId: string,
+  ): Promise<boolean> {
+    try {
+      this.assertRegisteredSidechat(childName, conversationId);
+    } catch {
+      return false;
+    }
+    const conversation = await new ChatService(
+      drizzle(this.env.DB),
+    ).getConversationById(conversationId, this.name);
+    return conversation?.archivedAt === null;
+  }
+
+  async enforceSidechatArchive(conversationId: string): Promise<void> {
+    const childName = toSidechatChildName(conversationId);
+    if (!this.hasSubAgent(MavenChatAgent, childName)) return;
+    const child = await this.subAgent(MavenChatAgent, childName);
+    await child.enforceArchive();
   }
 
   async getSidechatContext(
@@ -277,8 +328,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const childName = toSidechatChildName(conversationId);
     this.assertRegisteredSidechat(childName, conversationId);
     const db = drizzle(this.env.DB);
+    const chatService = new ChatService(db);
     const [conversation, actorAllowed] = await Promise.all([
-      new ChatService(db).getConversationById(conversationId, this.name),
+      chatService.getConversationById(conversationId, this.name),
       this.canActorAccessProject(db, actorUserId),
     ]);
     if (!conversation || conversation.archivedAt !== null || !actorAllowed) {
@@ -295,6 +347,13 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       conversationId,
     )).find((candidate) => candidate.exposedName === pending.exposedName);
     if (!descriptor || descriptor.access !== "write" || !descriptor.enabled) {
+      return false;
+    }
+    const latestConversation = await chatService.getConversationById(
+      conversationId,
+      this.name,
+    );
+    if (!latestConversation || latestConversation.archivedAt !== null) {
       return false;
     }
     this.ensureMcpApplicationSchema();
@@ -1000,13 +1059,23 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     ) {
       return new Response("Not found", { status: 404 });
     }
-    return authorizeSubAgentRequest(
+    const authorized = await authorizeSubAgentRequest(
       request,
       this.name,
       child.name,
       this.env.SIDECHAT_TOKEN_SECRET,
     );
+    if (authorized instanceof Response) return authorized;
+    const claims = readVerifiedSidechatClaims(authorized);
+    if (
+      claims?.scope === "child" &&
+      claims.canSubmit &&
+      !await this.isSidechatOperational(child.name, claims.conversationId)
+    ) {
+      return new Response("Conversation archived", { status: 409 });
+    }
+    return authorized;
   }
 }
 
-export { upsertSidechatSummary };
+export { removeSidechatSummary, upsertSidechatSummary };

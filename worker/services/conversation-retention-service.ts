@@ -61,6 +61,11 @@ export interface ConversationRetentionResult {
   failed: number;
 }
 
+export type NativeSidechatCleanup = (
+  projectId: string,
+  conversationId: string,
+) => Promise<void>;
+
 export function buildClaimExpiredArchivesQuery(
   db: DrizzleD1Database<Record<string, unknown>>,
   conversationIds: string[],
@@ -223,6 +228,7 @@ export async function purgeOneClaimedConversation(
   store: ConversationRetentionStore,
   uploads: R2Bucket,
   claimed: ClaimedConversation,
+  cleanupSidechat: NativeSidechatCleanup,
 ): Promise<boolean> {
   const attachmentSources = await store.listMessageAttachments(claimed.id);
   const ownedKeys = collectOwnedUploadKeys(
@@ -236,13 +242,41 @@ export async function purgeOneClaimedConversation(
       unreferencedKeys.push(key);
     }
   }
+  await cleanupSidechat(claimed.projectId, claimed.id);
   await deleteUploadKeys(uploads, unreferencedKeys);
   return store.deleteClaimedConversation(claimed.id, claimed.purgeStartedAt);
+}
+
+export async function purgeClaimedConversations(
+  store: ConversationRetentionStore,
+  uploads: R2Bucket,
+  claimed: ClaimedConversation[],
+  cleanupSidechat: NativeSidechatCleanup,
+): Promise<ConversationRetentionResult> {
+  let deleted = 0;
+  let failed = 0;
+  for (const conversation of claimed) {
+    try {
+      if (await purgeOneClaimedConversation(
+        store,
+        uploads,
+        conversation,
+        cleanupSidechat,
+      )) {
+        deleted += 1;
+      }
+    } catch {
+      failed += 1;
+      console.error("Archived conversation cleanup failed");
+    }
+  }
+  return { claimed: claimed.length, deleted, failed };
 }
 
 export async function purgeExpiredArchivedConversations(
   db: DrizzleD1Database<Record<string, unknown>>,
   uploads: R2Bucket,
+  cleanupSidechat: NativeSidechatCleanup,
   now: Date = new Date(),
   batchSize = DEFAULT_PURGE_BATCH_SIZE,
 ): Promise<ConversationRetentionResult> {
@@ -256,21 +290,10 @@ export async function purgeExpiredArchivedConversations(
     batchSize,
   );
 
-  let deleted = 0;
-  let failed = 0;
-  for (const conversation of claimed) {
-    try {
-      if (await purgeOneClaimedConversation(store, uploads, conversation)) {
-        deleted += 1;
-      }
-    } catch (error) {
-      failed += 1;
-      console.error(
-        `Failed to purge archived conversation ${conversation.id}:`,
-        error,
-      );
-    }
-  }
-
-  return { claimed: claimed.length, deleted, failed };
+  return purgeClaimedConversations(
+    store,
+    uploads,
+    claimed,
+    cleanupSidechat,
+  );
 }

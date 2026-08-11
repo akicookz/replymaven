@@ -50,10 +50,35 @@ type SidechatUIMessage = UIMessage<unknown, SidechatDataParts>;
 const MAX_PRIVATE_MODEL_MESSAGES = 80;
 
 interface SidechatStatusUpdater {
+  isSidechatOperational(
+    childName: string,
+    conversationId: string,
+  ): Promise<boolean>;
   updateSidechatSummary(
     conversationId: string,
     status: SidechatStatus,
   ): Promise<boolean>;
+}
+
+interface SidechatMessageStore {
+  messages: UIMessage[];
+  persistMessages(
+    messages: UIMessage[],
+    excludeBroadcastIds?: string[],
+    options?: { _deleteStaleRows?: boolean },
+  ): Promise<void>;
+}
+
+async function discardArchivedSubmission(
+  store: SidechatMessageStore,
+  submittedMessageId: string | null,
+): Promise<void> {
+  if (!submittedMessageId) return;
+  await store.persistMessages(
+    store.messages.filter((message) => message.id !== submittedMessageId),
+    [],
+    { _deleteStaleRows: true },
+  );
 }
 
 export function buildTurnAcceptedPart(messageId: string) {
@@ -211,6 +236,11 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
     ) {
       return Response.json({ error: "not_found" }, { status: 404 });
     }
+    const parent = await this.parentAgent(MavenProjectAgent);
+    if (!await parent.isSidechatOperational(this.name, conversationId)) {
+      await discardArchivedSubmission(this, submittedMessageId);
+      return new Response(null, { status: 409 });
+    }
 
     const stream = createUIMessageStream<SidechatUIMessage>({
       originalMessages: this.messages as SidechatUIMessage[],
@@ -218,18 +248,24 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
         return "The Sidechat response failed.";
       },
       execute: async ({ writer }) => {
-        if (submittedMessageId) {
-          writer.write(buildTurnAcceptedPart(submittedMessageId));
-        }
-        let parentForFailure: SidechatStatusUpdater | null = null;
+        const parentForFailure: SidechatStatusUpdater = parent;
         try {
-          const parent = await this.parentAgent(MavenProjectAgent);
-          parentForFailure = parent;
+          if (!await parent.isSidechatOperational(this.name, conversationId)) {
+            await discardArchivedSubmission(this, submittedMessageId);
+            throw new Error("Sidechat conversation is archived");
+          }
+          if (submittedMessageId) {
+            writer.write(buildTurnAcceptedPart(submittedMessageId));
+          }
           await parent.updateSidechatSummary(conversationId, "working");
           const [context, descriptors] = await Promise.all([
             parent.getSidechatContext(this.name, conversationId),
             parent.getSidechatToolDescriptors(this.name, conversationId),
           ]);
+          if (context.archivedAt !== null) {
+            await discardArchivedSubmission(this, submittedMessageId);
+            throw new Error("Sidechat conversation is archived");
+          }
           const model = this.createSidechatLanguageModel();
           const tools: ToolSet = {
             present_reply_draft: createReplyDraftTool(),
@@ -280,10 +316,15 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
               ),
           );
         } catch {
-          await parentForFailure?.updateSidechatSummary(
+          if (await parentForFailure.isSidechatOperational(
+            this.name,
             conversationId,
-            "failed",
-          );
+          )) {
+            await parentForFailure.updateSidechatSummary(
+              conversationId,
+              "failed",
+            );
+          }
           throw new Error("Sidechat turn setup failed");
         }
       },
@@ -296,6 +337,7 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
   ): Promise<void> {
     const conversationId = conversationIdFromChildName(this.name);
     const parent = await this.parentAgent(MavenProjectAgent);
+    if (!await parent.isSidechatOperational(this.name, conversationId)) return;
     if (result.status !== "completed") {
       await parent.updateSidechatSummary(conversationId, "failed");
       return;
@@ -339,5 +381,12 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
     toolCallId: string,
   ): Promise<PendingSidechatApprovalScope | null> {
     return readPendingApprovalScope(this.messages, approvalId, toolCallId);
+  }
+
+  async enforceArchive(): Promise<void> {
+    this.abortAllRequests("Conversation archived");
+    for (const connection of this.getConnections()) {
+      connection.close(4003, "Conversation archived");
+    }
   }
 }
