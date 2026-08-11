@@ -46,6 +46,9 @@ interface SidechatProjectToolDependencies {
     connectionId: string,
     toolName: string,
   ): Promise<SidechatToolDescriptor | null> | SidechatToolDescriptor | null;
+  hasAlwaysAllowGrant(
+    request: ExecuteProjectToolRequest,
+  ): boolean | Promise<boolean>;
   runKnowledgeSearch(input: unknown): Promise<unknown>;
   runExternalAction(
     action: () => Promise<unknown>,
@@ -279,6 +282,8 @@ export function buildSidechatDynamicTools(
       title: descriptor.displayName,
       description: descriptor.description,
       inputSchema: jsonSchema(descriptor.inputSchema),
+      needsApproval:
+        descriptor.access === "write" && descriptor.alwaysAllowed !== true,
       async execute(input) {
         options.emitActivity(activityPart(descriptor.displayName, "started"));
         try {
@@ -290,6 +295,11 @@ export function buildSidechatDynamicTools(
             toolName: descriptor.toolName,
             catalogFingerprint: descriptor.catalogFingerprint,
             access: descriptor.access,
+            approvalMode: descriptor.access === "read"
+              ? "none"
+              : descriptor.alwaysAllowed === true
+                ? "always"
+                : "once",
             input,
           });
           const completed = result.status === "completed";
@@ -339,6 +349,7 @@ function auditMetadata(options: {
   startedAt: number;
   finishedAt: number;
   safeActivity: string;
+  approvalMode: "none" | "once" | "always";
   errorCode?: string;
 }): SidechatToolAuditMetadata {
   return {
@@ -350,7 +361,7 @@ function auditMetadata(options: {
     catalogFingerprint: options.request.catalogFingerprint,
     access: options.request.access,
     actorUserId: options.request.actorUserId,
-    approvalMode: "none",
+    approvalMode: options.approvalMode,
     status: options.status,
     startedAt: options.startedAt,
     finishedAt: options.finishedAt,
@@ -415,21 +426,207 @@ export function persistSidechatActionAudit(
   `;
 }
 
+type LeasedToolValue =
+  | { kind: "denied" }
+  | { kind: "failed" }
+  | { kind: "ambiguous" }
+  | { kind: "completed"; value: unknown; displayName: string };
+
+function resultFromLease(
+  leased: { executed: boolean; value?: unknown },
+): ExecuteProjectToolResult {
+  const value = leased.value as LeasedToolValue | undefined;
+  if (!leased.executed) return deniedResult("conversation_unavailable");
+  if (value?.kind === "failed") {
+    return {
+      status: "failed",
+      safeActivity: "Tool failed",
+      errorCode: "tool_failed",
+    };
+  }
+  if (value?.kind === "ambiguous") {
+    return {
+      status: "ambiguous",
+      safeActivity: "Write result unknown",
+      errorCode: "write_result_unknown",
+    };
+  }
+  if (value?.kind !== "completed") {
+    return deniedResult("tool_authority_changed");
+  }
+  return {
+    status: "completed",
+    output: value.value,
+    safeActivity: safeCompletedActivity(value.displayName),
+  };
+}
+
+function transportValue(
+  value: unknown,
+  request: ExecuteProjectToolRequest,
+  displayName: string,
+): LeasedToolValue {
+  if (isSafeTransportFailure(value)) {
+    return request.access === "write"
+      ? { kind: "ambiguous" }
+      : { kind: "failed" };
+  }
+  return { kind: "completed", value, displayName };
+}
+
+async function executeAuthorizedMcpTool(
+  request: ExecuteProjectToolRequest,
+  dependencies: SidechatProjectToolDependencies,
+  effectiveApprovalMode: "none" | "once" | "always",
+): Promise<ExecuteProjectToolResult> {
+  const descriptor = await dependencies.getAuthoritativeMcpTool(
+    request.connectionId,
+    request.toolName,
+  );
+  if (!mcpDescriptorMatchesRequest(descriptor, request)) {
+    return deniedResult("tool_authority_changed");
+  }
+  const leased = await dependencies.runExternalAction(async () => {
+    const [actorAllowed, currentDescriptor, grantCurrent] = await Promise.all([
+      dependencies.canActorAccessProject(request.actorUserId),
+      dependencies.getAuthoritativeMcpTool(
+        request.connectionId,
+        request.toolName,
+      ),
+      effectiveApprovalMode === "always"
+        ? dependencies.hasAlwaysAllowGrant(request)
+        : true,
+    ]);
+    if (
+      !actorAllowed ||
+      !mcpDescriptorMatchesRequest(currentDescriptor, request) ||
+      !grantCurrent
+    ) {
+      return { kind: "denied" as const };
+    }
+    const value = await dependencies.executeMcpTool(
+      request.connectionId,
+      request.toolName,
+      request.input,
+    );
+    return transportValue(value, request, currentDescriptor.displayName);
+  });
+  return resultFromLease(leased);
+}
+
+async function executeAuthorizedHttpTool(
+  projectId: string,
+  request: ExecuteProjectToolRequest,
+  dependencies: SidechatProjectToolDependencies,
+  effectiveApprovalMode: "none" | "once" | "always",
+): Promise<ExecuteProjectToolResult> {
+  const toolId = request.connectionId.slice("http:".length);
+  const authoritativeTool = await dependencies.getAuthoritativeHttpTool(toolId);
+  const descriptor = authoritativeTool
+    ? await httpDescriptor(authoritativeTool)
+    : null;
+  const contract = authoritativeTool
+    ? readHttpContract(authoritativeTool)
+    : null;
+  const validatedInput = contract
+    ? validateHttpInput(contract.parameters, request.input)
+    : null;
+  if (
+    !validatedInput ||
+    !descriptorMatchesRequest(
+      descriptor,
+      authoritativeTool,
+      projectId,
+      request,
+    )
+  ) {
+    return deniedResult("tool_authority_changed");
+  }
+  const leased = await dependencies.runExternalAction(async () => {
+    const [actorAllowed, currentTool, grantCurrent] = await Promise.all([
+      dependencies.canActorAccessProject(request.actorUserId),
+      dependencies.getAuthoritativeHttpTool(toolId),
+      effectiveApprovalMode === "always"
+        ? dependencies.hasAlwaysAllowGrant(request)
+        : true,
+    ]);
+    const currentDescriptor = currentTool
+      ? await httpDescriptor(currentTool)
+      : null;
+    const currentContract = currentTool ? readHttpContract(currentTool) : null;
+    const currentInput = currentContract
+      ? validateHttpInput(currentContract.parameters, request.input)
+      : null;
+    if (
+      !actorAllowed ||
+      !currentTool ||
+      !currentInput ||
+      !grantCurrent ||
+      !descriptorMatchesRequest(
+        currentDescriptor,
+        currentTool,
+        projectId,
+        request,
+      )
+    ) {
+      return { kind: "denied" as const };
+    }
+    const value = await dependencies.executeHttpTool(currentTool, currentInput);
+    return transportValue(value, request, currentDescriptor.displayName);
+  });
+  return resultFromLease(leased);
+}
+
+async function executeAuthorizedProjectTool(
+  options: ExecuteSidechatProjectToolOptions,
+  effectiveApprovalMode: "none" | "once" | "always",
+): Promise<ExecuteProjectToolResult> {
+  const { request, dependencies } = options;
+  if (
+    request.connectionId === INTERNAL_KNOWLEDGE_CONNECTION_ID &&
+    request.toolName === "search_knowledge" &&
+    request.catalogFingerprint === INTERNAL_KNOWLEDGE_FINGERPRINT &&
+    request.access === "read"
+  ) {
+    return {
+      status: "completed",
+      output: await dependencies.runKnowledgeSearch(request.input),
+      safeActivity: "Searched knowledge",
+    };
+  }
+  if (request.connectionId.startsWith("mcp-")) {
+    return executeAuthorizedMcpTool(
+      request,
+      dependencies,
+      effectiveApprovalMode,
+    );
+  }
+  if (request.connectionId.startsWith("http:")) {
+    return executeAuthorizedHttpTool(
+      options.projectId,
+      request,
+      dependencies,
+      effectiveApprovalMode,
+    );
+  }
+  return deniedResult("tool_unavailable");
+}
+
 export async function executeSidechatProjectTool(
   options: ExecuteSidechatProjectToolOptions,
 ): Promise<ExecuteProjectToolResult> {
   const now = options.now ?? Date.now;
   const startedAt = now();
   const { request, dependencies } = options;
+  let effectiveApprovalMode = request.approvalMode;
   let result: ExecuteProjectToolResult;
 
   try {
-    if (
-      !(await dependencies.isRegisteredSidechat(
-        request.childName,
-        request.conversationId,
-      ))
-    ) {
+    const registered = await dependencies.isRegisteredSidechat(
+      request.childName,
+      request.conversationId,
+    );
+    if (!registered) {
       result = deniedResult("sidechat_not_registered");
     } else {
       const [conversation, actorAllowed] = await Promise.all([
@@ -440,172 +637,31 @@ export async function executeSidechatProjectTool(
         result = deniedResult("conversation_unavailable");
       } else if (!actorAllowed) {
         result = deniedResult("actor_access_revoked");
-      } else if (
-        request.connectionId === INTERNAL_KNOWLEDGE_CONNECTION_ID &&
-        request.toolName === "search_knowledge" &&
-        request.catalogFingerprint === INTERNAL_KNOWLEDGE_FINGERPRINT &&
-        request.access === "read"
-      ) {
-        result = {
-          status: "completed",
-          output: await dependencies.runKnowledgeSearch(request.input),
-          safeActivity: "Searched knowledge",
-        };
-      } else if (request.connectionId.startsWith("mcp-")) {
-        const descriptor = await dependencies.getAuthoritativeMcpTool(
-          request.connectionId,
-          request.toolName,
-        );
-        if (!mcpDescriptorMatchesRequest(descriptor, request)) {
-          result = deniedResult("tool_authority_changed");
-        } else if (request.access === "write") {
-          result = {
-            status: "unavailable",
-            safeActivity: "Approval required",
-            errorCode: "approval_required",
-          };
-        } else {
-          const leased = await dependencies.runExternalAction(async () => {
-            const [actorStillAllowed, currentDescriptor] = await Promise.all([
-              dependencies.canActorAccessProject(request.actorUserId),
-              dependencies.getAuthoritativeMcpTool(
-                request.connectionId,
-                request.toolName,
-              ),
-            ]);
-            if (
-              !actorStillAllowed ||
-              !mcpDescriptorMatchesRequest(currentDescriptor, request)
-            ) {
-              return { kind: "denied" as const };
-            }
-            const value = await dependencies.executeMcpTool(
-              request.connectionId,
-              request.toolName,
-              request.input,
-            );
-            return isSafeTransportFailure(value)
-              ? { kind: "failed" as const }
-              : {
-                  kind: "completed" as const,
-                  value,
-                  displayName: currentDescriptor.displayName,
-                };
-          });
-          const leasedValue = leased.value as
-            | { kind: "denied" }
-            | { kind: "failed" }
-            | { kind: "completed"; value: unknown; displayName: string }
-            | undefined;
-          result = !leased.executed
-            ? deniedResult("conversation_unavailable")
-            : leasedValue?.kind === "failed"
-              ? {
-                  status: "failed",
-                  safeActivity: "Tool failed",
-                  errorCode: "tool_failed",
-                }
-              : leasedValue?.kind !== "completed"
-                ? deniedResult("tool_authority_changed")
-                : {
-                    status: "completed",
-                    output: leasedValue.value,
-                    safeActivity: safeCompletedActivity(
-                      leasedValue.displayName,
-                    ),
-                  };
-        }
-      } else if (request.connectionId.startsWith("http:")) {
-        const toolId = request.connectionId.slice("http:".length);
-        const authoritativeTool = await dependencies.getAuthoritativeHttpTool(toolId);
-        const descriptor = authoritativeTool
-          ? await httpDescriptor(authoritativeTool)
-          : null;
-        const contract = authoritativeTool
-          ? readHttpContract(authoritativeTool)
-          : null;
-        const validatedInput = contract
-          ? validateHttpInput(contract.parameters, request.input)
-          : null;
-        if (
-          !validatedInput ||
-          !descriptorMatchesRequest(
-            descriptor,
-            authoritativeTool,
-            options.projectId,
-            request,
-          )
-        ) {
-          result = deniedResult("tool_authority_changed");
-        } else if (request.access === "write") {
-          result = {
-            status: "unavailable",
-            safeActivity: "Approval required",
-            errorCode: "approval_required",
-          };
-        } else {
-          const leased = await dependencies.runExternalAction(async () => {
-            const [actorStillAllowed, currentTool] = await Promise.all([
-              dependencies.canActorAccessProject(request.actorUserId),
-              dependencies.getAuthoritativeHttpTool(toolId),
-            ]);
-            const currentDescriptor = currentTool
-              ? await httpDescriptor(currentTool)
-              : null;
-            const currentContract = currentTool
-              ? readHttpContract(currentTool)
-              : null;
-            const currentInput = currentContract
-              ? validateHttpInput(currentContract.parameters, request.input)
-              : null;
-            if (
-              !actorStillAllowed ||
-              !currentTool ||
-              !currentInput ||
-              !descriptorMatchesRequest(
-                currentDescriptor,
-                currentTool,
-                options.projectId,
-                request,
-              )
-            ) {
-              return { kind: "denied" as const };
-            }
-            const value = await dependencies.executeHttpTool(
-              currentTool,
-              currentInput,
-            );
-            return isSafeTransportFailure(value)
-              ? { kind: "failed" as const }
-              : {
-                  kind: "completed" as const,
-                  value,
-                  displayName: currentDescriptor.displayName,
-                };
-          });
-          const leasedValue = leased.value as
-            | { kind: "denied" }
-            | { kind: "failed" }
-            | { kind: "completed"; value: unknown; displayName: string }
-            | undefined;
-          result = !leased.executed
-            ? deniedResult("conversation_unavailable")
-            : leasedValue?.kind === "failed"
-              ? {
-                  status: "failed",
-                  safeActivity: "Tool failed",
-                  errorCode: "tool_failed",
-                }
-              : leasedValue?.kind !== "completed"
-              ? deniedResult("tool_authority_changed")
-              : {
-                  status: "completed",
-                  output: leasedValue.value,
-                  safeActivity: safeCompletedActivity(leasedValue.displayName),
-                };
-        }
       } else {
-        result = deniedResult("tool_unavailable");
+        if (
+          request.access === "write" &&
+          request.approvalMode === "once" &&
+          await dependencies.hasAlwaysAllowGrant(request)
+        ) {
+          effectiveApprovalMode = "always";
+        }
+        if (
+          (request.access === "read" && effectiveApprovalMode !== "none") ||
+          (request.access === "write" && effectiveApprovalMode === "none")
+        ) {
+          result = deniedResult("approval_required");
+        } else if (
+          request.access === "write" &&
+          effectiveApprovalMode === "always" &&
+          !(await dependencies.hasAlwaysAllowGrant(request))
+        ) {
+          result = deniedResult("approval_grant_changed");
+        } else {
+          result = await executeAuthorizedProjectTool(
+            options,
+            effectiveApprovalMode,
+          );
+        }
       }
     }
   } catch {
@@ -626,6 +682,7 @@ export async function executeSidechatProjectTool(
       startedAt,
       finishedAt,
       safeActivity: result.safeActivity,
+      approvalMode: effectiveApprovalMode,
       ...(result.errorCode ? { errorCode: result.errorCode } : {}),
     }),
   );

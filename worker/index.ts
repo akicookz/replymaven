@@ -127,9 +127,11 @@ import {
   handleConnectProjectMcp,
   handleDisconnectProjectMcp,
   handleGetProjectMcp,
+  handleGrantProjectToolAlwaysAllow,
   handleMcpOAuthCallback,
   handleRefreshProjectMcp,
   handleUpdateProjectMcpPolicy,
+  handleRevokeProjectToolAlwaysAllow,
 } from "./routes/project-mcp-handlers";
 import { authorizeSidechatAgentRouteRequest } from "./agents/sidechat/agent-auth";
 import { MavenProjectAgent } from "./agents/sidechat/maven-project-agent";
@@ -2876,6 +2878,38 @@ const app = new Hono<HonoAppContext>()
         actor,
         projectId,
         connectionId: c.req.param("connectionId"),
+        projectService: new ProjectService(c.get("db")),
+        getParent: () =>
+          getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+      });
+    },
+  )
+  .post(
+    "/api/projects/:projectId/conversations/:conversationId/sidechat/approvals/:approvalId/always",
+    async (c) => {
+      const actor = getSidechatRouteActor(c);
+      const projectId = c.req.param("projectId");
+      return handleGrantProjectToolAlwaysAllow({
+        actor,
+        projectId,
+        conversationId: c.req.param("conversationId"),
+        approvalId: c.req.param("approvalId"),
+        request: c.req.raw,
+        projectService: new ProjectService(c.get("db")),
+        getParent: () =>
+          getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
+      });
+    },
+  )
+  .delete(
+    "/api/projects/:projectId/sidechat/approvals/always",
+    async (c) => {
+      const actor = getSidechatRouteActor(c);
+      const projectId = c.req.param("projectId");
+      return handleRevokeProjectToolAlwaysAllow({
+        actor,
+        projectId,
+        request: c.req.raw,
         projectService: new ProjectService(c.get("db")),
         getParent: () =>
           getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),

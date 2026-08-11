@@ -38,6 +38,8 @@ describe("Conversations native Sidechat orchestration", () => {
         token: "token",
         expiresAt: 2_000,
         created: false,
+        canApproveOnce: true,
+        canAlwaysAllow: true,
       },
       messageId: "human-1",
       publicTextSnapshot: "Keep this in the public composer",

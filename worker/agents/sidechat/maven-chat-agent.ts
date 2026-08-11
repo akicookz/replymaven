@@ -7,13 +7,18 @@ import {
   convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
+  getToolName,
+  isToolUIPart,
   type ToolSet,
   stepCountIs,
   streamText,
   type LanguageModel,
   type UIMessage,
 } from "ai";
-import type { SidechatStatus } from "../../../shared/sidechat-agent";
+import type {
+  PendingSidechatApprovalScope,
+  SidechatStatus,
+} from "../../../shared/sidechat-agent";
 import { createLanguageModel } from "../../chat-runtime/llm/create-language-model";
 import { type AppEnv } from "../../types";
 import {
@@ -85,6 +90,57 @@ export function selectSidechatModelMessages(
   const bounded = messages.slice(-MAX_PRIVATE_MODEL_MESSAGES);
   const firstUserIndex = bounded.findIndex((message) => message.role === "user");
   return firstUserIndex > 0 ? bounded.slice(firstUserIndex) : bounded;
+}
+
+export function readPendingApprovalScope(
+  messages: UIMessage[],
+  approvalId: string,
+  toolCallId: string,
+): PendingSidechatApprovalScope | null {
+  if (
+    approvalId.length === 0 || approvalId.length > 200 ||
+    toolCallId.length === 0 || toolCallId.length > 200
+  ) {
+    return null;
+  }
+  const seenToolCalls = new Set<string>();
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = messages[messageIndex];
+    if (message?.role !== "assistant") continue;
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.parts[partIndex];
+      if (!part || !isToolUIPart(part)) continue;
+      if (seenToolCalls.has(part.toolCallId)) continue;
+      seenToolCalls.add(part.toolCallId);
+      if (part.toolCallId !== toolCallId) continue;
+      if (
+        part.state !== "approval-requested" ||
+        part.approval.id !== approvalId
+      ) return null;
+      return {
+        approvalId,
+        toolCallId,
+        exposedName: getToolName(part),
+      };
+    }
+  }
+  return null;
+}
+
+export function hasPendingSidechatApproval(messages: UIMessage[]): boolean {
+  const seenToolCalls = new Set<string>();
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = messages[messageIndex];
+    if (message?.role !== "assistant") continue;
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.parts[partIndex];
+      if (!part || !isToolUIPart(part)) continue;
+      if (seenToolCalls.has(part.toolCallId)) continue;
+      seenToolCalls.add(part.toolCallId);
+      if (part.state === "approval-requested") return true;
+    }
+  }
+  return false;
 }
 
 function conversationIdFromChildName(childName: string): string {
@@ -203,7 +259,13 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
               );
             },
           });
-          const shouldForward = createPrivateToolChunkFilter();
+          const shouldForward = createPrivateToolChunkFilter(
+            new Set(
+              descriptors
+                .filter((descriptor) => descriptor.access === "write")
+                .map((descriptor) => descriptor.exposedName),
+            ),
+          );
           writer.merge(
             result
               .toUIMessageStream<SidechatUIMessage>({
@@ -239,6 +301,11 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
       return;
     }
 
+    if (hasPendingSidechatApproval([...this.messages, result.message])) {
+      await parent.updateSidechatSummary(conversationId, "waiting_approval");
+      return;
+    }
+
     try {
       const published = await persistCompletedReplyDraft({
         result,
@@ -265,5 +332,12 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
   // decorated as browser-callable and is never mounted on an HTTP route.
   async getPrivateTranscriptSnapshot(): Promise<UIMessage[]> {
     return structuredClone(this.messages);
+  }
+
+  async getPendingApprovalScope(
+    approvalId: string,
+    toolCallId: string,
+  ): Promise<PendingSidechatApprovalScope | null> {
+    return readPendingApprovalScope(this.messages, approvalId, toolCallId);
   }
 }

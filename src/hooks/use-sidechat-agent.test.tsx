@@ -4,6 +4,7 @@ import {
   buildSidechatAgentConnectionOptions,
   buildSidechatChatOptions,
   buildSidechatSendBody,
+  claimSidechatApprovalSubmission,
   fetchSidechatSession,
   deriveNativeSidechatUiStatus,
   isSidechatSessionUsable,
@@ -11,6 +12,7 @@ import {
   planInitialSidechatSubmission,
   reduceAcceptedSidechatTransfer,
   sidechatSessionRefreshInterval,
+  submitSidechatApproval,
 } from "./use-sidechat-agent";
 
 function session(overrides: Partial<SidechatSessionResponse> = {}) {
@@ -22,6 +24,8 @@ function session(overrides: Partial<SidechatSessionResponse> = {}) {
     token: "signed-token",
     expiresAt: 2_000,
     created: true,
+    canApproveOnce: true,
+    canAlwaysAllow: true,
     ...overrides,
   };
 }
@@ -169,5 +173,70 @@ describe("native Sidechat client contract", () => {
       persistedMessageIds: new Set(),
       trustedDefault: "Help me respond to Ada.",
     })).toEqual({ kind: "regenerate" });
+  });
+
+  test("submits native Allow once without creating persistent policy", async () => {
+    const submitted = new Set<string>();
+    expect(claimSidechatApprovalSubmission(submitted, "approval-1")).toBe(true);
+    expect(claimSidechatApprovalSubmission(submitted, "approval-1")).toBe(false);
+
+    const requests: string[] = [];
+    const approveNative = async (approvalId: string) => {
+      requests.push(`native:${approvalId}`);
+    };
+    await submitSidechatApproval({
+      mode: "once",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      approvalId: "approval-1",
+      toolCallId: "call-1",
+      approveNative,
+      fetcher: async (input) => {
+        requests.push(String(input));
+        return new Response(null, { status: 204 });
+      },
+    });
+
+    expect(requests).toEqual(["native:approval-1"]);
+  });
+
+  test("persists Always allow before native approval and stops on a stale grant", async () => {
+    const order: string[] = [];
+    const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
+      order.push(`grant:${String(input)}:${String(init?.body)}`);
+      return new Response(null, { status: 204 });
+    };
+    await submitSidechatApproval({
+      mode: "always",
+      projectId: "project / one",
+      conversationId: "conversation / one",
+      approvalId: "approval / one",
+      toolCallId: "call-1",
+      approveNative: async (approvalId) => {
+        order.push(`native:${approvalId}`);
+      },
+      fetcher,
+    });
+    expect(order).toEqual([
+      'grant:/api/projects/project%20%2F%20one/conversations/conversation%20%2F%20one/sidechat/approvals/approval%20%2F%20one/always:{"toolCallId":"call-1"}',
+      "native:approval / one",
+    ]);
+
+    let approved = false;
+    await expect(submitSidechatApproval({
+      mode: "always",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      approvalId: "approval-stale",
+      toolCallId: "call-stale",
+      approveNative: async () => {
+        approved = true;
+      },
+      fetcher: async () => Response.json(
+        { error: "approval_stale" },
+        { status: 409 },
+      ),
+    })).rejects.toThrow("approval_stale");
+    expect(approved).toBe(false);
   });
 });

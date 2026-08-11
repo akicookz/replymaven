@@ -27,6 +27,7 @@ interface SidechatPaneProps {
   onRetry: () => void;
   onApproval: (
     approvalId: string,
+    toolCallId: string,
     mode: "always" | "once",
   ) => void;
   composerDisabled?: boolean;
@@ -64,7 +65,7 @@ export default function SidechatPane({
     const message = messages.find((candidate) => candidate.id === messageId);
     const action = message?.presentationAction;
     if (action?.type !== "approval") return;
-    onApproval(action.approvalId, mode);
+    onApproval(action.approvalId, action.toolCallId, mode);
   }
 
   return (

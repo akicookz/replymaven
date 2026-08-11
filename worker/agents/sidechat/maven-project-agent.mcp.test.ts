@@ -140,6 +140,14 @@ const readTool: NativeTool = {
   annotations: { readOnlyHint: true, destructiveHint: false },
 };
 
+const writeTool: NativeTool = {
+  ...readTool,
+  name: "update_customer",
+  title: "Update customer",
+  description: "Update a customer",
+  annotations: { readOnlyHint: false, destructiveHint: true },
+};
+
 describe("MavenProjectAgent native MCP connections", () => {
   test("serializes concurrent connection mutations without duplicating native state", async () => {
     const fixture = createAgent({ tools: [readTool] });
@@ -268,5 +276,85 @@ describe("MavenProjectAgent native MCP connections", () => {
     await expect(first.agent.listMcpConnections()).resolves.toEqual([]);
     expect(first.removeMcpServer).toHaveBeenCalledWith(firstConnection.id);
     await expect(first.agent.disconnectMcp(firstConnection.id)).resolves.toBe(false);
+  });
+
+  test("matches persistent grants exactly and invalidates them on policy, catalog, and disconnect changes", async () => {
+    const fixture = createAgent({ tools: [writeTool] });
+    const connection = await fixture.agent.connectMcp(connectInput());
+    const discovered = connection.tools[0];
+    if (!discovered) throw new Error("Expected discovered write tool");
+    await fixture.agent.updateMcpToolPolicy(connection.id, [{
+      toolName: discovered.toolName,
+      catalogFingerprint: discovered.catalogFingerprint,
+      enabled: true,
+      access: "write",
+    }]);
+    fixture.database.query(`
+      INSERT INTO sidechat_always_allow_grants (
+        connection_id, tool_name, catalog_fingerprint, access,
+        granted_by, created_at
+      ) VALUES (?, ?, ?, 'write', 'owner-1', 1)
+    `).run(connection.id, discovered.toolName, discovered.catalogFingerprint);
+
+    expect((await fixture.agent.listMcpConnections())[0]?.tools[0]).toMatchObject({
+      enabled: true,
+      access: "write",
+      alwaysAllowed: true,
+    });
+
+    await fixture.agent.updateMcpToolPolicy(connection.id, [{
+      toolName: discovered.toolName,
+      catalogFingerprint: discovered.catalogFingerprint,
+      enabled: true,
+      access: "read",
+    }]);
+    expect(fixture.database.query(
+      "SELECT * FROM sidechat_always_allow_grants",
+    ).all()).toEqual([]);
+
+    await fixture.agent.updateMcpToolPolicy(connection.id, [{
+      toolName: discovered.toolName,
+      catalogFingerprint: discovered.catalogFingerprint,
+      enabled: true,
+      access: "write",
+    }]);
+    fixture.database.query(`
+      INSERT INTO sidechat_always_allow_grants (
+        connection_id, tool_name, catalog_fingerprint, access,
+        granted_by, created_at
+      ) VALUES (?, ?, ?, 'write', 'owner-1', 2)
+    `).run(connection.id, discovered.toolName, discovered.catalogFingerprint);
+    fixture.setTools([{
+      ...writeTool,
+      inputSchema: {
+        type: "object",
+        required: ["externalId"],
+        properties: { externalId: { type: "string" } },
+      },
+    }]);
+    const changed = await fixture.agent.refreshMcpCatalog(connection.id);
+    expect(changed?.tools[0]?.alwaysAllowed).toBe(false);
+    expect(fixture.database.query(
+      "SELECT * FROM sidechat_always_allow_grants",
+    ).all()).toEqual([]);
+
+    const current = changed?.tools[0];
+    if (!current) throw new Error("Expected refreshed write tool");
+    await fixture.agent.updateMcpToolPolicy(connection.id, [{
+      toolName: current.toolName,
+      catalogFingerprint: current.catalogFingerprint,
+      enabled: true,
+      access: "write",
+    }]);
+    fixture.database.query(`
+      INSERT INTO sidechat_always_allow_grants (
+        connection_id, tool_name, catalog_fingerprint, access,
+        granted_by, created_at
+      ) VALUES (?, ?, ?, 'write', 'owner-1', 3)
+    `).run(connection.id, current.toolName, current.catalogFingerprint);
+    await expect(fixture.agent.disconnectMcp(connection.id)).resolves.toBe(true);
+    expect(fixture.database.query(
+      "SELECT * FROM sidechat_always_allow_grants",
+    ).all()).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@ import {
   getToolCallId,
   getToolPartState,
 } from "@cloudflare/ai-chat/react";
-import { isToolUIPart, type UIMessage } from "ai";
+import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import type { Message } from "./types";
 
 const MAX_RENDERED_TEXT = 20_000;
@@ -19,6 +19,7 @@ export type SafeSidechatDataPart =
 
 interface AdaptSidechatMessagesOptions {
   now?: number;
+  canAlwaysAllow?: boolean;
 }
 
 function boundedString(value: unknown, maximum: number): string | null {
@@ -148,17 +149,20 @@ export function adaptSidechatMessages(
       }
       const toolCallId = boundedString(getToolCallId(part), 200);
       const approvalId = boundedString(getToolApproval(part)?.id, 200);
-      if (!toolCallId || !approvalId) return;
+      const toolName = boundedString(getToolName(part), 200);
+      if (!toolCallId || !approvalId || !toolName) return;
       rendered.push({
         id: `${nativeMessage.id}:${toolCallId}`,
         role: "bot",
-        content: "Maven needs permission to run this action.",
+        content:
+          "Run this write action?\n\nThis **can change data in the connected service** and may not be reversible.",
         senderName: "Maven",
         createdAt: toIsoTime(baseTime + messageIndex + partIndex + 1),
         presentationAction: {
           type: "approval",
           approvalId,
           toolCallId,
+          canAlwaysAllow: options.canAlwaysAllow === true,
         },
       });
     });

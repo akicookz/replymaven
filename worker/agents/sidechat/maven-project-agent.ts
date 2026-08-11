@@ -4,6 +4,7 @@ import type {
   ExecuteProjectToolRequest,
   ExecuteProjectToolResult,
   MavenProjectState,
+  PendingSidechatApprovalScope,
   SidechatCustomerContext,
   SidechatStatus,
   SidechatSummary,
@@ -65,12 +66,21 @@ interface McpToolPolicyRow {
   enabled: number;
 }
 
+interface AlwaysAllowGrantRow {
+  connection_id: string;
+  tool_name: string;
+  catalog_fingerprint: string;
+  access: string;
+}
+
 interface NativeMcpServer {
   name: string;
   server_url: string;
   auth_url: string | null;
   state: string;
 }
+
+const MCP_TOOL_TIMEOUT_MS = 30_000;
 
 function readMcpAuthMode(value: string): ProjectMcpAuthMode | null {
   return value === "oauth" ||
@@ -251,10 +261,75 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       buildSidechatToolDescriptors(this.name, sidechatTools),
       this.listMcpConnections(),
     ]);
+    this.ensureMcpApplicationSchema();
     return [
       ...httpDescriptors,
       ...mcpConnections.flatMap((connection) => connection.tools),
-    ];
+    ].map((descriptor) => this.withAlwaysAllowState(descriptor));
+  }
+
+  async grantAlwaysForPendingApproval(
+    conversationId: string,
+    actorUserId: string,
+    approvalId: string,
+    toolCallId: string,
+  ): Promise<boolean> {
+    const childName = toSidechatChildName(conversationId);
+    this.assertRegisteredSidechat(childName, conversationId);
+    const db = drizzle(this.env.DB);
+    const [conversation, actorAllowed] = await Promise.all([
+      new ChatService(db).getConversationById(conversationId, this.name),
+      this.canActorAccessProject(db, actorUserId),
+    ]);
+    if (!conversation || conversation.archivedAt !== null || !actorAllowed) {
+      return false;
+    }
+    const child = await this.subAgent(MavenChatAgent, childName);
+    const pending = await child.getPendingApprovalScope(
+      approvalId,
+      toolCallId,
+    ) as PendingSidechatApprovalScope | null;
+    if (!pending) return false;
+    const descriptor = (await this.getSidechatToolDescriptors(
+      childName,
+      conversationId,
+    )).find((candidate) => candidate.exposedName === pending.exposedName);
+    if (!descriptor || descriptor.access !== "write" || !descriptor.enabled) {
+      return false;
+    }
+    this.ensureMcpApplicationSchema();
+    void this.sql`
+      INSERT INTO sidechat_always_allow_grants (
+        connection_id, tool_name, catalog_fingerprint, access,
+        granted_by, created_at
+      ) VALUES (
+        ${descriptor.connectionId}, ${descriptor.toolName},
+        ${descriptor.catalogFingerprint}, ${descriptor.access},
+        ${actorUserId}, ${Date.now()}
+      )
+      ON CONFLICT (connection_id, tool_name) DO UPDATE SET
+        catalog_fingerprint = excluded.catalog_fingerprint,
+        access = excluded.access,
+        granted_by = excluded.granted_by,
+        created_at = excluded.created_at
+    `;
+    return true;
+  }
+
+  async revokeAlwaysAllow(
+    connectionId: string,
+    toolName: string,
+    catalogFingerprint: string,
+  ): Promise<boolean> {
+    this.ensureMcpApplicationSchema();
+    const removed = this.sql<{ connection_id: string }>`
+      DELETE FROM sidechat_always_allow_grants
+      WHERE connection_id = ${connectionId}
+        AND tool_name = ${toolName}
+        AND catalog_fingerprint = ${catalogFingerprint}
+      RETURNING connection_id
+    `;
+    return removed.length === 1;
   }
 
   async connectMcp(input: ConnectProjectMcpInput): Promise<McpConnectionView> {
@@ -288,7 +363,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     }
 
     try {
-      this.sql`
+      void this.sql`
         INSERT INTO sidechat_mcp_connections (
           id, name, preset_key, url, auth_mode, created_at, updated_at
         ) VALUES (
@@ -389,7 +464,15 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       }
     }
     for (const update of updates) {
-      this.sql`
+      const current = policiesByName.get(update.toolName);
+      if (
+        current &&
+        (current.access !== update.access ||
+          (current.enabled && !update.enabled))
+      ) {
+        this.deleteAlwaysAllowGrant(connectionId, update.toolName);
+      }
+      void this.sql`
         UPDATE sidechat_mcp_tool_policy
         SET enabled = ${update.enabled ? 1 : 0}, access = ${update.access},
             updated_at = ${Date.now()}
@@ -411,11 +494,15 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     this.ensureMcpApplicationSchema();
     if (!this.readMcpConnectionMetadata(connectionId)) return false;
     await this.removeMcpServer(connectionId);
-    this.sql`
+    void this.sql`
       DELETE FROM sidechat_mcp_tool_policy
       WHERE connection_id = ${connectionId}
     `;
-    this.sql`
+    void this.sql`
+      DELETE FROM sidechat_always_allow_grants
+      WHERE connection_id = ${connectionId}
+    `;
+    void this.sql`
       DELETE FROM sidechat_mcp_connections
       WHERE id = ${connectionId}
     `;
@@ -451,6 +538,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           toolService.getAuthoritativeTool(this.name, toolId),
         getAuthoritativeMcpTool: (connectionId, toolName) =>
           this.getMcpToolPolicy(connectionId, toolName),
+        hasAlwaysAllowGrant: (candidate) =>
+          this.hasAlwaysAllowGrant(candidate),
         runKnowledgeSearch: async (input) => {
           const conversation = await chatService.getConversationById(
             request.conversationId,
@@ -503,7 +592,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   }
 
   private ensureMcpApplicationSchema(): void {
-    this.sql`
+    void this.sql`
       CREATE TABLE IF NOT EXISTS sidechat_mcp_connections (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -514,7 +603,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         updated_at INTEGER NOT NULL
       )
     `;
-    this.sql`
+    void this.sql`
       CREATE TABLE IF NOT EXISTS sidechat_mcp_tool_policy (
         connection_id TEXT NOT NULL,
         tool_name TEXT NOT NULL,
@@ -527,6 +616,17 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         enabled INTEGER NOT NULL DEFAULT 0,
         catalog_present INTEGER NOT NULL DEFAULT 1,
         updated_at INTEGER NOT NULL,
+        PRIMARY KEY (connection_id, tool_name)
+      )
+    `;
+    void this.sql`
+      CREATE TABLE IF NOT EXISTS sidechat_always_allow_grants (
+        connection_id TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        catalog_fingerprint TEXT NOT NULL,
+        access TEXT NOT NULL,
+        granted_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
         PRIMARY KEY (connection_id, tool_name)
       )
     `;
@@ -587,7 +687,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       ORDER BY tool_name ASC
     `
       .map(parseMcpToolPolicy)
-      .filter((tool): tool is SidechatToolDescriptor => tool !== null);
+      .filter((tool): tool is SidechatToolDescriptor => tool !== null)
+      .map((tool) => this.withAlwaysAllowState(tool));
   }
 
   private getMcpToolPolicy(
@@ -604,7 +705,69 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         AND catalog_present = 1
       LIMIT 1
     `;
-    return rows[0] ? parseMcpToolPolicy(rows[0]) : null;
+    const descriptor = rows[0] ? parseMcpToolPolicy(rows[0]) : null;
+    return descriptor ? this.withAlwaysAllowState(descriptor) : null;
+  }
+
+  private readAlwaysAllowGrant(
+    connectionId: string,
+    toolName: string,
+  ): AlwaysAllowGrantRow | null {
+    const rows = this.sql<AlwaysAllowGrantRow>`
+      SELECT connection_id, tool_name, catalog_fingerprint, access
+      FROM sidechat_always_allow_grants
+      WHERE connection_id = ${connectionId}
+        AND tool_name = ${toolName}
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+
+  private withAlwaysAllowState(
+    descriptor: SidechatToolDescriptor,
+  ): SidechatToolDescriptor {
+    if (descriptor.access !== "write" || !descriptor.enabled) {
+      return { ...descriptor, alwaysAllowed: false };
+    }
+    const grant = this.readAlwaysAllowGrant(
+      descriptor.connectionId,
+      descriptor.toolName,
+    );
+    return {
+      ...descriptor,
+      alwaysAllowed: Boolean(
+        grant &&
+        grant.catalog_fingerprint === descriptor.catalogFingerprint &&
+        grant.access === descriptor.access,
+      ),
+    };
+  }
+
+  private hasAlwaysAllowGrant(
+    request: ExecuteProjectToolRequest,
+  ): boolean {
+    if (request.access !== "write") return false;
+    this.ensureMcpApplicationSchema();
+    const grant = this.readAlwaysAllowGrant(
+      request.connectionId,
+      request.toolName,
+    );
+    return Boolean(
+      grant &&
+      grant.catalog_fingerprint === request.catalogFingerprint &&
+      grant.access === request.access,
+    );
+  }
+
+  private deleteAlwaysAllowGrant(
+    connectionId: string,
+    toolName: string,
+  ): void {
+    void this.sql`
+      DELETE FROM sidechat_always_allow_grants
+      WHERE connection_id = ${connectionId}
+        AND tool_name = ${toolName}
+    `;
   }
 
   private mcpTransportHeaders(
@@ -617,6 +780,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   }
 
   private async syncMcpCatalog(connectionId: string): Promise<void> {
+    const previousPolicies = new Map(
+      this.readMcpToolPolicies(connectionId).map((tool) => [tool.toolName, tool]),
+    );
     const discovered = this.mcp.listTools({ serverId: connectionId }).map(
       (tool) =>
         ({
@@ -633,13 +799,22 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       discovered,
       this.readMcpToolPolicies(connectionId),
     );
-    this.sql`
+    void this.sql`
       UPDATE sidechat_mcp_tool_policy
       SET catalog_present = 0, updated_at = ${Date.now()}
       WHERE connection_id = ${connectionId}
     `;
     for (const tool of normalized) {
-      this.sql`
+      const previous = previousPolicies.get(tool.toolName);
+      if (
+        previous &&
+        (previous.catalogFingerprint !== tool.catalogFingerprint ||
+          previous.access !== tool.access ||
+          (previous.enabled && !tool.enabled))
+      ) {
+        this.deleteAlwaysAllowGrant(connectionId, tool.toolName);
+      }
+      void this.sql`
         INSERT INTO sidechat_mcp_tool_policy (
           connection_id, tool_name, exposed_name, display_name, description,
           input_schema, catalog_fingerprint, access, enabled,
@@ -662,10 +837,23 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           updated_at = excluded.updated_at
       `;
     }
-    this.sql`
+    void this.sql`
       DELETE FROM sidechat_mcp_tool_policy
       WHERE connection_id = ${connectionId}
         AND catalog_present = 0
+    `;
+    void this.sql`
+      DELETE FROM sidechat_always_allow_grants
+      WHERE connection_id = ${connectionId}
+        AND NOT EXISTS (
+          SELECT 1
+          FROM sidechat_mcp_tool_policy
+          WHERE sidechat_mcp_tool_policy.connection_id =
+                sidechat_always_allow_grants.connection_id
+            AND sidechat_mcp_tool_policy.tool_name =
+                sidechat_always_allow_grants.tool_name
+            AND sidechat_mcp_tool_policy.catalog_present = 1
+        )
     `;
   }
 
@@ -702,11 +890,29 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       return { error: "invalid_tool_input" };
     }
     await this.mcp.waitForConnections({ timeout: 10_000 });
-    const result = await this.mcp.callTool({
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const call = this.mcp.callTool({
       serverId: connectionId,
       name: toolName,
       arguments: input as Record<string, unknown>,
+    }).then(
+      (result) => ({ kind: "result" as const, result }),
+      () => ({ kind: "error" as const }),
+    );
+    const timeout = new Promise<{ kind: "timeout" }>((resolve) => {
+      timeoutId = setTimeout(
+        () => resolve({ kind: "timeout" }),
+        MCP_TOOL_TIMEOUT_MS,
+      );
     });
+    const outcome = await Promise.race([call, timeout]);
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    if (outcome.kind !== "result") {
+      return { error: outcome.kind === "timeout"
+        ? "mcp_tool_timeout"
+        : "mcp_tool_failed" };
+    }
+    const { result } = outcome;
     return result.isError
       ? { error: "mcp_tool_failed" }
       : normalizeMcpToolResult(result);

@@ -36,6 +36,7 @@ interface McpTool {
   audience: "sidechat";
   access: McpToolAccess;
   enabled: boolean;
+  alwaysAllowed: boolean;
 }
 
 interface McpConnection {
@@ -235,6 +236,27 @@ function McpConnections({ projectId }: McpConnectionsProps) {
       setExpandedConnectionId(null);
       queryClient.invalidateQueries({ queryKey });
     },
+  });
+
+  const revokeAlwaysAllow = useMutation({
+    mutationFn: async (tool: McpTool) => {
+      const response = await fetch(
+        `/api/projects/${projectId}/sidechat/approvals/always`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            connectionId: tool.connectionId,
+            toolName: tool.toolName,
+            catalogFingerprint: tool.catalogFingerprint,
+          }),
+        },
+      );
+      if (!response.ok) {
+        throw await parseError(response, "Could not revoke permission");
+      }
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   });
 
   function choosePreset(preset: McpPreset): void {
@@ -603,6 +625,21 @@ function McpConnections({ projectId }: McpConnectionsProps) {
                                           {access}
                                         </button>
                                       ))}
+                                    </div>
+                                  )}
+                                  {tool.alwaysAllowed && (
+                                    <div className="mt-1 flex min-h-10 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                      <span>Always allowed for this exact tool version.</span>
+                                      {data.canManage && (
+                                        <button
+                                          type="button"
+                                          className="min-h-10 rounded-lg px-2 text-xs font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                          disabled={revokeAlwaysAllow.isPending}
+                                          onClick={() => revokeAlwaysAllow.mutate(tool)}
+                                        >
+                                          Revoke always
+                                        </button>
+                                      )}
                                     </div>
                                   )}
                                 </div>

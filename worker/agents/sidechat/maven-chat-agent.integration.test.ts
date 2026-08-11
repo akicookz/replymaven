@@ -67,6 +67,62 @@ function sidechatContext(): SidechatCustomerContext {
 }
 
 describe("native MavenChatAgent transcript", () => {
+  nativeTest("finds only the exact pending native approval scope", async () => {
+    const {
+      hasPendingSidechatApproval,
+      readPendingApprovalScope,
+    } = await import("./maven-chat-agent");
+    const messages: UIMessage[] = [{
+      id: "assistant-approval",
+      role: "assistant",
+      parts: [{
+        type: "dynamic-tool",
+        toolName: "tool_mcpserver_write_customer",
+        toolCallId: "write-call",
+        state: "approval-requested",
+        input: { hidden: true },
+        approval: { id: "approval-1" },
+      }],
+    }];
+
+    expect(readPendingApprovalScope(
+      messages,
+      "approval-1",
+      "write-call",
+    )).toEqual({
+      approvalId: "approval-1",
+      toolCallId: "write-call",
+      exposedName: "tool_mcpserver_write_customer",
+    });
+    expect(readPendingApprovalScope(
+      messages,
+      "stale-approval",
+      "write-call",
+    )).toBeNull();
+
+    const resolvedMessages: UIMessage[] = [
+      ...messages,
+      {
+        id: "assistant-approval-resolved",
+        role: "assistant",
+        parts: [{
+          type: "dynamic-tool",
+          toolName: "tool_mcpserver_write_customer",
+          toolCallId: "write-call",
+          state: "approval-responded",
+          input: { hidden: true },
+          approval: { id: "approval-1", approved: true },
+        }],
+      },
+    ];
+    expect(readPendingApprovalScope(
+      resolvedMessages,
+      "approval-1",
+      "write-call",
+    )).toBeNull();
+    expect(hasPendingSidechatApproval(resolvedMessages)).toBe(false);
+  });
+
   nativeTest("builds the transient acceptance part from the submitted UI message ID", async () => {
     const { buildTurnAcceptedPart, selectSidechatModelMessages } = await import(
       "./maven-chat-agent"
@@ -246,6 +302,25 @@ describe("native MavenChatAgent transcript", () => {
         continuation: false,
         status: "completed",
       });
+      const pendingApprovalMessage = {
+        id: "assistant-pending",
+        role: "assistant",
+        parts: [{
+          type: "dynamic-tool",
+          toolName: "tool_mcpserver_write_customer",
+          toolCallId: "write-call",
+          state: "approval-requested",
+          input: { hidden: true },
+          approval: { id: "approval-1" },
+        }],
+      } as UIMessage;
+      fakeAgent.messages = [pendingApprovalMessage];
+      await lifecycle.onChatResponse.call(fakeAgent, {
+        message: pendingApprovalMessage,
+        requestId: "request-pending",
+        continuation: false,
+        status: "completed",
+      });
       await lifecycle.onChatResponse.call(fakeAgent, {
         message: completedMessage,
         requestId: "request-aborted",
@@ -259,7 +334,7 @@ describe("native MavenChatAgent transcript", () => {
         id: "assistant-complete:reply-draft",
         data: { text: "Completed draft", createdAt: expect.any(Number) },
       });
-      expect(statuses).toEqual(["ready", "failed"]);
+      expect(statuses).toEqual(["ready", "waiting_approval", "failed"]);
     },
   );
 
@@ -306,6 +381,61 @@ describe("native MavenChatAgent transcript", () => {
       await expect(freshStub.getPrivateTranscriptSnapshot()).resolves.toEqual([
         userMessage("private-user-1", "Investigate this privately"),
       ]);
+    },
+  );
+
+  nativeTest(
+    "recovers an exact pending approval after Durable Object eviction",
+    async () => {
+      const [
+        { env },
+        { evictAllDurableObjects },
+        { MavenChatAgent },
+        { getSubAgentByName },
+      ] = await Promise.all([
+        import("cloudflare:workers"),
+        import("cloudflare:test"),
+        import("./maven-chat-agent"),
+        import("agents"),
+      ]);
+      const projectId = "approval-recovery-project";
+      const conversationId = "conversation-approval";
+      const childName = `sc_${conversationId}`;
+      const parent = env.MAVEN_PROJECT_AGENT.get(
+        env.MAVEN_PROJECT_AGENT.idFromName(projectId),
+      );
+      await parent.registerSidechat(conversationId);
+      const child = await getSubAgentByName(parent, MavenChatAgent, childName);
+      await child.persistMessages([{
+        id: "assistant-pending",
+        role: "assistant",
+        parts: [{
+          type: "dynamic-tool",
+          toolName: "tool_mcpserver_write_customer",
+          toolCallId: "write-call",
+          state: "approval-requested",
+          input: { opaque: "native-only" },
+          approval: { id: "approval-1" },
+        }],
+      } as UIMessage]);
+
+      await evictAllDurableObjects();
+      const reloadedParent = env.MAVEN_PROJECT_AGENT.get(
+        env.MAVEN_PROJECT_AGENT.idFromName(projectId),
+      );
+      const freshChild = await getSubAgentByName(
+        reloadedParent,
+        MavenChatAgent,
+        childName,
+      );
+      await expect(freshChild.getPendingApprovalScope(
+        "approval-1",
+        "write-call",
+      )).resolves.toEqual({
+        approvalId: "approval-1",
+        toolCallId: "write-call",
+        exposedName: "tool_mcpserver_write_customer",
+      });
     },
   );
 

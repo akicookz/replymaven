@@ -26,6 +26,8 @@ export interface SidechatSessionResponse {
   token: string;
   expiresAt: number;
   created: boolean;
+  canApproveOnce: boolean;
+  canAlwaysAllow: boolean;
 }
 
 interface SidechatClaimBase {
@@ -105,6 +107,7 @@ export interface SidechatToolDescriptor {
   audience: "sidechat";
   access: "read" | "write";
   enabled: boolean;
+  alwaysAllowed?: boolean;
 }
 
 export interface ExecuteProjectToolRequest {
@@ -115,7 +118,14 @@ export interface ExecuteProjectToolRequest {
   toolName: string;
   catalogFingerprint: string;
   access: "read" | "write";
+  approvalMode: "none" | "once" | "always";
   input: unknown;
+}
+
+export interface PendingSidechatApprovalScope {
+  approvalId: string;
+  toolCallId: string;
+  exposedName: string;
 }
 
 export interface ExecuteProjectToolResult {

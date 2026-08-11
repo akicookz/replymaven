@@ -178,6 +178,8 @@ export async function handleCreateSidechatSession(
     token: await signSidechatToken(claims, options.secret),
     expiresAt: claims.exp,
     created: registration.created,
+    canApproveOnce: claims.canApproveOnce,
+    canAlwaysAllow: claims.canAlwaysAllow,
   };
   return Response.json(response);
 }

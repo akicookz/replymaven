@@ -56,7 +56,7 @@ describe("Sidechat native message adapter", () => {
           draft: "The visitor-ready answer.",
         },
       }),
-    ]);
+    ], { canAlwaysAllow: true });
     const serialized = JSON.stringify(messages);
     expect(serialized).not.toContain("private chain of thought");
     expect(serialized).not.toContain("secret-provider");
@@ -72,7 +72,7 @@ describe("Sidechat native message adapter", () => {
           data: { text: "Exact answer", createdAt: 1_786_334_400_000 },
         },
       ] as UIMessage["parts"]),
-    ]);
+    ], { canAlwaysAllow: true });
 
     expect(message).toMatchObject({
       content: "Exact answer",
@@ -104,17 +104,19 @@ describe("Sidechat native message adapter", () => {
           output: { accessToken: "output-secret", entireRecord: true },
         },
       ] as UIMessage["parts"]),
-    ]);
+    ], { canAlwaysAllow: true });
 
     expect(messages).toEqual([
       expect.objectContaining({
         id: "maven-approval:call-1",
         role: "bot",
-        content: "Maven needs permission to run this action.",
+        content:
+          "Run this write action?\n\nThis **can change data in the connected service** and may not be reversible.",
         presentationAction: {
           type: "approval",
           approvalId: "approval-1",
           toolCallId: "call-1",
+          canAlwaysAllow: true,
         },
       }),
     ]);
@@ -124,6 +126,31 @@ describe("Sidechat native message adapter", () => {
     expect(serialized).not.toContain("input-secret");
     expect(serialized).not.toContain("output-secret");
     expect(serialized).not.toContain("entireRecord");
+  });
+
+  test("shows only Allow once to members without exposing tool identifiers", () => {
+    const messages = adaptSidechatMessages([
+      uiMessage("maven-member-approval", "assistant", [
+        {
+          type: "dynamic-tool",
+          toolName: "tool_mcpsecret123_internal_write_name",
+          toolCallId: "call-member",
+          state: "approval-requested",
+          input: { privateCustomerRecord: "hidden" },
+          approval: { id: "approval-member" },
+        },
+      ] as UIMessage["parts"]),
+    ], { canAlwaysAllow: false });
+
+    expect(messages[0]).toMatchObject({
+      presentationAction: {
+        type: "approval",
+        canAlwaysAllow: false,
+      },
+    });
+    expect(JSON.stringify(messages)).not.toContain("mcpsecret123");
+    expect(JSON.stringify(messages)).not.toContain("privateCustomerRecord");
+    expect(JSON.stringify(messages)).not.toContain("hidden");
   });
 
   test("fails closed for unknown data parts and parses only bounded safe transient parts", () => {

@@ -8,6 +8,8 @@ import { getMcpPreset, listMcpPresets } from "../agents/sidechat/mcp-presets";
 import { validateMcpServerUrl } from "../agents/sidechat/mcp-policy";
 import {
   createProjectMcpConnectionSchema,
+  grantSidechatAlwaysAllowSchema,
+  revokeSidechatAlwaysAllowSchema,
   updateProjectMcpPolicySchema,
 } from "../validation";
 import type { SidechatRouteActor } from "./sidechat-agent-handlers";
@@ -21,6 +23,17 @@ interface ProjectMcpParent {
     connectionId: string,
     tools: ProjectMcpPolicyInput[],
   ): Promise<McpConnectionView | null>;
+  grantAlwaysForPendingApproval(
+    conversationId: string,
+    actorUserId: string,
+    approvalId: string,
+    toolCallId: string,
+  ): Promise<boolean>;
+  revokeAlwaysAllow(
+    connectionId: string,
+    toolName: string,
+    catalogFingerprint: string,
+  ): Promise<boolean>;
 }
 
 interface ProjectMcpCallbackParent {
@@ -62,9 +75,19 @@ interface McpOAuthCallbackOptions {
   getParent(): Promise<ProjectMcpCallbackParent>;
 }
 
+interface GrantProjectToolAlwaysAllowOptions extends ProjectMcpOptions {
+  conversationId: string;
+  approvalId: string;
+  request: Request;
+}
+
+interface RevokeProjectToolAlwaysAllowOptions extends ProjectMcpOptions {
+  request: Request;
+}
+
 function errorResponse(
   error: string,
-  status: 400 | 401 | 403 | 404 | 502,
+  status: 400 | 401 | 403 | 404 | 409 | 502,
 ): Response {
   return Response.json({ error }, { status });
 }
@@ -114,6 +137,7 @@ function safeDescriptor(tool: SidechatToolDescriptor): SidechatToolDescriptor {
     audience: "sidechat",
     access: tool.access,
     enabled: tool.enabled,
+    alwaysAllowed: tool.alwaysAllowed === true,
   };
 }
 
@@ -288,6 +312,63 @@ export async function handleDisconnectProjectMcp(
     const parent = await options.getParent();
     const disconnected = await parent.disconnectMcp(options.connectionId);
     return disconnected
+      ? new Response(null, { status: 204 })
+      : errorResponse("not_found", 404);
+  } catch {
+    return errorResponse("mcp_unavailable", 502);
+  }
+}
+
+export async function handleGrantProjectToolAlwaysAllow(
+  options: GrantProjectToolAlwaysAllowOptions,
+): Promise<Response> {
+  const denied = await authorizeProject(options, true);
+  if (denied) return denied;
+  if (
+    !options.conversationId || options.conversationId.length > 200 ||
+    !options.approvalId || options.approvalId.length > 200
+  ) {
+    return errorResponse("invalid_request", 400);
+  }
+  const parsed = grantSidechatAlwaysAllowSchema.safeParse(
+    await parseJson(options.request),
+  );
+  if (!parsed.success) return errorResponse("invalid_request", 400);
+
+  try {
+    const parent = await options.getParent();
+    const granted = await parent.grantAlwaysForPendingApproval(
+      options.conversationId,
+      options.actor!.userId,
+      options.approvalId,
+      parsed.data.toolCallId,
+    );
+    return granted
+      ? new Response(null, { status: 204 })
+      : errorResponse("approval_stale", 409);
+  } catch {
+    return errorResponse("mcp_unavailable", 502);
+  }
+}
+
+export async function handleRevokeProjectToolAlwaysAllow(
+  options: RevokeProjectToolAlwaysAllowOptions,
+): Promise<Response> {
+  const denied = await authorizeProject(options, true);
+  if (denied) return denied;
+  const parsed = revokeSidechatAlwaysAllowSchema.safeParse(
+    await parseJson(options.request),
+  );
+  if (!parsed.success) return errorResponse("invalid_request", 400);
+
+  try {
+    const parent = await options.getParent();
+    const revoked = await parent.revokeAlwaysAllow(
+      parsed.data.connectionId,
+      parsed.data.toolName,
+      parsed.data.catalogFingerprint,
+    );
+    return revoked
       ? new Response(null, { status: 204 })
       : errorResponse("not_found", 404);
   } catch {

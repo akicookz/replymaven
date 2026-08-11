@@ -27,8 +27,10 @@ function isToolFollowupChunk(type: string): boolean {
   );
 }
 
-export function createPrivateToolChunkFilter(): (chunk: unknown) => boolean {
-  const safeToolCalls = new Map<string, boolean>();
+export function createPrivateToolChunkFilter(
+  approvalToolNames: ReadonlySet<string> = new Set(),
+): (chunk: unknown) => boolean {
+  const toolKinds = new Map<string, "draft" | "approval" | "private">();
   return function shouldForward(chunk: unknown): boolean {
     if (!chunk || typeof chunk !== "object") return false;
     const value = chunk as ToolChunkLike;
@@ -40,15 +42,21 @@ export function createPrivateToolChunkFilter(): (chunk: unknown) => boolean {
       ) {
         return false;
       }
-      const safe = value.toolName === SAFE_STREAM_TOOL_NAME;
-      safeToolCalls.set(value.toolCallId, safe);
-      return safe;
+      const kind = value.toolName === SAFE_STREAM_TOOL_NAME
+        ? "draft"
+        : approvalToolNames.has(value.toolName)
+          ? "approval"
+          : "private";
+      toolKinds.set(value.toolCallId, kind);
+      return kind === "draft" || (
+        kind === "approval" && value.type !== "tool-input-error"
+      );
     }
     if (isToolFollowupChunk(value.type)) {
-      return (
-        typeof value.toolCallId === "string" &&
-        safeToolCalls.get(value.toolCallId) === true
-      );
+      if (typeof value.toolCallId !== "string") return false;
+      const kind = toolKinds.get(value.toolCallId);
+      if (kind === "draft") return true;
+      return kind === "approval" && value.type === "tool-approval-request";
     }
     return true;
   };
@@ -60,7 +68,10 @@ export function sanitizePrivateMessageForPersistence(
   return {
     ...message,
     parts: message.parts.filter((part) => {
-      if (part.type === "dynamic-tool") return false;
+      if (part.type === "dynamic-tool") {
+        return part.state === "approval-requested" ||
+          part.state === "approval-responded";
+      }
       if (part.type.startsWith("tool-")) {
         return part.type === SAFE_PERSISTED_TOOL_TYPE;
       }

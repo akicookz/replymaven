@@ -141,16 +141,18 @@ export default function MessageBubble({
         </div>
       );
     }
-    if (actions.approveAlways && actions.approveOnce && onApprovalAction) {
+    if (actions.approveOnce && onApprovalAction) {
       return (
         <div className="mt-1 flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1">
-          <button
-            type="button"
-            className="min-h-10 shrink-0 whitespace-nowrap text-[12px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
-            onClick={() => onApprovalAction(message.id, "always")}
-          >
-            Always allow
-          </button>
+          {actions.approveAlways && (
+            <button
+              type="button"
+              className="min-h-10 shrink-0 whitespace-nowrap text-[12px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
+              onClick={() => onApprovalAction(message.id, "always")}
+            >
+              Always allow
+            </button>
+          )}
           <button
             type="button"
             className="flex min-h-10 shrink-0 items-center whitespace-nowrap text-[12px] font-semibold motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"

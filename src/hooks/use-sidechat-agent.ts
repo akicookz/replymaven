@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
@@ -63,6 +63,7 @@ interface UseSidechatSessionOptions {
 
 interface UseSidechatAgentOptions {
   session: SidechatSessionResponse;
+  conversationId: string;
   onTurnAccepted?: (messageId: string) => void;
   onSafeActivity?: (
     activity: Extract<SafeSidechatDataPart, { type: "safe-activity" }>,
@@ -81,7 +82,11 @@ export interface SidechatAgentController {
   send(text: string, messageId?: string): Promise<string>;
   stop(): Promise<void>;
   retry(): Promise<void>;
-  approve(approvalId: string, approved: boolean): Promise<void>;
+  approve(
+    approvalId: string,
+    toolCallId: string,
+    mode: "always" | "once",
+  ): Promise<void>;
 }
 
 interface SidechatChatOptions {
@@ -284,6 +289,50 @@ export function planFailedSidechatRetry(options: {
   };
 }
 
+interface SubmitSidechatApprovalOptions {
+  mode: "always" | "once";
+  projectId: string;
+  conversationId: string;
+  approvalId: string;
+  toolCallId: string;
+  approveNative(approvalId: string): Promise<void>;
+  fetcher?: typeof fetch;
+}
+
+export function claimSidechatApprovalSubmission(
+  submitted: Set<string>,
+  approvalId: string,
+): boolean {
+  if (submitted.has(approvalId)) return false;
+  submitted.add(approvalId);
+  return true;
+}
+
+export async function submitSidechatApproval(
+  options: SubmitSidechatApprovalOptions,
+): Promise<void> {
+  if (options.mode === "always") {
+    const fetcher = options.fetcher ?? fetch;
+    const response = await fetcher(
+      `/api/projects/${encoded(options.projectId)}` +
+        `/conversations/${encoded(options.conversationId)}` +
+        `/sidechat/approvals/${encoded(options.approvalId)}/always`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toolCallId: options.toolCallId }),
+      },
+    );
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as {
+        error?: string;
+      } | null;
+      throw new Error(body?.error ?? `Request failed (${response.status})`);
+    }
+  }
+  await options.approveNative(options.approvalId);
+}
+
 export function useSidechatParentState(
   session: SidechatSummarySessionResponse,
 ): MavenProjectState | undefined {
@@ -302,6 +351,7 @@ export function useSidechatAgent(
   const [acceptedMessageIds, setAcceptedMessageIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const submittedApprovalIds = useRef(new Set<string>());
   const agent = useAgent(
     buildSidechatAgentConnectionOptions(options.session),
   );
@@ -337,8 +387,10 @@ export function useSidechatAgent(
     stop,
   } = chat;
   const messages = useMemo(
-    () => adaptSidechatMessages(chat.messages),
-    [chat.messages],
+    () => adaptSidechatMessages(chat.messages, {
+      canAlwaysAllow: options.session.canAlwaysAllow,
+    }),
+    [chat.messages, options.session.canAlwaysAllow],
   );
 
   const send = useCallback(async (text: string, messageId?: string) => {
@@ -356,10 +408,33 @@ export function useSidechatAgent(
 
   const approve = useCallback(async (
     approvalId: string,
-    approved: boolean,
+    toolCallId: string,
+    mode: "always" | "once",
   ) => {
-    await addToolApprovalResponse({ id: approvalId, approved });
-  }, [addToolApprovalResponse]);
+    if (!claimSidechatApprovalSubmission(
+      submittedApprovalIds.current,
+      approvalId,
+    )) return;
+    try {
+      await submitSidechatApproval({
+        mode,
+        projectId: options.session.parentName,
+        conversationId: options.conversationId,
+        approvalId,
+        toolCallId,
+        approveNative: async (id) => {
+          await addToolApprovalResponse({ id, approved: true });
+        },
+      });
+    } catch (error) {
+      submittedApprovalIds.current.delete(approvalId);
+      throw error;
+    }
+  }, [
+    addToolApprovalResponse,
+    options.conversationId,
+    options.session.parentName,
+  ]);
 
   return {
     messages,

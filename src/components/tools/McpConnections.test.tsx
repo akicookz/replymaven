@@ -110,7 +110,7 @@ const presets = [
   },
 ];
 
-function responseData(canManage = true) {
+function responseData(canManage = true, alwaysAllowed = false) {
   return {
     canManage,
     presets,
@@ -132,8 +132,9 @@ function responseData(canManage = true) {
             inputSchema: { type: "object" },
             catalogFingerprint: "a".repeat(64),
             audience: "sidechat",
-            access: "read",
-            enabled: false,
+            access: alwaysAllowed ? "write" : "read",
+            enabled: alwaysAllowed,
+            alwaysAllowed,
           },
         ],
       },
@@ -141,7 +142,10 @@ function responseData(canManage = true) {
   };
 }
 
-async function renderConnections(canManage = true): Promise<Rendered> {
+async function renderConnections(
+  canManage = true,
+  alwaysAllowed = false,
+): Promise<Rendered> {
   const dom = new JSDOM(
     '<!doctype html><html><body><div id="root"></div></body></html>',
     { url: "https://app.test/app/projects/project-1/quick-actions?tab=tools" },
@@ -184,7 +188,9 @@ async function renderConnections(canManage = true): Promise<Rendered> {
       ? JSON.parse(init.body) as Record<string, unknown>
       : null;
     if (method !== "GET") requests.push({ url, method, body });
-    if (method === "GET") return Response.json(responseData(canManage));
+    if (method === "GET") {
+      return Response.json(responseData(canManage, alwaysAllowed));
+    }
     if (method === "POST" && url.endsWith("/connections")) {
       return Response.json(
         {
@@ -326,5 +332,28 @@ describe("native MCP connection settings", () => {
       "Only project owners and admins can change MCP connections.",
     );
     expect(dom.window.document.querySelector("button[aria-label^='Enable']")).toBeNull();
+  });
+
+  test("shows and revokes an exact persistent write grant", async () => {
+    const { dom, requests } = await renderConnections(true, true);
+    const example = await waitForText(dom, "Example MCP");
+    await act(async () => example.closest("button")?.click());
+    expect(dom.window.document.body.textContent).toContain(
+      "Always allowed for this exact tool version.",
+    );
+    const revoke = await waitForText(dom, "Revoke always");
+    await act(async () => {
+      revoke.click();
+      await flush();
+    });
+    expect(requests).toContainEqual({
+      url: "/api/projects/project-1/sidechat/approvals/always",
+      method: "DELETE",
+      body: {
+        connectionId: "mcp-example-123",
+        toolName: "find_customer",
+        catalogFingerprint: "a".repeat(64),
+      },
+    });
   });
 });

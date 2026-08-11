@@ -45,6 +45,7 @@ export type MessagePresentationAction =
       type: "approval";
       approvalId: string;
       toolCallId: string;
+      canAlwaysAllow: boolean;
     };
 
 export interface Message {

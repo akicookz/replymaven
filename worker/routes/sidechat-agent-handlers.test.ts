@@ -97,6 +97,8 @@ describe("create native Sidechat session", () => {
         childName: "sc_conversation-1",
         created: true,
         expiresAt: now + 120,
+        canApproveOnce: true,
+        canAlwaysAllow: role !== "member",
       });
       expect(claims).toMatchObject({
         scope: "child",

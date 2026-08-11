@@ -55,6 +55,7 @@ function executionRequest(
     toolName: descriptor.toolName,
     catalogFingerprint: descriptor.catalogFingerprint,
     access: descriptor.access,
+    approvalMode: descriptor.access === "write" ? "once" : "none",
     input: { customerId: "never-audit-me" },
     ...overrides,
   };
@@ -85,6 +86,7 @@ function executionDependencies(overrides: Record<string, unknown> = {}) {
     canActorAccessProject: mock(async () => true),
     getAuthoritativeHttpTool: mock(async () => toolRow()),
     getAuthoritativeMcpTool: mock(async () => null),
+    hasAlwaysAllowGrant: mock(() => false),
     runKnowledgeSearch: mock(async () => ({ found: true, context: "Answer" })),
     runExternalAction: mock(async (action: () => Promise<unknown>) => ({
       executed: true,
@@ -168,6 +170,7 @@ describe("Sidechat project tool descriptors", () => {
       toolName: "lookup_customer",
       catalogFingerprint: descriptors[1]?.catalogFingerprint,
       access: "read",
+      approvalMode: "none",
       input: { customerId: "customer-1" },
     });
     expect(activities).toEqual([
@@ -181,6 +184,53 @@ describe("Sidechat project tool descriptors", () => {
         data: { label: "Look up customer · Done", status: "success" },
         transient: true,
       },
+    ]);
+  });
+
+  test("uses native approval only for writes without an exact persistent grant", async () => {
+    const read = mcpDescriptor({ exposedName: "read_tool" });
+    const write = mcpDescriptor({
+      toolName: "write_customer",
+      exposedName: "write_tool",
+      access: "write",
+    });
+    const allowedWrite = mcpDescriptor({
+      toolName: "allowed_write_customer",
+      exposedName: "allowed_write_tool",
+      access: "write",
+      alwaysAllowed: true,
+    });
+    const execute = mock(async () => ({
+      status: "completed" as const,
+      output: { ok: true },
+      safeActivity: "Done",
+    }));
+    const tools = buildSidechatDynamicTools({
+      descriptors: [read, write, allowedWrite],
+      childName: "sc_conversation-1",
+      conversationId: "conversation-1",
+      actorUserId: "user-1",
+      execute,
+      emitActivity() {},
+    });
+
+    expect(tools.read_tool?.needsApproval).toBe(false);
+    expect(tools.write_tool?.needsApproval).toBe(true);
+    expect(tools.allowed_write_tool?.needsApproval).toBe(false);
+
+    await tools.write_tool?.execute?.({}, {
+      toolCallId: "write-call",
+      messages: [],
+      abortSignal: undefined,
+    });
+    await tools.allowed_write_tool?.execute?.({}, {
+      toolCallId: "always-call",
+      messages: [],
+      abortSignal: undefined,
+    });
+    expect(execute.mock.calls.map((call) => call[0].approvalMode)).toEqual([
+      "once",
+      "always",
     ]);
   });
 });
@@ -217,12 +267,20 @@ describe("Sidechat project tool execution", () => {
     );
   });
 
-  test("does not execute MCP writes or stale catalog authority", async () => {
+  test("executes approved MCP writes once but rejects unapproved and stale authority", async () => {
     const writeDescriptor = mcpDescriptor({ access: "write" });
     const executeMcpTool = mock(async () => ({ content: [] }));
     const write = await executeSidechatProjectTool({
       projectId: "project-1",
-      request: executionRequest(writeDescriptor),
+      request: executionRequest(writeDescriptor, { approvalMode: "once" }),
+      dependencies: executionDependencies({
+        getAuthoritativeMcpTool: mock(async () => writeDescriptor),
+        executeMcpTool,
+      }),
+    });
+    const unapproved = await executeSidechatProjectTool({
+      projectId: "project-1",
+      request: executionRequest(writeDescriptor, { approvalMode: "none" }),
       dependencies: executionDependencies({
         getAuthoritativeMcpTool: mock(async () => writeDescriptor),
         executeMcpTool,
@@ -239,15 +297,75 @@ describe("Sidechat project tool execution", () => {
       }),
     });
 
-    expect(write).toMatchObject({
-      status: "unavailable",
+    expect(write).toMatchObject({ status: "completed" });
+    expect(unapproved).toMatchObject({
+      status: "denied",
       errorCode: "approval_required",
     });
     expect(stale).toMatchObject({
       status: "denied",
       errorCode: "tool_authority_changed",
     });
-    expect(executeMcpTool).not.toHaveBeenCalled();
+    expect(executeMcpTool).toHaveBeenCalledTimes(1);
+  });
+
+  test("requires an exact current grant for always-approved writes", async () => {
+    const descriptor = mcpDescriptor({ access: "write", alwaysAllowed: true });
+    const executeMcpTool = mock(async () => ({ content: [] }));
+    const allowed = await executeSidechatProjectTool({
+      projectId: "project-1",
+      request: executionRequest(descriptor, { approvalMode: "always" }),
+      dependencies: executionDependencies({
+        getAuthoritativeMcpTool: mock(async () => descriptor),
+        hasAlwaysAllowGrant: mock(() => true),
+        executeMcpTool,
+      }),
+    });
+    const stale = await executeSidechatProjectTool({
+      projectId: "project-1",
+      request: executionRequest(descriptor, { approvalMode: "always" }),
+      dependencies: executionDependencies({
+        getAuthoritativeMcpTool: mock(async () => ({
+          ...descriptor,
+          alwaysAllowed: false,
+        })),
+        hasAlwaysAllowGrant: mock(() => false),
+        executeMcpTool,
+      }),
+    });
+
+    expect(allowed.status).toBe("completed");
+    expect(stale).toMatchObject({
+      status: "denied",
+      errorCode: "approval_grant_changed",
+    });
+    expect(executeMcpTool).toHaveBeenCalledTimes(1);
+  });
+
+  test("reports an accepted-or-timeout write as ambiguous and never retries", async () => {
+    const descriptor = mcpDescriptor({ access: "write" });
+    const executeMcpTool = mock(async () => ({ error: "mcp_tool_timeout" }));
+    const dependencies = executionDependencies({
+      getAuthoritativeMcpTool: mock(async () => descriptor),
+      executeMcpTool,
+    });
+    const result = await executeSidechatProjectTool({
+      projectId: "project-1",
+      request: executionRequest(descriptor, { approvalMode: "once" }),
+      dependencies,
+    });
+
+    expect(result).toEqual({
+      status: "ambiguous",
+      safeActivity: "Write result unknown",
+      errorCode: "write_result_unknown",
+    });
+    expect(executeMcpTool).toHaveBeenCalledTimes(1);
+    expect(dependencies.writeAudit.mock.calls[0]?.[0]).toMatchObject({
+      status: "ambiguous",
+      approvalMode: "once",
+      errorCode: "write_result_unknown",
+    });
   });
 
   test("defines a parent-local audit table with metadata columns only", () => {
@@ -361,7 +479,7 @@ describe("Sidechat project tool execution", () => {
     expect(dependencies.executeHttpTool).not.toHaveBeenCalled();
   });
 
-  test("reports writes as approval-required without dispatching them", async () => {
+  test("reports unapproved writes as approval-required without dispatching them", async () => {
     const writeRow = toolRow({ access: "write" });
     const descriptor = (await buildSidechatToolDescriptors("project-1", [writeRow]))[1]!;
     const dependencies = executionDependencies({
@@ -370,12 +488,12 @@ describe("Sidechat project tool execution", () => {
 
     const result = await executeSidechatProjectTool({
       projectId: "project-1",
-      request: executionRequest(descriptor),
+      request: executionRequest(descriptor, { approvalMode: "none" }),
       dependencies,
     });
 
     expect(result).toMatchObject({
-      status: "unavailable",
+      status: "denied",
       errorCode: "approval_required",
     });
     expect(dependencies.runExternalAction).not.toHaveBeenCalled();

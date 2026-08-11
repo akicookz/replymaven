@@ -760,6 +760,20 @@ export const updateProjectMcpPolicySchema = z
     }
   });
 
+export const grantSidechatAlwaysAllowSchema = z
+  .object({
+    toolCallId: z.string().min(1).max(200),
+  })
+  .strict();
+
+export const revokeSidechatAlwaysAllowSchema = z
+  .object({
+    connectionId: z.string().min(1).max(100),
+    toolName: z.string().min(1).max(200),
+    catalogFingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
+  .strict();
+
 // ─── Billing ──────────────────────────────────────────────────────────────────
 
 export const createCheckoutSchema = z.object({

@@ -87,7 +87,12 @@ describe("Sidechat presentation helpers", () => {
     });
     expect(deriveMessageActions(
       "sidechat",
-      { type: "approval" },
+      {
+        type: "approval",
+        approvalId: "approval-1",
+        toolCallId: "call-1",
+        canAlwaysAllow: true,
+      },
       false,
     )).toEqual({
       addToReply: false,
@@ -96,12 +101,22 @@ describe("Sidechat presentation helpers", () => {
     });
     expect(deriveMessageActions(
       "public",
-      { type: "approval" },
+      {
+        type: "approval",
+        approvalId: "approval-1",
+        toolCallId: "call-1",
+        canAlwaysAllow: true,
+      },
       false,
     ).approveOnce).toBe(false);
     expect(deriveMessageActions(
       "sidechat",
-      { type: "approval" },
+      {
+        type: "approval",
+        approvalId: "approval-1",
+        toolCallId: "call-1",
+        canAlwaysAllow: true,
+      },
       true,
     ).approveOnce).toBe(false);
   });

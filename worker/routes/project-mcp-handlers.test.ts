@@ -4,9 +4,11 @@ import {
   handleConnectProjectMcp,
   handleDisconnectProjectMcp,
   handleGetProjectMcp,
+  handleGrantProjectToolAlwaysAllow,
   handleMcpOAuthCallback,
   handleRefreshProjectMcp,
   handleUpdateProjectMcpPolicy,
+  handleRevokeProjectToolAlwaysAllow,
 } from "./project-mcp-handlers";
 
 function actor(role: "owner" | "admin" | "member" = "owner"): SidechatRouteActor {
@@ -59,6 +61,8 @@ function parent() {
       state: "ready",
       tools: [],
     })),
+    grantAlwaysForPendingApproval: mock(async () => true),
+    revokeAlwaysAllow: mock(async () => true),
     fetch: mock(async () => new Response("connected", { status: 200 })),
   };
 }
@@ -117,6 +121,71 @@ describe("project MCP route authorization", () => {
 });
 
 describe("project MCP connection handlers", () => {
+  test("persists Always allow only for an owner or admin exact pending approval", async () => {
+    const target = parent();
+    const ownerResponse = await handleGrantProjectToolAlwaysAllow({
+      actor: actor("owner"),
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      approvalId: "approval-1",
+      request: bodyRequest({ toolCallId: "call-1" }),
+      projectService: projectService(),
+      getParent: async () => target,
+    });
+    const memberResponse = await handleGrantProjectToolAlwaysAllow({
+      actor: actor("member"),
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      approvalId: "approval-1",
+      request: bodyRequest({ toolCallId: "call-1" }),
+      projectService: projectService(),
+      getParent: async () => target,
+    });
+
+    expect(ownerResponse.status).toBe(204);
+    expect(target.grantAlwaysForPendingApproval).toHaveBeenCalledWith(
+      "conversation-1",
+      "user-1",
+      "approval-1",
+      "call-1",
+    );
+    expect(memberResponse.status).toBe(403);
+    expect(target.grantAlwaysForPendingApproval).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects stale approval grants and revokes only an exact scope", async () => {
+    const target = parent();
+    target.grantAlwaysForPendingApproval = mock(async () => false);
+    const stale = await handleGrantProjectToolAlwaysAllow({
+      actor: actor("admin"),
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      approvalId: "approval-stale",
+      request: bodyRequest({ toolCallId: "call-stale" }),
+      projectService: projectService(),
+      getParent: async () => target,
+    });
+    const revoked = await handleRevokeProjectToolAlwaysAllow({
+      actor: actor("owner"),
+      projectId: "project-1",
+      request: bodyRequest({
+        connectionId: "mcp-connection-1",
+        toolName: "write_customer",
+        catalogFingerprint: "a".repeat(64),
+      }),
+      projectService: projectService(),
+      getParent: async () => target,
+    });
+
+    expect(stale.status).toBe(409);
+    expect(revoked.status).toBe(204);
+    expect(target.revokeAlwaysAllow).toHaveBeenCalledWith(
+      "mcp-connection-1",
+      "write_customer",
+      "a".repeat(64),
+    );
+  });
+
   test("resolves a preset server-side and never returns bearer credentials", async () => {
     const target = parent();
     const response = await handleConnectProjectMcp({

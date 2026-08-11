@@ -179,6 +179,7 @@ function NativeSidechatPane({
   const [safeActivity, setSafeActivity] = useState<string | null>(null);
   const sidechat = useSidechatAgent({
     session,
+    conversationId: conversation.id,
     onTurnAccepted,
     onSafeActivity(activity) {
       setSafeActivity(activity.status === "started" ? activity.label : null);
@@ -287,8 +288,10 @@ function NativeSidechatPane({
         }
         void sidechat.retry().catch(() => undefined);
       }}
-      onApproval={(approvalId) => {
-        void sidechat.approve(approvalId, true).catch(() => undefined);
+      onApproval={(approvalId, toolCallId, mode) => {
+        void sidechat.approve(approvalId, toolCallId, mode).catch(
+          () => undefined,
+        );
       }}
     />
   );

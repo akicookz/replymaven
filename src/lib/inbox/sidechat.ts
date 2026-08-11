@@ -118,7 +118,10 @@ export function deriveMessageActions(
   const allowActions = perspective === "sidechat" && !readOnly;
   return {
     addToReply: allowActions && action?.type === "add_to_reply",
-    approveAlways: allowActions && action?.type === "approval",
+    approveAlways:
+      allowActions &&
+      action?.type === "approval" &&
+      action.canAlwaysAllow === true,
     approveOnce: allowActions && action?.type === "approval",
   };
 }
