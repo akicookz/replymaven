@@ -1,15 +1,25 @@
 import { Agent, type Connection, type ConnectionContext } from "agents";
 import { drizzle } from "drizzle-orm/d1";
 import type {
+  ExecuteProjectToolRequest,
+  ExecuteProjectToolResult,
   MavenProjectState,
   SidechatCustomerContext,
   SidechatStatus,
   SidechatSummary,
+  SidechatToolAuditMetadata,
   SidechatToolDescriptor,
 } from "../../../shared/sidechat-agent";
+import type { ToolRow } from "../../db";
 import { buildCustomerByIdQuery } from "../../services/customer-service";
 import { ChatService } from "../../services/chat-service";
+import { ProjectService } from "../../services/project-service";
+import { TeamService } from "../../services/team-service";
+import { ToolService } from "../../services/tool-service";
 import { type AppEnv } from "../../types";
+import { createSearchKnowledgeTool } from "../../chat-runtime/tools/internal/search-knowledge";
+import { executeHttpToolRequest } from "../../chat-runtime/tools/http-tool-executor";
+import type { MavenTurnContext, SupportToolDefinition } from "../../chat-runtime/types";
 import {
   authorizeSubAgentRequest,
   readVerifiedSidechatClaims,
@@ -17,6 +27,11 @@ import {
 } from "./agent-auth";
 import { MavenChatAgent } from "./maven-chat-agent";
 import { buildSidechatContext } from "./sidechat-context";
+import {
+  buildSidechatToolDescriptors,
+  executeSidechatProjectTool,
+  persistSidechatActionAudit,
+} from "./project-tool-proxy";
 
 function upsertSidechatSummary(
   state: MavenProjectState,
@@ -144,9 +159,130 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     conversationId: string,
   ): Promise<SidechatToolDescriptor[]> {
     this.assertRegisteredSidechat(childName, conversationId);
-    // Task 5 replaces this empty native boundary with project-authorized
-    // descriptor projection. The child never reads project tools directly.
-    return [];
+    const db = drizzle(this.env.DB);
+    const toolService = new ToolService(db);
+    const sidechatTools = await toolService.getEnabledToolsForChannel(
+      this.name,
+      "sidechat",
+    );
+    return buildSidechatToolDescriptors(this.name, sidechatTools);
+  }
+
+  async executeProjectTool(
+    request: ExecuteProjectToolRequest,
+  ): Promise<ExecuteProjectToolResult> {
+    const db = drizzle(this.env.DB);
+    const chatService = new ChatService(db);
+    const toolService = new ToolService(db);
+    return executeSidechatProjectTool({
+      projectId: this.name,
+      request,
+      dependencies: {
+        isRegisteredSidechat: (childName, conversationId) => {
+          try {
+            this.assertRegisteredSidechat(childName, conversationId);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        getConversation: () =>
+          chatService.getConversationById(
+            request.conversationId,
+            this.name,
+          ),
+        canActorAccessProject: (actorUserId) =>
+          this.canActorAccessProject(db, actorUserId),
+        getAuthoritativeHttpTool: (toolId) =>
+          toolService.getAuthoritativeTool(this.name, toolId),
+        runKnowledgeSearch: async (input) => {
+          const conversation = await chatService.getConversationById(
+            request.conversationId,
+            this.name,
+          );
+          if (!conversation || conversation.archivedAt !== null) {
+            return { found: false, context: "", sources: [], topScore: 0 };
+          }
+          const context: MavenTurnContext = {
+            channel: "sidechat",
+            projectId: this.name,
+            conversationId: request.conversationId,
+            actorUserId: request.actorUserId,
+            customerId: conversation.customerId,
+            ownership: {
+              status: conversation.status,
+              chatState: conversation.chatState,
+            },
+          };
+          const definition = createSearchKnowledgeTool({
+            env: this.env,
+            db,
+            context,
+            collectSources() {
+              // Native private tool results already carry bounded safe sources.
+            },
+          });
+          return definition.execute(input, {});
+        },
+        runExternalAction: (action) =>
+          chatService.runExternalActionIfOperational(
+            request.conversationId,
+            this.name,
+            action,
+          ),
+        executeHttpTool: async (tool, input) =>
+          executeHttpToolRequest(
+            {
+              tool: this.toHttpExecutionDefinition(tool),
+              params: input as Record<string, unknown>,
+              encryptionKey: this.env.ENCRYPTION_KEY,
+            },
+            {},
+          ),
+        writeAudit: (metadata) => this.writeSidechatActionAudit(metadata),
+      },
+    });
+  }
+
+  private async canActorAccessProject(
+    db: ReturnType<typeof drizzle>,
+    actorUserId: string,
+  ): Promise<boolean> {
+    const project = await new ProjectService(db).getProjectById(this.name);
+    if (!project) return false;
+    if (project.userId === actorUserId) return true;
+    const teamService = new TeamService(db);
+    const membership = await teamService.getMembershipForOwner(
+      actorUserId,
+      project.userId,
+    );
+    if (!membership) return false;
+    return (
+      membership.role === "admin" ||
+      membership.accessAllProjects ||
+      await teamService.memberHasProjectAccess(membership.id, this.name)
+    );
+  }
+
+  private toHttpExecutionDefinition(tool: ToolRow): SupportToolDefinition {
+    return {
+      name: tool.name,
+      displayName: tool.displayName,
+      description: tool.description,
+      endpoint: tool.endpoint,
+      method: tool.method,
+      headers: tool.headers,
+      parameters: tool.parameters,
+      responseMapping: tool.responseMapping,
+      enabled: tool.enabled,
+      timeout: tool.timeout,
+    };
+  }
+
+  private writeSidechatActionAudit(
+    metadata: SidechatToolAuditMetadata,
+  ): void {
+    persistSidechatActionAudit(this.sql.bind(this), metadata);
   }
 
   private assertRegisteredSidechat(

@@ -65,6 +65,13 @@ interface HttpExecutionOutcome {
   errorMessage: string | null;
 }
 
+export interface PreparedHttpToolRequest {
+  tool: SupportToolDefinition;
+  params: Record<string, unknown>;
+  encryptionKey?: string;
+  acquireRateLimitPermit?: () => boolean;
+}
+
 type HttpAbortCause = "caller" | "timeout";
 
 const BLOCKED_HOST_PATTERNS = [
@@ -78,11 +85,14 @@ const BLOCKED_HOST_PATTERNS = [
   /^\[::1\]$/,
   /^fc00:/i,
   /^fe80:/i,
+  /^\[f[cd][0-9a-f]*:/i,
+  /^\[fe[89ab][0-9a-f]*:/i,
 ];
 
 function isUrlBlocked(urlStr: string): boolean {
   try {
     const url = new URL(urlStr);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return true;
     return BLOCKED_HOST_PATTERNS.some((pattern) => pattern.test(url.hostname));
   } catch {
     return true;
@@ -268,13 +278,17 @@ async function executeHttpToolWithOutcome(
       };
     }
 
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
+    const headers = new Headers({ "Content-Type": "application/json" });
 
     if (toolDef.headers) {
-      const customHeaders = JSON.parse(toolDef.headers) as Record<string, string>;
-      Object.assign(headers, customHeaders);
+      const parsedHeaders = z.record(
+        z.string().min(1).max(256),
+        z.string().max(2048),
+      ).safeParse(JSON.parse(toolDef.headers) as unknown);
+      if (!parsedHeaders.success) throw new Error("Invalid tool headers");
+      for (const [name, value] of Object.entries(parsedHeaders.data)) {
+        headers.set(name, value);
+      }
     }
 
     let url = toolDef.endpoint;
@@ -310,13 +324,7 @@ async function executeHttpToolWithOutcome(
       signal: controller.signal,
     });
 
-    clearTimeout(timeoutId);
-
-    const responseText = await response.text();
-    const truncated =
-      responseText.length > 10240
-        ? `${responseText.slice(0, 10240)}\n...(response truncated)`
-        : responseText;
+    const truncated = await readBoundedResponseText(response, 10_240);
 
     try {
       const jsonResult = JSON.parse(truncated) as Record<string, unknown>;
@@ -417,12 +425,86 @@ async function executeHttpToolWithOutcome(
   }
 }
 
+async function readBoundedResponseText(
+  response: Response,
+  maximumBytes: number,
+): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let receivedBytes = 0;
+  let truncated = false;
+
+  try {
+    while (receivedBytes <= maximumBytes) {
+      const next = await reader.read();
+      if (next.done) break;
+      const remaining = maximumBytes + 1 - receivedBytes;
+      const selected = next.value.byteLength > remaining
+        ? next.value.slice(0, remaining)
+        : next.value;
+      chunks.push(selected);
+      receivedBytes += selected.byteLength;
+      if (next.value.byteLength > remaining || receivedBytes > maximumBytes) {
+        truncated = true;
+        try {
+          await reader.cancel("response_size_limit");
+        } catch {
+          // The bounded prefix is still valid even if the source rejects cancel.
+        }
+        break;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(Math.min(receivedBytes, maximumBytes));
+  let offset = 0;
+  for (const chunk of chunks) {
+    if (offset >= bytes.byteLength) break;
+    const selected = chunk.slice(0, bytes.byteLength - offset);
+    bytes.set(selected, offset);
+    offset += selected.byteLength;
+  }
+  const text = new TextDecoder().decode(bytes);
+  return truncated ? `${text}\n...(response truncated)` : text;
+}
+
+export async function executeHttpToolRequest(
+  request: PreparedHttpToolRequest,
+  options: { abortSignal?: AbortSignal },
+): Promise<Record<string, unknown>> {
+  const executableTool = { ...request.tool };
+  if (executableTool.headers && isEncrypted(executableTool.headers)) {
+    if (!request.encryptionKey) return { error: "tool_unavailable" };
+    try {
+      executableTool.headers = JSON.stringify(
+        await decryptHeaders(executableTool.headers, request.encryptionKey),
+      );
+    } catch {
+      return { error: "tool_unavailable" };
+    }
+  }
+  return (
+    await executeHttpToolWithOutcome(
+      executableTool,
+      request.params,
+      options.abortSignal,
+      request.acquireRateLimitPermit,
+    )
+  ).result;
+}
+
 export async function executeHttpTool(
   toolDef: SupportToolDefinition,
   params: Record<string, unknown>,
   abortSignal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
-  return (await executeHttpToolWithOutcome(toolDef, params, abortSignal)).result;
+  return executeHttpToolRequest(
+    { tool: toolDef, params },
+    { abortSignal },
+  );
 }
 
 export async function createHttpToolDefinition(

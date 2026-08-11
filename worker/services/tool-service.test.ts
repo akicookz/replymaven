@@ -39,6 +39,7 @@ function createToolServiceHarness(): { service: ToolService; sqlite: Database } 
         ('malformed-tool', 'project-1', 'malformed_tool', 'Malformed tool', 'Malformed', 'https://example.com/malformed', 1, 5, 'not-json'),
         ('legacy-search-collision', 'project-1', 'search_knowledge', 'Legacy search collision', 'Collision', 'https://example.com/search', 1, 6, '["public","sidechat"]'),
         ('legacy-team-collision', 'project-1', 'request_team_help', 'Legacy team collision', 'Collision', 'https://example.com/team', 1, 7, '["public"]'),
+        ('invalid-contract', 'project-1', 'bad name', 'Invalid contract', '', 'https://example.com/invalid', 1, 8, '["sidechat"]'),
         ('other-project-tool', 'project-2', 'other_tool', 'Other tool', 'Other', 'https://example.com/other', 1, 1, '["public"]');
     CREATE TABLE tool_executions (
       id text PRIMARY KEY NOT NULL,
@@ -97,6 +98,17 @@ describe("ToolService Maven audience policy", () => {
     const tools = await service.getEnabledToolsForChannel("project-1", "public");
 
     expect(tools.map((tool) => tool.id)).not.toContain("malformed-tool");
+  });
+
+  test("fails closed for malformed persisted model contracts", async () => {
+    const service = createToolService();
+
+    const tools = await service.getEnabledToolsForChannel(
+      "project-1",
+      "sidechat",
+    );
+
+    expect(tools.map((tool) => tool.id)).not.toContain("invalid-contract");
   });
 
   test("omits legacy rows that collide with internal Maven tools", async () => {

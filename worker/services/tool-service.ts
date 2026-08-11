@@ -8,6 +8,7 @@ import {
   type ToolExecutionRow,
 } from "../db";
 import {
+  httpToolModelContractSchema,
   isReservedMavenToolName,
   toolAudienceSchema,
   type MavenChannel,
@@ -76,14 +77,26 @@ export class ToolService {
     return enabledTools.filter((tool) => {
       if (isReservedMavenToolName(tool.name)) return false;
       let allowedChannels: unknown;
+      let parameters: unknown;
       try {
         allowedChannels = JSON.parse(tool.allowedChannels);
+        parameters = JSON.parse(tool.parameters);
       } catch {
         return false;
       }
 
       const parsed = toolAudienceSchema.safeParse(allowedChannels);
-      return parsed.success && parsed.data.includes(channel);
+      const contract = httpToolModelContractSchema.safeParse({
+        name: tool.name,
+        description: tool.description,
+        parameters,
+      });
+      return (
+        parsed.success &&
+        parsed.data.includes(channel) &&
+        contract.success &&
+        (tool.access === "read" || tool.access === "write")
+      );
     });
   }
 

@@ -7,6 +7,7 @@ import {
   convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
+  type ToolSet,
   stepCountIs,
   streamText,
   type LanguageModel,
@@ -25,9 +26,14 @@ import {
   persistCompletedReplyDraft,
 } from "./reply-draft-tool";
 import { buildSidechatSystemPrompt } from "./sidechat-prompt";
+import { buildSidechatDynamicTools } from "./project-tool-proxy";
 
 type SidechatDataParts = Record<string, unknown> & {
   "turn-accepted": { messageId: string };
+  "safe-activity": {
+    label: string;
+    status: "started" | "success" | "error";
+  };
   "reply-draft": { text: string; createdAt: number };
 };
 
@@ -160,12 +166,24 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
           const parent = await this.parentAgent(MavenProjectAgent);
           parentForFailure = parent;
           await parent.updateSidechatSummary(conversationId, "working");
-          const [context] = await Promise.all([
+          const [context, descriptors] = await Promise.all([
             parent.getSidechatContext(this.name, conversationId),
             parent.getSidechatToolDescriptors(this.name, conversationId),
           ]);
           const model = this.createSidechatLanguageModel();
-          const tools = { present_reply_draft: createReplyDraftTool() };
+          const tools: ToolSet = {
+            present_reply_draft: createReplyDraftTool(),
+            ...buildSidechatDynamicTools({
+              descriptors,
+              childName: this.name,
+              conversationId,
+              actorUserId: claims.userId,
+              execute: (request) => parent.executeProjectTool(request),
+              emitActivity(part) {
+                writer.write(part);
+              },
+            }),
+          };
           const result = streamText({
             model,
             system: buildSidechatSystemPrompt(context),
