@@ -9,7 +9,6 @@ import {
   MessageSquare,
   MessagesSquare,
   Plug,
-  Settings as SettingsIcon,
   Wrench,
   LogOut,
   ChevronDown,
@@ -173,7 +172,6 @@ function Layout() {
     { label: "Dashboard", href: projectRoute(currentProject.id, "dashboard"), icon: LayoutDashboard, exact: true },
     { label: "Customers", href: projectRoute(currentProject.id, "customers"), icon: Users },
     { label: "MCP Connections", href: projectRoute(currentProject.id, "mcp-connections"), icon: Plug },
-    { label: "Settings", href: projectRoute(currentProject.id, "settings"), icon: SettingsIcon },
   ] : [];
 
   function switchProject(project: Project) {
