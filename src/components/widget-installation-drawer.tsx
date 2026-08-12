@@ -9,10 +9,12 @@ import {
   Loader2,
   RotateCcw,
   ShieldCheck,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetDescription,
   SheetHeader,
@@ -107,13 +109,20 @@ export function WidgetInstallationDrawer({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
+        showCloseButton={false}
         className="w-full gap-0 overflow-hidden p-0 sm:max-w-2xl"
       >
-        <SheetHeader className="px-6 pb-4 pt-6 pr-14">
+        <SheetHeader className="relative px-6 pb-4 pt-6 pr-16">
           <SheetTitle className="text-balance text-lg">Installation</SheetTitle>
           <SheetDescription className="text-pretty">
             Install the widget and securely connect signed customer identity.
           </SheetDescription>
+          <SheetClose
+            className="absolute right-4 top-4 flex size-10 items-center justify-center rounded-xl text-muted-foreground transition-[background-color,color,scale] hover:bg-muted hover:text-foreground active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Close Installation"
+          >
+            <X className="size-4" />
+          </SheetClose>
         </SheetHeader>
 
         <div className="flex-1 space-y-6 overflow-y-auto px-6 pb-8">

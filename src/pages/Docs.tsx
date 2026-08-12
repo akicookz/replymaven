@@ -502,7 +502,8 @@ function Docs() {
             <p className="text-muted-foreground leading-relaxed mb-2">
               Replace <IC>your-project-slug</IC> with your project's slug
               from the dashboard. You can find it under{" "}
-              <strong>Settings &rarr; Installation</strong>.
+              <strong>Support Chat &rarr; Chat Widget</strong>, then choose
+              <strong> Installation</strong>.
             </p>
 
             <Callout type="tip">
@@ -761,7 +762,7 @@ window.ReplyMaven.toggle();`}
               Open the contact form programmatically. If the widget is
               closed, it will be opened first. The contact form must be
               enabled in your project settings under{" "}
-              <strong>Quick Actions</strong>.
+              <strong>Support Chat &rarr; Chat Widget &rarr; Actions</strong>.
             </p>
             <CodeBlock
               title="Open the contact form"
@@ -783,7 +784,8 @@ window.ReplyMaven.toggle();`}
             </SectionHeading>
             <p className="text-muted-foreground leading-relaxed mb-4">
               All visual customization is done through the dashboard under{" "}
-              <strong>Widget &rarr; Appearance</strong>. Changes are applied
+              <strong>Support Chat &rarr; Chat Widget &rarr; Appearance</strong>.
+              Changes are applied
               immediately to all pages using your widget.
             </p>
 
@@ -916,7 +918,8 @@ window.ReplyMaven.toggle();`}
             </p>
             <p className="text-muted-foreground leading-relaxed mb-4">
               Configure them in the dashboard under{" "}
-              <strong>Quick Actions</strong>. You can set the sort order to
+              <strong>Support Chat &rarr; Chat Widget &rarr; Actions</strong>.
+              You can set the sort order to
               control the display order.
             </p>
 
@@ -1551,7 +1554,8 @@ window.ReplyMaven.setMetadata({
               Enable a "Leave a message" contact form on the widget's home
               screen. Visitors can submit structured information when they
               prefer not to chat. Configure fields under{" "}
-              <strong>Quick Actions</strong> in the dashboard.
+              <strong>Support Chat &rarr; Chat Widget &rarr; Actions</strong> in
+              the dashboard.
             </p>
             <p className="text-muted-foreground leading-relaxed mb-4">
               You can also open the contact form programmatically using{" "}
