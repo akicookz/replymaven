@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { MobileMenuButton } from "@/components/PageHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -218,9 +219,10 @@ function Sops() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-start gap-3">
+        <MobileMenuButton />
         <div className="flex-1">
-          <h1 className="text-xl md:text-2xl font-bold text-foreground">SOPs</h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
+          <h1 className="text-balance text-xl font-bold text-foreground md:text-2xl">SOPs</h1>
+          <p className="mt-1 text-pretty text-xs text-muted-foreground md:text-sm">
             Define step-by-step instructions for how your bot should handle
             specific scenarios.
           </p>

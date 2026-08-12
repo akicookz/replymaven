@@ -65,7 +65,7 @@ function SortableArticleCard({
     opacity: isDragging ? 0.6 : 1,
   };
 
-  const editHref = `/app/projects/${projectId}/help/articles/${article.id}`;
+  const editHref = `/app/projects/${projectId}/knowledgebase/help-center/articles/${article.id}`;
 
   return (
     <li

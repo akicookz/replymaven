@@ -260,10 +260,10 @@ function Resources() {
       <div className="flex items-start gap-3">
         <MobileMenuButton />
         <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground">External Sources</h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
+          <h1 className="text-balance text-xl font-bold text-foreground md:text-2xl">Sources</h1>
+          <p className="mt-1 text-pretty text-xs text-muted-foreground md:text-sm">
             Webpages, PDFs, and FAQ sets the AI can draw on. Your help center
-            articles are indexed automatically and managed in the Articles tab.
+            articles are indexed automatically and managed in Help Center.
           </p>
         </div>
       </div>

@@ -13,7 +13,7 @@ import {
 } from "@/components/WidgetSettings";
 import { useWidgetSettings } from "@/hooks/use-widget-settings";
 
-const PAGE_TITLE = "Greetings & News";
+const PAGE_TITLE = "Greetings";
 const PAGE_DESCRIPTION =
   "Welcome bubbles, announcements, and changelog popups shown above the chat trigger.";
 

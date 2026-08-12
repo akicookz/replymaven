@@ -197,7 +197,7 @@ function HelpArticleEditorPage() {
         queryKey: ["help-categories", projectId],
       });
       toast.success("Article created");
-      navigate(`/app/projects/${projectId}/help/articles/${created.id}`, {
+      navigate(`/app/projects/${projectId}/knowledgebase/help-center/articles/${created.id}`, {
         replace: true,
       });
     },
@@ -396,7 +396,7 @@ function HelpArticleEditorPage() {
         <div className="flex items-center gap-2 min-w-0">
           <MobileMenuButton />
           <Button asChild variant="ghost" size="sm" className="-ml-1">
-            <Link to={`/app/projects/${projectId}/knowledge?tab=articles`}>
+            <Link to={`/app/projects/${projectId}/knowledgebase/help-center`}>
               <ArrowLeft className="w-4 h-4" />
               <span className="hidden sm:inline">Articles</span>
             </Link>

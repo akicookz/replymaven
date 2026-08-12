@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertCircle, Copy, RefreshCw, Save } from "lucide-react";
+import { MobileMenuButton } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -216,13 +217,16 @@ function GeneralSettings() {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground">
-            General
-          </h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Company profile, voice, and conversation behavior.
-          </p>
+        <div className="flex items-start gap-3">
+          <MobileMenuButton />
+          <div>
+            <h1 className="text-balance text-xl font-bold text-foreground md:text-2xl">
+              Company info
+            </h1>
+            <p className="mt-1 text-pretty text-xs text-muted-foreground md:text-sm">
+              Company profile, voice, and conversation behavior.
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Button

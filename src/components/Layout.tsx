@@ -2,10 +2,15 @@ import { useState, useEffect, useCallback } from "react";
 import { Outlet, Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Building2,
+  Database,
   LayoutDashboard,
+  ListChecks,
+  MessageSquare,
+  MessagesSquare,
+  Plug,
   Settings as SettingsIcon,
-  Zap,
-  Palette,
+  Wrench,
   LogOut,
   ChevronDown,
   Plus,
@@ -31,6 +36,7 @@ import { formatPlanName, getTrialDaysRemaining, usagePercent } from "@/lib/plan"
 import { canCreateProjects } from "@/lib/team-permissions";
 import { useNeedsYouPing } from "@/lib/use-needs-you-ping";
 import { formatTitleWithBadge } from "@/lib/title-badge";
+import { projectRoute } from "@/lib/dashboard-routes";
 import {
   Popover,
   PopoverContent,
@@ -150,16 +156,24 @@ function Layout() {
     { label: "Flagged",           filter: "flagged",   icon: Flag },
   ].map((i) => ({ ...i, href: `/app/projects/${currentProject.id}/conversations?filter=${i.filter}` })) : [];
 
-  const workspaceNav = currentProject ? [
-    { label: "Dashboard", href: `/app/projects/${currentProject.id}`,           icon: LayoutDashboard, exact: true },
-    { label: "Customers", href: `/app/projects/${currentProject.id}/customers`, icon: Users },
-    { label: "Knowledge", href: `/app/projects/${currentProject.id}/knowledge`, icon: BookOpen },
+  const knowledgebaseNav = currentProject ? [
+    { label: "Sources", href: projectRoute(currentProject.id, "sources"), icon: Database },
+    { label: "Help Center", href: projectRoute(currentProject.id, "help-center"), icon: BookOpen },
+    { label: "SOPs", href: projectRoute(currentProject.id, "sops"), icon: ListChecks },
+    { label: "Company info", href: projectRoute(currentProject.id, "company-info"), icon: Building2 },
   ] : [];
 
-  const configureNav = currentProject ? [
-    { label: "Settings", href: `/app/projects/${currentProject.id}/settings`,      icon: SettingsIcon },
-    { label: "Widget",   href: `/app/projects/${currentProject.id}/configuration`, icon: Palette },
-    { label: "Actions",  href: `/app/projects/${currentProject.id}/quick-actions`, icon: Zap },
+  const supportChatNav = currentProject ? [
+    { label: "Chat Widget", href: projectRoute(currentProject.id, "chat-widget"), icon: MessageSquare },
+    { label: "Greetings", href: projectRoute(currentProject.id, "greetings"), icon: MessagesSquare },
+    { label: "Tools", href: projectRoute(currentProject.id, "tools"), icon: Wrench },
+  ] : [];
+
+  const workspaceNav = currentProject ? [
+    { label: "Dashboard", href: projectRoute(currentProject.id, "dashboard"), icon: LayoutDashboard, exact: true },
+    { label: "Customers", href: projectRoute(currentProject.id, "customers"), icon: Users },
+    { label: "MCP Connections", href: projectRoute(currentProject.id, "mcp-connections"), icon: Plug },
+    { label: "Settings", href: projectRoute(currentProject.id, "settings"), icon: SettingsIcon },
   ] : [];
 
   function switchProject(project: Project) {
@@ -169,7 +183,7 @@ function Layout() {
         `/projects/${params.projectId}`,
         `/projects/${project.id}`,
       );
-      navigate(newPath);
+      navigate({ pathname: newPath, search: location.search });
     } else {
       navigate(`/app/projects/${project.id}`);
     }
@@ -213,8 +227,9 @@ function Layout() {
     return (
       <Link
         to={item.href}
+        title={collapsed ? item.label : undefined}
         className={cn(
-          "flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors",
+          "flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",
           active
             ? "bg-glass-raised text-ink-1"
             : "text-ink-4 hover:bg-glass-button hover:text-ink-1",
@@ -392,24 +407,36 @@ function Layout() {
             </div>
           )}
 
-          {/* Workspace */}
-          {workspaceNav.length > 0 && (
+          {/* Knowledgebase */}
+          {knowledgebaseNav.length > 0 && (
             <div>
-              <SectionHeader label="Workspace" />
+              <SectionHeader label="Knowledgebase" />
               <div className="space-y-0.5">
-                {workspaceNav.map((item) => (
+                {knowledgebaseNav.map((item) => (
                   <NavLink key={item.href} item={item} />
                 ))}
               </div>
             </div>
           )}
 
-          {/* Configure */}
-          {configureNav.length > 0 && (
+          {/* Support Chat */}
+          {supportChatNav.length > 0 && (
             <div>
-              <SectionHeader label="Configure" />
+              <SectionHeader label="Support Chat" />
               <div className="space-y-0.5">
-                {configureNav.map((item) => (
+                {supportChatNav.map((item) => (
+                  <NavLink key={item.href} item={item} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Workspace */}
+          {workspaceNav.length > 0 && (
+            <div>
+              <SectionHeader label="Workspace" />
+              <div className="space-y-0.5">
+                {workspaceNav.map((item) => (
                   <NavLink key={item.href} item={item} />
                 ))}
               </div>

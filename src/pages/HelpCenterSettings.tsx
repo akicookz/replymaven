@@ -220,7 +220,7 @@ function HelpCenterSettings() {
         <MobileMenuButton />
         <div className="flex-1">
           <Button asChild variant="ghost" size="sm" className="-ml-2 mb-2">
-            <Link to={`/app/projects/${projectId}/knowledge?tab=articles`}>
+            <Link to={`/app/projects/${projectId}/knowledgebase/help-center`}>
               <ArrowLeft className="w-4 h-4" />
               Back to Articles
             </Link>

@@ -153,7 +153,7 @@ function SortableCategoryRow({
           {articles.map((article) => (
             <li key={article.id}>
               <Link
-                to={`/app/projects/${projectId}/help/articles/${article.id}`}
+                to={`/app/projects/${projectId}/knowledgebase/help-center/articles/${article.id}`}
                 className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60"
               >
                 <span

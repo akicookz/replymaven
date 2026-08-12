@@ -423,7 +423,7 @@ function HelpCenter() {
 
   function handleNewArticleInCategory(categoryId: string) {
     navigate(
-      `/app/projects/${projectId}/help/articles/new?categoryId=${categoryId}`,
+      `/app/projects/${projectId}/knowledgebase/help-center/articles/new?categoryId=${categoryId}`,
     );
   }
 
@@ -438,7 +438,7 @@ function HelpCenter() {
       return;
     }
     navigate(
-      `/app/projects/${projectId}/help/articles/new?categoryId=${selectedCategoryId}`,
+      `/app/projects/${projectId}/knowledgebase/help-center/articles/new?categoryId=${selectedCategoryId}`,
     );
   }
 
@@ -471,10 +471,10 @@ function HelpCenter() {
         <div className="flex items-start gap-2">
           <MobileMenuButton />
           <div>
-            <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
-              Articles
+            <h1 className="text-balance text-xl font-bold tracking-tight text-foreground md:text-2xl">
+              Help Center
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="mt-1 text-pretty text-sm text-muted-foreground">
               Write help center articles. Published articles are indexed for
               the AI automatically.
             </p>
@@ -482,7 +482,7 @@ function HelpCenter() {
         </div>
         <div className="flex items-center gap-2">
           <Button asChild variant="outline" size="sm">
-            <Link to={`/app/projects/${projectId}/help/settings`}>
+            <Link to={`/app/projects/${projectId}/knowledgebase/help-center/settings`}>
               <Settings className="w-4 h-4" />
               Site settings
             </Link>

@@ -1,7 +1,15 @@
 import { useEffect } from "react";
-import { Routes, Route, Navigate, useParams } from "react-router-dom";
+import {
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Toaster } from "sonner";
+import { projectRoute } from "@/lib/dashboard-routes";
 import { ThemeContext } from "@/lib/theme";
 
 import Layout from "./components/Layout";
@@ -16,10 +24,15 @@ import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
 import Customers from "./pages/Customers";
 import CustomerDetail from "./pages/CustomerDetail";
-import Knowledge from "./pages/Knowledge";
-import QuickActions from "./pages/QuickActions";
+import GeneralSettings from "./pages/GeneralSettings";
+import HelpCenter from "./pages/HelpCenter";
+import McpConnections from "./pages/McpConnections";
+import Resources from "./pages/Resources";
+import Sops from "./pages/Sops";
+import Tools from "./pages/Tools";
 import Configuration from "./pages/Configuration";
 import Settings from "./pages/Settings";
+import WidgetGreetings from "./pages/WidgetGreetings";
 import AuthCallback from "./pages/AuthCallback";
 import Docs from "./pages/Docs";
 import TeamAccept from "./pages/TeamAccept";
@@ -160,6 +173,91 @@ function ProjectPageRedirect({ target }: { target: string }) {
   return <Navigate to={`/app/projects/${projectId}/${target}`} replace />;
 }
 
+function LegacyKnowledgeRedirect() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
+
+  if (!projectId) return <Navigate to="/app" replace />;
+
+  const tab = searchParams.get("tab");
+  const destination = tab === "sources"
+    ? "sources"
+    : tab === "sops"
+      ? "sops"
+      : "help-center";
+
+  return <Navigate to={projectRoute(projectId, destination)} replace />;
+}
+
+function LegacyConfigurationRedirect() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
+
+  if (!projectId) return <Navigate to="/app" replace />;
+
+  const section = searchParams.get("section") ?? searchParams.get("tab");
+  if (section === "greetings") {
+    return <Navigate to={projectRoute(projectId, "greetings")} replace />;
+  }
+  if (section === "installation") {
+    return (
+      <Navigate
+        to={`${projectRoute(projectId, "chat-widget")}?install=open`}
+        replace
+      />
+    );
+  }
+  if (section === "conversation") {
+    return <Navigate to={projectRoute(projectId, "company-info")} replace />;
+  }
+  if (section === "actions") {
+    const destination = searchParams.get("tab") === "tools"
+      ? projectRoute(projectId, "tools")
+      : `${projectRoute(projectId, "chat-widget")}?tab=actions`;
+    return <Navigate to={destination} replace />;
+  }
+
+  return <Navigate to={projectRoute(projectId, "chat-widget")} replace />;
+}
+
+function LegacyQuickActionsRedirect() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
+
+  if (!projectId) return <Navigate to="/app" replace />;
+
+  const destination = searchParams.get("tab") === "tools"
+    ? projectRoute(projectId, "tools")
+    : `${projectRoute(projectId, "chat-widget")}?tab=actions`;
+  return <Navigate to={destination} replace />;
+}
+
+function LegacyHelpRedirect({ target }: { target: "index" | "settings" | "new" | "article" }) {
+  const { projectId, articleId } = useParams<{
+    projectId: string;
+    articleId?: string;
+  }>();
+  const location = useLocation();
+
+  if (!projectId) return <Navigate to="/app" replace />;
+
+  const base = projectRoute(projectId, "help-center");
+  const pathname = target === "settings"
+    ? `${base}/settings`
+    : target === "new"
+      ? `${base}/articles/new`
+      : target === "article" && articleId
+        ? `${base}/articles/${articleId}`
+        : base;
+
+  return (
+    <Navigate
+      to={{ pathname, search: location.search }}
+      replace
+    />
+  );
+}
+
 function App() {
   // The landing pages and the dashboard are dark-only — no theme switching.
   // (The deployed help-desk widget keeps its own light/dark via per-project
@@ -290,63 +388,87 @@ function App() {
         />
         <Route
           path="projects/:projectId/knowledge"
-          element={<Knowledge />}
+          element={<LegacyKnowledgeRedirect />}
         />
         <Route
           path="projects/:projectId/company"
-          element={<ProjectPageRedirect target="settings?tab=general" />}
+          element={<ProjectPageRedirect target="knowledgebase/company-info" />}
         />
         <Route
           path="projects/:projectId/knowledgebase"
-          element={<ProjectPageRedirect target="knowledge?tab=sources" />}
+          element={<ProjectPageRedirect target="knowledgebase/sources" />}
+        />
+        <Route
+          path="projects/:projectId/knowledgebase/sources"
+          element={<Resources />}
+        />
+        <Route
+          path="projects/:projectId/knowledgebase/help-center"
+          element={<HelpCenter />}
         />
         <Route
           path="projects/:projectId/knowledgebase/company-info"
-          element={<ProjectPageRedirect target="company" />}
+          element={<GeneralSettings />}
         />
         <Route
           path="projects/:projectId/knowledgebase/sops"
-          element={<ProjectPageRedirect target="knowledge?tab=sops" />}
+          element={<Sops />}
         />
         <Route
           path="projects/:projectId/resources"
-          element={<ProjectPageRedirect target="knowledge?tab=sources" />}
+          element={<ProjectPageRedirect target="knowledgebase/sources" />}
         />
         <Route
           path="projects/:projectId/settings"
           element={<Settings />}
         />
         <Route
-          path="projects/:projectId/configuration"
+          path="projects/:projectId/mcp-connections"
+          element={<McpConnections />}
+        />
+        <Route
+          path="projects/:projectId/support-chat/widget"
           element={<Configuration />}
         />
         <Route
+          path="projects/:projectId/support-chat/greetings"
+          element={<WidgetGreetings />}
+        />
+        <Route
+          path="projects/:projectId/support-chat/tools"
+          element={<Tools />}
+        />
+        <Route
+          path="projects/:projectId/configuration"
+          element={<LegacyConfigurationRedirect />}
+        />
+        <Route
           path="projects/:projectId/widget"
-          element={<ProjectPageRedirect target="configuration?section=appearance" />}
+          element={<ProjectPageRedirect target="support-chat/widget" />}
         />
         <Route
           path="projects/:projectId/widget/home"
-          element={<ProjectPageRedirect target="configuration?section=appearance" />}
+          element={<ProjectPageRedirect target="support-chat/widget" />}
         />
         <Route
           path="projects/:projectId/widget/greetings"
-          element={<ProjectPageRedirect target="configuration?section=greetings" />}
+          element={<ProjectPageRedirect target="support-chat/greetings" />}
         />
         <Route
           path="projects/:projectId/widget/installation"
-          element={<ProjectPageRedirect target="configuration?section=installation" />}
+          element={<ProjectPageRedirect target="support-chat/widget?install=open" />}
         />
         <Route
           path="projects/:projectId/widget/quick-actions"
-          element={<ProjectPageRedirect target="quick-actions" />}
+          element={<ProjectPageRedirect target="support-chat/widget?tab=actions" />}
         />
         <Route
           path="projects/:projectId/widget/tools"
-          element={<ProjectPageRedirect target="quick-actions?tab=tools" />}
+          element={<ProjectPageRedirect target="support-chat/tools" />}
         />
         <Route
           path="projects/:projectId/widget/*"
-          element={<ProjectPageRedirect target="widget" />}
+          element={<ProjectPageRedirect target="support-chat/widget" />}
         />
         <Route
           path="projects/:projectId/tickets"
@@ -358,26 +480,38 @@ function App() {
         />
         <Route
           path="projects/:projectId/quick-actions"
-          element={<QuickActions />}
+          element={<LegacyQuickActionsRedirect />}
         />
         <Route
           path="projects/:projectId/tools"
-          element={<ProjectPageRedirect target="quick-actions?tab=tools" />}
+          element={<ProjectPageRedirect target="support-chat/tools" />}
         />
         <Route
           path="projects/:projectId/help"
-          element={<ProjectPageRedirect target="knowledge?tab=articles" />}
+          element={<LegacyHelpRedirect target="index" />}
         />
         <Route
           path="projects/:projectId/help/settings"
-          element={<HelpCenterSettings />}
+          element={<LegacyHelpRedirect target="settings" />}
         />
         <Route
           path="projects/:projectId/help/articles/new"
-          element={<HelpArticleEditor />}
+          element={<LegacyHelpRedirect target="new" />}
         />
         <Route
           path="projects/:projectId/help/articles/:articleId"
+          element={<LegacyHelpRedirect target="article" />}
+        />
+        <Route
+          path="projects/:projectId/knowledgebase/help-center/settings"
+          element={<HelpCenterSettings />}
+        />
+        <Route
+          path="projects/:projectId/knowledgebase/help-center/articles/new"
+          element={<HelpArticleEditor />}
+        />
+        <Route
+          path="projects/:projectId/knowledgebase/help-center/articles/:articleId"
           element={<HelpArticleEditor />}
         />
       </Route>
