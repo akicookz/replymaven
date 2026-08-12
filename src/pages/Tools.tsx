@@ -2169,7 +2169,7 @@ function Tools() {
 
   if (!projectId) return null;
 
-  return <ToolsPanel projectId={projectId} />;
+  return <ToolsPanel projectId={projectId} embedded />;
 }
 
 export default Tools;
