@@ -9,7 +9,10 @@ import {
 } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Toaster } from "sonner";
-import { projectRoute } from "@/lib/dashboard-routes";
+import {
+  getInboxDestination,
+  projectRoute,
+} from "@/lib/dashboard-routes";
 import { ThemeContext } from "@/lib/theme";
 
 import Layout from "./components/Layout";
@@ -39,8 +42,8 @@ import TeamAccept from "./pages/TeamAccept";
 import HelpCenterSettings from "./pages/HelpCenterSettings";
 import HelpArticleEditor from "./pages/HelpArticleEditor";
 
-// ─── Redirect /app to first project's dashboard ──────────────────────────────
-function DashboardRedirect() {
+// ─── Redirect /app to first project's inbox ──────────────────────────────────
+function AppRedirect() {
   const { data: subData, isPending: subPending } = useSubscription();
   const isTeamMember =
     subData?.role === "admin" || subData?.role === "member";
@@ -62,7 +65,7 @@ function DashboardRedirect() {
   if (subPending || projectsPending || subData === undefined) return null;
 
   if (projects && projects.length > 0) {
-    return <Navigate to={`/app/projects/${projects[0].id}`} replace />;
+    return <InboxRedirect />;
   }
 
   // Team members must never be redirected to onboarding -- they access the
@@ -133,10 +136,7 @@ function InboxRedirect() {
   }
   if (!projectId) return <Navigate to="/app" replace />;
 
-  const hasNeedsYou = (inboxCounts?.["needs-you"] ?? 0) > 0;
-  const destination = hasNeedsYou
-    ? `/app/projects/${projectId}/conversations?filter=needs-you&focus=true`
-    : `/app/projects/${projectId}/conversations?filter=all`;
+  const destination = getInboxDestination(projectId, inboxCounts);
 
   return <Navigate to={destination} replace />;
 }
@@ -355,7 +355,7 @@ function App() {
         element={<Navigate to="/app/account/team" replace />}
       />
 
-      {/* /app index -- redirect to first project dashboard */}
+      {/* /app index -- redirect to the first project's prioritized inbox */}
       <Route
         path="/app"
         element={
@@ -368,7 +368,7 @@ function App() {
           </ErrorBoundary>
         }
       >
-        <Route index element={<DashboardRedirect />} />
+        <Route index element={<AppRedirect />} />
         <Route path="new-project" element={<Onboarding />} />
         <Route
           path="projects/:projectId"

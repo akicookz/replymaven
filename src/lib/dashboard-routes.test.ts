@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getInboxDestination,
   getLegacySettingsDestination,
   normalizeChatWidgetTab,
   projectRoute,
@@ -33,5 +34,17 @@ describe("dashboard routes", () => {
       "/app/projects/project-1/mcp-connections",
     );
     expect(getLegacySettingsDestination("project-1", "billing")).toBeNull();
+  });
+
+  it("lands app traffic on Needs You before All Conversations", () => {
+    expect(getInboxDestination("project-1", { "needs-you": 2 })).toBe(
+      "/app/projects/project-1/conversations?filter=needs-you&focus=true",
+    );
+    expect(getInboxDestination("project-1", { "needs-you": 0 })).toBe(
+      "/app/projects/project-1/conversations?filter=all",
+    );
+    expect(getInboxDestination("project-1", undefined)).toBe(
+      "/app/projects/project-1/conversations?filter=all",
+    );
   });
 });

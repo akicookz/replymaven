@@ -34,6 +34,15 @@ export function projectRoute(
   return `/app/projects/${projectId}${destinationPaths[destination]}`;
 }
 
+export function getInboxDestination(
+  projectId: string,
+  inboxCounts: Record<string, number> | undefined,
+): string {
+  return (inboxCounts?.["needs-you"] ?? 0) > 0
+    ? `/app/projects/${projectId}/conversations?filter=needs-you&focus=true`
+    : `/app/projects/${projectId}/conversations?filter=all`;
+}
+
 export function normalizeChatWidgetTab(value: string | null): ChatWidgetTab {
   return value === "actions" ? "actions" : "appearance";
 }
