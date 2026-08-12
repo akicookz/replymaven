@@ -24,13 +24,13 @@ import Onboarding from "./pages/Onboarding";
 import Conversations from "./pages/Conversations";
 import Customers from "./pages/Customers";
 import CustomerDetail from "./pages/CustomerDetail";
+import ChatWidget from "./pages/ChatWidget";
 import GeneralSettings from "./pages/GeneralSettings";
 import HelpCenter from "./pages/HelpCenter";
 import McpConnections from "./pages/McpConnections";
 import Resources from "./pages/Resources";
 import Sops from "./pages/Sops";
 import Tools from "./pages/Tools";
-import Configuration from "./pages/Configuration";
 import Settings from "./pages/Settings";
 import WidgetGreetings from "./pages/WidgetGreetings";
 import AuthCallback from "./pages/AuthCallback";
@@ -428,7 +428,7 @@ function App() {
         />
         <Route
           path="projects/:projectId/support-chat/widget"
-          element={<Configuration />}
+          element={<ChatWidget />}
         />
         <Route
           path="projects/:projectId/support-chat/greetings"

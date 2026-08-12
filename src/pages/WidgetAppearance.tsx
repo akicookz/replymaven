@@ -1,5 +1,5 @@
-import { Image, Palette, Type, Upload, X } from "lucide-react";
-import { useParams } from "react-router-dom";
+import { Globe, Image, Palette, Type, Upload, X } from "lucide-react";
+import PageVisibilityInput from "@/components/PageVisibilityInput";
 import { Button } from "@/components/ui/button";
 import { ColorPicker } from "@/components/ui/color-picker";
 import { ImagePositioner } from "@/components/ImagePositioner";
@@ -14,7 +14,6 @@ import {
   WidgetPageShell,
   WidgetPreviewPanel,
   WidgetSectionCard,
-  WidgetSettingsLoading,
 } from "@/components/WidgetSettings";
 import {
   BACKGROUND_STYLES,
@@ -27,19 +26,20 @@ const PAGE_TITLE = "Appearance";
 const PAGE_DESCRIPTION =
   "Branding, home view, layout, and background treatment.";
 
-function WidgetAppearance() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const state = useWidgetSettings(projectId ?? "", {
-    defaultPreviewMode: "open",
-  });
+interface WidgetAppearancePanelProps {
+  state: ReturnType<typeof useWidgetSettings>;
+}
 
-  if (state.isLoading) {
-    return (
-      <WidgetSettingsLoading
-        title={PAGE_TITLE}
-        description={PAGE_DESCRIPTION}
-      />
-    );
+export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
+  const widgetPages = (state.form.allowedPages ?? "")
+    .split(",")
+    .map((page) => page.trim())
+    .filter(Boolean);
+
+  function setWidgetPages(next: string[]): void {
+    state.updateForm({
+      allowedPages: next.length > 0 ? next.join(",") : null,
+    });
   }
 
   return (
@@ -47,6 +47,7 @@ function WidgetAppearance() {
       title={PAGE_TITLE}
       description={PAGE_DESCRIPTION}
       save={state.save}
+      showHeader={false}
       sidebar={
         <WidgetPreviewPanel
           iframeRef={state.iframeRef}
@@ -54,6 +55,9 @@ function WidgetAppearance() {
           previewHtml={state.previewHtml}
           previewMode={state.previewMode}
           setPreviewMode={state.setPreviewMode}
+          pagePath={state.previewPagePath}
+          onPagePathChange={state.setPreviewPagePath}
+          onReplay={state.replayPreview}
         />
       }
     >
@@ -417,7 +421,7 @@ function WidgetAppearance() {
                   state.updateForm({ backgroundStyle: style.value })
                 }
                 className={cn(
-                  "relative flex flex-col items-center gap-1.5 rounded-xl border-2 p-3 transition-all text-center",
+                  "relative flex flex-col items-center gap-1.5 rounded-xl border-2 p-3 text-center transition-[background-color,border-color,box-shadow]",
                   (state.form.backgroundStyle ?? "solid") === style.value
                     ? "border-primary bg-primary/5"
                     : "border-border hover:border-muted-foreground/30",
@@ -450,8 +454,20 @@ function WidgetAppearance() {
           </div>
         </div>
       </WidgetSectionCard>
+
+      <WidgetSectionCard
+        title="Page Visibility"
+        description="Control which pages the widget appears on."
+        icon={Globe}
+      >
+        <PageVisibilityInput
+          value={widgetPages}
+          onChange={setWidgetPages}
+          emptyHint="No page rules set. The widget will show on all pages."
+        />
+      </WidgetSectionCard>
     </WidgetPageShell>
   );
 }
 
-export default WidgetAppearance;
+export default WidgetAppearancePanel;

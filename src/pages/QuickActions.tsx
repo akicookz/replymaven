@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Zap,
@@ -36,8 +35,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { MobileMenuButton } from "@/components/PageHeader";
-import { ToolsPanel } from "./Tools";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -109,94 +106,28 @@ function getIconComponent(icon: string) {
   return found?.Icon ?? LinkIcon;
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Widget Actions Panel ─────────────────────────────────────────────────────
 
-function QuickActions() {
-  const { projectId } = useParams<{ projectId: string }>();
+interface WidgetActionsPanelProps {
+  projectId: string;
+  showAddForm: boolean;
+  onCloseAddForm: () => void;
+}
+
+export function WidgetActionsPanel({
+  projectId,
+  showAddForm,
+  onCloseAddForm,
+}: WidgetActionsPanelProps) {
   const queryClient = useQueryClient();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const searchTab = searchParams.get("tab");
-  const [activeTab, setActiveTab] = useState<"actions" | "tools">(
-    searchTab === "tools" ? "tools" : "actions",
-  );
-  const [showAddForm, setShowAddForm] = useState(false);
-
-  useEffect(() => {
-    setActiveTab(searchTab === "tools" ? "tools" : "actions");
-  }, [searchTab]);
-
-  function handleTabChange(tab: "actions" | "tools") {
-    setActiveTab(tab);
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (tab === "tools") next.set("tab", "tools");
-        else next.delete("tab");
-        return next;
-      },
-      { replace: true },
-    );
-  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <MobileMenuButton />
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-foreground">
-              Actions &amp; Tools
-            </h1>
-            <p className="text-xs md:text-sm text-muted-foreground mt-1">
-              Manage widget shortcuts, contact form, and bot tools from one
-              place.
-            </p>
-          </div>
-        </div>
-        {activeTab === "actions" && (
-          <Button onClick={() => setShowAddForm((v) => !v)} className="shrink-0">
-            <Plus className="w-4 h-4 mr-2" />
-            Add Action
-          </Button>
-        )}
-      </div>
-
-      {/* Segment Control */}
-      <div className="inline-flex rounded-lg bg-muted p-1">
-        {(
-          [
-            { key: "actions", label: "Actions" },
-            { key: "tools", label: "Tools" },
-          ] as const
-        ).map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => handleTabChange(tab.key)}
-            className={cn(
-              "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
-              activeTab === tab.key
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <div className={activeTab !== "actions" ? "hidden" : ""}>
-        <ActionsTab
-          projectId={projectId!}
-          queryClient={queryClient}
-          showAddForm={showAddForm}
-          onCloseAddForm={() => setShowAddForm(false)}
-        />
-      </div>
-      <div className={activeTab !== "tools" ? "hidden" : ""}>
-        <ToolsPanel projectId={projectId!} embedded />
-      </div>
-    </div>
+    <ActionsTab
+      projectId={projectId}
+      queryClient={queryClient}
+      showAddForm={showAddForm}
+      onCloseAddForm={onCloseAddForm}
+    />
   );
 }
 
@@ -917,4 +848,4 @@ function ActionsTab({
   );
 }
 
-export default QuickActions;
+export default WidgetActionsPanel;

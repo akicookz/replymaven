@@ -39,6 +39,7 @@ interface WidgetPageShellProps {
   save?: SaveState;
   children: ReactNode;
   sidebar?: ReactNode;
+  showHeader?: boolean;
 }
 
 interface WidgetSettingsLoadingProps {
@@ -76,32 +77,35 @@ export function WidgetPageShell({
   save,
   children,
   sidebar,
+  showHeader = true,
 }: WidgetPageShellProps) {
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <MobileMenuButton />
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-foreground">
-              {title}
-            </h1>
-            <p className="text-xs md:text-sm text-muted-foreground mt-1">
-              {description}
-            </p>
+      {showHeader ? (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <MobileMenuButton />
+            <div>
+              <h1 className="text-balance text-xl font-bold text-foreground md:text-2xl">
+                {title}
+              </h1>
+              <p className="mt-1 text-pretty text-xs text-muted-foreground md:text-sm">
+                {description}
+              </p>
+            </div>
           </div>
+          {save && (
+            <Button
+              onClick={() => save.mutate()}
+              disabled={save.isPending}
+              className="w-full transition-transform active:scale-[0.96] sm:w-auto"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              {save.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          )}
         </div>
-        {save && (
-          <Button
-            onClick={() => save.mutate()}
-            disabled={save.isPending}
-            className="w-full sm:w-auto"
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {save.isPending ? "Saving..." : "Save Changes"}
-          </Button>
-        )}
-      </div>
+      ) : null}
 
       {save?.isSuccess && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-success/10 text-success text-sm">
