@@ -1,13 +1,24 @@
 import {
   getToolApproval,
   getToolCallId,
-  getToolPartState,
 } from "@cloudflare/ai-chat/react";
-import { getToolName, isToolUIPart, type UIMessage } from "ai";
-import type { Message } from "./types";
+import { isToolUIPart, type UIMessage } from "ai";
+import type { SidechatToolPresentation } from "../../../shared/sidechat-agent";
+import {
+  redactPrivateToolPayload,
+  redactPrivateToolText,
+} from "../../../shared/private-tool-payload";
+import type {
+  Message,
+  SidechatToolTraceState,
+  SidechatTraceItem,
+} from "./types";
 
 const MAX_RENDERED_TEXT = 20_000;
 const MAX_ACTIVITY_LABEL = 240;
+const MAX_TOOL_DISPLAY_NAME = 160;
+const MAX_SOURCE_NAME = 100;
+const SAFE_INTEGRATION_ICON = /^\/integrations\/[a-z0-9-]+\.svg$/u;
 
 export type SafeSidechatDataPart =
   | { type: "turn-accepted"; messageId: string }
@@ -15,11 +26,19 @@ export type SafeSidechatDataPart =
       type: "safe-activity";
       label: string;
       status: "started" | "success" | "error";
+      tool?: SidechatToolPresentation;
     };
 
 interface AdaptSidechatMessagesOptions {
   now?: number;
   canAlwaysAllow?: boolean;
+}
+
+interface ToolTraceContext {
+  toolCallId: string;
+  safety: ApprovalSafety;
+  tool: SidechatToolPresentation | null;
+  startedAt?: number;
 }
 
 function boundedString(value: unknown, maximum: number): string | null {
@@ -31,6 +50,23 @@ function boundedString(value: unknown, maximum: number): string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function readToolPresentation(value: unknown): SidechatToolPresentation | null {
+  if (!isRecord(value) || !isRecord(value.source)) return null;
+  const displayName = boundedString(value.displayName, MAX_TOOL_DISPLAY_NAME);
+  const kind = value.source.kind;
+  const name = boundedString(value.source.name, MAX_SOURCE_NAME);
+  const rawIcon = value.source.icon;
+  const icon = rawIcon === null
+    ? null
+    : typeof rawIcon === "string" && SAFE_INTEGRATION_ICON.test(rawIcon)
+      ? rawIcon
+      : null;
+  if (!displayName || !name || (kind !== "mcp" && kind !== "http")) {
+    return null;
+  }
+  return { displayName, source: { kind, name, icon } };
 }
 
 export function readSafeSidechatDataPart(
@@ -50,7 +86,13 @@ export function readSafeSidechatDataPart(
     ) {
       return null;
     }
-    return { type: "safe-activity", label, status };
+    const tool = readToolPresentation(value.data.tool);
+    return {
+      type: "safe-activity",
+      label,
+      status,
+      ...(tool ? { tool } : {}),
+    };
   }
   return null;
 }
@@ -75,6 +117,91 @@ function readReplyDraft(
   return { text, createdAt };
 }
 
+type ApprovalSafety = "read" | "write" | "destructive";
+
+function readApprovalContext(
+  part: unknown,
+): {
+  toolCallId: string;
+  safety: ApprovalSafety;
+  tool: SidechatToolPresentation | null;
+} | null {
+  if (
+    !isRecord(part) ||
+    part.type !== "data-tool-approval" ||
+    !isRecord(part.data)
+  ) {
+    return null;
+  }
+  const toolCallId = boundedString(part.data.toolCallId, 200);
+  const safety = part.data.safety;
+  if (
+    !toolCallId ||
+    part.id !== `${toolCallId}:approval-context` ||
+    (safety !== "read" && safety !== "write" && safety !== "destructive")
+  ) {
+    return null;
+  }
+  return {
+    toolCallId,
+    safety,
+    tool: readToolPresentation(part.data.tool),
+  };
+}
+
+function readToolTraceContext(part: unknown): ToolTraceContext | null {
+  if (
+    !isRecord(part) ||
+    part.type !== "data-tool-trace" ||
+    !isRecord(part.data)
+  ) {
+    return null;
+  }
+  const toolCallId = boundedString(part.data.toolCallId, 200);
+  const safety = part.data.safety;
+  const startedAt = part.data.startedAt;
+  if (
+    !toolCallId ||
+    part.id !== `${toolCallId}:trace` ||
+    (safety !== "read" && safety !== "write" && safety !== "destructive")
+  ) {
+    return null;
+  }
+  return {
+    toolCallId,
+    safety,
+    tool: readToolPresentation(part.data.tool),
+    ...(typeof startedAt === "number" && Number.isFinite(startedAt)
+      ? { startedAt }
+      : {}),
+  };
+}
+
+function readToolDuration(part: unknown): {
+  toolCallId: string;
+  durationMs: number;
+} | null {
+  if (
+    !isRecord(part) ||
+    part.type !== "data-tool-timing" ||
+    !isRecord(part.data)
+  ) {
+    return null;
+  }
+  const toolCallId = boundedString(part.data.toolCallId, 200);
+  const durationMs = part.data.durationMs;
+  if (
+    !toolCallId ||
+    part.id !== `${toolCallId}:timing` ||
+    typeof durationMs !== "number" ||
+    !Number.isFinite(durationMs) ||
+    durationMs < 0
+  ) {
+    return null;
+  }
+  return { toolCallId, durationMs };
+}
+
 function readText(parts: UIMessage["parts"]): string {
   return parts
     .filter(
@@ -84,6 +211,107 @@ function readText(parts: UIMessage["parts"]): string {
     .map((part) => part.text)
     .join("")
     .slice(0, MAX_RENDERED_TEXT);
+}
+
+function fallbackToolPresentation(part: UIMessage["parts"][number]) {
+  const dynamicTitle = part.type === "dynamic-tool"
+    ? boundedString(part.title, MAX_TOOL_DISPLAY_NAME)
+    : null;
+  return {
+    displayName: dynamicTitle ?? "Connected tool",
+    source: {
+      kind: part.type === "dynamic-tool" ? "mcp" as const : "http" as const,
+      name: part.type === "dynamic-tool" ? "MCP" : "Custom tool",
+      icon: null,
+    },
+  };
+}
+
+function readSidechatTrace(
+  nativeMessage: UIMessage,
+  canAlwaysAllow: boolean,
+): SidechatTraceItem[] {
+  const contextByToolCallId = new Map<string, ToolTraceContext>();
+  const durationByToolCallId = new Map<string, number>();
+  for (const part of nativeMessage.parts) {
+    const trace = readToolTraceContext(part);
+    if (trace) contextByToolCallId.set(trace.toolCallId, trace);
+    const approval = readApprovalContext(part);
+    if (approval) {
+      const current = contextByToolCallId.get(approval.toolCallId);
+      contextByToolCallId.set(approval.toolCallId, {
+        toolCallId: approval.toolCallId,
+        safety: approval.safety,
+        tool: approval.tool ?? current?.tool ?? null,
+        ...(current?.startedAt !== undefined
+          ? { startedAt: current.startedAt }
+          : {}),
+      });
+    }
+    const timing = readToolDuration(part);
+    if (timing) durationByToolCallId.set(timing.toolCallId, timing.durationMs);
+  }
+
+  const traceItems: SidechatTraceItem[] = [];
+  nativeMessage.parts.forEach((part, index) => {
+    if (part.type === "reasoning") {
+      const text = boundedString(part.text, MAX_RENDERED_TEXT);
+      if (text) {
+        traceItems.push({
+          type: "reasoning",
+          id: `${nativeMessage.id}:reasoning:${index}`,
+          text: redactPrivateToolText(text),
+          state: part.state === "streaming" ? "streaming" : "done",
+        });
+      }
+      return;
+    }
+    if (!isToolUIPart(part)) return;
+    const toolCallId = boundedString(getToolCallId(part), 200);
+    if (!toolCallId) return;
+    const context = contextByToolCallId.get(toolCallId);
+    const state = part.state as SidechatToolTraceState;
+    const approval = getToolApproval(part);
+    const value = part as typeof part & {
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+    };
+    traceItems.push({
+      type: "tool",
+      id: `${nativeMessage.id}:${toolCallId}`,
+      toolCallId,
+      state,
+      tool: {
+        ...(context?.tool ?? fallbackToolPresentation(part)),
+        safety: context?.safety ?? "write",
+      },
+      ...(value.input !== undefined
+        ? { input: redactPrivateToolPayload(value.input) }
+        : {}),
+      ...(value.output !== undefined
+        ? { output: redactPrivateToolPayload(value.output) }
+        : {}),
+      ...(typeof value.errorText === "string"
+        ? { errorText: redactPrivateToolText(value.errorText).slice(0, 2_000) }
+        : {}),
+      ...(durationByToolCallId.has(toolCallId)
+        ? { durationMs: durationByToolCallId.get(toolCallId) }
+        : {}),
+      ...(approval
+        ? {
+            approval: {
+              id: approval.id,
+              ...(typeof approval.approved === "boolean"
+                ? { approved: approval.approved }
+                : {}),
+              canAlwaysAllow,
+            },
+          }
+        : {}),
+    });
+  });
+  return traceItems;
 }
 
 function readLatestReplyDraft(
@@ -124,13 +352,17 @@ export function adaptSidechatMessages(
       ? readLatestReplyDraft(nativeMessage.id, nativeMessage.parts)
       : null;
     const content = text || draft?.text || "";
-    if (content) {
+    const sidechatTrace = nativeMessage.role === "assistant"
+      ? readSidechatTrace(nativeMessage, options.canAlwaysAllow === true)
+      : [];
+    if (content || sidechatTrace.length > 0) {
       rendered.push({
         id: nativeMessage.id,
         role: nativeMessage.role === "user" ? "agent" : "bot",
         content,
         senderName: nativeMessage.role === "assistant" ? "Maven" : "You",
         createdAt: toIsoTime(draft?.createdAt ?? baseTime + messageIndex),
+        ...(sidechatTrace.length > 0 ? { sidechatTrace } : {}),
         ...(draft
           ? {
               presentationAction: {
@@ -141,31 +373,6 @@ export function adaptSidechatMessages(
           : {}),
       });
     }
-
-    if (nativeMessage.role !== "assistant") return;
-    nativeMessage.parts.forEach((part, partIndex) => {
-      if (!isToolUIPart(part) || getToolPartState(part) !== "waiting-approval") {
-        return;
-      }
-      const toolCallId = boundedString(getToolCallId(part), 200);
-      const approvalId = boundedString(getToolApproval(part)?.id, 200);
-      const toolName = boundedString(getToolName(part), 200);
-      if (!toolCallId || !approvalId || !toolName) return;
-      rendered.push({
-        id: `${nativeMessage.id}:${toolCallId}`,
-        role: "bot",
-        content:
-          "Run this write action?\n\nThis **can change data in the connected service** and may not be reversible.",
-        senderName: "Maven",
-        createdAt: toIsoTime(baseTime + messageIndex + partIndex + 1),
-        presentationAction: {
-          type: "approval",
-          approvalId,
-          toolCallId,
-          canAlwaysAllow: options.canAlwaysAllow === true,
-        },
-      });
-    });
   });
 
   return rendered;

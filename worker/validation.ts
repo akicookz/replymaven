@@ -743,7 +743,7 @@ export const updateProjectMcpPolicySchema = z
           })
           .strict(),
       )
-      .max(200),
+      .max(1_000),
   })
   .strict()
   .superRefine((value, context) => {

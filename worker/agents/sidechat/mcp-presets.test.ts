@@ -7,22 +7,23 @@ describe("Sidechat MCP presets", () => {
       {
         key: "posthog",
         label: "PostHog",
-        url: "https://mcp.posthog.com/mcp",
-        auth: ["oauth", "bearer"],
+        url: "https://mcp.posthog.com/mcp?readonly=true&mode=tools",
+        auth: ["oauth"],
         icon: "/integrations/posthog.svg",
+        readOnly: true,
       },
       {
         key: "stripe",
         label: "Stripe",
         url: "https://mcp.stripe.com",
-        auth: ["oauth", "bearer"],
+        auth: ["oauth"],
         icon: "/integrations/stripe.svg",
       },
       {
         key: "slack",
         label: "Slack",
         url: "https://mcp.slack.com/mcp",
-        auth: ["bearer"],
+        auth: ["oauth"],
         icon: "/integrations/slack.svg",
       },
       {
@@ -36,7 +37,7 @@ describe("Sidechat MCP presets", () => {
         key: "linear",
         label: "Linear",
         url: "https://mcp.linear.app/mcp",
-        auth: ["oauth", "bearer"],
+        auth: ["oauth"],
         icon: "/integrations/linear.svg",
       },
     ]);
@@ -51,5 +52,13 @@ describe("Sidechat MCP presets", () => {
     expect(preset).not.toHaveProperty("reducer");
     expect(preset).not.toHaveProperty("identityMapping");
     expect(getMcpPreset("unknown")).toBeNull();
+  });
+
+  test("keeps PostHog OAuth in regular-tools read-only mode", () => {
+    expect(getMcpPreset("posthog")).toMatchObject({
+      url: "https://mcp.posthog.com/mcp?readonly=true&mode=tools",
+      auth: ["oauth"],
+      readOnly: true,
+    });
   });
 });

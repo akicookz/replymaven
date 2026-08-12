@@ -2,7 +2,11 @@ import {
   AIChatAgent,
   type ChatResponseResult,
 } from "@cloudflare/ai-chat";
-import { type Connection, type ConnectionContext } from "agents";
+import {
+  getCurrentAgent,
+  type Connection,
+  type ConnectionContext,
+} from "agents";
 import {
   convertToModelMessages,
   createUIMessageStream,
@@ -18,16 +22,18 @@ import {
 import type {
   PendingSidechatApprovalScope,
   SidechatStatus,
+  SidechatToolPresentation,
 } from "../../../shared/sidechat-agent";
 import { createLanguageModel } from "../../chat-runtime/llm/create-language-model";
 import { type AppEnv } from "../../types";
 import {
   readVerifiedSidechatClaims,
-  verifySidechatToken,
+  resolveSidechatChatTurnClaims,
 } from "./agent-auth";
 import { MavenProjectAgent } from "./maven-project-agent";
 import {
-  createPrivateToolChunkFilter,
+  createPrivateToolChunkProjector,
+  removeAbandonedApprovalParts,
   sanitizePrivateMessageForPersistence,
 } from "./private-tool-payload";
 import {
@@ -35,13 +41,32 @@ import {
   persistCompletedReplyDraft,
 } from "./reply-draft-tool";
 import { buildSidechatSystemPrompt } from "./sidechat-prompt";
-import { buildSidechatDynamicTools } from "./project-tool-proxy";
+import {
+  buildSidechatDynamicTools,
+  resolveSidechatToolSafety,
+} from "./project-tool-proxy";
 
 type SidechatDataParts = Record<string, unknown> & {
   "turn-accepted": { messageId: string };
   "safe-activity": {
     label: string;
     status: "started" | "success" | "error";
+    tool?: SidechatToolPresentation;
+  };
+  "tool-approval": {
+    toolCallId: string;
+    safety: "read" | "write" | "destructive";
+    tool: SidechatToolPresentation;
+  };
+  "tool-trace": {
+    toolCallId: string;
+    startedAt: number;
+    safety: "read" | "write" | "destructive";
+    tool: SidechatToolPresentation;
+  };
+  "tool-timing": {
+    toolCallId: string;
+    durationMs: number;
   };
   "reply-draft": { text: string; createdAt: number };
 };
@@ -110,9 +135,11 @@ export function readSubmittedUiMessageId(
 
 export function selectSidechatModelMessages(
   messages: UIMessage[],
+  continuation = false,
 ): UIMessage[] {
-  if (messages.length <= MAX_PRIVATE_MODEL_MESSAGES) return messages;
-  const bounded = messages.slice(-MAX_PRIVATE_MODEL_MESSAGES);
+  const eligible = removeAbandonedApprovalParts(messages, continuation);
+  if (eligible.length <= MAX_PRIVATE_MODEL_MESSAGES) return eligible;
+  const bounded = eligible.slice(-MAX_PRIVATE_MODEL_MESSAGES);
   const firstUserIndex = bounded.findIndex((message) => message.role === "user");
   return firstUserIndex > 0 ? bounded.slice(firstUserIndex) : bounded;
 }
@@ -209,10 +236,12 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
       return Response.json({ error: "invalid_request" }, { status: 400 });
     }
     const token = options?.body?.token;
-    const claims =
-      typeof token === "string"
-        ? await verifySidechatToken(token, this.env.SIDECHAT_TOKEN_SECRET)
-        : null;
+    const claims = await resolveSidechatChatTurnClaims({
+      token,
+      continuation: options.continuation === true,
+      connectionState: getCurrentAgent<MavenChatAgent>().connection?.state,
+      secret: this.env.SIDECHAT_TOKEN_SECRET,
+    });
     if (
       !claims ||
       claims.scope !== "child" ||
@@ -284,7 +313,10 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
             model,
             system: buildSidechatSystemPrompt(context),
             messages: await convertToModelMessages(
-              selectSidechatModelMessages(this.messages),
+              selectSidechatModelMessages(
+                this.messages,
+                options.continuation === true,
+              ),
             ),
             tools,
             stopWhen: stepCountIs(8),
@@ -295,22 +327,40 @@ export class MavenChatAgent extends AIChatAgent<AppEnv> {
               );
             },
           });
-          const shouldForward = createPrivateToolChunkFilter(
-            new Set(
+          const projectChunk = createPrivateToolChunkProjector(
+            new Map(
               descriptors
-                .filter((descriptor) => descriptor.access === "write")
-                .map((descriptor) => descriptor.exposedName),
+                .map((descriptor) => [
+                  descriptor.exposedName,
+                  {
+                    safety: resolveSidechatToolSafety(descriptor),
+                    tool: {
+                      displayName: descriptor.displayName,
+                      source: descriptor.source ?? {
+                        kind: descriptor.connectionId.startsWith("mcp-")
+                          ? "mcp"
+                          : "http",
+                        name: descriptor.connectionId.startsWith("mcp-")
+                          ? "MCP"
+                          : "Custom tool",
+                        icon: null,
+                      },
+                    },
+                  },
+                ] as const),
             ),
           );
           writer.merge(
             result
               .toUIMessageStream<SidechatUIMessage>({
-                sendReasoning: false,
+                sendReasoning: true,
               })
               .pipeThrough(
                 new TransformStream({
                   transform(chunk, controller) {
-                    if (shouldForward(chunk)) controller.enqueue(chunk);
+                    for (const projected of projectChunk(chunk)) {
+                      controller.enqueue(projected as typeof chunk);
+                    }
                   },
                 }),
               ),

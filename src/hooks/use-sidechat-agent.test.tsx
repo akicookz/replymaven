@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { Chat } from "@ai-sdk/react";
+import type { ChatTransport, UIMessage } from "ai";
 import type { SidechatSessionResponse } from "../../shared/sidechat-agent";
 import {
   buildSidechatAgentConnectionOptions,
   buildSidechatChatOptions,
+  buildSidechatSendRequest,
   buildSidechatSendBody,
-  claimSidechatApprovalSubmission,
   fetchSidechatSession,
   deriveNativeSidechatUiStatus,
   isSidechatSessionUsable,
@@ -31,6 +33,43 @@ function session(overrides: Partial<SidechatSessionResponse> = {}) {
 }
 
 describe("native Sidechat client contract", () => {
+  test("appends a new human message through the native AI SDK contract", async () => {
+    const requests: Parameters<ChatTransport<UIMessage>["sendMessages"]>[0][] = [];
+    const transport: ChatTransport<UIMessage> = {
+      async sendMessages(request) {
+        requests.push(request);
+        return new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        });
+      },
+      async reconnectToStream() {
+        return null;
+      },
+    };
+    const chat = new Chat<UIMessage>({ id: "sidechat-1", transport });
+    const request = buildSidechatSendRequest(
+      "signed-token",
+      "Check the renewal date",
+      "human-1",
+    );
+
+    await chat.sendMessage(request.message, request.options);
+
+    expect(chat.messages).toEqual([{
+      id: "human-1",
+      role: "user",
+      parts: [{ type: "text", text: "Check the renewal date" }],
+    }]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.messageId).toBeUndefined();
+    expect(requests[0]?.body).toEqual({
+      token: "signed-token",
+      submittedMessageId: "human-1",
+    });
+  });
+
   test("requests the exact authenticated project conversation session", async () => {
     const requests: Array<{ input: string; init?: RequestInit }> = [];
     const result = await fetchSidechatSession(
@@ -176,10 +215,6 @@ describe("native Sidechat client contract", () => {
   });
 
   test("submits native Allow once without creating persistent policy", async () => {
-    const submitted = new Set<string>();
-    expect(claimSidechatApprovalSubmission(submitted, "approval-1")).toBe(true);
-    expect(claimSidechatApprovalSubmission(submitted, "approval-1")).toBe(false);
-
     const requests: string[] = [];
     const approveNative = async (approvalId: string) => {
       requests.push(`native:${approvalId}`);

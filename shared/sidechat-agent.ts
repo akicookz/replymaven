@@ -105,9 +105,29 @@ export interface SidechatToolDescriptor {
   inputSchema: JSONSchema7;
   catalogFingerprint: string;
   audience: "sidechat";
+  safety?: "read" | "write" | "destructive";
   access: "read" | "write";
   enabled: boolean;
   alwaysAllowed?: boolean;
+  source?: SidechatToolSource;
+}
+
+export type SidechatToolSafety = NonNullable<SidechatToolDescriptor["safety"]>;
+
+export interface SidechatToolSource {
+  kind: "mcp" | "http";
+  name: string;
+  icon: string | null;
+}
+
+export interface SidechatToolPresentation {
+  displayName: string;
+  source: SidechatToolSource;
+}
+
+export interface SidechatToolApprovalContext {
+  safety: SidechatToolSafety;
+  tool: SidechatToolPresentation;
 }
 
 export interface ExecuteProjectToolRequest {
@@ -117,6 +137,7 @@ export interface ExecuteProjectToolRequest {
   connectionId: string;
   toolName: string;
   catalogFingerprint: string;
+  safety: SidechatToolSafety;
   access: "read" | "write";
   approvalMode: "none" | "once" | "always";
   input: unknown;

@@ -91,7 +91,7 @@ describe("Sidechat MCP tool policy", () => {
     expect(first).toMatch(/^[a-f0-9]{64}$/u);
   });
 
-  test("normalizes discovered tools disabled by default and preserves exact configured policy", async () => {
+  test("defaults discovered tools to ask and preserves exact configured policy", async () => {
     const tools = [
       {
         serverId: "mcp-example-123",
@@ -114,8 +114,8 @@ describe("Sidechat MCP tool policy", () => {
     const first = await normalizeMcpCatalog("mcp-example-123", tools, []);
     const configured = first.map((tool) =>
       tool.toolName === "find_customer"
-        ? { ...tool, enabled: true, access: "write" as const }
-        : tool,
+        ? { ...tool, enabled: true, access: "read" as const }
+        : { ...tool, enabled: false },
     );
     const second = await normalizeMcpCatalog(
       "mcp-example-123",
@@ -128,23 +128,85 @@ describe("Sidechat MCP tool policy", () => {
         toolName: "find_customer",
         exposedName: "tool_mcpexample123_find_customer",
         displayName: "Find customer",
-        access: "read",
-        enabled: false,
+        safety: "read",
+        access: "write",
+        enabled: true,
       }),
       expect.objectContaining({
         toolName: "update_customer",
+        safety: "write",
         access: "write",
-        enabled: false,
+        enabled: true,
       }),
     ]);
-    expect(second[0]).toMatchObject({ enabled: true, access: "write" });
+    expect(second[0]).toMatchObject({ enabled: true, access: "read" });
+    expect(second[1]).toMatchObject({ enabled: false, access: "write" });
     expect(second[0]?.inputSchema).toEqual({
       type: "object",
       properties: { email: { type: "string" } },
     });
   });
 
-  test("disables changed authority and skips reserved or oversized server declarations", async () => {
+  test("defaults tools to ask even when their safety is forced read-only", async () => {
+    const discovered = [{
+      serverId: "mcp-posthog",
+      name: "query_events",
+      description: "Query PostHog events",
+      inputSchema: { type: "object" as const },
+    }];
+    const [tool] = await normalizeMcpCatalog(
+      "mcp-posthog",
+      discovered,
+      [],
+      { forceReadOnly: true },
+    );
+
+    expect(tool).toMatchObject({
+      safety: "read",
+      access: "write",
+      enabled: true,
+    });
+
+    const [refreshed] = await normalizeMcpCatalog(
+      "mcp-posthog",
+      discovered,
+      [{ ...tool!, enabled: true, access: "read" }],
+      { forceReadOnly: true },
+    );
+    expect(refreshed).toMatchObject({
+      safety: "read",
+      access: "read",
+      enabled: true,
+    });
+  });
+
+  test("preserves destructive annotations as a separate safety class", async () => {
+    const tools = await normalizeMcpCatalog(
+      "mcp-example-123",
+      [
+        {
+          serverId: "mcp-example-123",
+          name: "create_customer",
+          inputSchema: { type: "object" },
+          annotations: { readOnlyHint: false, destructiveHint: false },
+        },
+        {
+          serverId: "mcp-example-123",
+          name: "delete_customer",
+          inputSchema: { type: "object" },
+          annotations: { readOnlyHint: false, destructiveHint: true },
+        },
+      ],
+      [],
+    );
+
+    expect(tools.map((tool) => [tool.toolName, tool.safety])).toEqual([
+      ["create_customer", "write"],
+      ["delete_customer", "destructive"],
+    ]);
+  });
+
+  test("resets changed authority to ask and skips reserved or oversized server declarations", async () => {
     const original = await normalizeMcpCatalog(
       "mcp-example-123",
       [
@@ -189,8 +251,8 @@ describe("Sidechat MCP tool policy", () => {
     expect(refreshed).toHaveLength(1);
     expect(refreshed[0]).toMatchObject({
       toolName: "find_customer",
-      enabled: false,
-      access: "read",
+      enabled: true,
+      access: "write",
     });
   });
 });

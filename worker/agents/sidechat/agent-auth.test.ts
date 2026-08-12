@@ -8,6 +8,7 @@ import {
   authorizeSidechatAgentRouteRequest,
   authorizeSubAgentRequest,
   readVerifiedSidechatClaims,
+  resolveSidechatChatTurnClaims,
   signSidechatToken,
   toSidechatChildName,
   verifySidechatToken,
@@ -50,6 +51,40 @@ function childClaims(
 }
 
 describe("native Sidechat session tokens", () => {
+  test("uses authenticated connection claims only for SDK continuations", async () => {
+    const expiredToken = await signSidechatToken(childClaims(), secret);
+    const connectionState = { sidechatActor: childClaims() };
+
+    expect(await resolveSidechatChatTurnClaims({
+      token: expiredToken,
+      continuation: false,
+      connectionState,
+      secret,
+      now: now + 121,
+    })).toBeNull();
+    expect(await resolveSidechatChatTurnClaims({
+      token: expiredToken,
+      continuation: true,
+      connectionState,
+      secret,
+      now: now + 121,
+    })).toEqual(childClaims());
+    expect(await resolveSidechatChatTurnClaims({
+      token: expiredToken,
+      continuation: true,
+      connectionState: null,
+      secret,
+      now: now + 121,
+    })).toBeNull();
+    expect(await resolveSidechatChatTurnClaims({
+      token: "invalid",
+      continuation: true,
+      connectionState: { sidechatActor: { ...childClaims(), childName: "sc_other" } },
+      secret,
+      now: now + 121,
+    })).toBeNull();
+  });
+
   test("signs and verifies canonical parent and child claims", async () => {
     const parentToken = await signSidechatToken(parentClaims(), secret);
     const childToken = await signSidechatToken(childClaims(), secret);

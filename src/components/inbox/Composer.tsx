@@ -57,6 +57,11 @@ const ACCEPTED_IMAGE_TYPES = [
 ];
 const MAX_IMAGES = 6;
 
+function resizeComposerTextarea(textarea: HTMLTextAreaElement): void {
+  textarea.style.height = "auto";
+  textarea.style.height = `${textarea.scrollHeight}px`;
+}
+
 export default function Composer(props: ComposerProps) {
   const {
     draft,
@@ -88,9 +93,27 @@ export default function Composer(props: ComposerProps) {
   useLayoutEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${ta.scrollHeight}px`;
+    resizeComposerTextarea(ta);
   }, [draft]);
+
+  // Sidechat stays mounted while its pane animates from zero width. Measuring
+  // only on `draft` can therefore lock an empty textarea to its maximum height
+  // while the pane is still narrow. Re-measure when the available width
+  // changes so the connecting composer settles to the same single-row shape
+  // as the ready composer.
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || typeof ResizeObserver === "undefined") return;
+    let observedWidth: number | null = null;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width === undefined || width === observedWidth) return;
+      observedWidth = width;
+      resizeComposerTextarea(textarea);
+    });
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, []);
 
   useLayoutEffect(() => {
     const previous = previousFocusRequest.current;
@@ -268,7 +291,7 @@ export default function Composer(props: ComposerProps) {
   return (
     <div className="sticky bottom-0 z-[5] px-4 pt-3 pb-4">
       <div
-        className="relative rounded-[20px] border border-hairline-strong glass-bar p-[14px_14px_11px_18px]"
+        className="relative rounded-[20px] border border-hairline-strong glass-bar p-[14px_14px_11px_18px] motion-safe:transition-[border-color] motion-safe:duration-150 focus-within:border-ink-6/50"
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -330,7 +353,7 @@ export default function Composer(props: ComposerProps) {
             : "Reply…"}
           rows={1}
           disabled={mode.kind === "sidechat" && mode.disabled}
-          className="w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ring/70"
+          className="w-full resize-none bg-transparent outline-none text-ink-2 placeholder:text-ink-7 max-h-[200px] overflow-y-auto disabled:opacity-60"
           style={{ fontSize: "14.5px", lineHeight: "1.5" }}
         />
 

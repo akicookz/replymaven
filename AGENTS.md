@@ -215,6 +215,12 @@ replymaven/
 2. Reuse existing components in `src/components/` next
 3. Create custom component only if no reusable option exists
 
+### UI verification
+
+- Do not add mocked DOM/component tests for visual styling, layout, focus, scrolling, or interaction behavior. These tests have repeatedly passed while the real dashboard was broken.
+- Verify UI changes in the real authenticated browser at the affected route and viewport. Exercise the actual interaction and inspect the rendered result.
+- Keep pure state/protocol tests and backend/security tests only when they prove a real contract independently of component markup or CSS classes.
+
 ### Styling
 
 - Tailwind CSS v4 tokens from `src/index.css`

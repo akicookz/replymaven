@@ -50,6 +50,41 @@ describe("native Sidechat Agent registration", () => {
     expect(className).toBe(MavenProjectAgent.name);
   });
 
+  nativeTest(
+    "identifies ReplyMaven to OAuth providers and returns to the project tools page",
+    async () => {
+      const [{ env }, { runInDurableObject }] = await Promise.all([
+        import("cloudflare:workers"),
+        import("cloudflare:test"),
+      ]);
+      const projectId = "3b6a334e-6d35-4b5d-8ce3-d7cbe676cc31";
+      const stub = env.MAVEN_PROJECT_AGENT.get(
+        env.MAVEN_PROJECT_AGENT.idFromName(projectId),
+      );
+      const result = await runInDurableObject(stub, async (instance) => {
+        const provider = instance.createMcpOAuthProvider(
+          "https://app.test/api/sidechat/mcp/oauth/project",
+        );
+        const response = instance.handleOAuthCallbackResponse(
+          { serverId: "attio", authSuccess: true },
+          new Request(
+            `https://app.test/api/sidechat/mcp/oauth/${projectId}?code=safe`,
+          ),
+        );
+        return {
+          clientName: provider.clientMetadata.client_name,
+          redirect: response.headers.get("location"),
+        };
+      });
+
+      expect(result).toEqual({
+        clientName: "ReplyMaven",
+        redirect:
+          `https://app.test/app/projects/${projectId}/quick-actions?tab=tools`,
+      });
+    },
+  );
+
   nativeTest("keeps the Worker fetch handler healthy", async () => {
     const { exports } = await import("cloudflare:workers");
     const response = await exports.default.fetch(

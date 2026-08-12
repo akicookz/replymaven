@@ -186,7 +186,7 @@ describe("project MCP connection handlers", () => {
     );
   });
 
-  test("resolves a preset server-side and never returns bearer credentials", async () => {
+  test("resolves an OAuth-only preset without accepting browser credentials", async () => {
     const target = parent();
     const response = await handleConnectProjectMcp({
       actor: actor(),
@@ -194,8 +194,7 @@ describe("project MCP connection handlers", () => {
       projectService: projectService(),
       request: bodyRequest({
         presetKey: "stripe",
-        authMode: "bearer",
-        bearerToken: "rk_live_secret",
+        authMode: "oauth",
       }),
       callbackHost: "https://app.test",
       getParent: async () => target,
@@ -206,23 +205,67 @@ describe("project MCP connection handlers", () => {
       name: "Stripe",
       presetKey: "stripe",
       url: "https://mcp.stripe.com/",
-      authMode: "bearer",
-      bearerToken: "rk_live_secret",
+      authMode: "oauth",
       callbackHost: "https://app.test",
       callbackPath: "/api/sidechat/mcp/oauth/project-1",
     });
     const text = await response.text();
-    expect(text).not.toContain("rk_live_secret");
+    expect(text).not.toContain("bearerToken");
     expect(text).not.toContain("headers");
+  });
+
+  test.each([
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://[::1]:5173",
+  ])("accepts the trusted local callback origin %s", async (callbackHost) => {
+    const target = parent();
+    const response = await handleConnectProjectMcp({
+      actor: actor(),
+      projectId: "project-1",
+      projectService: projectService(),
+      request: bodyRequest({ presetKey: "attio", authMode: "oauth" }),
+      callbackHost,
+      getParent: async () => target,
+    });
+
+    expect(response.status).toBe(201);
+    expect(target.connectMcp).toHaveBeenCalledWith(
+      expect.objectContaining({ callbackHost }),
+    );
+  });
+
+  test.each([
+    "http://mcp.example.com",
+    "http://192.168.1.10:5173",
+    "https://metadata.google.internal",
+  ])("rejects the unsafe callback origin %s", async (callbackHost) => {
+    const target = parent();
+    const response = await handleConnectProjectMcp({
+      actor: actor(),
+      projectId: "project-1",
+      projectService: projectService(),
+      request: bodyRequest({ presetKey: "attio", authMode: "oauth" }),
+      callbackHost,
+      getParent: async () => target,
+    });
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "invalid_callback_host" });
+    expect(target.connectMcp).not.toHaveBeenCalled();
   });
 
   test("rejects unsupported preset auth and unsafe custom URLs", async () => {
     const target = parent();
-    const slackOauth = await handleConnectProjectMcp({
+    const posthogBearer = await handleConnectProjectMcp({
       actor: actor(),
       projectId: "project-1",
       projectService: projectService(),
-      request: bodyRequest({ presetKey: "slack", authMode: "oauth" }),
+      request: bodyRequest({
+        presetKey: "posthog",
+        authMode: "bearer",
+        bearerToken: "must-not-be-used-for-presets",
+      }),
       callbackHost: "https://app.test",
       getParent: async () => target,
     });
@@ -239,7 +282,7 @@ describe("project MCP connection handlers", () => {
       getParent: async () => target,
     });
 
-    expect(slackOauth.status).toBe(400);
+    expect(posthogBearer.status).toBe(400);
     expect(unsafe.status).toBe(400);
     expect(target.connectMcp).not.toHaveBeenCalled();
   });
@@ -316,6 +359,32 @@ describe("project MCP connection handlers", () => {
     expect(await response.text()).not.toContain("provider leaked");
   });
 
+  test("returns only the safe MCP discovery issue code", async () => {
+    const target = parent();
+    target.listMcpConnections = mock(async () => [
+      {
+        id: "mcp-posthog",
+        name: "PostHog",
+        presetKey: "posthog",
+        url: "https://mcp.posthog.com/mcp",
+        authMode: "oauth",
+        state: "connected",
+        issue: "tool_discovery_failed",
+        tools: [],
+      },
+    ]);
+    const response = await handleGetProjectMcp({
+      actor: actor(),
+      projectId: "project-1",
+      projectService: projectService(),
+      getParent: async () => target,
+    });
+
+    await expect(response.json()).resolves.toMatchObject({
+      connections: [{ issue: "tool_discovery_failed" }],
+    });
+  });
+
   test("exposes management capability without weakening server authorization", async () => {
     const ownerResponse = await handleGetProjectMcp({
       actor: actor("owner"),
@@ -375,6 +444,31 @@ describe("project MCP connection handlers", () => {
       ],
     );
     expect(target.disconnectMcp).toHaveBeenCalledWith("mcp-connection-1");
+  });
+
+  test("accepts a PostHog-sized tool policy update", async () => {
+    const target = parent();
+    const tools = Array.from({ length: 336 }, (_, index) => ({
+      toolName: `posthog_tool_${index}`,
+      catalogFingerprint: index.toString(16).padStart(64, "0"),
+      enabled: index === 0,
+      access: "read" as const,
+    }));
+
+    const response = await handleUpdateProjectMcpPolicy({
+      actor: actor("owner"),
+      projectId: "project-1",
+      projectService: projectService(),
+      connectionId: "mcp-posthog",
+      request: bodyRequest({ tools }),
+      getParent: async () => target,
+    });
+
+    expect(response.status).toBe(200);
+    expect(target.updateMcpToolPolicy).toHaveBeenCalledWith(
+      "mcp-posthog",
+      tools,
+    );
   });
 });
 

@@ -5,6 +5,7 @@ import type {
   ExecuteProjectToolResult,
   SidechatToolAuditMetadata,
   SidechatToolDescriptor,
+  SidechatToolSafety,
 } from "../../../shared/sidechat-agent";
 import type { ToolRow } from "../../db";
 import {
@@ -96,6 +97,7 @@ function knowledgeDescriptor(): SidechatToolDescriptor {
     },
     catalogFingerprint: INTERNAL_KNOWLEDGE_FINGERPRINT,
     audience: "sidechat",
+    safety: "read",
     access: "read",
     enabled: true,
   };
@@ -203,9 +205,21 @@ async function httpDescriptor(
     inputSchema: httpInputSchema(contract.parameters),
     catalogFingerprint: await fingerprintHttpToolContract(contract),
     audience: "sidechat",
+    safety: tool.access === "read" ? "read" : "write",
     access: tool.access,
     enabled: true,
+    source: {
+      kind: "http",
+      name: "Custom tool",
+      icon: null,
+    },
   };
+}
+
+export function resolveSidechatToolSafety(
+  descriptor: SidechatToolDescriptor,
+): SidechatToolSafety {
+  return descriptor.safety ?? (descriptor.access === "read" ? "read" : "write");
 }
 
 function descriptorMatchesRequest(
@@ -220,6 +234,7 @@ function descriptorMatchesRequest(
     descriptor.connectionId === request.connectionId &&
     descriptor.toolName === request.toolName &&
     descriptor.catalogFingerprint === request.catalogFingerprint &&
+    resolveSidechatToolSafety(descriptor) === request.safety &&
     descriptor.access === request.access,
   );
 }
@@ -236,6 +251,7 @@ function mcpDescriptorMatchesRequest(
     descriptor.exposedName ===
       `tool_${request.connectionId.replace(/-/gu, "")}_${request.toolName}` &&
     descriptor.catalogFingerprint === request.catalogFingerprint &&
+    resolveSidechatToolSafety(descriptor) === request.safety &&
     descriptor.access === request.access,
   );
 }
@@ -294,6 +310,7 @@ export function buildSidechatDynamicTools(
             connectionId: descriptor.connectionId,
             toolName: descriptor.toolName,
             catalogFingerprint: descriptor.catalogFingerprint,
+            safety: resolveSidechatToolSafety(descriptor),
             access: descriptor.access,
             approvalMode: descriptor.access === "read"
               ? "none"
@@ -467,7 +484,7 @@ function transportValue(
   displayName: string,
 ): LeasedToolValue {
   if (isSafeTransportFailure(value)) {
-    return request.access === "write"
+    return request.safety !== "read"
       ? { kind: "ambiguous" }
       : { kind: "failed" };
   }
@@ -586,6 +603,7 @@ async function executeAuthorizedProjectTool(
     request.connectionId === INTERNAL_KNOWLEDGE_CONNECTION_ID &&
     request.toolName === "search_knowledge" &&
     request.catalogFingerprint === INTERNAL_KNOWLEDGE_FINGERPRINT &&
+    request.safety === "read" &&
     request.access === "read"
   ) {
     return {

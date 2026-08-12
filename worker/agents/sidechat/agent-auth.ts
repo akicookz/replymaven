@@ -97,6 +97,26 @@ function parseClaims(value: unknown): SidechatActorClaims | null {
   return null;
 }
 
+interface ResolveSidechatChatTurnClaimsInput {
+  token: unknown;
+  continuation: boolean;
+  connectionState: unknown;
+  secret: string;
+  now?: number;
+}
+
+export async function resolveSidechatChatTurnClaims(
+  input: ResolveSidechatChatTurnClaimsInput,
+): Promise<SidechatActorClaims | null> {
+  const tokenClaims = typeof input.token === "string"
+    ? await verifySidechatToken(input.token, input.secret, input.now)
+    : null;
+  if (tokenClaims || !input.continuation || !isRecord(input.connectionState)) {
+    return tokenClaims;
+  }
+  return parseClaims(input.connectionState.sidechatActor);
+}
+
 function canonicalClaims(claims: SidechatActorClaims): string {
   const base = {
     userId: claims.userId,

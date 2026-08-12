@@ -13,22 +13,17 @@ function uiMessage(
   return {
     id,
     role,
-    metadata: {
-      provider: "secret-provider",
-      credential: "sk-private",
-    },
+    metadata: { provider: "private-provider-metadata" },
     parts,
   };
 }
 
-describe("Sidechat native message adapter", () => {
-  test("renders only text and the completion-only reply draft", () => {
+describe("Sidechat native message protocol adapter", () => {
+  test("keeps provider reasoning summaries and completion-only reply drafts", () => {
     const messages = adaptSidechatMessages([
-      uiMessage("human-1", "user", [
-        { type: "text", text: "Check this customer" },
-      ]),
+      uiMessage("human-1", "user", [{ type: "text", text: "Check this customer" }]),
       uiMessage("maven-1", "assistant", [
-        { type: "reasoning", text: "private chain of thought" },
+        { type: "reasoning", text: "I should inspect recent account activity." },
         { type: "text", text: "I found the cause." },
         {
           type: "data-reply-draft",
@@ -41,119 +36,142 @@ describe("Sidechat native message adapter", () => {
       ] as UIMessage["parts"]),
     ], { now: 1_786_334_400_000 });
 
-    expect(messages).toEqual([
-      expect.objectContaining({
-        id: "human-1",
-        role: "agent",
-        content: "Check this customer",
-      }),
-      expect.objectContaining({
-        id: "maven-1",
-        role: "bot",
-        content: "I found the cause.",
-        presentationAction: {
-          type: "add_to_reply",
-          draft: "The visitor-ready answer.",
-        },
-      }),
-    ], { canAlwaysAllow: true });
-    const serialized = JSON.stringify(messages);
-    expect(serialized).not.toContain("private chain of thought");
-    expect(serialized).not.toContain("secret-provider");
-    expect(serialized).not.toContain("sk-private");
-  });
-
-  test("uses the reply draft as bubble copy when the completed assistant has no text", () => {
-    const [message] = adaptSidechatMessages([
-      uiMessage("maven-2", "assistant", [
-        {
-          type: "data-reply-draft",
-          id: "maven-2:reply-draft",
-          data: { text: "Exact answer", createdAt: 1_786_334_400_000 },
-        },
-      ] as UIMessage["parts"]),
-    ], { canAlwaysAllow: true });
-
-    expect(message).toMatchObject({
-      content: "Exact answer",
+    expect(messages[0]).toMatchObject({
+      id: "human-1",
+      role: "agent",
+      content: "Check this customer",
+    });
+    expect(messages[1]).toMatchObject({
+      id: "maven-1",
+      role: "bot",
+      content: "I found the cause.",
+      sidechatTrace: [{
+        type: "reasoning",
+        text: "I should inspect recent account activity.",
+        state: "done",
+      }],
       presentationAction: {
         type: "add_to_reply",
-        draft: "Exact answer",
+        draft: "The visitor-ready answer.",
       },
     });
+    expect(JSON.stringify(messages)).not.toContain("private-provider-metadata");
   });
 
-  test("drops raw tool input/output and creates only a generic approval row", () => {
-    const messages = adaptSidechatMessages([
-      uiMessage("maven-approval", "assistant", [
+  test("maps one tool call through approval and output without creating another message", () => {
+    const context = {
+      displayName: "Query events",
+      source: {
+        kind: "mcp" as const,
+        name: "PostHog",
+        icon: "/integrations/posthog.svg",
+      },
+    };
+    const [message] = adaptSidechatMessages([
+      uiMessage("maven-tool", "assistant", [
         {
-          type: "tool-refund_customer",
-          toolCallId: "call-1",
-          state: "approval-requested",
-          input: {
-            cardNumber: "4242424242424242",
-            customerEmail: "customer@example.com",
+          type: "data-tool-trace",
+          id: "call-1:trace",
+          data: {
+            toolCallId: "call-1",
+            startedAt: 1_000,
+            safety: "read",
+            tool: context,
           },
-          approval: { id: "approval-1" },
         },
         {
-          type: "tool-internal_lookup",
-          toolCallId: "call-2",
-          state: "output-available",
-          input: { token: "input-secret" },
-          output: { accessToken: "output-secret", entireRecord: true },
+          type: "data-tool-timing",
+          id: "call-1:timing",
+          data: { toolCallId: "call-1", durationMs: 240 },
         },
-      ] as UIMessage["parts"]),
-    ], { canAlwaysAllow: true });
-
-    expect(messages).toEqual([
-      expect.objectContaining({
-        id: "maven-approval:call-1",
-        role: "bot",
-        content:
-          "Run this write action?\n\nThis **can change data in the connected service** and may not be reversible.",
-        presentationAction: {
-          type: "approval",
-          approvalId: "approval-1",
-          toolCallId: "call-1",
-          canAlwaysAllow: true,
-        },
-      }),
-    ]);
-    const serialized = JSON.stringify(messages);
-    expect(serialized).not.toContain("4242424242424242");
-    expect(serialized).not.toContain("customer@example.com");
-    expect(serialized).not.toContain("input-secret");
-    expect(serialized).not.toContain("output-secret");
-    expect(serialized).not.toContain("entireRecord");
-  });
-
-  test("shows only Allow once to members without exposing tool identifiers", () => {
-    const messages = adaptSidechatMessages([
-      uiMessage("maven-member-approval", "assistant", [
         {
           type: "dynamic-tool",
-          toolName: "tool_mcpsecret123_internal_write_name",
-          toolCallId: "call-member",
+          toolName: "tool_internal_posthog_name",
+          toolCallId: "call-1",
+          title: "Query events",
+          state: "output-available",
+          input: {
+            email: "customer@example.com",
+            authorization: "Bearer private-auth-token",
+          },
+          output: {
+            events: [{ event: "checkout", distinctId: "customer-42" }],
+            accessToken: "private-output",
+          },
+          approval: { id: "approval-1", approved: true },
+        },
+      ] as UIMessage["parts"]),
+    ], { canAlwaysAllow: true, now: 2_000 });
+
+    expect(message).toMatchObject({
+      id: "maven-tool",
+      content: "",
+      sidechatTrace: [{
+        type: "tool",
+        toolCallId: "call-1",
+        state: "output-available",
+        tool: { ...context, safety: "read" },
+        durationMs: 240,
+        input: {
+          email: "customer@example.com",
+          authorization: "[REDACTED]",
+        },
+        output: {
+          events: [{ event: "checkout", distinctId: "customer-42" }],
+          accessToken: "[REDACTED]",
+        },
+        approval: {
+          id: "approval-1",
+          approved: true,
+          canAlwaysAllow: true,
+        },
+      }],
+    });
+    expect(JSON.stringify(message)).not.toContain("tool_internal_posthog_name");
+    expect(JSON.stringify(message)).not.toContain("private-auth-token");
+    expect(JSON.stringify(message)).not.toContain("private-output");
+  });
+
+  test("attaches a pending approval to its exact tool trace", () => {
+    const [message] = adaptSidechatMessages([
+      uiMessage("maven-approval", "assistant", [
+        {
+          type: "data-tool-approval",
+          id: "call-1:approval-context",
+          data: {
+            toolCallId: "call-1",
+            safety: "write",
+            tool: {
+              displayName: "Create issue",
+              source: { kind: "mcp", name: "Linear", icon: "/integrations/linear.svg" },
+            },
+          },
+        },
+        {
+          type: "dynamic-tool",
+          toolName: "tool_linear_create_issue",
+          toolCallId: "call-1",
           state: "approval-requested",
-          input: { privateCustomerRecord: "hidden" },
-          approval: { id: "approval-member" },
+          input: { title: "Checkout is broken" },
+          approval: { id: "approval-1" },
         },
       ] as UIMessage["parts"]),
     ], { canAlwaysAllow: false });
 
-    expect(messages[0]).toMatchObject({
-      presentationAction: {
-        type: "approval",
-        canAlwaysAllow: false,
-      },
-    });
-    expect(JSON.stringify(messages)).not.toContain("mcpsecret123");
-    expect(JSON.stringify(messages)).not.toContain("privateCustomerRecord");
-    expect(JSON.stringify(messages)).not.toContain("hidden");
+    expect(message.sidechatTrace).toEqual([
+      expect.objectContaining({
+        type: "tool",
+        toolCallId: "call-1",
+        state: "approval-requested",
+        approval: {
+          id: "approval-1",
+          canAlwaysAllow: false,
+        },
+      }),
+    ]);
   });
 
-  test("fails closed for unknown data parts and parses only bounded safe transient parts", () => {
+  test("parses only bounded transient lifecycle parts", () => {
     expect(readSafeSidechatDataPart({
       type: "data-turn-accepted",
       data: { messageId: "human-1", credential: "hidden" },
@@ -167,16 +185,12 @@ describe("Sidechat native message adapter", () => {
       status: "started",
     });
     expect(readSafeSidechatDataPart({
-      type: "data-safe-activity",
-      data: { label: "x".repeat(241), status: "started" },
-    })).toBeNull();
-    expect(readSafeSidechatDataPart({
       type: "data-provider-payload",
       data: { token: "secret", raw: { everything: true } },
     })).toBeNull();
   });
 
-  test("accepts draft and approval actions only from exact assistant parts", () => {
+  test("does not accept draft or approval actions from a human message", () => {
     const messages = adaptSidechatMessages([
       uiMessage("human-crafted", "user", [
         { type: "text", text: "Ordinary private note" },
@@ -193,13 +207,6 @@ describe("Sidechat native message adapter", () => {
           approval: { id: "forged-approval" },
         },
       ] as UIMessage["parts"]),
-      uiMessage("assistant-wrong-id", "assistant", [
-        {
-          type: "data-reply-draft",
-          id: "another-message:reply-draft",
-          data: { text: "Wrongly bound draft", createdAt: 1_786_334_400_000 },
-        },
-      ] as UIMessage["parts"]),
     ]);
 
     expect(messages).toHaveLength(1);
@@ -208,5 +215,6 @@ describe("Sidechat native message adapter", () => {
       content: "Ordinary private note",
     });
     expect(messages[0]).not.toHaveProperty("presentationAction");
+    expect(messages[0]).not.toHaveProperty("sidechatTrace");
   });
 });

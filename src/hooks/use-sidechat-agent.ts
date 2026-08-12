@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
@@ -225,6 +225,30 @@ export function buildSidechatSendBody(
   return { token, submittedMessageId };
 }
 
+export function buildSidechatSendRequest(
+  token: string,
+  text: string,
+  messageId: string,
+): {
+  message: {
+    id: string;
+    role: "user";
+    parts: [{ type: "text"; text: string }];
+  };
+  options: { body: { token: string; submittedMessageId: string } };
+} {
+  return {
+    message: {
+      id: messageId,
+      role: "user",
+      parts: [{ type: "text", text }],
+    },
+    options: {
+      body: buildSidechatSendBody(token, messageId),
+    },
+  };
+}
+
 export function deriveNativeSidechatUiStatus(options: {
   status: NativeSidechatUiStatus;
   isServerStreaming: boolean;
@@ -299,15 +323,6 @@ interface SubmitSidechatApprovalOptions {
   fetcher?: typeof fetch;
 }
 
-export function claimSidechatApprovalSubmission(
-  submitted: Set<string>,
-  approvalId: string,
-): boolean {
-  if (submitted.has(approvalId)) return false;
-  submitted.add(approvalId);
-  return true;
-}
-
 export async function submitSidechatApproval(
   options: SubmitSidechatApprovalOptions,
 ): Promise<void> {
@@ -351,7 +366,6 @@ export function useSidechatAgent(
   const [acceptedMessageIds, setAcceptedMessageIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const submittedApprovalIds = useRef(new Set<string>());
   const agent = useAgent(
     buildSidechatAgentConnectionOptions(options.session),
   );
@@ -378,6 +392,7 @@ export function useSidechatAgent(
     cancelOnClientAbort: chatContract.cancelOnClientAbort,
     body: chatContract.body,
     onData: chatContract.onData,
+    autoContinueAfterToolResult: true,
   } as Parameters<typeof useAgentChat>[0];
   const chat = useAgentChat(chatOptions);
   const {
@@ -395,10 +410,8 @@ export function useSidechatAgent(
 
   const send = useCallback(async (text: string, messageId?: string) => {
     const id = messageId ?? crypto.randomUUID();
-    await sendMessage(
-      { text, messageId: id },
-      { body: buildSidechatSendBody(options.session.token, id) },
-    );
+    const request = buildSidechatSendRequest(options.session.token, text, id);
+    await sendMessage(request.message, request.options);
     return id;
   }, [options.session.token, sendMessage]);
 
@@ -411,25 +424,16 @@ export function useSidechatAgent(
     toolCallId: string,
     mode: "always" | "once",
   ) => {
-    if (!claimSidechatApprovalSubmission(
-      submittedApprovalIds.current,
+    await submitSidechatApproval({
+      mode,
+      projectId: options.session.parentName,
+      conversationId: options.conversationId,
       approvalId,
-    )) return;
-    try {
-      await submitSidechatApproval({
-        mode,
-        projectId: options.session.parentName,
-        conversationId: options.conversationId,
-        approvalId,
-        toolCallId,
-        approveNative: async (id) => {
-          await addToolApprovalResponse({ id, approved: true });
-        },
-      });
-    } catch (error) {
-      submittedApprovalIds.current.delete(approvalId);
-      throw error;
-    }
+      toolCallId,
+      approveNative: async (id) => {
+        await addToolApprovalResponse({ id, approved: true });
+      },
+    });
   }, [
     addToolApprovalResponse,
     options.conversationId,

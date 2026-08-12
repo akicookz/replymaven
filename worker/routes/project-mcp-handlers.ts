@@ -5,7 +5,10 @@ import type {
   ProjectMcpPolicyInput,
 } from "../agents/sidechat/mcp-types";
 import { getMcpPreset, listMcpPresets } from "../agents/sidechat/mcp-presets";
-import { validateMcpServerUrl } from "../agents/sidechat/mcp-policy";
+import {
+  validateMcpCallbackHost,
+  validateMcpServerUrl,
+} from "../agents/sidechat/mcp-policy";
 import {
   createProjectMcpConnectionSchema,
   grantSidechatAlwaysAllowSchema,
@@ -135,6 +138,7 @@ function safeDescriptor(tool: SidechatToolDescriptor): SidechatToolDescriptor {
     inputSchema: tool.inputSchema,
     catalogFingerprint: tool.catalogFingerprint,
     audience: "sidechat",
+    safety: tool.safety ?? (tool.access === "read" ? "read" : "write"),
     access: tool.access,
     enabled: tool.enabled,
     alwaysAllowed: tool.alwaysAllowed === true,
@@ -160,6 +164,9 @@ function safeConnection(connection: McpConnectionView): McpConnectionView {
     authMode: connection.authMode,
     state: safeStates.has(connection.state) ? connection.state : "failed",
     ...(authUrl ? { authUrl } : {}),
+    ...(connection.issue === "tool_discovery_failed"
+      ? { issue: connection.issue }
+      : {}),
     tools: connection.tools.map(safeDescriptor),
   };
 }
@@ -225,7 +232,7 @@ export async function handleConnectProjectMcp(
 
   let callbackHost: string;
   try {
-    callbackHost = new URL(validateMcpServerUrl(options.callbackHost)).origin;
+    callbackHost = validateMcpCallbackHost(options.callbackHost);
   } catch {
     return errorResponse("invalid_callback_host", 502);
   }

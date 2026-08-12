@@ -28,6 +28,10 @@ export interface DiscoveredMcpTool {
   annotations?: McpToolAnnotations;
 }
 
+interface NormalizeMcpCatalogOptions {
+  forceReadOnly?: boolean;
+}
+
 interface FingerprintMcpToolInput {
   name: string;
   description?: string;
@@ -99,6 +103,32 @@ function isUnsafeHostname(hostname: string): boolean {
   );
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname
+    .replace(/^\[/u, "")
+    .replace(/\]$/u, "")
+    .toLowerCase()
+    .replace(/\.$/u, "");
+  if (
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost") ||
+    normalized === "::1"
+  ) {
+    return true;
+  }
+
+  const parts = normalized.split(".");
+  if (parts.length !== 4) return false;
+  const octets = parts.map((part) => Number(part));
+  return octets.every(
+    (octet, index) =>
+      Number.isInteger(octet) &&
+      octet >= 0 &&
+      octet <= 255 &&
+      String(octet) === parts[index],
+  ) && octets[0] === 127;
+}
+
 export function validateMcpServerUrl(value: string): string {
   let url: URL;
   try {
@@ -120,13 +150,42 @@ export function validateMcpServerUrl(value: string): string {
   return url.toString();
 }
 
+export function validateMcpCallbackHost(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("MCP callback must use public HTTPS or local loopback");
+  }
+
+  const loopback = isLoopbackHostname(url.hostname);
+  const validProtocol = loopback
+    ? url.protocol === "http:" || url.protocol === "https:"
+    : url.protocol === "https:";
+  if (
+    !validProtocol ||
+    !url.hostname ||
+    url.username !== "" ||
+    url.password !== "" ||
+    (!loopback && isUnsafeHostname(url.hostname))
+  ) {
+    throw new Error("MCP callback must use public HTTPS or local loopback");
+  }
+
+  return url.origin;
+}
+
 export function classifyMcpToolAccess(
   annotations: McpToolAnnotations | undefined,
 ): "read" | "write" {
-  return annotations?.readOnlyHint === true &&
-    annotations.destructiveHint !== true
-    ? "read"
-    : "write";
+  return classifyMcpToolSafety(annotations) === "read" ? "read" : "write";
+}
+
+export function classifyMcpToolSafety(
+  annotations: McpToolAnnotations | undefined,
+): "read" | "write" | "destructive" {
+  if (annotations?.destructiveHint === true) return "destructive";
+  return annotations?.readOnlyHint === true ? "read" : "write";
 }
 
 export function normalizeMcpToolResult(result: unknown): unknown {
@@ -243,6 +302,7 @@ export async function normalizeMcpCatalog(
   connectionId: string,
   tools: readonly DiscoveredMcpTool[],
   configured: readonly SidechatToolDescriptor[],
+  options: NormalizeMcpCatalogOptions = {},
 ): Promise<SidechatToolDescriptor[]> {
   const configuredByName = new Map(
     configured
@@ -292,10 +352,11 @@ export async function normalizeMcpCatalog(
       inputSchema,
       catalogFingerprint,
       audience: "sidechat",
-      access: previousIsCurrent
-        ? previous.access
-        : classifyMcpToolAccess(annotations),
-      enabled: previousIsCurrent ? previous.enabled : false,
+      safety: options.forceReadOnly
+        ? "read"
+        : classifyMcpToolSafety(annotations),
+      access: previousIsCurrent ? previous.access : "write",
+      enabled: previousIsCurrent ? previous.enabled : true,
     });
   }
 

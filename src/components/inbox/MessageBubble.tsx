@@ -1,4 +1,4 @@
-import { Mail, Trash2 } from "lucide-react";
+import { Mail, Plug, Trash2 } from "lucide-react";
 import { deriveMessageStatus } from "@/lib/inbox/message-status";
 import {
   deriveMessageActions,
@@ -12,6 +12,7 @@ import {
   shouldShowMessageContent,
 } from "../../../shared/message-images";
 import MessageImages from "./MessageImages";
+import SidechatExecutionTrace from "./SidechatExecutionTrace";
 
 interface MessageBubbleProps {
   message: Message;
@@ -22,12 +23,17 @@ interface MessageBubbleProps {
   isMatch?: boolean;
   /** This message is the currently-focused search match. */
   isActiveMatch?: boolean;
-  /** False when this message is grouped with the previous one from the same
-   *  sender — the name + timestamp header renders once per group. */
-  showHeader?: boolean;
+  /** Tightens spacing when this follows the same sender in one message group. */
+  groupedWithPrev?: boolean;
+  /** Renders sender, time, and delivery metadata under the group's last bubble. */
+  showMetadata?: boolean;
   perspective?: ChatPerspective;
   onAddToReply?: (draft: string) => void;
-  onApprovalAction?: (messageId: string, mode: "always" | "once") => void;
+  onApprovalAction?: (
+    approvalId: string,
+    toolCallId: string,
+    mode: "always" | "once",
+  ) => void;
 }
 
 function formatTime(isoStr: string): string {
@@ -44,7 +50,8 @@ export default function MessageBubble({
   readOnly = false,
   isMatch,
   isActiveMatch,
-  showHeader = true,
+  groupedWithPrev = false,
+  showMetadata = true,
   perspective = "public",
   onAddToReply,
   onApprovalAction,
@@ -66,18 +73,21 @@ export default function MessageBubble({
       ? "ring-1 ring-amber-400/40"
       : "";
 
-  const labelColorClass = isReceived
-    ? "text-ink-5"
-    : isBot
-      ? "text-brand-label"
-      : "text-brand-label-human";
-
   const html = renderMarkdown(message.content);
   const imageCount = parseMessageImageUrls(message.imageUrl).length;
   const showContent = shouldShowMessageContent(message.content);
+  const showSidechatTrace =
+    perspective === "sidechat" && Boolean(message.sidechatTrace?.length);
+  const approvalTool = message.presentationAction?.type === "approval"
+    ? message.presentationAction.tool
+    : undefined;
+  const showBubble =
+    showContent ||
+    imageCount > 0 ||
+    Boolean(message.presentationAction);
 
   // Grouped messages tuck up under the previous bubble (net ~4px gap).
-  const rootSpacing = showHeader ? "mb-3" : "-mt-2 mb-3";
+  const rootSpacing = groupedWithPrev ? "-mt-2 mb-3" : "mb-3";
   const actions = deriveMessageActions(
     perspective,
     message.presentationAction,
@@ -94,25 +104,14 @@ export default function MessageBubble({
     .filter(Boolean)
     .join(" · ");
 
-  // Delivery status — rendered inline in the header row (name · time · Seen);
-  // falls back to a row under the bubble for grouped messages that have no
-  // header of their own.
-  function renderStatus(withLeadingDot: boolean) {
+  function renderStatus() {
     return status && (
       <span
-        className="text-[11px] text-ink-8 flex items-baseline gap-1"
+        className="flex items-baseline gap-1"
         title={statusTooltip || undefined}
       >
-        {withLeadingDot && <span aria-hidden="true">·</span>}
-        <span
-          className={
-            status.status === "seen"
-              ? "text-brand-label-human font-medium"
-              : undefined
-          }
-        >
-          {status.label}
-        </span>
+        <span aria-hidden="true">·</span>
+        <span>{status.label}</span>
         {status.emailed && (
           <>
             <span aria-hidden="true">·</span>
@@ -121,6 +120,23 @@ export default function MessageBubble({
           </>
         )}
       </span>
+    );
+  }
+
+  function renderMetadata() {
+    if (!showMetadata) return null;
+    return (
+      <div
+        className={cn(
+          "mt-1 flex max-w-full flex-wrap items-center gap-1 text-[11px] leading-normal text-ink-7 tabular-nums",
+          isReceived ? "justify-start text-left" : "justify-end text-right",
+        )}
+      >
+        <span>{senderLabel}</span>
+        <span aria-hidden="true">·</span>
+        <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
+        {renderStatus()}
+      </div>
     );
   }
 
@@ -148,7 +164,14 @@ export default function MessageBubble({
             <button
               type="button"
               className="min-h-10 shrink-0 whitespace-nowrap text-[12px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
-              onClick={() => onApprovalAction(message.id, "always")}
+              onClick={() => {
+                if (message.presentationAction?.type !== "approval") return;
+                onApprovalAction(
+                  message.presentationAction.approvalId,
+                  message.presentationAction.toolCallId,
+                  "always",
+                );
+              }}
             >
               Always allow
             </button>
@@ -156,7 +179,14 @@ export default function MessageBubble({
           <button
             type="button"
             className="flex min-h-10 shrink-0 items-center whitespace-nowrap text-[12px] font-semibold motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
-            onClick={() => onApprovalAction(message.id, "once")}
+            onClick={() => {
+              if (message.presentationAction?.type !== "approval") return;
+              onApprovalAction(
+                message.presentationAction.approvalId,
+                message.presentationAction.toolCallId,
+                "once",
+              );
+            }}
           >
             <span className="rounded-[8px] bg-bubble-sent px-2.5 py-1.5 text-white">
               Allow once
@@ -176,49 +206,85 @@ export default function MessageBubble({
         rootSpacing,
       )}
     >
-      {showHeader && (
-        <div className={`flex items-baseline gap-2 mb-1 ${labelColorClass}`}>
-          <span className="text-xs leading-normal font-semibold">{senderLabel}</span>
-          <span className="text-[11px] text-ink-8">{formatTime(message.createdAt)}</span>
-          {renderStatus(true)}
-        </div>
+      {showSidechatTrace && message.sidechatTrace && (
+        <SidechatExecutionTrace
+          items={message.sidechatTrace}
+          onApproval={onApprovalAction}
+        />
       )}
-      <div className="relative group max-w-9/10 sm:max-w-3/4">
+      {showBubble && (
         <div
           className={cn(
-            "px-3.5 py-2.5 text-[14.5px] leading-normal rounded-bubble",
-            isReceived
-              ? "bg-bubble-received text-ink-2 rounded-bl-[6px]"
-              : "bg-bubble-sent text-white rounded-br-[6px]",
-            matchClass,
+            "relative group",
+            perspective === "sidechat"
+              ? "max-w-[88%]"
+              : "max-w-9/10 sm:max-w-3/4",
           )}
         >
-          <MessageImages imageUrl={message.imageUrl} />
-          {showContent && (
-            <div
-              className={`prose-chat${imageCount ? " mt-1.5" : ""}`}
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
-          )}
-          {renderMessageActions()}
-        </div>
-        {!isReceived &&
-          perspective === "public" &&
-          isAgent &&
-          !readOnly &&
-          onDelete && (
-          <button
-            onClick={() => onDelete(message.id)}
-            className="absolute -left-10 top-1/2 flex size-10 shrink-0 -translate-y-1/2 items-center justify-center rounded opacity-0 text-ink-7 group-hover:opacity-100 hover:text-red-400 focus-visible:opacity-100 motion-safe:transition-[opacity,color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
-            aria-label="Delete message"
+          <div
+            className={cn(
+              "text-[14.5px] leading-normal",
+              perspective === "sidechat" && isBot
+                ? "text-ink-2"
+                : perspective === "sidechat"
+                  ? "rounded-bubble rounded-br-[6px] bg-bubble-received px-3.5 py-2.5 text-ink-2"
+                  : isReceived
+                    ? "rounded-bubble rounded-bl-[6px] bg-bubble-received px-3.5 py-2.5 text-ink-2"
+                    : "rounded-bubble rounded-br-[6px] bg-bubble-sent px-3.5 py-2.5 text-white",
+              matchClass,
+            )}
           >
-            <Trash2 size={14} />
-          </button>
-        )}
-      </div>
-      {!showHeader && status && (
-        <div className="mt-1 flex items-center">{renderStatus(false)}</div>
+            <MessageImages imageUrl={message.imageUrl} />
+            {approvalTool && (
+              <div
+                className="mb-2 flex min-w-0 items-center gap-2"
+                aria-label={`${approvalTool.source.name}: ${approvalTool.displayName}`}
+              >
+                <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-ink-1/5">
+                  {approvalTool.source.icon ? (
+                    <img
+                      src={approvalTool.source.icon}
+                      alt=""
+                      aria-hidden="true"
+                      className="size-full object-contain p-1"
+                    />
+                  ) : (
+                    <Plug aria-hidden="true" className="size-3.5 text-ink-5" />
+                  )}
+                </span>
+                <p className="min-w-0 text-pretty text-[12.5px] leading-snug text-ink-5">
+                  <span>{approvalTool.source.name}</span>
+                  <span aria-hidden="true"> · </span>
+                  <strong className="font-semibold text-ink-2">
+                    {approvalTool.displayName}
+                  </strong>
+                </p>
+              </div>
+            )}
+            {showContent && (
+              <div
+                className={`prose-chat${imageCount ? " mt-1.5" : ""}`}
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+            )}
+            {renderMessageActions()}
+          </div>
+          {!isReceived &&
+            perspective === "public" &&
+            isAgent &&
+            !readOnly &&
+            onDelete && (
+            <button
+              onClick={() => onDelete(message.id)}
+              className="absolute -left-10 top-1/2 flex size-10 shrink-0 -translate-y-1/2 items-center justify-center rounded opacity-0 text-ink-7 group-hover:opacity-100 hover:text-red-400 focus-visible:opacity-100 motion-safe:transition-[opacity,color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
+              aria-label="Delete message"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
       )}
+      {renderMetadata()}
     </div>
   );
 }

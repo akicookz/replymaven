@@ -24,6 +24,7 @@ import type {
   SidechatSessionResponse,
   SidechatSummarySessionResponse,
 } from "../../shared/sidechat-agent";
+import type { SafeSidechatDataPart } from "@/lib/inbox/sidechat-message-adapter";
 import { cn } from "@/lib/utils";
 import { serializeMessageImageUrls } from "../../shared/message-images";
 import { useConversationWs } from "@/lib/use-conversation-ws";
@@ -176,13 +177,23 @@ function NativeSidechatPane({
   onClose,
 }: NativeSidechatPaneProps) {
   const attemptedMessageIds = useRef(new Set<string>());
-  const [safeActivity, setSafeActivity] = useState<string | null>(null);
+  const [safeActivity, setSafeActivity] = useState<Extract<
+    SafeSidechatDataPart,
+    { type: "safe-activity" }
+  > | null>(null);
   const sidechat = useSidechatAgent({
     session,
     conversationId: conversation.id,
     onTurnAccepted,
     onSafeActivity(activity) {
-      setSafeActivity(activity.status === "started" ? activity.label : null);
+      setSafeActivity((current) => activity.status === "started"
+        ? {
+            ...activity,
+            ...(activity.tool || !current?.tool
+              ? {}
+              : { tool: current.tool }),
+          }
+        : null);
     },
   });
   const trustedDefault = customerFirstName
@@ -226,7 +237,12 @@ function NativeSidechatPane({
   ]);
 
   const hasApproval = sidechat.messages.some(
-    (message) => message.presentationAction?.type === "approval",
+    (message) =>
+      message.presentationAction?.type === "approval" ||
+      message.sidechatTrace?.some(
+        (item) =>
+          item.type === "tool" && item.state === "approval-requested",
+      ) === true,
   );
   const hasReplyDraft = sidechat.messages.some(
     (message) => message.presentationAction?.type === "add_to_reply",
@@ -290,7 +306,7 @@ function NativeSidechatPane({
       }}
       onApproval={(approvalId, toolCallId, mode) => {
         void sidechat.approve(approvalId, toolCallId, mode).catch(
-          () => undefined,
+          () => setSafeActivity(null),
         );
       }}
     />
@@ -1938,7 +1954,8 @@ function Conversations() {
           status={sidechatSession.error ? "error" : "submitted"}
           presentationStatus={sidechatSession.error ? "failed" : "working"}
           error={sidechatSession.error ?? undefined}
-          safeActivity={sidechatSession.error ? null : "Connecting…"}
+          safeActivity={null}
+          loading={!sidechatSession.error}
           onSend={() => undefined}
           onStop={() => undefined}
           onRetry={() => {

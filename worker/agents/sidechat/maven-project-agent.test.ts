@@ -4,9 +4,16 @@ import type { SidechatChildClaims } from "../../../shared/sidechat-agent";
 const secret = "task-2-test-secret-with-at-least-32-bytes";
 
 class FakeAgent {
-  env = { SIDECHAT_TOKEN_SECRET: secret };
+  ctx: unknown;
+  env: Record<string, unknown>;
   name = "project-1";
   state: unknown;
+  mcp = { configureOAuthCallback: mock(() => undefined) };
+
+  constructor(ctx: unknown, env: Record<string, unknown>) {
+    this.ctx = ctx;
+    this.env = env;
+  }
 
   setState(state: unknown): void {
     this.state = state;
@@ -15,6 +22,8 @@ class FakeAgent {
   async onConnect(): Promise<void> {}
 }
 
+class FakeOAuthProvider {}
+
 class MavenChatAgentMock {}
 Object.defineProperty(MavenChatAgentMock, "name", { value: "MavenChatAgent" });
 
@@ -22,7 +31,10 @@ let MavenProjectAgent: typeof import("./maven-project-agent").MavenProjectAgent;
 let signSidechatToken: typeof import("./agent-auth").signSidechatToken;
 
 beforeAll(async () => {
-  mock.module("agents", () => ({ Agent: FakeAgent }));
+  mock.module("agents", () => ({
+    Agent: FakeAgent,
+    DurableObjectOAuthClientProvider: FakeOAuthProvider,
+  }));
   mock.module("./maven-chat-agent", () => ({
     MavenChatAgent: MavenChatAgentMock,
   }));

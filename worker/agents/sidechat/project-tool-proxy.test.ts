@@ -54,6 +54,7 @@ function executionRequest(
     connectionId: descriptor.connectionId,
     toolName: descriptor.toolName,
     catalogFingerprint: descriptor.catalogFingerprint,
+    safety: descriptor.safety ?? (descriptor.access === "read" ? "read" : "write"),
     access: descriptor.access,
     approvalMode: descriptor.access === "write" ? "once" : "none",
     input: { customerId: "never-audit-me" },
@@ -169,6 +170,7 @@ describe("Sidechat project tool descriptors", () => {
       connectionId: "http:tool-1",
       toolName: "lookup_customer",
       catalogFingerprint: descriptors[1]?.catalogFingerprint,
+      safety: "read",
       access: "read",
       approvalMode: "none",
       input: { customerId: "customer-1" },
@@ -232,6 +234,39 @@ describe("Sidechat project tool descriptors", () => {
       "once",
       "always",
     ]);
+  });
+
+  test("keeps an asked read classified as read when it reaches the parent", async () => {
+    const askedRead = mcpDescriptor({
+      exposedName: "asked_read_tool",
+      safety: "read",
+      access: "write",
+    });
+    const execute = mock(async () => ({
+      status: "completed" as const,
+      output: { ok: true },
+      safeActivity: "Done",
+    }));
+    const tools = buildSidechatDynamicTools({
+      descriptors: [askedRead],
+      childName: "sc_conversation-1",
+      conversationId: "conversation-1",
+      actorUserId: "user-1",
+      execute,
+      emitActivity() {},
+    });
+
+    expect(tools.asked_read_tool?.needsApproval).toBe(true);
+    await tools.asked_read_tool?.execute?.({ email: "customer@example.com" }, {
+      toolCallId: "asked-read-call",
+      messages: [],
+      abortSignal: undefined,
+    });
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      access: "write",
+      safety: "read",
+      approvalMode: "once",
+    }));
   });
 });
 
@@ -366,6 +401,26 @@ describe("Sidechat project tool execution", () => {
       approvalMode: "once",
       errorCode: "write_result_unknown",
     });
+  });
+
+  test("reports a failed asked read as a read failure, not an ambiguous write", async () => {
+    const descriptor = mcpDescriptor({ safety: "read", access: "write" });
+    const executeMcpTool = mock(async () => ({ error: "mcp_tool_timeout" }));
+    const result = await executeSidechatProjectTool({
+      projectId: "project-1",
+      request: executionRequest(descriptor, { approvalMode: "once" }),
+      dependencies: executionDependencies({
+        getAuthoritativeMcpTool: mock(async () => descriptor),
+        executeMcpTool,
+      }),
+    });
+
+    expect(result).toEqual({
+      status: "failed",
+      safeActivity: "Tool failed",
+      errorCode: "tool_failed",
+    });
+    expect(executeMcpTool).toHaveBeenCalledTimes(1);
   });
 
   test("defines a parent-local audit table with metadata columns only", () => {

@@ -1,0 +1,11 @@
+diff --git a/dist/client-zqKcsyFa.js b/dist/client-zqKcsyFa.js
+index 0320894c0c6226fd80c2ece15eff0e9e59d8135e..d33b11ef7e4e4b7277d065686b4fce20915c9c2d 100644
+--- a/dist/client-zqKcsyFa.js
++++ b/dist/client-zqKcsyFa.js
+@@ -989 +989,2 @@ var MCPClientConnection = class {
+-			if (e.code === -32601) {
++			const message = toErrorMessage(e);
++			if (e.code === -32601 || message.includes("-32601") && /method not found/i.test(message)) {
+@@ -996 +997 @@ var MCPClientConnection = class {
+-						error: toErrorMessage(e)
++						error: message

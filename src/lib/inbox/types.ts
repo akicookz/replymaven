@@ -1,4 +1,8 @@
 import type { InboxFilter } from "./filters";
+import type {
+  SidechatToolPresentation,
+  SidechatToolSafety,
+} from "../../../shared/sidechat-agent";
 
 // Shared inbox data shapes consumed by the Conversations orchestrator and the
 // inbox presentational components (MessageList / ReadingPane / FocusView and
@@ -46,6 +50,40 @@ export type MessagePresentationAction =
       approvalId: string;
       toolCallId: string;
       canAlwaysAllow: boolean;
+      tool?: SidechatToolPresentation & { safety: SidechatToolSafety };
+    };
+
+export type SidechatToolTraceState =
+  | "input-streaming"
+  | "input-available"
+  | "approval-requested"
+  | "approval-responded"
+  | "output-available"
+  | "output-error"
+  | "output-denied";
+
+export type SidechatTraceItem =
+  | {
+      type: "reasoning";
+      id: string;
+      text: string;
+      state: "streaming" | "done";
+    }
+  | {
+      type: "tool";
+      id: string;
+      toolCallId: string;
+      state: SidechatToolTraceState;
+      tool: SidechatToolPresentation & { safety: SidechatToolSafety };
+      input?: unknown;
+      output?: unknown;
+      errorText?: string;
+      durationMs?: number;
+      approval?: {
+        id: string;
+        approved?: boolean;
+        canAlwaysAllow: boolean;
+      };
     };
 
 export interface Message {
@@ -55,6 +93,7 @@ export interface Message {
   role: MessageRole;
   content: string;
   presentationAction?: MessagePresentationAction;
+  sidechatTrace?: SidechatTraceItem[];
   imageUrl?: string | null;
   sources?: string | null;
   senderName?: string | null;

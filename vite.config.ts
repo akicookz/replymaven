@@ -30,7 +30,7 @@ function logTestWidgetUrl(): Plugin {
 export default defineConfig({
   plugins: [
     react(),
-    cloudflare({ remoteBindings: false }),
+    cloudflare({ remoteBindings: true }),
     tailwindcss(),
     logTestWidgetUrl(),
   ],

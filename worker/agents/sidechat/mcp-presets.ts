@@ -13,28 +13,30 @@ export interface McpPreset {
   url: string;
   auth: readonly McpAuthMode[];
   icon: string;
+  readOnly?: boolean;
 }
 
 const MCP_PRESETS: readonly McpPreset[] = Object.freeze([
   Object.freeze({
     key: "posthog",
     label: "PostHog",
-    url: "https://mcp.posthog.com/mcp",
-    auth: Object.freeze(["oauth", "bearer"] satisfies McpAuthMode[]),
+    url: "https://mcp.posthog.com/mcp?readonly=true&mode=tools",
+    auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
     icon: "/integrations/posthog.svg",
+    readOnly: true,
   }),
   Object.freeze({
     key: "stripe",
     label: "Stripe",
     url: "https://mcp.stripe.com",
-    auth: Object.freeze(["oauth", "bearer"] satisfies McpAuthMode[]),
+    auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
     icon: "/integrations/stripe.svg",
   }),
   Object.freeze({
     key: "slack",
     label: "Slack",
     url: "https://mcp.slack.com/mcp",
-    auth: Object.freeze(["bearer"] satisfies McpAuthMode[]),
+    auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
     icon: "/integrations/slack.svg",
   }),
   Object.freeze({
@@ -48,7 +50,7 @@ const MCP_PRESETS: readonly McpPreset[] = Object.freeze([
     key: "linear",
     label: "Linear",
     url: "https://mcp.linear.app/mcp",
-    auth: Object.freeze(["oauth", "bearer"] satisfies McpAuthMode[]),
+    auth: Object.freeze(["oauth"] satisfies McpAuthMode[]),
     icon: "/integrations/linear.svg",
   }),
 ]);

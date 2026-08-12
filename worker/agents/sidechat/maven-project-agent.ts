@@ -1,4 +1,9 @@
-import { Agent, type Connection, type ConnectionContext } from "agents";
+import {
+  Agent,
+  type AgentMcpOAuthProvider,
+  type Connection,
+  type ConnectionContext,
+} from "agents";
 import { drizzle } from "drizzle-orm/d1";
 import type {
   ExecuteProjectToolRequest,
@@ -38,7 +43,9 @@ import {
   normalizeMcpCatalog,
   normalizeMcpToolResult,
   type DiscoveredMcpTool,
+  validateMcpServerUrl,
 } from "./mcp-policy";
+import { ReadOnlyMcpOAuthClientProvider } from "./mcp-oauth-provider";
 import { buildSidechatContext } from "./sidechat-context";
 import {
   buildSidechatToolDescriptors,
@@ -62,6 +69,7 @@ interface McpToolPolicyRow {
   description: string;
   input_schema: string;
   catalog_fingerprint: string;
+  safety: string | null;
   access: string;
   enabled: number;
 }
@@ -80,7 +88,19 @@ interface NativeMcpServer {
   state: string;
 }
 
+type AddMcpServerResult =
+  | { id: string; state: "authenticating"; authUrl: string }
+  | { id: string; state: "ready" };
+
 const MCP_TOOL_TIMEOUT_MS = 30_000;
+
+function sameMcpServerUrl(left: string, right: string): boolean {
+  try {
+    return validateMcpServerUrl(left) === validateMcpServerUrl(right);
+  } catch {
+    return false;
+  }
+}
 
 function readMcpAuthMode(value: string): ProjectMcpAuthMode | null {
   return value === "oauth" ||
@@ -96,6 +116,13 @@ function readMcpPresetKey(value: string | null): McpPresetKey | null {
 }
 
 function parseMcpToolPolicy(row: McpToolPolicyRow): SidechatToolDescriptor | null {
+  const safety = row.safety === "read" ||
+      row.safety === "write" ||
+      row.safety === "destructive"
+    ? row.safety
+    : row.access === "read"
+      ? "read"
+      : "write";
   if (
     (row.access !== "read" && row.access !== "write") ||
     (row.enabled !== 0 && row.enabled !== 1)
@@ -116,6 +143,7 @@ function parseMcpToolPolicy(row: McpToolPolicyRow): SidechatToolDescriptor | nul
       inputSchema,
       catalogFingerprint: row.catalog_fingerprint,
       audience: "sidechat",
+      safety,
       access: row.access,
       enabled: row.enabled === 1,
     };
@@ -157,7 +185,30 @@ function removeSidechatSummary(
 export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   initialState: MavenProjectState = { sidechats: {} };
   private readonly sidechatRegistrationLocks = new Map<string, Promise<void>>();
+  private readOnlyMcpOAuthConnections?: Set<string> = new Set<string>();
   private mcpOperationTail: Promise<void> = Promise.resolve();
+
+  constructor(ctx: DurableObjectState, env: AppEnv) {
+    super(ctx, env);
+    this.mcp.configureOAuthCallback({
+      successRedirect:
+        `/app/projects/${encodeURIComponent(this.name)}/quick-actions?tab=tools`,
+    });
+  }
+
+  createMcpOAuthProvider(callbackUrl: string): AgentMcpOAuthProvider {
+    return new ReadOnlyMcpOAuthClientProvider(
+      this.ctx.storage,
+      "ReplyMaven",
+      callbackUrl,
+      (serverId) => this.readOnlyMcpOAuthConnectionIds().has(serverId),
+    );
+  }
+
+  private readOnlyMcpOAuthConnectionIds(): Set<string> {
+    this.readOnlyMcpOAuthConnections ??= new Set<string>();
+    return this.readOnlyMcpOAuthConnections;
+  }
 
   async registerSidechat(
     conversationId: string,
@@ -406,16 +457,28 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     if (duplicate) throw new Error("MCP connection already exists");
 
     const requestedId = `mcp-${crypto.randomUUID()}`;
+    const preset = input.presetKey ? getMcpPreset(input.presetKey) : null;
+    if (preset?.readOnly) {
+      this.readOnlyMcpOAuthConnectionIds().add(requestedId);
+    }
     const headers = this.mcpTransportHeaders(input);
-    const result = await this.addMcpServer(input.name, input.url, {
-      id: requestedId,
-      callbackHost: input.callbackHost,
-      callbackPath: input.callbackPath,
-      transport: {
-        type: "streamable-http",
-        ...(headers ? { headers } : {}),
-      },
-    });
+    let result: AddMcpServerResult;
+    try {
+      result = await this.addMcpServer(input.name, input.url, {
+        id: requestedId,
+        callbackHost: input.callbackHost,
+        callbackPath: input.callbackPath,
+        transport: {
+          type: "auto",
+          ...(headers ? { headers } : {}),
+        },
+      });
+    } catch (error) {
+      await this.removeMcpServer(requestedId).catch(() => undefined);
+      throw error;
+    } finally {
+      this.readOnlyMcpOAuthConnectionIds().delete(requestedId);
+    }
     if (result.state === "authenticating" && input.authMode !== "oauth") {
       await this.removeMcpServer(result.id);
       throw new Error("Configured MCP credentials were rejected");
@@ -453,11 +516,15 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   private async listMcpConnectionsUnlocked(): Promise<McpConnectionView[]> {
     this.ensureMcpApplicationSchema();
     await this.mcp.waitForConnections({ timeout: 10_000 });
-    const nativeState = this.getMcpServers();
     for (const connection of this.readMcpConnectionMetadata()) {
-      if (nativeState.servers[connection.id]?.state === "ready") {
-        await this.syncMcpCatalog(connection.id);
+      const preset = connection.preset_key
+        ? getMcpPreset(connection.preset_key)
+        : null;
+      if (preset && !sameMcpServerUrl(connection.url, preset.url)) {
+        await this.disconnectMcpUnlocked(connection.id);
+        continue;
       }
+      await this.reconcileMcpCatalog(connection.id, false);
     }
     return this.readMcpConnectionMetadata()
       .map((connection) => this.buildMcpConnectionView(connection.id))
@@ -480,13 +547,39 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     await this.mcp.waitForConnections({ timeout: 10_000 });
     const server = this.getMcpServers().servers[connectionId];
     if (!server) return this.buildMcpConnectionView(connectionId);
-    if (server.state === "connected" || server.state === "ready") {
-      await this.mcp.discoverIfConnected(connectionId, { timeoutMs: 30_000 });
+    await this.reconcileMcpCatalog(connectionId, true);
+    return this.buildMcpConnectionView(connectionId);
+  }
+
+  private async reconcileMcpCatalog(
+    connectionId: string,
+    refreshReadyCatalog: boolean,
+  ): Promise<void> {
+    const server = this.getMcpServers().servers[connectionId];
+    const safetyNeedsSync = this.sql<{ pending: number }>`
+      SELECT 1 AS pending
+      FROM sidechat_mcp_tool_policy
+      WHERE connection_id = ${connectionId}
+        AND catalog_present = 1
+        AND safety IS NULL
+      LIMIT 1
+    `.length > 0;
+    if (
+      server?.state === "connected" ||
+      ((refreshReadyCatalog || safetyNeedsSync) && server?.state === "ready")
+    ) {
+      try {
+        await this.mcp.discoverIfConnected(connectionId, {
+          timeoutMs: 30_000,
+        });
+      } catch {
+        // The safe connection view below reports the discovery issue without
+        // exposing provider errors or failing the entire project catalog.
+      }
     }
     if (this.getMcpServers().servers[connectionId]?.state === "ready") {
       await this.syncMcpCatalog(connectionId);
     }
-    return this.buildMcpConnectionView(connectionId);
   }
 
   async updateMcpToolPolicy(
@@ -520,6 +613,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         current.catalogFingerprint !== update.catalogFingerprint
       ) {
         throw new Error("MCP catalog changed");
+      }
+      if (current.safety !== "read" && update.access === "read") {
+        throw new Error("Write tools cannot bypass approval");
       }
     }
     for (const update of updates) {
@@ -671,6 +767,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         description TEXT NOT NULL,
         input_schema TEXT NOT NULL,
         catalog_fingerprint TEXT NOT NULL,
+        safety TEXT,
         access TEXT NOT NULL,
         enabled INTEGER NOT NULL DEFAULT 0,
         catalog_present INTEGER NOT NULL DEFAULT 1,
@@ -678,6 +775,14 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         PRIMARY KEY (connection_id, tool_name)
       )
     `;
+    const policyColumns = this.sql<{ name: string }>`
+      PRAGMA table_info(sidechat_mcp_tool_policy)
+    `;
+    if (!policyColumns.some((column) => column.name === "safety")) {
+      void this.sql`
+        ALTER TABLE sidechat_mcp_tool_policy ADD COLUMN safety TEXT
+      `;
+    }
     void this.sql`
       CREATE TABLE IF NOT EXISTS sidechat_always_allow_grants (
         connection_id TEXT NOT NULL,
@@ -739,7 +844,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   ): SidechatToolDescriptor[] {
     return this.sql<McpToolPolicyRow>`
       SELECT connection_id, tool_name, exposed_name, display_name,
-             description, input_schema, catalog_fingerprint, access, enabled
+             description, input_schema, catalog_fingerprint, safety,
+             access, enabled
       FROM sidechat_mcp_tool_policy
       WHERE connection_id = ${connectionId}
         AND catalog_present = 1
@@ -757,7 +863,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     this.ensureMcpApplicationSchema();
     const rows = this.sql<McpToolPolicyRow>`
       SELECT connection_id, tool_name, exposed_name, display_name,
-             description, input_schema, catalog_fingerprint, access, enabled
+             description, input_schema, catalog_fingerprint, safety,
+             access, enabled
       FROM sidechat_mcp_tool_policy
       WHERE connection_id = ${connectionId}
         AND tool_name = ${toolName}
@@ -839,6 +946,10 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   }
 
   private async syncMcpCatalog(connectionId: string): Promise<void> {
+    const metadata = this.readMcpConnectionMetadata(connectionId);
+    const preset = metadata?.preset_key
+      ? getMcpPreset(metadata.preset_key)
+      : null;
     const previousPolicies = new Map(
       this.readMcpToolPolicies(connectionId).map((tool) => [tool.toolName, tool]),
     );
@@ -857,6 +968,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       connectionId,
       discovered,
       this.readMcpToolPolicies(connectionId),
+      { forceReadOnly: preset?.readOnly === true },
     );
     void this.sql`
       UPDATE sidechat_mcp_tool_policy
@@ -876,13 +988,14 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       void this.sql`
         INSERT INTO sidechat_mcp_tool_policy (
           connection_id, tool_name, exposed_name, display_name, description,
-          input_schema, catalog_fingerprint, access, enabled,
+          input_schema, catalog_fingerprint, safety, access, enabled,
           catalog_present, updated_at
         ) VALUES (
           ${tool.connectionId}, ${tool.toolName}, ${tool.exposedName},
           ${tool.displayName}, ${tool.description},
           ${JSON.stringify(tool.inputSchema)}, ${tool.catalogFingerprint},
-          ${tool.access}, ${tool.enabled ? 1 : 0}, 1, ${Date.now()}
+          ${tool.safety ?? tool.access}, ${tool.access},
+          ${tool.enabled ? 1 : 0}, 1, ${Date.now()}
         )
         ON CONFLICT (connection_id, tool_name) DO UPDATE SET
           exposed_name = excluded.exposed_name,
@@ -890,6 +1003,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           description = excluded.description,
           input_schema = excluded.input_schema,
           catalog_fingerprint = excluded.catalog_fingerprint,
+          safety = excluded.safety,
           access = excluded.access,
           enabled = excluded.enabled,
           catalog_present = 1,
@@ -923,20 +1037,32 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const metadata = this.readMcpConnectionMetadata(connectionId);
     const authMode = metadata ? readMcpAuthMode(metadata.auth_mode) : null;
     if (!metadata || !authMode) return null;
+    const presetKey = readMcpPresetKey(metadata.preset_key);
+    const preset = presetKey ? getMcpPreset(presetKey) : null;
     const native = this.getMcpServers().servers[connectionId] as
       | NativeMcpServer
       | undefined;
     return {
       id: metadata.id,
       name: metadata.name,
-      presetKey: readMcpPresetKey(metadata.preset_key),
+      presetKey,
       url: metadata.url,
       authMode,
       state: native?.state ?? "disconnected",
       ...(authUrl || native?.auth_url
         ? { authUrl: authUrl ?? native?.auth_url ?? undefined }
         : {}),
-      tools: this.readMcpToolPolicies(connectionId),
+      ...(native?.state === "connected"
+        ? { issue: "tool_discovery_failed" as const }
+        : {}),
+      tools: this.readMcpToolPolicies(connectionId).map((tool) => ({
+        ...tool,
+        source: {
+          kind: "mcp" as const,
+          name: metadata.name,
+          icon: preset?.icon ?? null,
+        },
+      })),
     };
   }
 

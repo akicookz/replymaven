@@ -2,14 +2,35 @@ import { Database } from "bun:sqlite";
 import { beforeAll, describe, expect, mock, test } from "bun:test";
 import type { ConnectProjectMcpInput } from "./mcp-types";
 
-class FakeAgent {}
+class FakeAgent {
+  ctx: unknown;
+  env: Record<string, unknown>;
+  name = "project-1";
+  state: unknown;
+  mcp = { configureOAuthCallback: mock(() => undefined) };
+
+  constructor(ctx: unknown, env: Record<string, unknown>) {
+    this.ctx = ctx;
+    this.env = env;
+  }
+
+  setState(state: unknown): void {
+    this.state = state;
+  }
+
+  async onConnect(): Promise<void> {}
+}
+class FakeOAuthProvider {}
 class MavenChatAgentMock {}
 Object.defineProperty(MavenChatAgentMock, "name", { value: "MavenChatAgent" });
 
 let MavenProjectAgent: typeof import("./maven-project-agent").MavenProjectAgent;
 
 beforeAll(async () => {
-  mock.module("agents", () => ({ Agent: FakeAgent }));
+  mock.module("agents", () => ({
+    Agent: FakeAgent,
+    DurableObjectOAuthClientProvider: FakeOAuthProvider,
+  }));
   mock.module("./maven-chat-agent", () => ({
     MavenChatAgent: MavenChatAgentMock,
   }));
@@ -57,9 +78,16 @@ function createAgent(options: {
   database?: Database;
   tools?: NativeTool[];
   resultState?: "ready" | "authenticating";
+  failAfterNativeRegistration?: boolean;
 }) {
   const database = options.database ?? new Database(":memory:");
   let tools = options.tools ?? [];
+  let discoveryResult:
+    | { success: true; state: "ready" }
+    | { success: false; state: "connected"; error: string } = {
+      success: true,
+      state: "ready",
+    };
   const servers: Record<string, Record<string, unknown>> = {};
   const addMcpServer = mock(
     async (
@@ -84,6 +112,11 @@ function createAgent(options: {
         instructions: null,
         capabilities: null,
       };
+      if (options.failAfterNativeRegistration) {
+        throw new Error(
+          'Failed to discover server capabilities: {"code":-32601,"message":"Method not found"}',
+        );
+      }
       return state === "authenticating"
         ? {
             id,
@@ -98,7 +131,14 @@ function createAgent(options: {
   });
   const mcp = {
     waitForConnections: mock(async () => undefined),
-    discoverIfConnected: mock(async () => ({ success: true, state: "ready" })),
+    discoverIfConnected: mock(async (serverId: string) => {
+      const server = servers[serverId];
+      if (server) {
+        server.state = discoveryResult.state;
+        server.error = discoveryResult.success ? null : discoveryResult.error;
+      }
+      return discoveryResult;
+    }),
     listTools: mock(({ serverId }: { serverId: string }) =>
       tools.map((tool) => ({ ...tool, serverId })),
     ),
@@ -124,6 +164,23 @@ function createAgent(options: {
     servers,
     setTools(next: NativeTool[]) {
       tools = next;
+    },
+    setServerState(
+      connectionId: string,
+      state: string,
+      error: string | null = null,
+    ) {
+      const server = servers[connectionId];
+      if (!server) throw new Error("Missing native MCP server");
+      server.state = state;
+      server.error = error;
+    },
+    setDiscoveryResult(
+      result:
+        | { success: true; state: "ready" }
+        | { success: false; state: "connected"; error: string },
+    ) {
+      discoveryResult = result;
     },
   };
 }
@@ -161,7 +218,7 @@ describe("MavenProjectAgent native MCP connections", () => {
     expect(fixture.addMcpServer).toHaveBeenCalledTimes(1);
   });
 
-  test("stores bearer credentials only in the native transport and disables discovered tools", async () => {
+  test("stores bearer credentials only in the native transport and defaults discovered tools to ask", async () => {
     const fixture = createAgent({ tools: [readTool] });
     const connection = await fixture.agent.connectMcp(connectInput());
 
@@ -171,7 +228,7 @@ describe("MavenProjectAgent native MCP connections", () => {
       callbackHost: "https://app.test",
       callbackPath: "/api/sidechat/mcp/oauth/project-1",
       transport: {
-        type: "streamable-http",
+        type: "auto",
         headers: { Authorization: "Bearer private-token" },
       },
     });
@@ -181,14 +238,24 @@ describe("MavenProjectAgent native MCP connections", () => {
       tools: [
         {
           toolName: "find_customer",
-          access: "read",
-          enabled: false,
+          access: "write",
+          enabled: true,
         },
       ],
     });
     const serialized = JSON.stringify(connection);
     expect(serialized).not.toContain("private-token");
     expect(serialized).not.toContain("Authorization");
+  });
+
+  test("removes native registration when connection or discovery fails", async () => {
+    const fixture = createAgent({ failAfterNativeRegistration: true });
+
+    await expect(fixture.agent.connectMcp(connectInput())).rejects.toThrow(
+      "Method not found",
+    );
+    expect(Object.keys(fixture.servers)).toEqual([]);
+    expect(fixture.removeMcpServer).toHaveBeenCalledTimes(1);
   });
 
   test("returns OAuth as authenticating without inventing a provider adapter", async () => {
@@ -211,7 +278,187 @@ describe("MavenProjectAgent native MCP connections", () => {
     });
   });
 
-  test("preserves exact policy across wake and disables it after catalog change", async () => {
+  test("keeps pending preset OAuth registration across URL canonicalization", async () => {
+    const fixture = createAgent({ resultState: "authenticating" });
+    const connection = await fixture.agent.connectMcp(
+      connectInput({
+        name: "Stripe",
+        presetKey: "stripe",
+        url: "https://mcp.stripe.com/",
+        authMode: "oauth",
+        bearerToken: undefined,
+      }),
+    );
+
+    const listed = await fixture.agent.listMcpConnections();
+
+    expect(listed).toEqual([
+      expect.objectContaining({
+        id: connection.id,
+        presetKey: "stripe",
+        state: "authenticating",
+      }),
+    ]);
+    expect(fixture.removeMcpServer).not.toHaveBeenCalled();
+  });
+
+  test("discovers tools when OAuth has connected the transport but not the catalog", async () => {
+    const fixture = createAgent({ resultState: "authenticating" });
+    const connection = await fixture.agent.connectMcp(
+      connectInput({
+        name: "PostHog",
+        presetKey: "posthog",
+        url: "https://mcp.posthog.com/mcp?readonly=true&mode=tools",
+        authMode: "oauth",
+        bearerToken: undefined,
+      }),
+    );
+    fixture.setServerState(connection.id, "connected");
+    fixture.setTools([readTool]);
+
+    const [reconciled] = await fixture.agent.listMcpConnections();
+
+    expect(fixture.mcp.discoverIfConnected).toHaveBeenCalledWith(
+      connection.id,
+      { timeoutMs: 30_000 },
+    );
+    expect(reconciled).toMatchObject({
+      state: "ready",
+      tools: [{ toolName: "find_customer" }],
+    });
+  });
+
+  test("keeps PostHog safety read-only while defaulting permission to ask", async () => {
+    const fixture = createAgent({
+      tools: [{
+        ...readTool,
+        name: "query_events",
+        annotations: undefined,
+      }],
+    });
+    const connection = await fixture.agent.connectMcp(connectInput({
+      name: "PostHog",
+      presetKey: "posthog",
+      url: "https://mcp.posthog.com/mcp?readonly=true&mode=tools",
+      authMode: "oauth",
+      bearerToken: undefined,
+    }));
+
+    expect(connection.tools).toEqual([
+      expect.objectContaining({
+        toolName: "query_events",
+        safety: "read",
+        access: "write",
+        enabled: true,
+        source: {
+          kind: "mcp",
+          name: "PostHog",
+          icon: "/integrations/posthog.svg",
+        },
+      }),
+    ]);
+    const updated = await fixture.agent.updateMcpToolPolicy(connection.id, [{
+      toolName: connection.tools[0]!.toolName,
+      catalogFingerprint: connection.tools[0]!.catalogFingerprint,
+      enabled: true,
+      access: "write",
+    }]);
+    expect(updated?.tools[0]).toMatchObject({
+      safety: "read",
+      access: "write",
+      enabled: true,
+    });
+  });
+
+  test("never lets write or destructive tools bypass approval", async () => {
+    const fixture = createAgent({ tools: [writeTool] });
+    const connection = await fixture.agent.connectMcp(connectInput());
+    const tool = connection.tools[0]!;
+
+    await expect(fixture.agent.updateMcpToolPolicy(connection.id, [{
+      toolName: tool.toolName,
+      catalogFingerprint: tool.catalogFingerprint,
+      enabled: true,
+      access: "read",
+    }])).rejects.toThrow("cannot bypass approval");
+  });
+
+  test("persists read, write, and destructive safety groups across wake", async () => {
+    const ordinaryWriteTool: NativeTool = {
+      ...writeTool,
+      name: "create_customer",
+      title: "Create customer",
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    };
+    const fixture = createAgent({
+      tools: [readTool, ordinaryWriteTool, writeTool],
+    });
+    const connected = await fixture.agent.connectMcp(connectInput());
+
+    expect(connected.tools.map((tool) => [tool.toolName, tool.safety])).toEqual([
+      ["create_customer", "write"],
+      ["find_customer", "read"],
+      ["update_customer", "destructive"],
+    ]);
+
+    const restored = createAgent({
+      database: fixture.database,
+      tools: [],
+    });
+    Object.assign(restored.servers, fixture.servers);
+    restored.setServerState(connected.id, "authenticating");
+    const [afterWake] = await restored.agent.listMcpConnections();
+
+    expect(afterWake?.tools.map((tool) => [tool.toolName, tool.safety])).toEqual([
+      ["create_customer", "write"],
+      ["find_customer", "read"],
+      ["update_customer", "destructive"],
+    ]);
+  });
+
+  test("removes legacy preset connections whose server policy changed", async () => {
+    const fixture = createAgent({ tools: [readTool] });
+    const legacy = await fixture.agent.connectMcp(connectInput({
+      name: "PostHog",
+      presetKey: "posthog",
+      url: "https://mcp.posthog.com/mcp",
+      authMode: "oauth",
+      bearerToken: undefined,
+    }));
+
+    await expect(fixture.agent.listMcpConnections()).resolves.toEqual([]);
+    expect(fixture.removeMcpServer).toHaveBeenCalledWith(legacy.id);
+  });
+
+  test("reduces a failed discovery to a safe issue without provider details", async () => {
+    const fixture = createAgent({ resultState: "authenticating" });
+    const connection = await fixture.agent.connectMcp(
+      connectInput({
+        name: "PostHog",
+        presetKey: "posthog",
+        url: "https://mcp.posthog.com/mcp?readonly=true&mode=tools",
+        authMode: "oauth",
+        bearerToken: undefined,
+      }),
+    );
+    fixture.setServerState(connection.id, "connected");
+    fixture.setDiscoveryResult({
+      success: false,
+      state: "connected",
+      error: "provider secret details must stay private",
+    });
+
+    const [reconciled] = await fixture.agent.listMcpConnections();
+
+    expect(reconciled).toMatchObject({
+      state: "connected",
+      issue: "tool_discovery_failed",
+      tools: [],
+    });
+    expect(JSON.stringify(reconciled)).not.toContain("provider secret details");
+  });
+
+  test("preserves exact policy across wake and resets it to ask after catalog change", async () => {
     const fixture = createAgent({ tools: [readTool] });
     const connected = await fixture.agent.connectMcp(connectInput());
     const [initial] = connected.tools;
@@ -246,8 +493,8 @@ describe("MavenProjectAgent native MCP connections", () => {
     ]);
     const refreshed = await restored.agent.refreshMcpCatalog(connected.id);
     expect(refreshed?.tools[0]).toMatchObject({
-      enabled: false,
-      access: "read",
+      enabled: true,
+      access: "write",
     });
     expect(refreshed?.tools[0]?.catalogFingerprint).not.toBe(
       initial.catalogFingerprint,
@@ -305,8 +552,8 @@ describe("MavenProjectAgent native MCP connections", () => {
     await fixture.agent.updateMcpToolPolicy(connection.id, [{
       toolName: discovered.toolName,
       catalogFingerprint: discovered.catalogFingerprint,
-      enabled: true,
-      access: "read",
+      enabled: false,
+      access: "write",
     }]);
     expect(fixture.database.query(
       "SELECT * FROM sidechat_always_allow_grants",

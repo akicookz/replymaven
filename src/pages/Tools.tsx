@@ -1170,6 +1170,8 @@ export function ToolsPanel({
         </div>
       )}
 
+      {!showLogs && <McpConnections projectId={projectId} />}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-foreground">
@@ -1215,8 +1217,6 @@ export function ToolsPanel({
           )}
         </div>
       </div>
-
-      {!showLogs && <McpConnections projectId={projectId} />}
 
       {/* Tool limit warning */}
       {!showLogs && (tools?.length ?? 0) >= 20 && (

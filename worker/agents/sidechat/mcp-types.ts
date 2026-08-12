@@ -22,6 +22,7 @@ export interface McpConnectionView {
   authMode: ProjectMcpAuthMode;
   state: string;
   authUrl?: string;
+  issue?: "tool_discovery_failed";
   tools: SidechatToolDescriptor[];
 }
 

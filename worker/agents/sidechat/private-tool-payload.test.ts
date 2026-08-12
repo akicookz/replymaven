@@ -2,165 +2,233 @@ import { describe, expect, test } from "bun:test";
 import type { UIMessage } from "ai";
 import {
   createPrivateToolChunkFilter,
+  createPrivateToolChunkProjector,
+  removeAbandonedApprovalParts,
   sanitizePrivateMessageForPersistence,
 } from "./private-tool-payload";
 
-describe("private Sidechat tool payload boundary", () => {
-  test("drops external tool inputs and outputs while preserving text and reply drafts", () => {
-    const keep = createPrivateToolChunkFilter(new Set(["tool_mcpserver_write_customer"]));
-    const chunks = [
-      { type: "text-delta", id: "text-1", delta: "I checked that." },
+const posthogContext = {
+  safety: "read" as const,
+  tool: {
+    displayName: "Query events",
+    source: {
+      kind: "mcp" as const,
+      name: "PostHog",
+      icon: "/integrations/posthog.svg",
+    },
+  },
+};
+
+describe("private Sidechat tool transcript boundary", () => {
+  test("removes abandoned approval state before a later model turn", () => {
+    const messages: UIMessage[] = [
       {
-        type: "tool-input-start",
-        toolCallId: "external-1",
-        toolName: "tool_mcpserver_find_customer",
-        dynamic: true,
+        id: "assistant-old-approval",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "I need permission first." },
+          {
+            type: "tool-tool_posthog_list_persons",
+            toolCallId: "stale-call",
+            state: "approval-responded",
+            input: { search: "private@example.com" },
+            approval: { id: "stale-approval", approved: true },
+          },
+        ],
       },
       {
-        type: "tool-input-start",
-        toolCallId: "write-1",
-        toolName: "tool_mcpserver_write_customer",
-        dynamic: true,
-      },
-      {
-        type: "tool-input-available",
-        toolCallId: "write-1",
-        toolName: "tool_mcpserver_write_customer",
-        input: { opaque: "approval-input" },
-        dynamic: true,
-      },
-      {
-        type: "tool-approval-request",
-        toolCallId: "write-1",
-        approvalId: "approval-1",
-      },
-      {
-        type: "tool-output-available",
-        toolCallId: "write-1",
-        output: { raw: "write-output" },
-      },
-      {
-        type: "tool-input-available",
-        toolCallId: "external-1",
-        toolName: "tool_mcpserver_find_customer",
-        input: { externalId: "secret-id" },
-        dynamic: true,
-      },
-      {
-        type: "tool-output-available",
-        toolCallId: "external-1",
-        output: { email: "private@example.com" },
-        dynamic: true,
-      },
-      {
-        type: "tool-input-available",
-        toolCallId: "draft-1",
-        toolName: "present_reply_draft",
-        input: { text: "Safe visitor reply" },
-      },
-      {
-        type: "tool-output-available",
-        toolCallId: "draft-1",
-        output: { accepted: true },
+        id: "user-new-turn",
+        role: "user",
+        parts: [{ type: "text", text: "Try something else." }],
       },
     ];
 
-    const forwarded = chunks.filter((chunk) => keep(chunk));
-    expect(JSON.stringify(forwarded)).not.toContain("secret-id");
-    expect(JSON.stringify(forwarded)).not.toContain("private@example.com");
-    expect(JSON.stringify(forwarded)).not.toContain("write-output");
-    expect(forwarded).toContainEqual(
-      expect.objectContaining({
-        type: "tool-approval-request",
-        approvalId: "approval-1",
-      }),
-    );
-    expect(forwarded).toContainEqual(
-      expect.objectContaining({ type: "text-delta" }),
-    );
-    expect(forwarded).toContainEqual(
-      expect.objectContaining({
-        type: "tool-input-available",
-        toolName: "present_reply_draft",
-      }),
-    );
-    expect(forwarded).toContainEqual(
-      expect.objectContaining({
-        type: "tool-output-available",
-        toolCallId: "draft-1",
-      }),
-    );
+    expect(removeAbandonedApprovalParts(messages)).toEqual([
+      {
+        id: "assistant-old-approval",
+        role: "assistant",
+        parts: [{ type: "text", text: "I need permission first." }],
+      },
+      messages[1],
+    ]);
   });
 
-  test("removes dynamic external tool parts before native transcript persistence", () => {
+  test("projects presentation, timing, and credential-redacted business payloads", () => {
+    const times = [1_000, 1_240];
+    const project = createPrivateToolChunkProjector(
+      new Map([["tool_posthog_query_events", posthogContext]]),
+      () => times.shift() ?? 1_240,
+    );
+
+    expect(project({
+      type: "tool-input-start",
+      toolCallId: "read-1",
+      toolName: "tool_posthog_query_events",
+      dynamic: true,
+    })).toEqual([
+      {
+        type: "data-tool-trace",
+        id: "read-1:trace",
+        data: {
+          toolCallId: "read-1",
+          startedAt: 1_000,
+          ...posthogContext,
+        },
+      },
+      expect.objectContaining({ type: "tool-input-start" }),
+    ]);
+
+    expect(project({
+      type: "tool-input-available",
+      toolCallId: "read-1",
+      toolName: "tool_posthog_query_events",
+      input: {
+        email: "customer@example.com",
+        range: { from: "2026-08-10", to: "2026-08-13" },
+        authorization: "Bearer private-auth-token",
+      },
+    })).toEqual([expect.objectContaining({
+      input: {
+        email: "customer@example.com",
+        range: { from: "2026-08-10", to: "2026-08-13" },
+        authorization: "[REDACTED]",
+      },
+    })]);
+
+    expect(project({
+      type: "tool-output-available",
+      toolCallId: "read-1",
+      output: {
+        events: [{ event: "checkout", distinctId: "customer-42" }],
+        accessToken: "secret-output-token",
+      },
+    })).toEqual([
+      {
+        type: "data-tool-timing",
+        id: "read-1:timing",
+        data: { toolCallId: "read-1", durationMs: 240 },
+      },
+      expect.objectContaining({
+        output: {
+          events: [{ event: "checkout", distinctId: "customer-42" }],
+          accessToken: "[REDACTED]",
+        },
+      }),
+    ]);
+  });
+
+  test("binds an approval to the same presented tool call", () => {
+    const project = createPrivateToolChunkProjector(
+      new Map([["tool_posthog_query_events", posthogContext]]),
+      () => 1_000,
+    );
+    project({
+      type: "tool-input-start",
+      toolCallId: "read-1",
+      toolName: "tool_posthog_query_events",
+    });
+
+    expect(project({
+      type: "tool-approval-request",
+      toolCallId: "read-1",
+      approvalId: "approval-1",
+    })).toEqual([
+      {
+        type: "data-tool-approval",
+        id: "read-1:approval-context",
+        data: { toolCallId: "read-1", ...posthogContext },
+      },
+      {
+        type: "tool-approval-request",
+        toolCallId: "read-1",
+        approvalId: "approval-1",
+      },
+    ]);
+  });
+
+  test("persists reasoning and tool history while stripping message metadata and credentials", () => {
     const message: UIMessage = {
       id: "assistant-1",
       role: "assistant",
+      metadata: { provider: "openai", credential: "sk-this-is-private-123456" },
       parts: [
-        { type: "text", text: "I checked that." },
+        { type: "reasoning", text: "I should query recent activity." },
+        { type: "text", text: "I found the cause." },
         {
           type: "dynamic-tool",
-          toolName: "tool_mcpserver_find_customer",
+          toolName: "tool_posthog_query_events",
           toolCallId: "external-1",
           state: "output-available",
-          input: { externalId: "secret-id" },
-          output: { email: "private@example.com" },
-        },
-        {
-          type: "tool-present_reply_draft",
-          toolCallId: "draft-1",
-          state: "output-available",
-          input: { text: "Safe visitor reply" },
-          output: { accepted: true },
+          input: {
+            email: "customer@example.com",
+            apiKey: "private-key",
+          },
+          output: {
+            events: [{ event: "checkout", distinctId: "customer-42" }],
+            refresh_token: "private-refresh",
+          },
+          callProviderMetadata: { secret: "provider-secret" },
         },
       ],
-    };
+    } as UIMessage;
 
     const sanitized = sanitizePrivateMessageForPersistence(message);
-    expect(JSON.stringify(sanitized)).not.toContain("secret-id");
-    expect(JSON.stringify(sanitized)).not.toContain("private@example.com");
-    expect(sanitized.parts).toContainEqual({
-      type: "text",
-      text: "I checked that.",
-    });
-    expect(sanitized.parts).toContainEqual(
-      expect.objectContaining({ type: "tool-present_reply_draft" }),
-    );
+    expect(sanitized.metadata).toBeUndefined();
+    expect(sanitized.parts).toHaveLength(3);
+    expect(JSON.stringify(sanitized)).toContain("customer@example.com");
+    expect(JSON.stringify(sanitized)).toContain("customer-42");
+    expect(JSON.stringify(sanitized)).toContain("I should query recent activity");
+    expect(JSON.stringify(sanitized)).not.toContain("private-key");
+    expect(JSON.stringify(sanitized)).not.toContain("private-refresh");
+    expect(JSON.stringify(sanitized)).not.toContain("provider-secret");
   });
 
-  test("retains only pending native write parts needed for durable approval continuation", () => {
+  test("keeps approval continuation state and redacts only credential fields", () => {
     const pending: UIMessage = {
       id: "assistant-approval",
       role: "assistant",
       parts: [
         {
-          type: "dynamic-tool",
-          toolName: "tool_mcpserver_write_customer",
-          toolCallId: "write-1",
-          state: "approval-requested",
-          input: { opaque: "native-continuation-input" },
-          approval: { id: "approval-1" },
+          type: "data-tool-approval",
+          id: "write-1:approval-context",
+          data: { toolCallId: "write-1", safety: "write" },
         },
         {
           type: "dynamic-tool",
-          toolName: "tool_mcpserver_read_customer",
-          toolCallId: "read-1",
-          state: "output-available",
-          input: { private: "read-input" },
-          output: { private: "read-output" },
+          toolName: "tool_linear_create_issue",
+          toolCallId: "write-1",
+          state: "approval-requested",
+          input: {
+            title: "Customer cannot checkout",
+            token: "private-token",
+          },
+          approval: { id: "approval-1" },
         },
       ],
-    };
+    } as UIMessage;
 
     const sanitized = sanitizePrivateMessageForPersistence(pending);
-    expect(sanitized.parts).toHaveLength(1);
-    expect(sanitized.parts[0]).toMatchObject({
-      type: "dynamic-tool",
+    expect(sanitized.parts).toHaveLength(2);
+    expect(JSON.stringify(sanitized)).toContain("Customer cannot checkout");
+    expect(JSON.stringify(sanitized)).not.toContain("private-token");
+    expect(sanitized.parts[1]).toMatchObject({
       state: "approval-requested",
-      toolCallId: "write-1",
       approval: { id: "approval-1" },
+      input: { title: "Customer cannot checkout", token: "[REDACTED]" },
     });
-    expect(JSON.stringify(sanitized)).not.toContain("read-input");
-    expect(JSON.stringify(sanitized)).not.toContain("read-output");
+  });
+
+  test("does not forward an unregistered tool call", () => {
+    const keep = createPrivateToolChunkFilter(new Set(["known_tool"]));
+    expect(keep({
+      type: "tool-input-start",
+      toolCallId: "unknown-1",
+      toolName: "unknown_tool",
+    })).toBe(false);
+    expect(keep({
+      type: "tool-output-available",
+      toolCallId: "unknown-1",
+      output: { value: true },
+    })).toBe(false);
   });
 });
