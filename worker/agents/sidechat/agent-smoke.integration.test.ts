@@ -35,11 +35,11 @@ describe("native Sidechat Agent registration", () => {
   );
 
   nativeTest("instantiates the project parent binding", async () => {
-    const [{ env }, { runInDurableObject }, { MavenProjectAgent }] =
+      const [{ env }, { runInDurableObject }, { MavenProjectAgent }] =
       await Promise.all([
         import("cloudflare:workers"),
         import("cloudflare:test"),
-        import("./maven-project-agent"),
+        import("../maven/maven-project-agent"),
       ]);
 
     const id = env.MAVEN_PROJECT_AGENT.idFromName("smoke-project");
@@ -91,6 +91,65 @@ describe("native Sidechat Agent registration", () => {
       new Request("https://example.test/api/health"),
     );
     expect(response.status).not.toBe(500);
+  });
+
+  nativeTest("persists the conversation directory in parent Agent SQLite", async () => {
+    const { env } = await import("cloudflare:workers");
+    const projectId = "directory-project";
+    const conversationId = "conversation-directory-1";
+    const parent = env.MAVEN_PROJECT_AGENT.get(
+      env.MAVEN_PROJECT_AGENT.idFromName(projectId),
+    );
+    const summary = {
+      conversationId,
+      publicChildName: `pub_${conversationId}` as const,
+      sidechatChildName: null,
+      sidechatStatus: null,
+      customerId: null,
+      visitorId: "visitor-1",
+      visitorName: "Ada",
+      visitorEmail: "ADA@example.com",
+      telegramThreadId: "telegram-1",
+      status: "waiting_agent" as const,
+      closeReason: null,
+      metadata: { source: "docs" },
+      priority: "high" as const,
+      assigneeId: null,
+      snoozedUntil: null,
+      archivedAt: null,
+      purgeStartedAt: null,
+      visitorLastSeenAt: null,
+      visitorPresence: "active" as const,
+      visitorLastOnlineAt: null,
+      lastMessageId: "message-1",
+      lastMessageAuthor: "visitor" as const,
+      lastMessagePreview: "Need help",
+      lastActivityAt: 100,
+      messageCount: 1,
+      botMessageCount: 0,
+      childRevision: 1,
+      createdAt: 50,
+      updatedAt: 100,
+    };
+
+    await expect(parent.upsertConversationSummary(summary)).resolves.toEqual({
+      applied: true,
+      revision: 1,
+    });
+    await expect(parent.listConversations({
+      filter: "needs-you",
+      search: "ada@example.com",
+    })).resolves.toEqual({
+      conversations: [summary],
+      nextCursor: null,
+    });
+    await expect(parent.getInboxCounts(200)).resolves.toMatchObject({
+      "needs-you": 1,
+      all: 1,
+    });
+    await expect(
+      parent.findConversationByTelegramThreadId("telegram-1"),
+    ).resolves.toEqual(summary);
   });
 
   nativeTest("routes Agent requests before the SPA and requires a token", async () => {

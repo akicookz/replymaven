@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, mock, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import type { SidechatChildClaims } from "../../../shared/sidechat-agent";
 
 const secret = "task-2-test-secret-with-at-least-32-bytes";
@@ -69,7 +70,17 @@ function createAgent(): InstanceType<typeof MavenProjectAgent> & {
   subAgent: ReturnType<typeof mock>;
   deleteSubAgent: ReturnType<typeof mock>;
 } {
-  const agent = new MavenProjectAgent({} as never, {
+  const database = new Database(":memory:");
+  const agent = new MavenProjectAgent({
+    storage: {
+      sql: {
+        exec<T>(query: string, ...bindings: Array<string | number | null>) {
+          const rows = database.query(query).all(...bindings) as T[];
+          return { toArray: () => rows };
+        },
+      },
+    },
+  } as never, {
     SIDECHAT_TOKEN_SECRET: secret,
   } as never) as ReturnType<typeof createAgent>;
   agent.state = agent.initialState;
@@ -136,6 +147,60 @@ describe("MavenProjectAgent child registry", () => {
       { childName: "sc_conversation-1", created: true },
       { childName: "sc_conversation-1", created: false },
     ]);
+  });
+
+  test("keeps the complete registry in SQL and broadcasts only the changed Sidechat", async () => {
+    const agent = createAgent();
+    const nativeChildren = new Set<string>();
+    agent.hasSubAgent = mock((_class, name: string) =>
+      nativeChildren.has(name),
+    );
+    agent.subAgent = mock(async (_class, name: string) => {
+      nativeChildren.add(name);
+      return {};
+    });
+
+    await agent.registerSidechat("conversation-1");
+    await agent.registerSidechat("conversation-2");
+
+    expect(Object.keys(agent.state as Record<string, unknown>)).toEqual([
+      "sidechats",
+    ]);
+    expect((agent.state as { sidechats: Record<string, unknown> }).sidechats)
+      .toEqual({
+        "conversation-2": expect.objectContaining({
+          childName: "sc_conversation-2",
+        }),
+      });
+    expect(await agent.getSidechatSummaries()).toEqual([
+      expect.objectContaining({ conversationId: "conversation-2" }),
+      expect.objectContaining({ conversationId: "conversation-1" }),
+    ]);
+  });
+
+  test("migrates the legacy in-state registry into directory SQL", async () => {
+    const agent = createAgent();
+    agent.state = {
+      sidechats: {
+        "conversation-1": {
+          conversationId: "conversation-1",
+          childName: "sc_conversation-1",
+          status: "ready",
+          updatedAt: 123,
+        },
+      },
+    };
+    agent.hasSubAgent = mock(() => true);
+
+    expect(await agent.getSidechatSummaries()).toEqual([
+      {
+        conversationId: "conversation-1",
+        childName: "sc_conversation-1",
+        status: "ready",
+        updatedAt: 123,
+      },
+    ]);
+    expect(agent.state).toEqual({ sidechats: {} });
   });
 
   test("returns 404 for a guessed child without invoking subAgent", async () => {

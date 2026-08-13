@@ -141,7 +141,7 @@ import {
 } from "./routes/project-mcp-handlers";
 import { deleteProjectWithNativeCleanup } from "./routes/project-cleanup";
 import { authorizeSidechatAgentRouteRequest } from "./agents/sidechat/agent-auth";
-import { MavenProjectAgent } from "./agents/sidechat/maven-project-agent";
+import { MavenProjectAgent } from "./agents/maven/maven-project-agent";
 import {
   handleCustomerProjectWsUpgrade,
   handleDashboardWsUpgrade,

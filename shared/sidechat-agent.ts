@@ -16,7 +16,73 @@ export interface SidechatSummary {
 
 export interface MavenProjectState {
   sidechats: Record<string, SidechatSummary>;
+  conversation?: MavenConversationSummary;
+  inboxCounts?: MavenInboxCounts;
 }
+
+export type MavenConversationFilter =
+  | "needs-you"
+  | "all"
+  | "snoozed"
+  | "resolved"
+  | "archived"
+  | "flagged";
+
+export type MavenConversationSort =
+  | "newest"
+  | "oldest"
+  | "priority"
+  | "botMessages";
+
+export interface MavenConversationSummary {
+  conversationId: string;
+  publicChildName: `pub_${string}`;
+  sidechatChildName: `sc_${string}` | null;
+  sidechatStatus: SidechatStatus | null;
+  customerId: string | null;
+  visitorId: string;
+  visitorName: string | null;
+  visitorEmail: string | null;
+  telegramThreadId: string | null;
+  status: "active" | "waiting_agent" | "agent_replied" | "closed";
+  closeReason: "resolved" | "ended" | "spam" | "bot_resolved" | null;
+  metadata: Record<string, unknown>;
+  priority: "low" | "medium" | "high";
+  assigneeId: string | null;
+  snoozedUntil: number | null;
+  archivedAt: number | null;
+  purgeStartedAt: number | null;
+  visitorLastSeenAt: number | null;
+  visitorPresence: "active" | "background";
+  visitorLastOnlineAt: number | null;
+  lastMessageId: string | null;
+  lastMessageAuthor: "visitor" | "bot" | "agent" | "system" | null;
+  lastMessagePreview: string | null;
+  lastActivityAt: number;
+  messageCount: number;
+  botMessageCount: number;
+  childRevision: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MavenConversationListQuery {
+  filter?: MavenConversationFilter;
+  sort?: MavenConversationSort;
+  search?: string;
+  cursor?: string;
+  limit?: number;
+  now?: number;
+  metadataKey?: string;
+  metadataValue?: string;
+}
+
+export interface MavenConversationListResult {
+  conversations: MavenConversationSummary[];
+  nextCursor: string | null;
+}
+
+export type MavenInboxCounts = Record<MavenConversationFilter, number>;
 
 export interface SidechatSessionResponse {
   parentAgent: "MavenProjectAgent";
