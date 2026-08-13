@@ -190,7 +190,9 @@ function createHandlerHarness(options?: {
     visitorName: options?.visitorName ?? null,
     visitorEmail: options?.visitorEmail ?? null,
     status: options?.status ?? "active",
-    chatState: options?.chatState ?? null,
+    chatState: options?.chatState
+      ? JSON.parse(options.chatState) as Record<string, unknown>
+      : {},
     closeReason: options?.closeReason ?? null,
     telegramThreadId: null,
     metadata: null,
@@ -207,28 +209,33 @@ function createHandlerHarness(options?: {
   const pendingContactUpdates: unknown[][] = [];
   const saveChatStateCalls: unknown[][] = [];
   const chatService = {
-    async getOperationalConversationById() {
+    async getOperational() {
       return conversation;
     },
-    async reopenConversation() {
+    async reopen() {
       return null;
     },
-    async getRecentPublicMessages() {
+    async getRecentMessages() {
       return { messages: [], hasMore: false };
     },
-    async addPublicBotMessageIfOwnershipMatches(...args: unknown[]) {
+    async appendBot(...args: unknown[]) {
       botInsertCalls.push(args);
       if (options?.botInsert) return options.botInsert(args);
       if (!options?.botInsertSucceeds) return null;
-      const message = args[0] as { content: string; sources?: string | null };
+      const message = args[0] as {
+        content: string;
+        sources?: unknown[];
+      };
       const persistedMessage = {
         ...createPersistedBotMessage(message.content),
-        sources: message.sources ?? null,
+        sources: message.sources?.length
+          ? JSON.stringify(message.sources)
+          : null,
       };
       persistedBotMessages.push(persistedMessage);
       return persistedMessage;
     },
-    async resolveConversationByAi() {
+    async resolveByAi() {
       resolveCalls.push("resolve");
       if (options?.resolveSucceeds) {
         conversation = {
@@ -240,11 +247,11 @@ function createHandlerHarness(options?: {
       conversation = {
         ...conversation,
         status: "agent_replied",
-        chatState: JSON.stringify({
+        chatState: {
           state: "agent_mode",
           aiParticipation: "human_only",
           ownershipRevision: 1,
-        }),
+        },
       };
       return false;
     },
@@ -253,7 +260,7 @@ function createHandlerHarness(options?: {
       if (conversation) {
         conversation = {
           ...conversation,
-          chatState: JSON.stringify(args[2]),
+          chatState: args[2] as Record<string, unknown>,
         };
       }
     },
@@ -264,19 +271,19 @@ function createHandlerHarness(options?: {
         conversation = {
           ...conversation,
           status: "agent_replied",
-          chatState: JSON.stringify({
+          chatState: {
             state: "agent_mode",
             aiParticipation: "human_only",
             ownershipRevision: 2,
             awaitingContactFields: ["name", "email"],
-          }),
+          },
         };
         return null;
       }
       const ownership = args[2] as { status: string; chatState: string | null };
       if (
         conversation.status !== ownership.status ||
-        conversation.chatState !== ownership.chatState
+        JSON.stringify(conversation.chatState) !== ownership.chatState
       ) {
         return null;
       }
@@ -286,29 +293,25 @@ function createHandlerHarness(options?: {
         awaitingContactFields: Array<"name" | "email">;
         contactDeclined?: boolean;
       };
-      const currentState = conversation.chatState
-        ? JSON.parse(conversation.chatState as string) as Record<string, unknown>
-        : {};
+      const currentState = conversation.chatState as Record<string, unknown>;
       conversation = {
         ...conversation,
         ...(update.visitorName ? { visitorName: update.visitorName } : {}),
         ...(update.visitorEmail ? { visitorEmail: update.visitorEmail } : {}),
-        chatState: JSON.stringify({
+        chatState: {
           ...currentState,
           awaitingContactFields: update.awaitingContactFields,
           contactDeclined: currentState.contactDeclined ?? false,
           ...(update.contactDeclined === undefined
             ? {}
             : { contactDeclined: update.contactDeclined }),
-        }),
+        },
       };
       return { ...conversation };
     },
-    async claimNewTeamRequest() {
+    async claimTeamRequest() {
       if (!conversation) return { status: "unavailable" as const };
-      const state = conversation.chatState
-        ? JSON.parse(conversation.chatState as string) as Record<string, unknown>
-        : {};
+      const state = conversation.chatState as Record<string, unknown>;
       const requiredFields: Array<"name" | "email"> = [];
       if (!conversation.visitorName) requiredFields.push("name");
       if (!conversation.visitorEmail) requiredFields.push("email");
@@ -318,7 +321,7 @@ function createHandlerHarness(options?: {
       conversation = {
         ...conversation,
         status: "waiting_agent",
-        chatState: JSON.stringify({
+        chatState: {
           ...state,
           state: "escalating",
           aiParticipation: "assist_until_agent",
@@ -326,12 +329,15 @@ function createHandlerHarness(options?: {
             typeof state.ownershipRevision === "number"
               ? state.ownershipRevision + 1
               : 1,
-        }),
+        },
       };
       return { status: "claimed" as const };
     },
-    async runExternalActionIfOperational() {
-      return { executed: false, value: null };
+    async acquireExternalAction() {
+      return null;
+    },
+    async releaseExternalAction() {
+      return undefined;
     },
   };
   const runtime = {
@@ -448,11 +454,11 @@ function createHandlerHarness(options?: {
         conversation = {
           ...conversation,
           status: "waiting_agent",
-          chatState: JSON.stringify({
+          chatState: {
             state: "escalating",
             aiParticipation: "assist_until_agent",
             ownershipRevision: 1,
-          }),
+          },
         };
         const turnInput = input as {
           dependencies: {
@@ -1148,7 +1154,7 @@ describe("widget handler Maven gates", () => {
 
     const afterQuestion = harness.getConversation();
     expect(afterQuestion?.status).toBe("active");
-    expect(JSON.parse(afterQuestion?.chatState as string)).toMatchObject({
+    expect(afterQuestion?.chatState).toMatchObject({
       awaitingContactFields: ["name", "email"],
       contactDeclined: false,
     });
@@ -1168,7 +1174,7 @@ describe("widget handler Maven gates", () => {
       visitorName: "Alice",
       visitorEmail: "alice@example.com",
     });
-    expect(JSON.parse(afterResume?.chatState as string)).toMatchObject({
+    expect(afterResume?.chatState).toMatchObject({
       awaitingContactFields: [],
       contactDeclined: false,
       aiParticipation: "assist_until_agent",
@@ -1202,7 +1208,7 @@ describe("widget handler Maven gates", () => {
       visitorName: null,
       visitorEmail: "alice@example.com",
     });
-    expect(JSON.parse(afterPartial?.chatState as string)).toMatchObject({
+    expect(afterPartial?.chatState).toMatchObject({
       awaitingContactFields: ["name"],
       contactDeclined: false,
     });
@@ -1230,7 +1236,7 @@ describe("widget handler Maven gates", () => {
 
     const afterRefusal = harness.getConversation();
     expect(afterRefusal?.status).toBe("waiting_agent");
-    expect(JSON.parse(afterRefusal?.chatState as string)).toMatchObject({
+    expect(afterRefusal?.chatState).toMatchObject({
       awaitingContactFields: [],
       contactDeclined: true,
       aiParticipation: "assist_until_agent",

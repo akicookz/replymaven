@@ -71,6 +71,7 @@ describe("buildSidechatContext", () => {
       "project-1",
     );
     expect(dependencies.getRecentPublicMessages).toHaveBeenCalledWith(
+      "project-1",
       "conversation-1",
       40,
     );

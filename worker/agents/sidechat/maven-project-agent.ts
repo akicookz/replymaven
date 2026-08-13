@@ -18,7 +18,8 @@ import type {
 } from "../../../shared/sidechat-agent";
 import type { ToolRow } from "../../db";
 import { buildCustomerByIdQuery } from "../../services/customer-service";
-import { ChatService } from "../../services/chat-service";
+import { createPublicConversationStore } from "../../conversations/create-public-conversation-store";
+import type { PublicConversationStore } from "../../conversations/public-conversation-store";
 import { ProjectService } from "../../services/project-service";
 import { TeamService } from "../../services/team-service";
 import { ToolService } from "../../services/tool-service";
@@ -93,6 +94,24 @@ type AddMcpServerResult =
   | { id: string; state: "ready" };
 
 const MCP_TOOL_TIMEOUT_MS = 30_000;
+
+async function runWithExternalActionLease<T>(
+  conversationStore: PublicConversationStore,
+  projectId: string,
+  conversationId: string,
+  action: () => Promise<T>,
+): Promise<{ executed: boolean; value?: T }> {
+  const lease = await conversationStore.acquireExternalAction({
+    projectId,
+    conversationId,
+  });
+  if (!lease) return { executed: false };
+  try {
+    return { executed: true, value: await action() };
+  } finally {
+    await conversationStore.releaseExternalAction(lease);
+  }
+}
 
 function sameMcpServerUrl(left: string, right: string): boolean {
   try {
@@ -306,9 +325,15 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     } catch {
       return false;
     }
-    const conversation = await new ChatService(
-      drizzle(this.env.DB),
-    ).getConversationById(conversationId, this.name);
+    const db = drizzle(this.env.DB);
+    const conversationStore = createPublicConversationStore({
+      db,
+      env: this.env,
+    });
+    const conversation = await conversationStore.get(
+      this.name,
+      conversationId,
+    );
     return conversation?.archivedAt === null;
   }
 
@@ -325,13 +350,16 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   ): Promise<SidechatCustomerContext> {
     this.assertRegisteredSidechat(childName, conversationId);
     const db = drizzle(this.env.DB);
-    const chatService = new ChatService(db);
+    const conversationStore = createPublicConversationStore({
+      db,
+      env: this.env,
+    });
     return buildSidechatContext({
       projectId: this.name,
       conversationId,
       dependencies: {
         getConversation(id, projectId) {
-          return chatService.getConversationById(id, projectId);
+          return conversationStore.get(projectId, id);
         },
         async getCustomer(projectId, customerId) {
           const rows = await buildCustomerByIdQuery(
@@ -341,8 +369,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           );
           return rows[0] ?? null;
         },
-        getRecentPublicMessages(id, limit) {
-          return chatService.getRecentPublicMessages(id, limit);
+        getRecentPublicMessages(projectId, id, limit) {
+          return conversationStore.getRecentMessages(projectId, id, limit);
         },
       },
     });
@@ -379,9 +407,12 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const childName = toSidechatChildName(conversationId);
     this.assertRegisteredSidechat(childName, conversationId);
     const db = drizzle(this.env.DB);
-    const chatService = new ChatService(db);
+    const conversationStore = createPublicConversationStore({
+      db,
+      env: this.env,
+    });
     const [conversation, actorAllowed] = await Promise.all([
-      chatService.getConversationById(conversationId, this.name),
+      conversationStore.get(this.name, conversationId),
       this.canActorAccessProject(db, actorUserId),
     ]);
     if (!conversation || conversation.archivedAt !== null || !actorAllowed) {
@@ -400,9 +431,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     if (!descriptor || descriptor.access !== "write" || !descriptor.enabled) {
       return false;
     }
-    const latestConversation = await chatService.getConversationById(
-      conversationId,
+    const latestConversation = await conversationStore.get(
       this.name,
+      conversationId,
     );
     if (!latestConversation || latestConversation.archivedAt !== null) {
       return false;
@@ -668,7 +699,10 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     request: ExecuteProjectToolRequest,
   ): Promise<ExecuteProjectToolResult> {
     const db = drizzle(this.env.DB);
-    const chatService = new ChatService(db);
+    const conversationStore = createPublicConversationStore({
+      db,
+      env: this.env,
+    });
     const toolService = new ToolService(db);
     return executeSidechatProjectTool({
       projectId: this.name,
@@ -683,9 +717,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           }
         },
         getConversation: () =>
-          chatService.getConversationById(
-            request.conversationId,
+          conversationStore.get(
             this.name,
+            request.conversationId,
           ),
         canActorAccessProject: (actorUserId) =>
           this.canActorAccessProject(db, actorUserId),
@@ -696,9 +730,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         hasAlwaysAllowGrant: (candidate) =>
           this.hasAlwaysAllowGrant(candidate),
         runKnowledgeSearch: async (input) => {
-          const conversation = await chatService.getConversationById(
-            request.conversationId,
+          const conversation = await conversationStore.get(
             this.name,
+            request.conversationId,
           );
           if (!conversation || conversation.archivedAt !== null) {
             return { found: false, context: "", sources: [], topScore: 0 };
@@ -711,7 +745,10 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
             customerId: conversation.customerId,
             ownership: {
               status: conversation.status,
-              chatState: conversation.chatState,
+              chatState:
+                Object.keys(conversation.chatState).length > 0
+                  ? JSON.stringify(conversation.chatState)
+                  : null,
             },
           };
           const definition = createSearchKnowledgeTool({
@@ -725,9 +762,10 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           return definition.execute(input, {});
         },
         runExternalAction: (action) =>
-          chatService.runExternalActionIfOperational(
-            request.conversationId,
+          runWithExternalActionLease(
+            conversationStore,
             this.name,
+            request.conversationId,
             action,
           ),
         executeHttpTool: async (tool, input) =>

@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/d1";
-import { ChatService } from "../services/chat-service";
+import { createPublicConversationStore } from "../conversations/create-public-conversation-store";
 import { type AppEnv } from "../types";
-import { type MessageRow } from "../db";
+import { type PublicMessageRecord } from "../../shared/maven-conversation";
 import {
   compareMessagePositions,
   type ServerEvent,
@@ -22,13 +22,16 @@ export interface ResumeCursors {
 }
 
 export interface ConversationReplayReader {
-  getPublicMessageById(
-    id: string,
-  ): Promise<{ id: string; conversationId: string; createdAt: Date } | null>;
-  getPublicMessagesSince(
+  getMessage(
+    projectId: string,
+    conversationId: string,
+    messageId: string,
+  ): Promise<PublicMessageRecord | null>;
+  getMessagesSince(
+    projectId: string,
     conversationId: string,
     since: number,
-  ): Promise<MessageRow[]>;
+  ): Promise<PublicMessageRecord[]>;
 }
 
 export interface SocketAttachment {
@@ -89,13 +92,15 @@ export async function replayConversationMessages(
   let publicSince = 0;
   let publicCursor: StableMessagePosition | null = null;
   if (cursors.lastMessageId) {
-    const lastPublic = await reader.getPublicMessageById(
+    const lastPublic = await reader.getMessage(
+      attachment.projectId,
+      attachment.conversationId,
       cursors.lastMessageId,
     );
     if (lastPublic?.conversationId === attachment.conversationId) {
       publicCursor = {
         id: lastPublic.id,
-        createdAt: lastPublic.createdAt.getTime(),
+        createdAt: lastPublic.createdAt,
       };
       publicSince = Math.max(
         0,
@@ -105,7 +110,8 @@ export async function replayConversationMessages(
   }
 
   const publicRows = replayRowsAfterCursor(
-    await reader.getPublicMessagesSince(
+    await reader.getMessagesSince(
+      attachment.projectId,
       attachment.conversationId,
       publicSince,
     ),
@@ -137,13 +143,13 @@ export async function replayConversationMessages(
 }
 
 function replayRowsAfterCursor(
-  rows: MessageRow[],
+  rows: PublicMessageRecord[],
   cursor: StableMessagePosition | null,
-): MessageRow[] {
+): PublicMessageRecord[] {
   return rows
     .filter((row) => {
       if (!cursor) return true;
-      const createdAt = row.createdAt.getTime();
+      const createdAt = row.createdAt;
       return (
         createdAt > cursor.createdAt ||
         (createdAt === cursor.createdAt && row.id !== cursor.id)
@@ -151,8 +157,8 @@ function replayRowsAfterCursor(
     })
     .sort((left, right) =>
       compareMessagePositions(
-        { id: left.id, createdAt: left.createdAt.getTime() },
-        { id: right.id, createdAt: right.createdAt.getTime() },
+        { id: left.id, createdAt: left.createdAt },
+        { id: right.id, createdAt: right.createdAt },
       ),
     );
 }
@@ -202,13 +208,13 @@ export class ConversationDO implements DurableObject {
 
     if (roomKind === "conversation") {
       const db = drizzle(this.env.DB);
-      const chatService = new ChatService(db);
+      const conversationStore = createPublicConversationStore({
+        db,
+        env: this.env,
+      });
       const conversation = kind === "agent"
-        ? await chatService.getConversationById(conversationId, projectId)
-        : await chatService.getOperationalConversationById(
-            conversationId,
-            projectId,
-          );
+        ? await conversationStore.get(projectId, conversationId)
+        : await conversationStore.getOperational(projectId, conversationId);
       if (!conversation) {
         return new Response("Conversation unavailable", { status: 410 });
       }
@@ -249,8 +255,15 @@ export class ConversationDO implements DurableObject {
     state: "active" | "background",
   ): Promise<void> {
     const db = drizzle(this.env.DB);
-    const chatService = new ChatService(db);
-    await chatService.updateVisitorLastSeen(conversationId, projectId, state);
+    const conversationStore = createPublicConversationStore({
+      db,
+      env: this.env,
+    });
+    await conversationStore.updatePresence({
+      projectId,
+      conversationId,
+      presence: state,
+    });
   }
 
   async webSocketMessage(
@@ -309,16 +322,21 @@ export class ConversationDO implements DurableObject {
       if (att?.kind !== "visitor") return;
 
       const db = drizzle(this.env.DB);
-      const chatService = new ChatService(db);
-      const conversation = await chatService.getOperationalConversationById(
-        att.conversationId,
+      const conversationStore = createPublicConversationStore({
+        db,
+        env: this.env,
+      });
+      const conversation = await conversationStore.getOperational(
         att.projectId,
+        att.conversationId,
       );
       if (!conversation) return;
-      const ids =
-        msg.type === "delivered"
-          ? await chatService.markPublicDeliveredUpTo(att.conversationId, msg.upToMessageId)
-          : await chatService.markPublicReadUpTo(att.conversationId, msg.upToMessageId);
+      const ids = await conversationStore.markDelivery({
+        projectId: att.projectId,
+        conversationId: att.conversationId,
+        upToMessageId: msg.upToMessageId,
+        kind: msg.type,
+      });
       if (ids.length === 0) return;
 
       this.broadcastToAgents({
@@ -351,18 +369,26 @@ export class ConversationDO implements DurableObject {
     if (attachment.roomKind !== "conversation") return;
 
     const db = drizzle(this.env.DB);
-    const chatService = new ChatService(db);
+    const conversationStore = createPublicConversationStore({
+      db,
+      env: this.env,
+    });
     const conversation = attachment.kind === "agent"
-      ? await chatService.getConversationById(
-          attachment.conversationId,
+      ? await conversationStore.get(
           attachment.projectId,
+          attachment.conversationId,
         )
-      : await chatService.getOperationalConversationById(
-          attachment.conversationId,
+      : await conversationStore.getOperational(
           attachment.projectId,
+          attachment.conversationId,
         );
     if (!conversation) return;
-    await replayConversationMessages(ws, attachment, cursors, chatService);
+    await replayConversationMessages(
+      ws,
+      attachment,
+      cursors,
+      conversationStore,
+    );
   }
 
   private async handleBroadcast(req: Request): Promise<Response> {

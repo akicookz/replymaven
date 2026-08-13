@@ -1,4 +1,4 @@
-import { and, asc, eq, exists, sql } from "drizzle-orm";
+import { and, eq, exists, sql } from "drizzle-orm";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import type {
   ConversationCustomerResponse,
@@ -9,11 +9,11 @@ import type {
   CustomerVisitorLinkSource,
   UpdateCustomerInput,
 } from "../../shared/customer-types";
+import type { PublicConversationRecord } from "../../shared/maven-conversation";
+import type { PublicConversationStore } from "../conversations/public-conversation-store";
 import {
-  conversations,
   customers,
   customerVisitors,
-  type ConversationRow,
   type CustomerRow,
   type CustomerVisitorRow,
 } from "../db";
@@ -106,8 +106,11 @@ export function normalizeCustomerEmail(
 export class CustomerIdentityService {
   private customerService: CustomerService;
 
-  constructor(private db: DrizzleD1Database<Record<string, unknown>>) {
-    this.customerService = new CustomerService(db);
+  constructor(
+    private db: DrizzleD1Database<Record<string, unknown>>,
+    private conversationStore: PublicConversationStore,
+  ) {
+    this.customerService = new CustomerService(db, conversationStore);
   }
 
   private async executeBatch(queries: unknown[]): Promise<void> {
@@ -204,34 +207,22 @@ export class CustomerIdentityService {
   private async getConversation(
     projectId: string,
     conversationId: string,
-  ): Promise<ConversationRow | null> {
-    const rows = await this.db
-      .select()
-      .from(conversations)
-      .where(
-        and(
-          eq(conversations.projectId, projectId),
-          eq(conversations.id, conversationId),
-        ),
-      )
-      .limit(1);
-    return rows[0] ?? null;
+  ): Promise<PublicConversationRecord | null> {
+    return this.conversationStore.get(projectId, conversationId);
   }
 
   private async getVisitorConversations(
     projectId: string,
     visitorId: string,
-  ): Promise<ConversationRow[]> {
-    return this.db
-      .select()
-      .from(conversations)
-      .where(
-        and(
-          eq(conversations.projectId, projectId),
-          eq(conversations.visitorId, visitorId),
-        ),
-      )
-      .orderBy(asc(conversations.createdAt), asc(conversations.id));
+  ): Promise<PublicConversationRecord[]> {
+    const rows = await this.conversationStore.listByVisitor(
+      projectId,
+      visitorId,
+    );
+    return rows.sort(
+      (left, right) =>
+        left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+    );
   }
 
   async resolveCustomer(
@@ -448,7 +439,7 @@ export class CustomerIdentityService {
 
   private async attachVisitor(
     projectId: string,
-    conversation: ConversationRow,
+    conversation: PublicConversationRecord,
     customer: CustomerRow,
     linkedBy: CustomerVisitorLinkSource,
     extraQueries: unknown[] = [],
@@ -495,10 +486,14 @@ export class CustomerIdentityService {
       .filter((row) => row.customerId !== customer.id)
       .map((row) => row.id);
     const firstSeenAt = visitorConversations.length
-      ? earliestDate(visitorConversations.map((row) => row.createdAt))
+      ? earliestDate(
+          visitorConversations.map((row) => new Date(row.createdAt)),
+        )
       : null;
     const lastSeenAt = visitorConversations.length
-      ? latestDate(visitorConversations.map((row) => row.lastActivityAt))
+      ? latestDate(
+          visitorConversations.map((row) => new Date(row.lastActivityAt)),
+        )
       : null;
     const queries: unknown[] = [...extraQueries];
 
@@ -530,21 +525,6 @@ export class CustomerIdentityService {
           ),
       );
     }
-    queries.push(
-      this.db
-        .update(conversations)
-        .set({
-          customerId: customer.id,
-          visitorName: sql`COALESCE(${conversations.visitorName}, ${customer.name})`,
-          visitorEmail: sql`COALESCE(${conversations.visitorEmail}, ${customer.email})`,
-        })
-        .where(
-          and(
-            eq(conversations.projectId, projectId),
-            eq(conversations.visitorId, visitorId),
-          ),
-        ),
-    );
     if (!visitor) {
       queries.push(
         this.db.insert(customerVisitors).values({
@@ -558,6 +538,24 @@ export class CustomerIdentityService {
     }
 
     await this.executeBatch(queries);
+    await Promise.all(
+      visitorConversations.map(async (conversation) => {
+        await this.conversationStore.updateCustomer({
+          projectId,
+          conversationId: conversation.id,
+          customerId: customer.id,
+        });
+        if (!conversation.visitorName || !conversation.visitorEmail) {
+          await this.conversationStore.updateContact({
+            projectId,
+            conversationId: conversation.id,
+            visitorName: conversation.visitorName ?? customer.name ?? undefined,
+            visitorEmail:
+              conversation.visitorEmail ?? customer.email ?? undefined,
+          });
+        }
+      }),
+    );
     const detail = await this.customerService.getCustomerDetail(
       projectId,
       customer.id,
@@ -694,16 +692,14 @@ export class CustomerIdentityService {
     ]);
     if (!target || !source) return { kind: "not_found" };
 
-    const sourceConversations = await this.db
-      .select()
-      .from(conversations)
-      .where(
-        and(
-          eq(conversations.projectId, projectId),
-          eq(conversations.customerId, sourceCustomerId),
-        ),
-      )
-      .orderBy(asc(conversations.createdAt), asc(conversations.id));
+    const sourceConversations = await this.conversationStore.listByCustomer(
+      projectId,
+      sourceCustomerId,
+    );
+    sourceConversations.sort(
+      (left, right) =>
+        left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+    );
     const customFields = {
       ...parseCustomFields(source.customFields),
       ...parseCustomFields(target.customFields),
@@ -756,15 +752,6 @@ export class CustomerIdentityService {
           ),
         ),
       this.db
-        .update(conversations)
-        .set({ customerId: targetCustomerId })
-        .where(
-          and(
-            eq(conversations.projectId, projectId),
-            eq(conversations.customerId, sourceCustomerId),
-          ),
-        ),
-      this.db
         .delete(customers)
         .where(
           and(
@@ -773,6 +760,15 @@ export class CustomerIdentityService {
           ),
         ),
     ]);
+    await Promise.all(
+      sourceConversations.map((conversation) =>
+        this.conversationStore.updateCustomer({
+          projectId,
+          conversationId: conversation.id,
+          customerId: targetCustomerId,
+        }),
+      ),
+    );
     return {
       kind: "merged",
       customerId: targetCustomerId,

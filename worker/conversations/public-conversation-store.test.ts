@@ -160,13 +160,17 @@ describe("public conversation storage conversion", () => {
         metadata: "[not-json",
         chatState: "null",
         visitorPresence: null,
-      }),
+        lastActivityAt: null,
+        priority: null,
+      } as unknown as Partial<ConversationRow>),
     );
 
     expect(record.metadata).toEqual({});
     expect(record.chatState).toEqual({});
     expect(record.ownershipRevision).toBe(0);
     expect(record.visitorPresence).toBe("active");
+    expect(record.lastActivityAt).toBe(record.createdAt);
+    expect(record.priority).toBe("medium");
   });
 
   test("converts images, sources, authorship, and receipt timestamps", () => {

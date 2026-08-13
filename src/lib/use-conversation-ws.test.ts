@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { MessageRow } from "../../worker/db";
+import { mapD1MessageRow } from "../../worker/conversations/d1-public-conversation-store";
 import {
   broadcastEventToSockets,
   replayConversationMessages,
@@ -152,11 +153,13 @@ test("public replay is lossless across equal-second message IDs", async () => {
     createMessageRow("public-next", 3_000),
   ];
   const reader: ConversationReplayReader = {
-    async getPublicMessageById(id) {
-      return id === cursor.id ? cursor : null;
+    async getMessage(_projectId, _conversationId, id) {
+      return id === cursor.id ? mapD1MessageRow(cursor) : null;
     },
-    async getPublicMessagesSince(_conversationId, since) {
-      return rows.filter((row) => row.createdAt.getTime() > since);
+    async getMessagesSince(_projectId, _conversationId, since) {
+      return rows
+        .filter((row) => row.createdAt.getTime() > since)
+        .map(mapD1MessageRow);
     },
   };
   const socket = createSocket();

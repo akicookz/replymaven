@@ -1,5 +1,8 @@
 import type { SidechatCustomerContext } from "../../../shared/sidechat-agent";
-import type { ConversationRow, MessageRow } from "../../db";
+import type {
+  PublicConversationRecord,
+  PublicMessageRecord,
+} from "../../../shared/maven-conversation";
 
 interface SidechatCustomerRow {
   id: string;
@@ -10,7 +13,7 @@ interface SidechatCustomerRow {
 }
 
 type SidechatConversationRow = Pick<
-  ConversationRow,
+  PublicConversationRecord,
   | "id"
   | "projectId"
   | "customerId"
@@ -30,9 +33,10 @@ export interface SidechatContextDependencies {
     customerId: string,
   ): Promise<SidechatCustomerRow | null>;
   getRecentPublicMessages(
+    projectId: string,
     conversationId: string,
     limit: number,
-  ): Promise<{ messages: MessageRow[]; hasMore: boolean }>;
+  ): Promise<{ messages: PublicMessageRecord[]; hasMore: boolean }>;
 }
 
 interface BuildSidechatContextOptions {
@@ -59,7 +63,10 @@ function toEpochMilliseconds(value: Date | number): number {
   return value instanceof Date ? value.getTime() : value;
 }
 
-function comparePublicMessages(left: MessageRow, right: MessageRow): number {
+function comparePublicMessages(
+  left: PublicMessageRecord,
+  right: PublicMessageRecord,
+): number {
   const timestampDifference =
     toEpochMilliseconds(left.createdAt) - toEpochMilliseconds(right.createdAt);
   if (timestampDifference !== 0) return timestampDifference;
@@ -88,7 +95,11 @@ export async function buildSidechatContext(
           conversation.customerId,
         )
       : Promise.resolve(null),
-    options.dependencies.getRecentPublicMessages(options.conversationId, 40),
+    options.dependencies.getRecentPublicMessages(
+      options.projectId,
+      options.conversationId,
+      40,
+    ),
   ]);
 
   const canonicalCustomer =
@@ -109,7 +120,7 @@ export async function buildSidechatContext(
     .slice(-40)
     .map((message) => ({
       id: message.id,
-      role: message.role,
+      role: message.author,
       content: message.content.slice(0, MAX_PUBLIC_MESSAGE_CHARS),
       createdAt: toEpochMilliseconds(message.createdAt),
     }));
@@ -118,7 +129,7 @@ export async function buildSidechatContext(
     projectId: options.projectId,
     conversationId: options.conversationId,
     conversationStatus: conversation.status,
-    archivedAt: conversation.archivedAt?.getTime() ?? null,
+    archivedAt: conversation.archivedAt,
     customer: canonicalCustomer,
     // The public schema currently has no durable bounded conversation summary.
     // Do not synthesize one or repurpose private handoff metadata here.

@@ -5,21 +5,25 @@ import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import {
-  type ConversationRow,
-  type MessageRow,
   type ProjectRow,
   type ProjectSettingsRow,
   type QuickActionRow,
   type ResourceRow,
   type WidgetConfigRow,
 } from "./db";
+import type {
+  PublicConversationRecord,
+  PublicMessageRecord,
+} from "../shared/maven-conversation";
+import { serializeMessageImageUrls } from "../shared/message-images";
+import { createPublicConversationStore } from "./conversations/create-public-conversation-store";
+import type { PublicConversationStore } from "./conversations/public-conversation-store";
 import { users } from "./db/auth.schema";
 import { type HonoAppContext } from "./types";
 import { buildMcpAuthenticateHeader } from "./mcp-oauth";
 import { ProjectService } from "./services/project-service";
 import { WidgetService } from "./services/widget-service";
 import { ResourceService } from "./services/resource-service";
-import { ChatService } from "./services/chat-service";
 import { DashboardService } from "./services/dashboard-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
 import { getTeamContext } from "./services/team-context";
@@ -44,6 +48,7 @@ type AppDb = DrizzleD1Database<Record<string, unknown>>;
 
 interface McpRequestContext {
   db: AppDb;
+  conversationStore: PublicConversationStore;
   env: HonoAppContext["Bindings"];
   executionCtx: ExecutionContext;
   userId: string;
@@ -118,6 +123,7 @@ async function getMcpRequestContext(
 
     return {
       db,
+      conversationStore: createPublicConversationStore({ db, env: c.env }),
       env: c.env,
       executionCtx: c.executionCtx,
       userId: user.id,
@@ -135,6 +141,7 @@ async function getMcpRequestContext(
 
   return {
     db,
+    conversationStore: createPublicConversationStore({ db, env: c.env }),
     env: c.env,
     executionCtx: c.executionCtx,
     userId: user.id,
@@ -260,7 +267,10 @@ function registerGetProjectOverviewTool(
       const project = await getAccessibleProject(context, projectId);
       const projectService = new ProjectService(context.db);
       const widgetService = new WidgetService(context.db);
-      const dashboardService = new DashboardService(context.db);
+      const dashboardService = new DashboardService(
+        context.db,
+        context.conversationStore,
+      );
 
       const [settings, widgetConfig, quickActions, stats] = await Promise.all([
         projectService.getSettings(project.id),
@@ -421,14 +431,13 @@ function registerListConversationsTool(
 
       await getAccessibleProject(context, projectId);
 
-      const chatService = new ChatService(context.db);
-      const conversations = await chatService.getConversationsByProject(
+      const { conversations } = await context.conversationStore.list({
         projectId,
-        limit ?? 20,
-        0,
-        status ?? "open",
-        searchQuery,
-      );
+        limit: limit ?? 20,
+        offset: 0,
+        status: status ?? "open",
+        search: searchQuery,
+      });
 
       return textResult({
         conversations: conversations.map(summarizeConversation),
@@ -473,14 +482,16 @@ function registerGetConversationTool(
 
       await getAccessibleProject(context, projectId);
 
-      const chatService = new ChatService(context.db);
-      const conversation = await chatService.getOperationalConversationById(
-        conversationId,
+      const conversation = await context.conversationStore.getOperational(
         projectId,
+        conversationId,
       );
       if (!conversation) throw new Error("Conversation not found");
 
-      const messages = await chatService.getPublicMessages(conversation.id);
+      const messages = await context.conversationStore.getMessages(
+        projectId,
+        conversation.id,
+      );
       const latestMessages = messages.slice(-(maxMessages ?? 50));
 
       return textResult({
@@ -522,25 +533,22 @@ function registerSendAgentReplyTool(
 
       await getAccessibleProject(context, projectId);
 
-      const chatService = new ChatService(context.db);
-      const conversation = await chatService.getOperationalConversationById(
-        conversationId,
+      const conversation = await context.conversationStore.getOperational(
         projectId,
+        conversationId,
       );
       if (!conversation) throw new Error("Conversation not found");
 
       const avatar = await getCurrentUserAvatar(context);
 
-      const message = await chatService.addPublicAgentMessageAndTakeOwnership(
-        {
-          conversationId: conversation.id,
-          content: content.trim(),
-          userId: context.userId,
-          senderName: context.userName,
-          senderAvatar: avatar,
-        },
+      const message = await context.conversationStore.appendHuman({
         projectId,
-      );
+        conversationId: conversation.id,
+        content: content.trim(),
+        userId: context.userId,
+        senderName: context.userName,
+        senderAvatar: avatar,
+      });
       if (!message) throw new Error("Conversation not found");
 
       broadcastMessageNew(context.env, context.executionCtx, conversation.id, message, {
@@ -1017,8 +1025,24 @@ function summarizeResource(
   };
 }
 
+interface SummarizableConversation {
+  id: string;
+  projectId: string;
+  visitorId: string;
+  visitorName: string | null;
+  visitorEmail: string | null;
+  status: PublicConversationRecord["status"];
+  closeReason: PublicConversationRecord["closeReason"];
+  visitorPresence: PublicConversationRecord["visitorPresence"] | null;
+  lastActivityAt: Date | number;
+  visitorLastSeenAt: Date | number | null;
+  visitorLastOnlineAt: Date | number | null;
+  createdAt: Date | number;
+  updatedAt: Date | number;
+}
+
 function summarizeConversation(
-  conversation: ConversationRow,
+  conversation: SummarizableConversation,
 ): Record<string, unknown> {
   return {
     id: conversation.id,
@@ -1037,14 +1061,14 @@ function summarizeConversation(
   };
 }
 
-function summarizeMessage(message: MessageRow): Record<string, unknown> {
+function summarizeMessage(message: PublicMessageRecord): Record<string, unknown> {
   return {
     id: message.id,
     conversationId: message.conversationId,
-    role: message.role,
+    role: message.author,
     content: message.content,
-    imageUrl: message.imageUrl,
-    sources: parseJsonValue(message.sources),
+    imageUrl: serializeMessageImageUrls(message.imageUrls),
+    sources: message.sources,
     senderName: message.senderName,
     createdAt: serializeDate(message.createdAt),
     emailedAt: serializeDate(message.emailedAt),
@@ -1090,8 +1114,8 @@ function truncateText(input: string | null, maxChars: number): TruncatedText {
   };
 }
 
-function serializeDate(value: Date | null | undefined): string | null {
-  return value ? value.toISOString() : null;
+function serializeDate(value: Date | number | null | undefined): string | null {
+  return value ? new Date(value).toISOString() : null;
 }
 
 function parseJsonValue(raw: string | null): unknown {

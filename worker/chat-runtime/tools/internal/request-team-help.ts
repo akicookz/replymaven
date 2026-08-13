@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { type MessageRow } from "../../../db";
-import { type ChatService } from "../../../services/chat-service";
+import { type PublicMessageRecord } from "../../../../shared/maven-conversation";
+import { type PublicConversationStore } from "../../../conversations/public-conversation-store";
 import { type ProjectService } from "../../../services/project-service";
 import { type TelegramService } from "../../../services/telegram-service";
 import { fallbackRenderHandoffMessage } from "../../llm/render-handoff-message";
@@ -91,10 +91,12 @@ interface AcceptedTeamRequest {
 }
 
 function getAcceptedTeamRequest(
-  metadata: string | null,
+  metadata: Record<string, unknown> | string | null,
 ): AcceptedTeamRequest | null {
   try {
-    const parsed: unknown = metadata ? JSON.parse(metadata) : null;
+    const parsed: unknown = typeof metadata === "string"
+      ? JSON.parse(metadata)
+      : metadata;
     if (!parsed || typeof parsed !== "object") return null;
     const record = parsed as Record<string, unknown>;
     if (typeof record.mavenTeamRequestAcceptedAt !== "string") return null;
@@ -126,7 +128,7 @@ function getAcceptedTeamRequest(
 
 export function createRequestTeamHelpTool(dependencies: {
   context: MavenTurnContext;
-  chatService: ChatService;
+  chatService: PublicConversationStore;
   projectService: ProjectService;
   telegramService?: TelegramService;
   env: {
@@ -135,7 +137,7 @@ export function createRequestTeamHelpTool(dependencies: {
   };
   executionCtx: ExecutionContext;
   onTeamRequested(): void;
-  broadcast(message: MessageRow): void;
+  broadcast(message: PublicMessageRecord): void;
 }): MavenToolDefinition {
   const capability = createCapability(dependencies.context.projectId);
 
@@ -155,9 +157,9 @@ export function createRequestTeamHelpTool(dependencies: {
         dependencies.projectService.getSettings(
           dependencies.context.projectId,
         ),
-        dependencies.chatService.getOperationalConversationById(
-          dependencies.context.conversationId,
+        dependencies.chatService.getOperational(
           dependencies.context.projectId,
+          dependencies.context.conversationId,
         ),
       ]);
       if (!project || !conversation) return createUnavailableResult();
@@ -173,7 +175,7 @@ export function createRequestTeamHelpTool(dependencies: {
         return createUnavailableResult();
       }
 
-      const chatState = parseChatState(conversation.chatState, {
+      const chatState = parseChatState(JSON.stringify(conversation.chatState), {
         fallbackAiParticipation: fallbackAiParticipationForStatus(
           conversation.status,
         ),
@@ -201,16 +203,16 @@ export function createRequestTeamHelpTool(dependencies: {
               executionCtx: dependencies.executionCtx,
               broadcast: dependencies.broadcast,
               claimExternalNotificationAttempt() {
-                return dependencies.chatService.claimNewTeamRequestNotification(
-                  dependencies.context.conversationId,
+                return dependencies.chatService.claimTeamRequestNotification(
                   dependencies.context.projectId,
+                  dependencies.context.conversationId,
                   acceptedRequest.acceptanceToken,
                 );
               },
               persistTelegramThreadId(threadId) {
-                return dependencies.chatService.persistNewTeamRequestTelegramThreadId(
-                  dependencies.context.conversationId,
+                return dependencies.chatService.persistTeamRequestTelegramThreadId(
                   dependencies.context.projectId,
+                  dependencies.context.conversationId,
                   acceptedRequest.acceptanceToken,
                   threadId,
                 );
@@ -227,11 +229,11 @@ export function createRequestTeamHelpTool(dependencies: {
       if (requiredFields.length > 0 && !chatState.contactDeclined) {
         const pendingConversation =
           await dependencies.chatService.updatePendingTeamRequestContact(
-            dependencies.context.conversationId,
             dependencies.context.projectId,
+            dependencies.context.conversationId,
             {
               status: conversation.status,
-              chatState: conversation.chatState,
+              chatState: JSON.stringify(conversation.chatState),
             },
             { awaitingContactFields: requiredFields },
           );
@@ -243,25 +245,25 @@ export function createRequestTeamHelpTool(dependencies: {
       }
 
       const claim =
-        await dependencies.chatService.claimNewTeamRequest(
-          dependencies.context.conversationId,
-          dependencies.context.projectId,
-          parsedInput.data.summary,
-        );
+        await dependencies.chatService.claimTeamRequest({
+          projectId: dependencies.context.projectId,
+          conversationId: dependencies.context.conversationId,
+          summary: parsedInput.data.summary,
+        });
       if (claim.status === "contact_required") {
         const latestConversation =
-          await dependencies.chatService.getOperationalConversationById(
-            dependencies.context.conversationId,
+          await dependencies.chatService.getOperational(
             dependencies.context.projectId,
+            dependencies.context.conversationId,
           );
         if (!latestConversation) return createUnavailableResult();
         const pendingConversation =
           await dependencies.chatService.updatePendingTeamRequestContact(
-            dependencies.context.conversationId,
             dependencies.context.projectId,
+            dependencies.context.conversationId,
             {
               status: latestConversation.status,
-              chatState: latestConversation.chatState,
+              chatState: JSON.stringify(latestConversation.chatState),
             },
             { awaitingContactFields: claim.requiredFields },
           );
@@ -279,18 +281,21 @@ export function createRequestTeamHelpTool(dependencies: {
       // Reload after the compare-and-set ownership claim. This is the final
       // authoritative gate before createEscalation can reach Telegram/email.
       const claimedConversation =
-        await dependencies.chatService.getOperationalConversationById(
-          dependencies.context.conversationId,
+        await dependencies.chatService.getOperational(
           dependencies.context.projectId,
+          dependencies.context.conversationId,
         );
       if (!claimedConversation) {
         return createRequestedResult(agentLabel, "created");
       }
-      const claimedState = parseChatState(claimedConversation.chatState, {
+      const claimedState = parseChatState(
+        JSON.stringify(claimedConversation.chatState),
+        {
         fallbackAiParticipation: fallbackAiParticipationForStatus(
           claimedConversation.status,
         ),
-      });
+        },
+      );
       if (
         claimedConversation.status === "agent_replied" ||
         claimedState.aiParticipation === "human_only"
@@ -333,17 +338,17 @@ export function createRequestTeamHelpTool(dependencies: {
           executionCtx: dependencies.executionCtx,
           broadcast: dependencies.broadcast,
           claimExternalNotificationAttempt() {
-            return dependencies.chatService.claimNewTeamRequestNotification(
-              dependencies.context.conversationId,
+            return dependencies.chatService.claimTeamRequestNotification(
               dependencies.context.projectId,
+              dependencies.context.conversationId,
               acceptedRequest?.acceptanceToken ?? "",
             );
           },
           persistTelegramThreadId(threadId) {
             if (!acceptedRequest) return Promise.resolve(false);
-            return dependencies.chatService.persistNewTeamRequestTelegramThreadId(
-              dependencies.context.conversationId,
+            return dependencies.chatService.persistTeamRequestTelegramThreadId(
               dependencies.context.projectId,
+              dependencies.context.conversationId,
               acceptedRequest.acceptanceToken,
               threadId,
             );
@@ -359,9 +364,9 @@ export function createRequestTeamHelpTool(dependencies: {
         dependencies.projectService.getProjectById(
           dependencies.context.projectId,
         ),
-        dependencies.chatService.getOperationalConversationById(
-          dependencies.context.conversationId,
+        dependencies.chatService.getOperational(
           dependencies.context.projectId,
+          dependencies.context.conversationId,
         ),
       ]);
       return project && conversation ? capability : null;

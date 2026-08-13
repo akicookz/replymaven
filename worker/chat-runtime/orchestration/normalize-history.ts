@@ -12,6 +12,10 @@ function toIsoTimestamp(value: unknown): string | undefined {
     const ms = new Date(value).getTime();
     return Number.isNaN(ms) ? undefined : new Date(ms).toISOString();
   }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
   return undefined;
 }
 

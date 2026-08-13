@@ -1,15 +1,17 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, count, and, sql, desc, isNull } from "drizzle-orm";
+import { eq, count, and, sql, isNull } from "drizzle-orm";
 import {
   projects,
-  conversations,
-  messages,
   resources,
   helpArticles,
 } from "../db";
+import type { PublicConversationStore } from "../conversations/public-conversation-store";
 
 export class DashboardService {
-  constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
+  constructor(
+    private db: DrizzleD1Database<Record<string, unknown>>,
+    private conversationStore: PublicConversationStore,
+  ) {}
 
   async getStats(userId: string, projectId?: string) {
     // Get user projects (all or filtered by projectId)
@@ -38,34 +40,11 @@ export class DashboardService {
     }
 
     const projectIds = userProjects.map((p) => p.id);
-    const inClause = sql`${conversations.projectId} IN (${sql.join(
-      projectIds.map((id) => sql`${id}`),
-      sql`, `,
-    )})`;
-
-    // Get conversation counts
-    const conversationCounts = await this.db
-      .select({
-        total: count(),
-        active: sql<number>`SUM(CASE WHEN ${conversations.status} IN ('active', 'waiting_agent') THEN 1 ELSE 0 END)`,
-      })
-      .from(conversations)
-      .where(inClause);
-
-    // Get message count
-    const messageCounts = await this.db
-      .select({ total: count() })
-      .from(messages)
-      .innerJoin(
-        conversations,
-        eq(messages.conversationId, conversations.id),
-      )
-      .where(
-        sql`${conversations.projectId} IN (${sql.join(
-          projectIds.map((id) => sql`${id}`),
-          sql`, `,
-        )})`,
-      );
+    const sevenDaysAgo = Date.now() - 7 * 86400 * 1000;
+    const analytics = await this.conversationStore.getAnalytics(
+      projectIds,
+      sevenDaysAgo,
+    );
 
     // External sources only — article mirrors are counted as articles below
     const resourceCounts = await this.db
@@ -94,76 +73,16 @@ export class DashboardService {
         ),
       );
 
-    // ─── Conversations by day (last 7 days) ──────────────────────────────────
-    const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 86400;
-    const conversationsByDay = await this.db
-      .select({
-        day: sql<string>`date(${conversations.createdAt}, 'unixepoch')`.as(
-          "day",
-        ),
-        count: count(),
-      })
-      .from(conversations)
-      .where(
-        and(
-          sql`${conversations.projectId} IN (${sql.join(
-            projectIds.map((id) => sql`${id}`),
-            sql`, `,
-          )})`,
-          sql`${conversations.createdAt} >= ${sevenDaysAgo}`,
-        ),
-      )
-      .groupBy(sql`date(${conversations.createdAt}, 'unixepoch')`)
-      .orderBy(sql`date(${conversations.createdAt}, 'unixepoch')`);
-
-    // ─── Conversations by status ──────────────────────────────────────────────
-    const conversationsByStatus = await this.db
-      .select({
-        status: conversations.status,
-        count: count(),
-      })
-      .from(conversations)
-      .where(
-        sql`${conversations.projectId} IN (${sql.join(
-          projectIds.map((id) => sql`${id}`),
-          sql`, `,
-        )})`,
-      )
-      .groupBy(conversations.status);
-
-    // ─── Recent conversations (last 5) ────────────────────────────────────────
-    const recentConversations = await this.db
-      .select()
-      .from(conversations)
-      .where(
-        sql`${conversations.projectId} IN (${sql.join(
-          projectIds.map((id) => sql`${id}`),
-          sql`, `,
-        )})`,
-      )
-      .orderBy(
-        desc(
-          sql`case
-            when ${conversations.visitorLastSeenAt} is not null
-              and ${conversations.visitorLastSeenAt} > ${conversations.updatedAt}
-            then ${conversations.visitorLastSeenAt}
-            else ${conversations.updatedAt}
-          end`,
-        ),
-        desc(conversations.updatedAt),
-      )
-      .limit(5);
-
     return {
       totalProjects: projectId ? undefined : userProjects.length,
-      totalConversations: conversationCounts[0]?.total ?? 0,
-      activeConversations: conversationCounts[0]?.active ?? 0,
-      totalMessages: messageCounts[0]?.total ?? 0,
+      totalConversations: analytics.totalConversations,
+      activeConversations: analytics.activeConversations,
+      totalMessages: analytics.totalMessages,
       totalResources: resourceCounts[0]?.total ?? 0,
       publishedArticles: articleCounts[0]?.total ?? 0,
-      conversationsByDay,
-      conversationsByStatus,
-      recentConversations,
+      conversationsByDay: analytics.conversationsByDay,
+      conversationsByStatus: analytics.conversationsByStatus,
+      recentConversations: analytics.recentConversations,
     };
   }
 }

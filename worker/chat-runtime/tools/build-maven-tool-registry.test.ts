@@ -35,6 +35,30 @@ function createContext(
   };
 }
 
+function createPublicConversationLeaseStore(options: {
+  available?: boolean;
+  onAcquire?: () => void;
+} = {}) {
+  return {
+    async acquireExternalAction(input: {
+      projectId: string;
+      conversationId: string;
+    }) {
+      options.onAcquire?.();
+      if (options.available === false) return null;
+      return {
+        ...input,
+        leaseId: "lease-1",
+        ownershipRevision: 0,
+        acquiredAt: Date.now(),
+      };
+    },
+    async releaseExternalAction() {
+      return undefined;
+    },
+  };
+}
+
 function createCapability(
   overrides: Partial<MavenToolCapability> = {},
 ): MavenToolCapability {
@@ -486,16 +510,7 @@ describe("createHttpToolDefinition", () => {
       toolService,
       encryptionKey: "00".repeat(32),
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches(
-            _conversationId: string,
-            _projectId: string,
-            _ownership: unknown,
-            action: () => Promise<unknown>,
-          ) {
-            return { executed: true, value: await action() };
-          },
-        },
+        chatService: createPublicConversationLeaseStore(),
         acquireRateLimitPermit: () => true,
       },
     } as never);
@@ -526,11 +541,11 @@ describe("createHttpToolDefinition", () => {
       },
       encryptionKey: "00".repeat(32),
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches() {
+        chatService: createPublicConversationLeaseStore({
+          onAcquire() {
             throw new Error("Malformed tools must not execute");
           },
-        },
+        }),
         acquireRateLimitPermit: () => true,
       },
     } as never);
@@ -563,11 +578,11 @@ describe("createHttpToolDefinition", () => {
         },
         encryptionKey: "00".repeat(32),
         publicExecution: {
-          chatService: {
-            async runExternalActionIfOwnershipMatches() {
+          chatService: createPublicConversationLeaseStore({
+            onAcquire() {
               throw new Error("Malformed tools must not execute");
             },
-          },
+          }),
           acquireRateLimitPermit: () => true,
         },
       } as never);
@@ -597,16 +612,7 @@ describe("createHttpToolDefinition", () => {
       },
       encryptionKey: "00".repeat(32),
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches(
-            _conversationId: string,
-            _projectId: string,
-            _ownership: unknown,
-            action: () => Promise<unknown>,
-          ) {
-            return { executed: true, value: await action() };
-          },
-        },
+        chatService: createPublicConversationLeaseStore(),
         acquireRateLimitPermit: () => true,
       },
     } as never);
@@ -645,16 +651,7 @@ describe("createHttpToolDefinition", () => {
         },
         encryptionKey: "00".repeat(32),
         publicExecution: {
-          chatService: {
-            async runExternalActionIfOwnershipMatches(
-              _conversationId: string,
-              _projectId: string,
-              _ownership: unknown,
-              action: () => Promise<unknown>,
-            ) {
-              return { executed: true, value: await action() };
-            },
-          },
+        chatService: createPublicConversationLeaseStore(),
           acquireRateLimitPermit: () => true,
         },
       } as never);
@@ -699,11 +696,9 @@ describe("createHttpToolDefinition", () => {
         toolService,
         encryptionKey: "00".repeat(32),
         publicExecution: {
-          chatService: {
-            async runExternalActionIfOwnershipMatches() {
-              return { executed: false };
-            },
-          },
+          chatService: createPublicConversationLeaseStore({
+            available: false,
+          }),
           acquireRateLimitPermit: () => true,
         },
       } as never);
@@ -742,17 +737,11 @@ describe("createHttpToolDefinition", () => {
       toolService,
       encryptionKey: "00".repeat(32),
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches(
-            _conversationId: string,
-            _projectId: string,
-            _ownership: unknown,
-            action: () => Promise<unknown>,
-          ) {
+        chatService: createPublicConversationLeaseStore({
+          onAcquire() {
             events.push("ownership");
-            return { executed: true, value: await action() };
           },
-        },
+        }),
         acquireRateLimitPermit() {
           events.push("permit");
           return false;
@@ -790,16 +779,7 @@ describe("createHttpToolDefinition", () => {
       },
       encryptionKey: "00".repeat(32),
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches(
-            _conversationId: string,
-            _projectId: string,
-            _ownership: unknown,
-            action: () => Promise<unknown>,
-          ) {
-            return { executed: true, value: await action() };
-          },
-        },
+        chatService: createPublicConversationLeaseStore(),
         acquireRateLimitPermit() {
           permitCount += 1;
           return true;
@@ -843,16 +823,7 @@ describe("createHttpToolDefinition", () => {
       },
       encryptionKey: "00".repeat(32),
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches(
-            _conversationId: string,
-            _projectId: string,
-            _ownership: unknown,
-            action: () => Promise<unknown>,
-          ) {
-            return { executed: true, value: await action() };
-          },
-        },
+        chatService: createPublicConversationLeaseStore(),
         acquireRateLimitPermit() {
           permitCount += 1;
           return true;
@@ -896,16 +867,7 @@ describe("createHttpToolDefinition", () => {
         executionIds.push(id);
       },
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches(
-            _conversationId: string,
-            _projectId: string,
-            _ownership: unknown,
-            action: () => Promise<unknown>,
-          ) {
-            return { executed: true, value: await action() };
-          },
-        },
+        chatService: createPublicConversationLeaseStore(),
         acquireRateLimitPermit: () => true,
       },
     } as never);
@@ -946,16 +908,7 @@ describe("createHttpToolDefinition", () => {
       },
       encryptionKey: "00".repeat(32),
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches(
-            _conversationId: string,
-            _projectId: string,
-            _ownership: unknown,
-            action: () => Promise<unknown>,
-          ) {
-            return { executed: true, value: await action() };
-          },
-        },
+        chatService: createPublicConversationLeaseStore(),
         acquireRateLimitPermit: () => true,
       },
     } as never);
@@ -993,16 +946,7 @@ describe("createHttpToolDefinition", () => {
       },
       encryptionKey: "00".repeat(32),
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches(
-            _conversationId: string,
-            _projectId: string,
-            _ownership: unknown,
-            action: () => Promise<unknown>,
-          ) {
-            return { executed: true, value: await action() };
-          },
-        },
+        chatService: createPublicConversationLeaseStore(),
         acquireRateLimitPermit() {
           permitCount += 1;
           return true;
@@ -1046,16 +990,7 @@ describe("createHttpToolDefinition", () => {
       },
       encryptionKey: "00".repeat(32),
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches(
-            _conversationId: string,
-            _projectId: string,
-            _ownership: unknown,
-            action: () => Promise<unknown>,
-          ) {
-            return { executed: true, value: await action() };
-          },
-        },
+        chatService: createPublicConversationLeaseStore(),
         acquireRateLimitPermit: () => true,
       },
     } as never);
@@ -1118,16 +1053,7 @@ describe("createHttpToolDefinition", () => {
       },
       encryptionKey: "00".repeat(32),
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches(
-            _conversationId: string,
-            _projectId: string,
-            _ownership: unknown,
-            action: () => Promise<unknown>,
-          ) {
-            return { executed: true, value: await action() };
-          },
-        },
+        chatService: createPublicConversationLeaseStore(),
         acquireRateLimitPermit: () => true,
       },
     } as never);
@@ -1188,16 +1114,7 @@ describe("createHttpToolDefinition", () => {
       toolService,
       encryptionKey,
       publicExecution: {
-        chatService: {
-          async runExternalActionIfOwnershipMatches(
-            _conversationId: string,
-            _projectId: string,
-            _ownership: unknown,
-            action: () => Promise<unknown>,
-          ) {
-            return { executed: true, value: await action() };
-          },
-        },
+        chatService: createPublicConversationLeaseStore(),
         acquireRateLimitPermit: () => true,
       },
     } as never);

@@ -1,7 +1,7 @@
 import { type Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
+import { createPublicConversationStore } from "../conversations/create-public-conversation-store";
 import { ProjectService } from "../services/project-service";
-import { ChatService } from "../services/chat-service";
 import { type HonoAppContext } from "../types";
 
 interface UpgradeContext {
@@ -55,11 +55,8 @@ export async function handleWidgetWsUpgrade(
   const project = await projectService.getProjectBySlugPublic(slug);
   if (!project) return c.json({ error: "Project not found" }, 404);
 
-  const chatService = new ChatService(db);
-  const conversation = await chatService.getConversationById(
-    conversationId,
-    project.id,
-  );
+  const conversationStore = createPublicConversationStore({ db, env: c.env });
+  const conversation = await conversationStore.get(project.id, conversationId);
   if (!conversation) return c.json({ error: "Conversation not found" }, 404);
   if (conversation.archivedAt) {
     return c.json({ error: "Conversation archived" }, 410);
@@ -99,8 +96,8 @@ export async function handleDashboardWsUpgrade(
     return c.json({ error: "Not found" }, 404);
   }
 
-  const chatService = new ChatService(db);
-  const conversation = await chatService.getConversationById(convId, project.id);
+  const conversationStore = createPublicConversationStore({ db, env: c.env });
+  const conversation = await conversationStore.get(project.id, convId);
   if (!conversation) return c.json({ error: "Not found" }, 404);
 
   return forwardUpgradeToDO(c, {

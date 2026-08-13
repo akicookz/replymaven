@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { type MessageRow, type ProjectSettingsRow } from "../../../db";
-import { type ChatService } from "../../../services/chat-service";
+import { type ProjectSettingsRow } from "../../../db";
+import type {
+  PublicConversationRecord,
+  PublicMessageRecord,
+} from "../../../../shared/maven-conversation";
+import { type PublicConversationStore } from "../../../conversations/public-conversation-store";
 import { type ProjectService } from "../../../services/project-service";
 import { type TelegramService } from "../../../services/telegram-service";
 import { buildMavenToolRegistry } from "../build-maven-tool-registry";
@@ -46,7 +50,7 @@ interface TestHarness {
   telegramUpdates: boolean[];
   telegramAttempts: number;
   telegramThreadPersistenceAttempts: number;
-  broadcasts: MessageRow[];
+  broadcasts: PublicMessageRecord[];
   systemMessageIds: Set<string>;
   failOwnershipClaim: boolean;
   humanTakesOwnershipAfterClaim: boolean;
@@ -111,22 +115,47 @@ function createConversation(
   };
 }
 
-function createMessage(content: string): MessageRow {
+function createMessage(content: string): PublicMessageRecord {
   return {
     id: "review-summary-1",
     conversationId: "conversation-1",
-    role: "system",
+    author: "system",
     content,
-    sources: JSON.stringify({ systemKind: "review_summary" }),
-    imageUrl: null,
+    sources: [],
+    imageUrls: [],
+    systemKind: "review_summary",
     senderName: null,
     senderAvatar: null,
     userId: null,
-    createdAt: new Date(0),
+    createdAt: 0,
     emailedAt: null,
     deliveredAt: null,
     readAt: null,
   };
+}
+
+function publicConversationSnapshot(
+  conversation: TestConversation,
+): PublicConversationRecord {
+  return {
+    ...conversation,
+    metadata: conversation.metadata ? JSON.parse(conversation.metadata) : {},
+    chatState: conversation.chatState ? JSON.parse(conversation.chatState) : {},
+    closeReason: null,
+    lastActivityAt: 0,
+    visitorLastSeenAt: null,
+    visitorPresence: "active",
+    visitorLastOnlineAt: null,
+    snoozedUntil: null,
+    archivedAt: null,
+    purgeStartedAt: null,
+    externalActionStartedAt: null,
+    priority: "medium",
+    assigneeId: null,
+    createdAt: 0,
+    updatedAt: 0,
+    ownershipRevision: 0,
+  } as PublicConversationRecord;
 }
 
 function createHarness(options: {
@@ -147,7 +176,7 @@ function createHarness(options: {
 } = {}): {
   harness: TestHarness;
   definition: ReturnType<typeof createRequestTeamHelpTool>;
-  chatService: ChatService;
+  chatService: PublicConversationStore;
 } {
   const harness: TestHarness = {
     context: createContext(options.channel ?? "public"),
@@ -188,21 +217,18 @@ function createHarness(options: {
   };
 
   const chatService = {
-    async getOperationalConversationById(
-      conversationId: string,
-      projectId: string,
-    ) {
+    async getOperational(projectId: string, conversationId: string) {
       if (
         conversationId !== harness.conversation.id ||
         projectId !== harness.conversation.projectId
       ) {
         return null;
       }
-      return { ...harness.conversation };
+      return publicConversationSnapshot(harness.conversation);
     },
     async updatePendingTeamRequestContact(
-      _conversationId: string,
       _projectId: string,
+      _conversationId: string,
       ownership: { status: string; chatState: string | null },
       update: { awaitingContactFields: Array<"name" | "email"> },
     ) {
@@ -217,38 +243,14 @@ function createHarness(options: {
         ...current,
         awaitingContactFields: update.awaitingContactFields,
       });
-      return { ...harness.conversation };
+      return publicConversationSnapshot(harness.conversation);
     },
-    async claimTeamRequest(conversationId: string, projectId: string) {
-      harness.ownershipClaims += 1;
-      if (
-        harness.failOwnershipClaim ||
-        conversationId !== harness.conversation.id ||
-        projectId !== harness.conversation.projectId ||
-        (harness.conversation.status !== "active" &&
-          harness.conversation.status !== "waiting_agent")
-      ) {
-        return false;
-      }
-      harness.conversation.status = "waiting_agent";
-      harness.conversation.chatState = JSON.stringify({
-        aiParticipation: "assist_until_agent",
-        contactDeclined: false,
-      });
-      if (harness.humanTakesOwnershipAfterClaim) {
-        harness.conversation.status = "agent_replied";
-        harness.conversation.chatState = JSON.stringify({
-          aiParticipation: "human_only",
-          contactDeclined: false,
-        });
-      }
-      return true;
-    },
-    async claimNewTeamRequest(
-      conversationId: string,
-      projectId: string,
-      summary: string,
-    ) {
+    async claimTeamRequest(input: {
+      projectId: string;
+      conversationId: string;
+      summary: string;
+    }) {
+      const { conversationId, projectId, summary } = input;
       harness.ownershipClaims += 1;
       if (harness.clearContactBeforeClaim) {
         harness.conversation.visitorEmail = null;
@@ -317,21 +319,19 @@ function createHarness(options: {
       }
       return { status: "claimed" as const };
     },
-    async addPublicSystemMessage(
-      _conversationId: string,
-      _kind: string,
-      content: string,
-      idempotencyKey?: string,
-    ) {
-      const messageId = idempotencyKey ?? "review-summary-1";
+    async appendSystem(input: {
+      content: string;
+      idempotencyKey?: string;
+    }) {
+      const messageId = input.idempotencyKey ?? "review-summary-1";
       if (harness.systemMessageIds.has(messageId)) return null;
       harness.systemMessageIds.add(messageId);
-      harness.reviewSummaries.push(content);
-      return { ...createMessage(content), id: messageId };
+      harness.reviewSummaries.push(input.content);
+      return { ...createMessage(input.content), id: messageId };
     },
-    async getNewTeamRequestAcceptance(
-      _conversationId: string,
+    async getTeamRequestAcceptance(
       _projectId: string,
+      _conversationId: string,
       acceptanceToken: string,
     ) {
       const metadata = harness.conversation.metadata
@@ -355,9 +355,9 @@ function createHarness(options: {
       }
       return snapshot;
     },
-    async addNewTeamRequestSummary(
-      _conversationId: string,
+    async addTeamRequestSummary(
       _projectId: string,
+      _conversationId: string,
       acceptanceToken: string,
     ) {
       const metadata = harness.conversation.metadata
@@ -378,11 +378,10 @@ function createHarness(options: {
       const message = createMessage(summary);
       return { ...message, id: messageId };
     },
-    async completeNewTeamRequestSummary(
-      _conversationId: string,
-      _projectId: string,
-      acceptanceToken: string,
-    ) {
+    async completeTeamRequestSummary(input: {
+      acceptanceToken: string;
+    }) {
+      const { acceptanceToken } = input;
       const metadata = harness.conversation.metadata
         ? JSON.parse(harness.conversation.metadata)
         : {};
@@ -393,10 +392,16 @@ function createHarness(options: {
       harness.conversation.metadata = JSON.stringify(metadata);
       return true;
     },
-    async updateConversation(
-      _conversationId: string,
+    async updateLegacyEscalationMetadata(
       _projectId: string,
-      data: { metadata?: string },
+      _conversationId: string,
+      data: {
+        expectedMavenAcceptanceToken: string | null;
+        summary: string;
+        summaryMessageId: string;
+        escalatedAt?: string;
+        summaryPending?: boolean;
+      },
     ) {
       harness.escalationUpdateCalls += 1;
       if (
@@ -410,31 +415,46 @@ function createHarness(options: {
         throw new Error("metadata write failed");
       }
       if (harness.failEscalationUpdate) return null;
-      if (data.metadata) {
-        const existing = harness.conversation.metadata
-          ? JSON.parse(harness.conversation.metadata)
-          : {};
-        harness.conversation.metadata = JSON.stringify({
-          ...existing,
-          ...JSON.parse(data.metadata),
-        });
+      const existing = harness.conversation.metadata
+        ? JSON.parse(harness.conversation.metadata)
+        : {};
+      const currentAcceptanceToken =
+        typeof existing.mavenTeamRequestAcceptanceToken === "string"
+          ? existing.mavenTeamRequestAcceptanceToken
+          : null;
+      if (currentAcceptanceToken !== data.expectedMavenAcceptanceToken) {
+        return null;
       }
-      return { ...harness.conversation };
+      harness.conversation.metadata = JSON.stringify({
+        ...existing,
+        teamRequestSummary: data.summary,
+        reviewSummaryMessageId: data.summaryMessageId,
+        ...(data.escalatedAt ? { escalatedAt: data.escalatedAt } : {}),
+        ...(data.summaryPending === undefined
+          ? {}
+          : { teamRequestSummaryPending: data.summaryPending }),
+      });
+      return publicConversationSnapshot(harness.conversation);
     },
-    async runExternalActionIfOperational<T>(
-      _conversationId: string,
-      _projectId: string,
-      action: () => Promise<T>,
-    ) {
+    async acquireExternalAction(input: {
+      projectId: string;
+      conversationId: string;
+    }) {
       if (harness.rejectExternalActionOnce) {
         harness.rejectExternalActionOnce = false;
-        return { executed: false };
+        return null;
       }
-      return { executed: true, value: await action() };
+      return {
+        ...input,
+        leaseId: "lease-1",
+        ownershipRevision: 0,
+        acquiredAt: Date.now(),
+      };
     },
+    async releaseExternalAction() {},
     async updateTelegramThreadId(
-      _conversationId: string,
       _projectId: string,
+      _conversationId: string,
       threadId: string,
     ) {
       harness.telegramThreadPersistenceAttempts += 1;
@@ -444,10 +464,10 @@ function createHarness(options: {
       }
       harness.conversation.telegramThreadId = threadId;
     },
-    async persistNewTeamRequestTelegramThreadId(
-      _conversationId: string,
+    async persistTeamRequestTelegramThreadId(
       _projectId: string,
-      _acceptanceToken: string,
+      _conversationId: string,
+      acceptanceToken: string,
       threadId: string,
     ) {
       harness.telegramThreadPersistenceAttempts += 1;
@@ -459,17 +479,17 @@ function createHarness(options: {
         ? JSON.parse(harness.conversation.metadata)
         : {};
       if (
-        metadata.mavenTeamRequestAcceptanceToken !== _acceptanceToken
+        metadata.mavenTeamRequestAcceptanceToken !== acceptanceToken
       ) {
         return false;
       }
-      harness.threadPersistenceTokens.push(_acceptanceToken);
+      harness.threadPersistenceTokens.push(acceptanceToken);
       harness.conversation.telegramThreadId = threadId;
       return true;
     },
-    async claimNewTeamRequestNotification(
-      _conversationId: string,
+    async claimTeamRequestNotification(
       _projectId: string,
+      _conversationId: string,
       acceptanceToken: string,
     ) {
       harness.notificationClaims += 1;
@@ -491,7 +511,7 @@ function createHarness(options: {
       });
       return true;
     },
-  } as unknown as ChatService;
+  } as unknown as PublicConversationStore;
 
   const settings = {
     telegramBotToken: "telegram-token",
@@ -783,11 +803,11 @@ describe("createRequestTeamHelpTool", () => {
       contactDeclined: false,
     });
     expect(
-      await chatService.claimNewTeamRequest(
-        harness.conversation.id,
-        harness.conversation.projectId,
-        "New accepted summary.",
-      ),
+      await chatService.claimTeamRequest({
+        conversationId: harness.conversation.id,
+        projectId: harness.conversation.projectId,
+        summary: "New accepted summary.",
+      }),
     ).toEqual({ status: "claimed" });
     const newAcceptance = JSON.parse(harness.conversation.metadata ?? "{}");
     harness.releaseAcceptedRequestRead.resolve();

@@ -1,8 +1,8 @@
 import { EmailService } from "../../services/email-service";
-import { type ChatService } from "../../services/chat-service";
+import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import { type ProjectService } from "../../services/project-service";
 import { type TelegramService } from "../../services/telegram-service";
-import { type MessageRow } from "../../db";
+import { type PublicMessageRecord } from "../../../shared/maven-conversation";
 import { logError, logInfo } from "../../observability";
 import { buildConversationDeepLink } from "../../lib/deep-links";
 
@@ -21,6 +21,24 @@ export function parseTelegramThreadId(
   return parsed;
 }
 
+async function runWithExternalActionLease<T>(
+  store: PublicConversationStore,
+  projectId: string,
+  conversationId: string,
+  action: () => Promise<T>,
+): Promise<{ executed: boolean; value?: T }> {
+  const lease = await store.acquireExternalAction({
+    projectId,
+    conversationId,
+  });
+  if (!lease) return { executed: false };
+  try {
+    return { executed: true, value: await action() };
+  } finally {
+    await store.releaseExternalAction(lease);
+  }
+}
+
 // Escalates a conversation for human review. No ticket row is written — the
 // detailed summary (built by the caller) is posted once into the thread as a
 // dashboard-only `review_summary` system message, broadcast live, and the
@@ -29,7 +47,7 @@ export function parseTelegramThreadId(
 // email pings carry the summary plus a conversation deep-link. Notification
 // failures are logged and swallowed so escalation never blocks the turn.
 export async function createEscalation(params: {
-  chatService: ChatService;
+  chatService: PublicConversationStore;
   projectService: ProjectService;
   telegramService?: TelegramService;
   project: { id: string; name: string };
@@ -40,7 +58,7 @@ export async function createEscalation(params: {
     visitorEmail: string | null;
     telegramThreadId?: string | null;
     status: string;
-    metadata: string | null;
+    metadata: Record<string, unknown> | string | null;
   };
   summary: string;
   settings: {
@@ -53,7 +71,7 @@ export async function createEscalation(params: {
     RESEND_API_KEY?: string;
   };
   executionCtx: ExecutionContext;
-  broadcast: (message: MessageRow) => void;
+  broadcast: (message: PublicMessageRecord) => void;
   acceptedTeamRequestToken?: string;
   notifyExternalActions?: boolean;
   claimExternalNotificationAttempt?: () => Promise<boolean>;
@@ -73,9 +91,9 @@ export async function createEscalation(params: {
   let legacyMavenAcceptanceToken: string | null = null;
 
   if (params.acceptedTeamRequestToken) {
-    const acceptance = await params.chatService.getNewTeamRequestAcceptance(
-      params.conversation.id,
+    const acceptance = await params.chatService.getTeamRequestAcceptance(
       params.project.id,
+      params.conversation.id,
       params.acceptedTeamRequestToken,
     );
     if (!acceptance) {
@@ -94,9 +112,9 @@ export async function createEscalation(params: {
       acceptance.summaryPending || acceptance.notificationState === "pending";
   } else {
     try {
-      const parsed = params.conversation.metadata
+      const parsed = typeof params.conversation.metadata === "string"
         ? JSON.parse(params.conversation.metadata)
-        : {};
+        : params.conversation.metadata ?? {};
       existingMeta =
         typeof parsed === "object" && parsed !== null ? parsed : {};
     } catch {
@@ -138,8 +156,8 @@ export async function createEscalation(params: {
   if (!params.acceptedTeamRequestToken) {
     const updatedConversation =
       await params.chatService.updateLegacyEscalationMetadata(
-        params.conversation.id,
         params.project.id,
+        params.conversation.id,
         {
           expectedMavenAcceptanceToken: legacyMavenAcceptanceToken,
           summary,
@@ -163,31 +181,32 @@ export async function createEscalation(params: {
 
   if (summaryNeedsPersistence) {
     const row = params.acceptedTeamRequestToken
-      ? await params.chatService.addNewTeamRequestSummary(
-          params.conversation.id,
+      ? await params.chatService.addTeamRequestSummary(
           params.project.id,
+          params.conversation.id,
           params.acceptedTeamRequestToken,
         )
-      : await params.chatService.addPublicSystemMessage(
-          params.conversation.id,
-          "review_summary",
-          summary,
-          summaryMessageId,
-        );
+      : await params.chatService.appendSystem({
+          projectId: params.project.id,
+          conversationId: params.conversation.id,
+          kind: "review_summary",
+          content: summary,
+          idempotencyKey: summaryMessageId ?? undefined,
+        });
     if (row) {
       params.broadcast(row);
     }
 
     const completed = params.acceptedTeamRequestToken
-      ? await params.chatService.completeNewTeamRequestSummary(
-          params.conversation.id,
-          params.project.id,
-          params.acceptedTeamRequestToken,
-        )
+      ? await params.chatService.completeTeamRequestSummary({
+          conversationId: params.conversation.id,
+          projectId: params.project.id,
+          acceptanceToken: params.acceptedTeamRequestToken,
+        })
       : Boolean(
           await params.chatService.updateLegacyEscalationMetadata(
-            params.conversation.id,
             params.project.id,
+            params.conversation.id,
             {
               expectedMavenAcceptanceToken: legacyMavenAcceptanceToken,
               summary,
@@ -235,10 +254,10 @@ export async function createEscalation(params: {
       const replyToMessageId = isUpdate
         ? parseTelegramThreadId(params.conversation.telegramThreadId)
         : undefined;
-      const notification = await params.chatService
-        .runExternalActionIfOperational(
-          params.conversation.id,
+      const notification = await runWithExternalActionLease(
+          params.chatService,
           params.project.id,
+          params.conversation.id,
           async () => {
             externalActionsClaimed = params.claimExternalNotificationAttempt
               ? await params.claimExternalNotificationAttempt()
@@ -329,10 +348,10 @@ export async function createEscalation(params: {
         isUpdate,
       });
       params.executionCtx.waitUntil(
-        params.chatService
-          .runExternalActionIfOperational(
-            params.conversation.id,
+        runWithExternalActionLease(
+            params.chatService,
             params.project.id,
+            params.conversation.id,
             async () => {
               if (!hasTelegram) {
                 externalActionsClaimed =
@@ -352,8 +371,7 @@ export async function createEscalation(params: {
                 accentColor: null,
               });
             },
-          )
-          .catch((err) => {
+          ).catch((err: unknown) => {
             logError("escalation.email_failed", err, {
               projectId: params.project.id,
               conversationId: params.conversation.id,

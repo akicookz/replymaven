@@ -4,23 +4,54 @@ import {
   type MessagePayload,
   type ServerEvent,
 } from "../../shared/ws-events";
-import { type MessageRow } from "../db";
+import { serializeMessageImageUrls } from "../../shared/message-images";
+import { type PublicMessageRecord } from "../../shared/maven-conversation";
 
 interface BroadcastOptions {
   excludeSubjectId?: string;
   audience?: "agents";
 }
 
-export function messageRowToPayload(row: MessageRow): MessagePayload {
+interface LegacyMessageLike {
+  id: string;
+  role: PublicMessageRecord["author"];
+  content: string;
+  imageUrl: string | null;
+  sources: string | null;
+  senderName: string | null;
+  senderAvatar: string | null;
+  createdAt: Date;
+}
+
+type BroadcastMessage = PublicMessageRecord | LegacyMessageLike;
+
+export function messageRowToPayload(row: BroadcastMessage): MessagePayload {
+  if (!("author" in row)) {
+    return {
+      id: row.id,
+      role: row.role,
+      content: row.content,
+      imageUrl: row.imageUrl,
+      sources: row.sources,
+      senderName: row.senderName,
+      senderAvatar: row.senderAvatar,
+      createdAt: row.createdAt.getTime(),
+    };
+  }
   return {
     id: row.id,
-    role: row.role,
+    role: row.author,
     content: row.content,
-    imageUrl: row.imageUrl,
-    sources: row.sources,
+    imageUrl: serializeMessageImageUrls(row.imageUrls),
+    sources:
+      row.sources.length > 0
+        ? JSON.stringify(row.sources)
+        : row.systemKind
+          ? JSON.stringify({ systemKind: row.systemKind })
+          : null,
     senderName: row.senderName,
     senderAvatar: row.senderAvatar,
-    createdAt: row.createdAt.getTime(),
+    createdAt: row.createdAt,
   };
 }
 
@@ -57,7 +88,7 @@ export function broadcastMessageNew(
   env: AppEnv,
   ctx: ExecutionContext,
   conversationId: string,
-  row: MessageRow,
+  row: BroadcastMessage,
   options: BroadcastOptions = {},
 ): void {
   dispatch(

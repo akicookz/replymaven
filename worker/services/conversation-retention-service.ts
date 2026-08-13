@@ -1,22 +1,11 @@
-import {
-  and,
-  asc,
-  eq,
-  inArray,
-  isNull,
-  lte,
-  ne,
-  or,
-  sql,
-} from "drizzle-orm";
-import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { parseMessageImageUrls } from "../../shared/message-images";
 import { getLocalUploadKey } from "../../shared/upload-ownership";
 import {
-  conversations,
-  messages,
-  toolExecutions,
-} from "../db/schema";
+  buildClaimExpiredArchivesQuery,
+} from "../conversations/d1-public-conversation-store";
+import type { PublicConversationStore } from "../conversations/public-conversation-store";
+
+export { buildClaimExpiredArchivesQuery };
 
 export const ARCHIVE_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;
 const PURGE_CLAIM_LEASE_MS = 60 * 60 * 1000;
@@ -66,31 +55,6 @@ export type NativeSidechatCleanup = (
   conversationId: string,
 ) => Promise<void>;
 
-export function buildClaimExpiredArchivesQuery(
-  db: DrizzleD1Database<Record<string, unknown>>,
-  conversationIds: string[],
-  retentionCutoff: Date,
-  staleClaimCutoff: Date,
-  claimAt: Date,
-) {
-  return db
-    .update(conversations)
-    .set({ purgeStartedAt: claimAt })
-    .where(and(
-      inArray(conversations.id, conversationIds),
-      lte(conversations.archivedAt, retentionCutoff),
-      or(
-        isNull(conversations.purgeStartedAt),
-        lte(conversations.purgeStartedAt, staleClaimCutoff),
-      ),
-    ))
-    .returning({
-      id: conversations.id,
-      projectId: conversations.projectId,
-      purgeStartedAt: conversations.purgeStartedAt,
-    });
-}
-
 export function collectOwnedUploadKeys(
   projectId: string,
   conversationId: string,
@@ -113,10 +77,8 @@ export function collectOwnedUploadKeys(
   return [...keys];
 }
 
-class D1ConversationRetentionStore implements ConversationRetentionStore {
-  constructor(
-    private db: DrizzleD1Database<Record<string, unknown>>,
-  ) {}
+class PublicConversationRetentionStore implements ConversationRetentionStore {
+  constructor(private conversationStore: PublicConversationStore) {}
 
   async claimExpired(
     retentionCutoff: Date,
@@ -124,55 +86,37 @@ class D1ConversationRetentionStore implements ConversationRetentionStore {
     claimAt: Date,
     limit: number,
   ): Promise<ClaimedConversation[]> {
-    const candidates = await this.db
-      .select({
-        id: conversations.id,
-        projectId: conversations.projectId,
-      })
-      .from(conversations)
-      .where(and(
-        lte(conversations.archivedAt, retentionCutoff),
-        or(
-          isNull(conversations.purgeStartedAt),
-          lte(conversations.purgeStartedAt, staleClaimCutoff),
-        ),
-      ))
-      .orderBy(asc(conversations.archivedAt))
-      .limit(limit);
-
-    if (candidates.length === 0) return [];
-
-    const rows = await buildClaimExpiredArchivesQuery(
-      this.db,
-      candidates.map((candidate) => candidate.id),
-      retentionCutoff,
-      staleClaimCutoff,
-      claimAt,
+    const rows = await this.conversationStore.claimExpiredArchives(
+      retentionCutoff.getTime(),
+      staleClaimCutoff.getTime(),
+      claimAt.getTime(),
+      limit,
     );
-
-    return rows.flatMap((row) => row.purgeStartedAt
-      ? [{
-          id: row.id,
-          projectId: row.projectId,
-          purgeStartedAt: row.purgeStartedAt,
-        }]
-      : []
-    );
+    const claimed = rows.map((row) => ({
+      ...row,
+      purgeStartedAt: new Date(row.purgeStartedAt),
+    }));
+    for (const conversation of claimed) {
+      this.claimed.set(conversation.id, conversation);
+    }
+    return claimed;
   }
 
   async listMessageAttachments(
     conversationId: string,
   ): Promise<MessageAttachmentSource[]> {
     // Purging a conversation removes attachments owned by its transcript.
-    const rows = await this.db
-      .select({
-        role: messages.role,
-        userId: messages.userId,
-        imageUrl: messages.imageUrl,
-      })
-      .from(messages)
-      .where(eq(messages.conversationId, conversationId));
-    return rows;
+    const conversation = await this.findClaimedConversation(conversationId);
+    if (!conversation) return [];
+    const rows = await this.conversationStore.listMessageAttachments(
+      conversation.projectId,
+      conversationId,
+    );
+    return rows.map((row) => ({
+      role: row.author,
+      userId: row.userId,
+      imageUrl: row.imageUrls.length > 0 ? JSON.stringify(row.imageUrls) : null,
+    }));
   }
 
   async isUploadKeyReferencedElsewhere(
@@ -181,18 +125,9 @@ class D1ConversationRetentionStore implements ConversationRetentionStore {
   ): Promise<boolean> {
     // A key referenced by another conversation remains owned and must not be
     // removed from R2.
-    const rows = await this.db
-      .select({ imageUrl: messages.imageUrl })
-      .from(messages)
-      .where(and(
-        ne(messages.conversationId, conversationId),
-        sql`instr(${messages.imageUrl}, ${key}) > 0`,
-      ));
-
-    return rows.some((row) =>
-      parseMessageImageUrls(row.imageUrl).some(
-        (imageUrl) => getLocalUploadKey(imageUrl) === key,
-      )
+    return this.conversationStore.isUploadKeyReferencedElsewhere(
+      key,
+      conversationId,
     );
   }
 
@@ -200,18 +135,21 @@ class D1ConversationRetentionStore implements ConversationRetentionStore {
     conversationId: string,
     purgeStartedAt: Date,
   ): Promise<boolean> {
-    await this.db
-      .delete(toolExecutions)
-      .where(eq(toolExecutions.conversationId, conversationId));
+    const conversation = await this.findClaimedConversation(conversationId);
+    if (!conversation) return false;
+    return this.conversationStore.deleteRetentionClaim(
+      conversation.projectId,
+      conversationId,
+      purgeStartedAt.getTime(),
+    );
+  }
 
-    const rows = await this.db
-      .delete(conversations)
-      .where(and(
-        eq(conversations.id, conversationId),
-        eq(conversations.purgeStartedAt, purgeStartedAt),
-      ))
-      .returning({ id: conversations.id });
-    return rows.length === 1;
+  private claimed = new Map<string, ClaimedConversation>();
+
+  private async findClaimedConversation(
+    conversationId: string,
+  ): Promise<ClaimedConversation | null> {
+    return this.claimed.get(conversationId) ?? null;
   }
 }
 
@@ -274,13 +212,13 @@ export async function purgeClaimedConversations(
 }
 
 export async function purgeExpiredArchivedConversations(
-  db: DrizzleD1Database<Record<string, unknown>>,
+  conversationStore: PublicConversationStore,
   uploads: R2Bucket,
   cleanupSidechat: NativeSidechatCleanup,
   now: Date = new Date(),
   batchSize = DEFAULT_PURGE_BATCH_SIZE,
 ): Promise<ConversationRetentionResult> {
-  const store = new D1ConversationRetentionStore(db);
+  const store = new PublicConversationRetentionStore(conversationStore);
   const retentionCutoff = new Date(now.getTime() - ARCHIVE_RETENTION_MS);
   const staleClaimCutoff = new Date(now.getTime() - PURGE_CLAIM_LEASE_MS);
   const claimed = await store.claimExpired(

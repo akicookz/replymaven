@@ -1,7 +1,7 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { type LanguageModel } from "ai";
-import { type MessageRow } from "../../db";
-import { type ChatService } from "../../services/chat-service";
+import { type PublicMessageRecord } from "../../../shared/maven-conversation";
+import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import { type ProjectService } from "../../services/project-service";
 import { type SourceReference } from "../../services/resource-service";
 import { type TelegramService } from "../../services/telegram-service";
@@ -52,12 +52,12 @@ export interface MavenTurnDependencies {
 
 export interface MavenPublicToolDependencies {
   executionCtx: ExecutionContext;
-  chatService: ChatService;
+  chatService: PublicConversationStore;
   projectService: ProjectService;
   telegramService?: TelegramService;
   acquireHttpRateLimitPermit(): boolean;
   onTeamRequested(): void;
-  broadcast(message: MessageRow): void;
+  broadcast(message: PublicMessageRecord): void;
 }
 
 export interface MavenTurnResult {

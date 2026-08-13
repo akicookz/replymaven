@@ -5,7 +5,7 @@ import {
   httpToolModelContractSchema,
   toolParameterSchema,
 } from "../../validation";
-import { type ChatService } from "../../services/chat-service";
+import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import {
   decryptHeaders,
   isEncrypted,
@@ -43,7 +43,10 @@ interface AuthoritativeHttpToolStore {
 }
 
 interface PublicHttpExecutionOptions {
-  chatService: Pick<ChatService, "runExternalActionIfOwnershipMatches">;
+  chatService: Pick<
+    PublicConversationStore,
+    "acquireExternalAction" | "releaseExternalAction"
+  >;
   acquireRateLimitPermit(): boolean;
 }
 
@@ -557,16 +560,17 @@ export async function createHttpToolDefinition(
         return outcome.result;
       }
 
-      const leased =
-        await options.publicExecution.chatService.runExternalActionIfOwnershipMatches(
-          options.context.conversationId,
-          options.context.projectId,
-          options.context.ownership,
-          executeAndAudit,
-        );
-      return leased.executed
-        ? leased.value ?? { error: "tool_unavailable" }
-        : { error: "conversation_ownership_changed" };
+      const lease = await options.publicExecution.chatService.acquireExternalAction({
+        projectId: options.context.projectId,
+        conversationId: options.context.conversationId,
+        ownership: options.context.ownership,
+      });
+      if (!lease) return { error: "conversation_ownership_changed" };
+      try {
+        return await executeAndAudit();
+      } finally {
+        await options.publicExecution.chatService.releaseExternalAction(lease);
+      }
     },
     async reauthorize() {
       const authoritativeTool = await options.toolService.getAuthoritativeTool(

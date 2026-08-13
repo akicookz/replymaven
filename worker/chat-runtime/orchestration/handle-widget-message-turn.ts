@@ -52,7 +52,9 @@ import {
   parseChatState,
 } from "../types";
 import { BillingService } from "../../services/billing-service";
-import { ChatService } from "../../services/chat-service";
+import { parseMessageImageUrls } from "../../../shared/message-images";
+import { createPublicConversationStore } from "../../conversations/create-public-conversation-store";
+import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import { CustomerIdentityService } from "../../services/customer-identity-service";
 import { GuidelineService } from "../../services/guideline-service";
 import { logError, logInfo, logWarn } from "../../observability";
@@ -70,9 +72,11 @@ import { buildContactFallbackMessage } from "../contact-support/contact-support"
 import { persistGuardedAiOutput } from "../post-turn/persist-guarded-ai-output";
 
 function parseConversationMetadata(
-  rawMetadata: string | null | undefined,
+  rawMetadata: Record<string, unknown> | string | null | undefined,
 ): Record<string, unknown> {
   if (!rawMetadata) return {};
+
+  if (typeof rawMetadata === "object") return rawMetadata;
 
   try {
     const parsed = JSON.parse(rawMetadata) as unknown;
@@ -84,6 +88,31 @@ function parseConversationMetadata(
   }
 
   return {};
+}
+
+function serializeConversationState(
+  state: Record<string, unknown> | string | null,
+): string | null {
+  if (typeof state === "string" || state === null) return state;
+  return JSON.stringify(state);
+}
+
+async function runWithExternalActionLease<T>(
+  store: PublicConversationStore,
+  projectId: string,
+  conversationId: string,
+  action: () => Promise<T>,
+): Promise<{ executed: boolean; value?: T }> {
+  const lease = await store.acquireExternalAction({
+    projectId,
+    conversationId,
+  });
+  if (!lease) return { executed: false };
+  try {
+    return { executed: true, value: await action() };
+  } finally {
+    await store.releaseExternalAction(lease);
+  }
 }
 
 function getMetadataString(
@@ -322,9 +351,13 @@ export interface WidgetMessageTurnRuntime {
     db: WidgetMessageTurnContext["db"],
     env: WidgetMessageTurnContext["env"],
   ): BillingService;
-  createChatService(db: WidgetMessageTurnContext["db"]): ChatService;
+  createChatService(
+    db: WidgetMessageTurnContext["db"],
+    env: WidgetMessageTurnContext["env"],
+  ): PublicConversationStore;
   createCustomerIdentityService(
     db: WidgetMessageTurnContext["db"],
+    env: WidgetMessageTurnContext["env"],
   ): CustomerIdentityService;
   createToolService(db: WidgetMessageTurnContext["db"]): ToolService;
   createGuidelineService(db: WidgetMessageTurnContext["db"]): GuidelineService;
@@ -339,11 +372,14 @@ const defaultWidgetMessageTurnRuntime: WidgetMessageTurnRuntime = {
   createBillingService(db, env) {
     return new BillingService(db, env);
   },
-  createChatService(db) {
-    return new ChatService(db);
+  createChatService(db, env) {
+    return createPublicConversationStore({ db, env });
   },
-  createCustomerIdentityService(db) {
-    return new CustomerIdentityService(db);
+  createCustomerIdentityService(db, env) {
+    return new CustomerIdentityService(
+      db,
+      createPublicConversationStore({ db, env }),
+    );
   },
   createToolService(db) {
     return new ToolService(db);
@@ -364,9 +400,10 @@ export async function handleWidgetMessageTurn(
   const turnId = crypto.randomUUID();
   const projectService = runtime.createProjectService(context.db);
   const billingService = runtime.createBillingService(context.db, context.env);
-  const chatService = runtime.createChatService(context.db);
+  const chatService = runtime.createChatService(context.db, context.env);
   const customerIdentityService = runtime.createCustomerIdentityService(
     context.db,
+    context.env,
   );
   const toolService = runtime.createToolService(context.db);
   const guidelineService = runtime.createGuidelineService(context.db);
@@ -390,9 +427,9 @@ export async function handleWidgetMessageTurn(
   // history are loaded only after muted and human-agent turns have exited.
   const [ownerSub, conversationLookup, settings] = await Promise.all([
     billingService.getSubscriptionByUserId(context.project.userId),
-    chatService.getOperationalConversationById(
-      context.conversationId,
+    chatService.getOperational(
       context.project.id,
+      context.conversationId,
     ),
     projectService.getSettings(context.project.id),
   ]);
@@ -453,7 +490,7 @@ export async function handleWidgetMessageTurn(
   let conversationStatusForTurn = conversation.status;
 
   let chatState: ConversationChatState = parseChatState(
-    conversation.chatState,
+    serializeConversationState(conversation.chatState),
     {
       fallbackAiParticipation: fallbackAiParticipationForStatus(
         conversation.status,
@@ -464,14 +501,12 @@ export async function handleWidgetMessageTurn(
   let isFirstVisitorTurn = context.isFirstVisitorTurn ?? false;
   let visitorMessageOccurredAt = new Date();
   if (!context.visitorMessageAlreadySaved) {
-    const visitorResult = await chatService.addPublicVisitorMessageWithFirstTurn(
-      {
+    const visitorResult = await chatService.appendVisitor({
+        projectId: context.project.id,
         conversationId: context.conversationId,
         content: context.payload.content,
-        imageUrl,
-      },
-      context.project.id,
-    );
+        imageUrls: parseMessageImageUrls(imageUrl),
+      });
     if (!visitorResult) {
       return Response.json(
         { error: "Conversation archived" },
@@ -479,7 +514,7 @@ export async function handleWidgetMessageTurn(
       );
     }
     const visitorMessage = visitorResult.message;
-    visitorMessageOccurredAt = visitorMessage.createdAt;
+    visitorMessageOccurredAt = new Date(visitorMessage.createdAt);
     isFirstVisitorTurn = visitorResult.isFirstVisitorTurn;
     markStage("visitor_message_saved");
 
@@ -513,11 +548,11 @@ export async function handleWidgetMessageTurn(
     ) {
       const updatedConversation =
         await chatService.updatePendingTeamRequestContact(
-          context.conversationId,
           context.project.id,
+          context.conversationId,
           {
             status: conversation.status,
-            chatState: conversation.chatState,
+            chatState: serializeConversationState(conversation.chatState),
           },
           {
             ...(contactReply.visitorName
@@ -532,7 +567,7 @@ export async function handleWidgetMessageTurn(
         );
       if (updatedConversation) {
         conversation = updatedConversation;
-        chatState = parseChatState(conversation.chatState, {
+        chatState = parseChatState(serializeConversationState(conversation.chatState), {
           fallbackAiParticipation: fallbackAiParticipationForStatus(
             conversation.status,
           ),
@@ -540,9 +575,9 @@ export async function handleWidgetMessageTurn(
         conversationStatusForTurn = conversation.status;
       } else {
         const latestConversation =
-          await chatService.getOperationalConversationById(
-            context.conversationId,
+          await chatService.getOperational(
             context.project.id,
+            context.conversationId,
           );
         if (!latestConversation) {
           return Response.json(
@@ -551,7 +586,7 @@ export async function handleWidgetMessageTurn(
           );
         }
         conversation = latestConversation;
-        chatState = parseChatState(conversation.chatState, {
+        chatState = parseChatState(serializeConversationState(conversation.chatState), {
           fallbackAiParticipation: fallbackAiParticipationForStatus(
             conversation.status,
           ),
@@ -564,7 +599,7 @@ export async function handleWidgetMessageTurn(
   const participationAtTurnStart = chatState.aiParticipation;
   const ownershipSnapshotAtTurnStart = {
     status: conversation.status,
-    chatState: conversation.chatState,
+    chatState: serializeConversationState(conversation.chatState),
   };
 
   context.executionCtx.waitUntil(
@@ -609,14 +644,14 @@ export async function handleWidgetMessageTurn(
     status: WidgetCompletedPayload["conversationStatus"];
     chatState: string | null;
   }> {
-    const latestConversation = await chatService.getOperationalConversationById(
-      context.conversationId,
+    const latestConversation = await chatService.getOperational(
       context.project.id,
+      context.conversationId,
     );
     if (!latestConversation) {
       return { allowed: false, status: "closed", chatState: null };
     }
-    const latestState = parseChatState(latestConversation.chatState, {
+    const latestState = parseChatState(serializeConversationState(latestConversation.chatState), {
       fallbackAiParticipation: fallbackAiParticipationForStatus(
         latestConversation.status,
       ),
@@ -627,7 +662,7 @@ export async function handleWidgetMessageTurn(
       !isInvokedHumanOnlyTurn ||
       isChatOwnershipSnapshotCurrent(ownershipSnapshotAtTurnStart, {
         status: latestConversation.status,
-        chatState: latestConversation.chatState,
+        chatState: serializeConversationState(latestConversation.chatState),
       });
     return {
       allowed:
@@ -642,7 +677,7 @@ export async function handleWidgetMessageTurn(
       status: latestConversation.status,
       chatState: isInvokedHumanOnlyTurn
         ? ownershipSnapshotAtTurnStart.chatState
-        : latestConversation.chatState,
+        : serializeConversationState(latestConversation.chatState),
     };
   }
 
@@ -657,9 +692,10 @@ export async function handleWidgetMessageTurn(
     const telegramChatId = settings.telegramChatId;
     context.executionCtx.waitUntil(
       (async () => {
-        await chatService.runExternalActionIfOperational(
-          conversation.id,
+        await runWithExternalActionLease(
+          chatService,
           context.project.id,
+          conversation.id,
           () => telegramService.forwardVisitorMessage(
             telegramBotToken,
             telegramChatId,
@@ -719,13 +755,21 @@ export async function handleWidgetMessageTurn(
 
   const [enabledGuidelines, recentHistory] = await Promise.all([
     guidelineService.getEnabledByProject(context.project.id),
-    chatService.getRecentPublicMessages(context.conversationId, 11),
+    chatService.getRecentMessages(
+      context.project.id,
+      context.conversationId,
+      11,
+    ),
   ]);
   const parallelPrefetchedHistory = recentHistory.messages;
   markStage("ai_prefetch_done");
 
   const conversationHistory = normalizeConversationHistory({
-    rawHistory: parallelPrefetchedHistory,
+    rawHistory: parallelPrefetchedHistory.map((message) => ({
+      role: message.author,
+      content: message.content,
+      createdAt: message.createdAt,
+    })),
     currentMessage: aiMessageContent,
     persistedCurrentMessage: context.payload.content,
   });
@@ -832,19 +876,16 @@ export async function handleWidgetMessageTurn(
       }
       currentStage = "save_bot_message";
       throwIfMavenTurnCancelled(turnAbortController.signal);
-      const botMessage = await chatService.addPublicBotMessageIfOwnershipMatches(
-        {
+      const botMessage = await chatService.appendBot({
+          projectId: context.project.id,
           conversationId: context.conversationId,
           content: cleanResponse,
-          sources: null,
           senderName: settings?.botName ?? null,
-        },
-        context.project.id,
-        {
+          expected: {
           status: outputPermission.status,
           chatState: outputPermission.chatState,
-        },
-      );
+          },
+        });
       throwIfMavenTurnCancelled(turnAbortController.signal);
       if (!botMessage) {
         const latestPermission = await getAiOutputPermission();
@@ -1126,9 +1167,9 @@ export async function handleWidgetMessageTurn(
       ) {
         currentStage = "close_conversation";
         throwIfMavenTurnCancelled(turnAbortController.signal);
-        resolvedByThisTurn = await chatService.resolveConversationByAi(
-          context.conversationId,
+        resolvedByThisTurn = await chatService.resolveByAi(
           context.project.id,
+          context.conversationId,
         );
         if (resolvedByThisTurn) {
           chatState = applyChatOwnershipEvent(chatState, "ai_handed_back");
@@ -1191,22 +1232,17 @@ export async function handleWidgetMessageTurn(
         finalText: fullResponse,
         abortSignal: turnAbortController.signal,
         persist: async () =>
-          chatService.addPublicBotMessageIfOwnershipMatches(
-            {
+          chatService.appendBot({
+              projectId: context.project.id,
               conversationId: context.conversationId,
               content: fullResponse,
-              sources:
-                sourceReferences.length > 0
-                  ? JSON.stringify(sourceReferences)
-                  : null,
+              sources: sourceReferences,
               senderName: settings?.botName ?? null,
-            },
-            context.project.id,
-            {
+              expected: {
               status: outputPermission.status,
               chatState: outputPermission.chatState,
-            },
-          ),
+              },
+            }),
         getConversationStatusAfterFailure: async () =>
           (await getAiOutputPermission()).status,
         onPersisted: () => {
@@ -1247,9 +1283,10 @@ export async function handleWidgetMessageTurn(
           const telegramChatId = settings.telegramChatId;
           context.executionCtx.waitUntil(
             (async () => {
-              await chatService.runExternalActionIfOperational(
-                context.conversationId,
+              await runWithExternalActionLease(
+                chatService,
                 context.project.id,
+                context.conversationId,
                 () => telegramService.notifyBotResolved(
                   telegramBotToken,
                   telegramChatId,
@@ -1404,19 +1441,16 @@ export async function handleWidgetMessageTurn(
           if (outputPermission.allowed) {
             const fallbackMessage = context.contactAccepted.fallbackMessage;
             throwIfMavenTurnCancelled(turnAbortController.signal);
-            const botMessage = await chatService.addPublicBotMessageIfOwnershipMatches(
-              {
+            const botMessage = await chatService.appendBot({
+                projectId: context.project.id,
                 conversationId: context.conversationId,
                 content: fallbackMessage,
-                sources: null,
                 senderName: settings?.botName ?? null,
-              },
-              context.project.id,
-              {
+                expected: {
                 status: outputPermission.status,
                 chatState: outputPermission.chatState,
-              },
-            );
+                },
+              });
             throwIfMavenTurnCancelled(turnAbortController.signal);
             if (!botMessage) {
               const latestPermission = await getAiOutputPermission();

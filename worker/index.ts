@@ -16,16 +16,22 @@ import { ProjectService } from "./services/project-service";
 import { WidgetService } from "./services/widget-service";
 import { getAssignableUsers } from "./services/assignable-users";
 import { ContactFormService } from "./services/contact-form-service";
-import { ChatService, type InboxFilter } from "./services/chat-service";
+import { createPublicConversationStore } from "./conversations/create-public-conversation-store";
+import {
+  toLegacyConversationDto,
+  toLegacyLastMessagePreviewDto,
+  toLegacyMessageDto,
+} from "./conversations/public-conversation-dto";
+import {
+  type PublicConversationStore,
+  type PublicInboxFilter as InboxFilter,
+} from "./conversations/public-conversation-store";
 import { CustomerIdentityService } from "./services/customer-identity-service";
 import { CustomerService } from "./services/customer-service";
 import { ResourceService, type FaqPair } from "./services/resource-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
 import { FAQ_SET_MAX_CHARS } from "../shared/faq-limits";
-import {
-  parseMessageImageUrls,
-  serializeMessageImageUrls,
-} from "../shared/message-images";
+import { serializeMessageImageUrls } from "../shared/message-images";
 import {
   isConversationUploadUrl,
   isProjectChatUploadUrl,
@@ -395,16 +401,38 @@ async function maskStoredToolHeaders(
 }
 
 function isConversationStale(
-  conv: { status: string; lastActivityAt: Date | null; createdAt: Date },
+  conv: {
+    status: string;
+    lastActivityAt: Date | number | null;
+    createdAt: Date | number;
+  },
   autoCloseMinutes: number,
 ): boolean {
   if (conv.status === "closed") return false;
   // Flagged-for-review conversations stay in Needs You until a human acts
   // (mirrors the guard in ChatService.checkAndCloseStale).
   if (conv.status === "waiting_agent") return false;
-  const last =
-    conv.lastActivityAt?.getTime() ?? conv.createdAt.getTime();
+  const activity = conv.lastActivityAt ?? conv.createdAt;
+  const last = activity instanceof Date ? activity.getTime() : activity;
   return last < Date.now() - autoCloseMinutes * 60_000;
+}
+
+async function runWithConversationExternalAction<T>(
+  store: PublicConversationStore,
+  projectId: string,
+  conversationId: string,
+  action: () => Promise<T>,
+): Promise<{ executed: boolean; value?: T }> {
+  const lease = await store.acquireExternalAction({
+    projectId,
+    conversationId,
+  });
+  if (!lease) return { executed: false };
+  try {
+    return { executed: true, value: await action() };
+  } finally {
+    await store.releaseExternalAction(lease);
+  }
 }
 
 interface BrowserRenderingMarkdownResponse {
@@ -726,7 +754,7 @@ const app = new Hono<HonoAppContext>()
     );
     if (!project) return c.json({ error: "Project not found" }, 404);
     const settings = await projectService.getSettings(project.id);
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
 
     return handleSignedWidgetIdentify({
       projectId: project.id,
@@ -737,7 +765,10 @@ const app = new Hono<HonoAppContext>()
       getConversation(projectId, conversationId) {
         return chatService.getConversationById(conversationId, projectId);
       },
-      identityService: new CustomerIdentityService(db),
+      identityService: new CustomerIdentityService(
+        db,
+        createPublicConversationStore({ db, env: c.env }),
+      ),
       onConversationsChanged(conversationIds) {
         broadcastCustomerConversationChanges(c, conversationIds);
       },
@@ -764,7 +795,10 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(createConversationSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-    const customerIdentityService = new CustomerIdentityService(db);
+    const customerIdentityService = new CustomerIdentityService(
+      db,
+      createPublicConversationStore({ db, env: c.env }),
+    );
     const linkedCustomer = await customerIdentityService.findCustomerByVisitorId(
       project.id,
       parsed.data.visitorId,
@@ -796,7 +830,7 @@ const app = new Hono<HonoAppContext>()
     const userAgent = c.req.header("user-agent");
     if (userAgent) geoMeta.userAgent = userAgent;
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.createConversation({
       projectId: project.id,
       customerId: linkedCustomer?.id ?? null,
@@ -806,7 +840,7 @@ const app = new Hono<HonoAppContext>()
       metadata: JSON.stringify(geoMeta),
     });
 
-    return c.json(conversation, 201);
+    return c.json(toLegacyConversationDto(conversation), 201);
   })
 
   // ─── Get Active Conversation by Visitor ────────────────────────────────────
@@ -825,13 +859,13 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectBySlugPublic(slug);
     if (!project) return c.json({ error: "Project not found" }, 404);
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.getActiveConversationByVisitor(
       project.id,
       visitorId,
     );
     if (!conversation) return c.json({ conversation: null });
-    return c.json({ conversation });
+    return c.json({ conversation: toLegacyConversationDto(conversation) });
   })
 
   // ─── Get Conversation Messages ──────────────────────────────────────────────
@@ -849,7 +883,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectBySlugPublic(slug);
     if (!project) return c.json({ error: "Project not found" }, 404);
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     let conversation = await chatService.getConversationById(
       conversationId,
       project.id,
@@ -881,20 +915,21 @@ const app = new Hono<HonoAppContext>()
     if (sinceParam) {
       const sinceTs = parseInt(sinceParam, 10);
       if (!isNaN(sinceTs)) {
-        const newMessages = await chatService.getPublicMessagesSince(
+        const newMessages = await chatService.getMessagesSince(
+          project.id,
           conversationId,
           sinceTs,
         );
         return c.json({
-          messages: newMessages,
+          messages: newMessages.map(toLegacyMessageDto),
           status: conversation.status,
         });
       }
     }
 
-    const msgs = await chatService.getPublicMessages(conversationId);
+    const msgs = await chatService.getMessages(project.id, conversationId);
     return c.json({
-      messages: msgs,
+      messages: msgs.map(toLegacyMessageDto),
       status: conversation.status,
     });
   })
@@ -931,7 +966,7 @@ const app = new Hono<HonoAppContext>()
       // No body or invalid JSON — default to active
     }
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.updateVisitorLastSeen(
       conversationId,
       project.id,
@@ -942,11 +977,21 @@ const app = new Hono<HonoAppContext>()
     }
 
     if (deliveredUpTo) {
-      const ids = await chatService.markPublicDeliveredUpTo(conversationId, deliveredUpTo);
+      const ids = await chatService.markDelivery({
+        projectId: project.id,
+        conversationId,
+        upToMessageId: deliveredUpTo,
+        kind: "delivered",
+      });
       broadcastMessageStatus(c.env, c.executionCtx, conversationId, "delivered", ids);
     }
     if (readUpTo) {
-      const ids = await chatService.markPublicReadUpTo(conversationId, readUpTo);
+      const ids = await chatService.markDelivery({
+        projectId: project.id,
+        conversationId,
+        upToMessageId: readUpTo,
+        kind: "read",
+      });
       broadcastMessageStatus(c.env, c.executionCtx, conversationId, "read", ids);
     }
 
@@ -1004,7 +1049,7 @@ const app = new Hono<HonoAppContext>()
       ) {
         return c.json({ error: "Visitor identity is required" }, 400);
       }
-      const chatService = new ChatService(db);
+      const chatService = createPublicConversationStore({ db, env: c.env });
       const conversation = await chatService.getOperationalConversationById(
         requestedConversationId,
         project.id,
@@ -1050,7 +1095,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectBySlugPublic(slug);
     if (!project) return c.json({ error: "Project not found" }, 404);
 
-    const chatServiceForBan = new ChatService(db);
+    const chatServiceForBan = createPublicConversationStore({ db, env: c.env });
     const convForBan = await chatServiceForBan.getConversationById(
       conversationId,
       project.id,
@@ -1126,7 +1171,7 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(updateVisitorEmailSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.getOperationalConversationById(
       conversationId,
       project.id,
@@ -1163,7 +1208,7 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(updateConversationPublicSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.getOperationalConversationById(
       conversationId,
       project.id,
@@ -1217,7 +1262,7 @@ const app = new Hono<HonoAppContext>()
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
     const contactFormService = new ContactFormService(db);
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
 
     // Verify contact form is enabled
     const formConfig = await contactFormService.getConfig(project.id);
@@ -1226,7 +1271,10 @@ const app = new Hono<HonoAppContext>()
     }
 
     const visitorId = parsed.data.visitorId ?? crypto.randomUUID();
-    const customerIdentityService = new CustomerIdentityService(db);
+    const customerIdentityService = new CustomerIdentityService(
+      db,
+      createPublicConversationStore({ db, env: c.env }),
+    );
     const linkedCustomer = await customerIdentityService.findCustomerByVisitorId(
       project.id,
       visitorId,
@@ -1524,7 +1572,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ ok: true });
     }
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const projectService = new ProjectService(db);
     const projectSettings = await projectService.getSettings(projectId);
     const botName = projectSettings?.botName;
@@ -1583,9 +1631,10 @@ const app = new Hono<HonoAppContext>()
       text: string,
       replyToMessageId: number,
     ): Promise<void> {
-      await chatService.runExternalActionIfOperational(
-        operationalConversationId,
+      await runWithConversationExternalAction(
+        chatService,
         projectId,
+        operationalConversationId,
         () => telegramService.sendMessage(
           tgSettings.telegramBotToken!,
           tgSettings.telegramChatId!,
@@ -1692,9 +1741,9 @@ const app = new Hono<HonoAppContext>()
           // Generate a bot response using the agent's instruction
           const msgs = await chatService.getPublicMessages(conversationId);
           const history = msgs
-            .filter((m) => m.role !== "bot" || m.content)
+            .filter((m) => m.author !== "bot" || m.content)
             .slice(-20)
-            .map((m) => ({ role: m.role, content: m.content }));
+            .map((m) => ({ role: m.author, content: m.content }));
 
           const defaultSettings = {
             toneOfVoice: "professional" as const,
@@ -2384,7 +2433,7 @@ const app = new Hono<HonoAppContext>()
     // Prefer In-Reply-To (single id), fall back to References (last id is the
     // most recent ancestor). If neither matches, fall back to a sender-email
     // lookup so visitor-initiated email replies still work without our headers.
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const referencedMessageId =
       parseEmailMessageId(inReplyToHeader) ??
       parseEmailMessageId(referencesHeader, { source: "references" });
@@ -2524,8 +2573,11 @@ const app = new Hono<HonoAppContext>()
           projectId: project.id,
           customerId: conversation.customerId,
           visitorId: conversation.visitorId,
-          occurredAt: inboundEmailMessage.createdAt,
-          identityService: new CustomerIdentityService(db),
+          occurredAt: new Date(inboundEmailMessage.createdAt),
+          identityService: new CustomerIdentityService(
+            db,
+            createPublicConversationStore({ db, env: c.env }),
+          ),
           logFailure(error) {
             logError("inbound_email.customer_last_seen_failed", error, {
               projectId: project.id,
@@ -2565,9 +2617,10 @@ const app = new Hono<HonoAppContext>()
             const replyTo = conversation.telegramThreadId
               ? parseInt(conversation.telegramThreadId, 10)
               : undefined;
-            await chatService.runExternalActionIfOperational(
-              conversation.id,
+            await runWithConversationExternalAction(
+              chatService,
               project.id,
+              conversation.id,
               () => telegramService.forwardVisitorMessage(
                 telegramBotToken,
                 telegramChatId,
@@ -2605,10 +2658,10 @@ const app = new Hono<HonoAppContext>()
             "Visitor";
           const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`;
           c.executionCtx.waitUntil(
-            chatService
-              .runExternalActionIfOperational(
-                conversation.id,
+            runWithConversationExternalAction(
+                chatService,
                 project.id,
+                conversation.id,
                 () => emailService.sendVisitorReplyToAgentEmail({
                   to: agentEmail,
                   projectSlug: project.slug,
@@ -2623,7 +2676,7 @@ const app = new Hono<HonoAppContext>()
                   accentColor: widgetCfgForReply?.primaryColor ?? null,
                 }),
               )
-              .catch((err) => {
+              .catch((err: unknown) => {
                 console.error(
                   "[InboundEmail] Visitor-reply notification failed:",
                   err,
@@ -2668,10 +2721,10 @@ const app = new Hono<HonoAppContext>()
         const visitorEmail = conversation.visitorEmail;
         const dashboardUrl = `${c.env.BETTER_AUTH_URL}/app/projects/${project.id}/conversations/${conversation.id}`;
         c.executionCtx.waitUntil(
-          chatService
-            .runExternalActionIfOperational(
-              conversation.id,
+          runWithConversationExternalAction(
+              chatService,
               project.id,
+              conversation.id,
               () => emailService.sendAgentMessageEmail({
                 to: visitorEmail,
                 projectSlug: project.slug,
@@ -2687,7 +2740,7 @@ const app = new Hono<HonoAppContext>()
                 autoSubmitted: true,
               }),
             )
-            .catch((err) => {
+            .catch((err: unknown) => {
               console.error(
                 "[InboundEmail] Agent-reply outbound to visitor failed:",
                 err,
@@ -2795,7 +2848,7 @@ const app = new Hono<HonoAppContext>()
         conversationId: c.req.param("conversationId"),
         secret: c.env.SIDECHAT_TOKEN_SECRET,
         projectService: new ProjectService(c.get("db")),
-        chatService: new ChatService(c.get("db")),
+        chatService: createPublicConversationStore({ db: c.get("db"), env: c.env }),
         getParent: () =>
           getAgentByName(c.env.MAVEN_PROJECT_AGENT, projectId),
       });
@@ -4023,9 +4076,17 @@ const app = new Hono<HonoAppContext>()
       }
     }
 
-    const dashboardService = new DashboardService(db);
+    const dashboardService = new DashboardService(
+      db,
+      createPublicConversationStore({ db, env: c.env }),
+    );
     const stats = await dashboardService.getStats(effectiveUserId, projectId);
-    return c.json(stats);
+    return c.json({
+      ...stats,
+      recentConversations: stats.recentConversations.map(
+        toLegacyConversationDto,
+      ),
+    });
   })
 
   // ─── Per-project access enforcement (scoped team members) ────────────────────
@@ -4043,7 +4104,10 @@ const app = new Hono<HonoAppContext>()
     return handleListCustomers({
       projectId,
       query: c.req.query(),
-      customerService: new CustomerService(c.get("db")),
+      customerService: new CustomerService(
+        c.get("db"),
+        createPublicConversationStore({ db: c.get("db"), env: c.env }),
+      ),
     });
   })
   .post("/api/projects/:id/customers", async (c) => {
@@ -4056,7 +4120,10 @@ const app = new Hono<HonoAppContext>()
     return handleCreateCustomer({
       projectId,
       body: await c.req.json(),
-      identityService: new CustomerIdentityService(c.get("db")),
+      identityService: new CustomerIdentityService(
+        c.get("db"),
+        createPublicConversationStore({ db: c.get("db"), env: c.env }),
+      ),
       onCustomersChanged(customerIds) {
         broadcastCustomerChanges(c, projectId, customerIds);
       },
@@ -4075,7 +4142,10 @@ const app = new Hono<HonoAppContext>()
     return handleGetCustomer({
       projectId,
       customerId: c.req.param("customerId"),
-      customerService: new CustomerService(c.get("db")),
+      customerService: new CustomerService(
+        c.get("db"),
+        createPublicConversationStore({ db: c.get("db"), env: c.env }),
+      ),
     });
   })
   .patch("/api/projects/:id/customers/:customerId", async (c) => {
@@ -4089,7 +4159,10 @@ const app = new Hono<HonoAppContext>()
       projectId,
       customerId: c.req.param("customerId"),
       body: await c.req.json(),
-      identityService: new CustomerIdentityService(c.get("db")),
+      identityService: new CustomerIdentityService(
+        c.get("db"),
+        createPublicConversationStore({ db: c.get("db"), env: c.env }),
+      ),
       onCustomersChanged(customerIds) {
         broadcastCustomerChanges(c, projectId, customerIds);
       },
@@ -4105,7 +4178,10 @@ const app = new Hono<HonoAppContext>()
     return handleDeleteCustomer({
       projectId,
       customerId: c.req.param("customerId"),
-      identityService: new CustomerIdentityService(c.get("db")),
+      identityService: new CustomerIdentityService(
+        c.get("db"),
+        createPublicConversationStore({ db: c.get("db"), env: c.env }),
+      ),
       onConversationsChanged(conversationIds) {
         broadcastCustomerConversationChanges(c, conversationIds);
       },
@@ -4127,7 +4203,10 @@ const app = new Hono<HonoAppContext>()
         projectId,
         targetCustomerId: c.req.param("targetCustomerId"),
         body: await c.req.json(),
-        identityService: new CustomerIdentityService(c.get("db")),
+        identityService: new CustomerIdentityService(
+          c.get("db"),
+          createPublicConversationStore({ db: c.get("db"), env: c.env }),
+        ),
         onConversationsChanged(conversationIds) {
           broadcastCustomerConversationChanges(c, conversationIds);
         },
@@ -4150,7 +4229,10 @@ const app = new Hono<HonoAppContext>()
         projectId,
         conversationId: c.req.param("conversationId"),
         body: await c.req.json(),
-        identityService: new CustomerIdentityService(c.get("db")),
+        identityService: new CustomerIdentityService(
+          c.get("db"),
+          createPublicConversationStore({ db: c.get("db"), env: c.env }),
+        ),
         onConversationsChanged(conversationIds) {
           broadcastCustomerConversationChanges(c, conversationIds);
         },
@@ -6536,7 +6618,7 @@ const app = new Hono<HonoAppContext>()
     );
     const offset = parseInt(c.req.query("offset") ?? "0", 10) || 0;
     const searchQuery = c.req.query("q")?.trim() || undefined;
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
 
     // Lazy auto-close stale conversations (single query, no double fetch)
     const settings = await projectService.getSettings(project.id);
@@ -6550,6 +6632,7 @@ const app = new Hono<HonoAppContext>()
     );
     if (settings?.autoCloseMinutes && statusFilter !== "closed" && inboxFilter !== "resolved") {
       const closedIds = await chatService.checkAndCloseStaleForProject(
+        project.id,
         convos,
         settings.autoCloseMinutes,
       );
@@ -6566,10 +6649,15 @@ const app = new Hono<HonoAppContext>()
       chatService.getInboxCounts(project.id),
       chatService.getLastPublicMessagesByConversationIds(convos.map((c) => c.id)),
     ]);
-    const conversationsWithPreview = convos.map((c) => ({
-      ...c,
-      lastMessage: lastMsgMap.get(c.id) ?? null,
-    }));
+    const conversationsWithPreview = convos.map((conversation) => {
+      const lastMessage = lastMsgMap.get(conversation.id);
+      return {
+        ...toLegacyConversationDto(conversation),
+        lastMessage: lastMessage
+          ? toLegacyLastMessagePreviewDto(lastMessage)
+          : null,
+      };
+    });
     return c.json({
       conversations: conversationsWithPreview,
       counts,
@@ -6594,7 +6682,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Invalid since parameter" }, 400);
     }
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const serverTime = Date.now();
 
     // If no since timestamp provided, return empty updates plus current counts.
@@ -6611,10 +6699,15 @@ const app = new Hono<HonoAppContext>()
     const lastMsgMap = await chatService.getLastPublicMessagesByConversationIds(
       updates.map((u) => u.id),
     );
-    const updatesWithPreview = updates.map((u) => ({
-      ...u,
-      lastMessage: lastMsgMap.get(u.id) ?? null,
-    }));
+    const updatesWithPreview = updates.map((conversation) => {
+      const lastMessage = lastMsgMap.get(conversation.id);
+      return {
+        ...toLegacyConversationDto(conversation),
+        lastMessage: lastMessage
+          ? toLegacyLastMessagePreviewDto(lastMessage)
+          : null,
+      };
+    });
 
     return c.json({ updates: updatesWithPreview, counts, serverTime });
   })
@@ -6628,11 +6721,11 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
     const since = parseInt(c.req.query("since") ?? "0", 10) || 0;
-    const rows = await new ChatService(db).getNeedsReviewSince(project.id, since);
+    const rows = await createPublicConversationStore({ db, env: c.env }).getNeedsReviewSince(project.id, since);
     const items = rows.map((row) => {
       let meta: Record<string, unknown> = {};
       try {
-        const parsed = row.metadata ? JSON.parse(row.metadata) : {};
+        const parsed = row.metadata;
         meta = typeof parsed === "object" && parsed !== null ? parsed : {};
       } catch { /* ignore */ }
       return {
@@ -6642,7 +6735,7 @@ const app = new Hono<HonoAppContext>()
         summary: typeof meta.teamRequestSummary === "string" ? meta.teamRequestSummary : null,
         summaryMessageId:
           typeof meta.reviewSummaryMessageId === "string" ? meta.reviewSummaryMessageId : null,
-        updatedAt: row.updatedAt.getTime(),
+        updatedAt: row.updatedAt,
       };
     });
     return c.json({ serverTime: Date.now(), items });
@@ -6662,7 +6755,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Wave 1: conversation row + settings in parallel.
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const [conversation, settings] = await Promise.all([
       chatService.getConversationById(c.req.param("convId"), project.id),
       projectService.getSettings(project.id),
@@ -6712,7 +6805,7 @@ const app = new Hono<HonoAppContext>()
     const toolService = new ToolService(db);
     const banService = new VisitorBanService(db);
     const [{ messages: msgs, hasMore }, ban] = await Promise.all([
-      chatService.getRecentPublicMessages(conversation.id, 25),
+      chatService.getRecentMessages(project.id, conversation.id, 25),
       banService.isVisitorBanned(
         project.id,
         conversation.visitorId,
@@ -6735,7 +6828,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     const messagesWithTools = msgs.map((msg) => ({
-      ...msg,
+      ...toLegacyMessageDto(msg),
       toolExecutions:
         execsByMessageId.get(msg.id)?.map((ex) => ({
           id: ex.id,
@@ -6753,7 +6846,10 @@ const app = new Hono<HonoAppContext>()
     }));
 
     return c.json({
-      conversation: { ...conversation, visitorBlocked: !!ban },
+      conversation: {
+        ...toLegacyConversationDto(conversation),
+        visitorBlocked: !!ban,
+      },
       messages: messagesWithTools,
       hasMore,
       botName: settings?.botName ?? null,
@@ -6781,18 +6877,19 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "before query param is required (ISO date)" }, 400);
     }
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.getConversationById(
       c.req.param("convId"),
       project.id,
     );
     if (!conversation) return c.json({ error: "Not found" }, 404);
 
-    const { messages: msgs, hasMore } = await chatService.getPublicMessagesBefore(
-      conversation.id,
-      before,
+    const { messages: msgs, hasMore } = await chatService.getMessagesBefore({
+      projectId: project.id,
+      conversationId: conversation.id,
+      beforeCreatedAt: before.getTime(),
       limit,
-    );
+    });
 
     const toolService = new ToolService(db);
     const toolExecs = await toolService.getExecutionsByMessageIds(
@@ -6807,7 +6904,7 @@ const app = new Hono<HonoAppContext>()
     }
 
     const messagesWithTools = msgs.map((msg) => ({
-      ...msg,
+      ...toLegacyMessageDto(msg),
       toolExecutions:
         execsByMessageId.get(msg.id)?.map((ex) => ({
           id: ex.id,
@@ -6841,7 +6938,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
@@ -6901,11 +6998,12 @@ const app = new Hono<HonoAppContext>()
 
     // Emit "joined" once — only when picking up an escalated conversation for the first time
     if (conversation.status === "waiting_agent") {
-      await chatService.addPublicSystemMessage(
-        conversation.id,
-        "joined",
-        `${user.name} joined the conversation`,
-      ).catch(() => {});
+      await chatService.appendSystem({
+        projectId: project.id,
+        conversationId: conversation.id,
+        kind: "joined",
+        content: `${user.name} joined the conversation`,
+      }).catch(() => {});
     }
 
     broadcastMessageNew(c.env, c.executionCtx, conversation.id, message, {
@@ -6918,7 +7016,7 @@ const app = new Hono<HonoAppContext>()
       "agent_replied",
     );
 
-    return c.json(message, 201);
+    return c.json(toLegacyMessageDto(message), 201);
   })
   .post("/api/projects/:id/conversations/:convId/send-email", async (c) => {
     const user = c.get("user");
@@ -6935,7 +7033,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
@@ -6948,14 +7046,16 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "No visitor email address" }, 400);
     }
 
-    const message = await chatService.getPublicMessageById(
+    const message = await chatService.getMessage(
+      project.id,
+      conversation.id,
       parsed.data.messageId,
     );
     if (!message || message.conversationId !== conversation.id) {
       return c.json({ error: "Message not found" }, 404);
     }
 
-    if (message.role !== "agent" && message.role !== "bot") {
+    if (message.author !== "agent" && message.author !== "bot") {
       return c.json({ error: "Only agent or bot messages can be emailed" }, 400);
     }
 
@@ -6973,9 +7073,10 @@ const app = new Hono<HonoAppContext>()
 
     const emailService = new EmailService(c.env.RESEND_API_KEY);
     try {
-      const delivery = await chatService.runExternalActionIfOperational(
-        conversation.id,
+      const delivery = await runWithConversationExternalAction(
+        chatService,
         project.id,
+        conversation.id,
         async () => {
           await emailService.sendAgentMessageEmail({
             to: conversation.visitorEmail!,
@@ -6986,14 +7087,15 @@ const app = new Hono<HonoAppContext>()
             agentName: message.senderName ?? user.name ?? "Support",
             agentAvatar: message.senderAvatar ?? null,
             messageContent: message.content,
-            imageUrls: parseMessageImageUrls(message.imageUrl),
+            imageUrls: message.imageUrls,
             dashboardUrl: `https://replymaven.com/app/projects/${project.id}/conversations/${conversation.id}`,
             accentColor: widgetCfg?.primaryColor ?? null,
           });
-          await chatService.markPublicMessageAsEmailed(
-            conversation.id,
-            message.id,
-          );
+          await chatService.markEmailed({
+            projectId: project.id,
+            conversationId: conversation.id,
+            messageId: message.id,
+          });
         },
       );
       if (!delivery.executed) {
@@ -7024,14 +7126,18 @@ const app = new Hono<HonoAppContext>()
       const convId = c.req.param("convId");
       const messageId = c.req.param("messageId");
 
-      const chatService = new ChatService(db);
+      const chatService = createPublicConversationStore({ db, env: c.env });
       const conversation = await chatService.getOperationalConversationById(
         convId,
         project.id,
       );
       if (!conversation) return c.json({ error: "Not found" }, 404);
 
-      const result = await chatService.deletePublicAgentMessage(convId, messageId);
+      const result = await chatService.deleteHumanMessage(
+        project.id,
+        convId,
+        messageId,
+      );
       if (!result.deleted) {
         if (result.reason === "not_agent") {
           return c.json(
@@ -7079,7 +7185,7 @@ const app = new Hono<HonoAppContext>()
       }
     }
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const actionAt = new Date();
     const result = await chatService.bulkUpdateConversations(
       project.id,
@@ -7156,7 +7262,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
@@ -7200,7 +7306,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(c.req.param("id"));
     if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
       return c.json({ error: "Not found" }, 404);
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const reopened = await chatService.reopenConversation(
       c.req.param("convId"),
       project.id,
@@ -7221,7 +7327,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(c.req.param("id"));
     if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
       return c.json({ error: "Not found" }, 404);
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
@@ -7246,7 +7352,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     const parsed = validate(snoozeSchema, await c.req.json());
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const convId = c.req.param("convId");
     const conversation = await chatService.getOperationalConversationById(
       convId,
@@ -7273,7 +7379,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     const parsed = validate(prioritySchema, await c.req.json());
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
@@ -7292,7 +7398,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     const parsed = validate(assignSchema, await c.req.json());
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     const conversation = await chatService.getOperationalConversationById(
       c.req.param("convId"),
       project.id,
@@ -7326,7 +7432,7 @@ const app = new Hono<HonoAppContext>()
     const project = await projectService.getProjectById(c.req.param("id"));
     if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id))
       return c.json({ error: "Not found" }, 404);
-    return c.json(await new ChatService(db).getInboxCounts(project.id));
+    return c.json(await createPublicConversationStore({ db, env: c.env }).getInboxCounts(project.id));
   })
 
   // ─── Visitor Bans ──────────────────────────────────────────────────────────
@@ -7345,7 +7451,7 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(banVisitorSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-    const chatService = new ChatService(db);
+    const chatService = createPublicConversationStore({ db, env: c.env });
     if (parsed.data.conversationId) {
       const conversation = await chatService.getOperationalConversationById(
         parsed.data.conversationId,
@@ -7707,7 +7813,7 @@ const app = new Hono<HonoAppContext>()
       if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
         return c.json({ error: "Not found" }, 404);
       }
-      const chatService = new ChatService(db);
+      const chatService = createPublicConversationStore({ db, env: c.env });
       const conversation = await chatService.getOperationalConversationById(
         requestedConversationId,
         project.id,
@@ -7818,7 +7924,7 @@ async function runArchivedConversationRetention(env: AppEnv): Promise<void> {
 
   for (let batch = 0; batch < maxBatches; batch += 1) {
     const result = await purgeExpiredArchivedConversations(
-      db,
+      createPublicConversationStore({ db, env }),
       env.UPLOADS,
       async (projectId, conversationId) => {
         const parent = await getAgentByName(

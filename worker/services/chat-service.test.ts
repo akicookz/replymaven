@@ -4,6 +4,7 @@ import { drizzle as drizzleSqlite } from "drizzle-orm/bun-sqlite";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { schema } from "../db";
 import { DashboardService } from "./dashboard-service";
+import { D1PublicConversationStore } from "../conversations/d1-public-conversation-store";
 import {
   buildAiResolutionQuery,
   buildAcceptedPublicTeamRequestSummaryQuery,
@@ -273,10 +274,9 @@ function createDashboardStatsHarness(): {
     status text NOT NULL
   )`);
   const db = drizzleSqlite(sqlite, { schema });
+  const d1 = db as unknown as DrizzleD1Database<Record<string, unknown>>;
   return {
-    service: new DashboardService(
-      db as unknown as DrizzleD1Database<Record<string, unknown>>,
-    ),
+    service: new DashboardService(d1, new D1PublicConversationStore(d1)),
     sqlite,
   };
 }

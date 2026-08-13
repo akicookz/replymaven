@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { MessageRow } from "../db";
 import type { AppEnv } from "../types";
+import { mapD1MessageRow } from "../conversations/d1-public-conversation-store";
 import {
   broadcastCustomerUpdated,
   broadcastMessageNew,
@@ -190,11 +191,13 @@ test("public replay includes equal-second peers after the cursor", async () => {
     }),
   ];
   const reader: ConversationReplayReader = {
-    async getPublicMessageById(id) {
-      return id === cursor.id ? cursor : null;
+    async getMessage(_projectId, _conversationId, id) {
+      return id === cursor.id ? mapD1MessageRow(cursor) : null;
     },
-    async getPublicMessagesSince(_conversationId, since) {
-      return rows.filter((row) => row.createdAt.getTime() > since);
+    async getMessagesSince(_projectId, _conversationId, since) {
+      return rows
+        .filter((row) => row.createdAt.getTime() > since)
+        .map(mapD1MessageRow);
     },
   };
   const socket = createSocket(agentAttachment());

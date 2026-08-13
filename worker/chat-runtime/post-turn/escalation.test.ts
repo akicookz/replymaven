@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createEscalation } from "./escalation";
-import { type ChatService } from "../../services/chat-service";
+import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import { type ProjectService } from "../../services/project-service";
 import { type TelegramService } from "../../services/telegram-service";
-import { type MessageRow } from "../../db";
+import { type PublicMessageRecord } from "../../../shared/maven-conversation";
 
 // ─── createEscalation harness ─────────────────────────────────────────────────
 // Services are mocked at the I/O boundary; each helper records the calls the
@@ -39,21 +39,23 @@ function makeChatService() {
       [] as UpdateLegacyEscalationMetadataCall[],
   };
   const service = {
-    addPublicSystemMessage: async (
-      conversationId: string,
-      kind: string,
-      content: string,
-      idempotencyKey?: string,
-    ): Promise<MessageRow> => {
+    appendSystem: async (input: {
+      conversationId: string;
+      kind: string;
+      content: string;
+      idempotencyKey?: string;
+    }): Promise<PublicMessageRecord> => {
+      const { conversationId, kind, content, idempotencyKey } = input;
       calls.addPublicSystemMessage.push({ conversationId, kind, content });
-      const now = new Date();
+      const now = Date.now();
       return {
         id: idempotencyKey ?? "msg-review-1",
         conversationId,
-        role: "system",
+        author: "system",
         content,
-        sources: JSON.stringify({ systemKind: kind }),
-        imageUrl: null,
+        sources: [],
+        imageUrls: [],
+        systemKind: kind,
         senderName: null,
         senderAvatar: null,
         userId: null,
@@ -72,19 +74,22 @@ function makeChatService() {
       return { id };
     },
     updateLegacyEscalationMetadata: async (
-      id: string,
       projectId: string,
+      id: string,
       data: UpdateLegacyEscalationMetadataCall["data"],
     ) => {
       calls.updateLegacyEscalationMetadata.push({ id, projectId, data });
       return { id };
     },
-    runExternalActionIfOperational: async (
-      _conversationId: string,
-      _projectId: string,
-      action: () => Promise<unknown>,
-    ) => ({ executed: true, value: await action() }),
-  } as unknown as ChatService;
+    acquireExternalAction: async () => ({
+      projectId: "project-1",
+      conversationId: "conv-1",
+      leaseId: "lease-1",
+      ownershipRevision: 0,
+      acquiredAt: Date.now(),
+    }),
+    releaseExternalAction: async () => undefined,
+  } as unknown as PublicConversationStore;
   return { service, calls };
 }
 
@@ -122,7 +127,7 @@ function makeConversation(
 
 function baseParams(overrides: Record<string, unknown> = {}) {
   const { service, calls } = makeChatService();
-  const broadcasts: MessageRow[] = [];
+  const broadcasts: PublicMessageRecord[] = [];
   const params = {
     chatService: service,
     projectService: projectServiceStub,
@@ -133,7 +138,7 @@ function baseParams(overrides: Record<string, unknown> = {}) {
     settings: null,
     env: { BETTER_AUTH_URL: "https://app.test" },
     executionCtx: noopExecutionCtx,
-    broadcast: (row: MessageRow) => {
+    broadcast: (row: PublicMessageRecord) => {
       broadcasts.push(row);
     },
     ...overrides,
@@ -338,10 +343,10 @@ describe("createEscalation - telegram notification", () => {
   test("does not notify after the conversation becomes unavailable", async () => {
     const tg = makeTelegramService();
     const unavailableChatService = {
-      addPublicSystemMessage: async () => null,
+      appendSystem: async () => null,
       updateConversation: async () => null,
       updateLegacyEscalationMetadata: async () => null,
-    } as unknown as ChatService;
+    } as unknown as PublicConversationStore;
     const { params } = baseParams({
       chatService: unavailableChatService,
       telegramService: tg.service,

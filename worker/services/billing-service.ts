@@ -1,16 +1,16 @@
 import Stripe from "stripe";
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, and, desc, asc, sql, inArray, isNotNull } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import {
   subscriptions,
   usage,
   projects,
   projectSettings,
-  conversations,
-  messages,
   type SubscriptionRow,
   type UsageRow,
 } from "../db";
+import { createPublicConversationStore } from "../conversations/create-public-conversation-store";
+import type { PublicConversationStore } from "../conversations/public-conversation-store";
 import { users } from "../db/auth.schema";
 import {
   type AppEnv,
@@ -133,6 +133,7 @@ export class BillingService {
   private stripe: Stripe;
   private priceToMapping: Map<string, PriceMapping>;
   private planIntervalToPrice: Map<string, string>;
+  private conversationStore: PublicConversationStore;
 
   constructor(
     private db: DrizzleD1Database<Record<string, unknown>>,
@@ -144,6 +145,7 @@ export class BillingService {
     const maps = buildPriceMaps(env);
     this.priceToMapping = maps.priceToMapping;
     this.planIntervalToPrice = maps.planIntervalToPrice;
+    this.conversationStore = createPublicConversationStore({ db, env });
   }
 
   // ─── Price Resolution ─────────────────────────────────────────────────────
@@ -961,113 +963,27 @@ export class BillingService {
     const projectIds = userProjects.map((p) => p.id);
     const projectNameMap = new Map(userProjects.map((p) => [p.id, p.name]));
 
-    // Build WHERE conditions
-    const conditions = [
-      inArray(conversations.projectId, projectIds),
-      sql`${conversations.createdAt} >= ${Math.floor(periodStart.getTime() / 1000)}`,
-      sql`${conversations.createdAt} < ${Math.floor(periodEnd.getTime() / 1000)}`,
-    ];
-
-    if (options.status) {
-      conditions.push(eq(conversations.status, options.status as "active" | "waiting_agent" | "agent_replied" | "closed"));
-    }
-
-    if (options.metaKey && options.metaValue) {
-      conditions.push(
-        sql`json_extract(${conversations.metadata}, '$.' || ${options.metaKey}) LIKE ${"%" + options.metaValue.replace(/%/g, "\\%").replace(/_/g, "\\_") + "%"} ESCAPE '\\'`,
-      );
-    }
-
-    const whereClause = and(...conditions)!;
-
-    // Bot message count subquery via LEFT JOIN + GROUP BY
-    const orderExpr =
-      options.sortBy === "botMessages"
-        ? options.sortOrder === "asc"
-          ? asc(sql`bot_count`)
-          : desc(sql`bot_count`)
-        : options.sortOrder === "asc"
-          ? asc(conversations.createdAt)
-          : desc(conversations.createdAt);
-
-    const rows = await this.db
-      .select({
-        conversationId: conversations.id,
-        projectId: conversations.projectId,
-        visitorName: conversations.visitorName,
-        visitorEmail: conversations.visitorEmail,
-        status: conversations.status,
-        metadata: conversations.metadata,
-        createdAt: conversations.createdAt,
-        botCount: sql<number>`count(case when ${messages.role} = 'bot' then 1 end)`.as(
-          "bot_count",
-        ),
-      })
-      .from(conversations)
-      .leftJoin(
-        messages,
-        eq(messages.conversationId, conversations.id),
-      )
-      .where(whereClause)
-      .groupBy(conversations.id)
-      .orderBy(orderExpr)
-      .limit(options.limit)
-      .offset(options.offset);
-
-    // Total count
-    const countResult = await this.db
-      .select({ count: sql<number>`count(distinct ${conversations.id})` })
-      .from(conversations)
-      .where(whereClause);
-
-    const total = countResult[0]?.count ?? 0;
-
-    // Extract all metadata keys
-    const metaRows = await this.db
-      .select({ metadata: conversations.metadata })
-      .from(conversations)
-      .where(
-        and(
-          inArray(conversations.projectId, projectIds),
-          sql`${conversations.createdAt} >= ${Math.floor(periodStart.getTime() / 1000)}`,
-          sql`${conversations.createdAt} < ${Math.floor(periodEnd.getTime() / 1000)}`,
-          isNotNull(conversations.metadata),
-        ),
-      )
-      .limit(200);
-
-    const keySet = new Set<string>();
-    for (const row of metaRows) {
-      if (!row.metadata) continue;
-      try {
-        const parsed = JSON.parse(row.metadata);
-        if (parsed && typeof parsed === "object") {
-          for (const key of Object.keys(parsed)) {
-            keySet.add(key);
-          }
-        }
-      } catch {
-        // skip malformed JSON
-      }
-    }
+    const result = await this.conversationStore.queryUsageConversations({
+      projectIds,
+      periodStart: periodStart.getTime(),
+      periodEnd: periodEnd.getTime(),
+      ...options,
+    });
 
     return {
-      rows: rows.map((r) => ({
-        conversationId: r.conversationId,
-        projectId: r.projectId,
-        projectName: projectNameMap.get(r.projectId) ?? "Unknown",
-        visitorName: r.visitorName,
-        visitorEmail: r.visitorEmail,
-        status: r.status,
-        botMessageCount: r.botCount ?? 0,
-        createdAt:
-          r.createdAt instanceof Date
-            ? r.createdAt.toISOString()
-            : String(r.createdAt),
-        metadata: r.metadata ? safeParseJson(r.metadata) : null,
+      rows: result.rows.map(({ conversation, botMessageCount }) => ({
+        conversationId: conversation.id,
+        projectId: conversation.projectId,
+        projectName: projectNameMap.get(conversation.projectId) ?? "Unknown",
+        visitorName: conversation.visitorName,
+        visitorEmail: conversation.visitorEmail,
+        status: conversation.status,
+        botMessageCount,
+        createdAt: new Date(conversation.createdAt).toISOString(),
+        metadata: toStringRecord(conversation.metadata),
       })),
-      total,
-      metaKeys: Array.from(keySet).sort(),
+      total: result.total,
+      metaKeys: result.metaKeys,
     };
   }
 }
@@ -1086,11 +1002,12 @@ export interface UsageLogRow {
   metadata: Record<string, string> | null;
 }
 
-function safeParseJson(str: string): Record<string, string> | null {
-  try {
-    const parsed = JSON.parse(str);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
+function toStringRecord(
+  value: Record<string, unknown>,
+): Record<string, string> | null {
+  return Object.keys(value).length > 0
+    ? Object.fromEntries(
+        Object.entries(value).map(([key, entry]) => [key, String(entry)]),
+      )
+    : null;
 }

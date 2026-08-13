@@ -1,6 +1,5 @@
 import {
   and,
-  countDistinct,
   desc,
   eq,
   exists,
@@ -20,8 +19,9 @@ import type {
   CustomerVisitorDto,
   UpdateCustomerInput,
 } from "../../shared/customer-types";
+import type { PublicConversationRecord } from "../../shared/maven-conversation";
+import type { PublicConversationStore } from "../conversations/public-conversation-store";
 import {
-  conversations,
   customerVisitors,
   customers,
   type CustomerRow,
@@ -142,18 +142,9 @@ export function buildCustomerListQuery(
   return db
     .select({
       customer: customers,
-      conversationCount: countDistinct(conversations.id),
     })
     .from(customers)
-    .leftJoin(
-      conversations,
-      and(
-        eq(conversations.projectId, customers.projectId),
-        eq(conversations.customerId, customers.id),
-      ),
-    )
     .where(and(...conditions))
-    .groupBy(customers.id)
     .orderBy(desc(customers.updatedAt), desc(customers.id))
     .limit(limit + 1);
 }
@@ -214,23 +205,24 @@ function mapVisitor(
   };
 }
 
-function mapConversation(
-  row: typeof conversations.$inferSelect,
-): CustomerConversationDto {
+function mapConversation(row: PublicConversationRecord): CustomerConversationDto {
   return {
     id: row.id,
     visitorName: row.visitorName,
     visitorEmail: row.visitorEmail,
     status: row.status,
     closeReason: row.closeReason,
-    lastActivityAt: row.lastActivityAt.toISOString(),
-    archivedAt: toIso(row.archivedAt),
-    createdAt: row.createdAt.toISOString(),
+    lastActivityAt: new Date(row.lastActivityAt).toISOString(),
+    archivedAt: row.archivedAt ? new Date(row.archivedAt).toISOString() : null,
+    createdAt: new Date(row.createdAt).toISOString(),
   };
 }
 
 export class CustomerService {
-  constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
+  constructor(
+    private db: DrizzleD1Database<Record<string, unknown>>,
+    private conversationStore: PublicConversationStore,
+  ) {}
 
   async listCustomers(
     projectId: string,
@@ -244,8 +236,17 @@ export class CustomerService {
     const hasMore = rows.length > limit;
     const pageRows = hasMore ? rows.slice(0, limit) : rows;
     const lastRow = pageRows.at(-1);
+    const counts = await this.conversationStore.getConversationCountsByCustomer(
+      projectId,
+      pageRows.map((row) => row.customer.id),
+    );
     return {
-      customers: pageRows.map(mapCustomerListItem),
+      customers: pageRows.map((row) =>
+        mapCustomerListItem({
+          ...row,
+          conversationCount: counts.get(row.customer.id) ?? 0,
+        }),
+      ),
       nextCursor:
         hasMore && lastRow
           ? encodeCustomerCursor({
@@ -279,16 +280,7 @@ export class CustomerService {
           ),
         )
         .orderBy(desc(customerVisitors.createdAt)),
-      this.db
-        .select()
-        .from(conversations)
-        .where(
-          and(
-            eq(conversations.projectId, projectId),
-            eq(conversations.customerId, customerId),
-          ),
-        )
-        .orderBy(desc(conversations.lastActivityAt)),
+      this.conversationStore.listByCustomer(projectId, customerId),
     ]);
 
     return {
@@ -362,35 +354,24 @@ export class CustomerService {
           and(eq(customers.projectId, projectId), eq(customers.id, customerId)),
         )
         .limit(1),
-      this.db
-        .select({ id: conversations.id })
-        .from(conversations)
-        .where(
-          and(
-            eq(conversations.projectId, projectId),
-            eq(conversations.customerId, customerId),
-          ),
-        ),
+      this.conversationStore.listByCustomer(projectId, customerId),
     ]);
     if (customerRows.length === 0) return null;
 
-    const now = new Date();
-    await this.db.batch([
-      this.db
-        .update(conversations)
-        .set({ customerId: null, updatedAt: now })
-        .where(
-          and(
-            eq(conversations.projectId, projectId),
-            eq(conversations.customerId, customerId),
-          ),
-        ),
-      this.db
-        .delete(customers)
-        .where(
-          and(eq(customers.projectId, projectId), eq(customers.id, customerId)),
-        ),
-    ]);
+    await this.db
+      .delete(customers)
+      .where(
+        and(eq(customers.projectId, projectId), eq(customers.id, customerId)),
+      );
+    await Promise.all(
+      conversationRows.map((conversation) =>
+        this.conversationStore.updateCustomer({
+          projectId,
+          conversationId: conversation.id,
+          customerId: null,
+        }),
+      ),
+    );
     return {
       customerId,
       conversationIds: conversationRows.map((row) => row.id),

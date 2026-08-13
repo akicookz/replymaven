@@ -4,7 +4,11 @@ import type {
   PublicMessageRecord,
   PublicSourceReference,
 } from "../../shared/maven-conversation";
-import type { ChatOwnershipEvent } from "../chat-runtime/types";
+import type {
+  ChatOwnershipEvent,
+  ChatOwnershipSnapshot,
+  ConversationChatState,
+} from "../chat-runtime/types";
 
 export type PublicInboxFilter =
   | "needs-you"
@@ -43,6 +47,17 @@ export interface PublicConversationListQuery {
 
 export interface PublicConversationListResult {
   conversations: PublicConversationRecord[];
+}
+
+export interface PublicConversationCounts {
+  all: number;
+  open: number;
+  closed: number;
+}
+
+export interface PublicBulkConversationActionResult {
+  updatedIds: string[];
+  skippedIds: string[];
 }
 
 export interface PublicConversationUpdatesQuery {
@@ -140,6 +155,39 @@ export interface PublicTeamRequestSummaryInput {
   acceptanceToken: string;
 }
 
+export interface PublicTeamRequestAcceptance {
+  acceptanceToken: string;
+  acceptedAt: string;
+  notificationState: string;
+  summary: string;
+  summaryMessageId: string;
+  summaryPending: boolean;
+}
+
+export interface PublicLegacyEscalationMetadataUpdate {
+  expectedMavenAcceptanceToken: string | null;
+  summary: string;
+  summaryMessageId: string;
+  escalatedAt?: string;
+  summaryPending?: boolean;
+}
+
+export interface PublicLastMessagePreview {
+  id: string;
+  author: PublicMessageRecord["author"];
+  content: string;
+  senderName: string | null;
+  emailedAt: number | null;
+  createdAt: number;
+}
+
+export interface AppendPublicBotInput extends AppendPublicMessageFields {
+  expected: {
+    status: PublicConversationStatus;
+    chatState: string | null;
+  };
+}
+
 export interface PublicExternalActionLeaseInput {
   projectId: string;
   conversationId: string;
@@ -196,19 +244,94 @@ export interface PublicCustomerLinkInput {
   customerId: string | null;
 }
 
+export interface PublicConversationAnalytics {
+  totalConversations: number;
+  activeConversations: number;
+  totalMessages: number;
+  conversationsByDay: Array<{ day: string; count: number }>;
+  conversationsByStatus: Array<{
+    status: PublicConversationStatus;
+    count: number;
+  }>;
+  recentConversations: PublicConversationRecord[];
+}
+
+export interface PublicUsageConversationQuery {
+  projectIds: string[];
+  periodStart: number;
+  periodEnd: number;
+  limit: number;
+  offset: number;
+  sortBy: "botMessages" | "createdAt";
+  sortOrder: "asc" | "desc";
+  status?: string;
+  metaKey?: string;
+  metaValue?: string;
+}
+
+export interface PublicUsageConversationRow {
+  conversation: PublicConversationRecord;
+  botMessageCount: number;
+}
+
+export interface PublicUsageConversationResult {
+  rows: PublicUsageConversationRow[];
+  total: number;
+  metaKeys: string[];
+}
+
+export interface PublicRetentionClaim {
+  id: string;
+  projectId: string;
+  purgeStartedAt: number;
+}
+
+export interface PublicMessageAttachmentSource {
+  author: PublicMessageRecord["author"];
+  userId: string | null;
+  imageUrls: string[];
+}
+
+export interface LegacyPublicConversationCreateInput {
+  projectId: string;
+  customerId?: string | null;
+  visitorId: string;
+  visitorName?: string | null;
+  visitorEmail?: string | null;
+  metadata?: string | null;
+}
+
+export interface LegacyPublicMessageInput {
+  conversationId: string;
+  content: string;
+  imageUrl?: string | null;
+  sources?: string | null;
+  senderName?: string | null;
+  senderAvatar?: string | null;
+  userId?: string | null;
+  emailedAt?: Date | null;
+  deliveredAt?: Date | null;
+  readAt?: Date | null;
+}
+
 export interface PublicConversationStore {
   create(input: CreatePublicConversationInput): Promise<PublicConversationRecord>;
   get(projectId: string, conversationId: string): Promise<PublicConversationRecord | null>;
+  getOperational(projectId: string, conversationId: string): Promise<PublicConversationRecord | null>;
   getActiveByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord | null>;
   getLastByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord | null>;
   getRecentByVisitorEmail(projectId: string, email: string): Promise<PublicConversationRecord | null>;
   list(query: PublicConversationListQuery): Promise<PublicConversationListResult>;
+  getConversationCounts(projectId: string): Promise<PublicConversationCounts>;
+  bulkApplyActions(projectId: string, conversationIds: string[], action: PublicConversationAction): Promise<PublicBulkConversationActionResult>;
   listUpdates(query: PublicConversationUpdatesQuery): Promise<PublicConversationRecord[]>;
   listNeedsReview(projectId: string, since: number): Promise<PublicConversationRecord[]>;
   listAgentMode(projectId: string): Promise<PublicConversationRecord[]>;
   listByCustomer(projectId: string, customerId: string): Promise<PublicConversationRecord[]>;
+  getConversationCountsByCustomer(projectId: string, customerIds: string[]): Promise<Map<string, number>>;
   listByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord[]>;
   getInboxCounts(projectId: string): Promise<PublicInboxCounts>;
+  getLastMessagePreviews(conversationIds: string[]): Promise<Map<string, PublicLastMessagePreview>>;
   getMessages(projectId: string, conversationId: string): Promise<PublicMessageRecord[]>;
   getRecentMessages(projectId: string, conversationId: string, limit: number): Promise<PublicMessagePage>;
   getMessagesBefore(input: PublicMessagesBeforeInput): Promise<PublicMessagePage>;
@@ -218,17 +341,83 @@ export interface PublicConversationStore {
   getLatestEmailedHumanMessage(projectId: string, conversationId: string): Promise<PublicMessageRecord | null>;
   appendVisitor(input: AppendPublicVisitorInput): Promise<AppendVisitorResult | null>;
   appendHuman(input: AppendPublicHumanInput): Promise<PublicMessageRecord>;
+  appendBot(input: AppendPublicBotInput): Promise<PublicMessageRecord | null>;
   appendSystem(input: AppendPublicSystemInput): Promise<PublicMessageRecord>;
   deleteHumanMessage(projectId: string, conversationId: string, messageId: string): Promise<DeletePublicMessageResult>;
   applyAction(input: PublicConversationActionInput): Promise<PublicConversationRecord | null>;
   transitionOwnership(input: PublicOwnershipTransitionInput): Promise<PublicOwnershipTransitionResult>;
+  takeHumanOwnership(projectId: string, conversationId: string): Promise<{ status: PublicConversationStatus; chatState: string | null } | null>;
+  resolveByAi(projectId: string, conversationId: string): Promise<boolean>;
+  setStatus(projectId: string, conversationId: string, status: PublicConversationStatus, closeReason?: PublicConversationRecord["closeReason"]): Promise<PublicConversationRecord | null>;
+  reopen(projectId: string, conversationId: string, status?: "active" | "agent_replied"): Promise<PublicConversationRecord | null>;
+  checkAndCloseStale(projectId: string, conversationId: string, autoCloseMinutes: number): Promise<{ closed: boolean; conversation: PublicConversationRecord | null }>;
+  checkAndCloseStaleForProject(projectId: string, conversations: PublicConversationRecord[], autoCloseMinutes: number): Promise<string[]>;
+  prepareContactSupportOwnership(projectId: string, conversationId: string): Promise<"waiting_agent" | "agent_replied" | null>;
+  closeOpenAsSpam(projectId: string, visitorId: string, visitorEmail?: string | null): Promise<string[]>;
   claimTeamRequest(input: PublicTeamRequestClaimInput): Promise<PublicTeamRequestClaimResult>;
+  getTeamRequestAcceptance(projectId: string, conversationId: string, acceptanceToken: string): Promise<PublicTeamRequestAcceptance | null>;
+  claimTeamRequestNotification(projectId: string, conversationId: string, acceptanceToken: string): Promise<boolean>;
+  addTeamRequestSummary(projectId: string, conversationId: string, acceptanceToken: string): Promise<PublicMessageRecord | null>;
   completeTeamRequestSummary(input: PublicTeamRequestSummaryInput): Promise<boolean>;
+  updateLegacyEscalationMetadata(projectId: string, conversationId: string, update: PublicLegacyEscalationMetadataUpdate): Promise<PublicConversationRecord | null>;
+  persistTeamRequestTelegramThreadId(projectId: string, conversationId: string, acceptanceToken: string, threadId: string): Promise<boolean>;
+  updateTelegramThreadId(projectId: string, conversationId: string, threadId: string): Promise<void>;
   acquireExternalAction(input: PublicExternalActionLeaseInput): Promise<PublicExternalActionLease | null>;
   releaseExternalAction(input: PublicExternalActionLease): Promise<void>;
   markDelivery(input: PublicDeliveryUpdateInput): Promise<string[]>;
   markEmailed(input: PublicEmailUpdateInput): Promise<boolean>;
   updatePresence(input: PublicPresenceUpdateInput): Promise<PublicChatChildState | null>;
+  updateEmail(projectId: string, conversationId: string, email: string): Promise<void>;
   updateContact(input: PublicContactUpdateInput): Promise<PublicConversationRecord | null>;
+  updatePendingTeamRequestContact(projectId: string, conversationId: string, ownership: ChatOwnershipSnapshot, update: { visitorName?: string; visitorEmail?: string; awaitingContactFields: Array<"name" | "email">; contactDeclined?: boolean }): Promise<PublicConversationRecord | null>;
+  getChatState(projectId: string, conversationId: string): Promise<ConversationChatState>;
+  saveChatState(projectId: string, conversationId: string, chatState: ConversationChatState): Promise<void>;
   updateCustomer(input: PublicCustomerLinkInput): Promise<PublicConversationRecord | null>;
+  getAnalytics(projectIds: string[], since: number): Promise<PublicConversationAnalytics>;
+  queryUsageConversations(query: PublicUsageConversationQuery): Promise<PublicUsageConversationResult>;
+  claimExpiredArchives(retentionCutoff: number, staleClaimCutoff: number, claimAt: number, limit: number): Promise<PublicRetentionClaim[]>;
+  listMessageAttachments(projectId: string, conversationId: string): Promise<PublicMessageAttachmentSource[]>;
+  isUploadKeyReferencedElsewhere(key: string, conversationId: string): Promise<boolean>;
+  deleteRetentionClaim(projectId: string, conversationId: string, purgeStartedAt: number): Promise<boolean>;
+
+  // Temporary compatibility names keep the behavior-preserving cutover small.
+  // They return storage-neutral records and disappear with the legacy runtime.
+  getConversationById(conversationId: string, projectId: string): Promise<PublicConversationRecord | null>;
+  getOperationalConversationById(conversationId: string, projectId: string): Promise<PublicConversationRecord | null>;
+  getActiveConversationByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord | null>;
+  getLastConversationByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord | null>;
+  getRecentConversationByVisitorEmail(projectId: string, email: string): Promise<PublicConversationRecord | null>;
+  createConversation(input: LegacyPublicConversationCreateInput): Promise<PublicConversationRecord>;
+  getConversationsByProject(projectId: string, limit?: number, offset?: number, status?: "open" | "closed" | "all", search?: string, inboxFilter?: PublicInboxFilter): Promise<PublicConversationRecord[]>;
+  getConversationUpdatesSince(projectId: string, since: Date, limit?: number): Promise<PublicConversationRecord[]>;
+  getNeedsReviewSince(projectId: string, since: number): Promise<PublicConversationRecord[]>;
+  getAgentModeConversations(projectId: string): Promise<PublicConversationRecord[]>;
+  getLastPublicMessagesByConversationIds(conversationIds: string[]): Promise<Map<string, PublicLastMessagePreview>>;
+  getPublicMessages(conversationId: string, projectId?: string): Promise<PublicMessageRecord[]>;
+  getRecentPublicMessages(conversationId: string, limit?: number, projectId?: string): Promise<PublicMessagePage>;
+  getPublicMessagesBefore(conversationId: string, beforeCreatedAt: Date, limit?: number, projectId?: string): Promise<PublicMessagePage>;
+  getPublicMessagesSince(conversationId: string, since: number, projectId?: string): Promise<PublicMessageRecord[]>;
+  getPublicMessageById(messageId: string, projectId?: string, conversationId?: string): Promise<PublicMessageRecord | null>;
+  addPublicVisitorMessageWithFirstTurn(input: LegacyPublicMessageInput, projectId: string): Promise<AppendVisitorResult | null>;
+  addPublicAgentMessageAndTakeOwnership(input: LegacyPublicMessageInput, projectId: string): Promise<PublicMessageRecord | null>;
+  addPublicBotMessageIfOwnershipMatches(input: LegacyPublicMessageInput, projectId: string, expected: { status: PublicConversationStatus; chatState: string | null }): Promise<PublicMessageRecord | null>;
+  addPublicSystemMessage(conversationId: string, kind: AppendPublicSystemInput["kind"], content: string, idempotencyKey?: string, projectId?: string): Promise<PublicMessageRecord | null>;
+  addPublicMessage(input: LegacyPublicMessageInput & { role: "visitor" | "agent" }, projectId: string): Promise<PublicMessageRecord | null>;
+  getLatestEmailedPublicAgentMessage(conversationId: string, projectId?: string): Promise<PublicMessageRecord | null>;
+  markPublicMessageAsEmailed(conversationId: string, messageId: string, projectId?: string): Promise<void>;
+  markPublicDeliveredUpTo(conversationId: string, messageId: string, projectId?: string): Promise<string[]>;
+  markPublicReadUpTo(conversationId: string, messageId: string, projectId?: string): Promise<string[]>;
+  deletePublicAgentMessage(conversationId: string, messageId: string, projectId?: string): Promise<DeletePublicMessageResult>;
+  updateConversationStatus(conversationId: string, projectId: string, status: PublicConversationStatus, closeReason?: PublicConversationRecord["closeReason"]): Promise<void>;
+  reopenConversation(conversationId: string, projectId: string, status?: "active" | "agent_replied"): Promise<PublicConversationRecord | null>;
+  transitionChatOwnership(conversationId: string, projectId: string, event: ChatOwnershipEvent): Promise<PublicConversationStatus | null>;
+  updateConversation(conversationId: string, projectId: string, input: { visitorName?: string; visitorEmail?: string; metadata?: string }): Promise<PublicConversationRecord | null>;
+  updateConversationEmail(conversationId: string, projectId: string, email: string): Promise<void>;
+  updateVisitorLastSeen(conversationId: string, projectId: string, presence?: "active" | "background"): Promise<PublicConversationRecord | null>;
+  resolveConversationByAi(conversationId: string, projectId: string): Promise<boolean>;
+  closeOpenConversationsAsSpam(projectId: string, visitorId: string, visitorEmail?: string | null): Promise<string[]>;
+  bulkUpdateConversations(projectId: string, conversationIds: string[], action: PublicConversationAction, now?: Date): Promise<PublicBulkConversationActionResult>;
+  setSnooze(conversationId: string, projectId: string, until: Date | null): Promise<void>;
+  setPriority(conversationId: string, projectId: string, priority: "low" | "medium" | "high"): Promise<void>;
+  setAssignee(conversationId: string, projectId: string, assigneeId: string | null): Promise<void>;
 }

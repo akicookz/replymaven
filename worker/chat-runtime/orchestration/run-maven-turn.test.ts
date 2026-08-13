@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { simulateReadableStream, type LanguageModel } from "ai";
 import { type ToolRow } from "../../db";
-import { type ChatService } from "../../services/chat-service";
+import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import { type ProjectService } from "../../services/project-service";
 import { type SourceReference } from "../../services/resource-service";
 import { type ToolService } from "../../services/tool-service";
@@ -421,15 +421,16 @@ function createDependencies(options: {
     publicToolDependencies: {
       executionCtx: {} as ExecutionContext,
       chatService: {
-        async runExternalActionIfOwnershipMatches(
-          _conversationId: string,
-          _projectId: string,
-          _ownership: unknown,
-          action: () => Promise<unknown>,
-        ) {
-          return { executed: true, value: await action() };
+        async acquireExternalAction(input) {
+          return {
+            ...input,
+            leaseId: "lease-1",
+            ownershipRevision: 0,
+            acquiredAt: Date.now(),
+          };
         },
-      } as ChatService,
+        async releaseExternalAction() {},
+      } as PublicConversationStore,
       projectService: {} as ProjectService,
       acquireHttpRateLimitPermit() {
         options.httpPermitCalls?.push("permit");
