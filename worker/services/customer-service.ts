@@ -363,15 +363,16 @@ export class CustomerService {
       .where(
         and(eq(customers.projectId, projectId), eq(customers.id, customerId)),
       );
-    await Promise.all(
-      conversationRows.map((conversation) =>
-        this.conversationStore.updateCustomer({
-          projectId,
+    if (conversationRows.length > 0) {
+      await this.conversationStore.applyCustomerMutation({
+        projectId,
+        mutationId: crypto.randomUUID(),
+        updates: conversationRows.map((conversation) => ({
           conversationId: conversation.id,
           customerId: null,
-        }),
-      ),
-    );
+        })),
+      });
+    }
     return {
       customerId,
       conversationIds: conversationRows.map((row) => row.id),

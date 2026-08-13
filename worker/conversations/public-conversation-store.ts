@@ -247,6 +247,24 @@ export interface PublicCustomerLinkInput {
   customerId: string | null;
 }
 
+export interface PublicCustomerMutationUpdate {
+  conversationId: string;
+  customerId: string | null;
+  visitorName?: string;
+  visitorEmail?: string;
+}
+
+export interface PublicCustomerMutationInput {
+  projectId: string;
+  mutationId: string;
+  updates: PublicCustomerMutationUpdate[];
+}
+
+export interface PublicCustomerMutationResult {
+  status: "completed" | "pending";
+  updatedIds: string[];
+}
+
 export interface PublicConversationAnalytics {
   totalConversations: number;
   activeConversations: number;
@@ -379,6 +397,7 @@ export interface PublicConversationStore {
   getChatState(projectId: string, conversationId: string): Promise<ConversationChatState>;
   saveChatState(projectId: string, conversationId: string, chatState: ConversationChatState): Promise<void>;
   updateCustomer(input: PublicCustomerLinkInput): Promise<PublicConversationRecord | null>;
+  applyCustomerMutation(input: PublicCustomerMutationInput): Promise<PublicCustomerMutationResult>;
   getAnalytics(projectIds: string[], since: number): Promise<PublicConversationAnalytics>;
   queryUsageConversations(query: PublicUsageConversationQuery): Promise<PublicUsageConversationResult>;
   claimExpiredArchives(retentionCutoff: number, staleClaimCutoff: number, claimAt: number, limit: number): Promise<PublicRetentionClaim[]>;

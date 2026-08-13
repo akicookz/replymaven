@@ -11,6 +11,11 @@ import type {
   MavenConversationListResult,
   MavenConversationSummary,
   MavenInboxCounts,
+  MavenProjectConversationStats,
+  MavenPublicCustomerMutation,
+  MavenPublicCustomerMutationResult,
+  MavenUsageLogQuery,
+  MavenUsageLogResult,
 } from "../../shared/sidechat-agent";
 import type { AppEnv } from "../types";
 import { projects, toolExecutions } from "../db/schema";
@@ -34,6 +39,8 @@ import type {
   PublicConversationListQuery,
   PublicConversationListResult,
   PublicCustomerLinkInput,
+  PublicCustomerMutationInput,
+  PublicCustomerMutationResult,
   PublicDeliveryUpdateInput,
   PublicEmailUpdateInput,
   PublicInboxCounts,
@@ -196,6 +203,16 @@ interface PublicParentStub {
   }>;
   getInboxCounts(): Promise<PublicInboxCounts>;
   listAllPublicConversationSummaries(): Promise<MavenConversationSummary[]>;
+  listByCustomer(customerId: string): Promise<MavenConversationSummary[]>;
+  listByVisitor(visitorId: string): Promise<MavenConversationSummary[]>;
+  getConversationCountsByCustomer(
+    customerIds: string[],
+  ): Promise<Array<{ customerId: string; count: number }>>;
+  getProjectStats(since: number): Promise<MavenProjectConversationStats>;
+  getUsageLog(query: MavenUsageLogQuery): Promise<MavenUsageLogResult>;
+  applyPublicCustomerMutation(
+    input: MavenPublicCustomerMutation,
+  ): Promise<MavenPublicCustomerMutationResult>;
   bulkApplyPublicActions(input: {
     conversationIds: string[];
     action: PublicConversationAction;
@@ -255,6 +272,29 @@ function stableValue(value: unknown): unknown {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, entry]) => [key, stableValue(entry)]),
   );
+}
+
+async function mapWithConcurrency<Input, Output>(
+  inputs: Input[],
+  concurrency: number,
+  mapper: (input: Input) => Promise<Output>,
+): Promise<Output[]> {
+  const results = new Array<Output>(inputs.length);
+  let nextIndex = 0;
+  async function runWorker(): Promise<void> {
+    while (nextIndex < inputs.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(inputs[index]!);
+    }
+  }
+  await Promise.all(
+    Array.from(
+      { length: Math.min(Math.max(1, concurrency), inputs.length) },
+      runWorker,
+    ),
+  );
+  return results;
 }
 
 function isPublicSourceReference(value: unknown): value is PublicSourceReference {
@@ -611,8 +651,11 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     projectId: string,
     customerId: string,
   ): Promise<PublicConversationRecord[]> {
-    return (await this.readEverySummary(projectId))
-      .filter((summary) => summary.customerId === customerId)
+    const parent = await getPublicParent(
+      this.context.env.MAVEN_PROJECT_AGENT,
+      projectId,
+    );
+    return (await parent.listByCustomer(customerId))
       .map((summary) => summaryToConversation(summary, projectId));
   }
 
@@ -620,21 +663,25 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     projectId: string,
     customerIds: string[],
   ): Promise<Map<string, number>> {
-    const counts = new Map(customerIds.map((customerId) => [customerId, 0]));
-    for (const summary of await this.readEverySummary(projectId)) {
-      if (summary.customerId && counts.has(summary.customerId)) {
-        counts.set(summary.customerId, (counts.get(summary.customerId) ?? 0) + 1);
-      }
-    }
-    return counts;
+    const parent = await getPublicParent(
+      this.context.env.MAVEN_PROJECT_AGENT,
+      projectId,
+    );
+    return new Map(
+      (await parent.getConversationCountsByCustomer(customerIds))
+        .map(({ customerId, count }) => [customerId, count]),
+    );
   }
 
   async listByVisitor(
     projectId: string,
     visitorId: string,
   ): Promise<PublicConversationRecord[]> {
-    return (await this.readEverySummary(projectId))
-      .filter((summary) => summary.visitorId === visitorId)
+    const parent = await getPublicParent(
+      this.context.env.MAVEN_PROJECT_AGENT,
+      projectId,
+    );
+    return (await parent.listByVisitor(visitorId))
       .map((summary) => summaryToConversation(summary, projectId));
   }
 
@@ -1063,6 +1110,19 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return child ? child.updateCustomer(input) : null;
   }
 
+  async applyCustomerMutation(
+    input: PublicCustomerMutationInput,
+  ): Promise<PublicCustomerMutationResult> {
+    const parent = await getPublicParent(
+      this.context.env.MAVEN_PROJECT_AGENT,
+      input.projectId,
+    );
+    return parent.applyPublicCustomerMutation({
+      mutationId: input.mutationId,
+      updates: input.updates,
+    });
+  }
+
   async setStatus(
     projectId: string,
     conversationId: string,
@@ -1151,30 +1211,34 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     projectIds: string[],
     since: number,
   ): Promise<PublicConversationAnalytics> {
-    const pages = await Promise.all(projectIds.map(async (projectId) => ({
-      projectId,
-      summaries: await this.readEverySummary(projectId),
-    })));
-    const summaries = pages.flatMap((page) => page.summaries);
-    const projectByConversation = new Map(pages.flatMap((page) =>
-      page.summaries.map((summary) => [summary.conversationId, page.projectId])
-    ));
+    const pages = await mapWithConcurrency(projectIds, 5, async (projectId) => {
+      const parent = await getPublicParent(
+        this.context.env.MAVEN_PROJECT_AGENT,
+        projectId,
+      );
+      return { projectId, stats: await parent.getProjectStats(since) };
+    });
     const byDay = new Map<string, number>();
     const byStatus = new Map<PublicConversationRecord["status"], number>();
-    for (const summary of summaries) {
-      byStatus.set(summary.status, (byStatus.get(summary.status) ?? 0) + 1);
-      if (summary.createdAt >= since) {
-        const day = new Date(summary.createdAt).toISOString().slice(0, 10);
-        byDay.set(day, (byDay.get(day) ?? 0) + 1);
+    for (const { stats } of pages) {
+      for (const row of stats.conversationsByDay) {
+        byDay.set(row.day, (byDay.get(row.day) ?? 0) + row.count);
+      }
+      for (const row of stats.conversationsByStatus) {
+        byStatus.set(row.status, (byStatus.get(row.status) ?? 0) + row.count);
       }
     }
     return {
-      totalConversations: summaries.length,
-      activeConversations: summaries.filter((summary) =>
-        summary.status === "active" || summary.status === "waiting_agent"
-      ).length,
-      totalMessages: summaries.reduce(
-        (total, summary) => total + summary.messageCount,
+      totalConversations: pages.reduce(
+        (total, page) => total + page.stats.totalConversations,
+        0,
+      ),
+      activeConversations: pages.reduce(
+        (total, page) => total + page.stats.activeConversations,
+        0,
+      ),
+      totalMessages: pages.reduce(
+        (total, page) => total + page.stats.totalMessages,
         0,
       ),
       conversationsByDay: [...byDay]
@@ -1184,67 +1248,87 @@ export class AgentPublicConversationStore implements PublicConversationStore {
         status,
         count,
       })),
-      recentConversations: summaries
+      recentConversations: pages.flatMap((page) =>
+        page.stats.recentConversations.map((summary) => ({
+          projectId: page.projectId,
+          summary,
+        }))
+      )
         .sort((left, right) =>
-          Math.max(right.visitorLastSeenAt ?? 0, right.updatedAt) -
-          Math.max(left.visitorLastSeenAt ?? 0, left.updatedAt)
+          Math.max(
+            right.summary.visitorLastSeenAt ?? 0,
+            right.summary.updatedAt,
+          ) - Math.max(
+            left.summary.visitorLastSeenAt ?? 0,
+            left.summary.updatedAt,
+          )
         )
         .slice(0, 5)
-        .map((summary) => summaryToConversation(
-          summary,
-          projectByConversation.get(summary.conversationId)!,
-        )),
+        .map(({ projectId, summary }) =>
+          summaryToConversation(summary, projectId)
+        ),
     };
   }
 
   async queryUsageConversations(
     query: PublicUsageConversationQuery,
   ): Promise<PublicUsageConversationResult> {
-    const pages = await Promise.all(query.projectIds.map(async (projectId) => ({
-      projectId,
-      summaries: await this.readEverySummary(projectId),
-    })));
-    const projectByConversation = new Map(pages.flatMap((page) =>
-      page.summaries.map((summary) => [summary.conversationId, page.projectId])
-    ));
-    const summaries = pages.flatMap((page) => page.summaries).filter((summary) =>
-      summary.createdAt >= query.periodStart &&
-      summary.createdAt < query.periodEnd
+    const parentLimit = Math.max(1, query.offset + query.limit);
+    const pages = await mapWithConcurrency(
+      query.projectIds,
+      5,
+      async (projectId) => {
+        const parent = await getPublicParent(
+          this.context.env.MAVEN_PROJECT_AGENT,
+          projectId,
+        );
+        const result = await parent.getUsageLog({
+          periodStart: query.periodStart,
+          periodEnd: query.periodEnd,
+          limit: parentLimit,
+          offset: 0,
+          sortBy: query.sortBy,
+          sortOrder: query.sortOrder,
+          ...(query.status === undefined ? {} : { status: query.status }),
+          ...(query.metaKey === undefined
+            ? {}
+            : { metadataKey: query.metaKey }),
+          ...(query.metaValue === undefined
+            ? {}
+            : { metadataValue: query.metaValue }),
+        });
+        return { projectId, result };
+      },
     );
-    const metaKeys = new Set<string>();
-    for (const summary of summaries.slice(0, 200)) {
-      Object.keys(summary.metadata).forEach((key) => metaKeys.add(key));
-    }
-    const filtered = summaries.filter((summary) => {
-      if (query.status && summary.status !== query.status) return false;
-      if (query.metaKey && query.metaValue) {
-        const value = summary.metadata[query.metaKey];
-        if (!String(value ?? "").includes(query.metaValue)) return false;
-      }
-      return true;
-    });
-    filtered.sort((left, right) => {
+    const rows = pages.flatMap((page) =>
+      page.result.summaries.map((summary) => ({
+        projectId: page.projectId,
+        summary,
+      }))
+    );
+    rows.sort((left, right) => {
       const leftValue = query.sortBy === "botMessages"
-        ? left.botMessageCount
-        : left.createdAt;
+        ? left.summary.botMessageCount
+        : left.summary.createdAt;
       const rightValue = query.sortBy === "botMessages"
-        ? right.botMessageCount
-        : right.createdAt;
+        ? right.summary.botMessageCount
+        : right.summary.createdAt;
       return query.sortOrder === "asc"
-        ? leftValue - rightValue
-        : rightValue - leftValue;
+        ? leftValue - rightValue ||
+          left.summary.conversationId.localeCompare(right.summary.conversationId)
+        : rightValue - leftValue ||
+          right.summary.conversationId.localeCompare(left.summary.conversationId);
     });
     return {
-      rows: filtered.slice(query.offset, query.offset + query.limit)
-        .map((summary) => ({
-          conversation: summaryToConversation(
-            summary,
-            projectByConversation.get(summary.conversationId)!,
-          ),
+      rows: rows.slice(query.offset, query.offset + query.limit)
+        .map(({ projectId, summary }) => ({
+          conversation: summaryToConversation(summary, projectId),
           botMessageCount: summary.botMessageCount,
         })),
-      total: filtered.length,
-      metaKeys: [...metaKeys].sort(),
+      total: pages.reduce((total, page) => total + page.result.total, 0),
+      metaKeys: [...new Set(pages.flatMap((page) =>
+        page.result.metadataKeys
+      ))].sort(),
     };
   }
 

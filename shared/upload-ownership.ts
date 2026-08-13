@@ -1,7 +1,12 @@
 const UPLOAD_PATH_PREFIX = "/api/uploads/";
 
 export function getLocalUploadKey(imageUrl: string): string | null {
-  const path = imageUrl.split(/[?#]/, 1)[0];
+  let path: string;
+  try {
+    path = new URL(imageUrl, "https://replymaven.invalid").pathname;
+  } catch {
+    return null;
+  }
   if (!path.startsWith(UPLOAD_PATH_PREFIX)) return null;
 
   const key = path.slice(UPLOAD_PATH_PREFIX.length);

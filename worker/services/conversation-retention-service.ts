@@ -180,8 +180,8 @@ export async function purgeOneClaimedConversation(
       unreferencedKeys.push(key);
     }
   }
-  await cleanupSidechat(claimed.projectId, claimed.id);
   await deleteUploadKeys(uploads, unreferencedKeys);
+  await cleanupSidechat(claimed.projectId, claimed.id);
   return store.deleteClaimedConversation(claimed.id, claimed.purgeStartedAt);
 }
 

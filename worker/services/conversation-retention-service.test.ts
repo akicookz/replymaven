@@ -100,11 +100,11 @@ describe("archived conversation retention", () => {
         sidechatCleanupCalled = true;
       },
     )).rejects.toThrow("R2 unavailable");
-    expect(sidechatCleanupCalled).toBe(true);
+    expect(sidechatCleanupCalled).toBe(false);
     expect(databaseDeleteCalled).toBe(false);
   });
 
-  test("leaves uploads and database rows intact when native cleanup fails", async () => {
+  test("deletes uploads but leaves database rows intact when native cleanup fails", async () => {
     const events: string[] = [];
     const store: ConversationRetentionStore = {
       claimExpired: async () => [],
@@ -138,7 +138,7 @@ describe("archived conversation retention", () => {
         throw new Error("native cleanup unavailable");
       },
     )).rejects.toThrow("native cleanup unavailable");
-    expect(events).toEqual(["sidechat:project-1:conv-1"]);
+    expect(events).toEqual(["r2", "sidechat:project-1:conv-1"]);
   });
 
   test("counts native cleanup failures and leaves the purge claim for retry", async () => {
@@ -207,8 +207,8 @@ describe("archived conversation retention", () => {
 
     expect(deleted).toBe(true);
     expect(events).toEqual([
-      "sidechat:project-1:conv-1",
       "r2:project-1/conversation-attachments/conv-1/a.png,project-1/conversation-attachments/conv-1/b.png",
+      "sidechat:project-1:conv-1",
       "database",
     ]);
   });

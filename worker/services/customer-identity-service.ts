@@ -538,24 +538,22 @@ export class CustomerIdentityService {
     }
 
     await this.executeBatch(queries);
-    await Promise.all(
-      visitorConversations.map(async (conversation) => {
-        await this.conversationStore.updateCustomer({
-          projectId,
+    if (visitorConversations.length > 0) {
+      await this.conversationStore.applyCustomerMutation({
+        projectId,
+        mutationId: crypto.randomUUID(),
+        updates: visitorConversations.map((conversation) => ({
           conversationId: conversation.id,
           customerId: customer.id,
-        });
-        if (!conversation.visitorName || !conversation.visitorEmail) {
-          await this.conversationStore.updateContact({
-            projectId,
-            conversationId: conversation.id,
-            visitorName: conversation.visitorName ?? customer.name ?? undefined,
-            visitorEmail:
-              conversation.visitorEmail ?? customer.email ?? undefined,
-          });
-        }
-      }),
-    );
+          ...(!conversation.visitorName && customer.name
+            ? { visitorName: customer.name }
+            : {}),
+          ...(!conversation.visitorEmail && customer.email
+            ? { visitorEmail: customer.email }
+            : {}),
+        })),
+      });
+    }
     const detail = await this.customerService.getCustomerDetail(
       projectId,
       customer.id,
@@ -760,15 +758,16 @@ export class CustomerIdentityService {
           ),
         ),
     ]);
-    await Promise.all(
-      sourceConversations.map((conversation) =>
-        this.conversationStore.updateCustomer({
-          projectId,
+    if (sourceConversations.length > 0) {
+      await this.conversationStore.applyCustomerMutation({
+        projectId,
+        mutationId: crypto.randomUUID(),
+        updates: sourceConversations.map((conversation) => ({
           conversationId: conversation.id,
           customerId: targetCustomerId,
-        }),
-      ),
-    );
+        })),
+      });
+    }
     return {
       kind: "merged",
       customerId: targetCustomerId,

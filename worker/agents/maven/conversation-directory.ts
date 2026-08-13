@@ -5,6 +5,9 @@ import type {
   MavenConversationSort,
   MavenConversationSummary,
   MavenInboxCounts,
+  MavenProjectConversationStats,
+  MavenUsageLogQuery,
+  MavenUsageLogResult,
   SidechatStatus,
   SidechatSummary,
 } from "../../../shared/sidechat-agent";
@@ -33,6 +36,7 @@ interface ConversationDirectoryRow {
   snoozed_until: number | null;
   archived_at: number | null;
   purge_started_at: number | null;
+  retention_schedule_id: string | null;
   visitor_last_seen_at: number | null;
   visitor_presence: string;
   visitor_last_online_at: number | null;
@@ -95,6 +99,7 @@ function mapDirectoryRow(row: ConversationDirectoryRow): MavenConversationSummar
     snoozedUntil: row.snoozed_until,
     archivedAt: row.archived_at,
     purgeStartedAt: row.purge_started_at,
+    retentionScheduleId: row.retention_schedule_id,
     visitorLastSeenAt: row.visitor_last_seen_at,
     visitorPresence: row.visitor_presence as MavenConversationSummary["visitorPresence"],
     visitorLastOnlineAt: row.visitor_last_online_at,
@@ -348,6 +353,162 @@ export class ConversationDirectory {
     ).map(mapDirectoryRow);
   }
 
+  listByCustomer(customerId: string): MavenConversationSummary[] {
+    return this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE customer_id = ? AND visitor_id != ''
+       ORDER BY created_at ASC, conversation_id ASC`,
+      [customerId],
+    ).map(mapDirectoryRow);
+  }
+
+  listByVisitor(visitorId: string): MavenConversationSummary[] {
+    return this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE visitor_id = ?
+       ORDER BY created_at ASC, conversation_id ASC`,
+      [visitorId],
+    ).map(mapDirectoryRow);
+  }
+
+  getConversationCountsByCustomer(
+    customerIds: string[],
+  ): Array<{ customerId: string; count: number }> {
+    const uniqueIds = [...new Set(customerIds)];
+    if (uniqueIds.length === 0) return [];
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    const rows = this.sql.execute<{ customer_id: string; count: number }>(
+      `SELECT customer_id, COUNT(*) AS count
+       FROM conversation_directory
+       WHERE customer_id IN (${placeholders}) AND visitor_id != ''
+       GROUP BY customer_id`,
+      uniqueIds,
+    );
+    const byCustomer = new Map(
+      rows.map((row) => [row.customer_id, row.count]),
+    );
+    return uniqueIds.map((customerId) => ({
+      customerId,
+      count: byCustomer.get(customerId) ?? 0,
+    }));
+  }
+
+  getProjectStats(since: number): MavenProjectConversationStats {
+    const totals = this.sql.execute<{
+      total: number;
+      active: number;
+      messages: number;
+    }>(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(CASE WHEN status IN ('active', 'waiting_agent')
+                THEN 1 ELSE 0 END), 0) AS active,
+              COALESCE(SUM(message_count), 0) AS messages
+       FROM conversation_directory
+       WHERE visitor_id != ''`,
+      [],
+    )[0];
+    const days = this.sql.execute<{ day: string; count: number }>(
+      `SELECT date(created_at / 1000, 'unixepoch') AS day,
+              COUNT(*) AS count
+       FROM conversation_directory
+       WHERE visitor_id != '' AND created_at >= ?
+       GROUP BY date(created_at / 1000, 'unixepoch')
+       ORDER BY day ASC`,
+      [since],
+    );
+    const statuses = this.sql.execute<{ status: string; count: number }>(
+      `SELECT status, COUNT(*) AS count
+       FROM conversation_directory
+       WHERE visitor_id != ''
+       GROUP BY status`,
+      [],
+    );
+    const recent = this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE visitor_id != ''
+       ORDER BY MAX(COALESCE(visitor_last_seen_at, 0), updated_at) DESC,
+                updated_at DESC, conversation_id DESC
+       LIMIT 5`,
+      [],
+    );
+    return {
+      totalConversations: totals?.total ?? 0,
+      activeConversations: totals?.active ?? 0,
+      totalMessages: totals?.messages ?? 0,
+      conversationsByDay: days,
+      conversationsByStatus: statuses.map((row) => ({
+        status: row.status as MavenConversationSummary["status"],
+        count: row.count,
+      })),
+      recentConversations: recent.map(mapDirectoryRow),
+    };
+  }
+
+  extractMetadataKeys(
+    periodStart: number,
+    periodEnd: number,
+    limit = 200,
+  ): string[] {
+    const rows = this.sql.execute<{ metadata_json: string }>(
+      `SELECT metadata_json FROM conversation_directory
+       WHERE visitor_id != '' AND created_at >= ? AND created_at < ?
+       LIMIT ?`,
+      [periodStart, periodEnd, Math.max(1, limit)],
+    );
+    const keys = new Set<string>();
+    for (const row of rows) {
+      Object.keys(parseMetadata(row.metadata_json)).forEach((key) => keys.add(key));
+    }
+    return [...keys].sort();
+  }
+
+  getUsageLog(query: MavenUsageLogQuery): MavenUsageLogResult {
+    const conditions = [
+      "visitor_id != ''",
+      "created_at >= ?",
+      "created_at < ?",
+    ];
+    const bindings: SqlBinding[] = [query.periodStart, query.periodEnd];
+    if (query.status) {
+      conditions.push("status = ?");
+      bindings.push(query.status);
+    }
+    if (query.metadataKey && query.metadataValue) {
+      const escaped = query.metadataValue.replace(/\\/g, "\\\\")
+        .replace(/%/g, "\\%")
+        .replace(/_/g, "\\_");
+      conditions.push(
+        "CAST(json_extract(metadata_json, '$.' || ?) AS TEXT) " +
+          "LIKE ? ESCAPE '\\'",
+      );
+      bindings.push(query.metadataKey, `%${escaped}%`);
+    }
+    const orderColumn = query.sortBy === "botMessages"
+      ? "bot_message_count"
+      : "created_at";
+    const direction = query.sortOrder === "asc" ? "ASC" : "DESC";
+    const rows = this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY ${orderColumn} ${direction}, conversation_id ${direction}
+       LIMIT ? OFFSET ?`,
+      [...bindings, Math.max(1, query.limit), Math.max(0, query.offset)],
+    );
+    const totals = this.sql.execute<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM conversation_directory
+       WHERE ${conditions.join(" AND ")}`,
+      bindings,
+    );
+    return {
+      summaries: rows.map(mapDirectoryRow),
+      total: totals[0]?.count ?? 0,
+      metadataKeys: this.extractMetadataKeys(
+        query.periodStart,
+        query.periodEnd,
+      ),
+    };
+  }
+
   listExpiredArchiveCandidates(
     retentionCutoff: number,
     staleClaimCutoff: number,
@@ -407,7 +568,7 @@ export class ConversationDirectory {
          sidechat_status, customer_id, visitor_id, visitor_name,
          visitor_email, telegram_thread_id, status, close_reason,
          metadata_json, priority, assignee_id, snoozed_until, archived_at,
-         purge_started_at, visitor_last_seen_at, visitor_presence,
+         purge_started_at, retention_schedule_id, visitor_last_seen_at, visitor_presence,
          visitor_last_online_at, last_message_id, last_message_author,
          last_message_preview, last_message_sender_name,
          last_message_emailed_at, last_message_created_at, last_activity_at,
@@ -415,7 +576,7 @@ export class ConversationDirectory {
          updated_at
        ) VALUES (
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        )
        ON CONFLICT(conversation_id) DO UPDATE SET
          public_child_name = excluded.public_child_name,
@@ -440,6 +601,7 @@ export class ConversationDirectory {
          snoozed_until = excluded.snoozed_until,
          archived_at = excluded.archived_at,
          purge_started_at = excluded.purge_started_at,
+         retention_schedule_id = excluded.retention_schedule_id,
          visitor_last_seen_at = excluded.visitor_last_seen_at,
          visitor_presence = excluded.visitor_presence,
          visitor_last_online_at = excluded.visitor_last_online_at,
@@ -479,6 +641,7 @@ export class ConversationDirectory {
         summary.snoozedUntil,
         summary.archivedAt,
         summary.purgeStartedAt,
+        summary.retentionScheduleId,
         summary.visitorLastSeenAt,
         summary.visitorPresence,
         summary.visitorLastOnlineAt,
@@ -516,8 +679,9 @@ export class ConversationDirectory {
          conversation_id, public_child_name, sidechat_child_name,
          sidechat_status, visitor_id, status, metadata_json, priority,
          visitor_presence, last_activity_at, message_count,
-         bot_message_count, child_revision, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, '', 'active', '{}', 'medium', 'active', ?, 0, 0, 0, ?, ?)
+         bot_message_count, child_revision, created_at, updated_at,
+         retention_schedule_id
+       ) VALUES (?, ?, ?, ?, '', 'active', '{}', 'medium', 'active', ?, 0, 0, 0, ?, ?, NULL)
        ON CONFLICT(conversation_id) DO UPDATE SET
          sidechat_child_name = excluded.sidechat_child_name,
          sidechat_status = excluded.sidechat_status,
@@ -592,6 +756,7 @@ export class ConversationDirectory {
       snoozed_until INTEGER,
       archived_at INTEGER,
       purge_started_at INTEGER,
+      retention_schedule_id TEXT,
       visitor_last_seen_at INTEGER,
       visitor_presence TEXT NOT NULL DEFAULT 'active',
       visitor_last_online_at INTEGER,
@@ -612,6 +777,7 @@ export class ConversationDirectory {
       ["last_message_sender_name", "TEXT"],
       ["last_message_emailed_at", "INTEGER"],
       ["last_message_created_at", "INTEGER"],
+      ["retention_schedule_id", "TEXT"],
     ] as const) {
       try {
         this.sql.execute(

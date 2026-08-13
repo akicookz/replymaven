@@ -1082,6 +1082,18 @@ export class MavenChatAgent extends AIChatAgent<
     return this.readPublicMessages();
   }
 
+  async getPublicContextSnapshot(input: { newestMessages: number }): Promise<{
+    conversation: PublicConversationRecord;
+    messages: PublicMessageRecord[];
+  }> {
+    const state = this.requirePublicState();
+    const limit = Math.max(0, Math.min(100, input.newestMessages));
+    return {
+      conversation: this.toPublicConversation(state),
+      messages: this.readPublicMessages().slice(-limit),
+    };
+  }
+
   async getPublicChildState(): Promise<PublicChatChildState> {
     return this.safePublicState(this.requirePublicState());
   }
@@ -1279,6 +1291,9 @@ export class MavenChatAgent extends AIChatAgent<
     return this.runExclusivePublicMutation(async () => {
       const state = this.requirePublicState();
       const now = Date.now();
+      const retentionScheduleToCancel = action.action === "unarchive"
+        ? state.retentionScheduleId
+        : null;
       if (state.archivedAt !== null && action.action !== "unarchive") {
         return null;
       }
@@ -1290,12 +1305,14 @@ export class MavenChatAgent extends AIChatAgent<
           if (state.archivedAt !== null) return null;
           changes.archivedAt = now;
           changes.purgeStartedAt = null;
+          changes.retentionScheduleId = null;
           break;
         case "unarchive":
           if (state.archivedAt === null || state.purgeStartedAt !== null) {
             return null;
           }
           changes.archivedAt = null;
+          changes.retentionScheduleId = null;
           break;
         case "resolve":
           if (state.status === "closed" && state.closeReason === "resolved") {
@@ -1324,9 +1341,36 @@ export class MavenChatAgent extends AIChatAgent<
           changes.closeReason = "spam";
           break;
       }
-      const saved = this.saveNextPublicState(state, changes);
+      let saved = this.saveNextPublicState(state, changes);
       const messages = this.readPublicMessages();
       await this.publishPublicProjection(saved, messages);
+      const parent = await this.parentAgent(MavenProjectAgent);
+      if (action.action === "archive" && saved.archivedAt !== null) {
+        try {
+          const scheduleId = await parent.schedulePublicRetention({
+            conversationId: saved.id,
+            archivedAt: saved.archivedAt,
+          });
+          const latest = this.requirePublicState();
+          if (
+            latest.archivedAt === saved.archivedAt &&
+            latest.retentionScheduleId === null
+          ) {
+            saved = this.saveNextPublicState(latest, {
+              retentionScheduleId: scheduleId,
+            });
+            await this.publishPublicProjection(saved, messages);
+          }
+        } catch {
+          // The project reconciliation sweep can recreate a missing schedule.
+        }
+      } else if (retentionScheduleToCancel) {
+        try {
+          await parent.cancelPublicRetention(retentionScheduleToCancel);
+        } catch {
+          // A stale callback rechecks archivedAt before deleting anything.
+        }
+      }
       return this.toPublicConversation(saved);
     });
   }
@@ -1976,6 +2020,14 @@ export class MavenChatAgent extends AIChatAgent<
     return this.runExclusivePublicMutation(async () => {
       const state = this.requirePublicState();
       this.assertPublicInput(input.projectId, input.conversationId);
+      const nextMetadata = input.metadata ?? state.metadata;
+      if (
+        (input.visitorName === undefined ||
+          input.visitorName === state.visitorName) &&
+        (input.visitorEmail === undefined ||
+          input.visitorEmail === state.visitorEmail) &&
+        JSON.stringify(nextMetadata) === JSON.stringify(state.metadata)
+      ) return this.toPublicConversation(state);
       const saved = this.saveNextPublicState(state, {
         ...(input.visitorName !== undefined
           ? { visitorName: input.visitorName }
@@ -1997,6 +2049,9 @@ export class MavenChatAgent extends AIChatAgent<
     return this.runExclusivePublicMutation(async () => {
       const state = this.requirePublicState();
       this.assertPublicInput(input.projectId, input.conversationId);
+      if (state.customerId === input.customerId) {
+        return this.toPublicConversation(state);
+      }
       const saved = this.saveNextPublicState(state, {
         customerId: input.customerId,
         updatedAt: Date.now(),
@@ -2431,6 +2486,7 @@ export class MavenChatAgent extends AIChatAgent<
       snoozedUntil: state.snoozedUntil,
       archivedAt: state.archivedAt,
       purgeStartedAt: state.purgeStartedAt,
+      retentionScheduleId: state.retentionScheduleId,
       visitorLastSeenAt: state.visitorLastSeenAt,
       visitorPresence: state.visitorPresence,
       visitorLastOnlineAt: state.visitorLastOnlineAt,

@@ -13,8 +13,13 @@ import type {
   MavenConversationListResult,
   MavenConversationSummary,
   MavenInboxCounts,
+  MavenProjectConversationStats,
   MavenProjectState,
   MavenProjectEvent,
+  MavenPublicCustomerMutation,
+  MavenPublicCustomerMutationResult,
+  MavenUsageLogQuery,
+  MavenUsageLogResult,
   PendingSidechatApprovalScope,
   SidechatCustomerContext,
   SidechatStatus,
@@ -26,13 +31,14 @@ import {
   toPublicChildName,
   toSidechatChildName,
 } from "../../../shared/maven-conversation";
+import { getLocalUploadKey } from "../../../shared/upload-ownership";
 import type { ToolRow } from "../../db";
 import { buildCustomerByIdQuery } from "../../services/customer-service";
-import { createPublicConversationStore } from "../../conversations/create-public-conversation-store";
 import type {
   PublicBulkConversationActionResult,
   PublicConversationAction,
-  PublicConversationStore,
+  PublicExternalActionLease,
+  PublicExternalActionLeaseInput,
   PublicRetentionClaim,
 } from "../../conversations/public-conversation-store";
 import { ProjectService } from "../../services/project-service";
@@ -111,14 +117,28 @@ interface NativeMcpServer {
   state: string;
 }
 
+interface PublicCustomerMutationRow {
+  mutation_id: string;
+  updates_json: string;
+  status: string;
+  result_json: string | null;
+  attempts: number;
+}
+
 type AddMcpServerResult =
   | { id: string; state: "authenticating"; authUrl: string }
   | { id: string; state: "ready" };
 
 const MCP_TOOL_TIMEOUT_MS = 30_000;
+const PUBLIC_ARCHIVE_RETENTION_MS = 60 * 24 * 60 * 60 * 1_000;
 
 async function runWithExternalActionLease<T>(
-  conversationStore: PublicConversationStore,
+  conversationStore: {
+    acquireExternalAction(
+      input: PublicExternalActionLeaseInput,
+    ): Promise<PublicExternalActionLease | null>;
+    releaseExternalAction(input: PublicExternalActionLease): Promise<void>;
+  },
   projectId: string,
   conversationId: string,
   action: () => Promise<T>,
@@ -272,6 +292,177 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     conversationId: string,
   ): Promise<MavenConversationSummary | null> {
     return this.conversationDirectory().getConversation(conversationId);
+  }
+
+  async getConversationChildPresence(conversationId: string): Promise<{
+    public: boolean;
+    sidechat: boolean;
+  }> {
+    return {
+      public: this.hasSubAgent(MavenChatAgent, toPublicChildName(conversationId)),
+      sidechat: this.hasSubAgent(
+        MavenChatAgent,
+        toSidechatChildName(conversationId),
+      ),
+    };
+  }
+
+  async listByCustomer(customerId: string): Promise<MavenConversationSummary[]> {
+    return this.conversationDirectory().listByCustomer(customerId);
+  }
+
+  async listByVisitor(visitorId: string): Promise<MavenConversationSummary[]> {
+    return this.conversationDirectory().listByVisitor(visitorId);
+  }
+
+  async getConversationCountsByCustomer(
+    customerIds: string[],
+  ): Promise<Array<{ customerId: string; count: number }>> {
+    return this.conversationDirectory().getConversationCountsByCustomer(
+      customerIds,
+    );
+  }
+
+  async getProjectStats(since: number): Promise<MavenProjectConversationStats> {
+    return this.conversationDirectory().getProjectStats(since);
+  }
+
+  async extractMetadataKeys(
+    periodStart: number,
+    periodEnd: number,
+  ): Promise<string[]> {
+    return this.conversationDirectory().extractMetadataKeys(
+      periodStart,
+      periodEnd,
+    );
+  }
+
+  async getUsageLog(query: MavenUsageLogQuery): Promise<MavenUsageLogResult> {
+    return this.conversationDirectory().getUsageLog(query);
+  }
+
+  async reconcileDirectory(
+    summaries: MavenConversationSummary[],
+  ): Promise<{ applied: number; skipped: number }> {
+    let applied = 0;
+    let skipped = 0;
+    for (const summary of summaries) {
+      const result = this.conversationDirectory().upsertConversationSummary(
+        summary,
+      );
+      if (result.applied) applied += 1;
+      else skipped += 1;
+    }
+    return { applied, skipped };
+  }
+
+  async applyPublicCustomerMutation(
+    input: MavenPublicCustomerMutation,
+  ): Promise<MavenPublicCustomerMutationResult> {
+    if (!input.mutationId || input.updates.length === 0) {
+      throw new Error("Invalid public customer mutation");
+    }
+    this.ensurePublicCustomerMutationSchema();
+    const updatesJson = JSON.stringify(input.updates);
+    void this.sql`
+      INSERT OR IGNORE INTO public_customer_mutations (
+        mutation_id, updates_json, status, attempts, created_at, updated_at
+      ) VALUES (
+        ${input.mutationId}, ${updatesJson}, 'pending', 0,
+        ${Date.now()}, ${Date.now()}
+      )
+    `;
+    const row = this.readPublicCustomerMutation(input.mutationId);
+    if (!row || row.updates_json !== updatesJson) {
+      throw new Error("Public customer mutation id was reused");
+    }
+    if (row.status === "completed" && row.result_json) {
+      return JSON.parse(row.result_json) as MavenPublicCustomerMutationResult;
+    }
+    return this.processPublicCustomerMutation(row);
+  }
+
+  async retryPublicCustomerMutation(
+    input: { mutationId: string },
+  ): Promise<MavenPublicCustomerMutationResult | null> {
+    this.ensurePublicCustomerMutationSchema();
+    const row = this.readPublicCustomerMutation(input.mutationId);
+    if (!row) return null;
+    if (row.status === "completed" && row.result_json) {
+      return JSON.parse(row.result_json) as MavenPublicCustomerMutationResult;
+    }
+    return this.processPublicCustomerMutation(row);
+  }
+
+  private async processPublicCustomerMutation(
+    row: PublicCustomerMutationRow,
+  ): Promise<MavenPublicCustomerMutationResult> {
+    const updates = JSON.parse(row.updates_json) as MavenPublicCustomerMutation["updates"];
+    const updatedIds: string[] = [];
+    try {
+      for (const update of updates) {
+        const summary = this.conversationDirectory().getConversation(
+          update.conversationId,
+        );
+        if (!summary || summary.visitorId === "") {
+          throw new Error("Public customer mutation is waiting for backfill");
+        }
+        const child = await this.subAgent(
+          MavenChatAgent,
+          summary.publicChildName,
+        );
+        await child.updateCustomer({
+          projectId: this.name,
+          conversationId: update.conversationId,
+          customerId: update.customerId,
+        });
+        if (
+          update.visitorName !== undefined ||
+          update.visitorEmail !== undefined
+        ) {
+          await child.updateContact({
+            projectId: this.name,
+            conversationId: update.conversationId,
+            ...(update.visitorName === undefined
+              ? {}
+              : { visitorName: update.visitorName }),
+            ...(update.visitorEmail === undefined
+              ? {}
+              : { visitorEmail: update.visitorEmail }),
+          });
+        }
+        updatedIds.push(update.conversationId);
+      }
+      const result: MavenPublicCustomerMutationResult = {
+        status: "completed",
+        updatedIds,
+      };
+      void this.sql`
+        UPDATE public_customer_mutations
+        SET status = 'completed', result_json = ${JSON.stringify(result)},
+            updated_at = ${Date.now()}
+        WHERE mutation_id = ${row.mutation_id}
+      `;
+      return result;
+    } catch {
+      const attempts = row.attempts + 1;
+      void this.sql`
+        UPDATE public_customer_mutations
+        SET attempts = ${attempts}, updated_at = ${Date.now()}
+        WHERE mutation_id = ${row.mutation_id}
+      `;
+      try {
+        await this.schedule(
+          Math.min(3_600, 2 ** Math.min(attempts, 10)),
+          "retryPublicCustomerMutation",
+          { mutationId: row.mutation_id },
+          { idempotent: true },
+        );
+      } catch {
+        // The reconciliation sweep can retry a persisted pending mutation.
+      }
+      return { status: "pending", updatedIds };
+    }
   }
 
   async findConversationByTelegramThreadId(
@@ -470,6 +661,101 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     return claimed;
   }
 
+  async schedulePublicRetention(input: {
+    conversationId: string;
+    archivedAt: number;
+  }): Promise<string> {
+    const delaySeconds = Math.max(
+      1,
+      Math.ceil(
+        (input.archivedAt + PUBLIC_ARCHIVE_RETENTION_MS - Date.now()) / 1_000,
+      ),
+    );
+    const schedule = await this.schedule(
+      delaySeconds,
+      "purgeConversation",
+      input,
+      { idempotent: true },
+    );
+    return schedule.id;
+  }
+
+  async cancelPublicRetention(scheduleId: string): Promise<void> {
+    await this.cancelSchedule(scheduleId);
+  }
+
+  async purgeConversation(input: {
+    conversationId: string;
+    archivedAt: number;
+    now?: number;
+  }): Promise<boolean> {
+    const summary = this.conversationDirectory().getConversation(
+      input.conversationId,
+    );
+    const now = input.now ?? Date.now();
+    if (
+      !summary ||
+      summary.visitorId === "" ||
+      summary.archivedAt !== input.archivedAt ||
+      now < input.archivedAt + PUBLIC_ARCHIVE_RETENTION_MS
+    ) return false;
+
+    const publicChild = await this.subAgent(
+      MavenChatAgent,
+      summary.publicChildName,
+    );
+    const manifest = await publicChild.getAttachmentManifest();
+    const prefix =
+      `${this.name}/conversation-attachments/${input.conversationId}/`;
+    const keys = [...new Set(manifest.flatMap((entry) =>
+      entry.imageUrls.map(getLocalUploadKey)
+        .filter((key): key is string => key?.startsWith(prefix) === true)
+    ))];
+    const deletable: string[] = [];
+    for (const key of keys) {
+      if (!await this.hasPublicUploadKeyElsewhere({
+        key,
+        excludedConversationId: input.conversationId,
+      })) deletable.push(key);
+    }
+    for (let offset = 0; offset < deletable.length; offset += 1_000) {
+      await this.env.UPLOADS.delete(deletable.slice(offset, offset + 1_000));
+    }
+
+    if (summary.retentionScheduleId) {
+      try {
+        await this.cancelSchedule(summary.retentionScheduleId);
+      } catch {
+        // The callback may be cancelling the schedule currently executing.
+      }
+    }
+    if (
+      summary.sidechatChildName &&
+      this.hasSubAgent(MavenChatAgent, summary.sidechatChildName)
+    ) {
+      await this.deleteSubAgent(MavenChatAgent, summary.sidechatChildName);
+    }
+    if (this.hasSubAgent(MavenChatAgent, summary.publicChildName)) {
+      await this.deleteSubAgent(MavenChatAgent, summary.publicChildName);
+    }
+    const removed = this.conversationDirectory().removeConversation(
+      input.conversationId,
+    );
+    if (removed) {
+      const inboxCounts = this.conversationDirectory().getInboxCounts();
+      this.setState({ sidechats: {}, inboxCounts });
+      this.broadcastProjectEvent({ type: "inbox-counts", counts: inboxCounts });
+    }
+    try {
+      await this.env.DB.prepare(
+        "DELETE FROM tool_executions WHERE conversation_id = ?",
+      ).bind(input.conversationId).run();
+    } catch {
+      // The legacy reconciliation sweep retries D1 auxiliary cleanup.
+    }
+    return removed;
+  }
+
   async hasPublicUploadKeyElsewhere(input: {
     key: string;
     excludedConversationId: string;
@@ -499,6 +785,12 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     );
     if (!await child.matchesPublicRetentionClaim(input.purgeStartedAt)) {
       return false;
+    }
+    if (
+      summary.sidechatChildName &&
+      this.hasSubAgent(MavenChatAgent, summary.sidechatChildName)
+    ) {
+      await this.deleteSubAgent(MavenChatAgent, summary.sidechatChildName);
     }
     await this.deleteSubAgent(MavenChatAgent, summary.publicChildName);
     const removed = this.conversationDirectory().removeConversation(
@@ -589,16 +881,10 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     } catch {
       return false;
     }
-    const db = drizzle(this.env.DB);
-    const conversationStore = createPublicConversationStore({
-      db,
-      env: this.env,
-    });
-    const conversation = await conversationStore.get(
-      this.name,
+    const conversation = this.conversationDirectory().getConversation(
       conversationId,
     );
-    return conversation?.archivedAt === null;
+    return conversation !== null && conversation.archivedAt === null;
   }
 
   async enforceSidechatArchive(conversationId: string): Promise<void> {
@@ -614,16 +900,29 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
   ): Promise<SidechatCustomerContext> {
     this.assertRegisteredSidechat(childName, conversationId);
     const db = drizzle(this.env.DB);
-    const conversationStore = createPublicConversationStore({
-      db,
-      env: this.env,
+    const summary = this.conversationDirectory().getConversation(
+      conversationId,
+    );
+    if (!summary || summary.visitorId === "") {
+      throw new Error("Sidechat conversation not found");
+    }
+    const publicChild = await this.subAgent(
+      MavenChatAgent,
+      summary.publicChildName,
+    );
+    const publicSnapshot = await publicChild.getPublicContextSnapshot({
+      newestMessages: 40,
     });
     return buildSidechatContext({
       projectId: this.name,
       conversationId,
       dependencies: {
         getConversation(id, projectId) {
-          return conversationStore.get(projectId, id);
+          return Promise.resolve(
+            id === conversationId && projectId === publicSnapshot.conversation.projectId
+              ? publicSnapshot.conversation
+              : null,
+          );
         },
         async getCustomer(projectId, customerId) {
           const rows = await buildCustomerByIdQuery(
@@ -634,7 +933,12 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           return rows[0] ?? null;
         },
         getRecentPublicMessages(projectId, id, limit) {
-          return conversationStore.getRecentMessages(projectId, id, limit);
+          const matches = projectId === publicSnapshot.conversation.projectId &&
+            id === conversationId;
+          return Promise.resolve({
+            messages: matches ? publicSnapshot.messages.slice(-limit) : [],
+            hasMore: matches && publicSnapshot.messages.length >= limit,
+          });
         },
       },
     });
@@ -671,12 +975,10 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const childName = toSidechatChildName(conversationId);
     this.assertRegisteredSidechat(childName, conversationId);
     const db = drizzle(this.env.DB);
-    const conversationStore = createPublicConversationStore({
-      db,
-      env: this.env,
-    });
     const [conversation, actorAllowed] = await Promise.all([
-      conversationStore.get(this.name, conversationId),
+      Promise.resolve(this.conversationDirectory().getConversation(
+        conversationId,
+      )),
       this.canActorAccessProject(db, actorUserId),
     ]);
     if (!conversation || conversation.archivedAt !== null || !actorAllowed) {
@@ -695,8 +997,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     if (!descriptor || descriptor.access !== "write" || !descriptor.enabled) {
       return false;
     }
-    const latestConversation = await conversationStore.get(
-      this.name,
+    const latestConversation = this.conversationDirectory().getConversation(
       conversationId,
     );
     if (!latestConversation || latestConversation.archivedAt !== null) {
@@ -963,11 +1264,13 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     request: ExecuteProjectToolRequest,
   ): Promise<ExecuteProjectToolResult> {
     const db = drizzle(this.env.DB);
-    const conversationStore = createPublicConversationStore({
-      db,
-      env: this.env,
-    });
     const toolService = new ToolService(db);
+    const summary = this.conversationDirectory().getConversation(
+      request.conversationId,
+    );
+    const publicChild = summary && summary.visitorId !== ""
+      ? await this.subAgent(MavenChatAgent, summary.publicChildName)
+      : null;
     return executeSidechatProjectTool({
       projectId: this.name,
       request,
@@ -980,11 +1283,12 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
             return false;
           }
         },
-        getConversation: () =>
-          conversationStore.get(
-            this.name,
-            request.conversationId,
-          ),
+        getConversation: async () =>
+          publicChild
+            ? (await publicChild.getPublicContextSnapshot({
+                newestMessages: 0,
+              })).conversation
+            : null,
         canActorAccessProject: (actorUserId) =>
           this.canActorAccessProject(db, actorUserId),
         getAuthoritativeHttpTool: (toolId) =>
@@ -994,10 +1298,11 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         hasAlwaysAllowGrant: (candidate) =>
           this.hasAlwaysAllowGrant(candidate),
         runKnowledgeSearch: async (input) => {
-          const conversation = await conversationStore.get(
-            this.name,
-            request.conversationId,
-          );
+          const conversation = publicChild
+            ? (await publicChild.getPublicContextSnapshot({
+                newestMessages: 0,
+              })).conversation
+            : null;
           if (!conversation || conversation.archivedAt !== null) {
             return { found: false, context: "", sources: [], topScore: 0 };
           }
@@ -1026,12 +1331,14 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
           return definition.execute(input, {});
         },
         runExternalAction: (action) =>
-          runWithExternalActionLease(
-            conversationStore,
-            this.name,
-            request.conversationId,
-            action,
-          ),
+          publicChild
+            ? runWithExternalActionLease(
+                publicChild,
+                this.name,
+                request.conversationId,
+                action,
+              )
+            : Promise.resolve({ executed: false }),
         executeHttpTool: async (tool, input) =>
           executeHttpToolRequest(
             {
@@ -1046,6 +1353,31 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         writeAudit: (metadata) => this.writeSidechatActionAudit(metadata),
       },
     });
+  }
+
+  private ensurePublicCustomerMutationSchema(): void {
+    void this.sql`
+      CREATE TABLE IF NOT EXISTS public_customer_mutations (
+        mutation_id TEXT PRIMARY KEY,
+        updates_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        result_json TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `;
+  }
+
+  private readPublicCustomerMutation(
+    mutationId: string,
+  ): PublicCustomerMutationRow | null {
+    const rows = this.sql<PublicCustomerMutationRow>`
+      SELECT * FROM public_customer_mutations
+      WHERE mutation_id = ${mutationId}
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
   }
 
   private ensureMcpApplicationSchema(): void {

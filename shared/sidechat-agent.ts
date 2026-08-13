@@ -52,6 +52,7 @@ export interface MavenConversationSummary {
   snoozedUntil: number | null;
   archivedAt: number | null;
   purgeStartedAt: number | null;
+  retentionScheduleId: string | null;
   visitorLastSeenAt: number | null;
   visitorPresence: "active" | "background";
   visitorLastOnlineAt: number | null;
@@ -90,6 +91,53 @@ export type MavenInboxCounts = Record<MavenConversationFilter, number>;
 export interface MavenConversationDashboardPage
   extends MavenConversationListResult {
   counts: MavenInboxCounts;
+}
+
+export interface MavenProjectConversationStats {
+  totalConversations: number;
+  activeConversations: number;
+  totalMessages: number;
+  conversationsByDay: Array<{ day: string; count: number }>;
+  conversationsByStatus: Array<{
+    status: MavenConversationSummary["status"];
+    count: number;
+  }>;
+  recentConversations: MavenConversationSummary[];
+}
+
+export interface MavenUsageLogQuery {
+  periodStart: number;
+  periodEnd: number;
+  limit: number;
+  offset: number;
+  sortBy: "botMessages" | "createdAt";
+  sortOrder: "asc" | "desc";
+  status?: string;
+  metadataKey?: string;
+  metadataValue?: string;
+}
+
+export interface MavenUsageLogResult {
+  summaries: MavenConversationSummary[];
+  total: number;
+  metadataKeys: string[];
+}
+
+export interface MavenPublicCustomerMutationUpdate {
+  conversationId: string;
+  customerId: string | null;
+  visitorName?: string;
+  visitorEmail?: string;
+}
+
+export interface MavenPublicCustomerMutation {
+  mutationId: string;
+  updates: MavenPublicCustomerMutationUpdate[];
+}
+
+export interface MavenPublicCustomerMutationResult {
+  status: "completed" | "pending";
+  updatedIds: string[];
 }
 
 export type MavenProjectEvent =

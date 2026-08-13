@@ -38,6 +38,7 @@ function summary(): MavenConversationSummary {
     snoozedUntil: null,
     archivedAt: null,
     purgeStartedAt: null,
+    retentionScheduleId: null,
     visitorLastSeenAt: 90,
     visitorPresence: "active",
     visitorLastOnlineAt: 95,

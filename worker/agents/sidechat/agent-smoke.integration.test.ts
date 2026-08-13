@@ -118,6 +118,7 @@ describe("native Sidechat Agent registration", () => {
       snoozedUntil: null,
       archivedAt: null,
       purgeStartedAt: null,
+      retentionScheduleId: null,
       visitorLastSeenAt: null,
       visitorPresence: "active" as const,
       visitorLastOnlineAt: null,

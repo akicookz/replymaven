@@ -49,6 +49,8 @@ import type {
   PublicConversationStore,
   PublicConversationUpdatesQuery,
   PublicCustomerLinkInput,
+  PublicCustomerMutationInput,
+  PublicCustomerMutationResult,
   PublicDeliveryUpdateInput,
   PublicEmailUpdateInput,
   PublicExternalActionLease,
@@ -850,6 +852,37 @@ export class D1PublicConversationStore implements PublicConversationStore {
       input.customerId,
     );
     return row ? mapD1ConversationRow(row) : null;
+  }
+
+  async applyCustomerMutation(
+    input: PublicCustomerMutationInput,
+  ): Promise<PublicCustomerMutationResult> {
+    const updatedIds: string[] = [];
+    for (const update of input.updates) {
+      const conversation = await this.updateCustomer({
+        projectId: input.projectId,
+        conversationId: update.conversationId,
+        customerId: update.customerId,
+      });
+      if (!conversation) continue;
+      if (
+        update.visitorName !== undefined ||
+        update.visitorEmail !== undefined
+      ) {
+        await this.updateContact({
+          projectId: input.projectId,
+          conversationId: update.conversationId,
+          ...(update.visitorName === undefined
+            ? {}
+            : { visitorName: update.visitorName }),
+          ...(update.visitorEmail === undefined
+            ? {}
+            : { visitorEmail: update.visitorEmail }),
+        });
+      }
+      updatedIds.push(update.conversationId);
+    }
+    return { status: "completed", updatedIds };
   }
 
   async getAnalytics(

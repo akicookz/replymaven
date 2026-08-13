@@ -41,6 +41,7 @@ function makeSummary(
     snoozedUntil: null,
     archivedAt: null,
     purgeStartedAt: null,
+    retentionScheduleId: null,
     visitorLastSeenAt: null,
     visitorPresence: "active",
     visitorLastOnlineAt: null,
@@ -237,6 +238,84 @@ describe("ConversationDirectory", () => {
     }))).toEqual(["c", "a"]);
   });
 
+  test("serves customer, analytics, and usage queries directly from SQL", async () => {
+    const dayOne = Date.UTC(2026, 7, 1, 12);
+    const dayTwo = Date.UTC(2026, 7, 2, 12);
+    const directory = createDirectory();
+    await insertAll(directory, [
+      makeSummary("a", {
+        customerId: "customer-1",
+        visitorId: "visitor-shared",
+        metadata: { source: "pricing", locale: "en" },
+        messageCount: 3,
+        botMessageCount: 2,
+        createdAt: dayOne,
+        updatedAt: dayOne,
+      }),
+      makeSummary("b", {
+        customerId: "customer-1",
+        visitorId: "visitor-shared",
+        status: "waiting_agent",
+        metadata: { source: "docs" },
+        messageCount: 7,
+        botMessageCount: 5,
+        createdAt: dayTwo,
+        updatedAt: dayTwo,
+      }),
+      makeSummary("c", {
+        customerId: "customer-2",
+        status: "closed",
+        messageCount: 1,
+        createdAt: dayTwo,
+        updatedAt: dayTwo + 1,
+      }),
+    ]);
+
+    expect(directory.listByCustomer("customer-1").map((row) =>
+      row.conversationId
+    )).toEqual(["a", "b"]);
+    expect(directory.listByVisitor("visitor-shared").map((row) =>
+      row.conversationId
+    )).toEqual(["a", "b"]);
+    expect(directory.getConversationCountsByCustomer([
+      "customer-1",
+      "missing",
+      "customer-1",
+    ])).toEqual([
+      { customerId: "customer-1", count: 2 },
+      { customerId: "missing", count: 0 },
+    ]);
+    expect(directory.getProjectStats(dayOne)).toMatchObject({
+      totalConversations: 3,
+      activeConversations: 2,
+      totalMessages: 11,
+      conversationsByDay: [
+        { day: "2026-08-01", count: 1 },
+        { day: "2026-08-02", count: 2 },
+      ],
+      conversationsByStatus: expect.arrayContaining([
+        { status: "active", count: 1 },
+        { status: "waiting_agent", count: 1 },
+        { status: "closed", count: 1 },
+      ]),
+    });
+    expect(directory.getUsageLog({
+      periodStart: dayOne,
+      periodEnd: dayTwo + 24 * 60 * 60 * 1_000,
+      limit: 2,
+      offset: 0,
+      sortBy: "botMessages",
+      sortOrder: "desc",
+    })).toMatchObject({
+      summaries: [
+        expect.objectContaining({ conversationId: "b" }),
+        expect.objectContaining({ conversationId: "a" }),
+      ],
+      total: 3,
+      metadataKeys: ["locale", "source"],
+    });
+  });
+
   test("keeps the complete last-message preview in the parent directory", async () => {
     const directory = createDirectory();
     await directory.upsertConversationSummary(makeSummary("a", {
@@ -246,6 +325,7 @@ describe("ConversationDirectory", () => {
       lastMessageSenderName: "Grace",
       lastMessageEmailedAt: 123,
       lastMessageCreatedAt: 100,
+      retentionScheduleId: "schedule-1",
     }));
 
     expect(directory.getConversation("a")).toMatchObject({
@@ -255,6 +335,7 @@ describe("ConversationDirectory", () => {
       lastMessageSenderName: "Grace",
       lastMessageEmailedAt: 123,
       lastMessageCreatedAt: 100,
+      retentionScheduleId: "schedule-1",
     });
   });
 });

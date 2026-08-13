@@ -1,10 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import {
+  getLocalUploadKey,
   isConversationUploadUrl,
   isProjectChatUploadUrl,
 } from "./upload-ownership";
 
 describe("message upload ownership", () => {
+  test("extracts conversation keys from absolute ReplyMaven upload URLs", () => {
+    expect(getLocalUploadKey(
+      "https://replymaven.test/api/uploads/project-1/conversation-attachments/conversation-1/image.png?version=1",
+    )).toBe(
+      "project-1/conversation-attachments/conversation-1/image.png",
+    );
+  });
+
   test("accepts only the current project's widget upload namespace", () => {
     expect(isProjectChatUploadUrl(
       "/api/uploads/project-1/chat-images/image.png",

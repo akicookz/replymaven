@@ -180,7 +180,7 @@ describe("native public conversation operations", () => {
     if (lease) await child.releaseExternalAction(lease);
 
     await expect(child.getPublicSnapshot()).resolves.toMatchObject({
-      revision: 2,
+      revision: 3,
       messages: [],
       conversation: { archivedAt: expect.any(Number) },
     });
