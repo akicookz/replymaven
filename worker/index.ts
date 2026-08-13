@@ -17,6 +17,7 @@ import { WidgetService } from "./services/widget-service";
 import { getAssignableUsers } from "./services/assignable-users";
 import { ContactFormService } from "./services/contact-form-service";
 import { createPublicConversationStore } from "./conversations/create-public-conversation-store";
+import { AgentPublicConversationStore } from "./conversations/agent-public-conversation-store";
 import {
   toLegacyConversationDto,
   toLegacyLastMessagePreviewDto,
@@ -130,6 +131,10 @@ import {
   type SidechatRouteActor,
 } from "./routes/sidechat-agent-handlers";
 import {
+  handleCreateDashboardPublicAgentSession,
+  handleCreateWidgetPublicAgentSession,
+} from "./routes/public-agent-handlers";
+import {
   handleConnectProjectMcp,
   handleDisconnectProjectMcp,
   handleGetProjectMcp,
@@ -141,6 +146,7 @@ import {
 } from "./routes/project-mcp-handlers";
 import { deleteProjectWithNativeCleanup } from "./routes/project-cleanup";
 import { authorizeSidechatAgentRouteRequest } from "./agents/sidechat/agent-auth";
+import { authorizePublicAgentRouteRequest } from "./agents/maven/public/public-agent-auth";
 import { MavenProjectAgent } from "./agents/maven/maven-project-agent";
 import {
   handleCustomerProjectWsUpgrade,
@@ -661,23 +667,37 @@ const app = new Hono<HonoAppContext>()
     const auth = createAuth(c.env, c.req.raw.cf as CfProperties);
     return auth.handler(c.req.raw);
   })
-  // ─── Native Sidechat Agent routing ────────────────────────────────────────
+  // ─── Native Maven Agent routing ───────────────────────────────────────────
   // The signed two-minute session token is verified before the parent Agent
   // or any registered child facet is woken. Both HTTP and WebSocket requests
   // pass through the same exact route/claim matcher.
   .all("/agents/*", async (c) => {
     const response = await routeAgentRequest(c.req.raw, c.env, {
       onBeforeConnect(request) {
-        return authorizeSidechatAgentRouteRequest(
-          request,
-          c.env.SIDECHAT_TOKEN_SECRET,
-        );
+        return new URL(request.url).pathname.includes(
+            "/sub/maven-chat-agent/pub_",
+          )
+          ? authorizePublicAgentRouteRequest(
+              request,
+              c.env.SIDECHAT_TOKEN_SECRET,
+            )
+          : authorizeSidechatAgentRouteRequest(
+              request,
+              c.env.SIDECHAT_TOKEN_SECRET,
+            );
       },
       onBeforeRequest(request) {
-        return authorizeSidechatAgentRouteRequest(
-          request,
-          c.env.SIDECHAT_TOKEN_SECRET,
-        );
+        return new URL(request.url).pathname.includes(
+            "/sub/maven-chat-agent/pub_",
+          )
+          ? authorizePublicAgentRouteRequest(
+              request,
+              c.env.SIDECHAT_TOKEN_SECRET,
+            )
+          : authorizeSidechatAgentRouteRequest(
+              request,
+              c.env.SIDECHAT_TOKEN_SECRET,
+            );
       },
     });
     return response ?? c.json({ error: "not_found" }, 404);
@@ -842,6 +862,50 @@ const app = new Hono<HonoAppContext>()
 
     return c.json(toLegacyConversationDto(conversation), 201);
   })
+
+  // ─── Public Agent Session ──────────────────────────────────────────────────
+  .post(
+    "/api/widget/:projectSlug/conversations/:id/agent-session",
+    async (c) => {
+      const ip = getClientIp(c);
+      if (!checkRateLimit(`agent-session:${ip}`, 20, 60_000)) {
+        return c.json({ error: "Rate limit exceeded" }, 429);
+      }
+      let visitorId: string | null = null;
+      try {
+        const body: unknown = await c.req.json();
+        if (
+          body &&
+          typeof body === "object" &&
+          !Array.isArray(body) &&
+          typeof (body as Record<string, unknown>).visitorId === "string"
+        ) {
+          visitorId = (body as Record<string, string>).visitorId;
+        }
+      } catch {
+        visitorId = null;
+      }
+      if (!visitorId || visitorId.length > 128) {
+        return c.json({ error: "visitorId is required" }, 400);
+      }
+      const db = drizzle(c.env.DB);
+      const conversationStore = createPublicConversationStore({ db, env: c.env });
+      const agentStore = new AgentPublicConversationStore({ db, env: c.env });
+      return handleCreateWidgetPublicAgentSession({
+        request: c.req.raw,
+        projectSlug: c.req.param("projectSlug"),
+        conversationId: c.req.param("id"),
+        visitorId,
+        secret: c.env.SIDECHAT_TOKEN_SECRET,
+        projectService: new ProjectService(db),
+        conversationStore,
+        banService: new VisitorBanService(db),
+        ensurePublicConversation(conversation) {
+          return agentStore.ensurePublicConversation(conversation);
+        },
+      });
+    },
+  )
 
   // ─── Get Active Conversation by Visitor ────────────────────────────────────
   .get("/api/widget/:projectSlug/conversations/active", async (c) => {
@@ -2835,6 +2899,29 @@ const app = new Hono<HonoAppContext>()
 
     await next();
   })
+
+  // ─── Public dashboard Agent sessions ──────────────────────────────────────
+  .post(
+    "/api/projects/:projectId/conversations/:conversationId/agent-session",
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      const db = c.get("db");
+      const conversationStore = createPublicConversationStore({ db, env: c.env });
+      const agentStore = new AgentPublicConversationStore({ db, env: c.env });
+      return handleCreateDashboardPublicAgentSession({
+        request: c.req.raw,
+        actor: getSidechatRouteActor(c),
+        projectId,
+        conversationId: c.req.param("conversationId"),
+        secret: c.env.SIDECHAT_TOKEN_SECRET,
+        projectService: new ProjectService(db),
+        conversationStore,
+        ensurePublicConversation(conversation) {
+          return agentStore.ensurePublicConversation(conversation);
+        },
+      });
+    },
+  )
 
   // ─── Native Sidechat sessions ─────────────────────────────────────────────
   .post(

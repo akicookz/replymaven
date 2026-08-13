@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
 import type { UIMessage } from "ai";
+import { MessageType } from "@cloudflare/ai-chat/types";
 import type {
   PublicConversationRecord,
   PublicMessageRecord,
@@ -275,4 +276,110 @@ describe("native public MavenChatAgent child", () => {
       revision: 0,
     });
   });
+
+  nativeTest("accepts an exact visitor WebSocket and blocks destructive SDK frames", async () => {
+    const [
+      { env, exports },
+      { getSubAgentByName },
+      { MavenChatAgent },
+      { signPublicChatToken },
+      { toPublicUiMessage },
+    ] = await Promise.all([
+      import("cloudflare:workers"),
+      import("agents"),
+      import("../maven-chat-agent"),
+      import("./public-agent-auth"),
+      import("./public-message"),
+    ]);
+    const projectId = "public-websocket-project";
+    const conversationId = "public-websocket-conversation";
+    const visitorId = "public-websocket-visitor";
+    const parent = env.MAVEN_PROJECT_AGENT.get(
+      env.MAVEN_PROJECT_AGENT.idFromName(projectId),
+    );
+    await parent.registerPublicConversation(conversationId);
+    const child = await getSubAgentByName(
+      parent,
+      MavenChatAgent,
+      `pub_${conversationId}`,
+    );
+    const record = conversation(conversationId);
+    record.projectId = projectId;
+    record.visitorId = visitorId;
+    const importedMessage = {
+      ...publicMessage("public-ws-bot-1", "bot", "Welcome"),
+      conversationId,
+    };
+    await child.importLegacyPublicConversation({
+      conversation: record,
+      messages: [importedMessage],
+      checksum: "public-websocket-checksum",
+    });
+    const issuedAt = Math.floor(Date.now() / 1_000);
+    const token = await signPublicChatToken({
+      v: 1,
+      aud: "replymaven-public-chat",
+      scope: "child",
+      actor: "visitor",
+      projectId,
+      parentName: projectId,
+      conversationId,
+      childName: `pub_${conversationId}`,
+      visitorId,
+      canSubmitVisitor: true,
+      canRead: true,
+      iat: issuedAt,
+      exp: issuedAt + 120,
+    }, env.SIDECHAT_TOKEN_SECRET);
+    const response = await exports.default.fetch(new Request(
+      `https://example.test/agents/maven-project-agent/${projectId}/sub/maven-chat-agent/pub_${conversationId}?token=${token}`,
+      { headers: { Upgrade: "websocket" } },
+    ));
+    expect(response.status).toBe(101);
+    const socket = response.webSocket;
+    expect(socket).not.toBeNull();
+    if (!socket) throw new Error("Expected a WebSocket");
+    socket.accept();
+
+    const responseFrame = new Promise<MessageEvent>((resolve) => {
+      socket.addEventListener("message", function handleMessage(event) {
+        if (typeof event.data !== "string") return;
+        const parsed = JSON.parse(event.data) as Record<string, unknown>;
+        if (
+          parsed.type === MessageType.CF_AGENT_USE_CHAT_RESPONSE &&
+          parsed.id === "public-request-1" &&
+          parsed.done === true
+        ) {
+          socket.removeEventListener("message", handleMessage);
+          resolve(event);
+        }
+      });
+    });
+    socket.send(JSON.stringify({
+      type: MessageType.CF_AGENT_USE_CHAT_REQUEST,
+      id: "public-request-1",
+      init: {
+        method: "POST",
+        body: JSON.stringify({
+          messages: [
+            toPublicUiMessage(importedMessage, projectId),
+            {
+              id: "public-ws-visitor-1",
+              role: "user",
+              parts: [{ type: "text", text: "Hello" }],
+            },
+          ],
+        }),
+      },
+    }));
+    await responseFrame;
+    await expect(child.getPublicMessages()).resolves.toHaveLength(2);
+
+    const closed = new Promise<CloseEvent>((resolve) => {
+      socket.addEventListener("close", resolve, { once: true });
+    });
+    socket.send(JSON.stringify({ type: MessageType.CF_AGENT_CHAT_CLEAR }));
+    await closed;
+    await expect(child.getPublicMessages()).resolves.toHaveLength(2);
+  }, 30_000);
 });

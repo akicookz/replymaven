@@ -1,0 +1,117 @@
+/// <reference types="@cloudflare/vitest-pool-workers/types" />
+
+import { drizzle } from "drizzle-orm/d1";
+import type {
+  PublicConversationRecord,
+  PublicMessageRecord,
+} from "../../../../shared/maven-conversation";
+import type { PublicConversationStore } from "../../../conversations/public-conversation-store";
+
+const isBunTest = "Bun" in globalThis;
+const nativeTest = isBunTest ? test.skip : test;
+
+function conversation(): PublicConversationRecord {
+  return {
+    id: "adapter-conversation-1",
+    projectId: "adapter-project-1",
+    customerId: null,
+    visitorId: "adapter-visitor-1",
+    visitorName: "Legacy visitor",
+    visitorEmail: null,
+    status: "active",
+    closeReason: null,
+    telegramThreadId: null,
+    metadata: { imported: true },
+    chatState: {},
+    lastActivityAt: 100,
+    visitorLastSeenAt: null,
+    visitorPresence: "active",
+    visitorLastOnlineAt: null,
+    snoozedUntil: null,
+    archivedAt: null,
+    purgeStartedAt: null,
+    externalActionStartedAt: null,
+    priority: "medium",
+    assigneeId: null,
+    createdAt: 50,
+    updatedAt: 100,
+    ownershipRevision: 0,
+  };
+}
+
+function message(): PublicMessageRecord {
+  return {
+    id: "adapter-message-1",
+    conversationId: "adapter-conversation-1",
+    author: "visitor",
+    content: "Imported once",
+    imageUrls: [],
+    sources: [],
+    senderName: null,
+    senderAvatar: null,
+    userId: null,
+    systemKind: null,
+    createdAt: 100,
+    deliveredAt: null,
+    readAt: null,
+    emailedAt: null,
+  };
+}
+
+describe("native AgentPublicConversationStore", () => {
+  nativeTest("imports legacy data once, then keeps Agent-native state authoritative", async () => {
+    const [
+      { env },
+      { AgentPublicConversationStore },
+    ] = await Promise.all([
+      import("cloudflare:workers"),
+      import("../../../conversations/agent-public-conversation-store"),
+    ]);
+    const legacyRecord = conversation();
+    const legacyMessages = [message()];
+    const legacy = {
+      async get(projectId: string, conversationId: string) {
+        return projectId === legacyRecord.projectId &&
+            conversationId === legacyRecord.id
+          ? structuredClone(legacyRecord)
+          : null;
+      },
+      async getMessages(projectId: string, conversationId: string) {
+        return projectId === legacyRecord.projectId &&
+            conversationId === legacyRecord.id
+          ? structuredClone(legacyMessages)
+          : [];
+      },
+    } as PublicConversationStore;
+    const store = new AgentPublicConversationStore({
+      db: drizzle(env.DB),
+      env,
+      legacy,
+    });
+
+    await expect(store.get(legacyRecord.projectId, legacyRecord.id)).resolves
+      .toMatchObject({ visitorName: "Legacy visitor" });
+    await expect(store.getMessages(legacyRecord.projectId, legacyRecord.id))
+      .resolves.toEqual(legacyMessages);
+    await store.updateContact({
+      projectId: legacyRecord.projectId,
+      conversationId: legacyRecord.id,
+      visitorName: "Agent visitor",
+    });
+    legacyRecord.visitorName = "Stale legacy visitor";
+
+    await expect(store.get(legacyRecord.projectId, legacyRecord.id)).resolves
+      .toMatchObject({ visitorName: "Agent visitor" });
+    await expect(store.getMessages(legacyRecord.projectId, legacyRecord.id))
+      .resolves.toHaveLength(1);
+    await expect(store.list({ projectId: legacyRecord.projectId })).resolves
+      .toMatchObject({
+        conversations: [{
+          id: legacyRecord.id,
+          visitorName: "Agent visitor",
+        }],
+      });
+    await expect(store.getConversationCounts(legacyRecord.projectId)).resolves
+      .toEqual({ all: 1, open: 1, closed: 0 });
+  }, 30_000);
+});

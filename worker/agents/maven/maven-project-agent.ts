@@ -39,6 +39,10 @@ import {
   authorizeSubAgentRequest,
   readVerifiedSidechatClaims,
 } from "../sidechat/agent-auth";
+import {
+  authorizePublicSubAgentRequest,
+  readVerifiedPublicChatClaims,
+} from "./public/public-agent-auth";
 import { MavenChatAgent } from "./maven-chat-agent";
 import type {
   ConnectProjectMcpInput,
@@ -1312,6 +1316,32 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       !this.hasSubAgent(MavenChatAgent, child.name)
     ) {
       return new Response("Not found", { status: 404 });
+    }
+    if (child.name.startsWith("pub_")) {
+      const conversationId = child.name.slice(4);
+      const summary = this.conversationDirectory().getConversation(
+        conversationId,
+      );
+      if (summary?.publicChildName !== child.name) {
+        return new Response("Not found", { status: 404 });
+      }
+      const authorized = await authorizePublicSubAgentRequest(
+        request,
+        this.name,
+        child.name,
+        this.env.SIDECHAT_TOKEN_SECRET,
+      );
+      if (authorized instanceof Response) return authorized;
+      const claims = readVerifiedPublicChatClaims(authorized);
+      if (
+        !claims ||
+        (claims.actor === "visitor" &&
+          (claims.visitorId !== summary.visitorId ||
+            summary.archivedAt !== null))
+      ) {
+        return new Response("Not found", { status: 404 });
+      }
+      return authorized;
     }
     const authorized = await authorizeSubAgentRequest(
       request,

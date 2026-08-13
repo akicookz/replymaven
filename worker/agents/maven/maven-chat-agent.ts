@@ -40,7 +40,9 @@ import type {
   PublicConversationAction,
   PublicCustomerLinkInput,
   PublicDeliveryUpdateInput,
+  PublicEmailUpdateInput,
   PublicMessageAttachmentSource,
+  PublicPresenceUpdateInput,
 } from "../../conversations/public-conversation-store";
 import {
   readVerifiedSidechatClaims,
@@ -71,6 +73,14 @@ import {
   sanitizePublicMessageForPersistence,
   toPublicUiMessage,
 } from "./public/public-message";
+import {
+  readPublicChatConnectionClaims,
+  readVerifiedPublicChatClaims,
+} from "./public/public-agent-auth";
+import {
+  buildPublicProtocolErrorFrame,
+  guardPublicChatProtocolMessage,
+} from "./public/public-chat-protocol-guard";
 
 type SidechatDataParts = Record<string, unknown> & {
   "turn-accepted": { messageId: string };
@@ -258,17 +268,59 @@ export class MavenChatAgent extends AIChatAgent<
 
   constructor(ctx: DurableObjectState, env: AppEnv) {
     super(ctx, env);
-    this.maxPersistedMessages = parseMavenChildName(this.name).kind === "sidechat"
+    const channel = parseMavenChildName(this.name).kind;
+    this.maxPersistedMessages = channel === "sidechat"
       ? 200
       : undefined;
+    if (channel === "public") {
+      const sdkOnMessage = this.onMessage.bind(this);
+      this.onMessage = async (connection, message) => {
+        if (typeof message !== "string") {
+          connection.close(4003, "Invalid public chat protocol");
+          return;
+        }
+        const guarded = guardPublicChatProtocolMessage({
+          raw: message,
+          authoritativeMessages: this.messages,
+          claims: readPublicChatConnectionClaims(connection.state),
+        });
+        if (!guarded.allowed) {
+          if (guarded.requestId) {
+            connection.send(buildPublicProtocolErrorFrame(guarded.requestId));
+          }
+          if (guarded.close) {
+            connection.close(4003, "Invalid public chat protocol");
+          }
+          return;
+        }
+        return sdkOnMessage(connection, guarded.raw);
+      };
+    }
   }
 
   override async onConnect(
     connection: Connection,
     context: ConnectionContext,
   ): Promise<void> {
-    if (parseMavenChildName(this.name).kind === "public") {
-      throw new Error("Public Agent sessions are not enabled");
+    const identity = parseMavenChildName(this.name);
+    if (identity.kind === "public") {
+      const claims = readVerifiedPublicChatClaims(context.request);
+      const parentName = this.publicProjectId();
+      const state = this.requirePublicState();
+      if (
+        !claims ||
+        claims.parentName !== parentName ||
+        claims.projectId !== parentName ||
+        claims.childName !== this.name ||
+        claims.conversationId !== identity.conversationId ||
+        (claims.actor === "visitor" &&
+          (claims.visitorId !== state.visitorId || state.archivedAt !== null))
+      ) {
+        throw new Error("Unauthorized public child connection");
+      }
+      await super.onConnect(connection, context);
+      connection.setState({ publicChatActor: claims });
+      return;
     }
     const claims = readVerifiedSidechatClaims(context.request);
     if (!claims || claims.scope !== "child" || claims.childName !== this.name) {
@@ -276,6 +328,10 @@ export class MavenChatAgent extends AIChatAgent<
     }
     await super.onConnect(connection, context);
     connection.setState({ sidechatActor: claims });
+  }
+
+  override shouldConnectionBeReadonly(): boolean {
+    return parseMavenChildName(this.name).kind === "public";
   }
 
   protected createSidechatLanguageModel(): LanguageModel {
@@ -291,10 +347,7 @@ export class MavenChatAgent extends AIChatAgent<
     options?: Parameters<AIChatAgent<AppEnv>["onChatMessage"]>[1],
   ): Promise<Response> {
     if (parseMavenChildName(this.name).kind === "public") {
-      return Response.json(
-        { error: "public_agent_session_unavailable" },
-        { status: 503 },
-      );
+      return new Response(null, { status: 503 });
     }
     if (!options?.requestId) {
       return Response.json({ error: "invalid_request" }, { status: 400 });
@@ -584,6 +637,24 @@ export class MavenChatAgent extends AIChatAgent<
     return this.appendPublicRecord(message, true);
   }
 
+  async appendVisitorMessage(
+    message: PublicMessageRecord,
+  ): Promise<PublicMessageRecord> {
+    if (message.author !== "visitor") {
+      throw new Error("Visitor public messages must use the visitor author");
+    }
+    return this.appendPublicRecord(message, true);
+  }
+
+  async appendBotMessage(
+    message: PublicMessageRecord,
+  ): Promise<PublicMessageRecord> {
+    if (message.author !== "bot") {
+      throw new Error("Bot public messages must use the bot author");
+    }
+    return this.appendPublicRecord(message, true);
+  }
+
   async appendSystemMessage(
     message: PublicMessageRecord,
   ): Promise<PublicMessageRecord> {
@@ -695,6 +766,68 @@ export class MavenChatAgent extends AIChatAgent<
       const saved = this.saveNextPublicState(state, { updatedAt: now });
       await this.publishPublicProjection(saved, updated);
       return updatedIds;
+    });
+  }
+
+  async markEmailed(input: PublicEmailUpdateInput): Promise<boolean> {
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      this.assertPublicInput(input.projectId, input.conversationId);
+      const messages = this.readPublicMessages();
+      const now = Date.now();
+      let found = false;
+      const updated = messages.map((message) => {
+        if (message.id !== input.messageId) return message;
+        found = true;
+        return message.emailedAt === null
+          ? { ...message, emailedAt: now }
+          : message;
+      });
+      if (!found) return false;
+      if (updated.some((message, index) => message !== messages[index])) {
+        await this.persistPublicRecords(updated);
+        const saved = this.saveNextPublicState(state, { updatedAt: now });
+        await this.publishPublicProjection(saved, updated);
+      }
+      return true;
+    });
+  }
+
+  async updatePresence(
+    input: PublicPresenceUpdateInput,
+  ): Promise<PublicChatChildState | null> {
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      this.assertPublicInput(input.projectId, input.conversationId);
+      const now = Date.now();
+      const saved = this.saveNextPublicState(state, {
+        visitorPresence: input.presence,
+        visitorLastSeenAt: now,
+        visitorLastOnlineAt: now,
+        updatedAt: now,
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return this.safePublicState(saved);
+    });
+  }
+
+  async setPublicStatus(input: {
+    projectId: string;
+    conversationId: string;
+    status: PublicConversationRecord["status"];
+    closeReason?: PublicConversationRecord["closeReason"];
+  }): Promise<PublicConversationRecord | null> {
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      this.assertPublicInput(input.projectId, input.conversationId);
+      const saved = this.saveNextPublicState(state, {
+        status: input.status,
+        closeReason: input.closeReason ??
+          (input.status === "closed" ? state.closeReason : null),
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return this.toPublicConversation(saved);
     });
   }
 
