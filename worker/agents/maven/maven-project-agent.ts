@@ -8,11 +8,13 @@ import { drizzle } from "drizzle-orm/d1";
 import type {
   ExecuteProjectToolRequest,
   ExecuteProjectToolResult,
+  MavenConversationDashboardPage,
   MavenConversationListQuery,
   MavenConversationListResult,
   MavenConversationSummary,
   MavenInboxCounts,
   MavenProjectState,
+  MavenProjectEvent,
   PendingSidechatApprovalScope,
   SidechatCustomerContext,
   SidechatStatus,
@@ -252,6 +254,16 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     return this.conversationDirectory().listConversations(query);
   }
 
+  async getDashboardConversationPage(
+    query: MavenConversationListQuery,
+  ): Promise<MavenConversationDashboardPage> {
+    const page = this.conversationDirectory().listConversations(query);
+    return {
+      ...page,
+      counts: this.conversationDirectory().getInboxCounts(query.now),
+    };
+  }
+
   async getInboxCounts(now = Date.now()): Promise<MavenInboxCounts> {
     return this.conversationDirectory().getInboxCounts(now);
   }
@@ -277,11 +289,14 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       summary,
     );
     if (result.applied) {
+      const inboxCounts = this.conversationDirectory().getInboxCounts();
       this.setState({
         sidechats: {},
         conversation: summary,
-        inboxCounts: this.conversationDirectory().getInboxCounts(),
+        inboxCounts,
       });
+      this.broadcastProjectEvent({ type: "conversation-summary", summary });
+      this.broadcastProjectEvent({ type: "inbox-counts", counts: inboxCounts });
     }
     return result;
   }
@@ -490,10 +505,12 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       input.conversationId,
     );
     if (removed) {
+      const inboxCounts = this.conversationDirectory().getInboxCounts();
       this.setState({
         sidechats: {},
-        inboxCounts: this.conversationDirectory().getInboxCounts(),
+        inboxCounts,
       });
+      this.broadcastProjectEvent({ type: "inbox-counts", counts: inboxCounts });
     }
     return removed;
   }
@@ -1427,6 +1444,10 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     metadata: SidechatToolAuditMetadata,
   ): void {
     persistSidechatActionAudit(this.sql.bind(this), metadata);
+  }
+
+  private broadcastProjectEvent(event: MavenProjectEvent): void {
+    this.broadcast(JSON.stringify(event));
   }
 
   private assertRegisteredSidechat(

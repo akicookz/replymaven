@@ -47,6 +47,9 @@ function makeSummary(
     lastMessageId: null,
     lastMessageAuthor: null,
     lastMessagePreview: null,
+    lastMessageSenderName: null,
+    lastMessageEmailedAt: null,
+    lastMessageCreatedAt: null,
     lastActivityAt: 100,
     messageCount: 0,
     botMessageCount: 0,
@@ -232,5 +235,26 @@ describe("ConversationDirectory", () => {
       metadataValue: "pricing",
       sort: "botMessages",
     }))).toEqual(["c", "a"]);
+  });
+
+  test("keeps the complete last-message preview in the parent directory", async () => {
+    const directory = createDirectory();
+    await directory.upsertConversationSummary(makeSummary("a", {
+      lastMessageId: "message-1",
+      lastMessageAuthor: "agent",
+      lastMessagePreview: "I can help",
+      lastMessageSenderName: "Grace",
+      lastMessageEmailedAt: 123,
+      lastMessageCreatedAt: 100,
+    }));
+
+    expect(directory.getConversation("a")).toMatchObject({
+      lastMessageId: "message-1",
+      lastMessageAuthor: "agent",
+      lastMessagePreview: "I can help",
+      lastMessageSenderName: "Grace",
+      lastMessageEmailedAt: 123,
+      lastMessageCreatedAt: 100,
+    });
   });
 });

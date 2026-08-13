@@ -6732,6 +6732,44 @@ const app = new Hono<HonoAppContext>()
     const searchQuery = c.req.query("q")?.trim() || undefined;
     const chatService = createPublicConversationStore({ db, env: c.env });
 
+    if (c.env.PUBLIC_CONVERSATION_STORE === "agent") {
+      const agentStore = new AgentPublicConversationStore({ db, env: c.env });
+      const requestedSort = c.req.query("sort");
+      const sort = requestedSort === "oldest" ||
+          requestedSort === "priority" || requestedSort === "botMessages"
+        ? requestedSort
+        : "newest";
+      const page = await agentStore.getDashboardConversationPage(
+        project.id,
+        {
+          filter: inboxFilter ?? (statusFilter === "closed" ? "resolved" : "all"),
+          sort,
+          search: searchQuery,
+          cursor: c.req.query("cursor") || undefined,
+          limit: Math.min(100, limit + offset),
+        },
+      );
+      const statusFiltered = page.conversations.filter(({ conversation }) =>
+        statusFilter === "all" ||
+        (statusFilter === "closed"
+          ? conversation.status === "closed"
+          : conversation.status !== "closed")
+      ).slice(offset, offset + limit);
+      return c.json({
+        conversations: statusFiltered.map(({ conversation, lastMessage }) => ({
+          ...toLegacyConversationDto(conversation),
+          lastMessage: lastMessage
+            ? toLegacyLastMessagePreviewDto(lastMessage)
+            : null,
+        })),
+        counts: page.counts,
+        hasMore: page.nextCursor !== null,
+        nextCursor: page.nextCursor,
+        serverTime: Date.now(),
+        runtime: "agent" as const,
+      });
+    }
+
     // Lazy auto-close stale conversations (single query, no double fetch)
     const settings = await projectService.getSettings(project.id);
     let convos = await chatService.getConversationsByProject(
@@ -6775,6 +6813,7 @@ const app = new Hono<HonoAppContext>()
       counts,
       hasMore: convos.length === limit,
       serverTime: Date.now(),
+      runtime: "legacy" as const,
     });
   })
   .get("/api/projects/:id/conversations/updates", async (c) => {
@@ -6966,6 +7005,9 @@ const app = new Hono<HonoAppContext>()
       hasMore,
       botName: settings?.botName ?? null,
       agentName: settings?.agentName ?? null,
+      runtime: c.env.PUBLIC_CONVERSATION_STORE === "agent"
+        ? "agent" as const
+        : "legacy" as const,
     });
   })
   .get("/api/projects/:id/conversations/:convId/messages", async (c) => {

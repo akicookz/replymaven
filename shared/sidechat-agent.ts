@@ -58,6 +58,9 @@ export interface MavenConversationSummary {
   lastMessageId: string | null;
   lastMessageAuthor: "visitor" | "bot" | "agent" | "system" | null;
   lastMessagePreview: string | null;
+  lastMessageSenderName: string | null;
+  lastMessageEmailedAt: number | null;
+  lastMessageCreatedAt: number | null;
   lastActivityAt: number;
   messageCount: number;
   botMessageCount: number;
@@ -83,6 +86,25 @@ export interface MavenConversationListResult {
 }
 
 export type MavenInboxCounts = Record<MavenConversationFilter, number>;
+
+export interface MavenConversationDashboardPage
+  extends MavenConversationListResult {
+  counts: MavenInboxCounts;
+}
+
+export type MavenProjectEvent =
+  | {
+      type: "conversation-summary";
+      summary: MavenConversationSummary;
+    }
+  | {
+      type: "inbox-counts";
+      counts: MavenInboxCounts;
+    }
+  | {
+      type: "customer-updated";
+      customerId: string;
+    };
 
 export interface SidechatSessionResponse {
   parentAgent: "MavenProjectAgent";

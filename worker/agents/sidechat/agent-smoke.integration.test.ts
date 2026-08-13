@@ -124,6 +124,9 @@ describe("native Sidechat Agent registration", () => {
       lastMessageId: "message-1",
       lastMessageAuthor: "visitor" as const,
       lastMessagePreview: "Need help",
+      lastMessageSenderName: "Ada",
+      lastMessageEmailedAt: null,
+      lastMessageCreatedAt: 100,
       lastActivityAt: 100,
       messageCount: 1,
       botMessageCount: 0,
@@ -141,6 +144,22 @@ describe("native Sidechat Agent registration", () => {
       search: "ada@example.com",
     })).resolves.toEqual({
       conversations: [summary],
+      nextCursor: null,
+    });
+    await expect(parent.getDashboardConversationPage({
+      filter: "needs-you",
+      search: "ada@example.com",
+      now: 200,
+    })).resolves.toEqual({
+      conversations: [summary],
+      counts: {
+        "needs-you": 1,
+        all: 1,
+        snoozed: 0,
+        resolved: 0,
+        archived: 0,
+        flagged: 0,
+      },
       nextCursor: null,
     });
     await expect(parent.getInboxCounts(200)).resolves.toMatchObject({

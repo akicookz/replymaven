@@ -10,6 +10,7 @@ import type {
   MavenConversationListQuery,
   MavenConversationListResult,
   MavenConversationSummary,
+  MavenInboxCounts,
 } from "../../shared/sidechat-agent";
 import type { AppEnv } from "../types";
 import { projects, toolExecutions } from "../db/schema";
@@ -186,6 +187,13 @@ interface PublicParentStub {
   listConversations(
     query: MavenConversationListQuery,
   ): Promise<MavenConversationListResult>;
+  getDashboardConversationPage(
+    query: MavenConversationListQuery,
+  ): Promise<{
+    conversations: MavenConversationSummary[];
+    nextCursor: string | null;
+    counts: MavenInboxCounts;
+  }>;
   getInboxCounts(): Promise<PublicInboxCounts>;
   listAllPublicConversationSummaries(): Promise<MavenConversationSummary[]>;
   bulkApplyPublicActions(input: {
@@ -531,6 +539,42 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return parent.getInboxCounts();
   }
 
+  async getDashboardConversationPage(
+    projectId: string,
+    query: MavenConversationListQuery,
+  ): Promise<{
+    conversations: Array<{
+      conversation: PublicConversationRecord;
+      lastMessage: PublicLastMessagePreview | null;
+    }>;
+    counts: PublicInboxCounts;
+    nextCursor: string | null;
+  }> {
+    const parent = await getPublicParent(
+      this.context.env.MAVEN_PROJECT_AGENT,
+      projectId,
+    );
+    const page = await parent.getDashboardConversationPage(query);
+    return {
+      conversations: page.conversations.map((summary) => ({
+        conversation: summaryToConversation(summary, projectId),
+        lastMessage: summary.lastMessageId && summary.lastMessageAuthor
+          ? {
+              id: summary.lastMessageId,
+              author: summary.lastMessageAuthor,
+              content: summary.lastMessagePreview ?? "",
+              senderName: summary.lastMessageSenderName,
+              emailedAt: summary.lastMessageEmailedAt,
+              createdAt:
+                summary.lastMessageCreatedAt ?? summary.lastActivityAt,
+            }
+          : null,
+      })),
+      counts: page.counts,
+      nextCursor: page.nextCursor,
+    };
+  }
+
   async getLastMessagePreviews(
     conversationIds: string[],
   ): Promise<Map<string, PublicLastMessagePreview>> {
@@ -554,9 +598,9 @@ export class AgentPublicConversationStore implements PublicConversationStore {
           id: summary.lastMessageId,
           author: summary.lastMessageAuthor,
           content: summary.lastMessagePreview ?? "",
-          senderName: null,
-          emailedAt: null,
-          createdAt: summary.lastActivityAt,
+          senderName: summary.lastMessageSenderName,
+          emailedAt: summary.lastMessageEmailedAt,
+          createdAt: summary.lastMessageCreatedAt ?? summary.lastActivityAt,
         });
       }
     }

@@ -113,5 +113,23 @@ describe("native AgentPublicConversationStore", () => {
       });
     await expect(store.getConversationCounts(legacyRecord.projectId)).resolves
       .toEqual({ all: 1, open: 1, closed: 0 });
+    await expect(store.getDashboardConversationPage(
+      legacyRecord.projectId,
+      { filter: "all", limit: 25 },
+    )).resolves.toMatchObject({
+      conversations: [{
+        conversation: {
+          id: legacyRecord.id,
+          visitorName: "Agent visitor",
+        },
+        lastMessage: {
+          id: "adapter-message-1",
+          content: "Imported once",
+          createdAt: 100,
+        },
+      }],
+      counts: { all: 1 },
+      nextCursor: null,
+    });
   }, 30_000);
 });

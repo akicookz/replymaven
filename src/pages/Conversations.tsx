@@ -21,9 +21,14 @@ import type {
 } from "../../shared/customer-types";
 import type {
   MavenProjectState,
+  MavenProjectEvent,
   SidechatSessionResponse,
   SidechatSummarySessionResponse,
 } from "../../shared/sidechat-agent";
+import type {
+  PublicChatChildState,
+  PublicChatSessionResponse,
+} from "../../shared/public-chat-agent";
 import type { SafeSidechatDataPart } from "@/lib/inbox/sidechat-message-adapter";
 import { cn } from "@/lib/utils";
 import { serializeMessageImageUrls } from "../../shared/message-images";
@@ -60,11 +65,19 @@ import {
   deriveNativeSidechatUiStatus,
   isSidechatSessionUsable,
   useSidechatAgent,
-  useSidechatParentState,
   useSidechatSession,
   useSidechatSummarySession,
   type PendingSidechatTransfer,
 } from "@/hooks/use-sidechat-agent";
+import {
+  summaryToDashboardConversation,
+  useConversationDirectoryAgent,
+} from "@/hooks/use-conversation-directory-agent";
+import {
+  usePublicChatAgent,
+  usePublicChatSession,
+} from "@/hooks/use-public-chat-agent";
+import { reconcilePublicMessages } from "@/lib/inbox/public-message-adapter";
 import MessageList from "@/components/inbox/MessageList";
 import ReadingPane from "@/components/inbox/ReadingPane";
 import FocusView from "@/components/inbox/FocusView";
@@ -76,6 +89,7 @@ import {
   applyConversationCustomerResult,
   customerKeys,
   fetchCustomer,
+  invalidateCustomerProjectQueries,
   setConversationCustomer,
 } from "@/lib/customers";
 
@@ -86,6 +100,8 @@ interface ConversationsPage {
   counts: InboxCounts;
   hasMore: boolean;
   serverTime?: number;
+  runtime?: "legacy" | "agent";
+  nextCursor?: string | null;
 }
 
 interface ConversationUpdate {
@@ -126,6 +142,7 @@ interface ConversationDetail {
   hasMore: boolean;
   botName: string | null;
   agentName: string | null;
+  runtime?: "legacy" | "agent";
 }
 
 interface BulkConversationMutationInput {
@@ -133,17 +150,56 @@ interface BulkConversationMutationInput {
   action: BulkConversationAction;
 }
 
-interface SidechatParentStateBridgeProps {
+interface ConversationDirectoryAgentBridgeProps {
   session: SidechatSummarySessionResponse;
   onState: (state: MavenProjectState | undefined) => void;
+  onEvent: (event: MavenProjectEvent) => void;
 }
 
-function SidechatParentStateBridge({
+function ConversationDirectoryAgentBridge({
   session,
   onState,
-}: SidechatParentStateBridgeProps) {
-  const state = useSidechatParentState(session);
-  useEffect(() => onState(state), [onState, state]);
+  onEvent,
+}: ConversationDirectoryAgentBridgeProps) {
+  const agent = useConversationDirectoryAgent({ session, onEvent });
+  useEffect(() => onState(agent.state), [agent.state, onState]);
+  useEffect(() => {
+    if (agent.state?.conversation) {
+      onEvent({
+        type: "conversation-summary",
+        summary: agent.state.conversation,
+      });
+    }
+    if (agent.state?.inboxCounts) {
+      onEvent({ type: "inbox-counts", counts: agent.state.inboxCounts });
+    }
+  }, [agent.state, onEvent]);
+  return null;
+}
+
+interface NativePublicConversationBridgeProps {
+  session: PublicChatSessionResponse;
+  conversationId: string;
+  onMessages: (conversationId: string, messages: Message[]) => void;
+  onState: (
+    conversationId: string,
+    state: PublicChatChildState | undefined,
+  ) => void;
+}
+
+function NativePublicConversationBridge({
+  session,
+  conversationId,
+  onMessages,
+  onState,
+}: NativePublicConversationBridgeProps) {
+  const chat = usePublicChatAgent({ session, conversationId });
+  useEffect(() => {
+    onMessages(conversationId, chat.messages);
+  }, [chat.messages, conversationId, onMessages]);
+  useEffect(() => {
+    onState(conversationId, chat.state);
+  }, [chat.state, conversationId, onState]);
   return null;
 }
 
@@ -328,6 +384,10 @@ function getActivityMs(convo: Conversation): number {
   const raw = convo.lastActivityAt ?? convo.updatedAt;
   const ms = raw ? new Date(raw).getTime() : 0;
   return Number.isFinite(ms) ? ms : 0;
+}
+
+function optionalPublicStateIso(value: number | null): string | null {
+  return value === null ? null : new Date(value).toISOString();
 }
 
 // Priority sort rank (absent priority defaults to medium, matching the schema).
@@ -591,10 +651,6 @@ function Conversations() {
     }
   }, [serverTimeBaseline]);
 
-  // Open a WebSocket for the selected conversation. The hook patches the
-  // ["conversation-detail", id] cache on incoming events so messages and
-  // status changes appear in real time without polling.
-  useConversationWs(projectId, selectedConvo);
   useCustomerWs(projectId);
 
   // ── List query (drives the conversation column) ──────────────────────────
@@ -648,7 +704,8 @@ function Conversations() {
       if (!res.ok) throw new Error("Failed to fetch updates");
       return res.json();
     },
-    enabled: !!projectId && serverTimeBaseline != null,
+    enabled: !!projectId && serverTimeBaseline != null &&
+      convosPage?.runtime !== "agent",
     refetchInterval: 5_000,
     refetchIntervalInBackground: false,
   });
@@ -752,6 +809,114 @@ function Conversations() {
     structuralSharing: true,
   });
 
+  useConversationWs(
+    projectId,
+    convoDetail?.runtime === "agent" ? null : selectedConvo,
+  );
+  const publicChatSession = usePublicChatSession({
+    projectId,
+    conversationId: selectedConvo,
+    enabled: convoDetail?.runtime === "agent" && Boolean(selectedConvo),
+  });
+
+  const handleDirectoryEvent = useCallback((event: MavenProjectEvent) => {
+    if (!projectId || convosPage?.runtime !== "agent") return;
+    if (event.type === "inbox-counts") {
+      queryClient.setQueryData(["inbox-counts", projectId], event.counts);
+      queryClient.setQueryData<ConversationsPage | undefined>(
+        ["conversations", projectId, filter, debouncedSearch, listLimit],
+        (old) => old ? { ...old, counts: event.counts } : old,
+      );
+      return;
+    }
+    if (event.type === "customer-updated") {
+      void invalidateCustomerProjectQueries(queryClient, projectId);
+      return;
+    }
+    const incoming = summaryToDashboardConversation(event.summary);
+    const search = debouncedSearch.trim().toLowerCase();
+    const matchesSearch = !search ||
+      incoming.visitorName?.toLowerCase().includes(search) === true ||
+      incoming.visitorEmail?.toLowerCase().includes(search) === true;
+    const matches = matchesSearch && passesInboxFilter(
+      filter,
+      incoming,
+      Date.now(),
+    );
+    function patchList(current: Conversation[]): Conversation[] {
+      const without = current.filter((conversation) =>
+        conversation.id !== incoming.id
+      );
+      if (matches) without.push(incoming);
+      without.sort((left, right) => getActivityMs(right) - getActivityMs(left));
+      return without.slice(0, listLimit);
+    }
+    setLoadedConversations(patchList);
+    queryClient.setQueryData<ConversationsPage | undefined>(
+      ["conversations", projectId, filter, debouncedSearch, listLimit],
+      (old) => old
+        ? { ...old, conversations: patchList(old.conversations) }
+        : old,
+    );
+    queryClient.setQueryData<ConversationDetail | undefined>(
+      ["conversation-detail", incoming.id],
+      (old) => old?.runtime === "agent"
+        ? {
+            ...old,
+            conversation: { ...old.conversation, ...incoming },
+          }
+        : old,
+    );
+  }, [
+    convosPage?.runtime,
+    debouncedSearch,
+    filter,
+    listLimit,
+    projectId,
+    queryClient,
+  ]);
+
+  const handleNativePublicMessages = useCallback((
+    conversationId: string,
+    messages: Message[],
+  ) => {
+    queryClient.setQueryData<ConversationDetail | undefined>(
+      ["conversation-detail", conversationId],
+      (old) => old?.runtime === "agent"
+        ? {
+            ...old,
+            messages: reconcilePublicMessages(messages, old.messages),
+          }
+        : old,
+    );
+  }, [queryClient]);
+
+  const handleNativePublicState = useCallback((
+    conversationId: string,
+    state: PublicChatChildState | undefined,
+  ) => {
+    if (!state) return;
+    queryClient.setQueryData<ConversationDetail | undefined>(
+      ["conversation-detail", conversationId],
+      (old) => old?.runtime === "agent"
+        ? {
+            ...old,
+            conversation: {
+              ...old.conversation,
+              status: state.status,
+              visitorPresence: state.visitorPresence,
+              visitorLastOnlineAt: optionalPublicStateIso(
+                state.visitorLastOnlineAt,
+              ),
+              archivedAt: state.archived
+                ? old.conversation.archivedAt ?? new Date().toISOString()
+                : null,
+            },
+          }
+        : old,
+    );
+  }, [queryClient]);
+
   // Reset the composer draft when switching conversations.
   useEffect(() => {
     setDraft("");
@@ -763,16 +928,21 @@ function Conversations() {
       content,
       imageUrls,
       asEmail,
+      idempotencyKey,
     }: {
       content: string;
       imageUrls?: string[];
       asEmail?: boolean;
+      idempotencyKey: string;
     }) => {
       const res = await fetch(
         `/api/projects/${projectId}/conversations/${selectedConvo}/reply`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Idempotency-Key": idempotencyKey,
+          },
           body: JSON.stringify({ content, imageUrls: imageUrls ?? [] }),
         },
       );
@@ -800,7 +970,7 @@ function Conversations() {
       }
       return data;
     },
-    onMutate: async ({ content, imageUrls }) => {
+    onMutate: async ({ content, imageUrls, idempotencyKey }) => {
       await queryClient.cancelQueries({
         queryKey: ["conversation-detail", selectedConvo],
       });
@@ -815,7 +985,7 @@ function Conversations() {
           // _optimistic lets the WS hook swap this row for the server's copy
           // (message:new) instead of appending a duplicate.
           const optimistic = {
-            id: `optimistic-${Date.now()}`,
+            id: idempotencyKey,
             role: "agent",
             content,
             imageUrl: serializeMessageImageUrls(imageUrls ?? []),
@@ -1564,6 +1734,7 @@ function Conversations() {
       content: text,
       imageUrls,
       asEmail: opts?.asEmail ?? autoEmail,
+      idempotencyKey: crypto.randomUUID(),
     });
   }
 
@@ -1991,9 +2162,18 @@ function Conversations() {
     return (
       <>
         {sidechatSummarySession.data && (
-          <SidechatParentStateBridge
+          <ConversationDirectoryAgentBridge
             session={sidechatSummarySession.data}
             onState={handleSidechatParentState}
+            onEvent={handleDirectoryEvent}
+          />
+        )}
+        {publicChatSession.data && selectedConvo && (
+          <NativePublicConversationBridge
+            session={publicChatSession.data}
+            conversationId={selectedConvo}
+            onMessages={handleNativePublicMessages}
+            onState={handleNativePublicState}
           />
         )}
         <FocusSidechatLayout
@@ -2091,9 +2271,18 @@ function Conversations() {
       )}
       {sidechatPane}
       {sidechatSummarySession.data && (
-        <SidechatParentStateBridge
+        <ConversationDirectoryAgentBridge
           session={sidechatSummarySession.data}
           onState={handleSidechatParentState}
+          onEvent={handleDirectoryEvent}
+        />
+      )}
+      {publicChatSession.data && selectedConvo && (
+        <NativePublicConversationBridge
+          session={publicChatSession.data}
+          conversationId={selectedConvo}
+          onMessages={handleNativePublicMessages}
+          onState={handleNativePublicState}
         />
       )}
 

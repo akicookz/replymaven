@@ -20,6 +20,8 @@ class FakeAgent {
     this.state = state;
   }
 
+  broadcast(): void {}
+
   async onConnect(): Promise<void> {}
 }
 

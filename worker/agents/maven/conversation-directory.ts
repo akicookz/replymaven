@@ -39,6 +39,9 @@ interface ConversationDirectoryRow {
   last_message_id: string | null;
   last_message_author: string | null;
   last_message_preview: string | null;
+  last_message_sender_name: string | null;
+  last_message_emailed_at: number | null;
+  last_message_created_at: number | null;
   last_activity_at: number;
   message_count: number;
   bot_message_count: number;
@@ -98,6 +101,9 @@ function mapDirectoryRow(row: ConversationDirectoryRow): MavenConversationSummar
     lastMessageId: row.last_message_id,
     lastMessageAuthor: row.last_message_author as MavenConversationSummary["lastMessageAuthor"],
     lastMessagePreview: row.last_message_preview,
+    lastMessageSenderName: row.last_message_sender_name,
+    lastMessageEmailedAt: row.last_message_emailed_at,
+    lastMessageCreatedAt: row.last_message_created_at,
     lastActivityAt: row.last_activity_at,
     messageCount: row.message_count,
     botMessageCount: row.bot_message_count,
@@ -403,11 +409,13 @@ export class ConversationDirectory {
          metadata_json, priority, assignee_id, snoozed_until, archived_at,
          purge_started_at, visitor_last_seen_at, visitor_presence,
          visitor_last_online_at, last_message_id, last_message_author,
-         last_message_preview, last_activity_at, message_count,
-         bot_message_count, child_revision, created_at, updated_at
+         last_message_preview, last_message_sender_name,
+         last_message_emailed_at, last_message_created_at, last_activity_at,
+         message_count, bot_message_count, child_revision, created_at,
+         updated_at
        ) VALUES (
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, ?, ?
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        )
        ON CONFLICT(conversation_id) DO UPDATE SET
          public_child_name = excluded.public_child_name,
@@ -438,6 +446,9 @@ export class ConversationDirectory {
          last_message_id = excluded.last_message_id,
          last_message_author = excluded.last_message_author,
          last_message_preview = excluded.last_message_preview,
+         last_message_sender_name = excluded.last_message_sender_name,
+         last_message_emailed_at = excluded.last_message_emailed_at,
+         last_message_created_at = excluded.last_message_created_at,
          last_activity_at = excluded.last_activity_at,
          message_count = excluded.message_count,
          bot_message_count = excluded.bot_message_count,
@@ -474,6 +485,9 @@ export class ConversationDirectory {
         summary.lastMessageId,
         summary.lastMessageAuthor,
         summary.lastMessagePreview,
+        summary.lastMessageSenderName,
+        summary.lastMessageEmailedAt,
+        summary.lastMessageCreatedAt,
         summary.lastActivityAt,
         summary.messageCount,
         summary.botMessageCount,
@@ -584,6 +598,9 @@ export class ConversationDirectory {
       last_message_id TEXT,
       last_message_author TEXT,
       last_message_preview TEXT,
+      last_message_sender_name TEXT,
+      last_message_emailed_at INTEGER,
+      last_message_created_at INTEGER,
       last_activity_at INTEGER NOT NULL,
       message_count INTEGER NOT NULL DEFAULT 0,
       bot_message_count INTEGER NOT NULL DEFAULT 0,
@@ -591,6 +608,20 @@ export class ConversationDirectory {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`, []);
+    for (const [column, type] of [
+      ["last_message_sender_name", "TEXT"],
+      ["last_message_emailed_at", "INTEGER"],
+      ["last_message_created_at", "INTEGER"],
+    ] as const) {
+      try {
+        this.sql.execute(
+          `ALTER TABLE conversation_directory ADD COLUMN ${column} ${type}`,
+          [],
+        );
+      } catch {
+        // Existing and freshly-created directories already have the column.
+      }
+    }
     for (const statement of [
       "CREATE INDEX IF NOT EXISTS idx_directory_activity ON conversation_directory(last_activity_at DESC, conversation_id DESC)",
       "CREATE INDEX IF NOT EXISTS idx_directory_status_activity ON conversation_directory(status, last_activity_at DESC, conversation_id DESC)",
