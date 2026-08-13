@@ -1098,31 +1098,31 @@ git commit -m "feat: use native Agent chat in widget"
 - Consumes: Parent directory query APIs and child transcript/state RPC.
 - Produces: Zero steady-state D1 conversation/message reads outside the legacy adapter and migration verifier.
 
-- [ ] **Step 1: Write failing cross-system tests**
+- [x] **Step 1: Write failing cross-system tests**
 
 Cover customer conversation count/detail, promote/link visitor, merge customers, delete customer, multi-project dashboard stats, billing usage-log filtering, Sidechat public context, MCP transcript reads, archive scheduling, unarchive cancellation, retention deletion of public/Sidechat children plus conversation-scoped R2 objects, and project deletion through the existing `destroyProjectData()` cleanup.
 
-- [ ] **Step 2: Add project-level query RPCs**
+- [x] **Step 2: Add project-level query RPCs**
 
 Implement `listByCustomer`, `listByVisitor`, `getProjectStats`, `getUsageLog`, `extractMetadataKeys`, and `reconcileDirectory` against parent SQL. For multi-project pages, Hono fetches the user's project IDs from D1, calls those parents with bounded concurrency of five, and combines results.
 
-- [ ] **Step 3: Move Sidechat public context to the sibling child**
+- [x] **Step 3: Move Sidechat public context to the sibling child**
 
 Resolve `pub_<conversationId>` under the same parent and call `getPublicContextSnapshot({ newestMessages: 40 })`. Remove Sidechat's D1 `MessageRow`/`ConversationRow` dependency and preserve its current 40-message bound and archive checks.
 
-- [ ] **Step 4: Move customer linkage operations**
+- [x] **Step 4: Move customer linkage operations**
 
 Keep customer profiles and `customer_visitors` in D1. After the D1 identity transaction succeeds, call idempotent parent/child updates keyed by a mutation ID. A failed Agent update must be retried through the parent queue; repeated mutation IDs return the original result.
 
-- [ ] **Step 5: Move dashboard statistics and billing logs**
+- [x] **Step 5: Move dashboard statistics and billing logs**
 
 Keep the D1 `usage` counter for limits and invoices. Replace conversation/message table scans with project-parent aggregates. Preserve response fields, date bounds, status filters, metadata filtering, and bot-message counts.
 
-- [ ] **Step 6: Move retention to Agent schedules**
+- [x] **Step 6: Move retention to Agent schedules**
 
 On archive, schedule the parent's `purgeConversation` callback at `archivedAt + 60 days` with `{ idempotent: true }` and persist the schedule ID in child state/directory. On unarchive, cancel it. Purge obtains the child attachment manifest, removes conversation-scoped R2 keys, calls the SDK's idempotent `deleteSubAgent(MavenChatAgent, childName)` for both children, and removes the directory row. Preserve `destroyProjectData()` so project deletion enumerates and deletes every public/private child before destroying the parent. Keep the existing cron only as a reconciliation sweep until legacy removal.
 
-- [ ] **Step 7: Run cross-system tests and the boundary test**
+- [x] **Step 7: Run cross-system tests and the boundary test**
 
 ```bash
 bun test worker/services/conversation-retention-service.test.ts worker/conversations/public-conversation-boundary.test.ts
@@ -1131,7 +1131,7 @@ bun run test:agents -- worker/agents/maven/project-conversation-queries.integrat
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit the remaining consumer migration**
+- [x] **Step 8: Commit the remaining consumer migration**
 
 ```bash
 git add worker
@@ -1159,7 +1159,7 @@ git commit -m "refactor: move conversation consumers to agents"
 - Consumes: Complete D1 and Agent store implementations.
 - Produces: Resumable directory backfill, lazy transcript import, compatibility projection, parity report, and explicit cutover gates.
 
-- [ ] **Step 1: Add migration checkpoint storage and tests**
+- [x] **Step 1: Add migration checkpoint storage and tests**
 
 Create a D1 `conversation_runtime_migrations` table keyed by project with `directoryCursor`, `directoryCompleteAt`, `agentCutoverAt`, `lastVerifiedAt`, `mismatchCount`, and timestamps. Generate the migration as `0064_conversation_runtime_migration.sql` and update Drizzle metadata.
 
@@ -1181,27 +1181,27 @@ CREATE TABLE conversation_runtime_migrations (
 
 Tests must resume after interruption, avoid duplicate parent rows, reject a transcript checksum mismatch, and report directory IDs present on only one side.
 
-- [ ] **Step 2: Implement bounded directory backfill**
+- [x] **Step 2: Implement bounded directory backfill**
 
 Read 100 legacy conversations ordered by `(project_id, id)`, map them to summaries, and call one parent batch RPC per project. Persist the next cursor only after every parent confirms the batch. Reruns update rows by revision rather than creating duplicates.
 
-- [ ] **Step 3: Mirror directory mutations while legacy remains authoritative**
+- [x] **Step 3: Mirror directory mutations while legacy remains authoritative**
 
 After each successful D1 mutation, re-read the latest D1 row and send its normalized summary plus `(updatedAtMs, summaryChecksum)` to the parent. Keep legacy and Agent child revisions in separate source epochs. Because D1 timestamps can collide within one second, allow a same-timestamp checksum correction and run a bounded full reconciliation until cutover; the dashboard continues reading D1 during this phase, so the directory is not exposed as authoritative early. Once a project is cut over, reject every legacy-epoch update for that project.
 
-- [ ] **Step 4: Implement lazy transcript cutover and compatibility projection**
+- [x] **Step 4: Implement lazy transcript cutover and compatibility projection**
 
 On first Agent access, import the ordered D1 transcript and state with a checksum. After import succeeds, every mutation is Agent-authoritative. During the rollback window, attempt the D1 compatibility projection after each committed Agent mutation with an idempotency key of `(conversationId, childRevision)`. If D1 is unavailable, record a child-owned projection-outbox row and schedule retry; return the already-committed Agent result rather than inviting a duplicate client mutation. Never read the projection to decide runtime behavior, and block rollback/projection disablement while the outbox is non-empty or parity is dirty.
 
-- [ ] **Step 5: Add protected admin operations**
+- [x] **Step 5: Add protected admin operations**
 
 Expose existing-admin-only handlers for `backfill`, `verify`, `cutover-status`, and `disable-compatibility-projection`. Return counts and opaque cursors, never message content, tokens, or secrets. Require a confirmation string containing the project ID for cutover-affecting actions.
 
-- [ ] **Step 6: Add the parity gate**
+- [x] **Step 6: Add the parity gate**
 
 For each project compare conversation IDs, operational fields, message count, latest message ID, and SHA-256 transcript checksum. The `agent` runtime flag is not eligible until directory backfill is complete and mismatch count is zero. Projection disablement additionally requires zero legacy endpoint requests for seven consecutive days.
 
-- [ ] **Step 7: Run migration and full regression tests locally**
+- [x] **Step 7: Run migration and full regression tests locally**
 
 ```bash
 bun run db:migrate:dev
@@ -1215,7 +1215,7 @@ bun run widget:build
 
 Expected: PASS with `PUBLIC_CONVERSATION_STORE=legacy` and again locally with `PUBLIC_CONVERSATION_STORE=agent`.
 
-- [ ] **Step 8: Commit migration tooling without deploying**
+- [x] **Step 8: Commit migration tooling without deploying**
 
 ```bash
 git add worker wrangler.jsonc

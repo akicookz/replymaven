@@ -50,6 +50,7 @@ interface ConversationDirectoryRow {
   message_count: number;
   bot_message_count: number;
   child_revision: number;
+  source_checksum: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -113,6 +114,7 @@ function mapDirectoryRow(row: ConversationDirectoryRow): MavenConversationSummar
     messageCount: row.message_count,
     botMessageCount: row.bot_message_count,
     childRevision: row.child_revision,
+    sourceChecksum: row.source_checksum,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -572,11 +574,11 @@ export class ConversationDirectory {
          visitor_last_online_at, last_message_id, last_message_author,
          last_message_preview, last_message_sender_name,
          last_message_emailed_at, last_message_created_at, last_activity_at,
-         message_count, bot_message_count, child_revision, created_at,
-         updated_at
+         message_count, bot_message_count, child_revision, source_checksum,
+         created_at, updated_at
        ) VALUES (
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        )
        ON CONFLICT(conversation_id) DO UPDATE SET
          public_child_name = excluded.public_child_name,
@@ -615,12 +617,25 @@ export class ConversationDirectory {
          message_count = excluded.message_count,
          bot_message_count = excluded.bot_message_count,
          child_revision = excluded.child_revision,
+         source_checksum = excluded.source_checksum,
          created_at = excluded.created_at,
          updated_at = excluded.updated_at
        WHERE excluded.child_revision > conversation_directory.child_revision
           OR (
+            conversation_directory.visitor_id = ''
+            AND (
+              excluded.child_revision = conversation_directory.child_revision
+              OR (
+                conversation_directory.child_revision = 0
+                AND excluded.child_revision < 0
+              )
+            )
+          )
+          OR (
             excluded.child_revision = conversation_directory.child_revision
-            AND conversation_directory.visitor_id = ''
+            AND excluded.child_revision < 0
+            AND COALESCE(excluded.source_checksum, '') !=
+              COALESCE(conversation_directory.source_checksum, '')
           )
        RETURNING child_revision`,
       [
@@ -655,6 +670,7 @@ export class ConversationDirectory {
         summary.messageCount,
         summary.botMessageCount,
         summary.childRevision,
+        summary.sourceChecksum,
         summary.createdAt,
         summary.updatedAt,
       ],
@@ -680,8 +696,8 @@ export class ConversationDirectory {
          sidechat_status, visitor_id, status, metadata_json, priority,
          visitor_presence, last_activity_at, message_count,
          bot_message_count, child_revision, created_at, updated_at,
-         retention_schedule_id
-       ) VALUES (?, ?, ?, ?, '', 'active', '{}', 'medium', 'active', ?, 0, 0, 0, ?, ?, NULL)
+         retention_schedule_id, source_checksum
+       ) VALUES (?, ?, ?, ?, '', 'active', '{}', 'medium', 'active', ?, 0, 0, 0, ?, ?, NULL, NULL)
        ON CONFLICT(conversation_id) DO UPDATE SET
          sidechat_child_name = excluded.sidechat_child_name,
          sidechat_status = excluded.sidechat_status,
@@ -770,6 +786,7 @@ export class ConversationDirectory {
       message_count INTEGER NOT NULL DEFAULT 0,
       bot_message_count INTEGER NOT NULL DEFAULT 0,
       child_revision INTEGER NOT NULL,
+      source_checksum TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`, []);
@@ -778,6 +795,7 @@ export class ConversationDirectory {
       ["last_message_emailed_at", "INTEGER"],
       ["last_message_created_at", "INTEGER"],
       ["retention_schedule_id", "TEXT"],
+      ["source_checksum", "TEXT"],
     ] as const) {
       try {
         this.sql.execute(

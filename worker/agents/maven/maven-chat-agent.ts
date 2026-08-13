@@ -126,6 +126,7 @@ import { ToolService } from "../../services/tool-service";
 import { VisitorBanService } from "../../services/visitor-ban-service";
 import { logError } from "../../observability";
 import { resolvePendingPublicContactUpdate } from "./public/public-human-mode";
+import { projectPublicConversationSnapshot } from "../../migrations/conversation-runtime-projection";
 
 type SidechatDataParts = Record<string, unknown> & {
   "turn-accepted": { messageId: string };
@@ -1075,6 +1076,11 @@ export class MavenChatAgent extends AIChatAgent<
       messages: this.readPublicMessages(),
       revision: state.revision,
     };
+  }
+
+  async hasPublicConversation(): Promise<boolean> {
+    this.assertPublicChild();
+    return this.publicStateStore().get() !== null;
   }
 
   async getPublicMessages(): Promise<PublicMessageRecord[]> {
@@ -2081,6 +2087,23 @@ export class MavenChatAgent extends AIChatAgent<
     );
   }
 
+  async retryCompatibilityProjection(): Promise<void> {
+    const state = this.requirePublicState();
+    await this.publishCompatibilityProjection(
+      state,
+      this.readPublicMessages(),
+    );
+  }
+
+  async hasPendingCompatibilityProjection(): Promise<boolean> {
+    this.assertPublicChild();
+    this.ensureCompatibilityProjectionOutboxSchema();
+    const rows = this.ctx.storage.sql.exec(
+      "SELECT revision FROM public_projection_outbox LIMIT 1",
+    ).toArray();
+    return rows.length > 0;
+  }
+
   async autoClosePublicConversation(payload: {
     lastActivityAt: number;
     autoCloseMinutes: number;
@@ -2500,6 +2523,7 @@ export class MavenChatAgent extends AIChatAgent<
       messageCount: messages.length,
       botMessageCount: messages.filter((message) => message.author === "bot").length,
       childRevision: state.revision,
+      sourceChecksum: null,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
     };
@@ -2522,6 +2546,71 @@ export class MavenChatAgent extends AIChatAgent<
         { revision: state.revision },
         { idempotent: true },
       );
+    }
+    await this.publishCompatibilityProjection(state, messages);
+  }
+
+  private ensureCompatibilityProjectionOutboxSchema(): void {
+    this.ctx.storage.sql.exec(
+      `CREATE TABLE IF NOT EXISTS public_projection_outbox (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        revision INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      )`,
+    );
+  }
+
+  private clearCompatibilityProjectionOutbox(): void {
+    this.ensureCompatibilityProjectionOutboxSchema();
+    this.ctx.storage.sql.exec("DELETE FROM public_projection_outbox");
+  }
+
+  private async publishCompatibilityProjection(
+    state: StoredPublicConversationState,
+    messages: PublicMessageRecord[],
+  ): Promise<void> {
+    const parent = await this.parentAgent(MavenProjectAgent);
+    let enabled = false;
+    try {
+      enabled = await parent.isCompatibilityProjectionEnabled();
+    } catch {
+      enabled = this.env.PUBLIC_CONVERSATION_STORE === "agent";
+    }
+    if (!enabled) {
+      this.clearCompatibilityProjectionOutbox();
+      return;
+    }
+    try {
+      await projectPublicConversationSnapshot(
+        this.env.DB,
+        this.toPublicConversation(state),
+        messages,
+      );
+      this.clearCompatibilityProjectionOutbox();
+    } catch {
+      this.ensureCompatibilityProjectionOutboxSchema();
+      this.ctx.storage.sql.exec(
+        `INSERT INTO public_projection_outbox (
+          singleton, revision, attempts, updated_at
+        ) VALUES (1, ?, 1, ?)
+        ON CONFLICT(singleton) DO UPDATE SET
+          revision = excluded.revision,
+          attempts = public_projection_outbox.attempts + 1,
+          updated_at = excluded.updated_at`,
+        state.revision,
+        Date.now(),
+      );
+      try {
+        await this.schedule(
+          5,
+          "retryCompatibilityProjection",
+          {},
+          { idempotent: true },
+        );
+      } catch {
+        // The child-owned outbox remains discoverable for reconciliation.
+      }
     }
   }
 

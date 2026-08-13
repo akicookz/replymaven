@@ -75,6 +75,7 @@ interface AgentPublicConversationStoreContext {
 }
 
 interface PublicChildStub {
+  hasPublicConversation(): Promise<boolean>;
   getPublicSnapshot(): Promise<{
     conversation: PublicConversationRecord;
     messages: PublicMessageRecord[];
@@ -697,19 +698,21 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       conversation.id,
     );
     const child = await getPublicSubAgent(parent, registration.childName);
-    const summary = await parent.getConversationSummary(conversation.id);
-    if (summary && summary.visitorId !== "") {
+    if (await child.hasPublicConversation()) {
       return { childName: registration.childName as `pub_${string}` };
     }
     const messages = await this.legacy.getMessages(
       conversation.projectId,
       conversation.id,
     );
-    await child.importLegacyPublicConversation({
+    const imported = await child.importLegacyPublicConversation({
       conversation,
       messages,
       checksum: await importChecksum(conversation, messages),
     });
+    if (imported.status === "conflict") {
+      throw new Error("Legacy public conversation checksum conflict");
+    }
     return { childName: registration.childName as `pub_${string}` };
   }
 
@@ -1885,19 +1888,26 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       projectId,
     );
     const summary = await parent.getConversationSummary(conversationId);
-    const legacyConversation = !summary || summary.visitorId === ""
-      ? await this.legacy.get(projectId, conversationId)
-      : null;
+    let legacyConversation = summary
+      ? null
+      : await this.legacy.get(projectId, conversationId);
     if (!summary && !legacyConversation) return null;
     const registration = await parent.registerPublicConversation(conversationId);
     const child = await getPublicSubAgent(parent, registration.childName);
-    if (legacyConversation) {
+    if (!await child.hasPublicConversation()) {
+      legacyConversation ??= await this.legacy.get(projectId, conversationId);
+      if (!legacyConversation) {
+        return null;
+      }
       const messages = await this.legacy.getMessages(projectId, conversationId);
-      await child.importLegacyPublicConversation({
+      const imported = await child.importLegacyPublicConversation({
         conversation: legacyConversation,
         messages,
         checksum: await importChecksum(legacyConversation, messages),
       });
+      if (imported.status === "conflict") {
+        throw new Error("Legacy public conversation checksum conflict");
+      }
     }
     return child;
   }

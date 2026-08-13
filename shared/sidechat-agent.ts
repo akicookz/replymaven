@@ -66,6 +66,7 @@ export interface MavenConversationSummary {
   messageCount: number;
   botMessageCount: number;
   childRevision: number;
+  sourceChecksum: string | null;
   createdAt: number;
   updatedAt: number;
 }

@@ -132,6 +132,7 @@ describe("native Sidechat Agent registration", () => {
       messageCount: 1,
       botMessageCount: 0,
       childRevision: 1,
+      sourceChecksum: null,
       createdAt: 50,
       updatedAt: 100,
     };

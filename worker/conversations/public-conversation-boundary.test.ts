@@ -6,6 +6,8 @@ const LEGACY_ALLOWLIST = new Set([
   "worker/conversations/d1-public-conversation-store.ts",
   "worker/services/chat-service.ts",
   "worker/migrations/conversation-runtime-backfill.ts",
+  "worker/migrations/conversation-runtime-projection.ts",
+  "worker/migrations/legacy-conversation-directory-mirror.ts",
 ]);
 
 function isProductionSource(path: string): boolean {

@@ -55,6 +55,7 @@ function makeSummary(
     messageCount: 0,
     botMessageCount: 0,
     childRevision: 1,
+    sourceChecksum: null,
     createdAt: 10,
     updatedAt: 100,
     ...overrides,
@@ -187,6 +188,63 @@ describe("ConversationDirectory", () => {
     )).toEqual({ applied: true, revision: 6 });
 
     expect(directory.getConversation("a")?.visitorName).toBe("Six");
+  });
+
+  test("allows same-version legacy corrections but rejects them after native cutover", async () => {
+    const directory = createDirectory();
+    expect(directory.upsertConversationSummary(makeSummary("legacy", {
+      childRevision: -10,
+      sourceChecksum: "before",
+      visitorName: "Before",
+    })).applied).toBe(true);
+    expect(directory.upsertConversationSummary(makeSummary("legacy", {
+      childRevision: -10,
+      sourceChecksum: "corrected",
+      visitorName: "Corrected",
+    })).applied).toBe(true);
+    expect(directory.getConversation("legacy")?.visitorName).toBe("Corrected");
+
+    expect(directory.upsertConversationSummary(makeSummary("legacy", {
+      childRevision: 0,
+      sourceChecksum: null,
+      visitorName: "Native",
+    })).applied).toBe(true);
+    expect(directory.upsertConversationSummary(makeSummary("legacy", {
+      childRevision: -9,
+      sourceChecksum: "stale",
+      visitorName: "Stale legacy",
+    })).applied).toBe(false);
+    expect(directory.getConversation("legacy")?.visitorName).toBe("Native");
+  });
+
+  test("fills a Sidechat placeholder from legacy before native cutover", async () => {
+    const directory = createDirectory();
+    expect(directory.updateSidechatSummary(
+      "placeholder",
+      "sc_placeholder",
+      "ready",
+      50,
+    )).toBe(true);
+
+    expect(directory.upsertConversationSummary(makeSummary("placeholder", {
+      childRevision: -10,
+      sourceChecksum: "legacy",
+      visitorName: "Legacy visitor",
+    })).applied).toBe(true);
+    expect(directory.getConversation("placeholder")).toMatchObject({
+      childRevision: -10,
+      sidechatChildName: "sc_placeholder",
+      visitorName: "Legacy visitor",
+    });
+
+    expect(directory.upsertConversationSummary(makeSummary("placeholder", {
+      childRevision: 0,
+      sourceChecksum: null,
+      visitorName: "Native visitor",
+    })).applied).toBe(true);
+    expect(directory.getConversation("placeholder")?.visitorName).toBe(
+      "Native visitor",
+    );
   });
 
   test("stores Sidechat status in the directory without an unbounded Agent state", async () => {

@@ -41,6 +41,36 @@ export const projects = sqliteTable(
 export type ProjectRow = typeof projects.$inferSelect;
 export type NewProjectRow = typeof projects.$inferInsert;
 
+// ─── Conversation Runtime Migration ─────────────────────────────────────────
+
+export const conversationRuntimeMigrations = sqliteTable(
+  "conversation_runtime_migrations",
+  {
+    projectId: text("project_id")
+      .primaryKey()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    directoryCursor: text("directory_cursor"),
+    directoryCompleteAt: integer("directory_complete_at", {
+      mode: "timestamp",
+    }),
+    agentCutoverAt: integer("agent_cutover_at", { mode: "timestamp" }),
+    lastVerifiedAt: integer("last_verified_at", { mode: "timestamp" }),
+    mismatchCount: integer("mismatch_count").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+);
+
+export type ConversationRuntimeMigrationRow =
+  typeof conversationRuntimeMigrations.$inferSelect;
+export type NewConversationRuntimeMigrationRow =
+  typeof conversationRuntimeMigrations.$inferInsert;
+
 // ─── Project Settings ─────────────────────────────────────────────────────────
 
 export const projectSettings = sqliteTable(
@@ -1109,6 +1139,7 @@ export type NewVisitorBanRow = typeof visitorBans.$inferInsert;
 export const schema = {
   ...authSchema,
   projects,
+  conversationRuntimeMigrations,
   projectSettings,
   widgetConfig,
   quickActions,

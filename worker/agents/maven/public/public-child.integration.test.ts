@@ -238,6 +238,11 @@ describe("native public MavenChatAgent child", () => {
       messages,
       checksum: "checksum-once",
     })).resolves.toEqual({ status: "noop", revision: 0 });
+    await expect(child.importLegacyPublicConversation({
+      conversation: record,
+      messages: [{ ...messages[0]!, content: "checksum mismatch" }],
+      checksum: "checksum-different",
+    })).resolves.toEqual({ status: "conflict", revision: 0 });
     await child.appendSystemMessage({
       id: "system-native",
       conversationId,
@@ -430,9 +435,10 @@ describe("native public MavenChatAgent child", () => {
 
     await child.reconcilePublicAutoClose(5);
     await child.reconcilePublicAutoClose(10);
-    await expect(child.listSchedules({
-      callback: "autoClosePublicConversation",
-    })).resolves.toHaveLength(1);
+    const scheduledAutoCloses = (await child.listSchedules()).filter(
+      (schedule) => schedule.callback === "autoClosePublicConversation",
+    );
+    expect(scheduledAutoCloses).toHaveLength(1);
     const before = await child.getPublicSnapshot();
     await child.autoClosePublicConversation({
       lastActivityAt: record.lastActivityAt - 1,
@@ -443,9 +449,10 @@ describe("native public MavenChatAgent child", () => {
       revision: before.revision,
     });
     await child.reconcilePublicAutoClose(null);
-    await expect(child.listSchedules({
-      callback: "autoClosePublicConversation",
-    })).resolves.toHaveLength(0);
+    const remainingAutoCloses = (await child.listSchedules()).filter(
+      (schedule) => schedule.callback === "autoClosePublicConversation",
+    );
+    expect(remainingAutoCloses).toHaveLength(0);
   });
 
   nativeTest("persists a human reply in the same ownership mutation", async () => {

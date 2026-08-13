@@ -130,6 +130,14 @@ import {
   type SidechatRouteActor,
 } from "./routes/sidechat-agent-handlers";
 import {
+  handleConversationRuntimeBackfill,
+  handleConversationRuntimeStatus,
+  handleConversationRuntimeVerify,
+  handleDisableCompatibilityProjection,
+} from "./routes/conversation-runtime-admin";
+import { ConversationRuntimeMigrationService } from "./migrations/conversation-runtime-backfill";
+import { recordLegacyConversationEndpointRequest } from "./migrations/legacy-conversation-directory-mirror";
+import {
   handleCreateDashboardPublicAgentSession,
   handleCreateWidgetPublicAgentSession,
 } from "./routes/public-agent-handlers";
@@ -945,6 +953,7 @@ const app = new Hono<HonoAppContext>()
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectBySlugPublic(slug);
     if (!project) return c.json({ error: "Project not found" }, 404);
+    await recordLegacyConversationEndpointRequest(c.env, project.id);
 
     const chatService = createPublicConversationStore({ db, env: c.env });
     let conversation = await chatService.getConversationById(
@@ -1157,6 +1166,7 @@ const app = new Hono<HonoAppContext>()
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectBySlugPublic(slug);
     if (!project) return c.json({ error: "Project not found" }, 404);
+    await recordLegacyConversationEndpointRequest(c.env, project.id);
 
     const chatServiceForBan = createPublicConversationStore({ db, env: c.env });
     const convForBan = await chatServiceForBan.getConversationById(
@@ -2935,6 +2945,61 @@ const app = new Hono<HonoAppContext>()
         ensurePublicConversation(conversation) {
           return agentStore.ensurePublicConversation(conversation);
         },
+      });
+    },
+  )
+
+  // ─── Conversation runtime migration controls ─────────────────────────────
+  .post("/api/projects/:projectId/conversation-runtime/backfill", async (c) => {
+    const projectId = c.req.param("projectId");
+    return handleConversationRuntimeBackfill({
+      request: c.req.raw,
+      actor: getSidechatRouteActor(c),
+      projectId,
+      projectService: new ProjectService(c.get("db")),
+      runtimeService: new ConversationRuntimeMigrationService(
+        c.get("db"),
+        c.env,
+      ),
+    });
+  })
+  .post("/api/projects/:projectId/conversation-runtime/verify", async (c) => {
+    const projectId = c.req.param("projectId");
+    return handleConversationRuntimeVerify({
+      actor: getSidechatRouteActor(c),
+      projectId,
+      projectService: new ProjectService(c.get("db")),
+      runtimeService: new ConversationRuntimeMigrationService(
+        c.get("db"),
+        c.env,
+      ),
+    });
+  })
+  .get("/api/projects/:projectId/conversation-runtime/cutover-status", async (c) => {
+    const projectId = c.req.param("projectId");
+    return handleConversationRuntimeStatus({
+      actor: getSidechatRouteActor(c),
+      projectId,
+      projectService: new ProjectService(c.get("db")),
+      runtimeService: new ConversationRuntimeMigrationService(
+        c.get("db"),
+        c.env,
+      ),
+    });
+  })
+  .post(
+    "/api/projects/:projectId/conversation-runtime/disable-compatibility-projection",
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      return handleDisableCompatibilityProjection({
+        request: c.req.raw,
+        actor: getSidechatRouteActor(c),
+        projectId,
+        projectService: new ProjectService(c.get("db")),
+        runtimeService: new ConversationRuntimeMigrationService(
+          c.get("db"),
+          c.env,
+        ),
       });
     },
   )

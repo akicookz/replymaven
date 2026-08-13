@@ -59,6 +59,63 @@ function message(): PublicMessageRecord {
 }
 
 describe("native AgentPublicConversationStore", () => {
+  nativeTest("lazily imports a transcript after directory-only backfill", async () => {
+    const [
+      { env },
+      { getAgentByName },
+      { AgentPublicConversationStore },
+      { legacyEntryToSummary },
+    ] = await Promise.all([
+      import("cloudflare:workers"),
+      import("agents"),
+      import("../../../conversations/agent-public-conversation-store"),
+      import("../../../migrations/conversation-runtime-backfill"),
+    ]);
+    const legacyRecord = {
+      ...conversation(),
+      id: "adapter-backfilled-conversation",
+      projectId: "adapter-backfilled-project",
+      visitorId: "adapter-backfilled-visitor",
+    };
+    const legacyMessages = [{
+      ...message(),
+      id: "adapter-backfilled-message",
+      conversationId: legacyRecord.id,
+    }];
+    const parent = await getAgentByName(
+      env.MAVEN_PROJECT_AGENT,
+      legacyRecord.projectId,
+    );
+    await parent.reconcileDirectory([
+      await legacyEntryToSummary({
+        conversation: legacyRecord,
+        messages: legacyMessages,
+      }),
+    ]);
+    const store = new AgentPublicConversationStore({
+      db: drizzle(env.DB),
+      env,
+      legacy: {
+        async get(projectId: string, conversationId: string) {
+          return projectId === legacyRecord.projectId &&
+              conversationId === legacyRecord.id
+            ? legacyRecord
+            : null;
+        },
+        async getMessages() {
+          return legacyMessages;
+        },
+      } as PublicConversationStore,
+    });
+
+    await expect(store.get(legacyRecord.projectId, legacyRecord.id)).resolves
+      .toMatchObject({ id: legacyRecord.id });
+    await expect(store.getMessages(legacyRecord.projectId, legacyRecord.id))
+      .resolves.toMatchObject(legacyMessages);
+    await expect(parent.getConversationSummary(legacyRecord.id)).resolves
+      .toMatchObject({ childRevision: 0 });
+  }, 30_000);
+
   nativeTest("imports legacy data once, then keeps Agent-native state authoritative", async () => {
     const [
       { env },

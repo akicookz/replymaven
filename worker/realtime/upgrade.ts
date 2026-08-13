@@ -1,6 +1,7 @@
 import { type Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { createPublicConversationStore } from "../conversations/create-public-conversation-store";
+import { recordLegacyConversationEndpointRequest } from "../migrations/legacy-conversation-directory-mirror";
 import { ProjectService } from "../services/project-service";
 import { type HonoAppContext } from "../types";
 
@@ -54,6 +55,7 @@ export async function handleWidgetWsUpgrade(
   const projectService = new ProjectService(db);
   const project = await projectService.getProjectBySlugPublic(slug);
   if (!project) return c.json({ error: "Project not found" }, 404);
+  await recordLegacyConversationEndpointRequest(c.env, project.id);
 
   const conversationStore = createPublicConversationStore({ db, env: c.env });
   const conversation = await conversationStore.get(project.id, conversationId);
@@ -95,6 +97,7 @@ export async function handleDashboardWsUpgrade(
   if (!project || project.userId !== effectiveUserId) {
     return c.json({ error: "Not found" }, 404);
   }
+  await recordLegacyConversationEndpointRequest(c.env, project.id);
 
   const conversationStore = createPublicConversationStore({ db, env: c.env });
   const conversation = await conversationStore.get(project.id, convId);
@@ -124,6 +127,7 @@ export async function handleCustomerProjectWsUpgrade(
   if (!project || project.userId !== effectiveUserId) {
     return c.json({ error: "Not found" }, 404);
   }
+  await recordLegacyConversationEndpointRequest(c.env, project.id);
 
   return forwardUpgradeToDO(c, {
     conversationId: `customer-project:${projectId}`,

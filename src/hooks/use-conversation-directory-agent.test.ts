@@ -52,6 +52,7 @@ function summary(): MavenConversationSummary {
     messageCount: 1,
     botMessageCount: 0,
     childRevision: 2,
+    sourceChecksum: null,
     createdAt: 50,
     updatedAt: 100,
   };
