@@ -191,6 +191,7 @@ describe("public Agent SDK chat protocol guard", () => {
         ],
       }),
     ], {
+      token: "signed-token",
       pageContext: { page: "Pricing" },
       attachmentUrls: ["https://uploads.example.test/image.png"],
     });
@@ -211,7 +212,9 @@ describe("public Agent SDK chat protocol guard", () => {
     if (parsed?.type !== "chat-request") throw new Error("Expected request");
     const body = JSON.parse(parsed.init.body ?? "{}") as {
       messages: UIMessage[];
+      token: string;
     };
+    expect(body.token).toBe("signed-token");
     expect(body.messages).toHaveLength(2);
     expect(body.messages[0]).toEqual(authoritative[0]);
     expect(body.messages[1]).toMatchObject({

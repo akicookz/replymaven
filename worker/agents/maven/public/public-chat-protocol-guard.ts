@@ -178,10 +178,13 @@ function normalizeRequest(
       "pageContext",
       "attachmentUrls",
       "trigger",
+      "token",
     ]) ||
     !Array.isArray(body.messages) ||
     body.messages.length !== authoritativeMessages.length + 1 ||
     !isPageContext(body.pageContext) ||
+    (body.token !== undefined &&
+      (typeof body.token !== "string" || body.token.length > 2_048)) ||
     (body.trigger !== undefined && body.trigger !== "submit-message")
   ) return reject("invalid_submission", event.id);
 

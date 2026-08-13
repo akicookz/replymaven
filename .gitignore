@@ -21,6 +21,7 @@ dist-widget/
 
 # Local widget build
 public/widget-embed.js
+public/widget-agent-runtime.js
 
 # TypeScript
 *.tsbuildinfo

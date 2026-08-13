@@ -7,13 +7,13 @@ export default defineConfig({
   },
   build: {
     lib: {
-      entry: path.resolve(__dirname, "index.ts"),
-      name: "ReplyMaven",
+      entry: path.resolve(__dirname, "agent-runtime-entry.ts"),
+      name: "ReplyMavenAgentRuntime",
       formats: ["iife"],
-      fileName: () => "widget-embed.js",
+      fileName: () => "widget-agent-runtime.js",
     },
     outDir: path.resolve(__dirname, "../dist-widget"),
-    emptyOutDir: true,
+    emptyOutDir: false,
     minify: "esbuild",
     rollupOptions: {
       treeshake: {

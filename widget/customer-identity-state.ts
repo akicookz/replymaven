@@ -7,11 +7,9 @@ export interface WidgetIdentityRuntimeState {
   pageContext: Record<string, string>;
   messages: unknown[];
   renderedMessageIds: string[];
-  lastSeenMessageId: string | null;
   newestResponseId: string | null;
-  lastMessageTimestamp: number | null;
-  wsHealthy: boolean;
-  polling: boolean;
+  agentConnected: boolean;
+  agentSessionExpiresAt: number;
   heartbeat: boolean;
   messageDraft: string;
   inlineDraft: string;
@@ -101,11 +99,9 @@ export function planCustomerIdentityReset(input: {
       pageContext: {},
       messages: [],
       renderedMessageIds: [],
-      lastSeenMessageId: null,
       newestResponseId: null,
-      lastMessageTimestamp: null,
-      wsHealthy: false,
-      polling: false,
+      agentConnected: false,
+      agentSessionExpiresAt: 0,
       heartbeat: false,
       messageDraft: "",
       inlineDraft: "",

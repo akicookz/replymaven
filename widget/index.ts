@@ -12,13 +12,22 @@
  * window.ReplyMaven.identify({ name: "John", email: "john@example.com" })
  */
 
-import { WebSocket as ReconnectingWebSocket } from "partysocket";
 import { renderMarkdown } from "../shared/chat-markdown";
 import { WIDGET_FONTS } from "../shared/widget-fonts";
 import {
   parseMessageImageUrls,
+  serializeMessageImageUrls,
   shouldShowMessageContent,
 } from "../shared/message-images";
+import type {
+  PublicChatChildState,
+  PublicChatSessionResponse,
+} from "../shared/public-chat-agent";
+import type { PublicMessageRecord } from "../shared/maven-conversation";
+import {
+  createLazyWidgetAgentChatClient,
+} from "./lazy-agent-chat-client";
+import type { WidgetChatActivity } from "./agent-chat-bridge";
 import { claimWidgetInstance } from "./instance-guard";
 import {
   isSignedIdentityInput,
@@ -67,16 +76,24 @@ import {
   let isBanned = false;
   const identitySessions = new WidgetIdentitySessionGuard();
 
-  // Polling state
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let lastMessageTimestamp: number | null = null;
-  let lastNewMessageAt: number = Date.now();
   const renderedMessageIds = new Set<string>();
-
-  // WebSocket state — primary transport when available; polling is fallback.
-  let wsSocket: ReconnectingWebSocket | null = null;
-  let wsHealthy = false;
-  let lastSeenMessageId: string | null = null;
+  const pendingVisitorMessageIds = new Set<string>();
+  const pendingIncomingResponseIds = new Set<string>();
+  const agentChatClient = createLazyWidgetAgentChatClient(
+    `${scriptOrigin}/widget-agent-runtime.js`,
+  );
+  let agentSessionRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let agentSessionGeneration = 0;
+  let connectedAgentConversationId: string | null = null;
+  let agentSessionExpiresAt = 0;
+  let authoritativeMessageIds = new Set<string>();
+  let hasReceivedAgentSnapshot = false;
+  let latestAgentActivity: WidgetChatActivity = {
+    status: "ready",
+    isServerStreaming: false,
+    isRecovering: false,
+    error: undefined,
+  };
 
   // Id of the newest bot/agent (non-visitor) message currently known. Tracked so
   // we can surface an unseen response on page load and persist a per-device
@@ -91,95 +108,8 @@ import {
     typeof window.matchMedia === "function" &&
     window.matchMedia("(pointer: coarse)").matches;
 
-  // In-memory conversation history buffer (last N {role, content} pairs).
-  // Sent to the backend on each new message so the server can skip the
-  // D1/KV history fetch entirely on the happy path.
-  const HISTORY_BUFFER_LIMIT = 20;
-  const conversationHistoryBuffer: Array<{
-    role: "visitor" | "bot" | "agent";
-    content: string;
-    id?: string;
-    // ISO timestamp — shipped to the server so LLM transcripts can annotate
-    // time gaps between turns.
-    createdAt: string;
-  }> = [];
-
-  // Server timestamps arrive as epoch seconds, epoch ms, Dates, or ISO
-  // strings depending on the endpoint; normalize to ISO or undefined.
-  function toIsoTimestamp(value: unknown): string | undefined {
-    if (value === null || value === undefined || value === "") return undefined;
-    if (value instanceof Date) {
-      return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
-    }
-    if (typeof value === "number") {
-      const ms = value < 1_000_000_000_000 ? value * 1000 : value;
-      const d = new Date(ms);
-      return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-    }
-    if (typeof value === "string") {
-      const d = new Date(value);
-      return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-    }
-    return undefined;
-  }
-
-  function pushHistoryEntry(
-    role: string,
-    content: string,
-    id?: string,
-    createdAt?: unknown,
-  ): void {
-    if (role !== "visitor" && role !== "bot" && role !== "agent") return;
-    const trimmed = (content ?? "").toString();
-    if (!trimmed) return;
-    conversationHistoryBuffer.push({
-      role: role as "visitor" | "bot" | "agent",
-      content: trimmed,
-      id,
-      createdAt: toIsoTimestamp(createdAt) ?? new Date().toISOString(),
-    });
-    if (conversationHistoryBuffer.length > HISTORY_BUFFER_LIMIT * 2) {
-      conversationHistoryBuffer.splice(
-        0,
-        conversationHistoryBuffer.length - HISTORY_BUFFER_LIMIT,
-      );
-    }
-  }
-
-  function removeHistoryEntryById(id: string): void {
-    for (let i = conversationHistoryBuffer.length - 1; i >= 0; i--) {
-      if (conversationHistoryBuffer[i].id === id) {
-        conversationHistoryBuffer.splice(i, 1);
-        return;
-      }
-    }
-  }
-
-  function updateLastBotHistoryEntry(content: string): void {
-    if (!content) return;
-    for (let i = conversationHistoryBuffer.length - 1; i >= 0; i--) {
-      if (conversationHistoryBuffer[i].role === "bot") {
-        conversationHistoryBuffer[i].content = content;
-        return;
-      }
-    }
-    pushHistoryEntry("bot", content);
-  }
-
-  function removeLastBotHistoryEntry(): void {
-    for (let i = conversationHistoryBuffer.length - 1; i >= 0; i--) {
-      if (conversationHistoryBuffer[i].role === "bot") {
-        conversationHistoryBuffer.splice(i, 1);
-        return;
-      }
-    }
-  }
-
   // Send guard -- prevents duplicate message sends
   let isSending = false;
-
-  // Streaming guard -- prevents polling from creating duplicate messages during SSE
-  let isStreaming = false;
 
   // Heartbeat state
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -3275,17 +3205,15 @@ import {
     conversationId = null;
     conversationStatus = null;
     clearPersistedConversation();
-    stopPolling();
     stopHeartbeat();
-    disconnectWebSocket();
+    disconnectConversationAgent();
 
-    conversationHistoryBuffer.splice(0);
     renderedMessageIds.clear();
-    activeToolCallCards.clear();
-    lastSeenMessageId = null;
+    pendingVisitorMessageIds.clear();
+    pendingIncomingResponseIds.clear();
+    authoritativeMessageIds.clear();
+    hasReceivedAgentSnapshot = false;
     newestResponseId = null;
-    lastMessageTimestamp = null;
-    lastNewMessageAt = Date.now();
     lastVisitorStatusEl = null;
     messagesContainer.replaceChildren(typingRow);
     previewStack.replaceChildren();
@@ -3310,27 +3238,9 @@ import {
       document.title = originalDocTitle;
       titleOverridden = false;
     }
-    sendPresenceOverWs(document.hidden ? "background" : "active");
+    void sendAckViaHeartbeat({});
     if (isTabActive) reportRead();
   });
-
-  function sendPresenceOverWs(state: "active" | "background"): void {
-    if (!wsHealthy || !wsSocket) return;
-    try {
-      wsSocket.send(JSON.stringify({ type: "presence", state }));
-    } catch {
-      // ignore
-    }
-  }
-
-  function sendAckOverWs(type: "delivered" | "read", messageId: string): void {
-    if (!wsHealthy || !wsSocket) return;
-    try {
-      wsSocket.send(JSON.stringify({ type, upToMessageId: messageId }));
-    } catch {
-      // ignore
-    }
-  }
 
   async function sendAckViaHeartbeat(fields: {
     deliveredUpTo?: string;
@@ -3358,11 +3268,7 @@ import {
   // so the dashboard can show a "Delivered" receipt.
   function reportDelivered(): void {
     if (!conversationId || !newestResponseId) return;
-    if (wsHealthy && wsSocket) {
-      sendAckOverWs("delivered", newestResponseId);
-    } else {
-      void sendAckViaHeartbeat({ deliveredUpTo: newestResponseId });
-    }
+    void sendAckViaHeartbeat({ deliveredUpTo: newestResponseId });
   }
 
   // Tell the server the visitor has actually seen the newest outbound message —
@@ -3370,11 +3276,7 @@ import {
   function reportRead(): void {
     if (!conversationId || !newestResponseId) return;
     if (!isOpen || !isTabActive) return;
-    if (wsHealthy && wsSocket) {
-      sendAckOverWs("read", newestResponseId);
-    } else {
-      void sendAckViaHeartbeat({ readUpTo: newestResponseId });
-    }
+    void sendAckViaHeartbeat({ readUpTo: newestResponseId });
   }
 
   // ─── Event Handlers ─────────────────────────────────────────────────────────
@@ -3637,7 +3539,6 @@ import {
             if (!matchesCurrentPage(patterns) && !isOpen) {
               container.style.display = "none";
               hiddenByPageTargeting = true;
-              stopPolling();
               stopHeartbeat();
               hideGreetingStack();
             } else if (matchesCurrentPage(patterns)) {
@@ -4076,7 +3977,7 @@ import {
                   visitorName: requestVisitorInfo.name,
                   visitorEmail: requestVisitorInfo.email,
                   data,
-                  streamAi: true,
+                  streamAi: false,
                 }),
               },
             );
@@ -4094,18 +3995,18 @@ import {
               return;
             }
 
-            const formDisplayMessage = [
-              "Contact form submission",
-              ...Object.entries(data).map(([key, value]) => `${key}: ${value}`),
-            ].join("\n");
+            const accepted = await res.json() as ContactAcceptedClientPayload;
+            if (!identitySessions.isCurrent(identitySession)) return;
 
-            // Land in chat immediately. The accepted SSE event supplies the
-            // conversation id before AI status/tool/text events arrive.
+            // The form endpoint has already persisted the visitor message and
+            // started any server-side follow-up. Native Agent hydration owns
+            // the transcript from here; submitting it again would duplicate it.
+            applyContactAccepted(accepted);
             showChatScreen();
-            await handleSendMessage(formDisplayMessage, {
-              acceptedResponse: res,
+            await connectConversationAgent(
               identitySession,
-            });
+              accepted.conversationId,
+            );
             if (!identitySessions.isCurrent(identitySession)) return;
 
             // Reset the form so it stays usable if the visitor returns to it
@@ -4341,6 +4242,83 @@ import {
     }
   }
 
+  function disconnectConversationAgent(): void {
+    agentSessionGeneration += 1;
+    if (agentSessionRefreshTimer) {
+      clearTimeout(agentSessionRefreshTimer);
+      agentSessionRefreshTimer = null;
+    }
+    connectedAgentConversationId = null;
+    agentSessionExpiresAt = 0;
+    agentChatClient.disconnect();
+  }
+
+  async function connectConversationAgent(
+    identitySession: WidgetIdentitySessionToken = identitySessions.capture(),
+    requestedConversationId: string | null = conversationId,
+    forceRefresh = false,
+  ): Promise<void> {
+    if (!requestedConversationId) return;
+    if (
+      !forceRefresh &&
+      connectedAgentConversationId === requestedConversationId &&
+      agentSessionExpiresAt * 1_000 - Date.now() > 30_000
+    ) return;
+    const generation = agentSessionGeneration + 1;
+    agentSessionGeneration = generation;
+    if (agentSessionRefreshTimer) {
+      clearTimeout(agentSessionRefreshTimer);
+      agentSessionRefreshTimer = null;
+    }
+    try {
+      const response = await fetch(
+        `${baseUrl}/api/widget/${projectSlug}/conversations/${encodeURIComponent(requestedConversationId)}/agent-session`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: identitySession.signal,
+          body: JSON.stringify({ visitorId }),
+        },
+      );
+      if (
+        generation !== agentSessionGeneration ||
+        !identitySessions.isCurrent(identitySession) ||
+        conversationId !== requestedConversationId
+      ) return;
+      if (!response.ok) {
+        if (response.status === 404 || response.status === 409) {
+          retireArchivedConversation();
+        } else if (response.status === 403) {
+          showBannedState();
+        }
+        return;
+      }
+      const session = await response.json() as PublicChatSessionResponse;
+      if (
+        generation !== agentSessionGeneration ||
+        !identitySessions.isCurrent(identitySession) ||
+        conversationId !== requestedConversationId
+      ) return;
+      agentChatClient.connect(session);
+      connectedAgentConversationId = requestedConversationId;
+      agentSessionExpiresAt = session.expiresAt;
+      const refreshIn = Math.max(
+        5_000,
+        session.expiresAt * 1_000 - Date.now() - 15_000,
+      );
+      agentSessionRefreshTimer = setTimeout(() => {
+        void connectConversationAgent(
+          identitySession,
+          requestedConversationId,
+          true,
+        );
+      }, refreshIn);
+    } catch (error) {
+      if (!identitySessions.isCurrent(identitySession)) return;
+      console.error("[ReplyMaven] Failed to connect conversation Agent:", error);
+    }
+  }
+
   async function createConversation(
     session: WidgetIdentitySessionToken = identitySessions.capture(),
   ) {
@@ -4375,7 +4353,7 @@ import {
         conversationId = data.id;
         conversationStatus = data.status ?? "active";
         persistConversationId(data.id);
-        startPolling();
+        await connectConversationAgent(session, data.id);
         startHeartbeat();
         // Hide inline action bubbles once conversation starts
         inlineBarActions.classList.remove("has-actions");
@@ -4392,8 +4370,6 @@ import {
   }
 
   interface SendMessageOptions {
-    acceptedResponse?: Response;
-    contactFallbackMessage?: string;
     identitySession?: WidgetIdentitySessionToken;
   }
 
@@ -4414,9 +4390,7 @@ import {
     if (payload.visitorName) visitorInfo.name = payload.visitorName;
     if (payload.visitorEmail) visitorInfo.email = payload.visitorEmail;
     persistConversationId(payload.conversationId);
-    renderedMessageIds.add(payload.visitorMessageId);
     syncConversationModeUi();
-    startPolling();
     startHeartbeat();
     inlineBarActions.classList.remove("has-actions");
 
@@ -4433,80 +4407,70 @@ import {
   async function handleSendMessage(
     text: string,
     options: SendMessageOptions = {},
-  ) {
+  ): Promise<void> {
     const identitySession =
       options.identitySession ?? identitySessions.capture();
-    if (!identitySessions.isCurrent(identitySession)) return;
+    if (!identitySessions.isCurrent(identitySession) || isBanned || isSending) {
+      return;
+    }
     const requestVisitorId = visitorId;
-    if (isBanned) return;
-    // Prevent duplicate sends
-    if (isSending) return;
     isSending = true;
-    let activeContactFallbackMessage =
-      options.contactFallbackMessage ?? null;
     sendBtn.disabled = true;
     input.disabled = true;
-    // Also disable inline bar input if in center-inline mode
-    if (isInlineBarVariant) {
-      inlineBarInput.disabled = true;
-    }
+    if (isInlineBarVariant) inlineBarInput.disabled = true;
 
+    let optimisticMessageId: string | null = null;
     try {
-      // Switch to chat view if on home screen
-      if (currentView === "home") {
-        showChatScreen();
+      if (currentView === "home") showChatScreen();
+      if (!conversationId) await createConversation(identitySession);
+      if (!identitySessions.isCurrent(identitySession) || !conversationId) {
+        return;
       }
+      const requestedConversationId = conversationId;
+      await connectConversationAgent(identitySession, requestedConversationId);
+      if (
+        !identitySessions.isCurrent(identitySession) ||
+        conversationId !== requestedConversationId
+      ) return;
 
-      // Create conversation if needed
-      if (!conversationId && !options.acceptedResponse) {
-        await createConversation(identitySession);
-      }
-      if (!identitySessions.isCurrent(identitySession)) return;
-      if (!conversationId && !options.acceptedResponse) return;
-      let streamedConversationId = conversationId;
-
-      // Reopen closed conversation — server handles status update
       if (conversationStatus === "closed") {
         conversationStatus = "active";
         syncConversationModeUi();
       }
 
-      // Capture and clear any pending image
-      const imageFile = options.acceptedResponse ? null : pendingImageFile;
+      const imageFile = pendingImageFile;
       let uploadedImageUrl: string | null = null;
       let localPreviewUrl: string | null = null;
-
       if (imageFile) {
-        localPreviewUrl = imagePreviewImg.src; // data: URL from FileReader
+        localPreviewUrl = imagePreviewImg.src;
         pendingImageFile = null;
         imagePreview.classList.remove("visible");
         imagePreviewImg.src = "";
       }
 
-      // Use a default message if only an image was sent
       const messageText = text || (imageFile ? "Sent an image" : "");
       if (!messageText && !imageFile) return;
 
+      optimisticMessageId = crypto.randomUUID();
+      pendingVisitorMessageIds.add(optimisticMessageId);
       addMessageToUI(
         "visitor",
         messageText,
-        undefined,
+        optimisticMessageId,
         localPreviewUrl ?? undefined,
+        undefined,
+        undefined,
+        true,
       );
       quickTopicsContainer.style.display = "none";
-      lastMessageTimestamp = Date.now();
-      lastNewMessageAt = Date.now();
 
-      // Upload image to R2 if present — one retry for transient failures,
-      // and visible feedback when both attempts fail (previously the
-      // attachment was dropped silently while the text still sent).
       if (imageFile) {
-        const tryUpload = async (): Promise<string> => {
+        async function tryUpload(): Promise<string> {
           const formData = new FormData();
-          formData.append("file", imageFile);
-          formData.append("conversationId", conversationId!);
+          formData.append("file", imageFile!);
+          formData.append("conversationId", requestedConversationId);
           formData.append("visitorId", requestVisitorId);
-          const uploadRes = await fetch(
+          const uploadResponse = await fetch(
             `${baseUrl}/api/widget/${projectSlug}/upload`,
             {
               method: "POST",
@@ -4514,13 +4478,16 @@ import {
               signal: identitySession.signal,
             },
           );
-          if (!uploadRes.ok) throw new Error(`upload ${uploadRes.status}`);
-          const uploadData = await uploadRes.json();
+          if (!uploadResponse.ok) {
+            throw new Error(`upload ${uploadResponse.status}`);
+          }
+          const upload = await uploadResponse.json() as { url: string };
           if (!identitySessions.isCurrent(identitySession)) {
             throw new DOMException("Identity session reset", "AbortError");
           }
-          return uploadData.url;
-        };
+          return new URL(upload.url, baseUrl).toString();
+        }
+
         try {
           uploadedImageUrl = await tryUpload();
         } catch {
@@ -4528,462 +4495,62 @@ import {
             await new Promise((resolve) => setTimeout(resolve, 600));
             if (!identitySessions.isCurrent(identitySession)) return;
             uploadedImageUrl = await tryUpload();
-          } catch (err) {
+          } catch (error) {
             if (!identitySessions.isCurrent(identitySession)) return;
-            console.error("[ReplyMaven] Image upload failed:", err);
+            console.error("[ReplyMaven] Image upload failed:", error);
             if (lastVisitorStatusEl) {
               lastVisitorStatusEl.textContent = "Image failed to upload";
               lastVisitorStatusEl.classList.add("failed");
-              // Detach so the later "Sent" write can't overwrite the notice.
               lastVisitorStatusEl = null;
             }
           }
         }
-
-        // Image-only send whose upload failed: there is nothing real to send.
-        // Don't POST the synthetic "Sent an image" placeholder — that would be
-        // a phantom text turn the bot answers, with the image lost. The
-        // optimistic bubble already shows the local preview + failure status.
         if (!uploadedImageUrl && !text) return;
       }
 
-      // Pause polling during SSE streaming to prevent duplicate messages
-      isStreaming = true;
-      stopPolling();
-      let botMessage = "";
-      let botMessageEl: HTMLElement | null = null;
+      const currentPageContext: Record<string, string> = {
+        currentPageUrl: window.location.href,
+        pageTitle: document.title,
+        ...pageContext,
+      };
+      await agentChatClient.send({
+        id: optimisticMessageId,
+        content: messageText,
+        imageUrls: uploadedImageUrl ? [uploadedImageUrl] : [],
+        pageContext: currentPageContext,
+      });
+      if (!identitySessions.isCurrent(identitySession)) return;
 
-      function showStreamFallback(message: string): void {
-        botMessage = message;
-        if (!botMessageEl) {
-          botMessageEl = addMessageToUI("bot", message);
-        } else {
-          botMessageEl.innerHTML = renderMarkdown(message);
-          updateLastBotHistoryEntry(message);
-        }
-        scrollToBottom();
+      if (lastVisitorStatusEl) {
+        const statusElement = lastVisitorStatusEl;
+        statusElement.textContent = "Sent";
+        setTimeout(() => {
+          statusElement.style.opacity = "0";
+        }, 2_000);
       }
-
-      try {
-        const body: Record<string, unknown> = {
-          content: messageText,
-          streamProtocolVersion: 2,
-        };
-        if (uploadedImageUrl) body.imageUrl = uploadedImageUrl;
-        const ctx: Record<string, string> = {
-          currentPageUrl: window.location.href,
-          pageTitle: document.title,
-          ...pageContext,
-        };
-        body.pageContext = ctx;
-
-        const res =
-          options.acceptedResponse ??
-          (await fetch(
-            `${baseUrl}/api/widget/${projectSlug}/conversations/${conversationId}/messages`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              signal: identitySession.signal,
-              body: JSON.stringify(body),
-            },
-          ));
-
-        if (!identitySessions.isCurrent(identitySession)) return;
-
-        if (!res.ok) {
-          hideTyping();
-          if (res.status === 410 || res.status === 404) {
-            retireArchivedConversation();
-            return;
-          }
-          if (res.status === 403) {
-            const data = await res.json().catch(() => null);
-            if (data?.banned) {
-              showBannedState();
-              return;
-            }
-          }
-          if (lastVisitorStatusEl) {
-            lastVisitorStatusEl.textContent = "Failed to send";
-            lastVisitorStatusEl.classList.add("failed");
-          }
-          addMessageToUI(
-            "bot",
-            "Sorry, something went wrong. Please try again.",
-          );
-          return;
-        }
-
-        // Mark visitor message as sent
-        if (lastVisitorStatusEl) {
-          const statusEl = lastVisitorStatusEl;
-          statusEl.textContent = "Sent";
-          setTimeout(() => {
-            statusEl.style.opacity = "0";
-          }, 2000);
-        }
-
-        // Show typing only after the server has accepted the message
-        showTyping();
-
-        // After a real agent reply, the server returns JSON instead of SSE.
-        const contentType = res.headers.get("content-type") || "";
-        if (contentType.includes("application/json")) {
-          hideTyping();
-          const data = await res.json().catch(() => null);
-          const accepted =
-            (data as { contactAccepted?: ContactAcceptedClientPayload } | null)
-              ?.contactAccepted ??
-            ((data as ContactAcceptedClientPayload | null)?.conversationId
-              ? (data as ContactAcceptedClientPayload)
-              : null);
-          if (accepted) {
-            applyContactAccepted(accepted);
-            activeContactFallbackMessage = accepted.fallbackMessage;
-            if (accepted.aiWillRespond) {
-              addMessageToUI("bot", accepted.fallbackMessage);
-            }
-          }
-          // Ordinary human-owned messages are stored server-side and reach the
-          // agent through realtime/polling without an AI response.
-          return;
-        }
-
-        // Handle SSE stream
-        const reader = res.body?.getReader();
-        if (!reader) return;
-
-        const decoder = new TextDecoder();
-        let inquiryDetected = false;
-        let resolvedDetected = false;
-        let contactTurnAccepted = false;
-        let contactResponseCompleted = false;
-        let contactFallbackShown = false;
-        let sseBuffer = "";
-        let markdownRenderTimer: number | null = null;
-
-        // Timeout to prevent the stream from hanging forever (90s)
-        const streamTimeout = setTimeout(() => {
-          try {
-            reader.cancel();
-          } catch {
-            /* ignore */
-          }
-        }, 90_000);
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (
-            !identitySessions.isCurrent(identitySession) ||
-            streamedConversationId &&
-            conversationId !== streamedConversationId
-          ) {
-            await reader.cancel();
-            break;
-          }
-
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split("\n");
-          // Keep the last (possibly incomplete) line in the buffer
-          sseBuffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-
-                if (data.contactAccepted) {
-                  const accepted =
-                    data.contactAccepted as ContactAcceptedClientPayload;
-                  applyContactAccepted(accepted);
-                  streamedConversationId = accepted.conversationId;
-                  activeContactFallbackMessage = accepted.fallbackMessage;
-                  contactTurnAccepted = true;
-                  continue;
-                }
-
-                if (data.completed?.protocolVersion === 2) {
-                  const completed = data.completed;
-                  contactResponseCompleted = true;
-                  botMessage = String(completed.finalText ?? "");
-                  hideTyping();
-
-                  if (markdownRenderTimer) {
-                    clearTimeout(markdownRenderTimer);
-                    markdownRenderTimer = null;
-                  }
-
-                  if (!completed.messageId && !botMessage && botMessageEl) {
-                    botMessageEl.closest(".rm-message-row")?.remove();
-                    botMessageEl = null;
-                    removeLastBotHistoryEntry();
-                  }
-
-                  if (botMessage) {
-                    if (!botMessageEl) {
-                      botMessageEl = addMessageToUI("bot", botMessage);
-                    } else {
-                      botMessageEl.innerHTML = renderMarkdown(botMessage);
-                    }
-                    updateLastBotHistoryEntry(botMessage);
-                  }
-
-                  if (completed.sources?.length > 0 && botMessageEl) {
-                    addSourcesToMessage(botMessageEl, completed.sources);
-                  }
-
-                  if (completed.messageId) {
-                    renderedMessageIds.add(completed.messageId);
-                    lastSeenMessageId = completed.messageId;
-                    newestResponseId = completed.messageId;
-                    reportDelivered();
-                    reportRead();
-                  }
-
-                  lastMessageTimestamp = Date.now();
-                  conversationStatus = completed.conversationStatus;
-                  syncConversationModeUi();
-
-                  if (conversationStatus === "waiting_agent") {
-                    requestNotificationPermission();
-                  }
-                  if (conversationStatus === "closed") {
-                    stopPolling();
-                    stopHeartbeat();
-                    disconnectWebSocket();
-                  }
-
-                  scrollToBottom();
-                  continue;
-                }
-
-                if (data.inquiry) {
-                  inquiryDetected = true;
-                  continue;
-                }
-
-                if (data.resolved) {
-                  resolvedDetected = true;
-                  hideTyping();
-                  continue;
-                }
-
-                if (data.status?.message || data.status?.phase) {
-                  showTyping(data.status.message, data.status.phase);
-                  continue;
-                }
-
-                // Handle tool execution events
-                if (data.toolCall) {
-                  hideTyping();
-                  addToolCallCardToUI(
-                    data.toolCall.name,
-                    data.toolCall.args ?? null,
-                  );
-                  continue;
-                }
-
-                if (data.toolResult) {
-                  updateToolCallCard(data.toolResult.name, {
-                    success: data.toolResult.success,
-                    output: data.toolResult.output ?? undefined,
-                    httpStatus: data.toolResult.httpStatus ?? undefined,
-                    duration: data.toolResult.duration ?? undefined,
-                    errorMessage: data.toolResult.errorMessage ?? undefined,
-                  });
-                  if (data.toolResult.success) {
-                    // Show "Thinking" while model processes the result
-                    showTyping();
-                  }
-                  continue;
-                }
-
-                if (data.toolError) {
-                  // Show expandable error from fallback path
-                  hideTyping();
-                  addToolErrorToUI(
-                    null,
-                    data.toolError.detail || data.toolError.message,
-                  );
-                  continue;
-                }
-
-                if (data.finalText) {
-                  botMessage = String(data.finalText);
-                  if (!botMessageEl) {
-                    hideTyping();
-                    botMessageEl = addMessageToUI("bot", botMessage);
-                  } else {
-                    botMessageEl.innerHTML = renderMarkdown(botMessage);
-                  }
-                  scrollToBottom();
-                  continue;
-                }
-
-                if (data.text) {
-                  botMessage += data.text;
-
-                  // Client-side filter: strip [NEW_INQUIRY] token if it leaks through
-                  if (botMessage.includes("[NEW_INQUIRY]")) {
-                    inquiryDetected = true;
-                    botMessage = botMessage.replace("[NEW_INQUIRY]", "").trim();
-                  }
-
-                  // Client-side filter: if [RESOLVED] appears, mark as resolved
-                  if (botMessage.includes("[RESOLVED]")) {
-                    resolvedDetected = true;
-                    if (botMessageEl) {
-                      botMessageEl.closest(".rm-message-row")?.remove();
-                      botMessageEl = null;
-                    }
-                    hideTyping();
-                    botMessage = "";
-                    continue;
-                  }
-
-                  // Hide typing on first text chunk, show the bot bubble
-                  if (!botMessageEl) {
-                    hideTyping();
-                    botMessageEl = addMessageToUI("bot", botMessage);
-                  } else {
-                    botMessageEl.textContent = botMessage;
-                    if (markdownRenderTimer) clearTimeout(markdownRenderTimer);
-                    markdownRenderTimer = setTimeout(() => {
-                      if (botMessageEl)
-                        botMessageEl.innerHTML = renderMarkdown(botMessage);
-                    }, 120) as unknown as number;
-                  }
-                  scrollToBottom();
-                }
-
-                if (data.done) {
-                  contactResponseCompleted = true;
-                  hideTyping();
-                  // Stream complete -- clear debounce timer and render final markdown
-                  if (markdownRenderTimer) {
-                    clearTimeout(markdownRenderTimer);
-                    markdownRenderTimer = null;
-                  }
-                  if (botMessageEl && botMessage) {
-                    botMessageEl.innerHTML = renderMarkdown(botMessage);
-                  }
-                  // Persist the complete final bot text to the history buffer.
-                  // addMessageToUI was called with the first partial chunk, so
-                  // we patch the last bot entry to hold the final assembled text.
-                  if (botMessage) {
-                    updateLastBotHistoryEntry(botMessage);
-                  }
-                  // Add source links if present
-                  if (data.sources && data.sources.length > 0 && botMessageEl) {
-                    addSourcesToMessage(botMessageEl, data.sources);
-                  }
-                  // Track the bot message ID if provided, and update timestamp
-                  if (data.messageId) {
-                    renderedMessageIds.add(data.messageId);
-                    lastSeenMessageId = data.messageId;
-                    newestResponseId = data.messageId;
-                    reportDelivered();
-                    reportRead();
-                  }
-                  lastMessageTimestamp = Date.now();
-                  scrollToBottom();
-                  // Inquiry requests a human, but AI stays active until an agent replies.
-                  if (inquiryDetected) {
-                    conversationStatus = "waiting_agent";
-                    syncConversationModeUi();
-                    requestNotificationPermission();
-                  }
-                  // Handle resolved -- close the conversation
-                  if (resolvedDetected) {
-                    conversationStatus = "closed";
-                    syncConversationModeUi();
-                    scrollToBottom();
-                    stopPolling();
-                    stopHeartbeat();
-                    disconnectWebSocket();
-                  }
-                }
-
-                if (data.error) {
-                  hideTyping();
-                  showStreamFallback(
-                    activeContactFallbackMessage ??
-                      "Sorry, an error occurred. Please try again.",
-                  );
-                  contactFallbackShown = Boolean(activeContactFallbackMessage);
-                }
-              } catch {
-                // Skip malformed JSON
-              }
-            }
-          }
-        }
-
-        if (
-          streamedConversationId &&
-          conversationId !== streamedConversationId
-        ) {
-          clearTimeout(streamTimeout);
-          return;
-        }
-
-        // Edge case: stream ended without a done event but inquiry was detected
-        if (inquiryDetected && conversationStatus !== "waiting_agent") {
-          conversationStatus = "waiting_agent";
-          syncConversationModeUi();
-          requestNotificationPermission();
-        }
-        // Edge case: stream ended without a done event but resolved was detected
-        if (resolvedDetected && conversationStatus !== "closed") {
-          conversationStatus = "closed";
-          syncConversationModeUi();
-          scrollToBottom();
-          stopPolling();
-          stopHeartbeat();
-          disconnectWebSocket();
-        }
-        if (
-          contactTurnAccepted &&
-          !contactResponseCompleted &&
-          activeContactFallbackMessage &&
-          !contactFallbackShown
-        ) {
-          hideTyping();
-          showStreamFallback(activeContactFallbackMessage);
-        }
-        clearTimeout(streamTimeout);
-      } catch {
-        if (!identitySessions.isCurrent(identitySession)) return;
-        hideTyping();
-        if (lastVisitorStatusEl) {
-          lastVisitorStatusEl.textContent = "Failed to send";
-          lastVisitorStatusEl.classList.add("failed");
-        }
-        showStreamFallback(
-          activeContactFallbackMessage ??
-            "Sorry, I couldn't connect. Please check your internet connection.",
-        );
+    } catch (error) {
+      if (!identitySessions.isCurrent(identitySession)) return;
+      console.error("[ReplyMaven] Agent message failed:", error);
+      hideTyping();
+      if (lastVisitorStatusEl) {
+        lastVisitorStatusEl.textContent = "Failed to send";
+        lastVisitorStatusEl.classList.add("failed");
       }
+      addMessageToUI(
+        "bot",
+        "Sorry, I couldn't connect. Please check your internet connection.",
+      );
     } finally {
+      if (optimisticMessageId) {
+        pendingVisitorMessageIds.delete(optimisticMessageId);
+      }
       if (identitySessions.isCurrent(identitySession)) {
-        isStreaming = false;
-        lastNewMessageAt = Date.now();
-        if (conversationStatus !== "closed") {
-          startPolling();
-        }
         isSending = false;
         sendBtn.disabled = false;
         input.disabled = false;
-        // Re-enable and focus the correct input
-        if (isInlineBarVariant) {
-          inlineBarInput.disabled = false;
-          if (!isMobileViewport()) {
-            inlineBarInput.focus();
-          } else {
-            input.focus();
-          }
+        inlineBarInput.disabled = false;
+        if (isInlineBarVariant && !isMobileViewport()) {
+          inlineBarInput.focus();
         } else {
           input.focus();
         }
@@ -5098,9 +4665,9 @@ import {
     imageUrl?: string,
     senderName?: string,
     senderAvatar?: string,
-    createdAt?: unknown,
+    optimisticVisitor = false,
   ): HTMLElement {
-    // Track rendered message IDs for deduplication (polling)
+    // Track rendered message IDs for native full-transcript reconciliation.
     if (messageId) {
       if (renderedMessageIds.has(messageId)) {
         // Return a dummy element if already rendered
@@ -5108,12 +4675,6 @@ import {
       }
       renderedMessageIds.add(messageId);
     }
-
-    // Record in the in-memory history buffer for optimistic rendering and
-    // realtime reconciliation. The id (when present) lets us prune the buffer
-    // on message:deleted. Restored history keeps its real timestamp; live
-    // messages default to now.
-    pushHistoryEntry(role, content, messageId, createdAt);
 
     const primaryColor = getPrimaryColor();
     const isRoleChange = lastMessageRole !== null && lastMessageRole !== role;
@@ -5238,8 +4799,8 @@ import {
       visitorCol.style.minWidth = "0";
       visitorCol.appendChild(msgEl);
 
-      // Add delivery status element (only for new messages sent by the visitor, not poll-loaded ones)
-      if (!messageId) {
+      // Add delivery status only for a locally submitted visitor message.
+      if (!messageId || optimisticVisitor) {
         const statusEl = document.createElement("div");
         statusEl.className = "rm-msg-status";
         statusEl.textContent = "Sending...";
@@ -5375,503 +4936,206 @@ import {
 
   // ─── Tool Error Display ────────────────────────────────────────────────────
 
-  function addToolErrorToUI(toolName: string | null, detail: string) {
-    const container = document.createElement("div");
-    container.className = "rm-tool-error";
-
-    const header = document.createElement("div");
-    header.className = "rm-tool-error-header";
-
-    // Chevron-down SVG icon
-    const chevron = document.createElementNS(
-      "http://www.w3.org/2000/svg",
-      "svg",
-    );
-    chevron.setAttribute("viewBox", "0 0 24 24");
-    chevron.setAttribute("fill", "none");
-    chevron.setAttribute("stroke", "currentColor");
-    chevron.setAttribute("stroke-width", "2");
-    chevron.setAttribute("stroke-linecap", "round");
-    chevron.setAttribute("stroke-linejoin", "round");
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", "m6 9 6 6 6-6");
-    chevron.appendChild(path);
-
-    const label = document.createElement("span");
-    const displayName = toolName ? toolName.replace(/_/g, " ") : "Tool";
-    label.textContent = `${displayName} failed`;
-
-    header.appendChild(chevron);
-    header.appendChild(label);
-
-    const detailEl = document.createElement("div");
-    detailEl.className = "rm-tool-error-detail";
-    detailEl.textContent = detail;
-
-    container.appendChild(header);
-    container.appendChild(detailEl);
-
-    header.addEventListener("click", () => {
-      container.classList.toggle("expanded");
-    });
-
-    messagesContainer.insertBefore(container, typingRow);
-    scrollToBottom();
-  }
-
-  // ─── Tool Call Card ─────────────────────────────────────────────────────────
-
-  // Map of toolName -> card element for updating when result arrives
-  const activeToolCallCards = new Map<string, HTMLElement>();
-
-  function createSvgIcon(pathD: string): SVGSVGElement {
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", "0 0 24 24");
-    svg.setAttribute("fill", "none");
-    svg.setAttribute("stroke", "currentColor");
-    svg.setAttribute("stroke-width", "2");
-    svg.setAttribute("stroke-linecap", "round");
-    svg.setAttribute("stroke-linejoin", "round");
-    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    p.setAttribute("d", pathD);
-    svg.appendChild(p);
-    return svg;
-  }
-
-  function addToolCallCardToUI(
-    toolName: string,
-    args: Record<string, unknown> | null,
-  ) {
-    const container = document.createElement("div");
-    container.className = "rm-tool-call";
-    container.setAttribute("data-tool", toolName);
-
-    const card = document.createElement("div");
-    card.className = "rm-tool-call-card";
-
-    // Header
-    const header = document.createElement("div");
-    header.className = "rm-tool-call-header";
-
-    const icon = document.createElement("div");
-    icon.className = "rm-tool-call-icon pending rm-tool-call-loading";
-    // Wrench icon
-    icon.appendChild(
-      createSvgIcon(
-        "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z",
-      ),
-    );
-
-    const nameEl = document.createElement("span");
-    nameEl.className = "rm-tool-call-name";
-    const displayName = toolName.replace(/_/g, " ");
-    nameEl.textContent =
-      displayName.charAt(0).toUpperCase() + displayName.slice(1);
-
-    const meta = document.createElement("div");
-    meta.className = "rm-tool-call-meta";
-
-    const statusBadge = document.createElement("span");
-    statusBadge.className = "rm-tool-call-status pending";
-    statusBadge.textContent = "Running...";
-    meta.appendChild(statusBadge);
-
-    // Chevron-right icon
-    const chevron = createSvgIcon("m9 18 6-6-6-6");
-    chevron.classList.add("rm-tool-call-chevron");
-
-    header.appendChild(icon);
-    header.appendChild(nameEl);
-    header.appendChild(meta);
-    header.appendChild(chevron);
-
-    // Details (hidden by default)
-    const details = document.createElement("div");
-    details.className = "rm-tool-call-details";
-
-    // Input section (shown immediately if args exist)
-    if (args && Object.keys(args).length > 0) {
-      const inputSection = document.createElement("div");
-      inputSection.className = "rm-tool-call-section";
-      const inputLabel = document.createElement("div");
-      inputLabel.className = "rm-tool-call-section-label";
-      inputLabel.textContent = "Parameters";
-      const inputCode = document.createElement("div");
-      inputCode.className = "rm-tool-call-code";
-      inputCode.textContent = JSON.stringify(args, null, 2);
-      inputSection.appendChild(inputLabel);
-      inputSection.appendChild(inputCode);
-      details.appendChild(inputSection);
-    }
-
-    // Result section placeholder — will be filled by updateToolCallCard
-    const resultSection = document.createElement("div");
-    resultSection.className = "rm-tool-call-section";
-    resultSection.setAttribute("data-result", "true");
-    resultSection.style.display = "none";
-    details.appendChild(resultSection);
-
-    card.appendChild(header);
-    card.appendChild(details);
-    container.appendChild(card);
-
-    // Toggle expand on click
-    header.addEventListener("click", () => {
-      container.classList.toggle("expanded");
-    });
-
-    messagesContainer.insertBefore(container, typingRow);
-    scrollToBottom();
-
-    activeToolCallCards.set(toolName, container);
-  }
-
-  function updateToolCallCard(
-    toolName: string,
-    result: {
-      success: boolean;
-      output?: unknown;
-      httpStatus?: number;
-      duration?: number;
-      errorMessage?: string;
-    },
-  ) {
-    const container = activeToolCallCards.get(toolName);
-    if (!container) return;
-
-    // Update icon
-    const icon = container.querySelector(".rm-tool-call-icon");
-    if (icon) {
-      icon.classList.remove("pending", "rm-tool-call-loading");
-      icon.classList.add(result.success ? "success" : "error");
-    }
-
-    // Update status badge
-    const statusBadge = container.querySelector(".rm-tool-call-status");
-    if (statusBadge) {
-      statusBadge.classList.remove("pending");
-      statusBadge.classList.add(result.success ? "success" : "error");
-      if (result.success) {
-        statusBadge.textContent = result.httpStatus
-          ? `${result.httpStatus} OK`
-          : "Success";
-      } else {
-        statusBadge.textContent = "Error";
-      }
-    }
-
-    // Add duration
-    const meta = container.querySelector(".rm-tool-call-meta");
-    if (meta && result.duration != null) {
-      const durEl = document.createElement("span");
-      durEl.className = "rm-tool-call-duration";
-      durEl.textContent = `${result.duration}ms`;
-      meta.insertBefore(
-        durEl,
-        meta.querySelector(".rm-tool-call-chevron") ?? null,
-      );
-    }
-
-    // Fill in result section
-    const resultSection = container.querySelector('[data-result="true"]');
-    if (resultSection) {
-      resultSection.removeAttribute("style"); // show it
-
-      const resultLabel = document.createElement("div");
-      resultLabel.className = "rm-tool-call-section-label";
-      resultLabel.textContent = "Result";
-      resultSection.appendChild(resultLabel);
-
-      if (!result.success && result.errorMessage) {
-        const errEl = document.createElement("div");
-        errEl.className = "rm-tool-call-error-msg";
-        errEl.textContent = result.errorMessage;
-        resultSection.appendChild(errEl);
-      }
-
-      if (result.output) {
-        const outputCode = document.createElement("div");
-        outputCode.className = "rm-tool-call-code";
-        outputCode.textContent =
-          typeof result.output === "string"
-            ? result.output
-            : JSON.stringify(result.output, null, 2);
-        resultSection.appendChild(outputCode);
-      } else if (!result.errorMessage) {
-        const noData = document.createElement("div");
-        noData.className = "rm-tool-call-code";
-        noData.textContent = "No output data";
-        noData.style.fontStyle = "italic";
-        resultSection.appendChild(noData);
-      }
-    }
-
-    activeToolCallCards.delete(toolName);
-    scrollToBottom();
-  }
-
   // ─── Handoff Card ───────────────────────────────────────────────────────────
 
-  // ─── Polling for New Messages ──────────────────────────────────────────────
+  // ─── Native Agent Transcript ───────────────────────────────────────────────
 
-  function startPolling() {
-    if (pollTimer) return; // Already polling
-    if (!conversationId) return;
-    if (hiddenByPageTargeting) return;
-
-    // Connect WebSocket in parallel. When healthy, polling becomes a no-op
-    // (see pollMessages early-return). On WS failure, polling carries on.
-    connectWebSocket();
-
-    // Determine poll interval based on conversation status and idle time
-    const getInterval = () => {
-      const idleMin = (Date.now() - lastNewMessageAt) / 60000;
-      const agentMode = conversationStatus === "agent_replied";
-
-      if (idleMin < 5) return agentMode ? 3000 : 10000;
-      if (idleMin < 30) return agentMode ? 10000 : 15000;
-      return agentMode ? 15000 : 30000;
-    };
-
-    let currentInterval = getInterval();
-
-    function schedulePoll() {
-      pollTimer = setTimeout(async () => {
-        if (!conversationId) {
-          stopPolling();
-          return;
-        }
-        await pollMessages();
-        // Recalculate interval in case status changed
-        currentInterval = getInterval();
-        schedulePoll();
-      }, currentInterval);
-    }
-
-    schedulePoll();
-  }
-
-  function stopPolling() {
-    if (pollTimer) {
-      clearTimeout(pollTimer);
-      pollTimer = null;
-    }
-  }
-
-  // ─── WebSocket Realtime ────────────────────────────────────────────────────
-
-  function buildWsUrl(): string {
-    if (!conversationId) return "";
-    const url = new URL(baseUrl);
-    const proto = url.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${url.host}/api/widget/${encodeURIComponent(projectSlug)}/conversations/${encodeURIComponent(conversationId)}/ws?visitorId=${encodeURIComponent(visitorId)}`;
-  }
-
-  function renderIncomingMessage(msg: {
-    id: string;
-    role: "visitor" | "bot" | "agent";
-    content: string;
-    sources: string | null;
-    senderName: string | null;
-    senderAvatar: string | null;
-    imageUrl: string | null;
-    createdAt: number;
-  }): boolean {
-    if (renderedMessageIds.has(msg.id)) return false;
-
-    if (msg.role === "bot" || msg.role === "agent") {
-      hideTyping();
-      // addMessageToUI already renders the markdown body (and the image, when
-      // present) into msgEl. Re-setting el.innerHTML here would wipe the image,
-      // so we only layer sources on top of what it built.
-      const el = addMessageToUI(
-        msg.role,
-        msg.content,
-        msg.id,
-        msg.imageUrl ?? undefined,
-        msg.senderName ?? undefined,
-        msg.senderAvatar ?? undefined,
-        msg.createdAt,
+  function updateRenderedPublicMessage(message: PublicMessageRecord): void {
+    if (message.author === "system") return;
+    const role = message.author;
+    const imageUrl = message.imageUrls.length > 0
+      ? serializeMessageImageUrls(message.imageUrls) ?? undefined
+      : undefined;
+    const row = messagesContainer.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(message.id)}"]`,
+    );
+    if (!row) {
+      const messageElement = addMessageToUI(
+        role,
+        message.content,
+        message.id,
+        imageUrl,
+        message.senderName ?? undefined,
+        message.senderAvatar ?? undefined,
       );
-      if (el.parentElement) {
-        if (msg.sources) {
-          try {
-            const sources =
-              typeof msg.sources === "string"
-                ? JSON.parse(msg.sources)
-                : msg.sources;
-            if (Array.isArray(sources) && sources.length > 0) {
-              addSourcesToMessage(el, sources);
-            }
-          } catch {
-            // Ignore malformed sources
-          }
-        }
+      if (message.sources.length > 0) {
+        addSourcesToMessage(messageElement, message.sources);
       }
-      lastSeenMessageId = msg.id;
-      newestResponseId = msg.id;
-      lastMessageTimestamp = Math.max(
-        lastMessageTimestamp ?? 0,
-        msg.createdAt,
-      );
-      return true;
-    }
-
-    if (msg.role === "visitor") {
-      renderedMessageIds.add(msg.id);
-      lastSeenMessageId = msg.id;
-      lastMessageTimestamp = Math.max(
-        lastMessageTimestamp ?? 0,
-        msg.createdAt,
-      );
-    }
-    return false;
-  }
-
-  function connectWebSocket() {
-    if (!conversationId) return;
-    if (wsSocket) return;
-
-    try {
-      wsSocket = new ReconnectingWebSocket(() => buildWsUrl(), undefined, {
-        maxRetries: Number.POSITIVE_INFINITY,
-        minReconnectionDelay: 1000,
-        maxReconnectionDelay: 30000,
-        reconnectionDelayGrowFactor: 1.6,
-      });
-    } catch {
-      wsSocket = null;
       return;
     }
 
-    wsSocket.addEventListener("open", () => {
-      wsHealthy = true;
-      try {
-        wsSocket?.send(
-          JSON.stringify({ type: "resume", lastMessageId: lastSeenMessageId }),
-        );
-        // Sync presence on (re)connect — covers the case where the user
-        // backgrounded/foregrounded the tab while the WS was down.
-        wsSocket?.send(
-          JSON.stringify({
-            type: "presence",
-            state: document.hidden ? "background" : "active",
-          }),
-        );
-      } catch {
-        // ignore
-      }
-    });
-
-    wsSocket.addEventListener("close", () => {
-      wsHealthy = false;
-    });
-
-    wsSocket.addEventListener("error", () => {
-      wsHealthy = false;
-    });
-
-    wsSocket.addEventListener("message", (ev: MessageEvent<string>) => {
-      let parsed: {
-        type?: string;
-        message?: {
-          id: string;
-          role: "visitor" | "bot" | "agent";
-          content: string;
-          sources: string | null;
-          senderName: string | null;
-          senderAvatar: string | null;
-          imageUrl: string | null;
-          createdAt: number;
-        };
-        status?: string;
-        reason?: string | null;
-      } | null = null;
-      try {
-        parsed = JSON.parse(ev.data);
-      } catch {
-        return;
-      }
-      if (!parsed) return;
-
-      if (parsed.type === "message:new" && parsed.message) {
-        const rendered = renderIncomingMessage(parsed.message);
-        if (rendered) {
-          lastNewMessageAt = Date.now();
-          reportDelivered();
-          if (isOpen) {
-            scrollToBottom();
-            markConversationSeen();
-          }
-          if (!isOpen) {
-            incrementUnreadBadge();
-            showBrowserNotification(parsed.message.content ?? "New message");
-            popMessagePreviewForIncomingMessage(parsed.message);
-          } else if (!isTabActive) {
-            incrementUnreadBadge();
-            showBrowserNotification(parsed.message.content ?? "New message");
-            if (!titleOverridden) {
-              originalDocTitle = document.title;
-            }
-            document.title = "New Message | " + originalDocTitle;
-            titleOverridden = true;
-          }
-        }
-      } else if (parsed.type === "message:deleted" && parsed.messageId) {
-        const deletedId = parsed.messageId as string;
-        const row = messagesContainer.querySelector(
-          `[data-message-id="${CSS.escape(deletedId)}"]`,
-        );
-        if (row?.parentElement) row.parentElement.removeChild(row);
-        renderedMessageIds.delete(deletedId);
-        // Prune from the buffer so the deleted content isn't replayed to the
-        // AI as conversation context on the next visitor message.
-        removeHistoryEntryById(deletedId);
-        // If we just deleted the message used as the WS resume cursor, point
-        // the cursor at the now-newest still-rendered message so a reconnect
-        // doesn't replay the entire conversation from scratch.
-        if (lastSeenMessageId === deletedId) {
-          const remaining = messagesContainer.querySelectorAll(
-            "[data-message-id]",
-          );
-          const last = remaining[remaining.length - 1] as
-            | HTMLElement
-            | undefined;
-          lastSeenMessageId = last?.dataset.messageId ?? null;
-        }
-      } else if (parsed.type === "status:change" && parsed.status) {
-        if (parsed.status !== conversationStatus) {
-          conversationStatus = parsed.status;
-          syncConversationModeUi();
-          if (parsed.status === "closed") {
-            stopPolling();
-            stopHeartbeat();
-          }
-        }
-      } else if (parsed.type === "conversation:closed") {
-        if (conversationStatus !== "closed") {
-          conversationStatus = "closed";
-          syncConversationModeUi();
-          stopPolling();
-          stopHeartbeat();
-        }
-      } else if (parsed.type === "conversation:archived") {
-        retireArchivedConversation();
-      }
-    });
-  }
-
-  function disconnectWebSocket() {
-    if (wsSocket) {
-      try {
-        wsSocket.close();
-      } catch {
-        // ignore
-      }
-      wsSocket = null;
-      wsHealthy = false;
+    const messageElement = row.querySelector<HTMLElement>(".rm-message");
+    if (!messageElement) return;
+    messageElement.replaceChildren();
+    if (imageUrl) appendMessageImages(messageElement, imageUrl);
+    if (shouldShowMessageContent(message.content)) {
+      const text = document.createElement("div");
+      text.innerHTML = renderMarkdown(message.content);
+      messageElement.appendChild(text);
+    }
+    if (message.sources.length > 0) {
+      addSourcesToMessage(messageElement, message.sources);
     }
   }
+
+  function notifyForIncomingResponse(message: PublicMessageRecord): void {
+    if (isOpen) {
+      scrollToBottom();
+      markConversationSeen();
+    }
+    if (!isOpen) {
+      incrementUnreadBadge();
+      showBrowserNotification(message.content || "New message");
+      popMessagePreviewForIncomingMessage({
+        ...message,
+        role: message.author,
+      });
+    } else if (!isTabActive) {
+      incrementUnreadBadge();
+      showBrowserNotification(message.content || "New message");
+      if (!titleOverridden) originalDocTitle = document.title;
+      document.title = `New Message | ${originalDocTitle}`;
+      titleOverridden = true;
+    }
+  }
+
+  function handleAgentMessages(messages: PublicMessageRecord[]): void {
+    const nextIds = new Set(messages.map((message) => message.id));
+    for (const id of authoritativeMessageIds) {
+      if (nextIds.has(id)) continue;
+      const row = messagesContainer.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(id)}"]`,
+      );
+      row?.remove();
+      renderedMessageIds.delete(id);
+      pendingIncomingResponseIds.delete(id);
+    }
+
+    for (const message of messages) {
+      if (pendingVisitorMessageIds.has(message.id)) {
+        pendingVisitorMessageIds.delete(message.id);
+      }
+      if (
+        hasReceivedAgentSnapshot &&
+        !authoritativeMessageIds.has(message.id) &&
+        (message.author === "bot" || message.author === "agent")
+      ) {
+        pendingIncomingResponseIds.add(message.id);
+      }
+      updateRenderedPublicMessage(message);
+      if (
+        (message.author === "bot" || message.author === "agent") &&
+        message.content
+      ) hideTyping();
+    }
+    authoritativeMessageIds = nextIds;
+
+    if (messages.length > 0) {
+      introMessageText = null;
+      if (conversationStatus !== "closed") showChatScreen();
+      ensureLatestMessageVisible();
+    }
+
+    const latestResponse = [...messages].reverse().find((message) =>
+      message.author === "bot" || message.author === "agent"
+    );
+    if (latestResponse) {
+      const isNewLatestResponse = newestResponseId !== latestResponse.id;
+      newestResponseId = latestResponse.id;
+      if (
+        isNewLatestResponse &&
+        latestAgentActivity.status === "ready" &&
+        !latestAgentActivity.isServerStreaming &&
+        !latestAgentActivity.isRecovering
+      ) reportDelivered();
+    } else {
+      newestResponseId = null;
+    }
+
+    if (!hasReceivedAgentSnapshot) {
+      hasReceivedAgentSnapshot = true;
+      if (latestResponse) {
+        if (isOpen) {
+          markConversationSeen();
+        } else if (latestResponse.id !== getStoredSeenResponseId()) {
+          incrementUnreadBadge();
+          const lastMessage = messages.at(-1);
+          if (lastMessage?.id === latestResponse.id) {
+            popMessagePreviewForIncomingMessage({
+              ...latestResponse,
+              role: latestResponse.author,
+            });
+          }
+        }
+      }
+      return;
+    }
+
+    flushPendingIncomingResponses(messages);
+  }
+
+  function flushPendingIncomingResponses(
+    messages: PublicMessageRecord[],
+  ): void {
+    if (
+      latestAgentActivity.status !== "ready" ||
+      latestAgentActivity.isServerStreaming ||
+      latestAgentActivity.isRecovering
+    ) return;
+    const deliverable = messages.filter((message) =>
+      pendingIncomingResponseIds.has(message.id) &&
+      (message.author === "bot" || message.author === "agent") &&
+      (message.content.length > 0 || message.imageUrls.length > 0)
+    );
+    for (const message of deliverable) {
+      pendingIncomingResponseIds.delete(message.id);
+    }
+    const latestIncoming = deliverable.at(-1);
+    if (latestIncoming) notifyForIncomingResponse(latestIncoming);
+  }
+
+  function handleAgentActivity(activity: WidgetChatActivity): void {
+    latestAgentActivity = activity;
+    if (activity.error) {
+      hideTyping();
+      console.error("[ReplyMaven] Conversation Agent connection failed:", activity.error);
+      return;
+    }
+    if (activity.isRecovering) {
+      showTyping("Reconnecting…");
+      return;
+    }
+    if (
+      activity.status === "submitted" ||
+      activity.status === "streaming" ||
+      activity.isServerStreaming
+    ) {
+      showTyping();
+      return;
+    }
+    hideTyping();
+    reportDelivered();
+    queueMicrotask(() => {
+      flushPendingIncomingResponses(agentChatClient.messages());
+    });
+  }
+
+  function handleAgentConversationState(state: PublicChatChildState): void {
+    if (state.archived) {
+      retireArchivedConversation();
+      return;
+    }
+    if (conversationStatus !== state.status) {
+      conversationStatus = state.status;
+      syncConversationModeUi();
+    }
+    if (state.status === "waiting_agent") requestNotificationPermission();
+    if (state.status === "closed") stopHeartbeat();
+  }
+
+  agentChatClient.onMessages(handleAgentMessages);
+  agentChatClient.onActivity(handleAgentActivity);
+  agentChatClient.onConversationState(handleAgentConversationState);
 
   // Messages older than this never pop the preview — a stale reply shouldn't
   // greet a visitor returning weeks later. The launcher badge still marks it.
@@ -5882,7 +5146,9 @@ import {
   // polling timestamp bookkeeping. Returns null when unparseable.
   function messageTimeMs(createdAt: unknown): number | null {
     if (createdAt instanceof Date) return createdAt.getTime();
-    if (typeof createdAt === "number") return createdAt * 1000;
+    if (typeof createdAt === "number") {
+      return createdAt < 1_000_000_000_000 ? createdAt * 1000 : createdAt;
+    }
     if (typeof createdAt === "string") {
       const t = new Date(createdAt).getTime();
       return Number.isNaN(t) ? null : t;
@@ -6011,18 +5277,15 @@ import {
   function startHeartbeat() {
     stopHeartbeat();
     if (!conversationId) return;
+    void sendAckViaHeartbeat({});
 
-    // When WS is healthy, presence is delivered via WS frames on
-    // visibilitychange + on (re)connect, and status changes are pushed via
-    // status:change events. The HTTP heartbeat is the fallback path —
-    // run it on a slower cadence and skip individual ticks when WS is up.
+    // Agent state owns status changes. This low-frequency HTTP path preserves
+    // presence plus delivery/read receipts without a second realtime socket.
     heartbeatTimer = setInterval(async () => {
       if (!conversationId) {
         stopHeartbeat();
         return;
       }
-      // Skip when WS is doing the job
-      if (wsHealthy) return;
       const identitySession = identitySessions.capture();
       const requestedConversationId = conversationId;
       try {
@@ -6057,8 +5320,9 @@ import {
         }
         if (data.status && data.status !== conversationStatus) {
           conversationStatus = data.status;
+          syncConversationModeUi();
           if (data.status === "closed") {
-            stopPolling();
+            stopHeartbeat();
           }
         }
       } catch {
@@ -6071,148 +5335,6 @@ import {
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
-    }
-  }
-
-  async function pollMessages() {
-    if (!conversationId) return;
-    if (isStreaming) return; // Don't poll during active SSE stream
-    if (wsHealthy) return; // WS is delivering messages — polling is fallback only
-    const identitySession = identitySessions.capture();
-    const requestedConversationId = conversationId;
-
-    try {
-      let url = `${baseUrl}/api/widget/${projectSlug}/conversations/${requestedConversationId}/messages`;
-      if (lastMessageTimestamp) {
-        url += `?since=${lastMessageTimestamp}`;
-      }
-
-      const res = await fetch(url, { signal: identitySession.signal });
-      if (
-        !identitySessions.isCurrent(identitySession) ||
-        conversationId !== requestedConversationId
-      ) {
-        return;
-      }
-      if (!res.ok) {
-        if (res.status === 410 || res.status === 404) {
-          retireArchivedConversation();
-        }
-        return;
-      }
-
-      const data = await res.json();
-      if (
-        !identitySessions.isCurrent(identitySession) ||
-        conversationId !== requestedConversationId
-      ) {
-        return;
-      }
-      const msgs = data.messages ?? data;
-      const status = data.status;
-
-      // Update conversation status
-      if (status && status !== conversationStatus) {
-        conversationStatus = status;
-        syncConversationModeUi();
-        if (status === "closed") {
-          stopPolling();
-          stopHeartbeat();
-          return;
-        }
-      }
-
-      // Process new messages
-      let hasNewMessages = false;
-      for (const msg of msgs) {
-        if (renderedMessageIds.has(msg.id)) continue;
-        // Track latest seen id so a subsequent WS reconnect can resume cleanly.
-        lastSeenMessageId = msg.id;
-
-        // Only render bot/agent messages (visitor messages are already rendered locally)
-        if (msg.role === "bot" || msg.role === "agent") {
-          hideTyping();
-          const el = addMessageToUI(
-            msg.role,
-            msg.content,
-            msg.id,
-            msg.imageUrl ?? undefined,
-            msg.senderName ?? undefined,
-            msg.senderAvatar ?? undefined,
-            msg.createdAt,
-          );
-          // addMessageToUI already rendered the markdown body and image; only
-          // layer sources on top (re-setting innerHTML would wipe the image).
-          if (el.parentElement) {
-            if (msg.sources) {
-              try {
-                const sources =
-                  typeof msg.sources === "string"
-                    ? JSON.parse(msg.sources)
-                    : msg.sources;
-                if (Array.isArray(sources) && sources.length > 0) {
-                  addSourcesToMessage(el, sources);
-                }
-              } catch {
-                // Ignore malformed sources
-              }
-            }
-          }
-          newestResponseId = msg.id;
-          hasNewMessages = true;
-        } else if (msg.role === "visitor") {
-          // Mark visitor messages as rendered so we don't duplicate them
-          renderedMessageIds.add(msg.id);
-        }
-
-        // Update last message timestamp
-        const msgTime =
-          msg.createdAt instanceof Date
-            ? msg.createdAt.getTime()
-            : typeof msg.createdAt === "number"
-              ? msg.createdAt * 1000
-              : new Date(msg.createdAt).getTime();
-        if (!lastMessageTimestamp || msgTime > lastMessageTimestamp) {
-          lastMessageTimestamp = msgTime;
-        }
-      }
-
-      if (hasNewMessages) {
-        lastNewMessageAt = Date.now();
-        reportDelivered();
-        if (isOpen) {
-          scrollToBottom();
-          markConversationSeen();
-        }
-
-        if (!isOpen) {
-          // Widget is closed -- show red dot + pop out intro pill with latest message
-          incrementUnreadBadge();
-          showBrowserNotification(
-            msgs[msgs.length - 1]?.content ?? "New message",
-          );
-
-          // Only pop when the batch actually ends with an agent/bot message —
-          // if the visitor's own reply is newest, nothing is awaiting them.
-          const lastMsg = msgs[msgs.length - 1];
-          if (lastMsg) {
-            popMessagePreviewForIncomingMessage(lastMsg);
-          }
-        } else if (!isTabActive) {
-          // Widget is open but tab is inactive -- flash document title
-          incrementUnreadBadge();
-          showBrowserNotification(
-            msgs[msgs.length - 1]?.content ?? "New message",
-          );
-          if (!titleOverridden) {
-            originalDocTitle = document.title;
-          }
-          document.title = "New Message | " + originalDocTitle;
-          titleOverridden = true;
-        }
-      }
-    } catch {
-      // Silently ignore polling errors
     }
   }
 
@@ -6288,140 +5410,19 @@ import {
 
   // ─── Conversation History Loading ────────────────────────────────────────────
 
-  async function loadConversationHistory(
-    openChat = true,
+  async function loadConversationAgent(
     identitySession: WidgetIdentitySessionToken = identitySessions.capture(),
     requestedConversationId: string | null = conversationId,
-  ) {
+  ): Promise<void> {
     if (!requestedConversationId) return;
-
-    try {
-      const res = await fetch(
-        `${baseUrl}/api/widget/${projectSlug}/conversations/${requestedConversationId}/messages`,
-        { signal: identitySession.signal },
-      );
-      if (
-        !identitySessions.isCurrent(identitySession) ||
-        conversationId !== requestedConversationId
-      ) {
-        return;
-      }
-      if (!res.ok) {
-        // Conversation might not exist anymore
-        if (res.status === 404 || res.status === 410) {
-          retireArchivedConversation();
-        }
-        return;
-      }
-
-      const data = await res.json();
-      if (
-        !identitySessions.isCurrent(identitySession) ||
-        conversationId !== requestedConversationId
-      ) {
-        return;
-      }
-      const msgs = data.messages ?? data;
-      conversationStatus = data.status ?? null;
-      syncConversationModeUi();
-
-      // If conversation is closed, show history with closed banner (visitor can reopen)
-      if (conversationStatus === "closed") {
-        // Don't clear — show history and allow reopen by sending a message
-      }
-
-      // Render existing messages
-      if (msgs.length > 0) {
-        // Clear intro message — history already contains the conversation
-        introMessageText = null;
-        if (openChat && conversationStatus !== "closed") {
-          // Switch to chat view since we have an active conversation with history
-          showChatScreen();
-        }
-
-        for (const msg of msgs) {
-          const el = addMessageToUI(
-            msg.role,
-            msg.content,
-            msg.id,
-            msg.imageUrl ?? undefined,
-            msg.senderName ?? undefined,
-            msg.senderAvatar ?? undefined,
-            msg.createdAt,
-          );
-          // addMessageToUI already rendered the markdown body and image; only
-          // layer sources on top (re-setting innerHTML would wipe the image).
-          if (
-            (msg.role === "bot" || msg.role === "agent") &&
-            el.parentElement
-          ) {
-            if (msg.sources) {
-              try {
-                const sources =
-                  typeof msg.sources === "string"
-                    ? JSON.parse(msg.sources)
-                    : msg.sources;
-                if (Array.isArray(sources) && sources.length > 0) {
-                  addSourcesToMessage(el, sources);
-                }
-              } catch {
-                // Ignore malformed sources
-              }
-            }
-          }
-
-          // Track timestamp
-          const msgTime =
-            msg.createdAt instanceof Date
-              ? msg.createdAt.getTime()
-              : typeof msg.createdAt === "number"
-                ? msg.createdAt * 1000
-                : new Date(msg.createdAt).getTime();
-          if (!lastMessageTimestamp || msgTime > lastMessageTimestamp) {
-            lastMessageTimestamp = msgTime;
-          }
-        }
-
-        ensureLatestMessageVisible();
-
-        // Surface an unseen response on load. Find the newest bot/agent message;
-        // if it hasn't been seen on this device, badge the launcher — and pop
-        // the preview card on every page view until it's seen or dismissed,
-        // but only when it's the conversation's LAST message (a reply the
-        // visitor already responded to isn't awaiting them) and recent enough
-        // (the age gate lives in the pop function). Runs for active and
-        // recently-closed threads alike.
-        const latestResponse = [...msgs]
-          .reverse()
-          .find((m: { role: string }) => m.role !== "visitor");
-        if (latestResponse) {
-          newestResponseId = latestResponse.id;
-          reportDelivered();
-          if (isOpen) {
-            markConversationSeen();
-          } else if (latestResponse.id !== getStoredSeenResponseId()) {
-            incrementUnreadBadge();
-            const lastMessage = msgs[msgs.length - 1];
-            if (lastMessage && lastMessage.id === latestResponse.id) {
-              popMessagePreviewForIncomingMessage(latestResponse);
-            }
-          }
-        }
-      }
-
-      // Don't start polling for closed conversations
-      if (conversationStatus === "closed") {
-        disconnectWebSocket();
-        return;
-      }
-
-      // Start polling for new messages (also opens WS in parallel)
-      startPolling();
-      startHeartbeat();
-    } catch (err) {
-      if (!identitySessions.isCurrent(identitySession)) return;
-      console.error("[ReplyMaven] Failed to load conversation history:", err);
-    }
+    hasReceivedAgentSnapshot = false;
+    authoritativeMessageIds.clear();
+    await connectConversationAgent(identitySession, requestedConversationId);
+    if (
+      !identitySessions.isCurrent(identitySession) ||
+      conversationId !== requestedConversationId
+    ) return;
+    startHeartbeat();
   }
 
   async function restoreConversation(
@@ -6432,7 +5433,7 @@ import {
     const storedId = loadPersistedConversationId();
     if (storedId) {
       conversationId = storedId;
-      await loadConversationHistory(true, identitySession, storedId);
+      await loadConversationAgent(identitySession, storedId);
       if (!identitySessions.isCurrent(identitySession)) return;
       if (conversationId) {
         // Hide inline action bubbles — conversation already exists
@@ -6461,11 +5462,7 @@ import {
         conversationId = data.conversation.id;
         conversationStatus = data.conversation.status;
         persistConversationId(data.conversation.id);
-        await loadConversationHistory(
-          true,
-          identitySession,
-          data.conversation.id,
-        );
+        await loadConversationAgent(identitySession, data.conversation.id);
         if (!identitySessions.isCurrent(identitySession)) return;
         // Hide inline action bubbles — conversation already exists
         inlineBarActions.classList.remove("has-actions");
@@ -6796,12 +5793,12 @@ import {
   function resetCustomerIdentity(): void {
     identitySessions.rotate();
     closeChatWidget();
-    stopPolling();
+    agentChatClient.stop();
     stopHeartbeat();
-    disconnectWebSocket();
+    disconnectConversationAgent();
 
     const plan = planCustomerIdentityReset({
-      projectSlug,
+      projectSlug: projectSlug!,
       currentVisitorId: visitorId,
       nextUuid: crypto.randomUUID(),
       state: {
@@ -6811,13 +5808,11 @@ import {
         visitorInfo,
         customMetadata,
         pageContext,
-        messages: [...conversationHistoryBuffer],
+        messages: agentChatClient.messages(),
         renderedMessageIds: [...renderedMessageIds],
-        lastSeenMessageId,
         newestResponseId,
-        lastMessageTimestamp,
-        wsHealthy,
-        polling: pollTimer !== null,
+        agentConnected: connectedAgentConversationId !== null,
+        agentSessionExpiresAt,
         heartbeat: heartbeatTimer !== null,
         messageDraft: input.value,
         inlineDraft: inlineBarInput.value,
@@ -6841,16 +5836,14 @@ import {
     visitorInfo = {};
     customMetadata = {};
     pageContext = {};
-    conversationHistoryBuffer.splice(0);
     renderedMessageIds.clear();
-    activeToolCallCards.clear();
-    lastSeenMessageId = null;
+    pendingVisitorMessageIds.clear();
+    pendingIncomingResponseIds.clear();
+    authoritativeMessageIds.clear();
+    hasReceivedAgentSnapshot = false;
     newestResponseId = null;
-    lastMessageTimestamp = null;
-    lastNewMessageAt = Date.now();
     lastVisitorStatusEl = null;
     isSending = false;
-    isStreaming = false;
     _isHandedOff = false;
     isBanned = false;
     input.value = plan.nextState.messageDraft;
