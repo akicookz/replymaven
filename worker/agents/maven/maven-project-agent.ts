@@ -20,7 +20,10 @@ import type {
   SidechatToolAuditMetadata,
   SidechatToolDescriptor,
 } from "../../../shared/sidechat-agent";
-import { toSidechatChildName } from "../../../shared/maven-conversation";
+import {
+  toPublicChildName,
+  toSidechatChildName,
+} from "../../../shared/maven-conversation";
 import type { ToolRow } from "../../db";
 import { buildCustomerByIdQuery } from "../../services/customer-service";
 import { createPublicConversationStore } from "../../conversations/create-public-conversation-store";
@@ -36,7 +39,7 @@ import {
   authorizeSubAgentRequest,
   readVerifiedSidechatClaims,
 } from "../sidechat/agent-auth";
-import { MavenChatAgent } from "../sidechat/maven-chat-agent";
+import { MavenChatAgent } from "./maven-chat-agent";
 import type {
   ConnectProjectMcpInput,
   McpConnectionView,
@@ -325,6 +328,15 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         this.sidechatRegistrationLocks.delete(conversationId);
       }
     }
+  }
+
+  async registerPublicConversation(
+    conversationId: string,
+  ): Promise<{ childName: `pub_${string}`; created: boolean }> {
+    const childName = toPublicChildName(conversationId);
+    const created = !this.hasSubAgent(MavenChatAgent, childName);
+    await this.subAgent(MavenChatAgent, childName);
+    return { childName, created };
   }
 
   async getSidechatRegistration(

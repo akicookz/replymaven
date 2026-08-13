@@ -31,7 +31,7 @@ beforeAll(async () => {
     Agent: FakeAgent,
     DurableObjectOAuthClientProvider: FakeOAuthProvider,
   }));
-  mock.module("./maven-chat-agent", () => ({
+  mock.module("../maven/maven-chat-agent", () => ({
     MavenChatAgent: MavenChatAgentMock,
   }));
   ({ MavenProjectAgent } = await import("./maven-project-agent"));

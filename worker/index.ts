@@ -159,7 +159,7 @@ import {
 } from "./mcp-oauth";
 export { ConversationDO } from "./durable-objects/conversation-do";
 export { MavenProjectAgent };
-export { MavenChatAgent } from "./agents/sidechat/maven-chat-agent";
+export { MavenChatAgent } from "./agents/maven/maven-chat-agent";
 import {
   createProjectSchema,
   updateProjectSchema,

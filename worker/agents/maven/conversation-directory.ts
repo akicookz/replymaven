@@ -387,6 +387,10 @@ export class ConversationDirectory {
          created_at = excluded.created_at,
          updated_at = excluded.updated_at
        WHERE excluded.child_revision > conversation_directory.child_revision
+          OR (
+            excluded.child_revision = conversation_directory.child_revision
+            AND conversation_directory.visitor_id = ''
+          )
        RETURNING child_revision`,
       [
         summary.conversationId,
