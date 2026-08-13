@@ -59,6 +59,7 @@ export interface AppEnv extends Env {
   CRAWL_QUEUE: Queue<CrawlMessage>;
   SIDECHAT_TOKEN_SECRET: string;
   INTERNAL_BROADCAST_SECRET: string;
+  PUBLIC_CONVERSATION_STORE?: "legacy" | "agent";
 }
 
 export interface HonoAppContext {

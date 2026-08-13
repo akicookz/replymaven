@@ -856,6 +856,53 @@ export class ChatService {
     }
   }
 
+  async acquireExternalActionLease(
+    conversationId: string,
+    projectId: string,
+    ownership?: ChatOwnershipSnapshot,
+    now: Date = new Date(),
+  ): Promise<{
+    acquiredAt: Date;
+    ownershipRevision: number;
+  } | null> {
+    const conversation = await this.getOperationalConversationById(
+      conversationId,
+      projectId,
+    );
+    if (!conversation) return null;
+    const staleBefore = new Date(now.getTime() - EXTERNAL_ACTION_LEASE_MS);
+    const rows = await buildExternalActionLeaseQuery(
+      this.db,
+      conversationId,
+      projectId,
+      now,
+      staleBefore,
+      ownership,
+    );
+    if (rows.length === 0) return null;
+    return {
+      acquiredAt: now,
+      ownershipRevision: parseChatState(conversation.chatState, {
+        fallbackAiParticipation: fallbackAiParticipationForStatus(
+          conversation.status,
+        ),
+      }).ownershipRevision,
+    };
+  }
+
+  async releaseExternalActionLease(
+    conversationId: string,
+    projectId: string,
+    acquiredAt: Date,
+  ): Promise<void> {
+    await buildExternalActionLeaseReleaseQuery(
+      this.db,
+      conversationId,
+      projectId,
+      acquiredAt,
+    );
+  }
+
   async getConversationsByProject(
     projectId: string,
     limit = 50,
@@ -1870,6 +1917,55 @@ export class ChatService {
       .orderBy(desc(conversations.updatedAt))
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  async getConversationsByCustomer(
+    projectId: string,
+    customerId: string,
+  ): Promise<ConversationRow[]> {
+    return this.db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.projectId, projectId),
+          eq(conversations.customerId, customerId),
+        ),
+      )
+      .orderBy(desc(conversations.lastActivityAt));
+  }
+
+  async getConversationsByVisitor(
+    projectId: string,
+    visitorId: string,
+  ): Promise<ConversationRow[]> {
+    return this.db
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.projectId, projectId),
+          eq(conversations.visitorId, visitorId),
+        ),
+      )
+      .orderBy(desc(conversations.lastActivityAt));
+  }
+
+  async updateConversationCustomer(
+    id: string,
+    projectId: string,
+    customerId: string | null,
+  ): Promise<ConversationRow | null> {
+    await this.db
+      .update(conversations)
+      .set({ customerId })
+      .where(
+        and(
+          eq(conversations.id, id),
+          eq(conversations.projectId, projectId),
+        ),
+      );
+    return this.getConversationById(id, projectId);
   }
 
   async getRecentConversationByVisitorEmail(
