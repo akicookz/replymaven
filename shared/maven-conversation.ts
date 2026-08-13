@@ -28,6 +28,9 @@ export interface PublicMessageMetadata {
   readAt: number | null;
   emailedAt: number | null;
   systemKind: string | null;
+  idempotencyKey?: string | null;
+  origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
+  externalReplyTo?: string | null;
 }
 
 export interface PublicMessageRecord {
@@ -45,6 +48,9 @@ export interface PublicMessageRecord {
   deliveredAt: number | null;
   readAt: number | null;
   emailedAt: number | null;
+  idempotencyKey?: string | null;
+  origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
+  externalReplyTo?: string | null;
 }
 
 export interface PublicConversationRecord {

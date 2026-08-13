@@ -1,4 +1,6 @@
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { eq } from "drizzle-orm";
+import { parseMessageImageUrls } from "../../shared/message-images";
 import type {
   PublicConversationRecord,
   PublicMessageRecord,
@@ -10,6 +12,7 @@ import type {
   MavenConversationSummary,
 } from "../../shared/sidechat-agent";
 import type { AppEnv } from "../types";
+import { projects, toolExecutions } from "../db/schema";
 import { D1PublicConversationStore } from "./d1-public-conversation-store";
 import type {
   AppendPublicBotInput,
@@ -19,10 +22,13 @@ import type {
   AppendVisitorResult,
   CreatePublicConversationInput,
   DeletePublicMessageResult,
+  LegacyPublicMessageInput,
   PublicChatChildState,
   PublicContactUpdateInput,
   PublicConversationAction,
   PublicConversationActionInput,
+  PublicConversationAnalytics,
+  PublicBulkConversationActionResult,
   PublicConversationCounts,
   PublicConversationListQuery,
   PublicConversationListResult,
@@ -30,12 +36,29 @@ import type {
   PublicDeliveryUpdateInput,
   PublicEmailUpdateInput,
   PublicInboxCounts,
+  PublicLastMessagePreview,
+  PublicLegacyEscalationMetadataUpdate,
   PublicMessageAttachmentSource,
   PublicMessagePage,
   PublicMessagesBeforeInput,
   PublicPresenceUpdateInput,
+  PublicExternalActionLease,
+  PublicExternalActionLeaseInput,
+  PublicOwnershipTransitionInput,
+  PublicOwnershipTransitionResult,
+  PublicRetentionClaim,
+  PublicTeamRequestAcceptance,
+  PublicTeamRequestClaimInput,
+  PublicTeamRequestClaimResult,
+  PublicTeamRequestSummaryInput,
+  PublicUsageConversationQuery,
+  PublicUsageConversationResult,
   PublicConversationStore,
 } from "./public-conversation-store";
+import type {
+  ChatOwnershipEvent,
+  ConversationChatState,
+} from "../chat-runtime/types";
 
 interface AgentPublicConversationStoreContext {
   db: DrizzleD1Database<Record<string, unknown>>;
@@ -87,6 +110,70 @@ interface PublicChildStub {
     status: PublicConversationRecord["status"];
     closeReason?: PublicConversationRecord["closeReason"];
   }): Promise<PublicConversationRecord | null>;
+  transitionPublicOwnership(
+    event: ChatOwnershipEvent,
+  ): Promise<PublicOwnershipTransitionResult>;
+  takePublicHumanOwnership(): Promise<{
+    status: PublicConversationRecord["status"];
+    chatState: string | null;
+  } | null>;
+  resolvePublicByAi(): Promise<boolean>;
+  checkAndClosePublicStale(autoCloseMinutes: number): Promise<{
+    closed: boolean;
+    conversation: PublicConversationRecord | null;
+  }>;
+  preparePublicContactSupportOwnership(): Promise<
+    "waiting_agent" | "agent_replied" | null
+  >;
+  claimTeamRequest(
+    input: PublicTeamRequestClaimInput,
+  ): Promise<PublicTeamRequestClaimResult>;
+  getTeamRequestAcceptance(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<PublicTeamRequestAcceptance | null>;
+  claimTeamRequestNotification(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<boolean>;
+  addTeamRequestSummary(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<PublicMessageRecord | null>;
+  completeTeamRequestSummary(input: PublicTeamRequestSummaryInput): Promise<boolean>;
+  updateLegacyEscalationMetadata(
+    projectId: string,
+    conversationId: string,
+    update: PublicLegacyEscalationMetadataUpdate,
+  ): Promise<PublicConversationRecord | null>;
+  persistTeamRequestTelegramThreadId(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+    threadId: string,
+  ): Promise<boolean>;
+  updatePublicTelegramThreadId(threadId: string): Promise<void>;
+  acquireExternalAction(
+    input: PublicExternalActionLeaseInput,
+  ): Promise<PublicExternalActionLease | null>;
+  releaseExternalAction(input: PublicExternalActionLease): Promise<void>;
+  updatePendingTeamRequestContact(
+    projectId: string,
+    conversationId: string,
+    ownership: { status: string; chatState: string | null },
+    update: {
+      visitorName?: string;
+      visitorEmail?: string;
+      awaitingContactFields: Array<"name" | "email">;
+      contactDeclined?: boolean;
+    },
+  ): Promise<PublicConversationRecord | null>;
+  getPublicChatState(): Promise<ConversationChatState>;
+  savePublicChatState(chatState: ConversationChatState): Promise<void>;
+  hasPublicUploadKey(key: string): Promise<boolean>;
 }
 
 interface PublicParentStub {
@@ -100,6 +187,32 @@ interface PublicParentStub {
     query: MavenConversationListQuery,
   ): Promise<MavenConversationListResult>;
   getInboxCounts(): Promise<PublicInboxCounts>;
+  listAllPublicConversationSummaries(): Promise<MavenConversationSummary[]>;
+  bulkApplyPublicActions(input: {
+    conversationIds: string[];
+    action: PublicConversationAction;
+  }): Promise<PublicBulkConversationActionResult>;
+  closePublicConversationsAsSpam(input: {
+    visitorId: string;
+    visitorEmail?: string | null;
+  }): Promise<string[]>;
+  reconcilePublicAutoCloseSchedules(
+    autoCloseMinutes: number | null,
+  ): Promise<void>;
+  claimExpiredPublicArchives(input: {
+    retentionCutoff: number;
+    staleClaimCutoff: number;
+    claimAt: number;
+    limit: number;
+  }): Promise<PublicRetentionClaim[]>;
+  hasPublicUploadKeyElsewhere(input: {
+    key: string;
+    excludedConversationId: string;
+  }): Promise<boolean>;
+  deleteClaimedPublicConversation(input: {
+    conversationId: string;
+    purgeStartedAt: number;
+  }): Promise<boolean>;
 }
 
 async function getPublicParent(
@@ -134,6 +247,25 @@ function stableValue(value: unknown): unknown {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, entry]) => [key, stableValue(entry)]),
   );
+}
+
+function isPublicSourceReference(value: unknown): value is PublicSourceReference {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const source = value as Record<string, unknown>;
+  return typeof source.title === "string" &&
+    (source.url === null || typeof source.url === "string") &&
+    (source.type === "webpage" || source.type === "pdf" ||
+      source.type === "faq");
+}
+
+function parseMessageSources(raw: string | null | undefined): PublicSourceReference[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(isPublicSourceReference) : [];
+  } catch {
+    return [];
+  }
 }
 
 async function importChecksum(
@@ -189,6 +321,9 @@ interface NewMessageInput {
   senderName?: string | null;
   senderAvatar?: string | null;
   userId?: string | null;
+  idempotencyKey?: string | null;
+  origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
+  externalReplyTo?: string | null;
 }
 
 function newMessage(
@@ -197,7 +332,7 @@ function newMessage(
   options: { systemKind?: string | null; id?: string } = {},
 ): PublicMessageRecord {
   return {
-    id: options.id ?? crypto.randomUUID(),
+    id: options.id ?? input.idempotencyKey ?? crypto.randomUUID(),
     conversationId: input.conversationId,
     author,
     content: input.content,
@@ -211,10 +346,13 @@ function newMessage(
     deliveredAt: null,
     readAt: null,
     emailedAt: null,
+    idempotencyKey: input.idempotencyKey ?? null,
+    origin: input.origin ?? null,
+    externalReplyTo: input.externalReplyTo ?? null,
   };
 }
 
-export class AgentPublicConversationStore {
+export class AgentPublicConversationStore implements PublicConversationStore {
   private readonly legacy: PublicConversationStore;
 
   constructor(private readonly context: AgentPublicConversationStoreContext) {
@@ -278,12 +416,14 @@ export class AgentPublicConversationStore {
     projectId: string,
     visitorId: string,
   ): Promise<PublicConversationRecord | null> {
-    const summaries = await this.readAllSummaries(projectId);
-    const match = summaries.find((summary) =>
-      summary.visitorId === visitorId &&
-      summary.status !== "closed" &&
-      summary.archivedAt === null
-    );
+    const summaries = await this.readEverySummary(projectId);
+    const match = summaries
+      .filter((summary) =>
+        summary.visitorId === visitorId &&
+        summary.status !== "closed" &&
+        summary.archivedAt === null
+      )
+      .sort((left, right) => right.lastActivityAt - left.lastActivityAt)[0];
     return match ? this.get(projectId, match.conversationId) : null;
   }
 
@@ -291,8 +431,12 @@ export class AgentPublicConversationStore {
     projectId: string,
     visitorId: string,
   ): Promise<PublicConversationRecord | null> {
-    const summaries = await this.readAllSummaries(projectId);
-    const match = summaries.find((summary) => summary.visitorId === visitorId);
+    const summaries = await this.readEverySummary(projectId);
+    const match = summaries
+      .filter((summary) =>
+        summary.visitorId === visitorId && summary.archivedAt === null
+      )
+      .sort((left, right) => right.lastActivityAt - left.lastActivityAt)[0];
     return match ? this.get(projectId, match.conversationId) : null;
   }
 
@@ -301,10 +445,13 @@ export class AgentPublicConversationStore {
     email: string,
   ): Promise<PublicConversationRecord | null> {
     const normalized = email.trim().toLowerCase();
-    const summaries = await this.readAllSummaries(projectId);
-    const match = summaries.find((summary) =>
-      summary.visitorEmail?.trim().toLowerCase() === normalized
-    );
+    const summaries = await this.readEverySummary(projectId);
+    const match = summaries
+      .filter((summary) =>
+        summary.visitorEmail?.trim().toLowerCase() === normalized &&
+        summary.archivedAt === null
+      )
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
     return match ? this.get(projectId, match.conversationId) : null;
   }
 
@@ -333,7 +480,7 @@ export class AgentPublicConversationStore {
   async getConversationCounts(
     projectId: string,
   ): Promise<PublicConversationCounts> {
-    const summaries = await this.readAllSummaries(projectId);
+    const summaries = await this.readEverySummary(projectId);
     const closed = summaries.filter((summary) => summary.status === "closed").length;
     return {
       all: summaries.length,
@@ -348,7 +495,7 @@ export class AgentPublicConversationStore {
     limit?: number;
   }): Promise<PublicConversationRecord[]> {
     const limit = Math.max(1, Math.min(100, input.limit ?? 100));
-    return (await this.readAllSummaries(input.projectId))
+    return (await this.readEverySummary(input.projectId))
       .filter((summary) => summary.updatedAt > input.since)
       .slice(0, limit)
       .map((summary) => summaryToConversation(summary, input.projectId));
@@ -358,7 +505,7 @@ export class AgentPublicConversationStore {
     projectId: string,
     since: number,
   ): Promise<PublicConversationRecord[]> {
-    return (await this.readAllSummaries(projectId))
+    return (await this.readEverySummary(projectId))
       .filter((summary) =>
         summary.updatedAt >= since &&
         summary.metadata.needsReview === true
@@ -367,11 +514,12 @@ export class AgentPublicConversationStore {
   }
 
   async listAgentMode(projectId: string): Promise<PublicConversationRecord[]> {
-    return (await this.readAllSummaries(projectId))
+    return (await this.readEverySummary(projectId))
       .filter((summary) =>
         summary.status === "waiting_agent" ||
         summary.status === "agent_replied"
       )
+      .filter((summary) => summary.archivedAt === null)
       .map((summary) => summaryToConversation(summary, projectId));
   }
 
@@ -383,11 +531,43 @@ export class AgentPublicConversationStore {
     return parent.getInboxCounts();
   }
 
+  async getLastMessagePreviews(
+    conversationIds: string[],
+  ): Promise<Map<string, PublicLastMessagePreview>> {
+    const requested = new Set(conversationIds);
+    const previews = new Map<string, PublicLastMessagePreview>();
+    const projectRows = await this.context.db
+      .select({ id: projects.id })
+      .from(projects);
+    for (const project of projectRows) {
+      const parent = await getPublicParent(
+        this.context.env.MAVEN_PROJECT_AGENT,
+        project.id,
+      );
+      for (const summary of await parent.listAllPublicConversationSummaries()) {
+        if (
+          !requested.has(summary.conversationId) ||
+          !summary.lastMessageId ||
+          !summary.lastMessageAuthor
+        ) continue;
+        previews.set(summary.conversationId, {
+          id: summary.lastMessageId,
+          author: summary.lastMessageAuthor,
+          content: summary.lastMessagePreview ?? "",
+          senderName: null,
+          emailedAt: null,
+          createdAt: summary.lastActivityAt,
+        });
+      }
+    }
+    return previews;
+  }
+
   async listByCustomer(
     projectId: string,
     customerId: string,
   ): Promise<PublicConversationRecord[]> {
-    return (await this.readAllSummaries(projectId))
+    return (await this.readEverySummary(projectId))
       .filter((summary) => summary.customerId === customerId)
       .map((summary) => summaryToConversation(summary, projectId));
   }
@@ -397,7 +577,7 @@ export class AgentPublicConversationStore {
     customerIds: string[],
   ): Promise<Map<string, number>> {
     const counts = new Map(customerIds.map((customerId) => [customerId, 0]));
-    for (const summary of await this.readAllSummaries(projectId)) {
+    for (const summary of await this.readEverySummary(projectId)) {
       if (summary.customerId && counts.has(summary.customerId)) {
         counts.set(summary.customerId, (counts.get(summary.customerId) ?? 0) + 1);
       }
@@ -409,7 +589,7 @@ export class AgentPublicConversationStore {
     projectId: string,
     visitorId: string,
   ): Promise<PublicConversationRecord[]> {
-    return (await this.readAllSummaries(projectId))
+    return (await this.readEverySummary(projectId))
       .filter((summary) => summary.visitorId === visitorId)
       .map((summary) => summaryToConversation(summary, projectId));
   }
@@ -599,13 +779,147 @@ export class AgentPublicConversationStore {
     conversationIds: string[],
     action: PublicConversationAction,
   ): Promise<{ updatedIds: string[]; skippedIds: string[] }> {
-    const updatedIds: string[] = [];
-    const skippedIds: string[] = [];
-    for (const conversationId of conversationIds) {
-      const updated = await this.applyAction({ projectId, conversationId, action });
-      (updated ? updatedIds : skippedIds).push(conversationId);
-    }
-    return { updatedIds, skippedIds };
+    const parent = await getPublicParent(
+      this.context.env.MAVEN_PROJECT_AGENT,
+      projectId,
+    );
+    return parent.bulkApplyPublicActions({ conversationIds, action });
+  }
+
+  async transitionOwnership(
+    input: PublicOwnershipTransitionInput,
+  ): Promise<PublicOwnershipTransitionResult> {
+    const child = await this.resolveChild(input.projectId, input.conversationId);
+    return child
+      ? child.transitionPublicOwnership(input.event)
+      : { status: null, conversation: null };
+  }
+
+  async takeHumanOwnership(
+    projectId: string,
+    conversationId: string,
+  ): Promise<{
+    status: PublicConversationRecord["status"];
+    chatState: string | null;
+  } | null> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child ? child.takePublicHumanOwnership() : null;
+  }
+
+  async resolveByAi(
+    projectId: string,
+    conversationId: string,
+  ): Promise<boolean> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child ? child.resolvePublicByAi() : false;
+  }
+
+  async claimTeamRequest(
+    input: PublicTeamRequestClaimInput,
+  ): Promise<PublicTeamRequestClaimResult> {
+    const child = await this.resolveChild(input.projectId, input.conversationId);
+    return child ? child.claimTeamRequest(input) : { status: "unavailable" };
+  }
+
+  async getTeamRequestAcceptance(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<PublicTeamRequestAcceptance | null> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.getTeamRequestAcceptance(
+          projectId,
+          conversationId,
+          acceptanceToken,
+        )
+      : null;
+  }
+
+  async claimTeamRequestNotification(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<boolean> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.claimTeamRequestNotification(
+          projectId,
+          conversationId,
+          acceptanceToken,
+        )
+      : false;
+  }
+
+  async addTeamRequestSummary(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<PublicMessageRecord | null> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.addTeamRequestSummary(projectId, conversationId, acceptanceToken)
+      : null;
+  }
+
+  async completeTeamRequestSummary(
+    input: PublicTeamRequestSummaryInput,
+  ): Promise<boolean> {
+    const child = await this.resolveChild(input.projectId, input.conversationId);
+    return child ? child.completeTeamRequestSummary(input) : false;
+  }
+
+  async updateLegacyEscalationMetadata(
+    projectId: string,
+    conversationId: string,
+    update: PublicLegacyEscalationMetadataUpdate,
+  ): Promise<PublicConversationRecord | null> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.updateLegacyEscalationMetadata(
+          projectId,
+          conversationId,
+          update,
+        )
+      : null;
+  }
+
+  async persistTeamRequestTelegramThreadId(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+    threadId: string,
+  ): Promise<boolean> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.persistTeamRequestTelegramThreadId(
+          projectId,
+          conversationId,
+          acceptanceToken,
+          threadId,
+        )
+      : false;
+  }
+
+  async updateTelegramThreadId(
+    projectId: string,
+    conversationId: string,
+    threadId: string,
+  ): Promise<void> {
+    const child = await this.resolveChild(projectId, conversationId);
+    await child?.updatePublicTelegramThreadId(threadId);
+  }
+
+  async acquireExternalAction(
+    input: PublicExternalActionLeaseInput,
+  ): Promise<PublicExternalActionLease | null> {
+    const child = await this.resolveChild(input.projectId, input.conversationId);
+    return child ? child.acquireExternalAction(input) : null;
+  }
+
+  async releaseExternalAction(input: PublicExternalActionLease): Promise<void> {
+    const child = await this.resolveChild(input.projectId, input.conversationId);
+    await child?.releaseExternalAction(input);
   }
 
   async markDelivery(input: PublicDeliveryUpdateInput): Promise<string[]> {
@@ -644,6 +958,60 @@ export class AgentPublicConversationStore {
     });
   }
 
+  async updatePendingTeamRequestContact(
+    projectId: string,
+    conversationId: string,
+    ownership: { status: string; chatState: string | null },
+    update: {
+      visitorName?: string;
+      visitorEmail?: string;
+      awaitingContactFields: Array<"name" | "email">;
+      contactDeclined?: boolean;
+    },
+  ): Promise<PublicConversationRecord | null> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.updatePendingTeamRequestContact(
+          projectId,
+          conversationId,
+          ownership,
+          update,
+        )
+      : null;
+  }
+
+  async getChatState(
+    projectId: string,
+    conversationId: string,
+  ): Promise<ConversationChatState> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.getPublicChatState()
+      : {
+          state: "active",
+          aiParticipation: "continuous",
+          ownershipRevision: 0,
+          askedClarifications: [],
+          clarificationAttempts: 0,
+          lastBotQuestion: null,
+          frustrationScore: 0,
+          lastIntent: null,
+          pendingHandoffReason: null,
+          awaitingContactFields: [],
+          awaitingHandoffConfirmation: false,
+          contactDeclined: false,
+        };
+  }
+
+  async saveChatState(
+    projectId: string,
+    conversationId: string,
+    chatState: ConversationChatState,
+  ): Promise<void> {
+    const child = await this.resolveChild(projectId, conversationId);
+    await child?.savePublicChatState(chatState);
+  }
+
   async updateCustomer(
     input: PublicCustomerLinkInput,
   ): Promise<PublicConversationRecord | null> {
@@ -676,12 +1044,239 @@ export class AgentPublicConversationStore {
     return this.setStatus(projectId, conversationId, status, null);
   }
 
+  async checkAndCloseStale(
+    projectId: string,
+    conversationId: string,
+    autoCloseMinutes: number,
+  ): Promise<{
+    closed: boolean;
+    conversation: PublicConversationRecord | null;
+  }> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.checkAndClosePublicStale(autoCloseMinutes)
+      : { closed: false, conversation: null };
+  }
+
+  async checkAndCloseStaleForProject(
+    projectId: string,
+    conversationRecords: PublicConversationRecord[],
+    autoCloseMinutes: number,
+  ): Promise<string[]> {
+    const closedIds: string[] = [];
+    for (let offset = 0; offset < conversationRecords.length; offset += 25) {
+      const batch = conversationRecords.slice(offset, offset + 25);
+      const results = await Promise.all(batch.map((conversation) =>
+        this.checkAndCloseStale(
+          projectId,
+          conversation.id,
+          autoCloseMinutes,
+        )
+      ));
+      results.forEach((result, index) => {
+        if (result.closed) closedIds.push(batch[index]!.id);
+      });
+    }
+    return closedIds;
+  }
+
+  async prepareContactSupportOwnership(
+    projectId: string,
+    conversationId: string,
+  ): Promise<"waiting_agent" | "agent_replied" | null> {
+    const child = await this.resolveChild(projectId, conversationId);
+    return child ? child.preparePublicContactSupportOwnership() : null;
+  }
+
+  async closeOpenAsSpam(
+    projectId: string,
+    visitorId: string,
+    visitorEmail?: string | null,
+  ): Promise<string[]> {
+    const parent = await getPublicParent(
+      this.context.env.MAVEN_PROJECT_AGENT,
+      projectId,
+    );
+    return parent.closePublicConversationsAsSpam({
+      visitorId,
+      visitorEmail,
+    });
+  }
+
+  async getAnalytics(
+    projectIds: string[],
+    since: number,
+  ): Promise<PublicConversationAnalytics> {
+    const pages = await Promise.all(projectIds.map(async (projectId) => ({
+      projectId,
+      summaries: await this.readEverySummary(projectId),
+    })));
+    const summaries = pages.flatMap((page) => page.summaries);
+    const projectByConversation = new Map(pages.flatMap((page) =>
+      page.summaries.map((summary) => [summary.conversationId, page.projectId])
+    ));
+    const byDay = new Map<string, number>();
+    const byStatus = new Map<PublicConversationRecord["status"], number>();
+    for (const summary of summaries) {
+      byStatus.set(summary.status, (byStatus.get(summary.status) ?? 0) + 1);
+      if (summary.createdAt >= since) {
+        const day = new Date(summary.createdAt).toISOString().slice(0, 10);
+        byDay.set(day, (byDay.get(day) ?? 0) + 1);
+      }
+    }
+    return {
+      totalConversations: summaries.length,
+      activeConversations: summaries.filter((summary) =>
+        summary.status === "active" || summary.status === "waiting_agent"
+      ).length,
+      totalMessages: summaries.reduce(
+        (total, summary) => total + summary.messageCount,
+        0,
+      ),
+      conversationsByDay: [...byDay]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([day, count]) => ({ day, count })),
+      conversationsByStatus: [...byStatus].map(([status, count]) => ({
+        status,
+        count,
+      })),
+      recentConversations: summaries
+        .sort((left, right) =>
+          Math.max(right.visitorLastSeenAt ?? 0, right.updatedAt) -
+          Math.max(left.visitorLastSeenAt ?? 0, left.updatedAt)
+        )
+        .slice(0, 5)
+        .map((summary) => summaryToConversation(
+          summary,
+          projectByConversation.get(summary.conversationId)!,
+        )),
+    };
+  }
+
+  async queryUsageConversations(
+    query: PublicUsageConversationQuery,
+  ): Promise<PublicUsageConversationResult> {
+    const pages = await Promise.all(query.projectIds.map(async (projectId) => ({
+      projectId,
+      summaries: await this.readEverySummary(projectId),
+    })));
+    const projectByConversation = new Map(pages.flatMap((page) =>
+      page.summaries.map((summary) => [summary.conversationId, page.projectId])
+    ));
+    const summaries = pages.flatMap((page) => page.summaries).filter((summary) =>
+      summary.createdAt >= query.periodStart &&
+      summary.createdAt < query.periodEnd
+    );
+    const metaKeys = new Set<string>();
+    for (const summary of summaries.slice(0, 200)) {
+      Object.keys(summary.metadata).forEach((key) => metaKeys.add(key));
+    }
+    const filtered = summaries.filter((summary) => {
+      if (query.status && summary.status !== query.status) return false;
+      if (query.metaKey && query.metaValue) {
+        const value = summary.metadata[query.metaKey];
+        if (!String(value ?? "").includes(query.metaValue)) return false;
+      }
+      return true;
+    });
+    filtered.sort((left, right) => {
+      const leftValue = query.sortBy === "botMessages"
+        ? left.botMessageCount
+        : left.createdAt;
+      const rightValue = query.sortBy === "botMessages"
+        ? right.botMessageCount
+        : right.createdAt;
+      return query.sortOrder === "asc"
+        ? leftValue - rightValue
+        : rightValue - leftValue;
+    });
+    return {
+      rows: filtered.slice(query.offset, query.offset + query.limit)
+        .map((summary) => ({
+          conversation: summaryToConversation(
+            summary,
+            projectByConversation.get(summary.conversationId)!,
+          ),
+          botMessageCount: summary.botMessageCount,
+        })),
+      total: filtered.length,
+      metaKeys: [...metaKeys].sort(),
+    };
+  }
+
+  async claimExpiredArchives(
+    retentionCutoff: number,
+    staleClaimCutoff: number,
+    claimAt: number,
+    limit: number,
+  ): Promise<PublicRetentionClaim[]> {
+    const claimed: PublicRetentionClaim[] = [];
+    const projectRows = await this.context.db
+      .select({ id: projects.id })
+      .from(projects);
+    for (const project of projectRows) {
+      if (claimed.length >= limit) break;
+      const parent = await getPublicParent(
+        this.context.env.MAVEN_PROJECT_AGENT,
+        project.id,
+      );
+      claimed.push(...await parent.claimExpiredPublicArchives({
+        retentionCutoff,
+        staleClaimCutoff,
+        claimAt,
+        limit: limit - claimed.length,
+      }));
+    }
+    return claimed;
+  }
+
   async listMessageAttachments(
     projectId: string,
     conversationId: string,
   ): Promise<PublicMessageAttachmentSource[]> {
     const child = await this.resolveChild(projectId, conversationId);
     return child ? child.getAttachmentManifest() : [];
+  }
+
+  async isUploadKeyReferencedElsewhere(
+    key: string,
+    conversationId: string,
+  ): Promise<boolean> {
+    const projectRows = await this.context.db
+      .select({ id: projects.id })
+      .from(projects);
+    for (const project of projectRows) {
+      const parent = await getPublicParent(
+        this.context.env.MAVEN_PROJECT_AGENT,
+        project.id,
+      );
+      if (await parent.hasPublicUploadKeyElsewhere({
+        key,
+        excludedConversationId: conversationId,
+      })) return true;
+    }
+    return false;
+  }
+
+  async deleteRetentionClaim(
+    projectId: string,
+    conversationId: string,
+    purgeStartedAt: number,
+  ): Promise<boolean> {
+    const parent = await getPublicParent(
+      this.context.env.MAVEN_PROJECT_AGENT,
+      projectId,
+    );
+    const deleted = await parent.deleteClaimedPublicConversation({
+      conversationId,
+      purgeStartedAt,
+    });
+    if (deleted) {
+      await this.context.db
+        .delete(toolExecutions)
+        .where(eq(toolExecutions.conversationId, conversationId));
+    }
+    return deleted;
   }
 
   async getConversationById(
@@ -778,6 +1373,12 @@ export class AgentPublicConversationStore {
     return this.listAgentMode(projectId);
   }
 
+  async getLastPublicMessagesByConversationIds(
+    conversationIds: string[],
+  ): Promise<Map<string, PublicLastMessagePreview>> {
+    return this.getLastMessagePreviews(conversationIds);
+  }
+
   async getPublicMessages(
     conversationId: string,
     projectId?: string,
@@ -824,22 +1425,143 @@ export class AgentPublicConversationStore {
     projectId?: string,
     conversationId?: string,
   ): Promise<PublicMessageRecord | null> {
-    if (!projectId || !conversationId) {
-      throw new Error("Agent message reads require project and conversation IDs");
+    if (!projectId) {
+      throw new Error("Agent message reads require a project ID");
     }
-    return this.getMessage(projectId, conversationId, messageId);
+    if (conversationId) {
+      return this.getMessage(projectId, conversationId, messageId);
+    }
+    const parent = await getPublicParent(
+      this.context.env.MAVEN_PROJECT_AGENT,
+      projectId,
+    );
+    const summaries = await parent.listAllPublicConversationSummaries();
+    for (let offset = 0; offset < summaries.length; offset += 25) {
+      const batch = summaries.slice(offset, offset + 25);
+      const matches = await Promise.all(batch.map(async (summary) => {
+        const child = await getPublicSubAgent(
+          parent,
+          summary.publicChildName,
+        );
+        return (await child.getPublicMessages())
+          .find((message) => message.id === messageId) ?? null;
+      }));
+      const match = matches.find(
+        (message): message is PublicMessageRecord => message !== null,
+      );
+      if (match) return match;
+    }
+    return null;
   }
 
   async addPublicVisitorMessageWithFirstTurn(
-    input: { conversationId: string; content: string; imageUrl?: string | null },
+    input: LegacyPublicMessageInput,
     projectId: string,
   ): Promise<AppendVisitorResult | null> {
     return this.appendVisitor({
       projectId,
       conversationId: input.conversationId,
       content: input.content,
-      imageUrls: input.imageUrl ? [input.imageUrl] : [],
+      imageUrls: parseMessageImageUrls(input.imageUrl),
+      sources: parseMessageSources(input.sources),
+      senderName: input.senderName,
+      senderAvatar: input.senderAvatar,
+      userId: input.userId,
+      idempotencyKey: input.idempotencyKey,
+      origin: input.origin,
+      externalReplyTo: input.externalReplyTo,
     });
+  }
+
+  async addPublicAgentMessageAndTakeOwnership(
+    input: LegacyPublicMessageInput,
+    projectId: string,
+  ): Promise<PublicMessageRecord | null> {
+    try {
+      return await this.appendHuman({
+        projectId,
+        conversationId: input.conversationId,
+        content: input.content,
+        imageUrls: parseMessageImageUrls(input.imageUrl),
+        sources: parseMessageSources(input.sources),
+        senderName: input.senderName,
+        senderAvatar: input.senderAvatar,
+        userId: input.userId,
+        idempotencyKey: input.idempotencyKey,
+        origin: input.origin,
+        externalReplyTo: input.externalReplyTo,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async addPublicBotMessageIfOwnershipMatches(
+    input: LegacyPublicMessageInput,
+    projectId: string,
+    expected: {
+      status: PublicConversationRecord["status"];
+      chatState: string | null;
+    },
+  ): Promise<PublicMessageRecord | null> {
+    return this.appendBot({
+      projectId,
+      conversationId: input.conversationId,
+      content: input.content,
+      imageUrls: parseMessageImageUrls(input.imageUrl),
+      sources: parseMessageSources(input.sources),
+      senderName: input.senderName,
+      senderAvatar: input.senderAvatar,
+      userId: input.userId,
+      idempotencyKey: input.idempotencyKey,
+      origin: input.origin,
+      externalReplyTo: input.externalReplyTo,
+      expected,
+    });
+  }
+
+  async addPublicSystemMessage(
+    conversationId: string,
+    kind: AppendPublicSystemInput["kind"],
+    content: string,
+    idempotencyKey?: string,
+    projectId?: string,
+  ): Promise<PublicMessageRecord | null> {
+    if (!projectId) {
+      throw new Error("Agent message writes require a project ID");
+    }
+    try {
+      return await this.appendSystem({
+        projectId,
+        conversationId,
+        kind,
+        content,
+        idempotencyKey,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async addPublicMessage(
+    input: LegacyPublicMessageInput & { role: "visitor" | "agent" },
+    projectId: string,
+  ): Promise<PublicMessageRecord | null> {
+    if (input.role === "visitor") {
+      return (await this.addPublicVisitorMessageWithFirstTurn(
+        input,
+        projectId,
+      ))?.message ?? null;
+    }
+    return this.addPublicAgentMessageAndTakeOwnership(input, projectId);
+  }
+
+  async getLatestEmailedPublicAgentMessage(
+    conversationId: string,
+    projectId?: string,
+  ): Promise<PublicMessageRecord | null> {
+    if (!projectId) throw new Error("Agent message reads require a project ID");
+    return this.getLatestEmailedHumanMessage(projectId, conversationId);
   }
 
   async markPublicMessageAsEmailed(
@@ -905,6 +1627,18 @@ export class AgentPublicConversationStore {
     return this.reopen(projectId, conversationId, status);
   }
 
+  async transitionChatOwnership(
+    conversationId: string,
+    projectId: string,
+    event: ChatOwnershipEvent,
+  ): Promise<PublicConversationRecord["status"] | null> {
+    return (await this.transitionOwnership({
+      projectId,
+      conversationId,
+      event,
+    })).status;
+  }
+
   async updateConversation(
     conversationId: string,
     projectId: string,
@@ -953,6 +1687,21 @@ export class AgentPublicConversationStore {
       presence,
     });
     return updated ? this.get(projectId, conversationId) : null;
+  }
+
+  async resolveConversationByAi(
+    conversationId: string,
+    projectId: string,
+  ): Promise<boolean> {
+    return this.resolveByAi(projectId, conversationId);
+  }
+
+  async closeOpenConversationsAsSpam(
+    projectId: string,
+    visitorId: string,
+    visitorEmail?: string | null,
+  ): Promise<string[]> {
+    return this.closeOpenAsSpam(projectId, visitorId, visitorEmail);
   }
 
   async bulkUpdateConversations(
@@ -1057,5 +1806,15 @@ export class AgentPublicConversationStore {
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
     return summaries;
+  }
+
+  private async readEverySummary(
+    projectId: string,
+  ): Promise<MavenConversationSummary[]> {
+    const parent = await getPublicParent(
+      this.context.env.MAVEN_PROJECT_AGENT,
+      projectId,
+    );
+    return parent.listAllPublicConversationSummaries();
   }
 }

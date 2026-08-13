@@ -311,6 +311,64 @@ export class ConversationDirectory {
     return rows[0] ? mapDirectoryRow(rows[0]) : null;
   }
 
+  listOpenByVisitor(
+    visitorId: string,
+    visitorEmail?: string | null,
+  ): MavenConversationSummary[] {
+    const conditions = [
+      "status != 'closed'",
+      "archived_at IS NULL",
+      visitorEmail
+        ? "(visitor_id = ? OR visitor_email = ?)"
+        : "visitor_id = ?",
+    ];
+    const bindings = visitorEmail
+      ? [visitorId, visitorEmail]
+      : [visitorId];
+    return this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY conversation_id ASC`,
+      bindings,
+    ).map(mapDirectoryRow);
+  }
+
+  listAll(): MavenConversationSummary[] {
+    return this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE visitor_id != ''
+       ORDER BY conversation_id ASC`,
+      [],
+    ).map(mapDirectoryRow);
+  }
+
+  listExpiredArchiveCandidates(
+    retentionCutoff: number,
+    staleClaimCutoff: number,
+    limit: number,
+  ): MavenConversationSummary[] {
+    return this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE visitor_id != ''
+         AND archived_at IS NOT NULL
+         AND archived_at <= ?
+         AND (purge_started_at IS NULL OR purge_started_at <= ?)
+       ORDER BY archived_at ASC, conversation_id ASC
+       LIMIT ?`,
+      [retentionCutoff, staleClaimCutoff, Math.max(1, limit)],
+    ).map(mapDirectoryRow);
+  }
+
+  removeConversation(conversationId: string): boolean {
+    const rows = this.sql.execute<{ conversation_id: string }>(
+      `DELETE FROM conversation_directory
+       WHERE conversation_id = ?
+       RETURNING conversation_id`,
+      [conversationId],
+    );
+    return rows.length === 1;
+  }
+
   getInboxCounts(now = Date.now()): MavenInboxCounts {
     const counts = {} as MavenInboxCounts;
     for (const filter of [

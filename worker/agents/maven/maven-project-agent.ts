@@ -27,7 +27,12 @@ import {
 import type { ToolRow } from "../../db";
 import { buildCustomerByIdQuery } from "../../services/customer-service";
 import { createPublicConversationStore } from "../../conversations/create-public-conversation-store";
-import type { PublicConversationStore } from "../../conversations/public-conversation-store";
+import type {
+  PublicBulkConversationActionResult,
+  PublicConversationAction,
+  PublicConversationStore,
+  PublicRetentionClaim,
+} from "../../conversations/public-conversation-store";
 import { ProjectService } from "../../services/project-service";
 import { TeamService } from "../../services/team-service";
 import { ToolService } from "../../services/tool-service";
@@ -341,6 +346,156 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const created = !this.hasSubAgent(MavenChatAgent, childName);
     await this.subAgent(MavenChatAgent, childName);
     return { childName, created };
+  }
+
+  async closePublicConversationsAsSpam(input: {
+    visitorId: string;
+    visitorEmail?: string | null;
+  }): Promise<string[]> {
+    const matches = this.conversationDirectory().listOpenByVisitor(
+      input.visitorId,
+      input.visitorEmail,
+    );
+    const closedIds: string[] = [];
+    for (let offset = 0; offset < matches.length; offset += 25) {
+      const batch = matches.slice(offset, offset + 25);
+      const results = await Promise.all(batch.map(async (summary) => {
+        const child = await this.subAgent(
+          MavenChatAgent,
+          summary.publicChildName,
+        );
+        const updated = await child.applyConversationAction({
+          action: "flag_spam",
+        });
+        return updated ? summary.conversationId : null;
+      }));
+      closedIds.push(...results.filter((id): id is string => id !== null));
+    }
+    return closedIds;
+  }
+
+  async listAllPublicConversationSummaries(): Promise<
+    MavenConversationSummary[]
+  > {
+    return this.conversationDirectory().listAll();
+  }
+
+  async bulkApplyPublicActions(input: {
+    conversationIds: string[];
+    action: PublicConversationAction;
+  }): Promise<PublicBulkConversationActionResult> {
+    const uniqueIds = [...new Set(input.conversationIds)];
+    const updatedIds: string[] = [];
+    const skippedIds: string[] = [];
+    for (let offset = 0; offset < uniqueIds.length; offset += 25) {
+      const batch = uniqueIds.slice(offset, offset + 25);
+      const results = await Promise.all(batch.map(async (conversationId) => {
+        const summary = this.conversationDirectory().getConversation(
+          conversationId,
+        );
+        if (!summary || summary.visitorId === "") return false;
+        const child = await this.subAgent(
+          MavenChatAgent,
+          summary.publicChildName,
+        );
+        return await child.applyConversationAction(input.action) !== null;
+      }));
+      results.forEach((updated, index) => {
+        (updated ? updatedIds : skippedIds).push(batch[index]!);
+      });
+    }
+    return { updatedIds, skippedIds };
+  }
+
+  async reconcilePublicAutoCloseSchedules(
+    autoCloseMinutes: number | null,
+  ): Promise<void> {
+    const summaries = this.conversationDirectory().listAll().filter(
+      (summary) => summary.archivedAt === null && summary.status !== "closed",
+    );
+    for (let offset = 0; offset < summaries.length; offset += 25) {
+      await Promise.all(summaries.slice(offset, offset + 25).map(
+        async (summary) => {
+          const child = await this.subAgent(
+            MavenChatAgent,
+            summary.publicChildName,
+          );
+          await child.reconcilePublicAutoClose(autoCloseMinutes);
+        },
+      ));
+    }
+  }
+
+  async claimExpiredPublicArchives(input: {
+    retentionCutoff: number;
+    staleClaimCutoff: number;
+    claimAt: number;
+    limit: number;
+  }): Promise<PublicRetentionClaim[]> {
+    const candidates = this.conversationDirectory()
+      .listExpiredArchiveCandidates(
+        input.retentionCutoff,
+        input.staleClaimCutoff,
+        input.limit,
+      );
+    const claimed: PublicRetentionClaim[] = [];
+    for (const summary of candidates) {
+      const child = await this.subAgent(
+        MavenChatAgent,
+        summary.publicChildName,
+      );
+      if (await child.claimPublicRetention(input)) {
+        claimed.push({
+          id: summary.conversationId,
+          projectId: this.name,
+          purgeStartedAt: input.claimAt,
+        });
+      }
+    }
+    return claimed;
+  }
+
+  async hasPublicUploadKeyElsewhere(input: {
+    key: string;
+    excludedConversationId: string;
+  }): Promise<boolean> {
+    for (const summary of this.conversationDirectory().listAll()) {
+      if (summary.conversationId === input.excludedConversationId) continue;
+      const child = await this.subAgent(
+        MavenChatAgent,
+        summary.publicChildName,
+      );
+      if (await child.hasPublicUploadKey(input.key)) return true;
+    }
+    return false;
+  }
+
+  async deleteClaimedPublicConversation(input: {
+    conversationId: string;
+    purgeStartedAt: number;
+  }): Promise<boolean> {
+    const summary = this.conversationDirectory().getConversation(
+      input.conversationId,
+    );
+    if (!summary || summary.visitorId === "") return false;
+    const child = await this.subAgent(
+      MavenChatAgent,
+      summary.publicChildName,
+    );
+    if (!await child.matchesPublicRetentionClaim(input.purgeStartedAt)) {
+      return false;
+    }
+    await this.deleteSubAgent(MavenChatAgent, summary.publicChildName);
+    const removed = this.conversationDirectory().removeConversation(
+      input.conversationId,
+    );
+    if (removed) {
+      this.setState({
+        sidechats: {},
+        inboxCounts: this.conversationDirectory().getInboxCounts(),
+      });
+    }
+    return removed;
   }
 
   async getSidechatRegistration(

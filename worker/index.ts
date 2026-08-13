@@ -32,7 +32,6 @@ import { CustomerService } from "./services/customer-service";
 import { ResourceService, type FaqPair } from "./services/resource-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
 import { FAQ_SET_MAX_CHARS } from "../shared/faq-limits";
-import { serializeMessageImageUrls } from "../shared/message-images";
 import {
   isConversationUploadUrl,
   isProjectChatUploadUrl,
@@ -1803,7 +1802,10 @@ const app = new Hono<HonoAppContext>()
           }
 
           // Generate a bot response using the agent's instruction
-          const msgs = await chatService.getPublicMessages(conversationId);
+          const msgs = await chatService.getPublicMessages(
+            conversationId,
+            projectId,
+          );
           const history = msgs
             .filter((m) => m.author !== "bot" || m.content)
             .slice(-20)
@@ -1891,14 +1893,19 @@ const app = new Hono<HonoAppContext>()
     }
 
     // Normal agent reply — store and forward to visitor
-    const agentMessage = await chatService.addPublicAgentMessageAndTakeOwnership(
-      {
-        conversationId,
-        content: message.text,
-        senderName: message.from?.first_name ?? null,
-      },
+    const telegramIdempotencyKey =
+      `telegram:${projectId}:${String(message.chat?.id ?? "unknown")}:${String(message.message_id)}`;
+    const agentMessage = await chatService.appendHuman({
       projectId,
-    );
+      conversationId,
+      content: message.text,
+      senderName: message.from?.first_name ?? null,
+      idempotencyKey: telegramIdempotencyKey,
+      origin: "telegram",
+      externalReplyTo: message.reply_to_message?.message_id === undefined
+        ? null
+        : String(message.reply_to_message.message_id),
+    }).catch(() => null);
     if (!agentMessage) return c.json({ ok: true });
 
     broadcastMessageNew(c.env, c.executionCtx, conversationId, agentMessage);
@@ -2508,6 +2515,7 @@ const app = new Hono<HonoAppContext>()
     if (referencedMessageId) {
       const sourceMessage = await chatService.getPublicMessageById(
         referencedMessageId,
+        project.id,
       );
       if (sourceMessage) {
         const conv = await chatService.getConversationById(
@@ -2539,6 +2547,7 @@ const app = new Hono<HonoAppContext>()
     const existingMessages = await chatService.getPublicMessagesSince(
       conversation.id,
       Date.now() - 5 * 60 * 1000,
+      project.id,
     );
     const alreadyProcessed = existingMessages.some(
       (m) => m.content === cleanedText,
@@ -2622,6 +2631,9 @@ const app = new Hono<HonoAppContext>()
           role: "visitor",
           content: cleanedText,
           sources: null,
+          idempotencyKey: `email:${emailId}`,
+          origin: "email",
+          externalReplyTo: referencedMessageId,
         },
         project.id,
       );
@@ -2704,7 +2716,10 @@ const app = new Hono<HonoAppContext>()
       let recipientUserId = referencedAgentUserId;
       if (!recipientUserId) {
         const fallback =
-          await chatService.getLatestEmailedPublicAgentMessage(conversation.id);
+          await chatService.getLatestEmailedPublicAgentMessage(
+            conversation.id,
+            project.id,
+          );
         recipientUserId = fallback?.userId ?? null;
       }
       if (recipientUserId && c.env.RESEND_API_KEY) {
@@ -2751,23 +2766,24 @@ const app = new Hono<HonoAppContext>()
       }
     } else if (agentUser) {
       // ─── Agent reply branch (round-trip from agent's inbox) ───────────
-      const agentMessage = await chatService.addPublicAgentMessageAndTakeOwnership(
-        {
-          conversationId: conversation.id,
-          content: cleanedText,
-          userId: agentUser.id,
-          senderName: agentUser.name,
-          senderAvatar: agentUser.avatar,
-          sources: null,
-        },
-        project.id,
-      );
+      const agentMessage = await chatService.appendHuman({
+        projectId: project.id,
+        conversationId: conversation.id,
+        content: cleanedText,
+        userId: agentUser.id,
+        senderName: agentUser.name,
+        senderAvatar: agentUser.avatar,
+        idempotencyKey: `email:${emailId}`,
+        origin: "email",
+        externalReplyTo: referencedMessageId,
+      }).catch(() => null);
       if (!agentMessage) {
         return new Response("Conversation not found", { status: 404 });
       }
       await chatService.markPublicMessageAsEmailed(
         conversation.id,
         agentMessage.id,
+        project.id,
       );
       broadcastMessageNew(c.env, c.executionCtx, conversation.id, agentMessage);
       broadcastStatusChange(
@@ -4531,6 +4547,15 @@ const app = new Hono<HonoAppContext>()
       updatePayload,
     );
     if (!settings) return c.json(null);
+    if (parsed.data.autoCloseMinutes !== undefined) {
+      const parent = await getAgentByName(
+        c.env.MAVEN_PROJECT_AGENT,
+        project.id,
+      );
+      await parent.reconcilePublicAutoCloseSchedules(
+        settings.autoCloseMinutes,
+      );
+    }
     const serialized = serializeProjectSettings(
       settings as unknown as Record<string, unknown>,
     );
@@ -7064,23 +7089,26 @@ const app = new Hono<HonoAppContext>()
       await chatService.reopenConversation(conversation.id, project.id);
     }
 
-    const message = await chatService.addPublicAgentMessageAndTakeOwnership(
-      {
-        conversationId: conversation.id,
-        content:
-          parsed.data.content?.trim() ||
-          (replyImageUrls.length > 1
-            ? "Sent images"
-            : replyImageUrls.length
-              ? "Sent an image"
-              : ""),
-        imageUrl: serializeMessageImageUrls(replyImageUrls),
-        userId: user.id,
-        senderName: user.name,
-        senderAvatar: avatar,
-      },
-      project.id,
-    );
+    const requestId = c.req.header("idempotency-key")?.trim();
+    const message = await chatService.appendHuman({
+      projectId: project.id,
+      conversationId: conversation.id,
+      content:
+        parsed.data.content?.trim() ||
+        (replyImageUrls.length > 1
+          ? "Sent images"
+          : replyImageUrls.length
+            ? "Sent an image"
+            : ""),
+      imageUrls: replyImageUrls,
+      userId: user.id,
+      senderName: user.name,
+      senderAvatar: avatar,
+      idempotencyKey: requestId
+        ? `dashboard:${project.id}:${conversation.id}:${user.id}:${requestId.slice(0, 200)}`
+        : null,
+      origin: "dashboard",
+    }).catch(() => null);
     if (!message) return c.json({ error: "Conversation not found" }, 404);
 
     // Emit "joined" once — only when picking up an escalated conversation for the first time
@@ -7316,6 +7344,8 @@ const app = new Hono<HonoAppContext>()
           conversationId,
           until ? "snoozed" : "snooze_ended",
           content,
+          undefined,
+          project.id,
         )
       ));
     }
@@ -7450,9 +7480,17 @@ const app = new Hono<HonoAppContext>()
     await chatService.setSnooze(convId, project.id, until);
     if (until) {
       await chatService.addPublicSystemMessage(convId, "snoozed",
-        `Snoozed until ${until.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`);
+        `Snoozed until ${until.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`,
+        undefined,
+        project.id);
     } else {
-      await chatService.addPublicSystemMessage(convId, "snooze_ended", "Snooze ended");
+      await chatService.addPublicSystemMessage(
+        convId,
+        "snooze_ended",
+        "Snooze ended",
+        undefined,
+        project.id,
+      );
     }
     return c.json({ ok: true });
   })

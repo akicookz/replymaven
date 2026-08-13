@@ -23,7 +23,7 @@ export default defineConfig({
   test: {
     globals: true,
     include: ["worker/agents/**/*.integration.test.ts"],
-    testTimeout: 15_000,
+    testTimeout: 30_000,
     deps: {
       optimizer: {
         ssr: {

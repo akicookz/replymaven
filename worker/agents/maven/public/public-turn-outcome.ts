@@ -10,6 +10,7 @@ export interface PublicTurnOutcome {
   messageId: string;
   ownershipRevision: number;
   internalTokens: InternalToken[];
+  httpExecutionIds: string[];
   status: "pending" | "completed";
   humanTakeover: boolean;
   aiInvoked: boolean;
@@ -27,6 +28,7 @@ export interface CompletePublicTurnOutcome {
   messageId: string;
   ownershipRevision: number;
   internalTokens: InternalToken[];
+  httpExecutionIds: string[];
   createdAt: number;
 }
 
@@ -34,6 +36,7 @@ interface PublicTurnOutcomeRow {
   message_id: string;
   ownership_revision: number;
   internal_tokens_json: string;
+  http_execution_ids_json: string;
   status: string;
   human_takeover: number;
   ai_invoked: number;
@@ -42,6 +45,7 @@ interface PublicTurnOutcomeRow {
 
 function mapOutcome(row: PublicTurnOutcomeRow): PublicTurnOutcome {
   let internalTokens: InternalToken[] = [];
+  let httpExecutionIds: string[] = [];
   try {
     const parsed: unknown = JSON.parse(row.internal_tokens_json);
     if (Array.isArray(parsed)) {
@@ -56,10 +60,21 @@ function mapOutcome(row: PublicTurnOutcomeRow): PublicTurnOutcome {
   } catch {
     internalTokens = [];
   }
+  try {
+    const parsed: unknown = JSON.parse(row.http_execution_ids_json ?? "[]");
+    if (Array.isArray(parsed)) {
+      httpExecutionIds = parsed.filter((value): value is string =>
+        typeof value === "string" && value.length > 0
+      );
+    }
+  } catch {
+    httpExecutionIds = [];
+  }
   return {
     messageId: row.message_id,
     ownershipRevision: row.ownership_revision,
     internalTokens,
+    httpExecutionIds,
     status: row.status === "pending" ? "pending" : "completed",
     humanTakeover: row.human_takeover === 1,
     aiInvoked: row.ai_invoked === 1,
@@ -73,6 +88,7 @@ export class PublicTurnOutcomeStore {
       message_id TEXT PRIMARY KEY NOT NULL,
       ownership_revision INTEGER NOT NULL,
       internal_tokens_json TEXT NOT NULL,
+      http_execution_ids_json TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL DEFAULT 'completed',
       human_takeover INTEGER NOT NULL DEFAULT 0,
       ai_invoked INTEGER NOT NULL DEFAULT 0,
@@ -85,6 +101,12 @@ export class PublicTurnOutcomeStore {
     if (!columns.some((column) => column.name === "status")) {
       this.sql.execute(
         "ALTER TABLE public_turn_outcomes ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'",
+        [],
+      );
+    }
+    if (!columns.some((column) => column.name === "http_execution_ids_json")) {
+      this.sql.execute(
+        "ALTER TABLE public_turn_outcomes ADD COLUMN http_execution_ids_json TEXT NOT NULL DEFAULT '[]'",
         [],
       );
     }
@@ -106,11 +128,12 @@ export class PublicTurnOutcomeStore {
     this.sql.execute(
       `INSERT INTO public_turn_outcomes (
          message_id, ownership_revision, internal_tokens_json, status,
-         human_takeover, ai_invoked, created_at
-       ) VALUES (?, ?, '[]', 'pending', 0, ?, ?)
+         http_execution_ids_json, human_takeover, ai_invoked, created_at
+       ) VALUES (?, ?, '[]', 'pending', '[]', 0, ?, ?)
        ON CONFLICT(message_id) DO UPDATE SET
          ownership_revision = excluded.ownership_revision,
          internal_tokens_json = '[]',
+         http_execution_ids_json = '[]',
          status = 'pending',
          human_takeover = 0,
          ai_invoked = excluded.ai_invoked,
@@ -128,16 +151,18 @@ export class PublicTurnOutcomeStore {
     this.sql.execute(
       `INSERT INTO public_turn_outcomes (
          message_id, ownership_revision, internal_tokens_json, status,
-         human_takeover, ai_invoked, created_at
-       ) VALUES (?, ?, ?, 'completed', 0, 0, ?)
+         http_execution_ids_json, human_takeover, ai_invoked, created_at
+       ) VALUES (?, ?, ?, 'completed', ?, 0, 0, ?)
        ON CONFLICT(message_id) DO UPDATE SET
          ownership_revision = excluded.ownership_revision,
          internal_tokens_json = excluded.internal_tokens_json,
+         http_execution_ids_json = excluded.http_execution_ids_json,
          status = 'completed'`,
       [
         outcome.messageId,
         outcome.ownershipRevision,
         JSON.stringify(outcome.internalTokens),
+        JSON.stringify(outcome.httpExecutionIds),
         outcome.createdAt,
       ],
     );

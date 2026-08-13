@@ -89,6 +89,9 @@ interface AppendPublicMessageFields {
   senderName?: string | null;
   senderAvatar?: string | null;
   userId?: string | null;
+  idempotencyKey?: string | null;
+  origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
+  externalReplyTo?: string | null;
 }
 
 export type AppendPublicVisitorInput = AppendPublicMessageFields;
@@ -312,6 +315,9 @@ export interface LegacyPublicMessageInput {
   emailedAt?: Date | null;
   deliveredAt?: Date | null;
   readAt?: Date | null;
+  idempotencyKey?: string | null;
+  origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
+  externalReplyTo?: string | null;
 }
 
 export interface PublicConversationStore {

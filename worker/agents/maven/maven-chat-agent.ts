@@ -53,6 +53,7 @@ import type {
   PublicExternalActionLeaseInput,
   PublicLegacyEscalationMetadataUpdate,
   PublicMessageAttachmentSource,
+  PublicOwnershipTransitionResult,
   PublicPresenceUpdateInput,
   PublicConversationStore,
   PublicTeamRequestAcceptance,
@@ -63,9 +64,12 @@ import type {
 import {
   applyChatOwnershipEvent,
   fallbackAiParticipationForStatus,
+  mergeChatStateForPersistence,
   parseChatState,
+  type ChatOwnershipEvent,
   type ConversationChatState,
 } from "../../chat-runtime/types";
+import { getLocalUploadKey } from "../../../shared/upload-ownership";
 import {
   readVerifiedSidechatClaims,
   resolveSidechatChatTurnClaims,
@@ -1020,6 +1024,13 @@ export class MavenChatAgent extends AIChatAgent<
         project.userId,
         subscription,
       );
+      if (outcome.httpExecutionIds.length > 0) {
+        await new ToolService(db).linkExecutionsToMessage(
+          outcome.httpExecutionIds,
+          responseMessage.conversationId,
+          responseMessage.id,
+        );
+      }
       const settings = await projectService.getSettings(projectId);
       await this.reconcilePublicAutoClose(settings?.autoCloseMinutes ?? null);
     })());
@@ -1169,7 +1180,10 @@ export class MavenChatAgent extends AIChatAgent<
       const messages = this.readPublicMessages();
       const existing = messages.find((candidate) => candidate.id === message.id);
       if (existing) {
-        if (existing.author !== "agent") {
+        if (
+          existing.author !== "agent" ||
+          !this.samePublicMessagePayload(existing, message)
+        ) {
           throw new Error("Public message id already exists");
         }
         return existing;
@@ -1255,6 +1269,13 @@ export class MavenChatAgent extends AIChatAgent<
   async applyConversationAction(
     action: PublicConversationAction,
   ): Promise<PublicConversationRecord | null> {
+    if (
+      action.action === "archive" ||
+      action.action === "resolve" ||
+      action.action === "flag_spam"
+    ) {
+      this.abortAllRequests(`Conversation action: ${action.action}`);
+    }
     return this.runExclusivePublicMutation(async () => {
       const state = this.requirePublicState();
       const now = Date.now();
@@ -1277,19 +1298,28 @@ export class MavenChatAgent extends AIChatAgent<
           changes.archivedAt = null;
           break;
         case "resolve":
+          if (state.status === "closed" && state.closeReason === "resolved") {
+            return null;
+          }
           changes.status = "closed";
           changes.closeReason = "resolved";
           break;
         case "snooze":
+          if (state.snoozedUntil === action.until) return null;
           changes.snoozedUntil = action.until;
           break;
         case "assign":
+          if (state.assigneeId === action.assigneeId) return null;
           changes.assigneeId = action.assigneeId;
           break;
         case "priority":
+          if (state.priority === action.priority) return null;
           changes.priority = action.priority;
           break;
         case "flag_spam":
+          if (state.status === "closed" && state.closeReason === "spam") {
+            return null;
+          }
           changes.status = "closed";
           changes.closeReason = "spam";
           break;
@@ -1384,18 +1414,230 @@ export class MavenChatAgent extends AIChatAgent<
     status: PublicConversationRecord["status"];
     closeReason?: PublicConversationRecord["closeReason"];
   }): Promise<PublicConversationRecord | null> {
+    if (input.status === "closed") {
+      this.abortAllRequests("Conversation closed");
+    }
     return this.runExclusivePublicMutation(async () => {
       const state = this.requirePublicState();
       this.assertPublicInput(input.projectId, input.conversationId);
+      if (state.archivedAt !== null || state.purgeStartedAt !== null) {
+        return null;
+      }
+      const closeReason = input.closeReason ??
+        (input.status === "closed" ? state.closeReason : null);
+      if (state.status === input.status && state.closeReason === closeReason) {
+        return this.toPublicConversation(state);
+      }
       const saved = this.saveNextPublicState(state, {
         status: input.status,
-        closeReason: input.closeReason ??
-          (input.status === "closed" ? state.closeReason : null),
+        closeReason,
         updatedAt: Date.now(),
       });
       await this.publishPublicProjection(saved, this.readPublicMessages());
       return this.toPublicConversation(saved);
     });
+  }
+
+  async transitionPublicOwnership(
+    event: ChatOwnershipEvent,
+  ): Promise<PublicOwnershipTransitionResult> {
+    if (event === "human_joined") {
+      this.abortAllRequests("Human takeover");
+      this.publicTurnOutcomeStore().markPendingHumanTakeover();
+    }
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (state.archivedAt !== null || state.purgeStartedAt !== null) {
+        return { status: null, conversation: null };
+      }
+      const currentChatState = this.parseStoredChatState(state);
+      const nextChatState = applyChatOwnershipEvent(currentChatState, event);
+      const status = event === "human_joined"
+        ? "agent_replied"
+        : event === "team_requested"
+        ? "waiting_agent"
+        : "active";
+      if (
+        nextChatState === currentChatState &&
+        state.status === status
+      ) {
+        const conversation = this.toPublicConversation(state);
+        return { status: conversation.status, conversation };
+      }
+      if (state.autoCloseScheduleId && status === "waiting_agent") {
+        await this.cancelSchedule(state.autoCloseScheduleId);
+      }
+      const saved = this.saveNextPublicState(state, {
+        status,
+        closeReason: event === "ai_handed_back" ? null : state.closeReason,
+        chatState: { ...nextChatState },
+        ownershipRevision: nextChatState.ownershipRevision,
+        autoCloseScheduleId: status === "waiting_agent"
+          ? null
+          : state.autoCloseScheduleId,
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      const conversation = this.toPublicConversation(saved);
+      return { status: conversation.status, conversation };
+    });
+  }
+
+  async takePublicHumanOwnership(): Promise<{
+    status: PublicConversationRecord["status"];
+    chatState: string | null;
+  } | null> {
+    const result = await this.transitionPublicOwnership("human_joined");
+    return result.conversation
+      ? {
+          status: result.conversation.status,
+          chatState: JSON.stringify(result.conversation.chatState),
+        }
+      : null;
+  }
+
+  async resolvePublicByAi(): Promise<boolean> {
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (
+        state.archivedAt !== null ||
+        state.purgeStartedAt !== null ||
+        state.status === "closed"
+      ) return false;
+      const chatState = this.parseStoredChatState(state);
+      if (chatState.aiParticipation === "human_only") return false;
+      const nextChatState = applyChatOwnershipEvent(chatState, "ai_handed_back");
+      const saved = this.saveNextPublicState(state, {
+        status: "closed",
+        closeReason: "bot_resolved",
+        chatState: { ...nextChatState },
+        ownershipRevision: nextChatState.ownershipRevision,
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return true;
+    });
+  }
+
+  async checkAndClosePublicStale(autoCloseMinutes: number): Promise<{
+    closed: boolean;
+    conversation: PublicConversationRecord | null;
+  }> {
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (state.archivedAt !== null || state.purgeStartedAt !== null) {
+        return { closed: false, conversation: null };
+      }
+      if (state.status === "closed" || state.status === "waiting_agent") {
+        return {
+          closed: false,
+          conversation: this.toPublicConversation(state),
+        };
+      }
+      if (state.lastActivityAt >= Date.now() - autoCloseMinutes * 60_000) {
+        return {
+          closed: false,
+          conversation: this.toPublicConversation(state),
+        };
+      }
+      const saved = this.saveNextPublicState(state, {
+        status: "closed",
+        closeReason: "ended",
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return { closed: true, conversation: this.toPublicConversation(saved) };
+    });
+  }
+
+  async preparePublicContactSupportOwnership(): Promise<
+    "waiting_agent" | "agent_replied" | null
+  > {
+    const state = this.requirePublicState();
+    if (state.archivedAt !== null || state.purgeStartedAt !== null) return null;
+    const chatState = this.parseStoredChatState(state);
+    if (chatState.aiParticipation === "human_only") {
+      const ownership = await this.takePublicHumanOwnership();
+      return ownership?.status === "agent_replied" ? ownership.status : null;
+    }
+    if (state.status === "closed") {
+      await this.setPublicStatus({
+        projectId: state.projectId,
+        conversationId: state.id,
+        status: "active",
+      });
+    }
+    const result = await this.transitionPublicOwnership("team_requested");
+    return result.status === "waiting_agent" ? result.status : null;
+  }
+
+  async updatePublicTelegramThreadId(threadId: string): Promise<void> {
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (
+        state.archivedAt !== null ||
+        state.purgeStartedAt !== null ||
+        state.telegramThreadId === threadId
+      ) return;
+      const saved = this.saveNextPublicState(state, {
+        telegramThreadId: threadId,
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+    });
+  }
+
+  async getPublicChatState(): Promise<ConversationChatState> {
+    return this.parseStoredChatState(this.requirePublicState());
+  }
+
+  async savePublicChatState(chatState: ConversationChatState): Promise<void> {
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (state.archivedAt !== null || state.purgeStartedAt !== null) return;
+      const current = this.parseStoredChatState(state);
+      const next = mergeChatStateForPersistence(current, chatState);
+      if (JSON.stringify(next) === JSON.stringify(current)) return;
+      const saved = this.saveNextPublicState(state, {
+        chatState: { ...next },
+        ownershipRevision: next.ownershipRevision,
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+    });
+  }
+
+  async claimPublicRetention(input: {
+    retentionCutoff: number;
+    staleClaimCutoff: number;
+    claimAt: number;
+  }): Promise<boolean> {
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (
+        state.archivedAt === null ||
+        state.archivedAt > input.retentionCutoff ||
+        (state.purgeStartedAt !== null &&
+          state.purgeStartedAt > input.staleClaimCutoff)
+      ) return false;
+      const saved = this.saveNextPublicState(state, {
+        purgeStartedAt: input.claimAt,
+        updatedAt: input.claimAt,
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return true;
+    });
+  }
+
+  async matchesPublicRetentionClaim(purgeStartedAt: number): Promise<boolean> {
+    return this.requirePublicState().purgeStartedAt === purgeStartedAt;
+  }
+
+  async hasPublicUploadKey(key: string): Promise<boolean> {
+    this.requirePublicState();
+    return this.readPublicMessages().some((message) =>
+      message.imageUrls.some((imageUrl) => getLocalUploadKey(imageUrl) === key)
+    );
   }
 
   async appendSystem(
@@ -1936,8 +2178,12 @@ export class MavenChatAgent extends AIChatAgent<
         throw new Error("Public message does not match its child");
       }
       const messages = this.readPublicMessages();
-      if (messages.some((candidate) => candidate.id === message.id)) {
-        throw new Error("Public message id already exists");
+      const existing = messages.find((candidate) => candidate.id === message.id);
+      if (existing) {
+        if (!this.samePublicMessagePayload(existing, message)) {
+          throw new Error("Public message id already exists");
+        }
+        return existing;
       }
       const updated = [...messages, structuredClone(message)];
       await this.persistPublicRecords(updated);
@@ -1950,6 +2196,23 @@ export class MavenChatAgent extends AIChatAgent<
       await this.publishPublicProjection(saved, updated);
       return structuredClone(message);
     });
+  }
+
+  private samePublicMessagePayload(
+    left: PublicMessageRecord,
+    right: PublicMessageRecord,
+  ): boolean {
+    return left.author === right.author &&
+      left.content === right.content &&
+      JSON.stringify(left.imageUrls) === JSON.stringify(right.imageUrls) &&
+      JSON.stringify(left.sources) === JSON.stringify(right.sources) &&
+      left.senderName === right.senderName &&
+      left.senderAvatar === right.senderAvatar &&
+      left.userId === right.userId &&
+      (left.systemKind ?? null) === (right.systemKind ?? null) &&
+      (left.idempotencyKey ?? null) === (right.idempotencyKey ?? null) &&
+      (left.origin ?? null) === (right.origin ?? null) &&
+      (left.externalReplyTo ?? null) === (right.externalReplyTo ?? null);
   }
 
   private publicStateStore(): PublicConversationStateStore {

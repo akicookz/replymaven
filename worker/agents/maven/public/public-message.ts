@@ -79,6 +79,9 @@ export function toPublicUiMessage(
     readAt: message.readAt,
     emailedAt: message.emailedAt,
     systemKind: message.systemKind,
+    idempotencyKey: message.idempotencyKey ?? null,
+    origin: message.origin ?? null,
+    externalReplyTo: message.externalReplyTo ?? null,
   };
   return {
     id: message.id,
@@ -145,6 +148,9 @@ export function fromPublicUiMessage(
     deliveredAt: message.metadata.deliveredAt,
     readAt: message.metadata.readAt,
     emailedAt: message.metadata.emailedAt,
+    idempotencyKey: message.metadata.idempotencyKey ?? null,
+    origin: message.metadata.origin ?? null,
+    externalReplyTo: message.metadata.externalReplyTo ?? null,
   };
 }
 

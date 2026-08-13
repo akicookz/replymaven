@@ -548,6 +548,7 @@ function registerSendAgentReplyTool(
         userId: context.userId,
         senderName: context.userName,
         senderAvatar: avatar,
+        origin: "mcp",
       });
       if (!message) throw new Error("Conversation not found");
 

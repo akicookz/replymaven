@@ -97,6 +97,7 @@ describe("public Agent turn parity", () => {
       messageId: "assistant-opening",
       ownershipRevision: 3,
       internalTokens: [],
+      httpExecutionIds: [],
     }]);
   });
 

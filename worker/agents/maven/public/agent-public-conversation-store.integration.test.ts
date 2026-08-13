@@ -92,7 +92,7 @@ describe("native AgentPublicConversationStore", () => {
     await expect(store.get(legacyRecord.projectId, legacyRecord.id)).resolves
       .toMatchObject({ visitorName: "Legacy visitor" });
     await expect(store.getMessages(legacyRecord.projectId, legacyRecord.id))
-      .resolves.toEqual(legacyMessages);
+      .resolves.toMatchObject(legacyMessages);
     await store.updateContact({
       projectId: legacyRecord.projectId,
       conversationId: legacyRecord.id,

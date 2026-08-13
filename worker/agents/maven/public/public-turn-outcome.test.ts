@@ -21,6 +21,7 @@ test("public turn outcomes survive recovery and are consumed once", () => {
     messageId: "assistant-1",
     ownershipRevision: 7,
     internalTokens: ["[HANDOFF_REQUESTED]"],
+    httpExecutionIds: ["execution-1"],
     createdAt: 100,
   });
 
@@ -29,6 +30,7 @@ test("public turn outcomes survive recovery and are consumed once", () => {
     messageId: "assistant-1",
     ownershipRevision: 7,
     internalTokens: ["[HANDOFF_REQUESTED]"],
+    httpExecutionIds: ["execution-1"],
     status: "completed",
     humanTakeover: true,
     aiInvoked: true,
@@ -38,6 +40,7 @@ test("public turn outcomes survive recovery and are consumed once", () => {
     messageId: "assistant-1",
     ownershipRevision: 7,
     internalTokens: ["[HANDOFF_REQUESTED]"],
+    httpExecutionIds: ["execution-1"],
     status: "completed",
     humanTakeover: true,
     aiInvoked: true,
@@ -70,6 +73,7 @@ test("marks only unfinished turns for human takeover", () => {
     messageId: "assistant-complete",
     ownershipRevision: 2,
     internalTokens: [],
+    httpExecutionIds: [],
     createdAt: 101,
   });
 

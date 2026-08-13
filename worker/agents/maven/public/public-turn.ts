@@ -117,6 +117,7 @@ interface CreatePublicTurnResponseInput {
     messageId: string;
     ownershipRevision: number;
     internalTokens: InternalToken[];
+    httpExecutionIds: string[];
   }): void;
 }
 
@@ -174,6 +175,7 @@ export function createPublicTurnResponse(
       }
       let internalTokens: InternalToken[] = [];
       let sources: PublicSourceReference[] = [];
+      let httpExecutionIds: string[] = [];
       if (input.openingText) {
         emitText(input.openingText);
       }
@@ -182,6 +184,7 @@ export function createPublicTurnResponse(
       } else {
         if (!input.runTurn) throw new Error("Public turn runner is required");
         const turn = await input.runTurn();
+        httpExecutionIds = turn.httpExecutionIds;
         const collected = await collectPublicTurnStream(
           turn.fullStream,
           emitText,
@@ -225,6 +228,7 @@ export function createPublicTurnResponse(
         messageId: input.assistantMessageId,
         ownershipRevision: input.ownershipRevision,
         internalTokens,
+        httpExecutionIds,
       });
       writer.write({
         type: "finish",
