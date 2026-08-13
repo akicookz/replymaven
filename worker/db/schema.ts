@@ -819,6 +819,31 @@ export const usage = sqliteTable(
 export type UsageRow = typeof usage.$inferSelect;
 export type NewUsageRow = typeof usage.$inferInsert;
 
+// ─── Idempotent Message Usage Credits ───────────────────────────────────────
+
+export const messageUsageCredits = sqliteTable(
+  "message_usage_credits",
+  {
+    messageId: text("message_id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authSchema.users.id, { onDelete: "cascade" }),
+    periodStart: integer("period_start", { mode: "timestamp" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .default(sql`(unixepoch())`)
+      .notNull(),
+  },
+  (table) => [
+    index("idx_message_usage_credits_user_period").on(
+      table.userId,
+      table.periodStart,
+    ),
+  ],
+);
+
+export type MessageUsageCreditRow = typeof messageUsageCredits.$inferSelect;
+export type NewMessageUsageCreditRow = typeof messageUsageCredits.$inferInsert;
+
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 
 export const apiKeys = sqliteTable(

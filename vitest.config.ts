@@ -12,6 +12,7 @@ export default defineConfig({
         bindings: {
           SIDECHAT_TOKEN_SECRET:
             "native-sidechat-workerd-test-secret-32-bytes",
+          STRIPE_SECRET_KEY: "sk_test_native_agents",
         },
       },
       wrangler: {

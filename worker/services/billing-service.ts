@@ -4,6 +4,7 @@ import { eq, and } from "drizzle-orm";
 import {
   subscriptions,
   usage,
+  messageUsageCredits,
   projects,
   projectSettings,
   type SubscriptionRow,
@@ -685,6 +686,30 @@ export class BillingService {
     }
 
     return 1;
+  }
+
+  async incrementMessageUsageOnce(
+    messageId: string,
+    userId: string,
+    subscription: SubscriptionRow | null,
+  ): Promise<number> {
+    const periodStart = this.getUsagePeriodStart(subscription);
+    const inserted = await this.db
+      .insert(messageUsageCredits)
+      .values({ messageId, userId, periodStart })
+      .onConflictDoNothing({ target: messageUsageCredits.messageId })
+      .returning({ messageId: messageUsageCredits.messageId });
+    const current = await this.getUsage(userId, subscription);
+    const count = current?.messagesUsed ?? 0;
+    if (inserted.length > 0 && current) {
+      await this.checkAndSendUsageAlerts(
+        userId,
+        subscription,
+        count,
+        current,
+      );
+    }
+    return count;
   }
 
   // ─── Usage Alerts ─────────────────────────────────────────────────────────

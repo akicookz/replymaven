@@ -2,6 +2,7 @@ import {
   AIChatAgent,
   type ChatResponseResult,
 } from "@cloudflare/ai-chat";
+import { drizzle } from "drizzle-orm/d1";
 import {
   getCurrentAgent,
   type Connection,
@@ -32,18 +33,39 @@ import {
   type PublicMessageRecord,
 } from "../../../shared/maven-conversation";
 import { createLanguageModel } from "../../chat-runtime/llm/create-language-model";
+import { createModelRuntimeState } from "../../chat-runtime/llm/create-language-model";
+import { normalizeConversationHistory } from "../../chat-runtime/orchestration/normalize-history";
+import { runMavenTurn } from "../../chat-runtime/orchestration/run-maven-turn";
+import { parseVisitorAiInvocation } from "../../chat-runtime/routing/public-turn-gates";
+import { classifyTaskScope } from "../../chat-runtime/workflows/classify-task-scope";
+import { buildSupportTurnOpening } from "../../chat-runtime/prompt/sections";
 import { type AppEnv } from "../../types";
 import type {
   DeletePublicMessageResult,
+  AppendPublicSystemInput,
   PublicChatChildState,
   PublicContactUpdateInput,
   PublicConversationAction,
   PublicCustomerLinkInput,
   PublicDeliveryUpdateInput,
   PublicEmailUpdateInput,
+  PublicExternalActionLease,
+  PublicExternalActionLeaseInput,
+  PublicLegacyEscalationMetadataUpdate,
   PublicMessageAttachmentSource,
   PublicPresenceUpdateInput,
+  PublicConversationStore,
+  PublicTeamRequestAcceptance,
+  PublicTeamRequestClaimInput,
+  PublicTeamRequestClaimResult,
+  PublicTeamRequestSummaryInput,
 } from "../../conversations/public-conversation-store";
+import {
+  applyChatOwnershipEvent,
+  fallbackAiParticipationForStatus,
+  parseChatState,
+  type ConversationChatState,
+} from "../../chat-runtime/types";
 import {
   readVerifiedSidechatClaims,
   resolveSidechatChatTurnClaims,
@@ -70,6 +92,7 @@ import {
 } from "./public/public-conversation-state";
 import {
   fromPublicUiMessage,
+  type PublicUIMessage,
   sanitizePublicMessageForPersistence,
   toPublicUiMessage,
 } from "./public/public-message";
@@ -81,6 +104,24 @@ import {
   buildPublicProtocolErrorFrame,
   guardPublicChatProtocolMessage,
 } from "./public/public-chat-protocol-guard";
+import {
+  createPublicTurnResponse,
+  evaluatePublicTurnGate,
+} from "./public/public-turn";
+import {
+  PublicTurnOutcomeStore,
+  type PublicTurnOutcomeSql,
+} from "./public/public-turn-outcome";
+import { decidePublicPostTurn } from "./public/public-post-turn";
+import { BillingService } from "../../services/billing-service";
+import { CustomerIdentityService } from "../../services/customer-identity-service";
+import { GuidelineService } from "../../services/guideline-service";
+import { ProjectService } from "../../services/project-service";
+import { TelegramService } from "../../services/telegram-service";
+import { ToolService } from "../../services/tool-service";
+import { VisitorBanService } from "../../services/visitor-ban-service";
+import { logError } from "../../observability";
+import { resolvePendingPublicContactUpdate } from "./public/public-human-mode";
 
 type SidechatDataParts = Record<string, unknown> & {
   "turn-accepted": { messageId: string };
@@ -264,7 +305,9 @@ export class MavenChatAgent extends AIChatAgent<
   maxPersistedMessages: number | undefined;
   waitForMcpConnections = false;
   private publicState?: PublicConversationStateStore;
+  private publicTurnOutcomes?: PublicTurnOutcomeStore;
   private publicMutationTail: Promise<void> = Promise.resolve();
+  private publicToolRateLimit = { count: 0, resetAt: 0 };
 
   constructor(ctx: DurableObjectState, env: AppEnv) {
     super(ctx, env);
@@ -330,8 +373,13 @@ export class MavenChatAgent extends AIChatAgent<
     connection.setState({ sidechatActor: claims });
   }
 
-  override shouldConnectionBeReadonly(): boolean {
-    return parseMavenChildName(this.name).kind === "public";
+  override shouldConnectionBeReadonly(
+    _connection: Connection,
+    context: ConnectionContext,
+  ): boolean {
+    if (parseMavenChildName(this.name).kind !== "public") return false;
+    const claims = readVerifiedPublicChatClaims(context.request);
+    return claims?.actor !== "visitor";
   }
 
   protected createSidechatLanguageModel(): LanguageModel {
@@ -347,7 +395,7 @@ export class MavenChatAgent extends AIChatAgent<
     options?: Parameters<AIChatAgent<AppEnv>["onChatMessage"]>[1],
   ): Promise<Response> {
     if (parseMavenChildName(this.name).kind === "public") {
-      return new Response(null, { status: 503 });
+      return this.handlePublicChatMessage(options);
     }
     if (!options?.requestId) {
       return Response.json({ error: "invalid_request" }, { status: 400 });
@@ -499,10 +547,365 @@ export class MavenChatAgent extends AIChatAgent<
     return createUIMessageStreamResponse({ stream });
   }
 
+  private async handlePublicChatMessage(
+    options?: Parameters<AIChatAgent<AppEnv>["onChatMessage"]>[1],
+  ): Promise<Response> {
+    const identity = this.assertPublicChild();
+    const projectId = this.publicProjectId();
+    const claims = readPublicChatConnectionClaims(
+      getCurrentAgent<MavenChatAgent>().connection?.state,
+    );
+    if (
+      !claims ||
+      claims.actor !== "visitor" ||
+      !claims.canSubmitVisitor ||
+      claims.projectId !== projectId ||
+      claims.conversationId !== identity.conversationId ||
+      claims.childName !== this.name
+    ) return new Response(null, { status: 401 });
+
+    const submittedUiMessage = this.messages.at(-1);
+    if (!submittedUiMessage || submittedUiMessage.role !== "user") {
+      return new Response(null, { status: 400 });
+    }
+    let submitted: PublicMessageRecord;
+    try {
+      submitted = fromPublicUiMessage(
+        submittedUiMessage,
+        projectId,
+        identity.conversationId,
+      );
+    } catch {
+      await this.discardPublicSubmission(submittedUiMessage.id);
+      return new Response(null, { status: 400 });
+    }
+
+    const initialState = this.requirePublicState();
+    if (
+      submitted.author !== "visitor" ||
+      submitted.conversationId !== initialState.id
+    ) {
+      await this.discardPublicSubmission(submitted.id);
+      return new Response(null, { status: 400 });
+    }
+
+    const db = drizzle(this.env.DB);
+    const projectService = new ProjectService(db);
+    const billingService = new BillingService(db, this.env);
+    const projectPromise = projectService.getProjectById(projectId);
+    const [project, settings, subscription, ban] = await Promise.all([
+      projectPromise,
+      projectService.getSettings(projectId),
+      projectPromise.then((row) =>
+        row
+          ? billingService.getSubscriptionByUserId(row.userId)
+          : Promise.resolve(null)
+      ),
+      new VisitorBanService(db).isVisitorBanned(
+        projectId,
+        initialState.visitorId,
+        initialState.visitorEmail,
+      ),
+    ]);
+    const subscriptionActive = Boolean(
+      project &&
+      subscription &&
+      billingService.isSubscriptionActive(subscription),
+    );
+    const messageAllowed = subscriptionActive && project
+      ? (await billingService.checkMessageLimit(
+          project.userId,
+          subscription,
+        )).allowed
+      : false;
+    const aiInvocation = parseVisitorAiInvocation(
+      submitted.content,
+      settings?.botName,
+    );
+    let currentState = initialState;
+    let currentChatState = this.parseStoredChatState(currentState);
+    let gate = evaluatePublicTurnGate({
+      subscriptionActive,
+      messageAllowed,
+      banned: Boolean(ban),
+      archived: currentState.archivedAt !== null,
+      status: currentState.status,
+      closeReason: currentState.closeReason,
+      aiParticipation: currentChatState.aiParticipation,
+      aiInvoked: aiInvocation.invoked,
+    });
+
+    if (
+      gate === "subscription_inactive" ||
+      gate === "message_limit_reached" ||
+      gate === "banned" ||
+      gate === "archived"
+    ) {
+      await this.discardPublicSubmission(submitted.id);
+      const status = gate === "message_limit_reached"
+        ? 429
+        : gate === "banned"
+        ? 403
+        : gate === "archived"
+        ? 410
+        : 503;
+      return new Response(null, { status });
+    }
+
+    await this.recordAcceptedVisitorActivity(submitted.createdAt);
+    await this.reconcilePublicAutoClose(settings?.autoCloseMinutes ?? null);
+    currentState = this.requirePublicState();
+    currentChatState = this.parseStoredChatState(currentState);
+
+    const contactUpdate = resolvePendingPublicContactUpdate({
+      status: currentState.status,
+      chatState: currentChatState,
+      message: submitted.content,
+    });
+    if (contactUpdate) {
+      await this.updatePendingTeamRequestContact(
+        projectId,
+        currentState.id,
+        {
+          status: currentState.status,
+          chatState: JSON.stringify(currentState.chatState),
+        },
+        contactUpdate,
+      );
+      currentState = this.requirePublicState();
+      currentChatState = this.parseStoredChatState(currentState);
+    }
+
+    gate = evaluatePublicTurnGate({
+      subscriptionActive,
+      messageAllowed,
+      banned: false,
+      archived: currentState.archivedAt !== null,
+      status: currentState.status,
+      closeReason: currentState.closeReason,
+      aiParticipation: currentChatState.aiParticipation,
+      aiInvoked: aiInvocation.invoked,
+    });
+    if (gate === "archived") {
+      await this.discardPublicSubmission(submitted.id);
+      return new Response(null, { status: 410 });
+    }
+
+    const operationalStore = this as unknown as PublicConversationStore;
+    if (currentState.customerId) {
+      const customerId = currentState.customerId;
+      const conversationId = currentState.id;
+      const identityService = new CustomerIdentityService(db, operationalStore);
+      this.ctx.waitUntil(
+        identityService.touchVisitorLastSeen(
+          projectId,
+          customerId,
+          currentState.visitorId,
+          new Date(submitted.createdAt),
+        ).catch((error) => {
+          logError("agent_public_turn.customer_last_seen_failed", error, {
+            projectId,
+            conversationId,
+            customerId,
+          });
+        }),
+      );
+    }
+
+    if (gate === "muted") return new Response(null, { status: 204 });
+    if (gate === "human_mode") {
+      if (
+        settings?.telegramBotToken &&
+        settings.telegramChatId &&
+        currentState.status !== "closed"
+      ) {
+        const telegram = new TelegramService(db);
+        this.ctx.waitUntil((async () => {
+          const lease = await this.acquireExternalAction({
+            projectId,
+            conversationId: currentState.id,
+          });
+          if (!lease) return;
+          try {
+            await telegram.forwardVisitorMessage(
+              settings.telegramBotToken!,
+              settings.telegramChatId!,
+              currentState.visitorName,
+              submitted.content,
+              currentState.id,
+              currentState.telegramThreadId
+                ? Number.parseInt(currentState.telegramThreadId, 10)
+                : undefined,
+            );
+          } finally {
+            await this.releaseExternalAction(lease);
+          }
+        })());
+      }
+      return new Response(null, { status: 204 });
+    }
+
+    if (!project) {
+      await this.discardPublicSubmission(submitted.id);
+      return new Response(null, { status: 404 });
+    }
+    if (gate === "reopen_and_run_ai") {
+      await this.reopenPublicConversationForVisitor();
+    }
+    currentState = this.requirePublicState();
+    currentChatState = this.parseStoredChatState(currentState);
+    const messageForAi = aiInvocation.invoked
+      ? aiInvocation.content
+      : submitted.content;
+    const pageContext = this.readPublicPageContext(options?.body?.pageContext);
+    const scope = classifyTaskScope({
+      message: messageForAi,
+      pageContext,
+    });
+    const assistantMessageId = crypto.randomUUID();
+    const originalMessages = this.messages as PublicUIMessage[];
+    const immediateText = scope.kind === "in_scope_support"
+      ? undefined
+      : scope.response ??
+        "I can only help with this product, website, and support-related questions here.";
+    const modelRuntime = createModelRuntimeState({
+      model: this.env.AI_MODEL,
+      geminiApiKey: this.env.GEMINI_API_KEY || null,
+      openaiApiKey: this.env.OPENAI_API_KEY || null,
+    });
+    const rawHistory = this.readPublicMessages().map((message) => ({
+      role: message.author,
+      content: message.content,
+      createdAt: message.createdAt,
+    }));
+    const isFirstVisitorTurn = rawHistory.filter((message) =>
+      message.role === "visitor"
+    ).length === 1;
+    const turnContext = {
+      kind: "standard",
+      isFirstVisitorTurn,
+    } as const;
+    const openingText = buildSupportTurnOpening(turnContext, {
+      name: currentState.visitorName,
+      email: currentState.visitorEmail,
+    });
+    const conversationHistory = normalizeConversationHistory({
+      rawHistory,
+      currentMessage: messageForAi,
+      persistedCurrentMessage: submitted.content,
+    });
+    const [guidelines, image] = await Promise.all([
+      new GuidelineService(db).getEnabledByProject(projectId),
+      this.loadPublicMessageImage(submitted.imageUrls[0] ?? null),
+    ]);
+    const toolService = new ToolService(db);
+    const telegramService = new TelegramService(db);
+    const executionCtx = this.ctx as unknown as ExecutionContext;
+    this.publicTurnOutcomeStore().begin({
+      messageId: assistantMessageId,
+      ownershipRevision: currentState.ownershipRevision,
+      aiInvoked: aiInvocation.invoked,
+      createdAt: Date.now(),
+    });
+
+    return createPublicTurnResponse({
+      originalMessages,
+      assistantMessageId,
+      projectId,
+      conversationId: currentState.id,
+      botName: settings?.botName ?? null,
+      ownershipRevision: currentState.ownershipRevision,
+      openingText,
+      resolvedFallbackText: currentState.status === "active"
+        ? "Glad I could help! Feel free to reach out anytime if you have more questions."
+        : undefined,
+      ...(immediateText === undefined ? {} : { immediateText }),
+      runTurn: immediateText === undefined
+        ? () => runMavenTurn({
+            context: {
+              channel: "public",
+              projectId,
+              conversationId: currentState.id,
+              actorUserId: null,
+              customerId: currentState.customerId,
+              ownership: {
+                status: currentState.status,
+                chatState: JSON.stringify(currentState.chatState),
+              },
+            },
+            dependencies: {
+              db,
+              env: this.env,
+              modelRuntime,
+              toolService,
+              projectName: project.name,
+              settings: settings ?? {
+                toneOfVoice: "professional",
+                customTonePrompt: null,
+                companyContext: null,
+                botName: null,
+                agentName: null,
+                workingHours: null,
+                avgResponseTime: null,
+              },
+              abortSignal: options?.abortSignal,
+              promptOptions: {
+                guidelines: guidelines.map((guideline) => ({
+                  condition: guideline.condition,
+                  instruction: guideline.instruction,
+                })),
+                agentHandbackInstructions:
+                  typeof currentState.metadata.agentHandbackInstructions ===
+                      "string"
+                    ? currentState.metadata.agentHandbackInstructions
+                    : null,
+                pageContext,
+                visitorInfo: {
+                  name: currentState.visitorName,
+                  email: currentState.visitorEmail,
+                },
+                timeContext: {
+                  nowMs: Date.now(),
+                  conversationHistory,
+                },
+                turnContext,
+                aiParticipation: currentChatState.aiParticipation,
+                escalated:
+                  currentState.status === "waiting_agent" ||
+                  currentState.status === "agent_replied",
+              },
+              publicToolDependencies: {
+                executionCtx,
+                chatService: operationalStore,
+                projectService,
+                telegramService,
+                acquireHttpRateLimitPermit: () =>
+                  this.acquirePublicToolRateLimitPermit(),
+                onTeamRequested() {},
+                broadcast() {},
+              },
+            },
+            conversationHistory,
+            currentMessage: messageForAi,
+            image,
+          })
+        : undefined,
+      onOutcome: (outcome) => {
+        this.publicTurnOutcomeStore().complete({
+          ...outcome,
+          createdAt: Date.now(),
+        });
+      },
+    });
+  }
+
   protected override async onChatResponse(
     result: ChatResponseResult,
   ): Promise<void> {
-    if (parseMavenChildName(this.name).kind === "public") return;
+    if (parseMavenChildName(this.name).kind === "public") {
+      await this.handlePublicChatResponse(result);
+      return;
+    }
     const conversationId = conversationIdFromChildName(this.name);
     const parent = await this.parentAgent(MavenProjectAgent);
     if (!await parent.isSidechatOperational(this.name, conversationId)) return;
@@ -530,6 +933,114 @@ export class MavenChatAgent extends AIChatAgent<
       await parent.updateSidechatSummary(conversationId, "failed");
       throw error;
     }
+  }
+
+  private async handlePublicChatResponse(
+    result: ChatResponseResult,
+  ): Promise<void> {
+    const outcome = this.publicTurnOutcomeStore().take(result.message.id);
+    if (!outcome) return;
+    if (result.status !== "completed" || outcome.status !== "completed") {
+      await this.discardUndeliveredPublicAssistant(result.message.id);
+      return;
+    }
+    if (!this.messages.some((message) => message.id === result.message.id)) {
+      return;
+    }
+    let responseMessage: PublicMessageRecord;
+    try {
+      responseMessage = fromPublicUiMessage(
+        result.message,
+        this.publicProjectId(),
+        this.assertPublicChild().conversationId,
+      );
+    } catch {
+      await this.discardPublicSubmission(result.message.id);
+      return;
+    }
+
+    const persisted = await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      const chatState = this.parseStoredChatState(state);
+      const decision = decidePublicPostTurn({
+        responseStatus: result.status,
+        outcomeStatus: outcome.status,
+        assistantPersisted: true,
+        archived: state.archivedAt !== null,
+        currentStatus: state.status,
+        currentParticipation: chatState.aiParticipation,
+        currentOwnershipRevision: state.ownershipRevision,
+        capturedOwnershipRevision: outcome.ownershipRevision,
+        aiInvoked: outcome.aiInvoked,
+        resolved: outcome.internalTokens.includes("[RESOLVED]"),
+      });
+      if (decision === "discard") {
+        const retained = this.readPublicMessages().filter((message) =>
+          message.id !== responseMessage.id
+        );
+        await this.persistPublicRecords(retained);
+        await this.publishPublicProjection(state, retained);
+        return false;
+      }
+      if (decision === "ignore") return false;
+
+      let nextChatState = chatState;
+      let status = state.status;
+      let closeReason = state.closeReason;
+      if (decision === "commit_resolved") {
+        nextChatState = applyChatOwnershipEvent(chatState, "ai_handed_back");
+        status = "closed";
+        closeReason = "bot_resolved";
+      }
+      const saved = this.saveNextPublicState(state, {
+        status,
+        closeReason,
+        chatState: { ...nextChatState },
+        ownershipRevision: nextChatState.ownershipRevision,
+        lastActivityAt: Math.max(state.lastActivityAt, responseMessage.createdAt),
+        updatedAt: Math.max(state.updatedAt, responseMessage.createdAt),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return true;
+    });
+    if (!persisted) return;
+
+    const projectId = this.publicProjectId();
+    const db = drizzle(this.env.DB);
+    const projectService = new ProjectService(db);
+    const billingService = new BillingService(db, this.env);
+    this.ctx.waitUntil((async () => {
+      const project = await projectService.getProjectById(projectId);
+      if (!project) return;
+      const subscription = await billingService.getSubscriptionByUserId(
+        project.userId,
+      );
+      await billingService.incrementMessageUsageOnce(
+        responseMessage.id,
+        project.userId,
+        subscription,
+      );
+      const settings = await projectService.getSettings(projectId);
+      await this.reconcilePublicAutoClose(settings?.autoCloseMinutes ?? null);
+    })());
+  }
+
+  private async discardUndeliveredPublicAssistant(
+    messageId: string,
+  ): Promise<void> {
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      const messages = this.readPublicMessages();
+      const message = messages.find((candidate) => candidate.id === messageId);
+      if (
+        !message ||
+        message.author !== "bot" ||
+        message.deliveredAt !== null
+      ) return;
+      const retained = messages.filter((candidate) => candidate.id !== messageId);
+      await this.persistPublicRecords(retained);
+      await this.publishPublicProjection(state, retained);
+    });
   }
 
   protected override sanitizeMessageForPersistence(
@@ -562,6 +1073,15 @@ export class MavenChatAgent extends AIChatAgent<
 
   async getPublicChildState(): Promise<PublicChatChildState> {
     return this.safePublicState(this.requirePublicState());
+  }
+
+  async getOperational(
+    projectId: string,
+    conversationId: string,
+  ): Promise<PublicConversationRecord | null> {
+    this.assertPublicInput(projectId, conversationId);
+    const state = this.requirePublicState();
+    return state.archivedAt === null ? this.toPublicConversation(state) : null;
   }
 
   async importLegacyPublicConversation(
@@ -634,7 +1154,54 @@ export class MavenChatAgent extends AIChatAgent<
     if (message.author !== "agent") {
       throw new Error("Human public messages must use the agent author");
     }
-    return this.appendPublicRecord(message, true);
+    this.abortAllRequests("Human takeover");
+    const interruptedAssistantIds = new Set(
+      this.publicTurnOutcomeStore().markPendingHumanTakeover(),
+    );
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (message.conversationId !== state.id) {
+        throw new Error("Public message does not match its child");
+      }
+      if (state.archivedAt !== null || state.purgeStartedAt !== null) {
+        throw new Error("Conversation is not available for a human reply");
+      }
+      const messages = this.readPublicMessages();
+      const existing = messages.find((candidate) => candidate.id === message.id);
+      if (existing) {
+        if (existing.author !== "agent") {
+          throw new Error("Public message id already exists");
+        }
+        return existing;
+      }
+      const retained = messages.filter((candidate) =>
+        !(
+          interruptedAssistantIds.has(candidate.id) &&
+          candidate.author === "bot" &&
+          candidate.deliveredAt === null
+        )
+      );
+      const updated = [...retained, structuredClone(message)];
+      if (state.autoCloseScheduleId) {
+        await this.cancelSchedule(state.autoCloseScheduleId);
+      }
+      const nextChatState = applyChatOwnershipEvent(
+        this.parseStoredChatState(state),
+        "human_joined",
+      );
+      await this.persistPublicRecords(updated);
+      const saved = this.saveNextPublicState(state, {
+        status: "agent_replied",
+        closeReason: null,
+        chatState: { ...nextChatState },
+        ownershipRevision: nextChatState.ownershipRevision,
+        lastActivityAt: Math.max(state.lastActivityAt, message.createdAt),
+        updatedAt: Math.max(state.updatedAt, message.createdAt),
+        autoCloseScheduleId: null,
+      });
+      await this.publishPublicProjection(saved, updated);
+      return structuredClone(message);
+    });
   }
 
   async appendVisitorMessage(
@@ -831,6 +1398,336 @@ export class MavenChatAgent extends AIChatAgent<
     });
   }
 
+  async appendSystem(
+    input: AppendPublicSystemInput,
+  ): Promise<PublicMessageRecord> {
+    this.assertPublicInput(input.projectId, input.conversationId);
+    const existing = input.idempotencyKey
+      ? this.readPublicMessages().find((message) =>
+          message.id === input.idempotencyKey
+        )
+      : null;
+    if (existing) return existing;
+    return this.appendSystemMessage({
+      id: input.idempotencyKey ?? crypto.randomUUID(),
+      conversationId: input.conversationId,
+      author: "system",
+      content: input.content,
+      imageUrls: [],
+      sources: [],
+      senderName: null,
+      senderAvatar: null,
+      userId: null,
+      systemKind: input.kind,
+      createdAt: Date.now(),
+      deliveredAt: null,
+      readAt: null,
+      emailedAt: null,
+    });
+  }
+
+  async claimTeamRequest(
+    input: PublicTeamRequestClaimInput,
+  ): Promise<PublicTeamRequestClaimResult> {
+    return this.runExclusivePublicMutation(async () => {
+      this.assertPublicInput(input.projectId, input.conversationId);
+      const state = this.requirePublicState();
+      if (state.archivedAt !== null) return { status: "unavailable" };
+      const chatState = this.parseStoredChatState(state);
+      if (
+        state.status === "waiting_agent" ||
+        state.status === "agent_replied" ||
+        chatState.aiParticipation === "human_only"
+      ) return { status: "already_requested" };
+      if (
+        state.status !== "active" ||
+        chatState.aiParticipation !== "continuous"
+      ) return { status: "unavailable" };
+      const requiredFields: Array<"name" | "email"> = [];
+      if (!state.visitorName?.trim()) requiredFields.push("name");
+      if (!state.visitorEmail?.trim()) requiredFields.push("email");
+      if (requiredFields.length > 0 && !chatState.contactDeclined) {
+        return { status: "contact_required", requiredFields };
+      }
+      const acceptedAt = new Date().toISOString();
+      const acceptanceToken = crypto.randomUUID();
+      const nextChatState = applyChatOwnershipEvent(
+        chatState,
+        "team_requested",
+      );
+      const saved = this.saveNextPublicState(state, {
+        status: "waiting_agent",
+        chatState: { ...nextChatState },
+        ownershipRevision: nextChatState.ownershipRevision,
+        metadata: {
+          ...state.metadata,
+          teamRequestSummary:
+            input.summary.trim() || "Visitor asked for team follow-up.",
+          escalatedAt: acceptedAt,
+          reviewSummaryMessageId: crypto.randomUUID(),
+          teamRequestSummaryPending: true,
+          teamRequestNotificationState: "pending",
+          mavenTeamRequestAcceptedAt: acceptedAt,
+          mavenTeamRequestAcceptanceToken: acceptanceToken,
+        },
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return { status: "claimed" };
+    });
+  }
+
+  async getTeamRequestAcceptance(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<PublicTeamRequestAcceptance | null> {
+    this.assertPublicInput(projectId, conversationId);
+    return this.readTeamRequestAcceptance(
+      this.requirePublicState(),
+      acceptanceToken,
+    );
+  }
+
+  async claimTeamRequestNotification(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<boolean> {
+    return this.runExclusivePublicMutation(async () => {
+      this.assertPublicInput(projectId, conversationId);
+      const state = this.requirePublicState();
+      const acceptance = this.readTeamRequestAcceptance(
+        state,
+        acceptanceToken,
+      );
+      if (!acceptance || acceptance.notificationState !== "pending") {
+        return false;
+      }
+      const saved = this.saveNextPublicState(state, {
+        metadata: {
+          ...state.metadata,
+          teamRequestNotificationState: "attempted",
+          teamRequestNotificationAttemptedAt: new Date().toISOString(),
+        },
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return true;
+    });
+  }
+
+  async addTeamRequestSummary(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+  ): Promise<PublicMessageRecord | null> {
+    return this.runExclusivePublicMutation(async () => {
+      this.assertPublicInput(projectId, conversationId);
+      const state = this.requirePublicState();
+      const acceptance = this.readTeamRequestAcceptance(state, acceptanceToken);
+      if (!acceptance?.summaryPending) return null;
+      const messages = this.readPublicMessages();
+      const existing = messages.find((message) =>
+        message.id === acceptance.summaryMessageId
+      );
+      if (existing) return existing;
+      const message: PublicMessageRecord = {
+        id: acceptance.summaryMessageId,
+        conversationId,
+        author: "system",
+        content: acceptance.summary,
+        imageUrls: [],
+        sources: [],
+        senderName: null,
+        senderAvatar: null,
+        userId: null,
+        systemKind: "review_summary",
+        createdAt: Date.now(),
+        deliveredAt: null,
+        readAt: null,
+        emailedAt: null,
+      };
+      const updated = [...messages, message];
+      await this.persistPublicRecords(updated);
+      const saved = this.saveNextPublicState(state, {
+        updatedAt: Math.max(state.updatedAt, message.createdAt),
+      });
+      await this.publishPublicProjection(saved, updated);
+      return message;
+    });
+  }
+
+  async completeTeamRequestSummary(
+    input: PublicTeamRequestSummaryInput,
+  ): Promise<boolean> {
+    return this.runExclusivePublicMutation(async () => {
+      this.assertPublicInput(input.projectId, input.conversationId);
+      const state = this.requirePublicState();
+      const acceptance = this.readTeamRequestAcceptance(
+        state,
+        input.acceptanceToken,
+      );
+      if (!acceptance) return false;
+      if (!acceptance.summaryPending) return true;
+      const saved = this.saveNextPublicState(state, {
+        metadata: {
+          ...state.metadata,
+          teamRequestSummaryPending: false,
+        },
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return true;
+    });
+  }
+
+  async updateLegacyEscalationMetadata(
+    projectId: string,
+    conversationId: string,
+    update: PublicLegacyEscalationMetadataUpdate,
+  ): Promise<PublicConversationRecord | null> {
+    return this.runExclusivePublicMutation(async () => {
+      this.assertPublicInput(projectId, conversationId);
+      const state = this.requirePublicState();
+      if (
+        state.archivedAt !== null ||
+        (state.metadata.mavenTeamRequestAcceptanceToken ?? null) !==
+          update.expectedMavenAcceptanceToken
+      ) return null;
+      const saved = this.saveNextPublicState(state, {
+        metadata: {
+          ...state.metadata,
+          teamRequestSummary: update.summary,
+          reviewSummaryMessageId: update.summaryMessageId,
+          ...(update.escalatedAt === undefined
+            ? {}
+            : { escalatedAt: update.escalatedAt }),
+          ...(update.summaryPending === undefined
+            ? {}
+            : { teamRequestSummaryPending: update.summaryPending }),
+        },
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return this.toPublicConversation(saved);
+    });
+  }
+
+  async persistTeamRequestTelegramThreadId(
+    projectId: string,
+    conversationId: string,
+    acceptanceToken: string,
+    threadId: string,
+  ): Promise<boolean> {
+    return this.runExclusivePublicMutation(async () => {
+      this.assertPublicInput(projectId, conversationId);
+      const state = this.requirePublicState();
+      const acceptance = this.readTeamRequestAcceptance(
+        state,
+        acceptanceToken,
+      );
+      if (
+        !acceptance ||
+        acceptance.notificationState !== "attempted" ||
+        (state.telegramThreadId !== null && state.telegramThreadId !== threadId)
+      ) return false;
+      if (
+        state.telegramThreadId === threadId &&
+        state.metadata.mavenTeamRequestTelegramThreadAcceptanceToken ===
+          acceptanceToken
+      ) return true;
+      const saved = this.saveNextPublicState(state, {
+        telegramThreadId: threadId,
+        metadata: {
+          ...state.metadata,
+          mavenTeamRequestTelegramThreadAcceptanceToken: acceptanceToken,
+        },
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return true;
+    });
+  }
+
+  async updatePendingTeamRequestContact(
+    projectId: string,
+    conversationId: string,
+    ownership: { status: string; chatState: string | null },
+    update: {
+      visitorName?: string;
+      visitorEmail?: string;
+      awaitingContactFields: Array<"name" | "email">;
+      contactDeclined?: boolean;
+    },
+  ): Promise<PublicConversationRecord | null> {
+    return this.runExclusivePublicMutation(async () => {
+      this.assertPublicInput(projectId, conversationId);
+      const state = this.requirePublicState();
+      if (
+        state.archivedAt !== null ||
+        state.status !== ownership.status ||
+        JSON.stringify(state.chatState) !== ownership.chatState
+      ) return null;
+      const chatState = this.parseStoredChatState(state);
+      const nextChatState: ConversationChatState = {
+        ...chatState,
+        awaitingContactFields: [...update.awaitingContactFields],
+        ...(update.contactDeclined === undefined
+          ? {}
+          : { contactDeclined: update.contactDeclined }),
+      };
+      const saved = this.saveNextPublicState(state, {
+        ...(update.visitorName === undefined
+          ? {}
+          : { visitorName: update.visitorName }),
+        ...(update.visitorEmail === undefined
+          ? {}
+          : { visitorEmail: update.visitorEmail }),
+        chatState: { ...nextChatState },
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+      return this.toPublicConversation(saved);
+    });
+  }
+
+  async acquireExternalAction(
+    input: PublicExternalActionLeaseInput,
+  ): Promise<PublicExternalActionLease | null> {
+    return this.runExclusivePublicMutation(async () => {
+      this.assertPublicInput(input.projectId, input.conversationId);
+      const state = this.requirePublicState();
+      if (
+        state.archivedAt !== null ||
+        state.externalActionLeaseId !== null ||
+        (input.ownership &&
+          (input.ownership.status !== state.status ||
+            input.ownership.chatState !== JSON.stringify(state.chatState)))
+      ) return null;
+      const acquiredAt = input.now ?? Date.now();
+      const leaseId = crypto.randomUUID();
+      this.saveInternalPublicState(state, {
+        externalActionLeaseId: leaseId,
+        externalActionStartedAt: acquiredAt,
+      });
+      return {
+        projectId: input.projectId,
+        conversationId: input.conversationId,
+        leaseId,
+        ownershipRevision: state.ownershipRevision,
+        acquiredAt,
+      };
+    });
+  }
+
+  async releaseExternalAction(input: PublicExternalActionLease): Promise<void> {
+    await this.runExclusivePublicMutation(async () => {
+      this.assertPublicInput(input.projectId, input.conversationId);
+      const state = this.requirePublicState();
+      if (state.externalActionLeaseId !== input.leaseId) return;
+      this.saveInternalPublicState(state, {
+        externalActionLeaseId: null,
+        externalActionStartedAt: null,
+      });
+    });
+  }
+
   async updateContact(
     input: PublicContactUpdateInput,
   ): Promise<PublicConversationRecord | null> {
@@ -887,6 +1784,148 @@ export class MavenChatAgent extends AIChatAgent<
     );
   }
 
+  async autoClosePublicConversation(payload: {
+    lastActivityAt: number;
+    autoCloseMinutes: number;
+  }): Promise<void> {
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (
+        state.archivedAt !== null ||
+        state.status === "closed" ||
+        state.status === "waiting_agent" ||
+        state.lastActivityAt !== payload.lastActivityAt ||
+        Date.now() <
+          payload.lastActivityAt + payload.autoCloseMinutes * 60_000
+      ) return;
+      const saved = this.saveNextPublicState(state, {
+        status: "closed",
+        closeReason: "ended",
+        autoCloseScheduleId: null,
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+    });
+  }
+
+  private async discardPublicSubmission(messageId: string): Promise<void> {
+    if (!this.messages.some((message) => message.id === messageId)) return;
+    await this.persistMessages(
+      this.messages.filter((message) => message.id !== messageId),
+      [],
+      { _deleteStaleRows: true },
+    );
+  }
+
+  private async recordAcceptedVisitorActivity(createdAt: number): Promise<void> {
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (state.archivedAt !== null) return;
+      const saved = this.saveNextPublicState(state, {
+        lastActivityAt: Math.max(state.lastActivityAt, createdAt),
+        updatedAt: Math.max(state.updatedAt, createdAt),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+    });
+  }
+
+  private async reopenPublicConversationForVisitor(): Promise<void> {
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (state.archivedAt !== null || state.status !== "closed") return;
+      const now = Date.now();
+      const saved = this.saveNextPublicState(state, {
+        status: "active",
+        closeReason: null,
+        lastActivityAt: now,
+        updatedAt: now,
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+    });
+  }
+
+  async reconcilePublicAutoClose(
+    autoCloseMinutes: number | null,
+  ): Promise<void> {
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (state.autoCloseScheduleId) {
+        await this.cancelSchedule(state.autoCloseScheduleId);
+      }
+      if (
+        autoCloseMinutes === null ||
+        state.archivedAt !== null ||
+        state.status === "closed" ||
+        state.status === "waiting_agent"
+      ) {
+        if (state.autoCloseScheduleId) {
+          this.saveInternalPublicState(state, { autoCloseScheduleId: null });
+        }
+        return;
+      }
+      const delaySeconds = Math.max(
+        1,
+        Math.ceil(
+          (state.lastActivityAt + autoCloseMinutes * 60_000 - Date.now()) /
+            1_000,
+        ),
+      );
+      const schedule = await this.schedule(
+        delaySeconds,
+        "autoClosePublicConversation",
+        { lastActivityAt: state.lastActivityAt, autoCloseMinutes },
+        { idempotent: true },
+      );
+      this.saveInternalPublicState(state, { autoCloseScheduleId: schedule.id });
+    });
+  }
+
+  private readPublicPageContext(value: unknown): Record<string, string> {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  }
+
+  private async loadPublicMessageImage(
+    imageUrl: string | null,
+  ): Promise<{ base64: string; mimeType: string } | null> {
+    if (!imageUrl) return null;
+    try {
+      const pathname = new URL(imageUrl).pathname;
+      const marker = "/api/uploads/";
+      const markerIndex = pathname.indexOf(marker);
+      if (markerIndex < 0) return null;
+      const key = decodeURIComponent(
+        pathname.slice(markerIndex + marker.length),
+      );
+      const object = await this.env.UPLOADS.get(key);
+      if (!object) return null;
+      const bytes = new Uint8Array(await object.arrayBuffer());
+      let binary = "";
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      return {
+        base64: btoa(binary),
+        mimeType: object.httpMetadata?.contentType ?? "image/jpeg",
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private acquirePublicToolRateLimitPermit(): boolean {
+    const now = Date.now();
+    if (now >= this.publicToolRateLimit.resetAt) {
+      this.publicToolRateLimit = { count: 1, resetAt: now + 60_000 };
+      return true;
+    }
+    if (this.publicToolRateLimit.count >= 100) return false;
+    this.publicToolRateLimit.count += 1;
+    return true;
+  }
+
   private async appendPublicRecord(
     message: PublicMessageRecord,
     updateActivity: boolean,
@@ -923,6 +1962,18 @@ export class MavenChatAgent extends AIChatAgent<
     };
     this.publicState = new PublicConversationStateStore(adapter);
     return this.publicState;
+  }
+
+  private publicTurnOutcomeStore(): PublicTurnOutcomeStore {
+    if (this.publicTurnOutcomes) return this.publicTurnOutcomes;
+    const durableSql = this.ctx.storage.sql;
+    const adapter: PublicTurnOutcomeSql = {
+      execute<T>(query: string, bindings: Array<string | number | null>): T[] {
+        return durableSql.exec(query, ...bindings).toArray() as T[];
+      },
+    };
+    this.publicTurnOutcomes = new PublicTurnOutcomeStore(adapter);
+    return this.publicTurnOutcomes;
   }
 
   private assertPublicChild(): {
@@ -968,6 +2019,42 @@ export class MavenChatAgent extends AIChatAgent<
     return state;
   }
 
+  private parseStoredChatState(
+    state: StoredPublicConversationState,
+  ): ConversationChatState {
+    return parseChatState(JSON.stringify(state.chatState), {
+      fallbackAiParticipation: fallbackAiParticipationForStatus(state.status),
+    });
+  }
+
+  private readTeamRequestAcceptance(
+    state: StoredPublicConversationState,
+    acceptanceToken: string,
+  ): PublicTeamRequestAcceptance | null {
+    if (state.status !== "waiting_agent" || state.archivedAt !== null) {
+      return null;
+    }
+    if (this.parseStoredChatState(state).aiParticipation === "human_only") {
+      return null;
+    }
+    const metadata = state.metadata;
+    if (
+      metadata.mavenTeamRequestAcceptanceToken !== acceptanceToken ||
+      typeof metadata.mavenTeamRequestAcceptedAt !== "string" ||
+      typeof metadata.teamRequestSummary !== "string" ||
+      typeof metadata.reviewSummaryMessageId !== "string" ||
+      typeof metadata.teamRequestNotificationState !== "string"
+    ) return null;
+    return {
+      acceptanceToken,
+      acceptedAt: metadata.mavenTeamRequestAcceptedAt,
+      notificationState: metadata.teamRequestNotificationState,
+      summary: metadata.teamRequestSummary,
+      summaryMessageId: metadata.reviewSummaryMessageId,
+      summaryPending: metadata.teamRequestSummaryPending === true,
+    };
+  }
+
   private readPublicMessages(): PublicMessageRecord[] {
     const identity = this.assertPublicChild();
     const projectId = this.publicProjectId();
@@ -995,6 +2082,20 @@ export class MavenChatAgent extends AIChatAgent<
       ...current,
       ...changes,
       revision: current.revision + 1,
+    };
+    const saved = this.publicStateStore().save(next, current.revision);
+    if (!saved) throw new Error("Public conversation revision conflict");
+    return saved;
+  }
+
+  private saveInternalPublicState(
+    current: StoredPublicConversationState,
+    changes: Partial<StoredPublicConversationState>,
+  ): StoredPublicConversationState {
+    const next: StoredPublicConversationState = {
+      ...current,
+      ...changes,
+      revision: current.revision,
     };
     const saved = this.publicStateStore().save(next, current.revision);
     if (!saved) throw new Error("Public conversation revision conflict");
