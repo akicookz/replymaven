@@ -1671,6 +1671,14 @@ const app = new Hono<HonoAppContext>()
     return c.redirect("https://widget.replymaven.com/widget-embed.js", 301);
   })
 
+  // Apex embeds resolve the runtime from scriptOrigin, which is this host.
+  .get("/widget-agent-runtime.js", (c) => {
+    return c.redirect(
+      "https://widget.replymaven.com/widget-agent-runtime.js",
+      301,
+    );
+  })
+
   // ═══════════════════════════════════════════════════════════════════════════
   // PUBLIC HELP CENTER (HTML, no auth)
   // ═══════════════════════════════════════════════════════════════════════════
