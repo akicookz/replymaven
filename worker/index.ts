@@ -710,9 +710,12 @@ const app = new Hono<HonoAppContext>()
   // those paths before the SPA fallback fires.
   .use(
     "*",
-    except(["/api/*", "/help/*", "/.well-known/*"], async (c) => {
-      return c.env.ASSETS.fetch(c.req.raw);
-    }),
+    except(
+      ["/api/*", "/help/*", "/.well-known/*", "/widget-agent-runtime.js"],
+      async (c) => {
+        return c.env.ASSETS.fetch(c.req.raw);
+      },
+    ),
   )
 
   // ─── OAuth Metadata (public) ──────────────────────────────────────────────
