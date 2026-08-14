@@ -18,7 +18,10 @@ import {
 const DEFAULT_BACKFILL_LIMIT = 100;
 const MAX_BACKFILL_LIMIT = 100;
 const VERIFY_CONCURRENCY = 5;
-const MAX_VERIFY_BATCH_LIMIT = 100;
+// Verify fans out per conversation (child import, state read, transcript
+// read), so large batches exhaust the per-request subrequest budget.
+const DEFAULT_VERIFY_LIMIT = 10;
+const MAX_VERIFY_BATCH_LIMIT = 25;
 
 interface ProjectAgentMigrationStub {
   reconcileDirectory(
@@ -263,7 +266,7 @@ export class ConversationRuntimeMigrationService {
   ): Promise<ConversationRuntimeParityResult> {
     const boundedLimit = Math.max(
       1,
-      Math.min(MAX_VERIFY_BATCH_LIMIT, options.limit ?? MAX_VERIFY_BATCH_LIMIT),
+      Math.min(MAX_VERIFY_BATCH_LIMIT, options.limit ?? DEFAULT_VERIFY_LIMIT),
     );
     const cursor = options.cursor ?? null;
     const parent = await this.getProjectAgent(projectId);
@@ -387,10 +390,15 @@ export class ConversationRuntimeMigrationService {
       .orderBy(asc(conversations.id))
       .limit(limit);
     if (rows.length === 0) return [];
+    // D1 caps bound parameters at 100 per query; chunk the id list so the
+    // batch size can never push the IN() clause over it.
     const ids = rows.map((row) => row.id);
-    const messageRows = await this.db.select().from(messages)
-      .where(inArray(messages.conversationId, ids))
-      .orderBy(asc(messages.createdAt), asc(messages.id));
+    const messageRows = [];
+    for (let offset = 0; offset < ids.length; offset += 50) {
+      messageRows.push(...await this.db.select().from(messages)
+        .where(inArray(messages.conversationId, ids.slice(offset, offset + 50)))
+        .orderBy(asc(messages.createdAt), asc(messages.id)));
+    }
     const byConversation = new Map<string, PublicMessageRecord[]>();
     for (const row of messageRows) {
       const mapped = mapD1MessageRow(row);
