@@ -9,7 +9,6 @@ import {
   buildSidechatSendBody,
   fetchSidechatSession,
   deriveNativeSidechatUiStatus,
-  isSidechatSessionUsable,
   planFailedSidechatRetry,
   planInitialSidechatSubmission,
   reduceAcceptedSidechatTransfer,
@@ -97,10 +96,9 @@ describe("native Sidechat client contract", () => {
       query: { token: "signed-token" },
       queryDeps: ["signed-token"],
     });
-    expect(sidechatSessionRefreshInterval(session(), 1_900_000)).toBe(85_000);
+    expect(sidechatSessionRefreshInterval(session(), 1_900_000)).toBe(50_000);
     expect(sidechatSessionRefreshInterval(session(), 1_995_000)).toBe(5_000);
-    expect(isSidechatSessionUsable(session(), 1_984_999)).toBe(true);
-    expect(isSidechatSessionUsable(session(), 1_985_000)).toBe(false);
+    expect(sidechatSessionRefreshInterval(session(), 2_100_000)).toBe(5_000);
   });
 
   test("resumes and syncs native chat without cancelling work on local cleanup", () => {
@@ -129,25 +127,20 @@ describe("native Sidechat client contract", () => {
       session: session({ created: true }),
       messageId: "human-1",
       publicTextSnapshot: "  Please investigate this  ",
-      trustedDefault: "Help me respond to Ada.",
     })).toEqual({
       messageId: "human-1",
       text: "Please investigate this",
     });
+    // No captured draft: open the pane empty, never auto-send a default.
     expect(planInitialSidechatSubmission({
       session: session({ created: true }),
       messageId: "human-2",
       publicTextSnapshot: "   ",
-      trustedDefault: "Help me respond to Ada.",
-    })).toEqual({
-      messageId: "human-2",
-      text: "Help me respond to Ada.",
-    });
+    })).toBeNull();
     expect(planInitialSidechatSubmission({
       session: session({ created: false }),
       messageId: "human-3",
       publicTextSnapshot: "Do not send this again",
-      trustedDefault: "Help me respond to Ada.",
     })).toBeNull();
   });
 
@@ -193,7 +186,6 @@ describe("native Sidechat client contract", () => {
     expect(planFailedSidechatRetry({
       transfer,
       persistedMessageIds: new Set(),
-      trustedDefault: "Help me respond to Ada.",
     })).toEqual({
       kind: "resubmit",
       messageId: "human-1",
@@ -202,15 +194,17 @@ describe("native Sidechat client contract", () => {
     expect(planFailedSidechatRetry({
       transfer,
       persistedMessageIds: new Set(["human-1"]),
-      trustedDefault: "Help me respond to Ada.",
     })).toEqual({
       kind: "regenerate",
       acceptedMessageId: "human-1",
     });
     expect(planFailedSidechatRetry({
+      transfer: { ...transfer, textSnapshot: "   " },
+      persistedMessageIds: new Set(),
+    })).toEqual({ kind: "regenerate" });
+    expect(planFailedSidechatRetry({
       transfer: null,
       persistedMessageIds: new Set(),
-      trustedDefault: "Help me respond to Ada.",
     })).toEqual({ kind: "regenerate" });
   });
 

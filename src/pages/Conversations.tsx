@@ -51,6 +51,7 @@ import type {
 } from "@/lib/inbox/types";
 import {
   deriveAddToReplyIntent,
+  deriveSidechatPresentation,
   mergeSidechatSummaryStatuses,
   planSidechatEntry,
   type SidechatPresentationStatus,
@@ -60,7 +61,6 @@ import {
   planFailedSidechatRetry,
   reduceAcceptedSidechatTransfer,
   deriveNativeSidechatUiStatus,
-  isSidechatSessionUsable,
   useSidechatAgent,
   useSidechatSession,
   useSidechatSummarySession,
@@ -171,6 +171,7 @@ interface NativeSidechatPaneProps {
   conversation: Conversation;
   customerFirstName: string | null;
   session: SidechatSessionResponse;
+  summaryStatus: SidechatPresentationStatus;
   transfer: PendingSidechatTransfer | null;
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
@@ -186,6 +187,7 @@ function NativeSidechatPane({
   conversation,
   customerFirstName,
   session,
+  summaryStatus,
   transfer,
   draft,
   setDraft,
@@ -215,9 +217,6 @@ function NativeSidechatPane({
         : null);
     },
   });
-  const trustedDefault = customerFirstName
-    ? `Help me respond to ${customerFirstName}.`
-    : "Help me respond to this conversation.";
   const sendSidechatMessage = sidechat.send;
 
   useEffect(() => {
@@ -233,7 +232,6 @@ function NativeSidechatPane({
       session,
       messageId: transfer.messageId,
       publicTextSnapshot: transfer.textSnapshot,
-      trustedDefault,
     });
     if (!submission) {
       onInitialSubmissionSkipped(transfer.messageId);
@@ -252,7 +250,6 @@ function NativeSidechatPane({
     session,
     sendSidechatMessage,
     transfer,
-    trustedDefault,
   ]);
 
   const hasApproval = sidechat.messages.some(
@@ -271,16 +268,13 @@ function NativeSidechatPane({
     isServerStreaming: sidechat.isServerStreaming,
     isRecovering: sidechat.isRecovering,
   });
-  const presentationStatus: SidechatPresentationStatus =
-    sidechatUiStatus === "error"
-      ? "failed"
-      : sidechatUiStatus === "streaming"
-        ? "working"
-        : hasApproval
-          ? "waiting_approval"
-          : hasReplyDraft
-            ? "ready"
-            : "idle";
+  const presentation = deriveSidechatPresentation({
+    uiStatus: sidechatUiStatus,
+    rawStatus: sidechat.status,
+    summaryStatus,
+    hasApproval,
+    hasReplyDraft,
+  });
 
   return (
     <SidechatPane
@@ -292,9 +286,11 @@ function NativeSidechatPane({
       setDraft={setDraft}
       onAddToReply={onAddToReply}
       onClose={onClose}
-      status={sidechatUiStatus}
-      presentationStatus={presentationStatus}
-      error={sidechat.error}
+      status={presentation.status}
+      presentationStatus={presentation.presentationStatus}
+      error={presentation.serverFailure
+        ? sidechat.error ?? new Error("The Sidechat turn failed.")
+        : sidechat.error}
       safeActivity={safeActivity}
       onSend={(text) => {
         setSafeActivity(null);
@@ -310,7 +306,6 @@ function NativeSidechatPane({
           persistedMessageIds: new Set(
             sidechat.nativeMessages.map((message) => message.id),
           ),
-          trustedDefault,
         });
         if (retryPlan.kind === "resubmit") {
           void sidechat.send(retryPlan.text, retryPlan.messageId).catch(
@@ -1933,9 +1928,12 @@ function Conversations() {
   ]);
 
   // ── Render ────────────────────────────────────────────────────────────────
+  // Keep the pane mounted on the last session for this conversation even if
+  // the token has gone stale: the open socket keeps working, and the session
+  // query delivers a fresh token before the next reconnect needs one.
+  // Unmounting here destroys the chat state and shows a skeleton wall.
   const matchingSidechatSession = selected &&
-      sidechatSession.data?.childName === `sc_${selected.id}` &&
-      isSidechatSessionUsable(sidechatSession.data)
+      sidechatSession.data?.childName === `sc_${selected.id}`
     ? sidechatSession.data
     : null;
   const sidechatPane = selected
@@ -1946,6 +1944,7 @@ function Conversations() {
           conversation={selected}
           customerFirstName={customerFirstName}
           session={matchingSidechatSession}
+          summaryStatus={selectedSidechatStatus}
           transfer={pendingSidechatTransfer}
           draft={sidechatDraft}
           setDraft={setSelectedSidechatDraft}

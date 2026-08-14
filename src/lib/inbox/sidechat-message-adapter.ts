@@ -2,7 +2,7 @@ import {
   getToolApproval,
   getToolCallId,
 } from "@cloudflare/ai-chat/react";
-import { isToolUIPart, type UIMessage } from "ai";
+import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import type { SidechatToolPresentation } from "../../../shared/sidechat-agent";
 import {
   redactPrivateToolPayload,
@@ -267,6 +267,9 @@ function readSidechatTrace(
       return;
     }
     if (!isToolUIPart(part)) return;
+    // The internal reply-draft tool is presentation plumbing, not an action:
+    // its result already renders as the draft bubble with "Add to reply".
+    if (getToolName(part) === "present_reply_draft") return;
     const toolCallId = boundedString(getToolCallId(part), 200);
     if (!toolCallId) return;
     const context = contextByToolCallId.get(toolCallId);
@@ -328,6 +331,18 @@ function readLatestReplyDraft(
   return null;
 }
 
+function readMessageCreatedAt(message: UIMessage): number | null {
+  const metadata = message.metadata;
+  if (
+    isRecord(metadata) &&
+    typeof metadata.createdAt === "number" &&
+    Number.isFinite(metadata.createdAt)
+  ) {
+    return metadata.createdAt;
+  }
+  return null;
+}
+
 function toIsoTime(milliseconds: number): string {
   const date = new Date(milliseconds);
   return Number.isNaN(date.getTime())
@@ -361,7 +376,11 @@ export function adaptSidechatMessages(
         role: nativeMessage.role === "user" ? "agent" : "bot",
         content,
         senderName: nativeMessage.role === "assistant" ? "Maven" : "You",
-        createdAt: toIsoTime(draft?.createdAt ?? baseTime + messageIndex),
+        createdAt: toIsoTime(
+          readMessageCreatedAt(nativeMessage) ??
+            draft?.createdAt ??
+            baseTime + messageIndex,
+        ),
         ...(sidechatTrace.length > 0 ? { sidechatTrace } : {}),
         ...(draft
           ? {

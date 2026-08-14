@@ -43,7 +43,6 @@ describe("Conversations native Sidechat orchestration", () => {
       },
       messageId: "human-1",
       publicTextSnapshot: "Keep this in the public composer",
-      trustedDefault: "Help me respond to Ada.",
     })).toBeNull();
   });
 

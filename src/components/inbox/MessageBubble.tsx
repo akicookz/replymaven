@@ -3,6 +3,7 @@ import { deriveMessageStatus } from "@/lib/inbox/message-status";
 import {
   deriveMessageActions,
   deriveMessagePresentation,
+  isSidechatToolRunning,
   type ChatPerspective,
 } from "@/lib/inbox/sidechat";
 import type { Conversation, Message } from "@/lib/inbox/types";
@@ -78,6 +79,16 @@ export default function MessageBubble({
   const showContent = shouldShowMessageContent(message.content);
   const showSidechatTrace =
     perspective === "sidechat" && Boolean(message.sidechatTrace?.length);
+  // While a tool runs or waits for approval, the trace row is the whole
+  // story; sender and time under a message still in flight are noise.
+  const sidechatToolPending =
+    perspective === "sidechat" &&
+    message.sidechatTrace?.some(
+      (item) =>
+        item.type === "tool" &&
+        (isSidechatToolRunning(item.state) ||
+          item.state === "approval-requested"),
+    ) === true;
   const approvalTool = message.presentationAction?.type === "approval"
     ? message.presentationAction.tool
     : undefined;
@@ -124,7 +135,7 @@ export default function MessageBubble({
   }
 
   function renderMetadata() {
-    if (!showMetadata) return null;
+    if (!showMetadata || sidechatToolPending) return null;
     return (
       <div
         className={cn(
@@ -149,21 +160,23 @@ export default function MessageBubble({
         <div className="mt-1 flex min-h-10 items-center">
           <button
             type="button"
-            className="min-h-10 shrink-0 whitespace-nowrap text-[12px] font-semibold text-brand-label underline-offset-4 hover:underline motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
+            className="group flex min-h-10 shrink-0 items-center whitespace-nowrap text-[12px] font-medium motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.97]"
             onClick={() => onAddToReply(draft)}
           >
-            Add to reply
+            <span className="rounded-full bg-brand/15 px-3 py-1 text-brand-label ring-1 ring-inset ring-brand/25 group-hover:bg-brand/25 motion-safe:transition-colors motion-safe:duration-150">
+              Add to reply
+            </span>
           </button>
         </div>
       );
     }
     if (actions.approveOnce && onApprovalAction) {
       return (
-        <div className="mt-1 flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="mt-1 flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1">
           {actions.approveAlways && (
             <button
               type="button"
-              className="min-h-10 shrink-0 whitespace-nowrap text-[12px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
+              className="group flex min-h-10 shrink-0 items-center whitespace-nowrap text-[12px] font-medium motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.97]"
               onClick={() => {
                 if (message.presentationAction?.type !== "approval") return;
                 onApprovalAction(
@@ -173,12 +186,14 @@ export default function MessageBubble({
                 );
               }}
             >
-              Always allow
+              <span className="rounded-full bg-ink-1/5 px-3 py-1 text-ink-5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] group-hover:text-ink-2 motion-safe:transition-colors motion-safe:duration-150">
+                Always allow
+              </span>
             </button>
           )}
           <button
             type="button"
-            className="flex min-h-10 shrink-0 items-center whitespace-nowrap text-[12px] font-semibold motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.96]"
+            className="group flex min-h-10 shrink-0 items-center whitespace-nowrap text-[12px] font-medium motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out motion-safe:active:scale-[0.97]"
             onClick={() => {
               if (message.presentationAction?.type !== "approval") return;
               onApprovalAction(
@@ -188,7 +203,7 @@ export default function MessageBubble({
               );
             }}
           >
-            <span className="rounded-[8px] bg-bubble-sent px-2.5 py-1.5 text-white">
+            <span className="rounded-full bg-brand/15 px-3 py-1 text-brand-label ring-1 ring-inset ring-brand/25 group-hover:bg-brand/25 motion-safe:transition-colors motion-safe:duration-150">
               Allow once
             </span>
           </button>

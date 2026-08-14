@@ -40,8 +40,9 @@ describe("public dashboard Agent client contract", () => {
         "/api/projects/project%20%2F%20one/conversations/conversation%20%2F%20one/agent-session",
       init: { method: "POST" },
     }]);
-    expect(publicChatSessionRefreshInterval(session(), 1_900_000)).toBe(85_000);
+    expect(publicChatSessionRefreshInterval(session(), 1_900_000)).toBe(50_000);
     expect(publicChatSessionRefreshInterval(session(), 1_995_000)).toBe(5_000);
+    expect(publicChatSessionRefreshInterval(session(), 2_100_000)).toBe(5_000);
   });
 
   test("connects through the parent to the exact public child", () => {

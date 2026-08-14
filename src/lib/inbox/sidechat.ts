@@ -1,6 +1,7 @@
 import type {
   MessagePresentationAction,
   MessageRole,
+  SidechatToolTraceState,
 } from "./types";
 import type {
   MavenProjectState,
@@ -213,6 +214,53 @@ export function mergeSidechatSummaryStatuses(
     statuses[summary.conversationId] = summary.status;
   }
   return statuses;
+}
+
+// "approval-responded" is running: the approved tool executes at the start of
+// the continuation turn and only then transitions to an output state.
+export function isSidechatToolRunning(state: SidechatToolTraceState): boolean {
+  return state === "input-streaming" ||
+    state === "input-available" ||
+    state === "approval-responded";
+}
+
+interface SidechatPresentationInput {
+  uiStatus: "submitted" | "streaming" | "ready" | "error";
+  rawStatus: "submitted" | "streaming" | "ready" | "error";
+  summaryStatus: SidechatPresentationStatus;
+  hasApproval: boolean;
+  hasReplyDraft: boolean;
+}
+
+interface SidechatPresentation {
+  status: "submitted" | "streaming" | "ready" | "error";
+  presentationStatus: SidechatPresentationStatus;
+  serverFailure: boolean;
+}
+
+// A continuation that dies server-side never sends the client an error frame,
+// so the chat status can sit on "streaming" forever. The project summary does
+// flip to "failed"; fold it in as a fallback error signal. An optimistic send
+// (rawStatus "submitted") or a visible approval card wins over a stale
+// failure.
+export function deriveSidechatPresentation(
+  input: SidechatPresentationInput,
+): SidechatPresentation {
+  const serverFailure = input.summaryStatus === "failed" &&
+    !input.hasApproval &&
+    input.rawStatus !== "submitted" &&
+    input.uiStatus !== "error";
+  const status = serverFailure ? "error" : input.uiStatus;
+  const presentationStatus: SidechatPresentationStatus = status === "error"
+    ? "failed"
+    : status === "streaming" || status === "submitted"
+      ? "working"
+      : input.hasApproval
+        ? "waiting_approval"
+        : input.hasReplyDraft
+          ? "ready"
+          : "idle";
+  return { status, presentationStatus, serverFailure };
 }
 
 export function deriveSidechatPaneMode(viewportWidth: number): SidechatPaneMode {

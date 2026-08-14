@@ -9,7 +9,6 @@ import type {
 } from "../../shared/public-chat-agent";
 import { adaptPublicMessages } from "@/lib/inbox/public-message-adapter";
 
-const SESSION_REFRESH_SAFETY_MS = 15_000;
 const MINIMUM_SESSION_REFRESH_MS = 5_000;
 
 interface UsePublicChatSessionOptions {
@@ -66,13 +65,15 @@ export async function fetchPublicChatSession(
   return readJsonResponse<PublicChatSessionResponse>(response);
 }
 
+// Refresh at half the remaining lifetime so a fresh token always lands well
+// before expiry; an established socket keeps working through refreshes.
 export function publicChatSessionRefreshInterval(
   session: { expiresAt: number },
   now = Date.now(),
 ): number {
   return Math.max(
     MINIMUM_SESSION_REFRESH_MS,
-    session.expiresAt * 1_000 - now - SESSION_REFRESH_SAFETY_MS,
+    Math.floor((session.expiresAt * 1_000 - now) / 2),
   );
 }
 
@@ -92,6 +93,7 @@ export function usePublicChatSession(
       const current = query.state.data;
       return current ? publicChatSessionRefreshInterval(current) : 30_000;
     },
+    refetchIntervalInBackground: true,
   });
 }
 

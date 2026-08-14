@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
@@ -15,7 +15,6 @@ import {
 } from "@/lib/inbox/sidechat-message-adapter";
 import { shouldClearAcceptedPublicDraft } from "@/lib/inbox/sidechat";
 
-const SESSION_REFRESH_SAFETY_MS = 15_000;
 const MINIMUM_SESSION_REFRESH_MS = 5_000;
 
 export interface PendingSidechatTransfer {
@@ -29,7 +28,6 @@ interface InitialSidechatSubmissionOptions {
   session: SidechatSessionResponse;
   messageId: string;
   publicTextSnapshot: string;
-  trustedDefault: string;
 }
 
 interface AcceptedSidechatTransferOptions {
@@ -138,21 +136,17 @@ export async function fetchSidechatSummarySession(
   return readJsonResponse<SidechatSummarySessionResponse>(response);
 }
 
+// Refresh at half the remaining lifetime so a fresh token always lands well
+// before expiry. A stale token only matters on the next socket (re)connect;
+// the mounted pane and its open socket keep working through refreshes.
 export function sidechatSessionRefreshInterval(
   session: { expiresAt: number },
   now = Date.now(),
 ): number {
   return Math.max(
     MINIMUM_SESSION_REFRESH_MS,
-    session.expiresAt * 1_000 - now - SESSION_REFRESH_SAFETY_MS,
+    Math.floor((session.expiresAt * 1_000 - now) / 2),
   );
-}
-
-export function isSidechatSessionUsable(
-  session: { expiresAt: number },
-  now = Date.now(),
-): boolean {
-  return session.expiresAt * 1_000 - now > SESSION_REFRESH_SAFETY_MS;
 }
 
 export function useSidechatSession(
@@ -175,6 +169,7 @@ export function useSidechatSession(
       const current = query.state.data;
       return current ? sidechatSessionRefreshInterval(current) : 30_000;
     },
+    refetchIntervalInBackground: true,
   });
 }
 
@@ -191,6 +186,7 @@ export function useSidechatSummarySession(
       const current = query.state.data;
       return current ? sidechatSessionRefreshInterval(current) : 30_000;
     },
+    refetchIntervalInBackground: true,
   });
 }
 
@@ -263,14 +259,18 @@ export function deriveNativeSidechatUiStatus(options: {
     : "ready";
 }
 
+// Only a draft the user actually typed in the public composer is carried
+// into a fresh Sidechat. An empty open never auto-sends anything: an
+// unprompted message would send Maven into unrequested tool use.
 export function planInitialSidechatSubmission(
   options: InitialSidechatSubmissionOptions,
 ): { messageId: string; text: string } | null {
   if (!options.session.created) return null;
   const captured = options.publicTextSnapshot.trim();
+  if (!captured) return null;
   return {
     messageId: options.messageId,
-    text: captured || options.trustedDefault,
+    text: captured,
   };
 }
 
@@ -296,7 +296,6 @@ export function reduceAcceptedSidechatTransfer(
 export function planFailedSidechatRetry(options: {
   transfer: PendingSidechatTransfer | null;
   persistedMessageIds: ReadonlySet<string>;
-  trustedDefault: string;
 }): FailedSidechatRetryPlan {
   const { transfer } = options;
   if (!transfer) return { kind: "regenerate" };
@@ -306,10 +305,12 @@ export function planFailedSidechatRetry(options: {
       acceptedMessageId: transfer.messageId,
     };
   }
+  const text = transfer.textSnapshot.trim();
+  if (!text) return { kind: "regenerate" };
   return {
     kind: "resubmit",
     messageId: transfer.messageId,
-    text: transfer.textSnapshot.trim() || options.trustedDefault,
+    text,
   };
 }
 
@@ -401,9 +402,13 @@ export function useSidechatAgent(
     sendMessage,
     stop,
   } = chat;
+  // Fallback clock for messages without a persisted createdAt; captured once
+  // so re-renders never shift the displayed times.
+  const fallbackNow = useRef(Date.now());
   const messages = useMemo(
     () => adaptSidechatMessages(chat.messages, {
       canAlwaysAllow: options.session.canAlwaysAllow,
+      now: fallbackNow.current,
     }),
     [chat.messages, options.session.canAlwaysAllow],
   );

@@ -58,6 +58,39 @@ describe("Sidechat native message protocol adapter", () => {
     expect(JSON.stringify(messages)).not.toContain("private-provider-metadata");
   });
 
+  test("hides the internal reply-draft tool from the execution trace", () => {
+    const messages = adaptSidechatMessages([
+      uiMessage("maven-1", "assistant", [
+        {
+          type: "tool-present_reply_draft",
+          toolCallId: "draft-1",
+          state: "output-available",
+          input: { text: "The visitor-ready answer." },
+          output: { accepted: true },
+        },
+        { type: "text", text: "Draft is ready." },
+      ] as UIMessage["parts"]),
+    ], { now: 1_786_334_400_000 });
+
+    expect(messages[0]!.sidechatTrace).toBeUndefined();
+    expect(messages[0]!.content).toBe("Draft is ready.");
+  });
+
+  test("prefers the persisted creation time over the render clock", () => {
+    const persisted: UIMessage = {
+      id: "human-1",
+      role: "user",
+      metadata: { createdAt: 1_786_300_000_000 },
+      parts: [{ type: "text", text: "Check this customer" }],
+    };
+    const [message] = adaptSidechatMessages([persisted], {
+      now: 1_786_334_400_000,
+    });
+    expect(message!.createdAt).toBe(
+      new Date(1_786_300_000_000).toISOString(),
+    );
+  });
+
   test("maps one tool call through approval and output without creating another message", () => {
     const context = {
       displayName: "Query events",

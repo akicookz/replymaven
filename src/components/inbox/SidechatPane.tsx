@@ -1,6 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
 import { Plug, X } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import type { SafeSidechatDataPart } from "@/lib/inbox/sidechat-message-adapter";
 import {
@@ -178,10 +177,9 @@ export default function SidechatPane({
                 <div
                   data-sidechat-working
                   aria-label="Maven is working"
-                  className="space-y-2"
+                  className="flex min-w-0 items-center gap-2"
                 >
-                  <Skeleton className="h-3 w-[72%] rounded" />
-                  <Skeleton className="h-3 w-[56%] rounded" />
+                  <span className="rm-text-sweep">Maven is working…</span>
                 </div>
               )}
               {status === "error" && error && (

@@ -6,7 +6,9 @@ import {
   deriveMessageActions,
   deriveMessagePresentation,
   deriveSidechatPaneMode,
+  deriveSidechatPresentation,
   deriveSidechatStatusDot,
+  isSidechatToolRunning,
 } from "./sidechat";
 
 function keyboardInput(overrides: Partial<Parameters<
@@ -155,6 +157,103 @@ describe("Sidechat presentation helpers", () => {
         showComposer: false,
         showMessageActions: false,
       });
+  });
+
+  test("surfaces a server-side turn failure the client stream never saw", () => {
+    // Stuck state: continuation died server-side, client still shows busy.
+    expect(deriveSidechatPresentation({
+      uiStatus: "streaming",
+      rawStatus: "streaming",
+      summaryStatus: "failed",
+      hasApproval: false,
+      hasReplyDraft: false,
+    })).toEqual({
+      status: "error",
+      presentationStatus: "failed",
+      serverFailure: true,
+    });
+  });
+
+  test("does not override an optimistic send or a pending approval with a stale failure", () => {
+    expect(deriveSidechatPresentation({
+      uiStatus: "streaming",
+      rawStatus: "submitted",
+      summaryStatus: "failed",
+      hasApproval: false,
+      hasReplyDraft: false,
+    })).toEqual({
+      status: "streaming",
+      presentationStatus: "working",
+      serverFailure: false,
+    });
+    expect(deriveSidechatPresentation({
+      uiStatus: "ready",
+      rawStatus: "ready",
+      summaryStatus: "failed",
+      hasApproval: true,
+      hasReplyDraft: false,
+    })).toEqual({
+      status: "ready",
+      presentationStatus: "waiting_approval",
+      serverFailure: false,
+    });
+  });
+
+  test("keeps the existing presentation ladder when the summary is healthy", () => {
+    expect(deriveSidechatPresentation({
+      uiStatus: "error",
+      rawStatus: "error",
+      summaryStatus: "working",
+      hasApproval: false,
+      hasReplyDraft: false,
+    })).toEqual({
+      status: "error",
+      presentationStatus: "failed",
+      serverFailure: false,
+    });
+    expect(deriveSidechatPresentation({
+      uiStatus: "streaming",
+      rawStatus: "streaming",
+      summaryStatus: "working",
+      hasApproval: false,
+      hasReplyDraft: false,
+    })).toEqual({
+      status: "streaming",
+      presentationStatus: "working",
+      serverFailure: false,
+    });
+    expect(deriveSidechatPresentation({
+      uiStatus: "ready",
+      rawStatus: "ready",
+      summaryStatus: "idle",
+      hasApproval: false,
+      hasReplyDraft: true,
+    })).toEqual({
+      status: "ready",
+      presentationStatus: "ready",
+      serverFailure: false,
+    });
+    expect(deriveSidechatPresentation({
+      uiStatus: "ready",
+      rawStatus: "ready",
+      summaryStatus: "idle",
+      hasApproval: false,
+      hasReplyDraft: false,
+    })).toEqual({
+      status: "ready",
+      presentationStatus: "idle",
+      serverFailure: false,
+    });
+  });
+
+  test("marks executing tool states as running, including approved continuations", () => {
+    expect(isSidechatToolRunning("input-streaming")).toBe(true);
+    expect(isSidechatToolRunning("input-available")).toBe(true);
+    expect(isSidechatToolRunning("approval-responded")).toBe(true);
+    expect(isSidechatToolRunning("approval-requested")).toBe(false);
+    expect(isSidechatToolRunning("output-available")).toBe(false);
+    expect(isSidechatToolRunning("output-error")).toBe(false);
+    expect(isSidechatToolRunning("output-denied")).toBe(false);
   });
 
   test("retains isolated future status-dot presentation", () => {
