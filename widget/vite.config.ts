@@ -10,6 +10,9 @@ export default defineConfig({
   // runtime explicitly; the classic transform would reference a global React.
   esbuild: {
     jsx: "automatic",
+    // Escape non-ASCII (e.g. the … in phase labels) so host pages that are
+    // not declared UTF-8 cannot mojibake the bundle's string literals.
+    charset: "ascii",
   },
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),

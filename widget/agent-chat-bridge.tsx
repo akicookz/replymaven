@@ -1,5 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
-import { Suspense, useCallback, useEffect, useLayoutEffect, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
@@ -111,6 +118,49 @@ function normalizeConnectionError(value: unknown): Error | undefined {
   return new Error("The chat connection closed");
 }
 
+const SOCKET_OPEN_TIMEOUT_MS = 10_000;
+
+interface SocketLike {
+  readyState?: number;
+  addEventListener?(type: string, listener: () => void): void;
+  removeEventListener?(type: string, listener: () => void): void;
+}
+
+// Submitting while the socket is still connecting flushes the request in the
+// same batch as useAgentChat's stream-resume probe. The server then treats the
+// brand-new turn as a resumable stream awaiting a replay ACK that the
+// submitting client never sends, so every chunk is buffered server-side and
+// the client only receives an empty final frame. Waiting for the open event
+// keeps the probe ahead of the submit in the socket's send order.
+function waitForOpenSocket(socket: SocketLike): Promise<void> {
+  if (
+    socket.readyState === undefined ||
+    socket.readyState === WebSocket.OPEN ||
+    !socket.addEventListener
+  ) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("The chat connection did not open in time"));
+    }, SOCKET_OPEN_TIMEOUT_MS);
+    function cleanup(): void {
+      clearTimeout(timer);
+      socket.removeEventListener?.("open", onOpen);
+      socket.removeEventListener?.("close", onClose);
+    }
+    function onOpen(): void {
+      cleanup();
+      resolve();
+    }
+    function onClose(): void {
+      cleanup();
+      reject(new Error("The chat connection closed before opening"));
+    }
+    socket.addEventListener?.("open", onOpen);
+    socket.addEventListener?.("close", onClose);
+  });
+}
+
 function buildMessage(input: WidgetPublicSendInput): UIMessage {
   const parts: UIMessage["parts"] = [];
   if (input.content) parts.push({ type: "text", text: input.content });
@@ -171,9 +221,13 @@ function WidgetAgentBridge(props: WidgetAgentBridgeProps) {
     stop,
   } = chat;
 
+  const socketRef = useRef<SocketLike>(agent);
+  socketRef.current = agent;
+
   useLayoutEffect(() => {
     onControls({
       async send(input: WidgetPublicSendInput): Promise<void> {
+        await waitForOpenSocket(socketRef.current);
         await sendMessage(buildMessage(input), {
           body: {
             token: session.token,
