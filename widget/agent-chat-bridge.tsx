@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { Suspense, useEffect, useLayoutEffect } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
@@ -23,6 +23,7 @@ export interface WidgetChatActivity {
   isServerStreaming: boolean;
   isRecovering: boolean;
   error: Error | undefined;
+  statusMessage?: string;
 }
 
 export interface WidgetAgentChatClient {
@@ -54,6 +55,13 @@ interface WidgetAgentBridgeProps {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readPublicActivityLabel(value: unknown): string | null {
+  if (!isRecord(value) || value.type !== "data-public-activity") return null;
+  if (!isRecord(value.data) || typeof value.data.label !== "string") return null;
+  const label = value.data.label.trim();
+  return label && label.length <= 120 ? label : null;
 }
 
 function readPublicChatChildState(value: unknown): PublicChatChildState | null {
@@ -122,12 +130,20 @@ function WidgetAgentBridge(props: WidgetAgentBridgeProps) {
     queryDeps: [session.token],
     onStateUpdate: onConversationState,
   });
+  const [statusMessage, setStatusMessage] = useState<string | undefined>(
+    undefined,
+  );
+  const onData = useCallback((value: unknown) => {
+    const label = readPublicActivityLabel(value);
+    if (label) setStatusMessage(label);
+  }, []);
   const chat = useAgentChat({
     agent,
     resume: true,
     cancelOnClientAbort: false,
     syncMessagesToServer: false,
     body: () => ({ token: session.token }),
+    onData,
   });
   const {
     error,
@@ -158,11 +174,15 @@ function WidgetAgentBridge(props: WidgetAgentBridgeProps) {
 
   useEffect(() => {
     const connectionError = normalizeConnectionError(agent.connectionError);
+    const active = status === "submitted" || status === "streaming" ||
+      isServerStreaming;
+    if (!active && statusMessage !== undefined) setStatusMessage(undefined);
     onActivity({
       status: connectionError ? "error" : status,
       isServerStreaming,
       isRecovering,
       error: error ?? connectionError,
+      ...(active && statusMessage ? { statusMessage } : {}),
     });
   }, [
     agent.connectionError,
@@ -171,6 +191,7 @@ function WidgetAgentBridge(props: WidgetAgentBridgeProps) {
     isServerStreaming,
     onActivity,
     status,
+    statusMessage,
   ]);
 
   useEffect(() => {

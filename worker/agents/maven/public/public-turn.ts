@@ -71,6 +71,7 @@ export interface CollectedPublicTurn {
 export async function collectPublicTurnStream(
   stream: AsyncIterable<MavenStreamPart>,
   emitText: (delta: string) => void,
+  emitActivity?: (label: string) => void,
 ): Promise<CollectedPublicTurn> {
   const stripState = createStreamingStripState();
   const internalTokens: InternalToken[] = [];
@@ -83,6 +84,11 @@ export async function collectPublicTurnStream(
       part.type === "tool-error"
     ) {
       hadToolCalls = true;
+    }
+    if (part.type === "tool-call") {
+      emitActivity?.(part.toolName === "search_knowledge"
+        ? "Searching the docs"
+        : "Checking project information");
     }
     if (part.type !== "text-delta" || typeof part.text !== "string") {
       continue;
@@ -165,9 +171,18 @@ export function createPublicTurnResponse(
         messageMetadata: botMetadata(input, [], createdAt),
       });
       let textStarted = false;
+      function emitActivity(label: string): void {
+        if (textStarted) return;
+        writer.write({
+          type: "data-public-activity",
+          data: { label },
+          transient: true,
+        });
+      }
       function emitText(delta: string): void {
         if (!delta) return;
         if (!textStarted) {
+          emitActivity("Composing a response");
           writer.write({ type: "text-start", id: textPartId });
           textStarted = true;
         }
@@ -183,11 +198,13 @@ export function createPublicTurnResponse(
         emitText(input.immediateText);
       } else {
         if (!input.runTurn) throw new Error("Public turn runner is required");
+        emitActivity("Thinking");
         const turn = await input.runTurn();
         httpExecutionIds = turn.httpExecutionIds;
         const collected = await collectPublicTurnStream(
           turn.fullStream,
           emitText,
+          emitActivity,
         );
         internalTokens = collected.internalTokens;
         sources = turn.collectedSources.map((source) => ({

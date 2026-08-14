@@ -4550,6 +4550,7 @@ import {
       hideTyping();
       if (lastVisitorStatusEl) {
         lastVisitorStatusEl.textContent = "Failed to send";
+        lastVisitorStatusEl.style.opacity = "1";
         lastVisitorStatusEl.classList.add("failed");
       }
       addMessageToUI(
@@ -4578,6 +4579,17 @@ import {
   let lastMessageRole: string | null = null;
   // Track the latest visitor message status element for iMessage-style delivery status
   let lastVisitorStatusEl: HTMLElement | null = null;
+
+  // The server streaming a reply proves the submit was accepted, so flip the
+  // pending "Sending..." label without waiting for the full turn to resolve.
+  function markPendingVisitorMessageSent(): void {
+    const statusElement = lastVisitorStatusEl;
+    if (!statusElement || statusElement.textContent !== "Sending...") return;
+    statusElement.textContent = "Sent";
+    setTimeout(() => {
+      statusElement.style.opacity = "0";
+    }, 2_000);
+  }
 
   // Full-screen viewer for message images: backdrop/image click or Esc
   // closes, ←/→ and arrow buttons navigate multi-image messages. Appended to
@@ -5038,7 +5050,13 @@ import {
       ) {
         pendingIncomingResponseIds.add(message.id);
       }
-      updateRenderedPublicMessage(message);
+      // A streaming response exists from the stream's start part, before any
+      // text; keep showing the typing indicator instead of an empty bubble.
+      const isEmptyPendingResponse =
+        (message.author === "bot" || message.author === "agent") &&
+        message.content.length === 0 &&
+        message.imageUrls.length === 0;
+      if (!isEmptyPendingResponse) updateRenderedPublicMessage(message);
       if (
         (message.author === "bot" || message.author === "agent") &&
         message.content
@@ -5126,7 +5144,10 @@ import {
       activity.status === "streaming" ||
       activity.isServerStreaming
     ) {
-      showTyping();
+      if (activity.status === "streaming" || activity.isServerStreaming) {
+        markPendingVisitorMessageSent();
+      }
+      showTyping(activity.statusMessage);
       return;
     }
     hideTyping();
