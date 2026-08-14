@@ -229,6 +229,48 @@ describe("public conversation storage conversion", () => {
 });
 
 describe("D1 public conversation store", () => {
+  test("migration reads preserve ordered system rows hidden from public reads", async () => {
+    const { sqlite, store } = createD1StoreHarness();
+    sqlite.query(`INSERT INTO conversations (
+      id, project_id, visitor_id, status, last_activity_at, priority,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, 'active', ?, 'medium', ?, ?)`).run(
+      "conversation-1",
+      "project-1",
+      "visitor-1",
+      10,
+      10,
+      10,
+    );
+    sqlite.query(`INSERT INTO messages (
+      id, conversation_id, role, content, sources, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?)`).run(
+      "a-system",
+      "conversation-1",
+      "system",
+      "Joined",
+      JSON.stringify({ systemKind: "joined" }),
+      10,
+    );
+    sqlite.query(`INSERT INTO messages (
+      id, conversation_id, role, content, created_at
+    ) VALUES (?, ?, ?, ?, ?)`).run(
+      "b-visitor",
+      "conversation-1",
+      "visitor",
+      "Hello",
+      10,
+    );
+
+    expect(await store.getMessages("project-1", "conversation-1"))
+      .toMatchObject([{ id: "b-visitor" }]);
+    expect(await store.getMigrationMessages("project-1", "conversation-1"))
+      .toMatchObject([
+        { id: "a-system", author: "system", systemKind: "joined" },
+        { id: "b-visitor", author: "visitor" },
+      ]);
+  });
+
   test("tenant-scopes transcript reads, receipts, and deletion", async () => {
     const { sqlite, store } = createD1StoreHarness();
     sqlite.query(`INSERT INTO conversations (

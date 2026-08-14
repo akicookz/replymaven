@@ -1,4 +1,9 @@
 import type { MavenConversationSummary } from "../../shared/sidechat-agent";
+import type {
+  PublicConversationRecord,
+  PublicMessageRecord,
+} from "../../shared/maven-conversation";
+import { publicConversationImportChecksum } from "../../shared/public-transcript-checksum";
 import type { AppEnv } from "../types";
 import type { PublicConversationStore } from "../conversations/public-conversation-store";
 import { legacyEntryToSummary } from "./conversation-runtime-backfill";
@@ -7,8 +12,13 @@ interface LegacyMirrorParentStub {
   reconcileDirectory(
     summaries: MavenConversationSummary[],
   ): Promise<{ applied: number; skipped: number }>;
+  reconcileLegacyConversation(input: {
+    summary: MavenConversationSummary;
+    conversation: PublicConversationRecord;
+    messages: PublicMessageRecord[];
+    checksum: string;
+  }): Promise<void>;
   removeLegacyConversation(conversationId: string): Promise<boolean>;
-  recordLegacyRuntimeRequest(input: { at: number }): Promise<void>;
 }
 
 interface ConversationReference {
@@ -125,6 +135,7 @@ function addStringArgumentReferences(
     "setStatus",
     "reopen",
     "checkAndCloseStale",
+    "checkAndCloseStaleForProject",
     "prepareContactSupportOwnership",
     "claimTeamRequestNotification",
     "addTeamRequestSummary",
@@ -183,6 +194,11 @@ function addStringArgumentReferences(
       Array.isArray(args[0]) ? args[0] : [];
     ids.filter((id): id is string => typeof id === "string")
       .forEach((id) => conversations.add(id));
+  } else if (
+    method === "closeOpenAsSpam" ||
+    method === "closeOpenConversationsAsSpam"
+  ) {
+    projectId = typeof args[0] === "string" ? args[0] : null;
   }
   if (projectId) projects.add(projectId);
   if (conversationId) conversations.add(conversationId);
@@ -223,35 +239,6 @@ export function extractLegacyMutationReferences(
   return [...pairs.values()];
 }
 
-function extractLegacyRuntimeProjectIds(
-  method: string,
-  args: unknown[],
-  result: unknown,
-  references: ConversationReference[],
-): string[] {
-  const projects = new Set(references.map((reference) => reference.projectId));
-  const conversations = new Set<string>();
-  const pairs = new Map<string, ConversationReference>();
-  args.forEach((arg) =>
-    collectReferenceParts(arg, projects, conversations, pairs)
-  );
-  collectReferenceParts(result, projects, conversations, pairs);
-  if (method === "getAnalytics" && Array.isArray(args[0])) {
-    args[0].filter((id): id is string => typeof id === "string")
-      .forEach((id) => projects.add(id));
-  }
-  if (
-    method === "queryUsageConversations" &&
-    args[0] && typeof args[0] === "object" &&
-    Array.isArray((args[0] as Record<string, unknown>).projectIds)
-  ) {
-    ((args[0] as Record<string, unknown>).projectIds as unknown[])
-      .filter((id): id is string => typeof id === "string")
-      .forEach((id) => projects.add(id));
-  }
-  return [...projects];
-}
-
 async function getParent(
   env: AppEnv,
   projectId: string,
@@ -261,18 +248,6 @@ async function getParent(
     env.MAVEN_PROJECT_AGENT,
     projectId,
   ) as unknown as LegacyMirrorParentStub;
-}
-
-export async function recordLegacyConversationEndpointRequest(
-  env: AppEnv,
-  projectId: string,
-): Promise<void> {
-  try {
-    const parent = await getParent(env, projectId);
-    await parent.recordLegacyRuntimeRequest({ at: Date.now() });
-  } catch {
-    // Traffic observation must never make a compatibility endpoint unavailable.
-  }
 }
 
 async function mirrorReference(
@@ -293,9 +268,15 @@ async function mirrorReference(
     reference.projectId,
     reference.conversationId,
   );
-  await parent.reconcileDirectory([
-    await legacyEntryToSummary({ conversation, messages: transcript }),
-  ]);
+  await parent.reconcileLegacyConversation({
+    summary: await legacyEntryToSummary({
+      conversation,
+      messages: transcript,
+    }),
+    conversation,
+    messages: transcript,
+    checksum: await publicConversationImportChecksum(conversation, transcript),
+  });
 }
 
 export function withLegacyConversationDirectoryMirror(
@@ -314,22 +295,17 @@ export function withLegacyConversationDirectoryMirror(
           target,
           args,
         );
-        const references = extractLegacyMutationReferences(property, args, result);
-        const projectIds = extractLegacyRuntimeProjectIds(
-          property,
-          args,
-          result,
-          references,
-        );
-        await Promise.all(projectIds.map(async (projectId) => {
-          await recordLegacyConversationEndpointRequest(env, projectId);
-        }));
         if (MUTATING_METHODS.has(property)) {
+          const references = extractLegacyMutationReferences(
+            property,
+            args,
+            result,
+          );
           await Promise.all(references.map(async (reference) => {
             try {
               await mirrorReference(store, env, reference);
             } catch {
-              // Legacy D1 remains authoritative; bounded backfill reconciles gaps.
+              // A rerun of the directory backfill repairs a missed refresh.
             }
           }));
         }

@@ -231,6 +231,19 @@ export function readPublicChatConnectionClaims(
   return parsePublicClaims(state.publicChatActor);
 }
 
+export function readPublicChatConnectionOrigin(state: unknown): string | null {
+  if (!isRecord(state) || typeof state.publicChatOrigin !== "string") {
+    return null;
+  }
+  try {
+    return new URL(state.publicChatOrigin).origin === state.publicChatOrigin
+      ? state.publicChatOrigin
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 interface PublicSubAgentAuthorizationOptions {
   expectedVisitorId?: string | null;
   now?: number;

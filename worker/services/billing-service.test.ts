@@ -5,6 +5,31 @@ import * as schema from "../db";
 import { type AppEnv } from "../types";
 import { BillingService } from "./billing-service";
 
+function createD1Stub(sqlite: Database): AppEnv["DB"] {
+  return {
+    prepare(query: string) {
+      return {
+        bind(...values: unknown[]) {
+          const statement = sqlite.query(query);
+          return {
+            async run() {
+              return {
+                meta: { changes: statement.run(...values as never[]).changes },
+              };
+            },
+            async first() {
+              return statement.get(...values as never[]) ?? null;
+            },
+            async all() {
+              return { results: statement.all(...values as never[]) };
+            },
+          };
+        },
+      };
+    },
+  } as unknown as AppEnv["DB"];
+}
+
 function createUsageLogHarness(): {
   service: BillingService;
   sqlite: Database;
@@ -33,6 +58,7 @@ function createUsageLogHarness(): {
   )`);
   const db = drizzleSqlite(sqlite, { schema });
   const env = {
+    DB: createD1Stub(sqlite),
     STRIPE_SECRET_KEY: "sk_test_usage_log",
     STRIPE_STARTER_MONTHLY_PRICE_ID: "price_starter_monthly",
     STRIPE_STARTER_ANNUAL_PRICE_ID: "price_starter_annual",

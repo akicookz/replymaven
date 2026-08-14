@@ -3,7 +3,6 @@ import {
   handleConversationRuntimeBackfill,
   handleConversationRuntimeStatus,
   handleConversationRuntimeVerify,
-  handleDisableCompatibilityProjection,
   type ConversationRuntimeAdminActor,
   type ConversationRuntimeAdminService,
 } from "./conversation-runtime-admin";
@@ -42,20 +41,11 @@ function service(): ConversationRuntimeAdminService {
         projectId: "project-1",
         directoryCursor: "opaque-cursor",
         directoryCompleteAt: 100,
-        agentCutoverAt: null,
         lastVerifiedAt: 100,
         mismatchCount: 0,
-        cutoverEligible: true,
-        compatibilityProjection: {
-          enabled: false,
-          pendingOutboxCount: 0,
-          lastLegacyRequestAt: null,
-          disableEligibleAt: null,
-        },
+        backfillComplete: true,
+        verified: true,
       };
-    },
-    async disableCompatibilityProjection() {
-      return { disabled: true };
     },
   };
 }
@@ -96,7 +86,7 @@ describe("conversation runtime admin handlers", () => {
     expect(wrongAccount.status).toBe(404);
   });
 
-  test("returns bounded backfill, parity, and cutover status data", async () => {
+  test("returns bounded backfill, parity, and status data", async () => {
     const backfill = await handleConversationRuntimeBackfill({
       ...options(),
       request: new Request("https://replymaven.test", {
@@ -112,28 +102,9 @@ describe("conversation runtime admin handlers", () => {
       nextCursor: "opaque-cursor",
     });
     expect(await verify.json()).toMatchObject({ mismatchCount: 0 });
-    expect(await status.json()).toMatchObject({ cutoverEligible: true });
-  });
-
-  test("requires the project-specific confirmation before disabling rollback", async () => {
-    const rejected = await handleDisableCompatibilityProjection({
-      ...options(),
-      request: new Request("https://replymaven.test", {
-        method: "POST",
-        body: JSON.stringify({ confirmation: "disable" }),
-      }),
+    expect(await status.json()).toMatchObject({
+      backfillComplete: true,
+      verified: true,
     });
-    const accepted = await handleDisableCompatibilityProjection({
-      ...options(),
-      request: new Request("https://replymaven.test", {
-        method: "POST",
-        body: JSON.stringify({
-          confirmation: "disable compatibility projection for project-1",
-        }),
-      }),
-    });
-
-    expect(rejected.status).toBe(400);
-    expect(await accepted.json()).toEqual({ disabled: true });
   });
 });

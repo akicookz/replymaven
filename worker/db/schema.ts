@@ -53,9 +53,26 @@ export const conversationRuntimeMigrations = sqliteTable(
     directoryCompleteAt: integer("directory_complete_at", {
       mode: "timestamp",
     }),
-    agentCutoverAt: integer("agent_cutover_at", { mode: "timestamp" }),
     lastVerifiedAt: integer("last_verified_at", { mode: "timestamp" }),
     mismatchCount: integer("mismatch_count").notNull().default(0),
+    verificationCursor: text("verification_cursor"),
+    verificationStartedAt: integer("verification_started_at", {
+      mode: "timestamp",
+    }),
+    verificationLegacyCount: integer("verification_legacy_count")
+      .notNull().default(0),
+    verificationAgentCount: integer("verification_agent_count")
+      .notNull().default(0),
+    verificationLegacyOnlyCount: integer("verification_legacy_only_count")
+      .notNull().default(0),
+    verificationAgentOnlyCount: integer("verification_agent_only_count")
+      .notNull().default(0),
+    verificationOperationalMismatchCount: integer(
+      "verification_operational_mismatch_count",
+    ).notNull().default(0),
+    verificationTranscriptMismatchCount: integer(
+      "verification_transcript_mismatch_count",
+    ).notNull().default(0),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),

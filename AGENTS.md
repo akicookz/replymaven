@@ -2,6 +2,44 @@
 
 This file is the operating guide for agents/contributors working in this repo.
 
+## How to respond
+
+Write in plain, everyday language. The target is ASD-STE100 Simplified Technical English: one word one meaning, short sentences, active voice. Use a technical term only when there is no simpler way, then define it in passing. Don't try to sound smart.
+
+Be concise and conversational. Give the precise answer and nothing around it.
+
+Don't:
+
+- Open with a setup phrase ("here's the thing", "straight version", "the fact is", "plain version").
+- Narrate what you are doing, or comment on what you got wrong. Fix it instead of describing the fix.
+- Restate the question back.
+- Write ad copy, essay framing, or exaggerations.
+- Use em-dashes for effect. Split the sentence, or use a comma, colon, or semicolon.
+
+If a sentence is not carrying information, cut it. Short and plain beats clever.
+
+This is about how you write, not how much you do. Still finish the whole task, and still say plainly when something failed or was skipped.
+
+## Trace it end to end before you touch it
+
+Never work from a single grep hit. Before changing or explaining anything, follow the whole path the request or the data actually takes, in order, and read the real files.
+
+For a feature in this repo that usually means:
+
+1. The page or component that triggers it (`src/pages/`, `src/components/`).
+2. The hook or client helper it calls (`src/hooks/`, `src/lib/`).
+3. The `fetch("/api/...")` call and the route it maps to.
+4. Where that route is mounted in `worker/index.ts`, and every middleware in front of it.
+5. The handler in `worker/routes/*.ts` or `worker/index.ts`, then each `worker/services/*.ts` and `worker/chat-runtime/*` function it calls.
+6. The Drizzle schema and the actual columns it reads or writes. For conversation data, the owning Agent's SQLite and its RPC methods.
+7. The response shape coming back, and every other place that reads it.
+
+Work that does not end at the handler keeps going. If the route writes to a Durable Object, schedules an Agent callback, or enqueues work, find the consumer and read that too. If a value is cached in KV or stored in R2, find where it is written and where it is invalidated. The widget is a separate bundle: a worker change that alters a widget contract is not finished until the widget side is traced too.
+
+Also check who else touches what you are about to change. Search for every call site, not the first one.
+
+Read whole files, not the matched lines. Half-read context is where the bugs come from: the problem is almost always in a small detail that looked irrelevant or sat just outside the part you bothered to read. If you are not sure how something works, keep reading until you are. This includes third-party behavior: read the installed package in `node_modules` rather than assuming what an SDK does. Do not guess, and do not fill the gap with a plausible story.
+
 ## Product Overview
 
 ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbot platform built on Cloudflare Workers. Users sign up, create a project/bot, customize its appearance and behavior, add knowledge resources (web pages, PDFs, FAQs), and embed a lightweight chat widget on their website. The bot uses configurable AI models (Google Gemini 3 Flash or OpenAI GPT-5, controlled via the `AI_MODEL` env var) for AI responses, Cloudflare AI Search for RAG over user-uploaded resources, and supports Telegram-based live agent handoff when the bot cannot confidently answer. Users can name their bot (e.g. "Luna") and configure a human agent label (e.g. "an engineer") for personalized handoff messages. Agents interact with the bot via `@BotName` commands in Telegram to hand back control, close conversations, or instruct the bot to respond directly.
@@ -70,6 +108,23 @@ bun run cf-typegen
 bun run db:generate
 bun run widget:build
 ```
+
+## Validation
+
+Bun, never npm. Before calling a change done, run:
+
+```bash
+bun test              # unit/contract tests
+bun run test:agents   # Workers-pool integration tests
+bun run lint
+bun run build         # tsc -b && vite build
+```
+
+Widget changes also need `bun run widget:build`. Changes to migration or cutover code need `bun run test:agents` with `PUBLIC_CONVERSATION_STORE=agent` as well.
+
+`tsc -b` is incremental and will report success off a stale cache. When you are verifying rather than iterating, use `bunx tsc -b --force`.
+
+Report failures plainly, including which ones are pre-existing.
 
 To preview/verify changes visually, run `bun run dev` (serves the SPA + worker API and the embeddable widget at `/test-widget.html`) alongside `bun run widget:watch` (rebuilds `public/widget-embed.js` on change), then drive the headless browser via `bun ~/.preview-tools/shot.mjs <url> <out.png> [selector] [width] [height]` to screenshot a route. For widget states that depend on server config (e.g. greetings, page targeting), intercept `**/api/widget/<slug>/config` with a Playwright route and patch the JSON.
 
@@ -194,6 +249,20 @@ replymaven/
   3. Internal alias `@/components/ui/*` then `@/components/*` then `@/lib/*`
   4. Relative imports
 - Use `import type` for type-only imports (e.g., `import { type HonoAppContext } from "./types"`)
+
+### Don't reach for `shared/` by default
+
+`shared/` is for code that genuinely needs to run in **both** the browser bundle and the worker. It is not a default home for "reusable" constants or helpers, and moving something there is not an automatic improvement.
+
+- A single constant or small helper used on one side belongs in that side's module (a worker constant in the relevant `worker/` file, a frontend one in the component or `src/lib/*.ts` that owns it). Export it from there if a sibling needs it.
+- A value used on both sides may still be better as **two local definitions** than one shared module, especially a trivial literal. Cross-bundle imports pull worker-only dependencies (drizzle, `AppEnv`, Cloudflare types) toward the browser and the widget bundle, so don't import worker modules from `src/` or `widget/` just to dedupe a number.
+- Only promote to `shared/` once the duplication is genuinely getting out of hand: the same non-trivial logic is maintained in multiple places and drifting, or correctness depends on both sides agreeing. A one-line constant duplicated in two files does not meet that bar.
+
+When in doubt, keep it local and let it duplicate. Consolidate later when the cost of drift is real.
+
+### No nested ternaries
+
+For 3+ branches, extract a small helper with `if`/`else if`/`return`, use a lookup map (`{ foo: "Foo", bar: "Bar" }[key] ?? "default"`), or, for JSX, split into mutually exclusive `{cond && <X/>}` sibling guards. Use explicit boolean conditions so `0` and `""` don't render literally. Prefer `??` over `||` for fallbacks so falsy-but-valid values (`0`, `""`, `false`) survive.
 
 ### TypeScript
 
@@ -416,6 +485,8 @@ bun run db:generate        # Generate migration SQL from schema changes
 bun run db:migrate:dev     # Apply migrations locally
 bun run db:migrate:prod    # Apply migrations to remote D1
 ```
+
+Only edit the Drizzle schema files, then run `bun run db:generate`. Never hand-write a SQL migration file and never edit `meta/_journal.json` by hand. After changing the schema, check that the generated SQL covers every change you made: a column added to `schema.ts` without a matching migration fails only at runtime, in production.
 
 ---
 

@@ -133,10 +133,8 @@ import {
   handleConversationRuntimeBackfill,
   handleConversationRuntimeStatus,
   handleConversationRuntimeVerify,
-  handleDisableCompatibilityProjection,
 } from "./routes/conversation-runtime-admin";
 import { ConversationRuntimeMigrationService } from "./migrations/conversation-runtime-backfill";
-import { recordLegacyConversationEndpointRequest } from "./migrations/legacy-conversation-directory-mirror";
 import {
   handleCreateDashboardPublicAgentSession,
   handleCreateWidgetPublicAgentSession,
@@ -679,15 +677,25 @@ const app = new Hono<HonoAppContext>()
   // or any registered child facet is woken. Both HTTP and WebSocket requests
   // pass through the same exact route/claim matcher.
   .all("/agents/*", async (c) => {
+    async function authorizePublicRequest(request: Request): Promise<Request | Response> {
+      const authorized = await authorizePublicAgentRouteRequest(
+        request,
+        c.env.SIDECHAT_TOKEN_SECRET,
+      );
+      if (authorized instanceof Response) return authorized;
+      const segments = new URL(authorized.url).pathname.split("/")
+        .filter(Boolean);
+      const projectId = segments[2];
+      return projectId && c.env.PUBLIC_CONVERSATION_STORE === "agent"
+        ? authorized
+        : c.json({ error: "agent_runtime_not_cut_over" }, 409);
+    }
     const response = await routeAgentRequest(c.req.raw, c.env, {
       onBeforeConnect(request) {
         return new URL(request.url).pathname.includes(
             "/sub/maven-chat-agent/pub_",
           )
-          ? authorizePublicAgentRouteRequest(
-              request,
-              c.env.SIDECHAT_TOKEN_SECRET,
-            )
+          ? authorizePublicRequest(request)
           : authorizeSidechatAgentRouteRequest(
               request,
               c.env.SIDECHAT_TOKEN_SECRET,
@@ -697,10 +705,7 @@ const app = new Hono<HonoAppContext>()
         return new URL(request.url).pathname.includes(
             "/sub/maven-chat-agent/pub_",
           )
-          ? authorizePublicAgentRouteRequest(
-              request,
-              c.env.SIDECHAT_TOKEN_SECRET,
-            )
+          ? authorizePublicRequest(request)
           : authorizeSidechatAgentRouteRequest(
               request,
               c.env.SIDECHAT_TOKEN_SECRET,
@@ -910,6 +915,9 @@ const app = new Hono<HonoAppContext>()
         ensurePublicConversation(conversation) {
           return agentStore.ensurePublicConversation(conversation);
         },
+        isPublicAgentRuntimeAvailable() {
+          return Promise.resolve(c.env.PUBLIC_CONVERSATION_STORE === "agent");
+        },
       });
     },
   )
@@ -953,7 +961,6 @@ const app = new Hono<HonoAppContext>()
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectBySlugPublic(slug);
     if (!project) return c.json({ error: "Project not found" }, 404);
-    await recordLegacyConversationEndpointRequest(c.env, project.id);
 
     const chatService = createPublicConversationStore({ db, env: c.env });
     let conversation = await chatService.getConversationById(
@@ -1166,7 +1173,6 @@ const app = new Hono<HonoAppContext>()
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectBySlugPublic(slug);
     if (!project) return c.json({ error: "Project not found" }, 404);
-    await recordLegacyConversationEndpointRequest(c.env, project.id);
 
     const chatServiceForBan = createPublicConversationStore({ db, env: c.env });
     const convForBan = await chatServiceForBan.getConversationById(
@@ -2945,6 +2951,9 @@ const app = new Hono<HonoAppContext>()
         ensurePublicConversation(conversation) {
           return agentStore.ensurePublicConversation(conversation);
         },
+        isPublicAgentRuntimeAvailable() {
+          return Promise.resolve(c.env.PUBLIC_CONVERSATION_STORE === "agent");
+        },
       });
     },
   )
@@ -2975,7 +2984,7 @@ const app = new Hono<HonoAppContext>()
       ),
     });
   })
-  .get("/api/projects/:projectId/conversation-runtime/cutover-status", async (c) => {
+  .get("/api/projects/:projectId/conversation-runtime/status", async (c) => {
     const projectId = c.req.param("projectId");
     return handleConversationRuntimeStatus({
       actor: getSidechatRouteActor(c),
@@ -2987,22 +2996,6 @@ const app = new Hono<HonoAppContext>()
       ),
     });
   })
-  .post(
-    "/api/projects/:projectId/conversation-runtime/disable-compatibility-projection",
-    async (c) => {
-      const projectId = c.req.param("projectId");
-      return handleDisableCompatibilityProjection({
-        request: c.req.raw,
-        actor: getSidechatRouteActor(c),
-        projectId,
-        projectService: new ProjectService(c.get("db")),
-        runtimeService: new ConversationRuntimeMigrationService(
-          c.get("db"),
-          c.env,
-        ),
-      });
-    },
-  )
 
   // ─── Native Sidechat sessions ─────────────────────────────────────────────
   .post(
@@ -6804,24 +6797,17 @@ const app = new Hono<HonoAppContext>()
           requestedSort === "priority" || requestedSort === "botMessages"
         ? requestedSort
         : "newest";
-      const page = await agentStore.getDashboardConversationPage(
-        project.id,
-        {
-          filter: inboxFilter ?? (statusFilter === "closed" ? "resolved" : "all"),
-          sort,
-          search: searchQuery,
-          cursor: c.req.query("cursor") || undefined,
-          limit: Math.min(100, limit + offset),
-        },
-      );
-      const statusFiltered = page.conversations.filter(({ conversation }) =>
-        statusFilter === "all" ||
-        (statusFilter === "closed"
-          ? conversation.status === "closed"
-          : conversation.status !== "closed")
-      ).slice(offset, offset + limit);
+      const page = await agentStore.getDashboardConversationPage(project.id, {
+        filter: inboxFilter,
+        status: inboxFilter ? undefined : statusFilter,
+        sort,
+        search: searchQuery,
+        cursor: c.req.query("cursor") || undefined,
+        offset,
+        limit,
+      });
       return c.json({
-        conversations: statusFiltered.map(({ conversation, lastMessage }) => ({
+        conversations: page.conversations.map(({ conversation, lastMessage }) => ({
           ...toLegacyConversationDto(conversation),
           lastMessage: lastMessage
             ? toLegacyLastMessagePreviewDto(lastMessage)
@@ -8159,6 +8145,7 @@ async function runArchivedConversationRetention(env: AppEnv): Promise<void> {
       createPublicConversationStore({ db, env }),
       env.UPLOADS,
       async (projectId, conversationId) => {
+        if (env.PUBLIC_CONVERSATION_STORE === "agent") return;
         const parent = await getAgentByName(
           env.MAVEN_PROJECT_AGENT,
           projectId,

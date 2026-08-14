@@ -28,6 +28,7 @@ import {
   createLazyWidgetAgentChatClient,
 } from "./lazy-agent-chat-client";
 import type { WidgetChatActivity } from "./agent-chat-bridge";
+import { classifyAgentSessionFailure } from "./agent-session-response";
 import { claimWidgetInstance } from "./instance-guard";
 import {
   isSignedIdentityInput,
@@ -4257,13 +4258,13 @@ import {
     identitySession: WidgetIdentitySessionToken = identitySessions.capture(),
     requestedConversationId: string | null = conversationId,
     forceRefresh = false,
-  ): Promise<void> {
-    if (!requestedConversationId) return;
+  ): Promise<"agent" | "unavailable"> {
+    if (!requestedConversationId) return "unavailable";
     if (
       !forceRefresh &&
       connectedAgentConversationId === requestedConversationId &&
       agentSessionExpiresAt * 1_000 - Date.now() > 30_000
-    ) return;
+    ) return "agent";
     const generation = agentSessionGeneration + 1;
     agentSessionGeneration = generation;
     if (agentSessionRefreshTimer) {
@@ -4284,21 +4285,28 @@ import {
         generation !== agentSessionGeneration ||
         !identitySessions.isCurrent(identitySession) ||
         conversationId !== requestedConversationId
-      ) return;
+      ) return "unavailable";
       if (!response.ok) {
-        if (response.status === 404 || response.status === 409) {
+        const errorPayload = await response.json().catch(() => null) as {
+          error?: string;
+        } | null;
+        const action = classifyAgentSessionFailure(
+          response.status,
+          errorPayload?.error ?? null,
+        );
+        if (action === "retire") {
           retireArchivedConversation();
         } else if (response.status === 403) {
           showBannedState();
         }
-        return;
+        return "unavailable";
       }
       const session = await response.json() as PublicChatSessionResponse;
       if (
         generation !== agentSessionGeneration ||
         !identitySessions.isCurrent(identitySession) ||
         conversationId !== requestedConversationId
-      ) return;
+      ) return "unavailable";
       agentChatClient.connect(session);
       connectedAgentConversationId = requestedConversationId;
       agentSessionExpiresAt = session.expiresAt;
@@ -4313,9 +4321,11 @@ import {
           true,
         );
       }, refreshIn);
+      return "agent";
     } catch (error) {
-      if (!identitySessions.isCurrent(identitySession)) return;
+      if (!identitySessions.isCurrent(identitySession)) return "unavailable";
       console.error("[ReplyMaven] Failed to connect conversation Agent:", error);
+      return "unavailable";
     }
   }
 
@@ -4427,11 +4437,17 @@ import {
         return;
       }
       const requestedConversationId = conversationId;
-      await connectConversationAgent(identitySession, requestedConversationId);
+      const transport = await connectConversationAgent(
+        identitySession,
+        requestedConversationId,
+      );
       if (
         !identitySessions.isCurrent(identitySession) ||
         conversationId !== requestedConversationId
       ) return;
+      if (transport === "unavailable") {
+        throw new Error("Conversation transport is unavailable");
+      }
 
       if (conversationStatus === "closed") {
         conversationStatus = "active";
@@ -5141,9 +5157,8 @@ import {
   // greet a visitor returning weeks later. The launcher badge still marks it.
   const MAX_PREVIEW_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
-  // createdAt arrives as a Date (rare), epoch seconds (WS/API), or an ISO
-  // string depending on the path — mirror the normalization used by the
-  // polling timestamp bookkeeping. Returns null when unparseable.
+  // createdAt arrives as a Date (rare), epoch seconds (Agent/API), or an ISO
+  // string depending on the path. Returns null when unparseable.
   function messageTimeMs(createdAt: unknown): number | null {
     if (createdAt instanceof Date) return createdAt.getTime();
     if (typeof createdAt === "number") {
@@ -5157,7 +5172,7 @@ import {
   }
 
   // Show the unseen-message preview when the widget is closed. Shared by the
-  // polling, WS, and page-load paths so behavior stays consistent. Renders a
+  // Agent and page-load paths so behavior stays consistent. Renders a
   // compact greeting-style card (same component as proactive greetings) that
   // stays out until the visitor opens the chat or dismisses it via ✕ —
   // auto-hiding meant unseen replies went unnoticed.

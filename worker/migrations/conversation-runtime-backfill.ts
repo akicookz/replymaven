@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type {
   PublicConversationRecord,
@@ -12,6 +12,7 @@ import {
   conversations,
   messages,
 } from "../db";
+import type { ConversationRuntimeMigrationRow } from "../db";
 import type { AppEnv } from "../types";
 import { AgentPublicConversationStore } from "../conversations/agent-public-conversation-store";
 import {
@@ -23,26 +24,23 @@ import {
 const DEFAULT_BACKFILL_LIMIT = 100;
 const MAX_BACKFILL_LIMIT = 100;
 const VERIFY_CONCURRENCY = 5;
-const COMPATIBILITY_ROLLBACK_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000;
+const MAX_VERIFY_BATCH_LIMIT = 100;
 
 interface ProjectAgentMigrationStub {
   reconcileDirectory(
     summaries: MavenConversationSummary[],
   ): Promise<{ applied: number; skipped: number }>;
   listAllPublicConversationSummaries(): Promise<MavenConversationSummary[]>;
-  getCompatibilityProjectionStatus(): Promise<{
-    enabled: boolean;
-    pendingOutboxCount: number;
-    lastLegacyRequestAt: number | null;
-  }>;
-  disableCompatibilityProjection(): Promise<void>;
+  listMigrationConversationSummaries(input: {
+    afterConversationId: string | null;
+    limit: number;
+  }): Promise<MavenConversationSummary[]>;
 }
 
 export interface ConversationRuntimeCheckpoint {
   projectId: string;
   directoryCursor: string | null;
   directoryCompleteAt: number | null;
-  agentCutoverAt: number | null;
   lastVerifiedAt: number | null;
   mismatchCount: number;
 }
@@ -80,6 +78,9 @@ export interface ConversationDirectoryBackfillResult {
 }
 
 export interface ConversationRuntimeParityResult {
+  processed: number;
+  complete: boolean;
+  nextCursor: string | null;
   legacyCount: number;
   agentCount: number;
   legacyOnlyCount: number;
@@ -87,43 +88,7 @@ export interface ConversationRuntimeParityResult {
   operationalMismatchCount: number;
   transcriptMismatchCount: number;
   mismatchCount: number;
-  verifiedAt: number;
-}
-
-interface CompatibilityProjectionDisableGate {
-  agentCutoverAt: number | null;
-  lastVerifiedAt: number | null;
-  mismatchCount: number;
-  pendingOutboxCount: number;
-  lastLegacyRequestAt: number | null;
-}
-
-export function isCompatibilityProjectionDisableEligible(
-  gate: CompatibilityProjectionDisableGate,
-  now: number,
-): boolean {
-  if (gate.agentCutoverAt === null) return false;
-  const quietPeriodEndsAt = Math.max(
-    gate.agentCutoverAt,
-    gate.lastLegacyRequestAt ?? 0,
-  ) + COMPATIBILITY_ROLLBACK_WINDOW_MS;
-  return gate.mismatchCount === 0 &&
-    gate.pendingOutboxCount === 0 &&
-    gate.lastVerifiedAt !== null &&
-    gate.lastVerifiedAt >= quietPeriodEndsAt &&
-    now >= quietPeriodEndsAt;
-}
-
-export function compareConversationRuntimeIds(
-  legacyIds: string[],
-  agentIds: string[],
-): { legacyOnlyIds: string[]; agentOnlyIds: string[] } {
-  const legacy = new Set(legacyIds);
-  const agent = new Set(agentIds);
-  return {
-    legacyOnlyIds: [...legacy].filter((id) => !agent.has(id)).sort(),
-    agentOnlyIds: [...agent].filter((id) => !legacy.has(id)).sort(),
-  };
+  verifiedAt: number | null;
 }
 
 function parseMetadata(value: unknown): Record<string, unknown> {
@@ -317,6 +282,7 @@ export class ConversationRuntimeMigrationService {
       db,
       env,
       legacy: this.legacyStore,
+      skipRuntimeCutoverGate: true,
     });
   }
 
@@ -340,25 +306,67 @@ export class ConversationRuntimeMigrationService {
     );
   }
 
-  async verifyProject(projectId: string): Promise<ConversationRuntimeParityResult> {
-    const checkpoint = await this.getOrCreateCheckpoint(projectId);
-    const legacyEntries = await this.readAllLegacy(projectId);
+  async verifyProject(
+    projectId: string,
+    limit = MAX_VERIFY_BATCH_LIMIT,
+  ): Promise<ConversationRuntimeParityResult> {
+    let migration = await this.getOrCreateMigrationRow(projectId);
+    const boundedLimit = Math.max(1, Math.min(MAX_VERIFY_BATCH_LIMIT, limit));
+    if (migration.verificationStartedAt === null) {
+      const startedAt = Date.now();
+      const started = await this.db.update(conversationRuntimeMigrations).set({
+        verificationCursor: null,
+        verificationStartedAt: new Date(startedAt),
+        verificationLegacyCount: 0,
+        verificationAgentCount: 0,
+        verificationLegacyOnlyCount: 0,
+        verificationAgentOnlyCount: 0,
+        verificationOperationalMismatchCount: 0,
+        verificationTranscriptMismatchCount: 0,
+        lastVerifiedAt: null,
+        updatedAt: new Date(startedAt),
+      }).where(
+        eq(conversationRuntimeMigrations.projectId, projectId),
+      ).returning();
+      if (started.length !== 1) {
+        throw new Error("Conversation runtime checkpoint unavailable");
+      }
+      migration = started[0]!;
+    }
+
+    const cursor = migration.verificationCursor;
     const parent = await this.getProjectAgent(projectId);
-    const agentSummaries = await parent.listAllPublicConversationSummaries();
-    const agentIds = new Set(agentSummaries.map((summary) =>
-      summary.conversationId
-    ));
-    const idComparison = compareConversationRuntimeIds(
-      legacyEntries.map((entry) => entry.conversation.id),
-      agentSummaries.map((summary) => summary.conversationId),
+    const [legacyEntries, agentSummaries] = await Promise.all([
+      this.readLegacyBatch(projectId, cursor, boundedLimit + 1),
+      parent.listMigrationConversationSummaries({
+        afterConversationId: cursor,
+        limit: boundedLimit + 1,
+      }),
+    ]);
+    const unionIds = [...new Set([
+      ...legacyEntries.map((entry) => entry.conversation.id),
+      ...agentSummaries.map((summary) => summary.conversationId),
+    ])].sort();
+    const selectedIds = unionIds.slice(0, boundedLimit);
+    const selected = new Set(selectedIds);
+    const complete = unionIds.length <= boundedLimit;
+    const selectedLegacyEntries = legacyEntries.filter((entry) =>
+      selected.has(entry.conversation.id)
     );
-    const sharedEntries = legacyEntries.filter((entry) =>
-      agentIds.has(entry.conversation.id)
+    const legacyById = new Map(selectedLegacyEntries.map((entry) =>
+      [entry.conversation.id, entry] as const
+    ));
+    const agentById = new Map(agentSummaries
+      .filter((summary) => selected.has(summary.conversationId))
+      .map((summary) => [summary.conversationId, summary] as const));
+    const sharedEntries = selectedLegacyEntries.filter((entry) =>
+      agentById.has(entry.conversation.id)
     );
     const comparisons = await mapWithConcurrency(
       sharedEntries,
       VERIFY_CONCURRENCY,
       async (entry) => {
+        await this.agentStore.ensurePublicConversation(entry.conversation);
         const agentConversation = await this.agentStore.get(
           projectId,
           entry.conversation.id,
@@ -392,36 +400,99 @@ export class ConversationRuntimeMigrationService {
         };
       },
     );
-    const legacyOnlyCount = idComparison.legacyOnlyIds.length;
-    const agentOnlyCount = idComparison.agentOnlyIds.length;
-    const operationalMismatchCount = comparisons.reduce(
+    const batchLegacyCount = selectedIds.filter((id) => legacyById.has(id)).length;
+    const batchAgentCount = selectedIds.filter((id) => agentById.has(id)).length;
+    const batchLegacyOnlyCount = selectedIds.filter((id) =>
+      legacyById.has(id) && !agentById.has(id)
+    ).length;
+    const batchAgentOnlyCount = selectedIds.filter((id) =>
+      agentById.has(id) && !legacyById.has(id)
+    ).length;
+    const batchOperationalMismatchCount = comparisons.reduce(
       (total, result) => total + result.operational,
       0,
     );
-    const transcriptMismatchCount = comparisons.reduce(
+    const batchTranscriptMismatchCount = comparisons.reduce(
       (total, result) => total + result.transcript,
       0,
     );
+    const legacyCount = migration.verificationLegacyCount + batchLegacyCount;
+    const agentCount = migration.verificationAgentCount + batchAgentCount;
+    const legacyOnlyCount = migration.verificationLegacyOnlyCount +
+      batchLegacyOnlyCount;
+    const agentOnlyCount = migration.verificationAgentOnlyCount +
+      batchAgentOnlyCount;
+    const operationalMismatchCount =
+      migration.verificationOperationalMismatchCount +
+      batchOperationalMismatchCount;
+    const transcriptMismatchCount = migration.verificationTranscriptMismatchCount +
+      batchTranscriptMismatchCount;
+    const nextCursor = selectedIds.at(-1) ?? cursor;
+    const cursorCondition = cursor === null
+      ? isNull(conversationRuntimeMigrations.verificationCursor)
+      : eq(conversationRuntimeMigrations.verificationCursor, cursor);
+
+    if (!complete) {
+      const saved = await this.db.update(conversationRuntimeMigrations).set({
+        verificationCursor: nextCursor,
+        verificationLegacyCount: legacyCount,
+        verificationAgentCount: agentCount,
+        verificationLegacyOnlyCount: legacyOnlyCount,
+        verificationAgentOnlyCount: agentOnlyCount,
+        verificationOperationalMismatchCount: operationalMismatchCount,
+        verificationTranscriptMismatchCount: transcriptMismatchCount,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(conversationRuntimeMigrations.projectId, projectId),
+        cursorCondition,
+      )).returning({ projectId: conversationRuntimeMigrations.projectId });
+      if (saved.length !== 1) {
+        throw new Error("Concurrent parity verification detected");
+      }
+      return {
+        processed: selectedIds.length,
+        complete: false,
+        nextCursor,
+        legacyCount,
+        agentCount,
+        legacyOnlyCount,
+        agentOnlyCount,
+        operationalMismatchCount,
+        transcriptMismatchCount,
+        mismatchCount: legacyOnlyCount + agentOnlyCount +
+          operationalMismatchCount + transcriptMismatchCount,
+        verifiedAt: null,
+      };
+    }
+
     const verifiedAt = Date.now();
     const mismatchCount = legacyOnlyCount + agentOnlyCount +
       operationalMismatchCount + transcriptMismatchCount;
-    await this.ensureCheckpoint(projectId);
-    const agentCutoverAt =
-      this.env.PUBLIC_CONVERSATION_STORE === "agent" &&
-        checkpoint.directoryCompleteAt !== null &&
-        mismatchCount === 0 &&
-        checkpoint.agentCutoverAt === null
-        ? new Date(verifiedAt)
-        : undefined;
-    await this.db.update(conversationRuntimeMigrations).set({
+    const committed = await this.db.update(conversationRuntimeMigrations).set({
       lastVerifiedAt: new Date(verifiedAt),
       mismatchCount,
-      ...(agentCutoverAt ? { agentCutoverAt } : {}),
+      verificationCursor: null,
+      verificationStartedAt: null,
+      verificationLegacyCount: 0,
+      verificationAgentCount: 0,
+      verificationLegacyOnlyCount: 0,
+      verificationAgentOnlyCount: 0,
+      verificationOperationalMismatchCount: 0,
+      verificationTranscriptMismatchCount: 0,
       updatedAt: new Date(verifiedAt),
-    }).where(eq(conversationRuntimeMigrations.projectId, projectId));
+    }).where(and(
+      eq(conversationRuntimeMigrations.projectId, projectId),
+      cursorCondition,
+    )).returning({ projectId: conversationRuntimeMigrations.projectId });
+    if (committed.length !== 1) {
+      throw new Error("Concurrent parity verification detected");
+    }
     return {
-      legacyCount: legacyEntries.length,
-      agentCount: agentSummaries.length,
+      processed: selectedIds.length,
+      complete: true,
+      nextCursor: null,
+      legacyCount,
+      agentCount,
       legacyOnlyCount,
       agentOnlyCount,
       operationalMismatchCount,
@@ -431,54 +502,16 @@ export class ConversationRuntimeMigrationService {
     };
   }
 
-  async getStatus(projectId: string): Promise<ConversationRuntimeCheckpoint & {
-    cutoverEligible: boolean;
-    compatibilityProjection: {
-      enabled: boolean;
-      pendingOutboxCount: number;
-      lastLegacyRequestAt: number | null;
-      disableEligibleAt: number | null;
-    };
-  }> {
-    const parent = await this.getProjectAgent(projectId);
-    const projection = await parent.getCompatibilityProjectionStatus();
+  async getStatus(projectId: string): Promise<
+    ConversationRuntimeCheckpoint & { backfillComplete: boolean; verified: boolean }
+  > {
     const checkpoint = await this.getOrCreateCheckpoint(projectId);
     return {
       ...checkpoint,
-      cutoverEligible:
-        checkpoint.directoryCompleteAt !== null &&
-        checkpoint.lastVerifiedAt !== null &&
+      backfillComplete: checkpoint.directoryCompleteAt !== null,
+      verified: checkpoint.lastVerifiedAt !== null &&
         checkpoint.mismatchCount === 0,
-      compatibilityProjection: {
-        ...projection,
-        disableEligibleAt: checkpoint.agentCutoverAt === null
-          ? null
-          : Math.max(
-              checkpoint.agentCutoverAt,
-              projection.lastLegacyRequestAt ?? 0,
-            ) + COMPATIBILITY_ROLLBACK_WINDOW_MS,
-      },
     };
-  }
-
-  async disableCompatibilityProjection(projectId: string): Promise<{
-    disabled: true;
-  }> {
-    const status = await this.getStatus(projectId);
-    if (!isCompatibilityProjectionDisableEligible({
-      agentCutoverAt: status.agentCutoverAt,
-      lastVerifiedAt: status.lastVerifiedAt,
-      mismatchCount: status.mismatchCount,
-      pendingOutboxCount:
-        status.compatibilityProjection.pendingOutboxCount,
-      lastLegacyRequestAt:
-        status.compatibilityProjection.lastLegacyRequestAt,
-    }, Date.now())) {
-      throw new Error("Compatibility projection disablement is not eligible");
-    }
-    const parent = await this.getProjectAgent(projectId);
-    await parent.disableCompatibilityProjection();
-    return { disabled: true };
   }
 
   private async getProjectAgent(
@@ -497,19 +530,25 @@ export class ConversationRuntimeMigrationService {
     }).onConflictDoNothing();
   }
 
-  private async getOrCreateCheckpoint(
+  private async getOrCreateMigrationRow(
     projectId: string,
-  ): Promise<ConversationRuntimeCheckpoint> {
+  ): Promise<ConversationRuntimeMigrationRow> {
     await this.ensureCheckpoint(projectId);
     const rows = await this.db.select().from(conversationRuntimeMigrations)
       .where(eq(conversationRuntimeMigrations.projectId, projectId)).limit(1);
     const row = rows[0];
     if (!row) throw new Error("Conversation runtime checkpoint unavailable");
+    return row;
+  }
+
+  private async getOrCreateCheckpoint(
+    projectId: string,
+  ): Promise<ConversationRuntimeCheckpoint> {
+    const row = await this.getOrCreateMigrationRow(projectId);
     return {
       projectId: row.projectId,
       directoryCursor: row.directoryCursor,
       directoryCompleteAt: row.directoryCompleteAt?.getTime() ?? null,
-      agentCutoverAt: row.agentCutoverAt?.getTime() ?? null,
       lastVerifiedAt: row.lastVerifiedAt?.getTime() ?? null,
       mismatchCount: row.mismatchCount,
     };
@@ -558,23 +597,5 @@ export class ConversationRuntimeMigrationService {
       conversation: mapD1ConversationRow(row),
       messages: byConversation.get(row.id) ?? [],
     }));
-  }
-
-  private async readAllLegacy(
-    projectId: string,
-  ): Promise<LegacyDirectoryEntry[]> {
-    const entries: LegacyDirectoryEntry[] = [];
-    let cursor: string | null = null;
-    do {
-      const batch = await this.readLegacyBatch(
-        projectId,
-        cursor,
-        DEFAULT_BACKFILL_LIMIT,
-      );
-      entries.push(...batch);
-      cursor = batch.at(-1)?.conversation.id ?? null;
-      if (batch.length < DEFAULT_BACKFILL_LIMIT) break;
-    } while (cursor);
-    return entries;
   }
 }

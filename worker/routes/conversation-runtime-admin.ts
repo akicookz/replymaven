@@ -25,9 +25,6 @@ export interface ConversationRuntimeAdminService {
   getStatus(
     projectId: string,
   ): ReturnType<ConversationRuntimeMigrationService["getStatus"]>;
-  disableCompatibilityProjection(
-    projectId: string,
-  ): Promise<{ disabled: true }>;
 }
 
 interface ConversationRuntimeAdminOptions {
@@ -118,29 +115,3 @@ export async function handleConversationRuntimeStatus(
   );
 }
 
-export async function handleDisableCompatibilityProjection(
-  options: ConversationRuntimeMutationOptions,
-): Promise<Response> {
-  const denied = await authorize(options);
-  if (denied) return denied;
-  const body = await readJsonRecord(options.request);
-  const requiredConfirmation =
-    `disable compatibility projection for ${options.projectId}`;
-  if (body.confirmation !== requiredConfirmation) {
-    return Response.json({
-      error: "Confirmation does not match",
-      requiredConfirmation,
-    }, { status: 400 });
-  }
-  try {
-    return Response.json(
-      await options.runtimeService.disableCompatibilityProjection(
-        options.projectId,
-      ),
-    );
-  } catch (error) {
-    return Response.json({
-      error: error instanceof Error ? error.message : "Disablement failed",
-    }, { status: 409 });
-  }
-}

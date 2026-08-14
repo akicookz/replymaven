@@ -43,6 +43,7 @@ function conversation(
 function dependencies(options: {
   record?: PublicConversationRecord | null;
   banned?: boolean;
+  runtimeAvailable?: boolean;
 } = {}) {
   const ensured: string[] = [];
   return {
@@ -75,6 +76,9 @@ function dependencies(options: {
     async ensurePublicConversation(record: PublicConversationRecord) {
       ensured.push(record.id);
       return { childName: `pub_${record.id}` as const };
+    },
+    async isPublicAgentRuntimeAvailable() {
+      return options.runtimeAvailable ?? true;
     },
   };
 }
@@ -148,6 +152,25 @@ describe("public Agent session handlers", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "invalid_visitor_id" });
+    expect(deps.ensured).toEqual([]);
+  });
+
+  test("does not issue a session before the project runtime is cut over", async () => {
+    const deps = dependencies({ runtimeAvailable: false });
+    const response = await handleCreateWidgetPublicAgentSession({
+      request: new Request("https://api.test/session", { method: "POST" }),
+      projectSlug: "project-slug",
+      conversationId: "conversation-1",
+      visitorId: "visitor-1",
+      secret,
+      now,
+      ...deps,
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "agent_runtime_not_cut_over",
+    });
     expect(deps.ensured).toEqual([]);
   });
 

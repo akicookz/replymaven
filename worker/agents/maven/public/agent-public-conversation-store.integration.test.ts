@@ -81,6 +81,13 @@ describe("native AgentPublicConversationStore", () => {
       ...message(),
       id: "adapter-backfilled-message",
       conversationId: legacyRecord.id,
+    }, {
+      ...message(),
+      id: "adapter-backfilled-system-message",
+      conversationId: legacyRecord.id,
+      author: "system" as const,
+      content: "Joined",
+      systemKind: "joined",
     }];
     const parent = await getAgentByName(
       env.MAVEN_PROJECT_AGENT,
@@ -103,9 +110,13 @@ describe("native AgentPublicConversationStore", () => {
             : null;
         },
         async getMessages() {
+          return legacyMessages.filter((entry) => entry.author !== "system");
+        },
+        async getMigrationMessages() {
           return legacyMessages;
         },
       } as PublicConversationStore,
+      skipRuntimeCutoverGate: true,
     });
 
     await expect(store.get(legacyRecord.projectId, legacyRecord.id)).resolves
@@ -144,6 +155,7 @@ describe("native AgentPublicConversationStore", () => {
       db: drizzle(env.DB),
       env,
       legacy,
+      skipRuntimeCutoverGate: true,
     });
 
     await expect(store.get(legacyRecord.projectId, legacyRecord.id)).resolves

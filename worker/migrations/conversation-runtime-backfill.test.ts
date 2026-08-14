@@ -4,8 +4,6 @@ import type {
   PublicMessageRecord,
 } from "../../shared/maven-conversation";
 import {
-  compareConversationRuntimeIds,
-  isCompatibilityProjectionDisableEligible,
   legacyDirectoryRevision,
   legacyEntryToSummary,
   runConversationDirectoryBackfillBatch,
@@ -76,7 +74,6 @@ function checkpoint(
     projectId: "project-1",
     directoryCursor: null,
     directoryCompleteAt: null,
-    agentCutoverAt: null,
     lastVerifiedAt: null,
     mismatchCount: 0,
     ...overrides,
@@ -151,43 +148,4 @@ describe("conversation runtime backfill", () => {
     );
   });
 
-  test("reports directory ids present on only one side", () => {
-    expect(compareConversationRuntimeIds(
-      ["shared", "legacy-only"],
-      ["shared", "agent-only"],
-    )).toEqual({
-      legacyOnlyIds: ["legacy-only"],
-      agentOnlyIds: ["agent-only"],
-    });
-  });
-
-  test("requires a fresh clean parity check after seven quiet days", () => {
-    const day = 24 * 60 * 60 * 1_000;
-    const cutoverAt = 1_000;
-    const quietPeriodEndsAt = cutoverAt + (7 * day);
-    const cleanGate = {
-      agentCutoverAt: cutoverAt,
-      lastVerifiedAt: quietPeriodEndsAt,
-      mismatchCount: 0,
-      pendingOutboxCount: 0,
-      lastLegacyRequestAt: null,
-    };
-
-    expect(isCompatibilityProjectionDisableEligible(
-      cleanGate,
-      quietPeriodEndsAt,
-    )).toBe(true);
-    expect(isCompatibilityProjectionDisableEligible({
-      ...cleanGate,
-      lastVerifiedAt: quietPeriodEndsAt - 1,
-    }, quietPeriodEndsAt)).toBe(false);
-    expect(isCompatibilityProjectionDisableEligible({
-      ...cleanGate,
-      lastLegacyRequestAt: cutoverAt + day,
-    }, quietPeriodEndsAt)).toBe(false);
-    expect(isCompatibilityProjectionDisableEligible({
-      ...cleanGate,
-      pendingOutboxCount: 1,
-    }, quietPeriodEndsAt)).toBe(false);
-  });
 });

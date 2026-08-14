@@ -73,9 +73,11 @@ export interface MavenConversationSummary {
 
 export interface MavenConversationListQuery {
   filter?: MavenConversationFilter;
+  status?: "open" | "closed" | "all";
   sort?: MavenConversationSort;
   search?: string;
   cursor?: string;
+  offset?: number;
   limit?: number;
   now?: number;
   metadataKey?: string;

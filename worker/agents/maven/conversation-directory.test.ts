@@ -9,10 +9,11 @@ import {
   type ConversationDirectorySql,
 } from "./conversation-directory";
 
-function createDirectory(): ConversationDirectory {
+function createDirectory(onExecute?: (query: string) => void): ConversationDirectory {
   const database = new Database(":memory:");
   const sql: ConversationDirectorySql = {
     execute<T>(query: string, bindings: Array<string | number | null>): T[] {
+      onExecute?.(query);
       return database.query(query).all(...bindings) as T[];
     },
   };
@@ -107,6 +108,74 @@ describe("ConversationDirectory", () => {
     }))).toEqual(["a", "b", "c"]);
   });
 
+  test("applies large offsets in one directory query", async () => {
+    let listQueries = 0;
+    const directory = createDirectory((query) => {
+      if (query.includes("SELECT * FROM conversation_directory")) {
+        listQueries += 1;
+      }
+    });
+    const summaries = Array.from({ length: 140 }, (_, index) =>
+      makeSummary(String(index).padStart(3, "0"), {
+        lastActivityAt: index,
+      })
+    );
+    await insertAll(directory, summaries);
+
+    const page = directory.listConversations({
+      status: "all",
+      sort: "newest",
+      offset: 100,
+      limit: 25,
+    });
+
+    expect(ids(page)).toEqual(
+      summaries.slice().reverse().slice(100, 125)
+        .map((summary) => summary.conversationId),
+    );
+    expect(listQueries).toBe(1);
+    expect(page.nextCursor).not.toBeNull();
+  });
+
+  test("serves hot visitor and email lookups with one bounded query", async () => {
+    let selectQueries = 0;
+    const directory = createDirectory((query) => {
+      if (query.includes("SELECT * FROM conversation_directory")) {
+        selectQueries += 1;
+      }
+    });
+    await insertAll(directory, [
+      makeSummary("older", {
+        visitorId: "visitor-shared",
+        visitorEmail: "Person@Example.com",
+        lastActivityAt: 100,
+        updatedAt: 100,
+      }),
+      makeSummary("newer-closed", {
+        visitorId: "visitor-shared",
+        visitorEmail: "person@example.com",
+        status: "closed",
+        lastActivityAt: 300,
+        updatedAt: 300,
+      }),
+      makeSummary("newer-active", {
+        visitorId: "visitor-shared",
+        visitorEmail: " person@example.com ",
+        lastActivityAt: 200,
+        updatedAt: 400,
+      }),
+    ]);
+    selectQueries = 0;
+
+    expect(directory.getActiveByVisitor("visitor-shared")?.conversationId)
+      .toBe("newer-active");
+    expect(directory.getLastByVisitor("visitor-shared")?.conversationId)
+      .toBe("newer-closed");
+    expect(directory.getRecentByVisitorEmail("PERSON@example.com")?.conversationId)
+      .toBe("newer-active");
+    expect(selectQueries).toBe(3);
+  });
+
   test("matches the six inbox filters and counts from the same predicates", async () => {
     const now = 1_000;
     const directory = createDirectory();
@@ -141,6 +210,59 @@ describe("ConversationDirectory", () => {
       archived: 1,
       flagged: 1,
     });
+  });
+
+  test("applies legacy status semantics before cursor pagination", async () => {
+    const now = 1_000;
+    const directory = createDirectory();
+    await insertAll(directory, [
+      makeSummary("active", { lastActivityAt: 500 }),
+      makeSummary("snoozed-active", {
+        snoozedUntil: now + 1,
+        lastActivityAt: 400,
+      }),
+      makeSummary("closed", {
+        status: "closed",
+        closeReason: "resolved",
+        lastActivityAt: 300,
+      }),
+      makeSummary("spam", {
+        status: "closed",
+        closeReason: "spam",
+        lastActivityAt: 200,
+      }),
+      makeSummary("archived", {
+        archivedAt: now - 1,
+        lastActivityAt: 100,
+      }),
+    ]);
+
+    expect(ids(directory.listConversations({ status: "all", now }))).toEqual([
+      "active",
+      "snoozed-active",
+      "closed",
+      "spam",
+    ]);
+
+    const firstOpen = directory.listConversations({
+      status: "open",
+      now,
+      limit: 1,
+    });
+    const secondOpen = directory.listConversations({
+      status: "open",
+      now,
+      limit: 1,
+      cursor: firstOpen.nextCursor ?? undefined,
+    });
+    expect(ids(firstOpen)).toEqual(["active"]);
+    expect(ids(secondOpen)).toEqual(["snoozed-active"]);
+
+    expect(ids(directory.listConversations({
+      filter: "flagged",
+      status: "open",
+      now,
+    }))).toEqual(["spam"]);
   });
 
   test("supports ASCII case-insensitive search and priority ordering", async () => {

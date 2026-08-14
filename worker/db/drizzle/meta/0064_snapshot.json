@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "28b649a0-b28c-48cf-a04b-d75ec55d4680",
+  "id": "8c808f50-2713-40ec-820e-91256c288d1e",
   "prevId": "7e942281-df9d-4081-a43a-d27d4e0fb2d7",
   "tables": {
     "accounts": {
@@ -523,13 +523,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "agent_cutover_at": {
-          "name": "agent_cutover_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "last_verified_at": {
           "name": "last_verified_at",
           "type": "integer",
@@ -539,6 +532,68 @@
         },
         "mismatch_count": {
           "name": "mismatch_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "verification_cursor": {
+          "name": "verification_cursor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verification_started_at": {
+          "name": "verification_started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verification_legacy_count": {
+          "name": "verification_legacy_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "verification_agent_count": {
+          "name": "verification_agent_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "verification_legacy_only_count": {
+          "name": "verification_legacy_only_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "verification_agent_only_count": {
+          "name": "verification_agent_only_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "verification_operational_mismatch_count": {
+          "name": "verification_operational_mismatch_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "verification_transcript_mismatch_count": {
+          "name": "verification_transcript_mismatch_count",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

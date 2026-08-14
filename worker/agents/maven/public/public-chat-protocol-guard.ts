@@ -3,7 +3,17 @@ import { parseProtocolMessage } from "agents/chat";
 import type { UIMessage } from "ai";
 import type { PublicChatChildClaims } from "../../../../shared/public-chat-agent";
 import type { PublicMessageRecord } from "../../../../shared/maven-conversation";
+import {
+  getLocalUploadKey,
+  isConversationUploadKeyOwnedByConversation,
+} from "../../../../shared/upload-ownership";
 import { toPublicUiMessage } from "./public-message";
+
+// The visitor's client holds and echoes at most this many messages, so a long
+// conversation cannot grow the submit frame past the WebSocket message limit.
+// Stored history is never trimmed; the server rebuilds the body from its own
+// copy either way.
+export const PUBLIC_SUBMIT_HISTORY_WINDOW = 200;
 
 const MAX_MESSAGE_ID_LENGTH = 200;
 const MAX_TEXT_LENGTH = 8_000;
@@ -16,6 +26,7 @@ interface PublicProtocolGuardInput {
   raw: string;
   authoritativeMessages: UIMessage[];
   claims: PublicChatChildClaims | null;
+  expectedOrigin?: string | null;
   now?: number;
 }
 
@@ -54,7 +65,11 @@ function sameStructure(left: unknown, right: unknown): boolean {
   }
 }
 
-function readAttachmentUrls(value: unknown): string[] | null {
+function readAttachmentUrls(
+  value: unknown,
+  claims: PublicChatChildClaims,
+  expectedOrigin: string | null,
+): string[] | null {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > MAX_ATTACHMENTS) return null;
   const urls: string[] = [];
@@ -66,7 +81,18 @@ function readAttachmentUrls(value: unknown): string[] | null {
     ) return null;
     try {
       const parsed = new URL(candidate);
-      if (parsed.protocol !== "https:") return null;
+      const key = getLocalUploadKey(candidate);
+      // Origin equality is the control; a protocol check would break local
+      // verification against an http://localhost widget origin.
+      if (
+        expectedOrigin === null ||
+        parsed.origin !== expectedOrigin ||
+        !key?.startsWith(`${claims.projectId}/`) ||
+        !isConversationUploadKeyOwnedByConversation(
+          key,
+          claims.conversationId,
+        )
+      ) return null;
     } catch {
       return null;
     }
@@ -161,6 +187,7 @@ function normalizeRequest(
   authoritativeMessages: UIMessage[],
   claims: PublicChatChildClaims,
   now: number,
+  expectedOrigin: string | null,
 ): PublicProtocolGuardResult {
   const event = parseProtocolMessage(raw);
   if (event?.type !== "chat-request" || event.init.method !== "POST") {
@@ -181,19 +208,39 @@ function normalizeRequest(
       "token",
     ]) ||
     !Array.isArray(body.messages) ||
-    body.messages.length !== authoritativeMessages.length + 1 ||
+    body.messages.length < 1 ||
+    body.messages.length > authoritativeMessages.length + 1 ||
     !isPageContext(body.pageContext) ||
     (body.token !== undefined &&
       (typeof body.token !== "string" || body.token.length > 2_048)) ||
     (body.trigger !== undefined && body.trigger !== "submit-message")
   ) return reject("invalid_submission", event.id);
 
-  for (let index = 0; index < authoritativeMessages.length; index += 1) {
-    if (!sameStructure(body.messages[index], authoritativeMessages[index])) {
+  // The client may hold only the newest window, so its history must match the
+  // tail of ours rather than the whole list. It must still echo everything it
+  // is expected to hold, so a truncated or edited history is still rejected.
+  const echoed = body.messages.length - 1;
+  const minimumEcho = Math.min(
+    authoritativeMessages.length,
+    PUBLIC_SUBMIT_HISTORY_WINDOW,
+  );
+  if (echoed < minimumEcho) return reject("history_mismatch", event.id);
+  const echoOffset = authoritativeMessages.length - echoed;
+  for (let index = 0; index < echoed; index += 1) {
+    if (
+      !sameStructure(
+        body.messages[index],
+        authoritativeMessages[echoOffset + index],
+      )
+    ) {
       return reject("history_mismatch", event.id);
     }
   }
-  const attachmentUrls = readAttachmentUrls(body.attachmentUrls);
+  const attachmentUrls = readAttachmentUrls(
+    body.attachmentUrls,
+    claims,
+    expectedOrigin,
+  );
   if (!attachmentUrls) return reject("invalid_attachments", event.id);
   const submitted = validateNewUserMessage(
     body.messages.at(-1),
@@ -218,10 +265,15 @@ function normalizeRequest(
     readAt: null,
     emailedAt: null,
   };
+  // Rebuild from our own copy, bounded to the same window so the SDK's
+  // downstream broadcasts stay small. Older rows survive because the appended
+  // message carries an id the server has not seen.
   const normalizedBody = {
     ...body,
     messages: [
-      ...structuredClone(authoritativeMessages),
+      ...structuredClone(
+        authoritativeMessages.slice(-PUBLIC_SUBMIT_HISTORY_WINDOW),
+      ),
       toPublicUiMessage(record, claims.projectId),
     ],
   };
@@ -260,6 +312,12 @@ export function guardPublicChatProtocolMessage(
 
   switch (event.type) {
     case "cancel":
+      // Only the visitor who owns the turn may abort it; dashboards use the
+      // takeover RPC, which also advances ownership and persists the reply.
+      if (claims.actor !== "visitor" || !claims.canSubmitVisitor) {
+        return reject("unauthorized", null, true);
+      }
+      return { allowed: true, raw: input.raw, submittedMessageId: null };
     case "stream-resume-request":
     case "stream-resume-ack":
       return { allowed: true, raw: input.raw, submittedMessageId: null };
@@ -272,6 +330,7 @@ export function guardPublicChatProtocolMessage(
         input.authoritativeMessages,
         claims,
         input.now ?? Date.now(),
+        input.expectedOrigin ?? null,
       );
     case "clear":
     case "messages":

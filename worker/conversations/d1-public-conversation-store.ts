@@ -382,6 +382,19 @@ export class D1PublicConversationStore implements PublicConversationStore {
     return (await this.chatService.getPublicMessages(conversationId)).map(mapD1MessageRow);
   }
 
+  async getMigrationMessages(
+    projectId: string,
+    conversationId: string,
+  ): Promise<PublicMessageRecord[]> {
+    if (!(await this.belongsToProject(projectId, conversationId))) return [];
+    const rows = await this.db
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, conversationId))
+      .orderBy(asc(messages.createdAt), asc(messages.id));
+    return rows.map(mapD1MessageRow);
+  }
+
   async getRecentMessages(projectId: string, conversationId: string, limit: number): Promise<PublicMessagePage> {
     if (!(await this.belongsToProject(projectId, conversationId))) {
       return { messages: [], hasMore: false };

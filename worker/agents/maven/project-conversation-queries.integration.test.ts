@@ -68,6 +68,26 @@ function message(
   };
 }
 
+// Purge deletes the legacy compatibility rows before the authoritative child.
+async function ensureCompatibilitySchema(): Promise<void> {
+  const { env } = await import("cloudflare:workers");
+  await env.DB.batch([
+    env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS conversations (
+        id text PRIMARY KEY NOT NULL,
+        project_id text NOT NULL,
+        archived_at integer
+      )`,
+    ),
+    env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS tool_executions (
+        id text PRIMARY KEY NOT NULL,
+        conversation_id text
+      )`,
+    ),
+  ]);
+}
+
 async function createConversation(
   projectId: string,
   conversationId: string,
@@ -80,6 +100,7 @@ async function createConversation(
       import("agents"),
       import("./maven-chat-agent"),
     ]);
+  await ensureCompatibilitySchema();
   const parent = env.MAVEN_PROJECT_AGENT.get(
     env.MAVEN_PROJECT_AGENT.idFromName(projectId),
   );

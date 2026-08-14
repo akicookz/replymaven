@@ -156,7 +156,7 @@ describe("native public conversation operations", () => {
     expect(snapshot.messages[0]?.readAt).toBeTypeOf("number");
   });
 
-  nativeTest("keeps deletion idempotent and lets archive win an external lease", async () => {
+  nativeTest("keeps deletion idempotent and preserves external-action lease TTL", async () => {
     const projectId = "public-operations-archive";
     const conversationId = "conversation-archive";
     const message = humanMessage(conversationId, "human-delete");
@@ -170,14 +170,24 @@ describe("native public conversation operations", () => {
       deleted: false,
       reason: "not_found",
     });
+    const acquiredAt = Date.now();
     const lease = await child.acquireExternalAction({
       projectId,
       conversationId,
-      now: 300,
+      now: acquiredAt,
     });
     expect(lease).not.toBeNull();
-    await child.applyConversationAction({ action: "archive" });
+    await expect(child.applyConversationAction({ action: "archive" }))
+      .resolves.toBeNull();
+    const replacement = await child.acquireExternalAction({
+      projectId,
+      conversationId,
+      now: acquiredAt + (2 * 60 * 1_000) + 1,
+    });
+    expect(replacement).not.toBeNull();
     if (lease) await child.releaseExternalAction(lease);
+    if (replacement) await child.releaseExternalAction(replacement);
+    await child.applyConversationAction({ action: "archive" });
 
     await expect(child.getPublicSnapshot()).resolves.toMatchObject({
       revision: 3,

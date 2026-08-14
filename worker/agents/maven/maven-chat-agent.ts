@@ -53,6 +53,7 @@ import type {
   PublicExternalActionLeaseInput,
   PublicLegacyEscalationMetadataUpdate,
   PublicMessageAttachmentSource,
+  PublicMessagePage,
   PublicOwnershipTransitionResult,
   PublicPresenceUpdateInput,
   PublicConversationStore,
@@ -69,7 +70,6 @@ import {
   type ChatOwnershipEvent,
   type ConversationChatState,
 } from "../../chat-runtime/types";
-import { getLocalUploadKey } from "../../../shared/upload-ownership";
 import {
   readVerifiedSidechatClaims,
   resolveSidechatChatTurnClaims,
@@ -101,12 +101,18 @@ import {
   toPublicUiMessage,
 } from "./public/public-message";
 import {
+  getLocalUploadKey,
+  isConversationUploadKeyOwnedByConversation,
+} from "../../../shared/upload-ownership";
+import {
+  readPublicChatConnectionOrigin,
   readPublicChatConnectionClaims,
   readVerifiedPublicChatClaims,
 } from "./public/public-agent-auth";
 import {
   buildPublicProtocolErrorFrame,
   guardPublicChatProtocolMessage,
+  PUBLIC_SUBMIT_HISTORY_WINDOW,
 } from "./public/public-chat-protocol-guard";
 import {
   createPublicTurnResponse,
@@ -126,7 +132,6 @@ import { ToolService } from "../../services/tool-service";
 import { VisitorBanService } from "../../services/visitor-ban-service";
 import { logError } from "../../observability";
 import { resolvePendingPublicContactUpdate } from "./public/public-human-mode";
-import { projectPublicConversationSnapshot } from "../../migrations/conversation-runtime-projection";
 
 type SidechatDataParts = Record<string, unknown> & {
   "turn-accepted": { messageId: string };
@@ -155,6 +160,8 @@ type SidechatDataParts = Record<string, unknown> & {
 
 type SidechatUIMessage = UIMessage<unknown, SidechatDataParts>;
 const MAX_PRIVATE_MODEL_MESSAGES = 80;
+const MAX_PUBLIC_MESSAGE_PAGE = 100;
+const EXTERNAL_ACTION_LEASE_MS = 2 * 60 * 1_000;
 
 interface PublicConversationSnapshot {
   conversation: PublicConversationRecord;
@@ -331,6 +338,7 @@ export class MavenChatAgent extends AIChatAgent<
           raw: message,
           authoritativeMessages: this.messages,
           claims: readPublicChatConnectionClaims(connection.state),
+          expectedOrigin: readPublicChatConnectionOrigin(connection.state),
         });
         if (!guarded.allowed) {
           if (guarded.requestId) {
@@ -342,6 +350,17 @@ export class MavenChatAgent extends AIChatAgent<
           return;
         }
         return sdkOnMessage(connection, guarded.raw);
+      };
+      // Hand the browser only the newest window. Older messages stay stored and
+      // are read through the dashboard and transcript endpoints.
+      const sdkOnRequest = this.onRequest.bind(this);
+      this.onRequest = async (request) => {
+        if (new URL(request.url).pathname.endsWith("/get-messages")) {
+          return Response.json(
+            this.messages.slice(-PUBLIC_SUBMIT_HISTORY_WINDOW),
+          );
+        }
+        return sdkOnRequest(request);
       };
     }
   }
@@ -367,7 +386,10 @@ export class MavenChatAgent extends AIChatAgent<
         throw new Error("Unauthorized public child connection");
       }
       await super.onConnect(connection, context);
-      connection.setState({ publicChatActor: claims });
+      connection.setState({
+        publicChatActor: claims,
+        publicChatOrigin: new URL(context.request.url).origin,
+      });
       return;
     }
     const claims = readVerifiedSidechatClaims(context.request);
@@ -1078,6 +1100,10 @@ export class MavenChatAgent extends AIChatAgent<
     };
   }
 
+  async getPublicConversationRecord(): Promise<PublicConversationRecord> {
+    return this.toPublicConversation(this.requirePublicState());
+  }
+
   async hasPublicConversation(): Promise<boolean> {
     this.assertPublicChild();
     return this.publicStateStore().get() !== null;
@@ -1086,6 +1112,105 @@ export class MavenChatAgent extends AIChatAgent<
   async getPublicMessages(): Promise<PublicMessageRecord[]> {
     this.assertPublicChild();
     return this.readPublicMessages();
+  }
+
+  async getRecentPublicMessages(input: {
+    limit: number;
+  }): Promise<PublicMessagePage> {
+    this.assertPublicChild();
+    const limit = Math.max(1, Math.min(MAX_PUBLIC_MESSAGE_PAGE, input.limit));
+    const rows = this.sql<{ message: string }>`
+      SELECT message
+      FROM cf_ai_chat_agent_messages
+      WHERE json_extract(message, '$.metadata.channel') = 'public'
+      ORDER BY CAST(json_extract(message, '$.metadata.createdAt') AS INTEGER) DESC,
+               id DESC
+      LIMIT ${limit + 1}
+    `;
+    return {
+      messages: rows.slice(0, limit)
+        .map((row) => this.publicRecordFromSerialized(row.message))
+        .reverse(),
+      hasMore: rows.length > limit,
+    };
+  }
+
+  async getPublicMessagesBefore(input: {
+    beforeCreatedAt: number;
+    limit: number;
+  }): Promise<PublicMessagePage> {
+    this.assertPublicChild();
+    const limit = Math.max(1, Math.min(MAX_PUBLIC_MESSAGE_PAGE, input.limit));
+    const rows = this.sql<{ message: string }>`
+      SELECT message
+      FROM cf_ai_chat_agent_messages
+      WHERE json_extract(message, '$.metadata.channel') = 'public'
+        AND CAST(json_extract(message, '$.metadata.createdAt') AS INTEGER) < ${input.beforeCreatedAt}
+      ORDER BY CAST(json_extract(message, '$.metadata.createdAt') AS INTEGER) DESC,
+               id DESC
+      LIMIT ${limit + 1}
+    `;
+    return {
+      messages: rows.slice(0, limit)
+        .map((row) => this.publicRecordFromSerialized(row.message))
+        .reverse(),
+      hasMore: rows.length > limit,
+    };
+  }
+
+  async getPublicMessagesSince(input: {
+    since: number;
+    limit: number;
+  }): Promise<PublicMessageRecord[]> {
+    this.assertPublicChild();
+    const limit = Math.max(1, Math.min(250, input.limit));
+    return this.sql<{ message: string }>`
+      SELECT message
+      FROM cf_ai_chat_agent_messages
+      WHERE json_extract(message, '$.metadata.channel') = 'public'
+        AND CAST(json_extract(message, '$.metadata.createdAt') AS INTEGER) >= ${input.since}
+      ORDER BY CAST(json_extract(message, '$.metadata.createdAt') AS INTEGER) ASC,
+               id ASC
+      LIMIT ${limit}
+    `.map((row) => this.publicRecordFromSerialized(row.message));
+  }
+
+  async getPublicMessage(messageId: string): Promise<PublicMessageRecord | null> {
+    this.assertPublicChild();
+    const row = this.sql<{ message: string }>`
+      SELECT message
+      FROM cf_ai_chat_agent_messages
+      WHERE id = ${messageId}
+        AND json_extract(message, '$.metadata.channel') = 'public'
+      LIMIT 1
+    `.at(0);
+    return row ? this.publicRecordFromSerialized(row.message) : null;
+  }
+
+  async hasPublicVisitorMessages(): Promise<boolean> {
+    this.assertPublicChild();
+    return this.sql<{ found: number }>`
+      SELECT 1 AS found
+      FROM cf_ai_chat_agent_messages
+      WHERE json_extract(message, '$.metadata.channel') = 'public'
+        AND json_extract(message, '$.metadata.author') = 'visitor'
+      LIMIT 1
+    `.length > 0;
+  }
+
+  async getLatestEmailedPublicHumanMessage(): Promise<PublicMessageRecord | null> {
+    this.assertPublicChild();
+    const row = this.sql<{ message: string }>`
+      SELECT message
+      FROM cf_ai_chat_agent_messages
+      WHERE json_extract(message, '$.metadata.channel') = 'public'
+        AND json_extract(message, '$.metadata.author') = 'agent'
+        AND json_extract(message, '$.metadata.emailedAt') IS NOT NULL
+      ORDER BY CAST(json_extract(message, '$.metadata.createdAt') AS INTEGER) DESC,
+               id DESC
+      LIMIT 1
+    `.at(0);
+    return row ? this.publicRecordFromSerialized(row.message) : null;
   }
 
   async getPublicContextSnapshot(input: { newestMessages: number }): Promise<{
@@ -1151,6 +1276,65 @@ export class MavenChatAgent extends AIChatAgent<
       }
       await this.publishPublicProjection(initialized.state, input.messages);
       return { status: "imported", revision: initialized.state.revision };
+    });
+  }
+
+  async refreshLegacyPublicConversation(
+    input: ImportPublicConversationInput,
+  ): Promise<ImportPublicConversationResult> {
+    return this.runExclusivePublicMutation(async () => {
+      const identity = this.assertPublicChild();
+      const projectId = this.publicProjectId();
+      if (
+        input.conversation.id !== identity.conversationId ||
+        input.conversation.projectId !== projectId ||
+        input.messages.some((message) =>
+          message.conversationId !== identity.conversationId
+        )
+      ) {
+        throw new Error("Legacy public conversation does not match its child");
+      }
+      const existing = this.publicStateStore().get();
+      if (!existing) {
+        await this.persistPublicRecords(input.messages);
+        const initialized = this.publicStateStore().initialize(
+          input.conversation,
+          input.checksum,
+        );
+        this.setState(this.safePublicState(initialized.state));
+        return {
+          status: initialized.created ? "imported" : "noop",
+          revision: initialized.state.revision,
+        };
+      }
+      if (existing.revision !== 0) {
+        return { status: "conflict", revision: existing.revision };
+      }
+      if (existing.legacyChecksum === input.checksum) {
+        return { status: "noop", revision: existing.revision };
+      }
+      if (existing.retentionScheduleId) {
+        try {
+          const parent = await this.parentAgent(MavenProjectAgent);
+          await parent.cancelPublicRetention(existing.retentionScheduleId);
+        } catch {
+          // A stale callback rechecks archivedAt before deleting anything.
+        }
+      }
+      if (existing.autoCloseScheduleId) {
+        await this.cancelSchedule(existing.autoCloseScheduleId);
+      }
+      await this.persistPublicRecords(input.messages);
+      const saved = this.saveInternalPublicState(existing, {
+        ...structuredClone(input.conversation),
+        revision: 0,
+        legacyChecksum: input.checksum,
+        externalActionLeaseId: null,
+        retentionScheduleId: null,
+        autoCloseScheduleId: null,
+      });
+      this.setState(this.safePublicState(saved));
+      return { status: "imported", revision: saved.revision };
     });
   }
 
@@ -1287,13 +1471,6 @@ export class MavenChatAgent extends AIChatAgent<
   async applyConversationAction(
     action: PublicConversationAction,
   ): Promise<PublicConversationRecord | null> {
-    if (
-      action.action === "archive" ||
-      action.action === "resolve" ||
-      action.action === "flag_spam"
-    ) {
-      this.abortAllRequests(`Conversation action: ${action.action}`);
-    }
     return this.runExclusivePublicMutation(async () => {
       const state = this.requirePublicState();
       const now = Date.now();
@@ -1309,6 +1486,10 @@ export class MavenChatAgent extends AIChatAgent<
       switch (action.action) {
         case "archive":
           if (state.archivedAt !== null) return null;
+          if (
+            state.externalActionStartedAt !== null &&
+            state.externalActionStartedAt > now - EXTERNAL_ACTION_LEASE_MS
+          ) return null;
           changes.archivedAt = now;
           changes.purgeStartedAt = null;
           changes.retentionScheduleId = null;
@@ -1346,6 +1527,15 @@ export class MavenChatAgent extends AIChatAgent<
           changes.status = "closed";
           changes.closeReason = "spam";
           break;
+      }
+      // Abort only after the guards accept the action, so a declined archive
+      // never destroys the visitor's in-flight stream.
+      if (
+        action.action === "archive" ||
+        action.action === "resolve" ||
+        action.action === "flag_spam"
+      ) {
+        this.abortAllRequests(`Conversation action: ${action.action}`);
       }
       let saved = this.saveNextPublicState(state, changes);
       const messages = this.readPublicMessages();
@@ -1683,11 +1873,22 @@ export class MavenChatAgent extends AIChatAgent<
     return this.requirePublicState().purgeStartedAt === purgeStartedAt;
   }
 
-  async hasPublicUploadKey(key: string): Promise<boolean> {
-    this.requirePublicState();
-    return this.readPublicMessages().some((message) =>
-      message.imageUrls.some((imageUrl) => getLocalUploadKey(imageUrl) === key)
-    );
+  async claimScheduledPublicRetention(input: {
+    archivedAt: number;
+    claimAt: number;
+  }): Promise<boolean> {
+    return this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      if (
+        state.archivedAt !== input.archivedAt ||
+        state.purgeStartedAt !== null
+      ) return false;
+      this.saveNextPublicState(state, {
+        purgeStartedAt: input.claimAt,
+        updatedAt: input.claimAt,
+      });
+      return true;
+    });
   }
 
   async appendSystem(
@@ -1985,9 +2186,12 @@ export class MavenChatAgent extends AIChatAgent<
     return this.runExclusivePublicMutation(async () => {
       this.assertPublicInput(input.projectId, input.conversationId);
       const state = this.requirePublicState();
+      const staleBefore = (input.now ?? Date.now()) - EXTERNAL_ACTION_LEASE_MS;
       if (
         state.archivedAt !== null ||
-        state.externalActionLeaseId !== null ||
+        (state.externalActionLeaseId !== null &&
+          state.externalActionStartedAt !== null &&
+          state.externalActionStartedAt > staleBefore) ||
         (input.ownership &&
           (input.ownership.status !== state.status ||
             input.ownership.chatState !== JSON.stringify(state.chatState)))
@@ -2085,23 +2289,6 @@ export class MavenChatAgent extends AIChatAgent<
     await parent.upsertConversationSummary(
       this.buildPublicSummary(state, this.readPublicMessages()),
     );
-  }
-
-  async retryCompatibilityProjection(): Promise<void> {
-    const state = this.requirePublicState();
-    await this.publishCompatibilityProjection(
-      state,
-      this.readPublicMessages(),
-    );
-  }
-
-  async hasPendingCompatibilityProjection(): Promise<boolean> {
-    this.assertPublicChild();
-    this.ensureCompatibilityProjectionOutboxSchema();
-    const rows = this.ctx.storage.sql.exec(
-      "SELECT revision FROM public_projection_outbox LIMIT 1",
-    ).toArray();
-    return rows.length > 0;
   }
 
   async autoClosePublicConversation(payload: {
@@ -2215,12 +2402,13 @@ export class MavenChatAgent extends AIChatAgent<
     if (!imageUrl) return null;
     try {
       const pathname = new URL(imageUrl).pathname;
-      const marker = "/api/uploads/";
-      const markerIndex = pathname.indexOf(marker);
-      if (markerIndex < 0) return null;
-      const key = decodeURIComponent(
-        pathname.slice(markerIndex + marker.length),
-      );
+      const state = this.requirePublicState();
+      const key = getLocalUploadKey(imageUrl);
+      if (
+        !pathname.startsWith("/api/uploads/") ||
+        !key?.startsWith(`${state.projectId}/`) ||
+        !isConversationUploadKeyOwnedByConversation(key, state.id)
+      ) return null;
       const object = await this.env.UPLOADS.get(key);
       if (!object) return null;
       const bytes = new Uint8Array(await object.arrayBuffer());
@@ -2404,6 +2592,15 @@ export class MavenChatAgent extends AIChatAgent<
     );
   }
 
+  private publicRecordFromSerialized(serialized: string): PublicMessageRecord {
+    const identity = this.assertPublicChild();
+    return fromPublicUiMessage(
+      JSON.parse(serialized) as UIMessage,
+      this.publicProjectId(),
+      identity.conversationId,
+    );
+  }
+
   private async persistPublicRecords(
     messages: PublicMessageRecord[],
   ): Promise<void> {
@@ -2546,71 +2743,6 @@ export class MavenChatAgent extends AIChatAgent<
         { revision: state.revision },
         { idempotent: true },
       );
-    }
-    await this.publishCompatibilityProjection(state, messages);
-  }
-
-  private ensureCompatibilityProjectionOutboxSchema(): void {
-    this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS public_projection_outbox (
-        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-        revision INTEGER NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        updated_at INTEGER NOT NULL
-      )`,
-    );
-  }
-
-  private clearCompatibilityProjectionOutbox(): void {
-    this.ensureCompatibilityProjectionOutboxSchema();
-    this.ctx.storage.sql.exec("DELETE FROM public_projection_outbox");
-  }
-
-  private async publishCompatibilityProjection(
-    state: StoredPublicConversationState,
-    messages: PublicMessageRecord[],
-  ): Promise<void> {
-    const parent = await this.parentAgent(MavenProjectAgent);
-    let enabled = false;
-    try {
-      enabled = await parent.isCompatibilityProjectionEnabled();
-    } catch {
-      enabled = this.env.PUBLIC_CONVERSATION_STORE === "agent";
-    }
-    if (!enabled) {
-      this.clearCompatibilityProjectionOutbox();
-      return;
-    }
-    try {
-      await projectPublicConversationSnapshot(
-        this.env.DB,
-        this.toPublicConversation(state),
-        messages,
-      );
-      this.clearCompatibilityProjectionOutbox();
-    } catch {
-      this.ensureCompatibilityProjectionOutboxSchema();
-      this.ctx.storage.sql.exec(
-        `INSERT INTO public_projection_outbox (
-          singleton, revision, attempts, updated_at
-        ) VALUES (1, ?, 1, ?)
-        ON CONFLICT(singleton) DO UPDATE SET
-          revision = excluded.revision,
-          attempts = public_projection_outbox.attempts + 1,
-          updated_at = excluded.updated_at`,
-        state.revision,
-        Date.now(),
-      );
-      try {
-        await this.schedule(
-          5,
-          "retryCompatibilityProjection",
-          {},
-          { idempotent: true },
-        );
-      } catch {
-        // The child-owned outbox remains discoverable for reconciliation.
-      }
     }
   }
 

@@ -64,6 +64,12 @@ async function preparePublicTurnDatabase(
       Math.floor(Date.now() / 1_000) - 60,
       Math.floor(Date.now() / 1_000) + 2_592_000,
     ),
+    db.prepare(`INSERT OR REPLACE INTO conversation_runtime_migrations (
+      project_id, directory_complete_at, last_verified_at, mismatch_count,
+      created_at, updated_at
+    ) VALUES (?, unixepoch(), unixepoch(), 0, unixepoch(), unixepoch())`).bind(
+      projectId,
+    ),
   ]);
 }
 
@@ -265,6 +271,68 @@ describe("native public MavenChatAgent child", () => {
       checksum: "checksum-once",
     })).resolves.toEqual({ status: "conflict", revision: 1 });
     await expect(child.getPublicMessages()).resolves.toHaveLength(2);
+  });
+
+  nativeTest("refreshes a legacy-owned child until its first native write", async () => {
+    const [
+      { env },
+      { getSubAgentByName },
+      { MavenChatAgent },
+    ] = await Promise.all([
+      import("cloudflare:workers"),
+      import("agents"),
+      import("../maven-chat-agent"),
+    ]);
+    const projectId = "public-child-project";
+    const conversationId = "conversation-legacy-refresh";
+    const parent = env.MAVEN_PROJECT_AGENT.get(
+      env.MAVEN_PROJECT_AGENT.idFromName(projectId),
+    );
+    await parent.registerPublicConversation(conversationId);
+    const child = await getSubAgentByName(
+      parent,
+      MavenChatAgent,
+      `pub_${conversationId}`,
+    );
+    const initial = {
+      ...conversation(conversationId),
+      projectId,
+    };
+    const firstMessage = {
+      ...publicMessage("legacy-first", "visitor", "first"),
+      conversationId,
+    };
+    await child.importLegacyPublicConversation({
+      conversation: initial,
+      messages: [firstMessage],
+      checksum: "checksum-before",
+    });
+    const secondMessage = {
+      ...publicMessage("legacy-second", "bot", "second"),
+      conversationId,
+      createdAt: 200,
+    };
+
+    await expect(child.refreshLegacyPublicConversation({
+      conversation: { ...initial, visitorName: "Updated legacy" },
+      messages: [firstMessage, secondMessage],
+      checksum: "checksum-after",
+    })).resolves.toEqual({ status: "imported", revision: 0 });
+    await expect(child.getPublicSnapshot()).resolves.toMatchObject({
+      conversation: { visitorName: "Updated legacy" },
+      messages: [{ id: "legacy-first" }, { id: "legacy-second" }],
+      revision: 0,
+    });
+
+    await child.appendSystemMessage({
+      ...publicMessage("native", "system", "native"),
+      conversationId,
+    });
+    await expect(child.refreshLegacyPublicConversation({
+      conversation: initial,
+      messages: [firstMessage],
+      checksum: "checksum-stale",
+    })).resolves.toEqual({ status: "conflict", revision: 1 });
   });
 
   nativeTest("does not cap persisted public history at the Sidechat limit", async () => {
@@ -566,6 +634,10 @@ describe("native public MavenChatAgent child", () => {
       `https://example.test/agents/maven-project-agent/${projectId}/sub/maven-chat-agent/pub_${conversationId}?token=${token}`,
       { headers: { Upgrade: "websocket" } },
     ));
+    if (env.PUBLIC_CONVERSATION_STORE !== "agent") {
+      expect(response.status).toBe(409);
+      return;
+    }
     expect(response.status).toBe(101);
     const socket = response.webSocket;
     expect(socket).not.toBeNull();

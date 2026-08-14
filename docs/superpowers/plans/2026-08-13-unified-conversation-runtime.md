@@ -4,7 +4,7 @@
 
 **Goal:** Make public visitor conversations and private Sidechats use the same `MavenChatAgent` runtime, with Agent SQLite authoritative for conversation messages/state and D1 limited to the rest of the product.
 
-**Architecture:** One `MavenProjectAgent` per project owns the child registry, shared project tools/MCP, and an indexed conversation directory. Each public transcript (`pub_<conversationId>`) and private Sidechat (`sc_<conversationId>`) is an isolated child instance of one `MavenChatAgent` class. The migration first puts every legacy caller behind a neutral store, then introduces Agent-backed storage, cuts clients and external writers over, verifies a temporary D1 compatibility projection, and finally removes D1 conversations/messages and `ConversationDO`.
+**Architecture:** One `MavenProjectAgent` per project owns the child registry, shared project tools/MCP, and an indexed conversation directory. Each public transcript (`pub_<conversationId>`) and private Sidechat (`sc_<conversationId>`) is an isolated child instance of one `MavenChatAgent` class. The migration first puts every legacy caller behind a neutral store, then introduces Agent-backed storage, cuts clients and external writers over in one release, and finally removes D1 conversations/messages and `ConversationDO`.
 
 **Tech Stack:** Bun, TypeScript, Hono, Cloudflare Workers, Agents SDK `0.20.1`, `@cloudflare/ai-chat` `0.10.1`, AI SDK `6.x`, Durable Object SQLite, D1/Drizzle, React 19, TanStack Query, vanilla widget IIFE, `bun:test` for unit/contract tests, and Vitest with `@cloudflare/vitest-pool-workers` for `worker/agents/**/*.integration.test.ts`.
 
@@ -672,7 +672,7 @@ After `super()` installs `AIChatAgent`'s message handler, wrap that handler only
 Allow SDK resume acknowledgements/probes and cancellation. Reject direct `CF_AGENT_CHAT_MESSAGES`, clear, regenerate, client-tool result, and client-tool approval frames. For a submit request, require:
 
 - the connection has a verified visitor claim for this exact child;
-- the submitted messages begin with a structural clone of every authoritative server message in the same order;
+- the submitted messages are a structural clone of a suffix of the authoritative server messages, in the same order, and at least as long as the newest-200 window the client is served; the server serves and rebuilds that same window, so the wire payload does not grow with transcript length;
 - there is exactly one additional `user` message with a new ID;
 - it contains only bounded text and approved image/file parts;
 - it contains no client metadata, assistant/system role, tool part, source part, or client tool schema;
@@ -932,7 +932,7 @@ Expected: FAIL because the public hooks do not exist.
 
 - [ ] **Step 2: Change the list endpoint to one parent query**
 
-After D1 authorization, call `parent.listConversations()` and `parent.getInboxCounts()`. Collect customer and assignee IDs from the returned page, batch-load those D1 profiles, and merge them into the response. Do not contact child Agents from the list endpoint.
+After D1 authorization, make one `parent.getDashboardConversationPage()` RPC that returns the filtered page and inbox counts together. Apply legacy offsets directly in the parent's indexed SQLite query (`LIMIT … OFFSET …`), including offsets above the 100-row RPC page cap; do not traverse multiple parent cursors for one HTTP request. Collect customer and assignee IDs from the returned page, batch-load those D1 profiles, and merge them into the response. Do not contact child Agents from the list endpoint.
 
 - [ ] **Step 3: Connect the inbox to the project parent**
 
@@ -1140,7 +1140,17 @@ git commit -m "refactor: move conversation consumers to agents"
 
 ---
 
-### Task 11: Backfill, cut over, verify parity, and preserve rollback
+### Task 11: Backfill and one-shot cutover
+
+> **Scope revision (2026-08-14):** Only two production projects carry paying
+> traffic (LovablehTML and replymaven), and the release process is
+> test-locally-then-deploy — no staged production flip, no rollback window.
+> The per-project cutover gate, the D1 compatibility projection, the
+> projection outbox, and the seven-day stabilization phase were removed.
+> `PUBLIC_CONVERSATION_STORE` in `wrangler.jsonc` is the single runtime
+> switch. Until Task 12 drops them, the frozen legacy D1 tables remain a
+> coarse fallback: reverting the flag and redeploying returns to D1 at its
+> pre-cutover contents, losing Agent-era messages.
 
 **Files:**
 - Create: `worker/migrations/conversation-runtime-backfill.ts`
@@ -1157,49 +1167,33 @@ git commit -m "refactor: move conversation consumers to agents"
 
 **Interfaces:**
 - Consumes: Complete D1 and Agent store implementations.
-- Produces: Resumable directory backfill, lazy transcript import, compatibility projection, parity report, and explicit cutover gates.
+- Produces: Resumable directory backfill, lazy transcript import, and a parity verification report.
 
 - [x] **Step 1: Add migration checkpoint storage and tests**
 
-Create a D1 `conversation_runtime_migrations` table keyed by project with `directoryCursor`, `directoryCompleteAt`, `agentCutoverAt`, `lastVerifiedAt`, `mismatchCount`, and timestamps. Generate the migration as `0064_conversation_runtime_migration.sql` and update Drizzle metadata.
-
-The migration table is temporary and uses this exact shape:
-
-```sql
-CREATE TABLE conversation_runtime_migrations (
-  project_id TEXT PRIMARY KEY NOT NULL
-    REFERENCES projects(id) ON DELETE CASCADE,
-  directory_cursor TEXT,
-  directory_complete_at INTEGER,
-  agent_cutover_at INTEGER,
-  last_verified_at INTEGER,
-  mismatch_count INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
-```
+Create a D1 `conversation_runtime_migrations` table keyed by project holding the backfill cursor (`directory_cursor`, `directory_complete_at`), the verification report (`last_verified_at`, `mismatch_count`, `verification_cursor`, `verification_started_at`, and the per-category verification counts), and timestamps. Generate the migration as `0064_conversation_runtime_migration.sql` via Drizzle. The table is temporary; Task 12 drops it.
 
 Tests must resume after interruption, avoid duplicate parent rows, reject a transcript checksum mismatch, and report directory IDs present on only one side.
 
 - [x] **Step 2: Implement bounded directory backfill**
 
-Read 100 legacy conversations ordered by `(project_id, id)`, map them to summaries, and call one parent batch RPC per project. Persist the next cursor only after every parent confirms the batch. Reruns update rows by revision rather than creating duplicates.
+Read 100 legacy conversations ordered by `(project_id, id)`, map them to summaries, and call one parent batch RPC per project. Persist the next cursor only after every parent confirms the batch. Reruns update rows by revision rather than creating duplicates. The batch size exists for Workers request limits, not fleet orchestration; the two production projects complete in a handful of calls.
 
 - [x] **Step 3: Mirror directory mutations while legacy remains authoritative**
 
-After each successful D1 mutation, re-read the latest D1 row and send its normalized summary plus `(updatedAtMs, summaryChecksum)` to the parent. Keep legacy and Agent child revisions in separate source epochs. Because D1 timestamps can collide within one second, allow a same-timestamp checksum correction and run a bounded full reconciliation until cutover; the dashboard continues reading D1 during this phase, so the directory is not exposed as authoritative early. Once a project is cut over, reject every legacy-epoch update for that project.
+After each successful D1 mutation, re-read the latest D1 row and send its normalized summary plus `(updatedAtMs, summaryChecksum)` to the parent. Keep legacy and Agent child revisions in separate source epochs. Because D1 timestamps can collide within one second, allow a same-timestamp checksum correction. The dashboard continues reading D1 while the flag is `legacy`, so the directory is not exposed as authoritative early. The mirror only matters while the flag is `legacy`; after the cutover deploy no legacy writes exist.
 
-- [x] **Step 4: Implement lazy transcript cutover and compatibility projection**
+- [x] **Step 4: Implement lazy transcript import**
 
-On first Agent access, import the ordered D1 transcript and state with a checksum. After import succeeds, every mutation is Agent-authoritative. During the rollback window, attempt the D1 compatibility projection after each committed Agent mutation with an idempotency key of `(conversationId, childRevision)`. If D1 is unavailable, record a child-owned projection-outbox row and schedule retry; return the already-committed Agent result rather than inviting a duplicate client mutation. Never read the projection to decide runtime behavior, and block rollback/projection disablement while the outbox is non-empty or parity is dirty.
+On first Agent access, import the ordered D1 transcript, including system rows, and state with a checksum. After import succeeds, every mutation is Agent-authoritative. There is no reverse projection into D1: the legacy tables freeze at their pre-cutover contents and remain only as the import source and parity baseline until Task 12 drops them.
 
 - [x] **Step 5: Add protected admin operations**
 
-Expose existing-admin-only handlers for `backfill`, `verify`, `cutover-status`, and `disable-compatibility-projection`. Return counts and opaque cursors, never message content, tokens, or secrets. Require a confirmation string containing the project ID for cutover-affecting actions.
+Expose existing-admin-only handlers for `backfill`, `verify`, and `status`. Return counts and opaque cursors, never message content, tokens, or secrets.
 
-- [x] **Step 6: Add the parity gate**
+- [x] **Step 6: Verify parity as a report, not a gate**
 
-For each project compare conversation IDs, operational fields, message count, latest message ID, and SHA-256 transcript checksum. The `agent` runtime flag is not eligible until directory backfill is complete and mismatch count is zero. Projection disablement additionally requires zero legacy endpoint requests for seven consecutive days.
+For each project compare conversation IDs, operational fields, message count, latest message ID, and SHA-256 transcript checksum, and record the result on the checkpoint row. The report is operator information for the cutover deploy and the final Task 12 evidence; nothing at runtime reads it.
 
 - [x] **Step 7: Run migration and full regression tests locally**
 
@@ -1222,19 +1216,17 @@ git add worker wrangler.jsonc
 git commit -m "feat: add conversation runtime migration tooling"
 ```
 
-- [ ] **Step 9: Stop for explicit deployment approval at each release gate**
+- [ ] **Step 9: Cut over in one release**
 
-Request approval separately for:
+Each step is manual and ordered:
 
-1. deploying the dormant Agent implementation and directory mirror;
-2. applying `0063_idempotent_message_usage_credits.sql` remotely before any Agent AI turn can run;
-3. applying `0064_conversation_runtime_migration.sql` remotely;
-4. running production directory backfill and parity verification;
-5. changing `PUBLIC_CONVERSATION_STORE` from `legacy` to `agent`;
-6. uploading the Agent-based widget;
-7. disabling the D1 compatibility projection.
+1. apply `0063_idempotent_message_usage_credits.sql` and `0064_conversation_runtime_migration.sql` to production D1;
+2. set `PUBLIC_CONVERSATION_STORE` to `agent` in `wrangler.jsonc` and push to `main` (the worker auto-deploys);
+3. run the backfill admin endpoint for the two production projects until `directory_complete_at` is set — legacy writes have stopped, so the run cannot go stale;
+4. run verify and confirm `mismatch_count` is 0 for both projects;
+5. run `bun run widget:deploy` to upload the Agent widget.
 
-Do not combine these approvals.
+The Agent widget speaks no legacy transport, so the widget upload must stay strictly after the worker deploy. Between steps 2 and 3 the dashboard inbox may be incomplete — conversations appear as they are backfilled or touched; visitor transcripts are unaffected because per-conversation import is lazy.
 
 ---
 
@@ -1270,7 +1262,7 @@ Do not combine these approvals.
 - Modify: `AGENTS.md`
 
 **Interfaces:**
-- Consumes: Verified Agent-authoritative production state with compatibility projection disabled.
+- Consumes: Verified Agent-authoritative production state after the one-shot cutover.
 - Produces: One conversation runtime, no D1 conversations/messages, no `ConversationDO`, no public SSE/polling endpoints.
 
 - [ ] **Step 1: Strengthen the source-boundary deletion test**
@@ -1313,7 +1305,7 @@ const parityReportKey =
   `_migration-reports/conversation-runtime/final-${Date.now()}.json`;
 ```
 
-Write it to `UPLOADS` and record the resulting R2 key in the release evidence. Then delete the compatibility writer and admin mutation handlers. Keep a read-only Agent integrity endpoint for operational diagnostics. `0065_remove_legacy_conversation_storage.sql` must also drop `conversation_runtime_migrations`.
+Write it to `UPLOADS` and record the resulting R2 key in the release evidence. Then delete the backfill/verify service and admin handlers. Keep a read-only Agent integrity endpoint for operational diagnostics. `0065_remove_legacy_conversation_storage.sql` must also drop `conversation_runtime_migrations`.
 
 - [ ] **Step 6: Update repository documentation**
 
@@ -1359,11 +1351,8 @@ Request separate explicit approval before applying `0065_remove_legacy_conversat
 
 ## Release sequence and rollback boundaries
 
-1. **Release A — boundary and dormant infrastructure:** Tasks 1-5 with runtime fixed to `legacy`. Rollback is a normal code rollback.
-2. **Release B — Agent behavior and clients:** Tasks 6-10, still using the migration gates. Rollback remains safe while the synchronous D1 compatibility projection passes parity.
-3. **Runtime cutover:** Task 11 changes the runtime flag only after directory and transcript checks pass. Agent SQLite becomes authoritative at this point.
-4. **Stabilization:** Keep compatibility projection until parity remains clean and legacy endpoints receive zero traffic for seven consecutive days.
-5. **Release C — irreversible cleanup:** Task 12 removes the projection, D1 tables, and `ConversationDO`. After this point rollback requires an explicit Agent transcript export, not a flag flip.
+1. **Cutover release:** Tasks 1-11 ship together in one deploy that sets the runtime flag to `agent` (Task 11 Step 9). Agent SQLite becomes authoritative at this point. The frozen legacy D1 tables are the only fallback, at the cost of Agent-era messages.
+2. **Cleanup release:** Task 12 removes the legacy runtime, D1 conversation tables, and `ConversationDO`. After this point recovery requires an explicit Agent transcript export, not a redeploy.
 
 ## Final acceptance checklist
 

@@ -69,6 +69,7 @@ interface SortDefinition {
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
+const MAX_OFFSET = 10_000;
 
 function parseMetadata(value: string): Record<string, unknown> {
   try {
@@ -239,13 +240,22 @@ export class ConversationDirectory {
   listConversations(
     query: MavenConversationListQuery,
   ): MavenConversationListResult {
-    const filter = query.filter ?? "all";
     const sort = query.sort ?? "newest";
     const now = query.now ?? Date.now();
     const limit = Math.max(1, Math.min(MAX_LIMIT, query.limit ?? DEFAULT_LIMIT));
+    const offset = Math.max(0, Math.min(MAX_OFFSET, query.offset ?? 0));
     const conditions: string[] = [];
     const bindings: SqlBinding[] = [];
-    addInboxFilter(conditions, bindings, filter, now);
+    if (query.filter !== undefined) {
+      addInboxFilter(conditions, bindings, query.filter, now);
+    } else {
+      conditions.push("archived_at IS NULL");
+      if (query.status === "open") {
+        conditions.push("status != 'closed'");
+      } else if (query.status === "closed") {
+        conditions.push("status = 'closed'");
+      }
+    }
 
     const search = query.search?.trim().toLowerCase();
     if (search) {
@@ -287,8 +297,8 @@ export class ConversationDirectory {
        ORDER BY ${definition.primaryExpression} ${definition.direction},
                 ${definition.secondaryExpression} ${definition.direction},
                 conversation_id ${definition.direction}
-       LIMIT ?`,
-      [...bindings, limit + 1],
+       LIMIT ? OFFSET ?`,
+      [...bindings, limit + 1, offset],
     );
     const hasMore = rows.length > limit;
     const pageRows = hasMore ? rows.slice(0, limit) : rows;
@@ -324,6 +334,42 @@ export class ConversationDirectory {
     return rows[0] ? mapDirectoryRow(rows[0]) : null;
   }
 
+  getActiveByVisitor(visitorId: string): MavenConversationSummary | null {
+    const row = this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE visitor_id = ?
+         AND status != 'closed'
+         AND archived_at IS NULL
+       ORDER BY last_activity_at DESC, conversation_id DESC
+       LIMIT 1`,
+      [visitorId],
+    )[0];
+    return row ? mapDirectoryRow(row) : null;
+  }
+
+  getLastByVisitor(visitorId: string): MavenConversationSummary | null {
+    const row = this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE visitor_id = ? AND archived_at IS NULL
+       ORDER BY last_activity_at DESC, conversation_id DESC
+       LIMIT 1`,
+      [visitorId],
+    )[0];
+    return row ? mapDirectoryRow(row) : null;
+  }
+
+  getRecentByVisitorEmail(email: string): MavenConversationSummary | null {
+    const row = this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE visitor_id != '' AND LOWER(TRIM(visitor_email)) = ?
+         AND archived_at IS NULL
+       ORDER BY updated_at DESC, conversation_id DESC
+       LIMIT 1`,
+      [email.trim().toLowerCase()],
+    )[0];
+    return row ? mapDirectoryRow(row) : null;
+  }
+
   listOpenByVisitor(
     visitorId: string,
     visitorEmail?: string | null,
@@ -352,6 +398,20 @@ export class ConversationDirectory {
        WHERE visitor_id != ''
        ORDER BY conversation_id ASC`,
       [],
+    ).map(mapDirectoryRow);
+  }
+
+  listMigrationSummariesAfter(
+    afterConversationId: string | null,
+    limit: number,
+  ): MavenConversationSummary[] {
+    return this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE visitor_id != ''
+         AND (? IS NULL OR conversation_id > ?)
+       ORDER BY conversation_id ASC
+       LIMIT ?`,
+      [afterConversationId, afterConversationId, Math.max(1, Math.min(101, limit))],
     ).map(mapDirectoryRow);
   }
 
@@ -811,6 +871,8 @@ export class ConversationDirectory {
       "CREATE INDEX IF NOT EXISTS idx_directory_status_activity ON conversation_directory(status, last_activity_at DESC, conversation_id DESC)",
       "CREATE INDEX IF NOT EXISTS idx_directory_customer_activity ON conversation_directory(customer_id, last_activity_at DESC)",
       "CREATE INDEX IF NOT EXISTS idx_directory_visitor_activity ON conversation_directory(visitor_id, last_activity_at DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_directory_visitor_active ON conversation_directory(visitor_id, archived_at, status, last_activity_at DESC, conversation_id DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_directory_email_recent ON conversation_directory(LOWER(TRIM(visitor_email)), archived_at, updated_at DESC, conversation_id DESC)",
       "CREATE INDEX IF NOT EXISTS idx_directory_telegram_thread ON conversation_directory(telegram_thread_id)",
       "CREATE INDEX IF NOT EXISTS idx_directory_created ON conversation_directory(created_at DESC, conversation_id DESC)",
     ]) {

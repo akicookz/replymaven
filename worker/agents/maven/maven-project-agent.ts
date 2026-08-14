@@ -30,8 +30,9 @@ import type {
 import {
   toPublicChildName,
   toSidechatChildName,
+  type PublicConversationRecord,
+  type PublicMessageRecord,
 } from "../../../shared/maven-conversation";
-import { getLocalUploadKey } from "../../../shared/upload-ownership";
 import type { ToolRow } from "../../db";
 import { buildCustomerByIdQuery } from "../../services/customer-service";
 import type {
@@ -294,6 +295,24 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     return this.conversationDirectory().getConversation(conversationId);
   }
 
+  async getActivePublicConversationByVisitor(
+    visitorId: string,
+  ): Promise<MavenConversationSummary | null> {
+    return this.conversationDirectory().getActiveByVisitor(visitorId);
+  }
+
+  async getLastPublicConversationByVisitor(
+    visitorId: string,
+  ): Promise<MavenConversationSummary | null> {
+    return this.conversationDirectory().getLastByVisitor(visitorId);
+  }
+
+  async getRecentPublicConversationByEmail(
+    email: string,
+  ): Promise<MavenConversationSummary | null> {
+    return this.conversationDirectory().getRecentByVisitorEmail(email);
+  }
+
   async getConversationChildPresence(conversationId: string): Promise<{
     public: boolean;
     sidechat: boolean;
@@ -354,6 +373,26 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       else skipped += 1;
     }
     return { applied, skipped };
+  }
+
+  async reconcileLegacyConversation(input: {
+    summary: MavenConversationSummary;
+    conversation: PublicConversationRecord;
+    messages: PublicMessageRecord[];
+    checksum: string;
+  }): Promise<void> {
+    this.conversationDirectory().upsertConversationSummary(input.summary);
+    const childName = toPublicChildName(input.conversation.id);
+    if (!this.hasSubAgent(MavenChatAgent, childName)) return;
+    const child = await this.subAgent(MavenChatAgent, childName);
+    const result = await child.refreshLegacyPublicConversation({
+      conversation: input.conversation,
+      messages: input.messages,
+      checksum: input.checksum,
+    });
+    if (result.status === "conflict") {
+      throw new Error("Agent-native conversation cannot accept a legacy refresh");
+    }
   }
 
   async applyPublicCustomerMutation(
@@ -586,8 +625,18 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     return this.conversationDirectory().listAll();
   }
 
+  async listMigrationConversationSummaries(input: {
+    afterConversationId: string | null;
+    limit: number;
+  }): Promise<MavenConversationSummary[]> {
+    return this.conversationDirectory().listMigrationSummariesAfter(
+      input.afterConversationId,
+      input.limit,
+    );
+  }
+
   async removeLegacyConversation(conversationId: string): Promise<boolean> {
-    if (await this.isCompatibilityProjectionEnabled()) return false;
+    if (this.env.PUBLIC_CONVERSATION_STORE === "agent") return false;
     const summary = this.conversationDirectory().getConversation(conversationId);
     if (!summary) return false;
     if (
@@ -700,123 +749,11 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     await this.cancelSchedule(scheduleId);
   }
 
-  async isCompatibilityProjectionEnabled(): Promise<boolean> {
-    this.ensureConversationRuntimeSettingsSchema();
-    const disabled = this.ctx.storage.sql.exec(
-      `SELECT value FROM conversation_runtime_settings
-       WHERE key = 'compatibility_projection_disabled_at'`,
-    ).toArray();
-    if (disabled.length > 0) return false;
-    try {
-      const row = await this.env.DB.prepare(
-        `SELECT directory_complete_at, agent_cutover_at, last_verified_at,
-           mismatch_count
-         FROM conversation_runtime_migrations
-         WHERE project_id = ?`,
-      ).bind(this.name).first<{
-        directory_complete_at: number | null;
-        agent_cutover_at: number | null;
-        last_verified_at: number | null;
-        mismatch_count: number;
-      }>();
-      if (row?.agent_cutover_at !== null && row?.agent_cutover_at !== undefined) {
-        return true;
-      }
-      if (
-        this.env.PUBLIC_CONVERSATION_STORE !== "agent" ||
-        row?.directory_complete_at === null ||
-        row?.directory_complete_at === undefined ||
-        row.last_verified_at === null ||
-        row.mismatch_count !== 0
-      ) return this.env.PUBLIC_CONVERSATION_STORE === "agent";
-      const cutoverAt = Math.floor(Date.now() / 1_000);
-      await this.env.DB.prepare(
-        `UPDATE conversation_runtime_migrations
-         SET agent_cutover_at = ?, updated_at = ?
-         WHERE project_id = ? AND agent_cutover_at IS NULL
-           AND directory_complete_at IS NOT NULL AND mismatch_count = 0`,
-      ).bind(cutoverAt, cutoverAt, this.name).run();
-      return true;
-    } catch {
-      return this.env.PUBLIC_CONVERSATION_STORE === "agent";
-    }
-  }
-
-  async getCompatibilityProjectionStatus(): Promise<{
-    enabled: boolean;
-    pendingOutboxCount: number;
-    lastLegacyRequestAt: number | null;
-  }> {
-    let pendingOutboxCount = 0;
-    const summaries = this.conversationDirectory().listAll();
-    for (let offset = 0; offset < summaries.length; offset += 25) {
-      const pending = await Promise.all(summaries.slice(offset, offset + 25)
-        .map(async (summary) => {
-          if (!this.hasSubAgent(MavenChatAgent, summary.publicChildName)) {
-            return false;
-          }
-          const child = await this.subAgent(
-            MavenChatAgent,
-            summary.publicChildName,
-          );
-          return child.hasPendingCompatibilityProjection();
-        }));
-      pendingOutboxCount += pending.filter(Boolean).length;
-    }
-    this.ensureConversationRuntimeSettingsSchema();
-    const legacyRows = this.ctx.storage.sql.exec(
-      `SELECT value FROM conversation_runtime_settings
-       WHERE key = 'last_legacy_request_at'`,
-    ).toArray() as Array<{ value: string }>;
-    const parsedLegacyRequestAt = Number(legacyRows[0]?.value);
-    return {
-      enabled: await this.isCompatibilityProjectionEnabled(),
-      pendingOutboxCount,
-      lastLegacyRequestAt: Number.isFinite(parsedLegacyRequestAt)
-        ? parsedLegacyRequestAt
-        : null,
-    };
-  }
-
-  async recordLegacyRuntimeRequest(input: { at: number }): Promise<void> {
-    this.ensureConversationRuntimeSettingsSchema();
-    this.ctx.storage.sql.exec(
-      `INSERT INTO conversation_runtime_settings (key, value, updated_at)
-       VALUES ('last_legacy_request_at', ?, ?)
-       ON CONFLICT(key) DO UPDATE SET
-         value = CASE
-           WHEN CAST(conversation_runtime_settings.value AS INTEGER) <
-             CAST(excluded.value AS INTEGER)
-           THEN excluded.value
-           ELSE conversation_runtime_settings.value
-         END,
-         updated_at = excluded.updated_at`,
-      String(input.at),
-      input.at,
-    );
-  }
-
-  async disableCompatibilityProjection(): Promise<void> {
-    const status = await this.getCompatibilityProjectionStatus();
-    if (status.pendingOutboxCount > 0) {
-      throw new Error("Compatibility projection outbox is not empty");
-    }
-    this.ensureConversationRuntimeSettingsSchema();
-    this.ctx.storage.sql.exec(
-      `INSERT INTO conversation_runtime_settings (key, value, updated_at)
-       VALUES ('compatibility_projection_disabled_at', ?, ?)
-       ON CONFLICT(key) DO UPDATE SET
-         value = excluded.value,
-         updated_at = excluded.updated_at`,
-      String(Date.now()),
-      Date.now(),
-    );
-  }
-
   async purgeConversation(input: {
     conversationId: string;
     archivedAt: number;
     now?: number;
+    purgeStartedAt?: number;
   }): Promise<boolean> {
     const summary = this.conversationDirectory().getConversation(
       input.conversationId,
@@ -833,22 +770,28 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       MavenChatAgent,
       summary.publicChildName,
     );
-    const manifest = await publicChild.getAttachmentManifest();
-    const prefix =
-      `${this.name}/conversation-attachments/${input.conversationId}/`;
-    const keys = [...new Set(manifest.flatMap((entry) =>
-      entry.imageUrls.map(getLocalUploadKey)
-        .filter((key): key is string => key?.startsWith(prefix) === true)
-    ))];
-    const deletable: string[] = [];
-    for (const key of keys) {
-      if (!await this.hasPublicUploadKeyElsewhere({
-        key,
-        excludedConversationId: input.conversationId,
-      })) deletable.push(key);
-    }
-    for (let offset = 0; offset < deletable.length; offset += 1_000) {
-      await this.env.UPLOADS.delete(deletable.slice(offset, offset + 1_000));
+    const purgeStartedAt = input.purgeStartedAt ?? now;
+    const claimed = input.purgeStartedAt === undefined
+      ? await publicChild.claimScheduledPublicRetention({
+          archivedAt: input.archivedAt,
+          claimAt: purgeStartedAt,
+        })
+      : await publicChild.matchesPublicRetentionClaim(purgeStartedAt);
+    if (!claimed) return false;
+
+    try {
+      await this.deleteCompatibilityConversationBeforeNative(
+        input.conversationId,
+      );
+      await this.deleteConversationUploads(input.conversationId);
+    } catch (error) {
+      await this.schedule(
+        60,
+        "purgeConversation",
+        { ...input, now: undefined, purgeStartedAt },
+        { idempotent: true },
+      );
+      throw error;
     }
 
     if (summary.retentionScheduleId) {
@@ -875,34 +818,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       this.setState({ sidechats: {}, inboxCounts });
       this.broadcastProjectEvent({ type: "inbox-counts", counts: inboxCounts });
     }
-    try {
-      await this.env.DB.prepare(
-        "DELETE FROM tool_executions WHERE conversation_id = ?",
-      ).bind(input.conversationId).run();
-      if (await this.isCompatibilityProjectionEnabled()) {
-        await this.env.DB.prepare(
-          "DELETE FROM conversations WHERE id = ? AND project_id = ?",
-        ).bind(input.conversationId, this.name).run();
-      }
-    } catch {
-      // The legacy reconciliation sweep retries D1 auxiliary cleanup.
-    }
     return removed;
-  }
-
-  async hasPublicUploadKeyElsewhere(input: {
-    key: string;
-    excludedConversationId: string;
-  }): Promise<boolean> {
-    for (const summary of this.conversationDirectory().listAll()) {
-      if (summary.conversationId === input.excludedConversationId) continue;
-      const child = await this.subAgent(
-        MavenChatAgent,
-        summary.publicChildName,
-      );
-      if (await child.hasPublicUploadKey(input.key)) return true;
-    }
-    return false;
   }
 
   async deleteClaimedPublicConversation(input: {
@@ -920,6 +836,10 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     if (!await child.matchesPublicRetentionClaim(input.purgeStartedAt)) {
       return false;
     }
+    await this.deleteCompatibilityConversationBeforeNative(
+      input.conversationId,
+    );
+    await this.deleteConversationUploads(input.conversationId);
     if (
       summary.sidechatChildName &&
       this.hasSubAgent(MavenChatAgent, summary.sidechatChildName)
@@ -938,16 +858,43 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       });
       this.broadcastProjectEvent({ type: "inbox-counts", counts: inboxCounts });
     }
-    try {
-      if (await this.isCompatibilityProjectionEnabled()) {
-        await this.env.DB.prepare(
-          "DELETE FROM conversations WHERE id = ? AND project_id = ?",
-        ).bind(input.conversationId, this.name).run();
-      }
-    } catch {
-      // Projection reconciliation can remove a stale compatibility row.
-    }
     return removed;
+  }
+
+  private async deleteCompatibilityConversationBeforeNative(
+    conversationId: string,
+  ): Promise<void> {
+    await this.env.DB.batch([
+      this.env.DB.prepare(
+        "DELETE FROM tool_executions WHERE conversation_id = ?",
+      ).bind(conversationId),
+      this.env.DB.prepare(
+        `DELETE FROM conversations
+         WHERE id = ? AND project_id = ? AND archived_at IS NOT NULL`,
+      ).bind(conversationId, this.name),
+    ]);
+    const remaining = await this.env.DB.prepare(
+      `SELECT 1 AS present FROM conversations
+       WHERE id = ? AND project_id = ? LIMIT 1`,
+    ).bind(conversationId, this.name).first<{ present: number }>();
+    if (remaining) {
+      throw new Error("Compatibility conversation is not durably archived");
+    }
+  }
+
+  private async deleteConversationUploads(conversationId: string): Promise<void> {
+    const prefix = `${this.name}/conversation-attachments/${conversationId}/`;
+    let cursor: string | undefined;
+    do {
+      const page = await this.env.UPLOADS.list({
+        prefix,
+        ...(cursor ? { cursor } : {}),
+        limit: 1_000,
+      });
+      const keys = page.objects.map((object) => object.key);
+      if (keys.length > 0) await this.env.UPLOADS.delete(keys);
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
   }
 
   async getSidechatRegistration(
@@ -1512,16 +1459,6 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     `;
   }
 
-  private ensureConversationRuntimeSettingsSchema(): void {
-    this.ctx.storage.sql.exec(
-      `CREATE TABLE IF NOT EXISTS conversation_runtime_settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      )`,
-    );
-  }
-
   private readPublicCustomerMutation(
     mutationId: string,
   ): PublicCustomerMutationRow | null {
@@ -1979,6 +1916,9 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       return new Response("Not found", { status: 404 });
     }
     if (child.name.startsWith("pub_")) {
+      if (this.env.PUBLIC_CONVERSATION_STORE !== "agent") {
+        return new Response("Agent runtime not cut over", { status: 409 });
+      }
       const conversationId = child.name.slice(4);
       const summary = this.conversationDirectory().getConversation(
         conversationId,

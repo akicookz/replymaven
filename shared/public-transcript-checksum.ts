@@ -1,4 +1,7 @@
-import type { PublicMessageRecord } from "./maven-conversation";
+import type {
+  PublicConversationRecord,
+  PublicMessageRecord,
+} from "./maven-conversation";
 
 function stableValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -41,6 +44,17 @@ export async function publicTranscriptChecksum(
     )
     .map(normalizedMessage);
   const bytes = new TextEncoder().encode(JSON.stringify(stableValue(ordered)));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export async function publicConversationImportChecksum(
+  conversation: PublicConversationRecord,
+  messages: PublicMessageRecord[],
+): Promise<string> {
+  const bytes = new TextEncoder().encode(
+    JSON.stringify(stableValue({ conversation, messages })),
+  );
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

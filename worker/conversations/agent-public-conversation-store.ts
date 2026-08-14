@@ -1,5 +1,4 @@
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
 import { parseMessageImageUrls } from "../../shared/message-images";
 import type {
   PublicConversationRecord,
@@ -17,8 +16,12 @@ import type {
   MavenUsageLogQuery,
   MavenUsageLogResult,
 } from "../../shared/sidechat-agent";
+import {
+  isConversationUploadKeyOwnedByConversation,
+} from "../../shared/upload-ownership";
+import { publicConversationImportChecksum } from "../../shared/public-transcript-checksum";
 import type { AppEnv } from "../types";
-import { projects, toolExecutions } from "../db/schema";
+import { projects } from "../db/schema";
 import { D1PublicConversationStore } from "./d1-public-conversation-store";
 import type {
   AppendPublicBotInput,
@@ -72,17 +75,46 @@ interface AgentPublicConversationStoreContext {
   db: DrizzleD1Database<Record<string, unknown>>;
   env: AppEnv;
   legacy?: PublicConversationStore;
+  skipRuntimeCutoverGate?: boolean;
+}
+
+interface LegacyImportConversationStore extends PublicConversationStore {
+  getMigrationMessages?(
+    projectId: string,
+    conversationId: string,
+  ): Promise<PublicMessageRecord[]>;
 }
 
 interface PublicChildStub {
   hasPublicConversation(): Promise<boolean>;
+  getPublicConversationRecord(): Promise<PublicConversationRecord>;
   getPublicSnapshot(): Promise<{
     conversation: PublicConversationRecord;
     messages: PublicMessageRecord[];
     revision: number;
   }>;
   getPublicMessages(): Promise<PublicMessageRecord[]>;
+  getRecentPublicMessages(input: { limit: number }): Promise<PublicMessagePage>;
+  getPublicMessagesBefore(input: {
+    beforeCreatedAt: number;
+    limit: number;
+  }): Promise<PublicMessagePage>;
+  getPublicMessagesSince(input: {
+    since: number;
+    limit: number;
+  }): Promise<PublicMessageRecord[]>;
+  getPublicMessage(messageId: string): Promise<PublicMessageRecord | null>;
+  hasPublicVisitorMessages(): Promise<boolean>;
+  getLatestEmailedPublicHumanMessage(): Promise<PublicMessageRecord | null>;
   importLegacyPublicConversation(input: {
+    conversation: PublicConversationRecord;
+    messages: PublicMessageRecord[];
+    checksum: string;
+  }): Promise<{
+    status: "imported" | "noop" | "conflict";
+    revision: number;
+  }>;
+  refreshLegacyPublicConversation(input: {
     conversation: PublicConversationRecord;
     messages: PublicMessageRecord[];
     checksum: string;
@@ -182,7 +214,6 @@ interface PublicChildStub {
   ): Promise<PublicConversationRecord | null>;
   getPublicChatState(): Promise<ConversationChatState>;
   savePublicChatState(chatState: ConversationChatState): Promise<void>;
-  hasPublicUploadKey(key: string): Promise<boolean>;
 }
 
 interface PublicParentStub {
@@ -191,6 +222,15 @@ interface PublicParentStub {
   ): Promise<{ childName: `pub_${string}`; created: boolean }>;
   getConversationSummary(
     conversationId: string,
+  ): Promise<MavenConversationSummary | null>;
+  getActivePublicConversationByVisitor(
+    visitorId: string,
+  ): Promise<MavenConversationSummary | null>;
+  getLastPublicConversationByVisitor(
+    visitorId: string,
+  ): Promise<MavenConversationSummary | null>;
+  getRecentPublicConversationByEmail(
+    email: string,
   ): Promise<MavenConversationSummary | null>;
   listConversations(
     query: MavenConversationListQuery,
@@ -231,10 +271,6 @@ interface PublicParentStub {
     claimAt: number;
     limit: number;
   }): Promise<PublicRetentionClaim[]>;
-  hasPublicUploadKeyElsewhere(input: {
-    key: string;
-    excludedConversationId: string;
-  }): Promise<boolean>;
   deleteClaimedPublicConversation(input: {
     conversationId: string;
     purgeStartedAt: number;
@@ -242,11 +278,20 @@ interface PublicParentStub {
 }
 
 async function getPublicParent(
-  namespace: AppEnv["MAVEN_PROJECT_AGENT"],
+  context: AgentPublicConversationStoreContext,
   projectId: string,
 ): Promise<PublicParentStub> {
+  if (
+    !context.skipRuntimeCutoverGate &&
+    context.env.PUBLIC_CONVERSATION_STORE !== "agent"
+  ) {
+    throw new Error("Public Agent runtime is not cut over for this project");
+  }
   const { getAgentByName } = await import("agents");
-  return await getAgentByName(namespace, projectId) as unknown as PublicParentStub;
+  return await getAgentByName(
+    context.env.MAVEN_PROJECT_AGENT,
+    projectId,
+  ) as unknown as PublicParentStub;
 }
 
 async function getPublicSubAgent(
@@ -263,16 +308,6 @@ async function getPublicSubAgent(
     childName: string,
   ) => Promise<PublicChildStub>;
   return getChild(parent, MavenChatAgent, name);
-}
-
-function stableValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [key, stableValue(entry)]),
-  );
 }
 
 async function mapWithConcurrency<Input, Output>(
@@ -315,19 +350,6 @@ function parseMessageSources(raw: string | null | undefined): PublicSourceRefere
   } catch {
     return [];
   }
-}
-
-async function importChecksum(
-  conversation: PublicConversationRecord,
-  messages: PublicMessageRecord[],
-): Promise<string> {
-  const bytes = new TextEncoder().encode(
-    JSON.stringify(stableValue({ conversation, messages })),
-  );
-  const digest = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", bytes),
-  );
-  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function summaryToConversation(
@@ -402,7 +424,7 @@ function newMessage(
 }
 
 export class AgentPublicConversationStore implements PublicConversationStore {
-  private readonly legacy: PublicConversationStore;
+  private readonly legacy: LegacyImportConversationStore;
 
   constructor(private readonly context: AgentPublicConversationStoreContext) {
     this.legacy = context.legacy ?? new D1PublicConversationStore(context.db);
@@ -439,7 +461,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       ownershipRevision: 0,
     };
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       input.projectId,
     );
     const registration = await parent.registerPublicConversation(
@@ -465,14 +487,8 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     projectId: string,
     visitorId: string,
   ): Promise<PublicConversationRecord | null> {
-    const summaries = await this.readEverySummary(projectId);
-    const match = summaries
-      .filter((summary) =>
-        summary.visitorId === visitorId &&
-        summary.status !== "closed" &&
-        summary.archivedAt === null
-      )
-      .sort((left, right) => right.lastActivityAt - left.lastActivityAt)[0];
+    const parent = await getPublicParent(this.context, projectId);
+    const match = await parent.getActivePublicConversationByVisitor(visitorId);
     return match ? this.get(projectId, match.conversationId) : null;
   }
 
@@ -480,12 +496,8 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     projectId: string,
     visitorId: string,
   ): Promise<PublicConversationRecord | null> {
-    const summaries = await this.readEverySummary(projectId);
-    const match = summaries
-      .filter((summary) =>
-        summary.visitorId === visitorId && summary.archivedAt === null
-      )
-      .sort((left, right) => right.lastActivityAt - left.lastActivityAt)[0];
+    const parent = await getPublicParent(this.context, projectId);
+    const match = await parent.getLastPublicConversationByVisitor(visitorId);
     return match ? this.get(projectId, match.conversationId) : null;
   }
 
@@ -493,14 +505,8 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     projectId: string,
     email: string,
   ): Promise<PublicConversationRecord | null> {
-    const normalized = email.trim().toLowerCase();
-    const summaries = await this.readEverySummary(projectId);
-    const match = summaries
-      .filter((summary) =>
-        summary.visitorEmail?.trim().toLowerCase() === normalized &&
-        summary.archivedAt === null
-      )
-      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    const parent = await getPublicParent(this.context, projectId);
+    const match = await parent.getRecentPublicConversationByEmail(email);
     return match ? this.get(projectId, match.conversationId) : null;
   }
 
@@ -509,19 +515,14 @@ export class AgentPublicConversationStore implements PublicConversationStore {
   ): Promise<PublicConversationListResult> {
     const summaries = await this.readAllSummaries(
       query.projectId,
-      query.inboxFilter ?? "all",
+      query.inboxFilter,
+      query.inboxFilter ? undefined : query.status,
       query.search,
-    );
-    const statusFiltered = summaries.filter((summary) =>
-      query.status === undefined || query.status === "all" ||
-      (query.status === "closed"
-        ? summary.status === "closed"
-        : summary.status !== "closed")
     );
     const offset = Math.max(0, query.offset ?? 0);
     const limit = Math.max(1, Math.min(100, query.limit ?? 50));
     return {
-      conversations: statusFiltered.slice(offset, offset + limit)
+      conversations: summaries.slice(offset, offset + limit)
         .map((summary) => summaryToConversation(summary, query.projectId)),
     };
   }
@@ -574,7 +575,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
 
   async getInboxCounts(projectId: string): Promise<PublicInboxCounts> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     return parent.getInboxCounts();
@@ -592,7 +593,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     nextCursor: string | null;
   }> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     const page = await parent.getDashboardConversationPage(query);
@@ -626,7 +627,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       .from(projects);
     for (const project of projectRows) {
       const parent = await getPublicParent(
-        this.context.env.MAVEN_PROJECT_AGENT,
+        this.context,
         project.id,
       );
       for (const summary of await parent.listAllPublicConversationSummaries()) {
@@ -653,7 +654,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     customerId: string,
   ): Promise<PublicConversationRecord[]> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     return (await parent.listByCustomer(customerId))
@@ -665,7 +666,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     customerIds: string[],
   ): Promise<Map<string, number>> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     return new Map(
@@ -679,7 +680,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     visitorId: string,
   ): Promise<PublicConversationRecord[]> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     return (await parent.listByVisitor(visitorId))
@@ -691,28 +692,31 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     conversation: PublicConversationRecord,
   ): Promise<{ childName: `pub_${string}` }> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       conversation.projectId,
     );
     const registration = await parent.registerPublicConversation(
       conversation.id,
     );
     const child = await getPublicSubAgent(parent, registration.childName);
-    if (await child.hasPublicConversation()) {
-      return { childName: registration.childName as `pub_${string}` };
-    }
-    const messages = await this.legacy.getMessages(
+    // Without a legacy row there is nothing to refresh from, and refreshing
+    // would replace a pristine child's transcript with an empty one.
+    const legacyConversation = await this.legacy.get(
       conversation.projectId,
       conversation.id,
     );
-    const imported = await child.importLegacyPublicConversation({
+    if (!legacyConversation) {
+      return { childName: registration.childName as `pub_${string}` };
+    }
+    const messages = await this.readLegacyImportMessages(
+      conversation.projectId,
+      conversation.id,
+    );
+    await child.refreshLegacyPublicConversation({
       conversation,
       messages,
-      checksum: await importChecksum(conversation, messages),
+      checksum: await publicConversationImportChecksum(conversation, messages),
     });
-    if (imported.status === "conflict") {
-      throw new Error("Legacy public conversation checksum conflict");
-    }
     return { childName: registration.childName as `pub_${string}` };
   }
 
@@ -721,7 +725,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     conversationId: string,
   ): Promise<PublicConversationRecord | null> {
     const child = await this.resolveChild(projectId, conversationId);
-    return child ? (await child.getPublicSnapshot()).conversation : null;
+    return child ? child.getPublicConversationRecord() : null;
   }
 
   async getMessages(
@@ -737,26 +741,22 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     conversationId: string,
     limit: number,
   ): Promise<PublicMessagePage> {
-    const messages = await this.getMessages(projectId, conversationId);
-    const bounded = Math.max(1, Math.min(100, limit));
-    return {
-      messages: messages.slice(-bounded),
-      hasMore: messages.length > bounded,
-    };
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.getRecentPublicMessages({ limit })
+      : { messages: [], hasMore: false };
   }
 
   async getMessagesBefore(
     input: PublicMessagesBeforeInput,
   ): Promise<PublicMessagePage> {
-    const all = await this.getMessages(input.projectId, input.conversationId);
-    const eligible = all.filter((message) =>
-      message.createdAt < input.beforeCreatedAt
-    );
-    const limit = Math.max(1, Math.min(100, input.limit ?? 50));
-    return {
-      messages: eligible.slice(-limit),
-      hasMore: eligible.length > limit,
-    };
+    const child = await this.resolveChild(input.projectId, input.conversationId);
+    return child
+      ? child.getPublicMessagesBefore({
+          beforeCreatedAt: input.beforeCreatedAt,
+          limit: input.limit ?? 50,
+        })
+      : { messages: [], hasMore: false };
   }
 
   async getMessagesSince(
@@ -764,8 +764,10 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     conversationId: string,
     since: number,
   ): Promise<PublicMessageRecord[]> {
-    return (await this.getMessages(projectId, conversationId))
-      .filter((message) => message.createdAt >= since);
+    const child = await this.resolveChild(projectId, conversationId);
+    return child
+      ? child.getPublicMessagesSince({ since, limit: 250 })
+      : [];
   }
 
   async getMessage(
@@ -773,26 +775,24 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     conversationId: string,
     messageId: string,
   ): Promise<PublicMessageRecord | null> {
-    return (await this.getMessages(projectId, conversationId))
-      .find((message) => message.id === messageId) ?? null;
+    const child = await this.resolveChild(projectId, conversationId);
+    return child ? child.getPublicMessage(messageId) : null;
   }
 
   async hasVisitorMessages(
     projectId: string,
     conversationId: string,
   ): Promise<boolean> {
-    return (await this.getMessages(projectId, conversationId))
-      .some((message) => message.author === "visitor");
+    const child = await this.resolveChild(projectId, conversationId);
+    return child ? child.hasPublicVisitorMessages() : false;
   }
 
   async getLatestEmailedHumanMessage(
     projectId: string,
     conversationId: string,
   ): Promise<PublicMessageRecord | null> {
-    return (await this.getMessages(projectId, conversationId))
-      .filter((message) =>
-        message.author === "agent" && message.emailedAt !== null
-      ).at(-1) ?? null;
+    const child = await this.resolveChild(projectId, conversationId);
+    return child ? child.getLatestEmailedPublicHumanMessage() : null;
   }
 
   async appendVisitor(
@@ -800,13 +800,13 @@ export class AgentPublicConversationStore implements PublicConversationStore {
   ): Promise<AppendVisitorResult | null> {
     const child = await this.resolveChild(input.projectId, input.conversationId);
     if (!child) return null;
-    const existing = await child.getPublicMessages();
+    const hasVisitorMessages = await child.hasPublicVisitorMessages();
     const message = await child.appendVisitorMessage(
       newMessage(input, "visitor"),
     );
     return {
       message,
-      isFirstVisitorTurn: !existing.some((entry) => entry.author === "visitor"),
+      isFirstVisitorTurn: !hasVisitorMessages,
     };
   }
 
@@ -822,13 +822,13 @@ export class AgentPublicConversationStore implements PublicConversationStore {
   ): Promise<PublicMessageRecord | null> {
     const child = await this.resolveChild(input.projectId, input.conversationId);
     if (!child) return null;
-    const snapshot = await child.getPublicSnapshot();
+    const conversation = await child.getPublicConversationRecord();
     const chatStateMatches = input.expected.chatState === null
-      ? Object.keys(snapshot.conversation.chatState).length === 0
-      : JSON.stringify(snapshot.conversation.chatState) ===
+      ? Object.keys(conversation.chatState).length === 0
+      : JSON.stringify(conversation.chatState) ===
         input.expected.chatState;
     if (
-      snapshot.conversation.status !== input.expected.status ||
+      conversation.status !== input.expected.status ||
       !chatStateMatches
     ) return null;
     return child.appendBotMessage(newMessage(input, "bot"));
@@ -841,8 +841,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     const id = input.idempotencyKey
       ? `system-${input.kind}-${input.idempotencyKey}`
       : crypto.randomUUID();
-    const existing = (await child.getPublicMessages())
-      .find((message) => message.id === id);
+    const existing = await child.getPublicMessage(id);
     if (existing) return existing;
     return child.appendSystemMessage(newMessage(input, "system", {
       id,
@@ -874,7 +873,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     action: PublicConversationAction,
   ): Promise<{ updatedIds: string[]; skippedIds: string[] }> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     return parent.bulkApplyPublicActions({ conversationIds, action });
@@ -1117,7 +1116,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     input: PublicCustomerMutationInput,
   ): Promise<PublicCustomerMutationResult> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       input.projectId,
     );
     return parent.applyPublicCustomerMutation({
@@ -1201,7 +1200,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     visitorEmail?: string | null,
   ): Promise<string[]> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     return parent.closePublicConversationsAsSpam({
@@ -1216,7 +1215,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
   ): Promise<PublicConversationAnalytics> {
     const pages = await mapWithConcurrency(projectIds, 5, async (projectId) => {
       const parent = await getPublicParent(
-        this.context.env.MAVEN_PROJECT_AGENT,
+        this.context,
         projectId,
       );
       return { projectId, stats: await parent.getProjectStats(since) };
@@ -1282,7 +1281,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       5,
       async (projectId) => {
         const parent = await getPublicParent(
-          this.context.env.MAVEN_PROJECT_AGENT,
+          this.context,
           projectId,
         );
         const result = await parent.getUsageLog({
@@ -1348,7 +1347,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     for (const project of projectRows) {
       if (claimed.length >= limit) break;
       const parent = await getPublicParent(
-        this.context.env.MAVEN_PROJECT_AGENT,
+        this.context,
         project.id,
       );
       claimed.push(...await parent.claimExpiredPublicArchives({
@@ -1373,20 +1372,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     key: string,
     conversationId: string,
   ): Promise<boolean> {
-    const projectRows = await this.context.db
-      .select({ id: projects.id })
-      .from(projects);
-    for (const project of projectRows) {
-      const parent = await getPublicParent(
-        this.context.env.MAVEN_PROJECT_AGENT,
-        project.id,
-      );
-      if (await parent.hasPublicUploadKeyElsewhere({
-        key,
-        excludedConversationId: conversationId,
-      })) return true;
-    }
-    return false;
+    return !isConversationUploadKeyOwnedByConversation(key, conversationId);
   }
 
   async deleteRetentionClaim(
@@ -1395,18 +1381,13 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     purgeStartedAt: number,
   ): Promise<boolean> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     const deleted = await parent.deleteClaimedPublicConversation({
       conversationId,
       purgeStartedAt,
     });
-    if (deleted) {
-      await this.context.db
-        .delete(toolExecutions)
-        .where(eq(toolExecutions.conversationId, conversationId));
-    }
     return deleted;
   }
 
@@ -1563,7 +1544,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       return this.getMessage(projectId, conversationId, messageId);
     }
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     const summaries = await parent.listAllPublicConversationSummaries();
@@ -1574,8 +1555,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
           parent,
           summary.publicChildName,
         );
-        return (await child.getPublicMessages())
-          .find((message) => message.id === messageId) ?? null;
+        return child.getPublicMessage(messageId);
       }));
       const match = matches.find(
         (message): message is PublicMessageRecord => message !== null,
@@ -1884,7 +1864,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     conversationId: string,
   ): Promise<PublicChildStub | null> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     const summary = await parent.getConversationSummary(conversationId);
@@ -1899,11 +1879,17 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       if (!legacyConversation) {
         return null;
       }
-      const messages = await this.legacy.getMessages(projectId, conversationId);
+      const messages = await this.readLegacyImportMessages(
+        projectId,
+        conversationId,
+      );
       const imported = await child.importLegacyPublicConversation({
         conversation: legacyConversation,
         messages,
-        checksum: await importChecksum(legacyConversation, messages),
+        checksum: await publicConversationImportChecksum(
+          legacyConversation,
+          messages,
+        ),
       });
       if (imported.status === "conflict") {
         throw new Error("Legacy public conversation checksum conflict");
@@ -1921,13 +1907,24 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return child;
   }
 
+  private async readLegacyImportMessages(
+    projectId: string,
+    conversationId: string,
+  ): Promise<PublicMessageRecord[]> {
+    if (this.legacy.getMigrationMessages) {
+      return this.legacy.getMigrationMessages(projectId, conversationId);
+    }
+    return this.legacy.getMessages(projectId, conversationId);
+  }
+
   private async readAllSummaries(
     projectId: string,
-    filter: PublicConversationListQuery["inboxFilter"] = "all",
+    filter?: PublicConversationListQuery["inboxFilter"],
+    status?: PublicConversationListQuery["status"],
     search?: string,
   ): Promise<MavenConversationSummary[]> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     const summaries: MavenConversationSummary[] = [];
@@ -1935,6 +1932,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     do {
       const page = await parent.listConversations({
         filter,
+        status,
         sort: "newest",
         search,
         cursor,
@@ -1950,7 +1948,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     projectId: string,
   ): Promise<MavenConversationSummary[]> {
     const parent = await getPublicParent(
-      this.context.env.MAVEN_PROJECT_AGENT,
+      this.context,
       projectId,
     );
     return parent.listAllPublicConversationSummaries();
