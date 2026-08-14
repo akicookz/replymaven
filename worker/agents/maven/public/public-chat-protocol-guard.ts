@@ -41,6 +41,7 @@ export type PublicProtocolGuardResult =
       requestId: string | null;
       close: boolean;
       reason: string;
+      detail?: Record<string, unknown>;
     };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -174,12 +175,32 @@ function validateNewUserMessage(
   return { id: value.id, content, imageUrls };
 }
 
+function describeMessageShape(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return { type: typeof value };
+  const message = value as Record<string, unknown>;
+  return {
+    role: message.role,
+    keys: Object.keys(message).sort(),
+    parts: Array.isArray(message.parts)
+      ? message.parts.map((part) =>
+        part && typeof part === "object"
+          ? (part as Record<string, unknown>).type
+          : typeof part
+      )
+      : null,
+    metadataKeys: message.metadata && typeof message.metadata === "object"
+      ? Object.keys(message.metadata as Record<string, unknown>).sort()
+      : null,
+  };
+}
+
 function reject(
   reason: string,
   requestId: string | null = null,
   close = false,
+  detail?: Record<string, unknown>,
 ): PublicProtocolGuardResult {
-  return { allowed: false, requestId, close, reason };
+  return { allowed: false, requestId, close, reason, ...(detail ? { detail } : {}) };
 }
 
 function normalizeRequest(
@@ -224,7 +245,13 @@ function normalizeRequest(
     authoritativeMessages.length,
     PUBLIC_SUBMIT_HISTORY_WINDOW,
   );
-  if (echoed < minimumEcho) return reject("history_mismatch", event.id);
+  if (echoed < minimumEcho) {
+    return reject("history_mismatch", event.id, false, {
+      echoed,
+      minimumEcho,
+      authoritative: authoritativeMessages.length,
+    });
+  }
   const echoOffset = authoritativeMessages.length - echoed;
   for (let index = 0; index < echoed; index += 1) {
     if (
@@ -233,7 +260,15 @@ function normalizeRequest(
         authoritativeMessages[echoOffset + index],
       )
     ) {
-      return reject("history_mismatch", event.id);
+      return reject("history_mismatch", event.id, false, {
+        index,
+        echoed,
+        authoritative: authoritativeMessages.length,
+        submitted: describeMessageShape(body.messages[index]),
+        expected: describeMessageShape(
+          authoritativeMessages[echoOffset + index],
+        ),
+      });
     }
   }
   const attachmentUrls = readAttachmentUrls(

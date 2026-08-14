@@ -341,6 +341,13 @@ export class MavenChatAgent extends AIChatAgent<
           expectedOrigin: readPublicChatConnectionOrigin(connection.state),
         });
         if (!guarded.allowed) {
+          // Content-free: reasons and structural shapes only, never text.
+          console.log(JSON.stringify({
+            event: "public_chat_guard_rejected",
+            child: this.name,
+            reason: guarded.reason,
+            detail: guarded.detail ?? null,
+          }));
           if (guarded.requestId) {
             connection.send(buildPublicProtocolErrorFrame(guarded.requestId));
           }
