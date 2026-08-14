@@ -106,7 +106,7 @@ describe("native Sidechat session tokens", () => {
       secret,
     );
     const overlong = await signSidechatToken(
-      childClaims({ exp: now + 121 }),
+      childClaims({ exp: now + 901 }),
       secret,
     );
 

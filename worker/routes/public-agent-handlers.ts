@@ -9,7 +9,7 @@ import {
   signPublicChatToken,
 } from "../agents/maven/public/public-agent-auth";
 
-const SESSION_LIFETIME_SECONDS = 120;
+const SESSION_LIFETIME_SECONDS = 900;
 
 export interface PublicAgentRouteActor {
   userId: string;

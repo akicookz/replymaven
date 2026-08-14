@@ -96,7 +96,7 @@ describe("create native Sidechat session", () => {
         childAgent: "MavenChatAgent",
         childName: "sc_conversation-1",
         created: true,
-        expiresAt: now + 120,
+        expiresAt: now + 900,
         canApproveOnce: true,
         canAlwaysAllow: role !== "member",
       });

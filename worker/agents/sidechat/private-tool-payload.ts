@@ -38,8 +38,18 @@ function redactToolChunk(chunk: ToolChunkLike): ToolChunkLike {
 
 export function createPrivateToolChunkFilter(
   knownToolNames: ReadonlySet<string> = new Set(),
+  seedToolCalls: ReadonlyMap<string, string> = new Map(),
 ): (chunk: unknown) => boolean {
   const visibleToolCalls = new Set<string>();
+  // Approved tools executed at continuation start stream their output without
+  // a fresh tool-input-start, so calls already in the transcript must be
+  // visible from the beginning or their outputs are dropped and the call
+  // stays dangling forever.
+  for (const [toolCallId, toolName] of seedToolCalls) {
+    if (toolName === SAFE_STREAM_TOOL_NAME || knownToolNames.has(toolName)) {
+      visibleToolCalls.add(toolCallId);
+    }
+  }
   return function shouldForward(chunk: unknown): boolean {
     if (!isRecord(chunk) || typeof chunk.type !== "string") return false;
     if (
@@ -74,12 +84,18 @@ export function createPrivateToolChunkFilter(
 export function createPrivateToolChunkProjector(
   contextByToolName: ReadonlyMap<string, SidechatToolApprovalContext>,
   now: () => number = Date.now,
+  seedToolCalls: ReadonlyMap<string, string> = new Map(),
 ): (chunk: unknown) => unknown[] {
   const shouldForward = createPrivateToolChunkFilter(
     new Set(contextByToolName.keys()),
+    seedToolCalls,
   );
   const contextByToolCallId = new Map<string, SidechatToolApprovalContext>();
   const startedAtByToolCallId = new Map<string, number>();
+  for (const [toolCallId, toolName] of seedToolCalls) {
+    const context = contextByToolName.get(toolName);
+    if (context) contextByToolCallId.set(toolCallId, context);
+  }
 
   return function projectPrivateToolChunk(chunk: unknown): unknown[] {
     if (!isRecord(chunk) || typeof chunk.type !== "string") return [];
@@ -164,40 +180,67 @@ function sanitizeToolPart(part: UIMessage["parts"][number]): UIMessage["parts"][
 export function sanitizePrivateMessageForPersistence(
   message: UIMessage,
 ): UIMessage {
+  // Strip provider metadata, but keep a stable persistence timestamp so the
+  // dashboard can render real message times instead of the render clock.
+  const existing = isRecord(message.metadata) ? message.metadata.createdAt : null;
+  const createdAt = typeof existing === "number" && Number.isFinite(existing)
+    ? existing
+    : Date.now();
   return {
     ...message,
-    metadata: undefined,
+    metadata: { createdAt },
     parts: message.parts.map(sanitizeToolPart),
   };
+}
+
+function isApprovalStatePart(part: UIMessage["parts"][number]): boolean {
+  return isToolUIPart(part) && (
+    part.state === "approval-requested" ||
+    part.state === "approval-responded"
+  );
 }
 
 export function removeAbandonedApprovalParts(
   messages: UIMessage[],
   preserveLatestApproval = false,
 ): UIMessage[] {
-  let latestApprovalMessageIndex = -1;
+  // The SDK only executes approvals whose responses land in the final model
+  // tool message, i.e. the final step segment of the latest approval-bearing
+  // message. Approval-state parts anywhere else can never be healed and must
+  // be dropped, or the provider receives a tool call with no output.
+  let preservedMessageIndex = -1;
+  let preservedFromPartIndex = -1;
   if (preserveLatestApproval) {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index]?.parts.some((part) =>
-        isToolUIPart(part) && (
-          part.state === "approval-requested" ||
-          part.state === "approval-responded"
-        )
-      )) {
-        latestApprovalMessageIndex = index;
-        break;
+      const parts = messages[index]?.parts ?? [];
+      let lastApprovalPartIndex = -1;
+      for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
+        if (isApprovalStatePart(parts[partIndex]!)) {
+          lastApprovalPartIndex = partIndex;
+          break;
+        }
       }
+      if (lastApprovalPartIndex === -1) continue;
+      let segmentStart = 0;
+      for (let partIndex = lastApprovalPartIndex; partIndex >= 0; partIndex -= 1) {
+        if (parts[partIndex]?.type === "step-start") {
+          segmentStart = partIndex;
+          break;
+        }
+      }
+      preservedMessageIndex = index;
+      preservedFromPartIndex = segmentStart;
+      break;
     }
   }
   return messages
     .map((message, messageIndex) => ({
       ...message,
-      parts: message.parts.filter((part) =>
-        !isToolUIPart(part) ||
-        messageIndex === latestApprovalMessageIndex ||
+      parts: message.parts.filter((part, partIndex) =>
+        !isApprovalStatePart(part) ||
         (
-          part.state !== "approval-requested" &&
-          part.state !== "approval-responded"
+          messageIndex === preservedMessageIndex &&
+          partIndex >= preservedFromPartIndex
         )
       ),
     }))

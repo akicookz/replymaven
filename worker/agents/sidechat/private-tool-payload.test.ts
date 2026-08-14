@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { UIMessage } from "ai";
+import { convertToModelMessages, isToolUIPart, type UIMessage } from "ai";
 import {
   createPrivateToolChunkFilter,
   createPrivateToolChunkProjector,
@@ -173,7 +173,8 @@ describe("private Sidechat tool transcript boundary", () => {
     } as UIMessage;
 
     const sanitized = sanitizePrivateMessageForPersistence(message);
-    expect(sanitized.metadata).toBeUndefined();
+    // Provider metadata is stripped; only a persistence timestamp survives.
+    expect(sanitized.metadata).toEqual({ createdAt: expect.any(Number) });
     expect(sanitized.parts).toHaveLength(3);
     expect(JSON.stringify(sanitized)).toContain("customer@example.com");
     expect(JSON.stringify(sanitized)).toContain("customer-42");
@@ -181,6 +182,18 @@ describe("private Sidechat tool transcript boundary", () => {
     expect(JSON.stringify(sanitized)).not.toContain("private-key");
     expect(JSON.stringify(sanitized)).not.toContain("private-refresh");
     expect(JSON.stringify(sanitized)).not.toContain("provider-secret");
+  });
+
+  test("keeps an existing persistence timestamp stable across re-sanitization", () => {
+    const message: UIMessage = {
+      id: "assistant-2",
+      role: "assistant",
+      metadata: { createdAt: 1_786_300_000_000, provider: "openai" },
+      parts: [{ type: "text", text: "Done." }],
+    } as UIMessage;
+
+    const sanitized = sanitizePrivateMessageForPersistence(message);
+    expect(sanitized.metadata).toEqual({ createdAt: 1_786_300_000_000 });
   });
 
   test("keeps approval continuation state and redacts only credential fields", () => {
@@ -216,6 +229,168 @@ describe("private Sidechat tool transcript boundary", () => {
       approval: { id: "approval-1" },
       input: { title: "Customer cannot checkout", token: "[REDACTED]" },
     });
+  });
+
+  test("forwards continuation outputs for tool calls approved in an earlier stream", () => {
+    const project = createPrivateToolChunkProjector(
+      new Map([["tool_posthog_query_events", posthogContext]]),
+      () => 1_000,
+      new Map([["approved-1", "tool_posthog_query_events"]]),
+    );
+
+    expect(project({
+      type: "tool-output-available",
+      toolCallId: "approved-1",
+      output: {
+        events: [{ event: "checkout" }],
+        authorization: "Bearer private-auth-token",
+      },
+    })).toEqual([
+      expect.objectContaining({
+        type: "tool-output-available",
+        toolCallId: "approved-1",
+        output: {
+          events: [{ event: "checkout" }],
+          authorization: "[REDACTED]",
+        },
+      }),
+    ]);
+  });
+
+  test("does not forward continuation outputs for unregistered seeded calls", () => {
+    const project = createPrivateToolChunkProjector(
+      new Map([["tool_posthog_query_events", posthogContext]]),
+      () => 1_000,
+      new Map([["approved-1", "tool_unknown_tool"]]),
+    );
+
+    expect(project({
+      type: "tool-output-available",
+      toolCallId: "approved-1",
+      output: { value: true },
+    })).toEqual([]);
+  });
+
+  test("drops earlier-step approval state while keeping the final continuation step", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "assistant-multi-step",
+        role: "assistant",
+        parts: [
+          { type: "step-start" },
+          {
+            type: "tool-tool_posthog_list_persons",
+            toolCallId: "call-1",
+            state: "approval-responded",
+            input: { search: "simon" },
+            approval: { id: "approval-1", approved: true },
+          },
+          { type: "step-start" },
+          {
+            type: "tool-tool_posthog_execute_sql",
+            toolCallId: "call-2",
+            state: "approval-responded",
+            input: { query: "select 1" },
+            approval: { id: "approval-2", approved: true },
+          },
+        ],
+      },
+    ];
+
+    const [pruned] = removeAbandonedApprovalParts(messages, true);
+    const toolCallIds = pruned!.parts
+      .filter((part) => isToolUIPart(part))
+      .map((part) => part.toolCallId);
+    expect(toolCallIds).toEqual(["call-2"]);
+  });
+
+  test("continuation model view never leaves an unhealable dangling tool call", async () => {
+    // Mirrors the production shape that produced
+    // "AI_APICallError: No tool output found for function call".
+    const messages: UIMessage[] = [
+      {
+        id: "user-1",
+        role: "user",
+        parts: [{ type: "text", text: "check his activity on posthog" }],
+      },
+      {
+        id: "assistant-1",
+        role: "assistant",
+        parts: [
+          { type: "step-start" },
+          {
+            type: "tool-tool_posthog_list_persons",
+            toolCallId: "call-old",
+            state: "approval-responded",
+            input: { search: "simon" },
+            approval: { id: "approval-old", approved: true },
+          },
+          { type: "step-start" },
+          { type: "text", text: "I found a matching person record." },
+        ],
+      },
+      {
+        id: "user-2",
+        role: "user",
+        parts: [{ type: "text", text: "do that" }],
+      },
+      {
+        id: "assistant-2",
+        role: "assistant",
+        parts: [
+          { type: "step-start" },
+          {
+            type: "tool-tool_posthog_list_persons",
+            toolCallId: "call-1",
+            state: "approval-responded",
+            input: { search: "simon" },
+            approval: { id: "approval-1", approved: true },
+          },
+          { type: "step-start" },
+          {
+            type: "tool-tool_posthog_execute_sql",
+            toolCallId: "call-2",
+            state: "approval-responded",
+            input: { query: "select 1" },
+            approval: { id: "approval-2", approved: true },
+          },
+        ],
+      },
+    ];
+
+    const modelMessages = await convertToModelMessages(
+      removeAbandonedApprovalParts(messages, true),
+    );
+
+    const approvalIdToToolCallId = new Map<string, string>();
+    const callIds = new Set<string>();
+    const resultIds = new Set<string>();
+    for (const message of modelMessages) {
+      if (typeof message.content === "string") continue;
+      for (const part of message.content) {
+        if (part.type === "tool-call") callIds.add(part.toolCallId);
+        if (part.type === "tool-result") resultIds.add(part.toolCallId);
+        if (part.type === "tool-approval-request") {
+          approvalIdToToolCallId.set(part.approvalId, part.toolCallId);
+        }
+      }
+    }
+    // Approvals are only healed (executed by the SDK) when their response is
+    // in the final model message.
+    const healableIds = new Set<string>();
+    const lastMessage = modelMessages.at(-1);
+    if (lastMessage?.role === "tool") {
+      for (const part of lastMessage.content) {
+        if (part.type === "tool-approval-response") {
+          const toolCallId = approvalIdToToolCallId.get(part.approvalId);
+          if (toolCallId) healableIds.add(toolCallId);
+        }
+      }
+    }
+    const dangling = [...callIds].filter(
+      (id) => !resultIds.has(id) && !healableIds.has(id),
+    );
+    expect(dangling).toEqual([]);
   });
 
   test("does not forward an unregistered tool call", () => {

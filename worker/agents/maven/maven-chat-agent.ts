@@ -526,6 +526,18 @@ export class MavenChatAgent extends AIChatAgent<
               );
             },
           });
+          // Tool calls already in the transcript (approved earlier, executed
+          // by this continuation) stream outputs without a tool-input-start;
+          // seed them so those outputs are forwarded and persisted.
+          const seedToolCalls = new Map<string, string>();
+          for (const message of this.messages) {
+            if (message.role !== "assistant") continue;
+            for (const part of message.parts) {
+              if (isToolUIPart(part)) {
+                seedToolCalls.set(part.toolCallId, getToolName(part));
+              }
+            }
+          }
           const projectChunk = createPrivateToolChunkProjector(
             new Map(
               descriptors
@@ -548,6 +560,8 @@ export class MavenChatAgent extends AIChatAgent<
                   },
                 ] as const),
             ),
+            Date.now,
+            seedToolCalls,
           );
           writer.merge(
             result
@@ -564,7 +578,12 @@ export class MavenChatAgent extends AIChatAgent<
                 }),
               ),
           );
-        } catch {
+        } catch (error) {
+          logError("sidechat_turn.setup_failed", error, {
+            childName: this.name,
+            conversationId,
+            continuation: options.continuation === true,
+          });
           if (await parentForFailure.isSidechatOperational(
             this.name,
             conversationId,

@@ -101,7 +101,7 @@ describe("public Agent session handlers", () => {
       parentName: "project-1",
       childAgent: "MavenChatAgent",
       childName: "pub_conversation-1",
-      expiresAt: now + 120,
+      expiresAt: now + 900,
     });
     expect(deps.ensured).toEqual(["conversation-1"]);
   });

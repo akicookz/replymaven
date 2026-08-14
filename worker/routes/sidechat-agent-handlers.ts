@@ -7,7 +7,7 @@ import type {
 } from "../../shared/sidechat-agent";
 import { signSidechatToken } from "../agents/sidechat/agent-auth";
 
-const SESSION_LIFETIME_SECONDS = 120;
+const SESSION_LIFETIME_SECONDS = 900;
 
 export interface SidechatRouteActor {
   userId: string;
