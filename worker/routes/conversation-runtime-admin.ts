@@ -72,15 +72,16 @@ async function readJsonRecord(request: Request): Promise<Record<string, unknown>
 
 function readBatchOptions(
   body: Record<string, unknown>,
+  maxLimit: number,
 ): { cursor?: string | null; limit?: number } | Response {
   const requestedLimit = body.limit;
   if (
     requestedLimit !== undefined &&
     (!Number.isInteger(requestedLimit) ||
       (requestedLimit as number) < 1 ||
-      (requestedLimit as number) > 100)
+      (requestedLimit as number) > maxLimit)
   ) {
-    return Response.json({ error: "limit must be between 1 and 100" }, {
+    return Response.json({ error: `limit must be between 1 and ${maxLimit}` }, {
       status: 400,
     });
   }
@@ -99,7 +100,7 @@ export async function handleConversationRuntimeBackfill(
 ): Promise<Response> {
   const denied = await authorize(options);
   if (denied) return denied;
-  const batch = readBatchOptions(await readJsonRecord(options.request));
+  const batch = readBatchOptions(await readJsonRecord(options.request), 100);
   if (batch instanceof Response) return batch;
   return Response.json(
     await options.runtimeService.backfillProject(options.projectId, batch),
@@ -111,7 +112,7 @@ export async function handleConversationRuntimeVerify(
 ): Promise<Response> {
   const denied = await authorize(options);
   if (denied) return denied;
-  const batch = readBatchOptions(await readJsonRecord(options.request));
+  const batch = readBatchOptions(await readJsonRecord(options.request), 25);
   if (batch instanceof Response) return batch;
   return Response.json(
     await options.runtimeService.verifyProject(options.projectId, batch),

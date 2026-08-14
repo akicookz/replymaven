@@ -729,7 +729,12 @@ export class MavenChatAgent extends AIChatAgent<
           customerId,
           currentState.visitorId,
           new Date(submitted.createdAt),
-        ).catch((error) => {
+        ).then(async () => {
+          // Keep dashboard customer views live: the visitor-message path is
+          // the main mover of lastSeenAt.
+          const parent = await this.parentAgent(MavenProjectAgent);
+          await parent.notifyCustomerUpdated([customerId]);
+        }).catch((error) => {
           logError("agent_public_turn.customer_last_seen_failed", error, {
             projectId,
             conversationId,

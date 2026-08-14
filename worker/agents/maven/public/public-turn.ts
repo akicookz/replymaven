@@ -71,7 +71,7 @@ export interface CollectedPublicTurn {
 export async function collectPublicTurnStream(
   stream: AsyncIterable<MavenStreamPart>,
   emitText: (delta: string) => void,
-  emitActivity?: (label: string) => void,
+  emitActivity?: (phase: string) => void,
 ): Promise<CollectedPublicTurn> {
   const stripState = createStreamingStripState();
   const internalTokens: InternalToken[] = [];
@@ -87,8 +87,8 @@ export async function collectPublicTurnStream(
     }
     if (part.type === "tool-call") {
       emitActivity?.(part.toolName === "search_knowledge"
-        ? "Searching the docs"
-        : "Checking project information");
+        ? "retrieval"
+        : "tool");
     }
     if (part.type !== "text-delta" || typeof part.text !== "string") {
       continue;
@@ -171,18 +171,19 @@ export function createPublicTurnResponse(
         messageMetadata: botMetadata(input, [], createdAt),
       });
       let textStarted = false;
-      function emitActivity(label: string): void {
+      // Phase keys only; the widget owns the user-facing copy.
+      function emitActivity(phase: string): void {
         if (textStarted) return;
         writer.write({
           type: "data-public-activity",
-          data: { label },
+          data: { phase },
           transient: true,
         });
       }
       function emitText(delta: string): void {
         if (!delta) return;
         if (!textStarted) {
-          emitActivity("Composing a response");
+          emitActivity("compose");
           writer.write({ type: "text-start", id: textPartId });
           textStarted = true;
         }
@@ -198,7 +199,7 @@ export function createPublicTurnResponse(
         emitText(input.immediateText);
       } else {
         if (!input.runTurn) throw new Error("Public turn runner is required");
-        emitActivity("Thinking");
+        emitActivity("thinking");
         const turn = await input.runTurn();
         httpExecutionIds = turn.httpExecutionIds;
         const collected = await collectPublicTurnStream(

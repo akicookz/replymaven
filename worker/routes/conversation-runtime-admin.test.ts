@@ -35,6 +35,7 @@ function service(): ConversationRuntimeAdminService {
         operationalMismatchCount: 0,
         transcriptMismatchCount: 0,
         mismatchCount: 0,
+        mismatchedIds: [],
       };
     },
   };

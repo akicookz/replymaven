@@ -1226,7 +1226,7 @@ Each step is manual and ordered:
 1. apply `0063_idempotent_message_usage_credits.sql` to production D1 (`bun run db:migrate:prod`);
 2. push to `main` — the worker auto-deploys, and that deploy IS the cutover: the Agent runtime is unconditional and the deploy also applies the `v3-delete-conversation-do` Durable Object deletion;
 3. run the backfill admin endpoint for the two production projects, passing each response's `nextCursor` back until `complete` — legacy writes have stopped, so the run cannot go stale;
-4. run verify the same way and confirm every batch reports `mismatchCount: 0` for both projects;
+4. run verify the same way and confirm every batch reports `mismatchCount: 0` for both projects — conversations that received traffic after the deploy legitimately drift from their frozen D1 rows, so triage any nonzero batch through its `mismatchedIds`: a mismatch on a recently-active conversation is expected, an untouched one is an import bug;
 5. run `bun run widget:deploy` to upload the Agent widget.
 
 The Agent widget speaks no legacy transport, so the widget upload must stay strictly after the worker deploy. Between steps 2 and 3 the dashboard inbox may be incomplete — conversations appear as they are backfilled or touched; visitor transcripts are unaffected because per-conversation import is lazy. There is no rollback: the old worker cannot be redeployed after `v3-delete-conversation-do`, so recovery means restoring D1 from backup.

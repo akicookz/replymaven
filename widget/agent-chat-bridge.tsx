@@ -18,12 +18,19 @@ export interface WidgetPublicSendInput {
   pageContext: Record<string, string>;
 }
 
+export type WidgetActivityPhase =
+  | "thinking"
+  | "retrieval"
+  | "tool"
+  | "verify"
+  | "compose";
+
 export interface WidgetChatActivity {
   status: "submitted" | "streaming" | "ready" | "error";
   isServerStreaming: boolean;
   isRecovering: boolean;
   error: Error | undefined;
-  statusMessage?: string;
+  statusPhase?: WidgetActivityPhase;
 }
 
 export interface WidgetAgentChatClient {
@@ -57,11 +64,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readPublicActivityLabel(value: unknown): string | null {
+const ACTIVITY_PHASES: ReadonlySet<WidgetActivityPhase> = new Set([
+  "thinking",
+  "retrieval",
+  "tool",
+  "verify",
+  "compose",
+]);
+
+function readPublicActivityPhase(value: unknown): WidgetActivityPhase | null {
   if (!isRecord(value) || value.type !== "data-public-activity") return null;
-  if (!isRecord(value.data) || typeof value.data.label !== "string") return null;
-  const label = value.data.label.trim();
-  return label && label.length <= 120 ? label : null;
+  if (!isRecord(value.data) || typeof value.data.phase !== "string") return null;
+  return ACTIVITY_PHASES.has(value.data.phase as WidgetActivityPhase)
+    ? value.data.phase as WidgetActivityPhase
+    : null;
 }
 
 function readPublicChatChildState(value: unknown): PublicChatChildState | null {
@@ -130,12 +146,12 @@ function WidgetAgentBridge(props: WidgetAgentBridgeProps) {
     queryDeps: [session.token],
     onStateUpdate: onConversationState,
   });
-  const [statusMessage, setStatusMessage] = useState<string | undefined>(
-    undefined,
-  );
+  const [statusPhase, setStatusPhase] = useState<
+    WidgetActivityPhase | undefined
+  >(undefined);
   const onData = useCallback((value: unknown) => {
-    const label = readPublicActivityLabel(value);
-    if (label) setStatusMessage(label);
+    const phase = readPublicActivityPhase(value);
+    if (phase) setStatusPhase(phase);
   }, []);
   const chat = useAgentChat({
     agent,
@@ -176,13 +192,13 @@ function WidgetAgentBridge(props: WidgetAgentBridgeProps) {
     const connectionError = normalizeConnectionError(agent.connectionError);
     const active = status === "submitted" || status === "streaming" ||
       isServerStreaming;
-    if (!active && statusMessage !== undefined) setStatusMessage(undefined);
+    if (!active && statusPhase !== undefined) setStatusPhase(undefined);
     onActivity({
       status: connectionError ? "error" : status,
       isServerStreaming,
       isRecovering,
       error: error ?? connectionError,
-      ...(active && statusMessage ? { statusMessage } : {}),
+      ...(active && statusPhase ? { statusPhase } : {}),
     });
   }, [
     agent.connectionError,
@@ -191,7 +207,7 @@ function WidgetAgentBridge(props: WidgetAgentBridgeProps) {
     isServerStreaming,
     onActivity,
     status,
-    statusMessage,
+    statusPhase,
   ]);
 
   useEffect(() => {

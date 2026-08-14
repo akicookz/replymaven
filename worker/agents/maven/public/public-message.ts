@@ -13,7 +13,7 @@ import type {
 
 type PublicDataParts = Record<string, unknown> & {
   "public-source": PublicSourceReference;
-  "public-activity": { label: string };
+  "public-activity": { phase: string };
 };
 
 export type PublicUIMessage = UIMessage<PublicMessageMetadata, PublicDataParts>;

@@ -523,8 +523,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     };
   }
 
-
-
   async listNeedsReview(
     projectId: string,
     since: number,
@@ -591,7 +589,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     };
   }
 
-
   async listByCustomer(
     projectId: string,
     customerId: string,
@@ -629,7 +626,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return (await parent.listByVisitor(visitorId))
       .map((summary) => summaryToConversation(summary, projectId));
   }
-
 
   async ensurePublicConversation(
     conversation: PublicConversationRecord,
@@ -1093,8 +1089,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return this.setStatus(projectId, conversationId, status, null);
   }
 
-
-
   async prepareContactSupportOwnership(
     projectId: string,
     conversationId: string,
@@ -1355,8 +1349,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return this.create({ ...input, metadata });
   }
 
-
-
   async getNeedsReviewSince(
     projectId: string,
     since: number,
@@ -1369,7 +1361,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
   ): Promise<PublicConversationRecord[]> {
     return this.listAgentMode(projectId);
   }
-
 
   async getPublicMessages(
     conversationId: string,

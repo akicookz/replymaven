@@ -70,6 +70,9 @@ export interface ConversationRuntimeParityResult {
   operationalMismatchCount: number;
   transcriptMismatchCount: number;
   mismatchCount: number;
+  // Opaque conversation IDs only, never content: lets the operator triage
+  // benign post-cutover drift (recently active threads) from import bugs.
+  mismatchedIds: string[];
 }
 
 function parseMetadata(value: unknown): Record<string, unknown> {
@@ -172,7 +175,7 @@ export async function runConversationDirectoryBackfillBatch(
     applied: reconciled.applied,
     skipped: reconciled.skipped,
     complete,
-    nextCursor: entries.at(-1)?.conversation.id ?? cursor,
+    nextCursor: complete ? null : entries.at(-1)?.conversation.id ?? cursor,
   };
 }
 
@@ -310,7 +313,7 @@ export class ConversationRuntimeMigrationService {
           entry.conversation.id,
         );
         if (!agentConversation) {
-          return { operational: 1, transcript: 1 };
+          return { id: entry.conversation.id, operational: 1, transcript: 1 };
         }
         const legacyLatest = entry.messages.at(-1)?.id ?? null;
         const agentLatest = agentMessages.at(-1)?.id ?? null;
@@ -319,6 +322,7 @@ export class ConversationRuntimeMigrationService {
           publicTranscriptChecksum(agentMessages),
         ]);
         return {
+          id: entry.conversation.id,
           operational: equalJson(
               operationalSnapshot(entry.conversation),
               operationalSnapshot(agentConversation),
@@ -350,6 +354,15 @@ export class ConversationRuntimeMigrationService {
       (total, result) => total + result.transcript,
       0,
     );
+    const mismatchedIds = [...new Set([
+      ...selectedIds.filter((id) =>
+        (legacyById.has(id) && !agentById.has(id)) ||
+        (agentById.has(id) && !legacyById.has(id))
+      ),
+      ...comparisons
+        .filter((result) => result.operational > 0 || result.transcript > 0)
+        .map((result) => result.id),
+    ])].sort();
     return {
       processed: selectedIds.length,
       complete,
@@ -362,6 +375,7 @@ export class ConversationRuntimeMigrationService {
       transcriptMismatchCount,
       mismatchCount: legacyOnlyCount + agentOnlyCount +
         operationalMismatchCount + transcriptMismatchCount,
+      mismatchedIds,
     };
   }
 

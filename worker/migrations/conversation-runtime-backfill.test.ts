@@ -106,7 +106,7 @@ describe("conversation runtime backfill", () => {
     )).resolves.toMatchObject({
       processed: 0,
       complete: true,
-      nextCursor: "b",
+      nextCursor: null,
     });
     expect(directory.size).toBe(2);
   });

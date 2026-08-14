@@ -126,6 +126,8 @@ bun run build         # tsc -b && vite build
 
 Widget changes also need `bun run widget:build`. Changes to Agent or migration code need `bun run test:agents` as well.
 
+`wrangler dev` binds a LOCAL D1 database (`"remote": false` on the DB binding). To work against realistic data, import a production export once: `wrangler d1 export supportbot-db --remote --output dump.sql`, reset `.wrangler/state/v3/d1`, load the dump into the local database, then `bun run db:migrate:dev`. Flip the binding to `"remote": true` only when you deliberately want dev pointed at production data; deploys ignore this flag either way.
+
 `tsc -b` is incremental and will report success off a stale cache. When you are verifying rather than iterating, use `bunx tsc -b --force`.
 
 Report failures plainly, including which ones are pre-existing.

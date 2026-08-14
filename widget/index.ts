@@ -5147,7 +5147,7 @@ import {
       if (activity.status === "streaming" || activity.isServerStreaming) {
         markPendingVisitorMessageSent();
       }
-      showTyping(activity.statusMessage);
+      showTyping(undefined, activity.statusPhase);
       return;
     }
     hideTyping();

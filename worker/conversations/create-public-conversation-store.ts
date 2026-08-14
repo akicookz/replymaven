@@ -11,5 +11,5 @@ export interface PublicConversationStoreContext {
 export function createPublicConversationStore(
   context: PublicConversationStoreContext,
 ): PublicConversationStore {
-  return new AgentPublicConversationStore(context) as unknown as PublicConversationStore;
+  return new AgentPublicConversationStore(context);
 }
