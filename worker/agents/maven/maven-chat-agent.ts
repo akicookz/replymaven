@@ -909,7 +909,6 @@ export class MavenChatAgent extends AIChatAgent<
                 acquireHttpRateLimitPermit: () =>
                   this.acquirePublicToolRateLimitPermit(),
                 onTeamRequested() {},
-                broadcast() {},
               },
             },
             conversationHistory,

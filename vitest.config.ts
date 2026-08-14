@@ -13,10 +13,6 @@ export default defineConfig({
           SIDECHAT_TOKEN_SECRET:
             "native-sidechat-workerd-test-secret-32-bytes",
           STRIPE_SECRET_KEY: "sk_test_native_agents",
-          PUBLIC_CONVERSATION_STORE:
-            process.env.PUBLIC_CONVERSATION_STORE === "agent"
-              ? "agent"
-              : "legacy",
         },
       },
       wrangler: {

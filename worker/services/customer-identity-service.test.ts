@@ -4,7 +4,7 @@ import { drizzle as drizzleSqlite } from "drizzle-orm/bun-sqlite";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { CustomerIdentityTokenPayload } from "../../shared/customer-types";
 import { schema } from "../db";
-import { D1PublicConversationStore } from "../conversations/d1-public-conversation-store";
+import { LegacyConversationStoreFixture } from "../conversations/legacy-conversation-store-fixture";
 import {
   CustomerIdentityService,
   normalizeCustomerEmail,
@@ -67,7 +67,7 @@ async function createContinuityTestService(): Promise<{
   return {
     service: new CustomerIdentityService(
       d1,
-      new D1PublicConversationStore(d1),
+      new LegacyConversationStoreFixture(d1).asStore(),
     ),
     sqlite,
   };

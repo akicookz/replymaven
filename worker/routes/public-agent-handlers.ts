@@ -52,7 +52,6 @@ interface PublicAgentSessionDependencies {
   ensurePublicConversation(
     conversation: PublicConversationRecord,
   ): Promise<{ childName: `pub_${string}` }>;
-  isPublicAgentRuntimeAvailable(projectId: string): Promise<boolean>;
   now?: number;
 }
 
@@ -125,9 +124,6 @@ export async function handleCreateWidgetPublicAgentSession(
     options.projectSlug,
   );
   if (!project) return errorResponse("not_found", 404);
-  if (!await options.isPublicAgentRuntimeAvailable(project.id)) {
-    return errorResponse("agent_runtime_not_cut_over", 409);
-  }
   const conversation = await options.conversationStore.get(
     project.id,
     options.conversationId,
@@ -167,9 +163,6 @@ export async function handleCreateDashboardPublicAgentSession(
   const project = await options.projectService.getProjectById(options.projectId);
   if (!project || project.userId !== actor.effectiveUserId) {
     return errorResponse("not_found", 404);
-  }
-  if (!await options.isPublicAgentRuntimeAvailable(project.id)) {
-    return errorResponse("agent_runtime_not_cut_over", 409);
   }
   const conversation = await options.conversationStore.get(
     options.projectId,

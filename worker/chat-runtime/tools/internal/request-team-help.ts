@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { type PublicMessageRecord } from "../../../../shared/maven-conversation";
 import { type PublicConversationStore } from "../../../conversations/public-conversation-store";
 import { type ProjectService } from "../../../services/project-service";
 import { type TelegramService } from "../../../services/telegram-service";
@@ -137,7 +136,6 @@ export function createRequestTeamHelpTool(dependencies: {
   };
   executionCtx: ExecutionContext;
   onTeamRequested(): void;
-  broadcast(message: PublicMessageRecord): void;
 }): MavenToolDefinition {
   const capability = createCapability(dependencies.context.projectId);
 
@@ -201,7 +199,6 @@ export function createRequestTeamHelpTool(dependencies: {
               settings,
               env: dependencies.env,
               executionCtx: dependencies.executionCtx,
-              broadcast: dependencies.broadcast,
               claimExternalNotificationAttempt() {
                 return dependencies.chatService.claimTeamRequestNotification(
                   dependencies.context.projectId,
@@ -336,7 +333,6 @@ export function createRequestTeamHelpTool(dependencies: {
           settings,
           env: dependencies.env,
           executionCtx: dependencies.executionCtx,
-          broadcast: dependencies.broadcast,
           claimExternalNotificationAttempt() {
             return dependencies.chatService.claimTeamRequestNotification(
               dependencies.context.projectId,

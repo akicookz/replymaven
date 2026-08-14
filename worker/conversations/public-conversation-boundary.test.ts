@@ -3,10 +3,9 @@ import { describe, expect, test } from "bun:test";
 const LEGACY_ALLOWLIST = new Set([
   "worker/db/schema.ts",
   "worker/db/index.ts",
-  "worker/conversations/d1-public-conversation-store.ts",
-  "worker/services/chat-service.ts",
+  "worker/conversations/legacy-conversation-reader.ts",
+  "worker/conversations/legacy-conversation-store-fixture.ts",
   "worker/migrations/conversation-runtime-backfill.ts",
-  "worker/migrations/legacy-conversation-directory-mirror.ts",
 ]);
 
 function isProductionSource(path: string): boolean {

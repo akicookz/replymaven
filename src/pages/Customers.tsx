@@ -19,7 +19,7 @@ import {
   customerKeys,
   fetchCustomers,
 } from "@/lib/customers";
-import { useCustomerWs } from "@/lib/use-customer-ws";
+import { CustomerRealtimeBridge } from "@/components/customers/CustomerRealtimeBridge";
 
 function customerInitial(name: string | null, email: string | null): string {
   return (name?.trim()[0] ?? email?.trim()[0] ?? "?").toUpperCase();
@@ -66,7 +66,6 @@ function Customers() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  useCustomerWs(projectId);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
@@ -106,6 +105,7 @@ function Customers() {
 
   return (
     <div className="space-y-6">
+      <CustomerRealtimeBridge projectId={projectId} />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <MobileMenuButton />

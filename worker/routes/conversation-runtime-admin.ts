@@ -1,6 +1,5 @@
 import type {
   ConversationDirectoryBackfillResult,
-  ConversationRuntimeMigrationService,
   ConversationRuntimeParityResult,
 } from "../migrations/conversation-runtime-backfill";
 
@@ -19,12 +18,12 @@ interface ConversationRuntimeProjectService {
 export interface ConversationRuntimeAdminService {
   backfillProject(
     projectId: string,
-    limit?: number,
+    options?: { cursor?: string | null; limit?: number },
   ): Promise<ConversationDirectoryBackfillResult>;
-  verifyProject(projectId: string): Promise<ConversationRuntimeParityResult>;
-  getStatus(
+  verifyProject(
     projectId: string,
-  ): ReturnType<ConversationRuntimeMigrationService["getStatus"]>;
+    options?: { cursor?: string | null; limit?: number },
+  ): Promise<ConversationRuntimeParityResult>;
 }
 
 interface ConversationRuntimeAdminOptions {
@@ -71,12 +70,9 @@ async function readJsonRecord(request: Request): Promise<Record<string, unknown>
   }
 }
 
-export async function handleConversationRuntimeBackfill(
-  options: ConversationRuntimeMutationOptions,
-): Promise<Response> {
-  const denied = await authorize(options);
-  if (denied) return denied;
-  const body = await readJsonRecord(options.request);
+function readBatchOptions(
+  body: Record<string, unknown>,
+): { cursor?: string | null; limit?: number } | Response {
   const requestedLimit = body.limit;
   if (
     requestedLimit !== undefined &&
@@ -88,30 +84,37 @@ export async function handleConversationRuntimeBackfill(
       status: 400,
     });
   }
-  const result = await options.runtimeService.backfillProject(
-    options.projectId,
-    requestedLimit as number | undefined,
+  const cursor = body.cursor;
+  if (cursor !== undefined && cursor !== null && typeof cursor !== "string") {
+    return Response.json({ error: "cursor must be a string" }, { status: 400 });
+  }
+  return {
+    cursor: cursor as string | null | undefined,
+    limit: requestedLimit as number | undefined,
+  };
+}
+
+export async function handleConversationRuntimeBackfill(
+  options: ConversationRuntimeMutationOptions,
+): Promise<Response> {
+  const denied = await authorize(options);
+  if (denied) return denied;
+  const batch = readBatchOptions(await readJsonRecord(options.request));
+  if (batch instanceof Response) return batch;
+  return Response.json(
+    await options.runtimeService.backfillProject(options.projectId, batch),
   );
-  return Response.json(result);
 }
 
 export async function handleConversationRuntimeVerify(
-  options: ConversationRuntimeAdminOptions,
+  options: ConversationRuntimeMutationOptions,
 ): Promise<Response> {
   const denied = await authorize(options);
   if (denied) return denied;
+  const batch = readBatchOptions(await readJsonRecord(options.request));
+  if (batch instanceof Response) return batch;
   return Response.json(
-    await options.runtimeService.verifyProject(options.projectId),
-  );
-}
-
-export async function handleConversationRuntimeStatus(
-  options: ConversationRuntimeAdminOptions,
-): Promise<Response> {
-  const denied = await authorize(options);
-  if (denied) return denied;
-  return Response.json(
-    await options.runtimeService.getStatus(options.projectId),
+    await options.runtimeService.verifyProject(options.projectId, batch),
   );
 }
 

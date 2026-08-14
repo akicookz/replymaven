@@ -18,7 +18,7 @@ export function filterTitle(f: InboxFilter): string {
 }
 
 // Client-side mirror of the server's inboxFilterConditions (see
-// worker/services/chat-service.ts): snoozed and flagged (spam) conversations
+// worker/agents/maven/conversation-directory.ts): snoozed and flagged (spam) conversations
 // live only in their own tabs. Used by the /updates poll merge to decide
 // which delta rows enter — and which patched rows leave — the visible list.
 export interface InboxFilterableRow {

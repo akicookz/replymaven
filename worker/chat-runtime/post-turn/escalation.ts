@@ -2,7 +2,6 @@ import { EmailService } from "../../services/email-service";
 import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import { type ProjectService } from "../../services/project-service";
 import { type TelegramService } from "../../services/telegram-service";
-import { type PublicMessageRecord } from "../../../shared/maven-conversation";
 import { logError, logInfo } from "../../observability";
 import { buildConversationDeepLink } from "../../lib/deep-links";
 
@@ -71,7 +70,6 @@ export async function createEscalation(params: {
     RESEND_API_KEY?: string;
   };
   executionCtx: ExecutionContext;
-  broadcast: (message: PublicMessageRecord) => void;
   acceptedTeamRequestToken?: string;
   notifyExternalActions?: boolean;
   claimExternalNotificationAttempt?: () => Promise<boolean>;
@@ -180,21 +178,20 @@ export async function createEscalation(params: {
   }
 
   if (summaryNeedsPersistence) {
-    const row = params.acceptedTeamRequestToken
-      ? await params.chatService.addTeamRequestSummary(
-          params.project.id,
-          params.conversation.id,
-          params.acceptedTeamRequestToken,
-        )
-      : await params.chatService.appendSystem({
-          projectId: params.project.id,
-          conversationId: params.conversation.id,
-          kind: "review_summary",
-          content: summary,
-          idempotencyKey: summaryMessageId ?? undefined,
-        });
-    if (row) {
-      params.broadcast(row);
+    if (params.acceptedTeamRequestToken) {
+      await params.chatService.addTeamRequestSummary(
+        params.project.id,
+        params.conversation.id,
+        params.acceptedTeamRequestToken,
+      );
+    } else {
+      await params.chatService.appendSystem({
+        projectId: params.project.id,
+        conversationId: params.conversation.id,
+        kind: "review_summary",
+        content: summary,
+        idempotencyKey: summaryMessageId ?? undefined,
+      });
     }
 
     const completed = params.acceptedTeamRequestToken

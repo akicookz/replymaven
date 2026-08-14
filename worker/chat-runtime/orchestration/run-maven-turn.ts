@@ -1,6 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { type LanguageModel } from "ai";
-import { type PublicMessageRecord } from "../../../shared/maven-conversation";
 import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import { type ProjectService } from "../../services/project-service";
 import { type SourceReference } from "../../services/resource-service";
@@ -57,7 +56,6 @@ export interface MavenPublicToolDependencies {
   telegramService?: TelegramService;
   acquireHttpRateLimitPermit(): boolean;
   onTeamRequested(): void;
-  broadcast(message: PublicMessageRecord): void;
 }
 
 export interface MavenTurnResult {
@@ -226,7 +224,6 @@ export async function runMavenTurn(options: {
       },
       executionCtx: publicDependencies.executionCtx,
       onTeamRequested: publicDependencies.onTeamRequested,
-      broadcast: publicDependencies.broadcast,
     }),
   );
   const registry = buildMavenToolRegistry({

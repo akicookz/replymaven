@@ -30,7 +30,9 @@
       "database_name": "supportbot-db",
       "database_id": "930df889-1d05-4762-8fcf-072f9521fd20",
       "migrations_dir": "worker/db/drizzle",
-      "remote": true,
+      // Dev binds the local D1 copy (import a prod export to rehearse the
+      // cutover). Deploys are unaffected; flip to true to point dev at prod.
+      "remote": false,
     },
   ],
   "r2_buckets": [
@@ -59,10 +61,6 @@
   "durable_objects": {
     "bindings": [
       {
-        "name": "CONVERSATION_DO",
-        "class_name": "ConversationDO",
-      },
-      {
         "name": "MAVEN_PROJECT_AGENT",
         "class_name": "MavenProjectAgent",
       },
@@ -76,6 +74,10 @@
     {
       "tag": "v2-maven-project-agent",
       "new_sqlite_classes": ["MavenProjectAgent"],
+    },
+    {
+      "tag": "v3-delete-conversation-do",
+      "deleted_classes": ["ConversationDO"],
     },
   ],
   "queues": {
@@ -103,7 +105,6 @@
     "BETTER_AUTH_URL": "https://replymaven.com",
     "CF_ACCOUNT_ID": "35bc7a4522237728214ba9d54c36002e",
     "AI_MODEL": "gpt-5.6-terra",
-    "PUBLIC_CONVERSATION_STORE": "legacy",
     "STRIPE_STARTER_MONTHLY_PRICE_ID": "price_1T6BKmR3FrLxl9TOBoGEMvvA",
     "STRIPE_STARTER_ANNUAL_PRICE_ID": "price_1T6E7yR3FrLxl9TOvPWqvcPV",
     "STRIPE_STANDARD_MONTHLY_PRICE_ID": "price_1T6BNHR3FrLxl9TOPqOKQytI",

@@ -46,7 +46,7 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 
 ### Core Features
 
-- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation (`open`, `close`, `toggle`, `sendMessage`, `identify`, `setPageContext`, `setMetadata`, `requestNotifications`, `openInquiryForm`). Uses SSE for streaming AI responses. Automatically sends current page URL and title as context with each message.
+- **Embeddable chat widget** -- standalone JS embed script (`<script>` tag) that users install on their pages. Supports programmatic invocation (`open`, `close`, `toggle`, `sendMessage`, `identify`, `setPageContext`, `setMetadata`, `requestNotifications`, `openInquiryForm`). Talks native Agent chat over a WebSocket to the conversation's `MavenChatAgent` child. Automatically sends current page URL and title as context with each message.
 - **Dashboard** -- React SPA where users configure their bot, manage resources, review conversations, and customize the widget's look and feel.
 - **Resource management** -- users add web pages, FAQs, and PDFs as knowledge sources. These are stored in R2 and indexed via Cloudflare AI Search for RAG retrieval.
 - **Tone of voice** -- configurable AI personality (professional, friendly, casual, formal, or custom prompt).
@@ -55,6 +55,10 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 - **Telegram live agent handoff** -- when the bot cannot answer or the visitor requests a human, the conversation is relayed to the user's Telegram. Agent replies in Telegram are synced back to the widget. When a conversation is in agent mode, the AI is completely silenced and visitor messages are forwarded to Telegram. Agents use `@BotName` commands to hand back to AI (with optional instructions), close conversations, or instruct the bot to respond immediately. New bookings, conversations, and contact form submissions also trigger Telegram notifications when configured.
 - **Canned response auto-drafting** -- after a conversation ends, the AI analyzes it and generates draft canned responses. Users approve or reject drafts from the dashboard.
 - **Customer continuity** -- anonymous widget visitor IDs can be connected to project-scoped customer profiles. Signed server-issued tokens keep exact visitor history together across devices without trusting browser-supplied email.
+
+### Conversation runtime
+
+There is one conversation runtime, built on Cloudflare Agents. One `MavenProjectAgent` per project owns the child registry, shared project tools/MCP, and an indexed conversation directory that serves the dashboard inbox in a single query. Each public transcript (`pub_<conversationId>`) and each private Sidechat (`sc_<conversationId>`) is an isolated child instance of the shared `MavenChatAgent` class; every transcript lives in its child Agent's SQLite, and every public mutation is serialized by its child. The widget and dashboard both use native Agent chat sessions. Retention deletes child Agents and conversation-scoped R2 attachments. D1 keeps product/business data only; the frozen legacy `conversations`/`messages` tables remain solely as the one-time import source (`worker/conversations/legacy-conversation-reader.ts` plus the backfill admin endpoints) until the final cleanup migration drops them.
 
 ---
 
@@ -75,7 +79,7 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 | Cache | **Cloudflare KV** (active conversation cache) |
 | File Storage | **Cloudflare R2** (PDFs, uploads, widget bundle) |
 | RAG | **Cloudflare AI Search** (managed indexing + search) |
-| AI Model | **Google Gemini 3 Flash** or **OpenAI GPT-5** (configurable via `AI_MODEL` env var, server-side, SSE streaming) |
+| AI Model | **Google Gemini 3 Flash** or **OpenAI GPT-5** (configurable via `AI_MODEL` env var, server-side, streamed over the Agent WebSocket) |
 | Auth | **Better Auth** + `better-auth-cloudflare` (Google/GitHub OAuth) |
 | Validation | **Zod** |
 | Email | **Resend** |
@@ -120,7 +124,7 @@ bun run lint
 bun run build         # tsc -b && vite build
 ```
 
-Widget changes also need `bun run widget:build`. Changes to migration or cutover code need `bun run test:agents` with `PUBLIC_CONVERSATION_STORE=agent` as well.
+Widget changes also need `bun run widget:build`. Changes to Agent or migration code need `bun run test:agents` as well.
 
 `tsc -b` is incremental and will report success off a stale cache. When you are verifying rather than iterating, use `bunx tsc -b --force`.
 
@@ -181,7 +185,6 @@ replymaven/
 │   │   └── drizzle/                # SQL migration files
 │   └── services/                    # Domain service classes
 │       ├── project-service.ts
-│       ├── chat-service.ts
 │       ├── resource-service.ts
 │       ├── widget-service.ts
 │       ├── telegram-service.ts
@@ -275,7 +278,7 @@ For 3+ branches, extract a small helper with `if`/`else if`/`return`, use a look
 
 - **PascalCase**: Components, types, interfaces, service classes (`ProjectService`, `AuthGuard`, `ChatService`)
 - **camelCase**: Variables, functions
-- **kebab-case**: UI component files (`app-sidebar.tsx`), service files (`chat-service.ts`), hook files (`use-mobile.ts`)
+- **kebab-case**: UI component files (`app-sidebar.tsx`), service files (`project-service.ts`), hook files (`use-mobile.ts`)
 - **PascalCase filenames**: Page components (`Dashboard.tsx`, `Conversations.tsx`)
 
 ### UI/component workflow

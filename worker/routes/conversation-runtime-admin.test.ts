@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   handleConversationRuntimeBackfill,
-  handleConversationRuntimeStatus,
   handleConversationRuntimeVerify,
   type ConversationRuntimeAdminActor,
   type ConversationRuntimeAdminService,
@@ -26,6 +25,9 @@ function service(): ConversationRuntimeAdminService {
     },
     async verifyProject() {
       return {
+        processed: 2,
+        complete: true,
+        nextCursor: null,
         legacyCount: 2,
         agentCount: 2,
         legacyOnlyCount: 0,
@@ -33,18 +35,6 @@ function service(): ConversationRuntimeAdminService {
         operationalMismatchCount: 0,
         transcriptMismatchCount: 0,
         mismatchCount: 0,
-        verifiedAt: 100,
-      };
-    },
-    async getStatus() {
-      return {
-        projectId: "project-1",
-        directoryCursor: "opaque-cursor",
-        directoryCompleteAt: 100,
-        lastVerifiedAt: 100,
-        mismatchCount: 0,
-        backfillComplete: true,
-        verified: true,
       };
     },
   };
@@ -52,6 +42,7 @@ function service(): ConversationRuntimeAdminService {
 
 function options(overrides: Record<string, unknown> = {}) {
   return {
+    request: new Request("https://replymaven.test", { method: "POST" }),
     actor: actor(),
     projectId: "project-1",
     projectService: {
@@ -66,13 +57,13 @@ function options(overrides: Record<string, unknown> = {}) {
 
 describe("conversation runtime admin handlers", () => {
   test("requires an owner or admin in the exact project account", async () => {
-    const signedOut = await handleConversationRuntimeStatus(options({
+    const signedOut = await handleConversationRuntimeVerify(options({
       actor: null,
     }));
-    const member = await handleConversationRuntimeStatus(options({
+    const member = await handleConversationRuntimeVerify(options({
       actor: actor("member"),
     }));
-    const wrongAccount = await handleConversationRuntimeStatus(options({
+    const wrongAccount = await handleConversationRuntimeVerify(options({
       actor: actor("admin"),
       projectService: {
         async getProjectById() {
@@ -86,25 +77,37 @@ describe("conversation runtime admin handlers", () => {
     expect(wrongAccount.status).toBe(404);
   });
 
-  test("returns bounded backfill, parity, and status data", async () => {
-    const backfill = await handleConversationRuntimeBackfill({
-      ...options(),
+  test("returns bounded cursor-in, cursor-out batch results", async () => {
+    const backfill = await handleConversationRuntimeBackfill(options({
       request: new Request("https://replymaven.test", {
         method: "POST",
-        body: JSON.stringify({ limit: 100 }),
+        body: JSON.stringify({ cursor: "conversation-0", limit: 100 }),
       }),
-    });
+    }));
     const verify = await handleConversationRuntimeVerify(options());
-    const status = await handleConversationRuntimeStatus(options());
+    const badLimit = await handleConversationRuntimeBackfill(options({
+      request: new Request("https://replymaven.test", {
+        method: "POST",
+        body: JSON.stringify({ limit: 500 }),
+      }),
+    }));
+    const badCursor = await handleConversationRuntimeVerify(options({
+      request: new Request("https://replymaven.test", {
+        method: "POST",
+        body: JSON.stringify({ cursor: 42 }),
+      }),
+    }));
 
     expect(await backfill.json()).toMatchObject({
       processed: 2,
+      complete: false,
       nextCursor: "opaque-cursor",
     });
-    expect(await verify.json()).toMatchObject({ mismatchCount: 0 });
-    expect(await status.json()).toMatchObject({
-      backfillComplete: true,
-      verified: true,
+    expect(await verify.json()).toMatchObject({
+      complete: true,
+      mismatchCount: 0,
     });
+    expect(badLimit.status).toBe(400);
+    expect(badCursor.status).toBe(400);
   });
 });

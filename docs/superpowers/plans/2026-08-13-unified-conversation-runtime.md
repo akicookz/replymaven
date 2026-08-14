@@ -1147,33 +1147,36 @@ git commit -m "refactor: move conversation consumers to agents"
 > test-locally-then-deploy — no staged production flip, no rollback window.
 > The per-project cutover gate, the D1 compatibility projection, the
 > projection outbox, and the seven-day stabilization phase were removed.
-> `PUBLIC_CONVERSATION_STORE` in `wrangler.jsonc` is the single runtime
-> switch. Until Task 12 drops them, the frozen legacy D1 tables remain a
-> coarse fallback: reverting the flag and redeploying returns to D1 at its
-> pre-cutover contents, losing Agent-era messages.
+>
+> **Second revision (same day):** the dual runtime itself was removed. The
+> `PUBLIC_CONVERSATION_STORE` flag, the D1 store, the directory mirror,
+> `ChatService`, `ConversationDO`, the widget SSE/polling routes, and the
+> legacy dashboard WebSockets are deleted; the Agent runtime is
+> unconditional. What survives of Task 12 is only the destructive final
+> step: dropping the frozen D1 `conversations`/`messages` tables (and the
+> checkpoint table, backfill tooling, and `legacy-conversation-reader.ts`
+> with them) once the production backfill has been verified.
 
 **Files:**
 - Create: `worker/migrations/conversation-runtime-backfill.ts`
 - Create: `worker/migrations/conversation-runtime-backfill.test.ts`
 - Create: `worker/routes/conversation-runtime-admin.ts`
 - Create: `worker/routes/conversation-runtime-admin.test.ts`
-- Modify: `worker/conversations/d1-public-conversation-store.ts`
+- Create: `worker/conversations/legacy-conversation-reader.ts`
 - Modify: `worker/conversations/agent-public-conversation-store.ts`
 - Modify: `worker/agents/maven/maven-project-agent.ts`
 - Modify: `worker/agents/maven/maven-chat-agent.ts`
 - Modify: `worker/index.ts`
-- Modify: `worker/db/schema.ts`
-- Create: `worker/db/drizzle/0064_conversation_runtime_migration.sql`
 
 **Interfaces:**
 - Consumes: Complete D1 and Agent store implementations.
 - Produces: Resumable directory backfill, lazy transcript import, and a parity verification report.
 
-- [x] **Step 1: Add migration checkpoint storage and tests**
+- [x] **Step 1: Keep the run stateless**
 
-Create a D1 `conversation_runtime_migrations` table keyed by project holding the backfill cursor (`directory_cursor`, `directory_complete_at`), the verification report (`last_verified_at`, `mismatch_count`, `verification_cursor`, `verification_started_at`, and the per-category verification counts), and timestamps. Generate the migration as `0064_conversation_runtime_migration.sql` via Drizzle. The table is temporary; Task 12 drops it.
+There is no checkpoint table. The backfill and verify admin endpoints take an optional `cursor` in the request body and return `{ complete, nextCursor, counts }`; the operator passes the cursor back until `complete`. Reruns are idempotent because the parent directory upserts summaries by revision, so a failed run restarts from the beginning at worst. The only D1 migration the runtime needs is `0063` (billing).
 
-Tests must resume after interruption, avoid duplicate parent rows, reject a transcript checksum mismatch, and report directory IDs present on only one side.
+Tests must propagate a failed parent reconcile without advancing the cursor, avoid duplicate parent rows, reject a transcript checksum mismatch, and report directory IDs present on only one side.
 
 - [x] **Step 2: Implement bounded directory backfill**
 
@@ -1189,11 +1192,11 @@ On first Agent access, import the ordered D1 transcript, including system rows, 
 
 - [x] **Step 5: Add protected admin operations**
 
-Expose existing-admin-only handlers for `backfill`, `verify`, and `status`. Return counts and opaque cursors, never message content, tokens, or secrets.
+Expose existing-admin-only handlers for `backfill` and `verify`. Both accept `{ cursor?, limit? }` and return counts and opaque cursors, never message content, tokens, or secrets.
 
 - [x] **Step 6: Verify parity as a report, not a gate**
 
-For each project compare conversation IDs, operational fields, message count, latest message ID, and SHA-256 transcript checksum, and record the result on the checkpoint row. The report is operator information for the cutover deploy and the final Task 12 evidence; nothing at runtime reads it.
+For each batch compare conversation IDs, operational fields, message count, latest message ID, and SHA-256 transcript checksum, and return the counts in the response. Parity is clean when every batch of a full walk reports `mismatchCount: 0`. The report is operator information for the cutover deploy and the final Task 12 evidence; nothing stores or reads it.
 
 - [x] **Step 7: Run migration and full regression tests locally**
 
@@ -1220,17 +1223,25 @@ git commit -m "feat: add conversation runtime migration tooling"
 
 Each step is manual and ordered:
 
-1. apply `0063_idempotent_message_usage_credits.sql` and `0064_conversation_runtime_migration.sql` to production D1;
-2. set `PUBLIC_CONVERSATION_STORE` to `agent` in `wrangler.jsonc` and push to `main` (the worker auto-deploys);
-3. run the backfill admin endpoint for the two production projects until `directory_complete_at` is set — legacy writes have stopped, so the run cannot go stale;
-4. run verify and confirm `mismatch_count` is 0 for both projects;
+1. apply `0063_idempotent_message_usage_credits.sql` to production D1 (`bun run db:migrate:prod`);
+2. push to `main` — the worker auto-deploys, and that deploy IS the cutover: the Agent runtime is unconditional and the deploy also applies the `v3-delete-conversation-do` Durable Object deletion;
+3. run the backfill admin endpoint for the two production projects, passing each response's `nextCursor` back until `complete` — legacy writes have stopped, so the run cannot go stale;
+4. run verify the same way and confirm every batch reports `mismatchCount: 0` for both projects;
 5. run `bun run widget:deploy` to upload the Agent widget.
 
-The Agent widget speaks no legacy transport, so the widget upload must stay strictly after the worker deploy. Between steps 2 and 3 the dashboard inbox may be incomplete — conversations appear as they are backfilled or touched; visitor transcripts are unaffected because per-conversation import is lazy.
+The Agent widget speaks no legacy transport, so the widget upload must stay strictly after the worker deploy. Between steps 2 and 3 the dashboard inbox may be incomplete — conversations appear as they are backfilled or touched; visitor transcripts are unaffected because per-conversation import is lazy. There is no rollback: the old worker cannot be redeployed after `v3-delete-conversation-do`, so recovery means restoring D1 from backup.
 
 ---
 
 ### Task 12: Remove the legacy runtime and D1 conversation storage
+
+> **Scope revision (2026-08-14):** the code-deletion half of this task was
+> pulled forward and shipped with Task 11 — legacy routes, `ConversationDO`
+> (including the `v3-delete-conversation-do` Wrangler migration), the
+> directory mirror, `ChatService`, the D1 store (replaced by the read-only
+> `legacy-conversation-reader.ts`), the dashboard/customer legacy
+> WebSockets, and the runtime flag are already gone. What remains here is
+> the destructive final cleanup after the production backfill is verified.
 
 **Files:**
 - Delete: `worker/chat-runtime/orchestration/handle-widget-message-turn.ts`
@@ -1254,7 +1265,7 @@ The Agent widget speaks no legacy transport, so the widget upload must stay stri
 - Delete: `worker/routes/conversation-runtime-admin.test.ts`
 - Create: `worker/routes/conversation-runtime-integrity.ts`
 - Modify: `worker/db/schema.ts:442-566, 645-668, 1050-1070`
-- Create: `worker/db/drizzle/0065_remove_legacy_conversation_storage.sql`
+- Create: `worker/db/drizzle/0064_remove_legacy_conversation_storage.sql`
 - Modify: `worker/index.ts`
 - Modify: `worker/types.ts`
 - Modify: `wrangler.jsonc:60-78`
@@ -1265,21 +1276,21 @@ The Agent widget speaks no legacy transport, so the widget upload must stay stri
 - Consumes: Verified Agent-authoritative production state after the one-shot cutover.
 - Produces: One conversation runtime, no D1 conversations/messages, no `ConversationDO`, no public SSE/polling endpoints.
 
-- [ ] **Step 1: Strengthen the source-boundary deletion test**
+- [x] **Step 1: Strengthen the source-boundary deletion test**
 
-Make the test require zero production imports of D1 `conversations`, D1 `messages`, `ChatService`, `CONVERSATION_DO`, legacy broadcast helpers, and custom public SSE modules. Allow only the historical migration verifier until its removal in this task.
+Make the test require zero production imports of D1 `conversations`, D1 `messages`, `ChatService`, `CONVERSATION_DO`, legacy broadcast helpers, and custom public SSE modules. Allow only the historical migration reader (`legacy-conversation-reader.ts`) and its test fixture until their removal in this task.
 
 - [ ] **Step 2: Remove foreign keys that point at conversations**
 
 Keep `tool_executions.conversation_id` and `visitor_bans.banned_from_conversation_id` as nullable text columns with indexes, but remove their foreign keys. Then remove `messages` and `conversations` from `worker/db/schema.ts` and Drizzle exports.
 
-Generate `0065_remove_legacy_conversation_storage.sql` and inspect it to ensure it preserves tool-execution and visitor-ban rows before dropping the legacy tables.
+Generate `0064_remove_legacy_conversation_storage.sql` and inspect it to ensure it preserves tool-execution and visitor-ban rows before dropping the legacy tables.
 
-- [ ] **Step 3: Remove legacy routes and runtime code**
+- [x] **Step 3: Remove legacy routes and runtime code**
 
 Delete public POST-message SSE, GET-message polling, legacy conversation WebSocket, dashboard conversation WebSocket, customer-project WebSocket, old broadcast helpers, and the legacy store implementation. Keep the new Agent-session routes and any stable REST endpoints that now delegate to the Agent store.
 
-- [ ] **Step 4: Remove `ConversationDO` safely**
+- [x] **Step 4: Remove `ConversationDO` safely**
 
 Delete its binding and export. Add this new Wrangler migration after the existing tags:
 
@@ -1305,9 +1316,9 @@ const parityReportKey =
   `_migration-reports/conversation-runtime/final-${Date.now()}.json`;
 ```
 
-Write it to `UPLOADS` and record the resulting R2 key in the release evidence. Then delete the backfill/verify service and admin handlers. Keep a read-only Agent integrity endpoint for operational diagnostics. `0065_remove_legacy_conversation_storage.sql` must also drop `conversation_runtime_migrations`.
+Write it to `UPLOADS` and record the resulting R2 key in the release evidence. Then delete the backfill/verify service and admin handlers. Keep a read-only Agent integrity endpoint for operational diagnostics. `0064_remove_legacy_conversation_storage.sql` drops only the two legacy tables; there is no checkpoint table.
 
-- [ ] **Step 6: Update repository documentation**
+- [x] **Step 6: Update repository documentation**
 
 Update `AGENTS.md` to state:
 
@@ -1345,14 +1356,14 @@ git commit -m "refactor: remove legacy conversation runtime"
 
 - [ ] **Step 10: Stop for final destructive-production approvals**
 
-Request separate explicit approval before applying `0065_remove_legacy_conversation_storage.sql`, deploying the Wrangler `deleted_classes` migration, or uploading the final widget. Report that the D1 table drop and Durable Object class deletion are destructive and only recoverable from backups/exports.
+Request separate explicit approval before applying `0064_remove_legacy_conversation_storage.sql`, deploying the Wrangler `deleted_classes` migration, or uploading the final widget. Report that the D1 table drop and Durable Object class deletion are destructive and only recoverable from backups/exports.
 
 ---
 
 ## Release sequence and rollback boundaries
 
-1. **Cutover release:** Tasks 1-11 ship together in one deploy that sets the runtime flag to `agent` (Task 11 Step 9). Agent SQLite becomes authoritative at this point. The frozen legacy D1 tables are the only fallback, at the cost of Agent-era messages.
-2. **Cleanup release:** Task 12 removes the legacy runtime, D1 conversation tables, and `ConversationDO`. After this point recovery requires an explicit Agent transcript export, not a redeploy.
+1. **Cutover release:** Tasks 1-11 plus the legacy-runtime deletion ship together in one deploy (Task 11 Step 9). The Agent runtime is unconditional, `ConversationDO` is deleted by the same deploy, and Agent SQLite becomes authoritative. Recovery afterwards means restoring D1 from backup, not redeploying.
+2. **Cleanup release:** Task 12's remaining steps drop the frozen D1 conversation tables, the checkpoint table, and the migration reader/backfill tooling once the production backfill has been verified. After this point recovery requires an explicit Agent transcript export.
 
 ## Final acceptance checklist
 

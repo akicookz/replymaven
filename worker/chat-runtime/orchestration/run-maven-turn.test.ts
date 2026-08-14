@@ -7,12 +7,40 @@ import { type SourceReference } from "../../services/resource-service";
 import { type ToolService } from "../../services/tool-service";
 import { type AppEnv } from "../../types";
 import { createModelRuntimeState } from "../llm/create-language-model";
-import { mapAgentEventsToSse } from "../streaming/map-agent-events-to-sse";
+import { MavenStreamFailure } from "../streaming/maven-stream-failure";
+import { MavenTurnCancelled } from "../streaming/maven-turn-cancelled";
 import {
   runMavenTurn,
   type MavenTurnDependencies,
   type PublicMavenTurnContext,
 } from "./run-maven-turn";
+
+// Local copy of the deleted legacy SSE mapper, kept as a parity-fixture
+// consumer for the turn's full stream.
+async function* mapAgentEventsToSse(
+  parts: Iterable<unknown> | AsyncIterable<unknown>,
+): AsyncGenerator<Record<string, unknown>> {
+  for await (const part of parts) {
+    const type = part && typeof part === "object"
+      ? (part as Record<string, unknown>).type
+      : null;
+    if (type === "abort") throw new MavenTurnCancelled();
+    if (type === "error") throw new MavenStreamFailure();
+    if (type === "text-delta") {
+      const text = (part as Record<string, unknown>).text;
+      if (typeof text === "string" && text) yield { text };
+      continue;
+    }
+    if (type === "tool-call") {
+      yield {
+        status: {
+          phase: "tool",
+          message: "Checking project information",
+        },
+      };
+    }
+  }
+}
 
 interface ModelCall {
   prompt?: unknown;

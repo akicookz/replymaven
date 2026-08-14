@@ -33,10 +33,6 @@ import {
   McpOAuthService,
 } from "./services/mcp-oauth-service";
 import {
-  broadcastMessageNew,
-  broadcastStatusChange,
-} from "./realtime/broadcast";
-import {
   createResourceSchema,
   createFaqResourceSchema,
   updateFaqResourceSchema,
@@ -551,16 +547,6 @@ function registerSendAgentReplyTool(
         origin: "mcp",
       });
       if (!message) throw new Error("Conversation not found");
-
-      broadcastMessageNew(context.env, context.executionCtx, conversation.id, message, {
-        excludeSubjectId: context.userId,
-      });
-      broadcastStatusChange(
-        context.env,
-        context.executionCtx,
-        conversation.id,
-        "agent_replied",
-      );
 
       return textResult({
         ok: true,

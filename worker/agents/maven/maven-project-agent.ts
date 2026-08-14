@@ -30,8 +30,6 @@ import type {
 import {
   toPublicChildName,
   toSidechatChildName,
-  type PublicConversationRecord,
-  type PublicMessageRecord,
 } from "../../../shared/maven-conversation";
 import type { ToolRow } from "../../db";
 import { buildCustomerByIdQuery } from "../../services/customer-service";
@@ -375,25 +373,6 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     return { applied, skipped };
   }
 
-  async reconcileLegacyConversation(input: {
-    summary: MavenConversationSummary;
-    conversation: PublicConversationRecord;
-    messages: PublicMessageRecord[];
-    checksum: string;
-  }): Promise<void> {
-    this.conversationDirectory().upsertConversationSummary(input.summary);
-    const childName = toPublicChildName(input.conversation.id);
-    if (!this.hasSubAgent(MavenChatAgent, childName)) return;
-    const child = await this.subAgent(MavenChatAgent, childName);
-    const result = await child.refreshLegacyPublicConversation({
-      conversation: input.conversation,
-      messages: input.messages,
-      checksum: input.checksum,
-    });
-    if (result.status === "conflict") {
-      throw new Error("Agent-native conversation cannot accept a legacy refresh");
-    }
-  }
 
   async applyPublicCustomerMutation(
     input: MavenPublicCustomerMutation,
@@ -633,22 +612,6 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       input.afterConversationId,
       input.limit,
     );
-  }
-
-  async removeLegacyConversation(conversationId: string): Promise<boolean> {
-    if (this.env.PUBLIC_CONVERSATION_STORE === "agent") return false;
-    const summary = this.conversationDirectory().getConversation(conversationId);
-    if (!summary) return false;
-    if (
-      summary.sidechatChildName &&
-      this.hasSubAgent(MavenChatAgent, summary.sidechatChildName)
-    ) {
-      await this.deleteSubAgent(MavenChatAgent, summary.sidechatChildName);
-    }
-    if (this.hasSubAgent(MavenChatAgent, summary.publicChildName)) {
-      await this.deleteSubAgent(MavenChatAgent, summary.publicChildName);
-    }
-    return this.conversationDirectory().removeConversation(conversationId);
   }
 
   async bulkApplyPublicActions(input: {
@@ -1872,6 +1835,13 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     this.broadcast(JSON.stringify(event));
   }
 
+  async notifyCustomerUpdated(customerIds: string[]): Promise<void> {
+    for (const customerId of customerIds) {
+      if (!customerId) continue;
+      this.broadcastProjectEvent({ type: "customer-updated", customerId });
+    }
+  }
+
   private assertRegisteredSidechat(
     childName: string,
     conversationId: string,
@@ -1916,9 +1886,6 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
       return new Response("Not found", { status: 404 });
     }
     if (child.name.startsWith("pub_")) {
-      if (this.env.PUBLIC_CONVERSATION_STORE !== "agent") {
-        return new Response("Agent runtime not cut over", { status: 409 });
-      }
       const conversationId = child.name.slice(4);
       const summary = this.conversationDirectory().getConversation(
         conversationId,

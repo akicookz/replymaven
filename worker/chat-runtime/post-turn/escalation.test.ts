@@ -127,7 +127,6 @@ function makeConversation(
 
 function baseParams(overrides: Record<string, unknown> = {}) {
   const { service, calls } = makeChatService();
-  const broadcasts: PublicMessageRecord[] = [];
   const params = {
     chatService: service,
     projectService: projectServiceStub,
@@ -138,17 +137,14 @@ function baseParams(overrides: Record<string, unknown> = {}) {
     settings: null,
     env: { BETTER_AUTH_URL: "https://app.test" },
     executionCtx: noopExecutionCtx,
-    broadcast: (row: PublicMessageRecord) => {
-      broadcasts.push(row);
-    },
     ...overrides,
   };
-  return { params, calls, broadcasts };
+  return { params, calls };
 }
 
 describe("createEscalation - first escalation (created)", () => {
-  test("posts a review_summary system message and broadcasts it", async () => {
-    const { params, calls, broadcasts } = baseParams();
+  test("posts a review_summary system message", async () => {
+    const { params, calls } = baseParams();
 
     const result = await createEscalation(params as never);
 
@@ -160,8 +156,6 @@ describe("createEscalation - first escalation (created)", () => {
       kind: "review_summary",
       content: "Visitor needs a refund on order 123.",
     });
-    expect(broadcasts).toHaveLength(1);
-    expect(broadcasts[0].id).toBe(result.summaryMessageId);
   });
 
   test("patches escalation fields without replaying unrelated metadata", async () => {
@@ -243,8 +237,8 @@ describe("createEscalation - first escalation (created)", () => {
 });
 
 describe("createEscalation - repeat escalation (already forwarded)", () => {
-  test("does not post or broadcast a duplicate summary message", async () => {
-    const { params, calls, broadcasts } = baseParams({
+  test("does not post a duplicate summary message", async () => {
+    const { params, calls } = baseParams({
       conversation: makeConversation({
         metadata: JSON.stringify({
           escalatedAt: "2020-01-01T00:00:00.000Z",
@@ -259,7 +253,6 @@ describe("createEscalation - repeat escalation (already forwarded)", () => {
     expect(result.created).toBe(false);
     expect(result.summaryMessageId).toBe("msg-existing");
     expect(calls.addPublicSystemMessage).toHaveLength(0);
-    expect(broadcasts).toHaveLength(0);
   });
 });
 

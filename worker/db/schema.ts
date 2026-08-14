@@ -41,53 +41,6 @@ export const projects = sqliteTable(
 export type ProjectRow = typeof projects.$inferSelect;
 export type NewProjectRow = typeof projects.$inferInsert;
 
-// ─── Conversation Runtime Migration ─────────────────────────────────────────
-
-export const conversationRuntimeMigrations = sqliteTable(
-  "conversation_runtime_migrations",
-  {
-    projectId: text("project_id")
-      .primaryKey()
-      .references(() => projects.id, { onDelete: "cascade" }),
-    directoryCursor: text("directory_cursor"),
-    directoryCompleteAt: integer("directory_complete_at", {
-      mode: "timestamp",
-    }),
-    lastVerifiedAt: integer("last_verified_at", { mode: "timestamp" }),
-    mismatchCount: integer("mismatch_count").notNull().default(0),
-    verificationCursor: text("verification_cursor"),
-    verificationStartedAt: integer("verification_started_at", {
-      mode: "timestamp",
-    }),
-    verificationLegacyCount: integer("verification_legacy_count")
-      .notNull().default(0),
-    verificationAgentCount: integer("verification_agent_count")
-      .notNull().default(0),
-    verificationLegacyOnlyCount: integer("verification_legacy_only_count")
-      .notNull().default(0),
-    verificationAgentOnlyCount: integer("verification_agent_only_count")
-      .notNull().default(0),
-    verificationOperationalMismatchCount: integer(
-      "verification_operational_mismatch_count",
-    ).notNull().default(0),
-    verificationTranscriptMismatchCount: integer(
-      "verification_transcript_mismatch_count",
-    ).notNull().default(0),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp" })
-      .default(sql`(unixepoch())`)
-      .$onUpdate(() => new Date())
-      .notNull(),
-  },
-);
-
-export type ConversationRuntimeMigrationRow =
-  typeof conversationRuntimeMigrations.$inferSelect;
-export type NewConversationRuntimeMigrationRow =
-  typeof conversationRuntimeMigrations.$inferInsert;
-
 // ─── Project Settings ─────────────────────────────────────────────────────────
 
 export const projectSettings = sqliteTable(
@@ -1156,7 +1109,6 @@ export type NewVisitorBanRow = typeof visitorBans.$inferInsert;
 export const schema = {
   ...authSchema,
   projects,
-  conversationRuntimeMigrations,
   projectSettings,
   widgetConfig,
   quickActions,

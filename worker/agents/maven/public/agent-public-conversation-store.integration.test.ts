@@ -5,7 +5,6 @@ import type {
   PublicConversationRecord,
   PublicMessageRecord,
 } from "../../../../shared/maven-conversation";
-import type { PublicConversationStore } from "../../../conversations/public-conversation-store";
 
 const isBunTest = "Bun" in globalThis;
 const nativeTest = isBunTest ? test.skip : test;
@@ -109,14 +108,10 @@ describe("native AgentPublicConversationStore", () => {
             ? legacyRecord
             : null;
         },
-        async getMessages() {
-          return legacyMessages.filter((entry) => entry.author !== "system");
-        },
         async getMigrationMessages() {
           return legacyMessages;
         },
-      } as PublicConversationStore,
-      skipRuntimeCutoverGate: true,
+      },
     });
 
     await expect(store.get(legacyRecord.projectId, legacyRecord.id)).resolves
@@ -144,18 +139,17 @@ describe("native AgentPublicConversationStore", () => {
           ? structuredClone(legacyRecord)
           : null;
       },
-      async getMessages(projectId: string, conversationId: string) {
+      async getMigrationMessages(projectId: string, conversationId: string) {
         return projectId === legacyRecord.projectId &&
             conversationId === legacyRecord.id
           ? structuredClone(legacyMessages)
           : [];
       },
-    } as PublicConversationStore;
+    };
     const store = new AgentPublicConversationStore({
       db: drizzle(env.DB),
       env,
       legacy,
-      skipRuntimeCutoverGate: true,
     });
 
     await expect(store.get(legacyRecord.projectId, legacyRecord.id)).resolves
@@ -180,8 +174,6 @@ describe("native AgentPublicConversationStore", () => {
           visitorName: "Agent visitor",
         }],
       });
-    await expect(store.getConversationCounts(legacyRecord.projectId)).resolves
-      .toEqual({ all: 1, open: 1, closed: 0 });
     await expect(store.getDashboardConversationPage(
       legacyRecord.projectId,
       { filter: "all", limit: 25 },

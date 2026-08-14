@@ -67,10 +67,50 @@ function createUsageLogHarness(): {
     STRIPE_BUSINESS_MONTHLY_PRICE_ID: "price_business_monthly",
     STRIPE_BUSINESS_ANNUAL_PRICE_ID: "price_business_annual",
   } as unknown as AppEnv;
+  const store = {
+    async queryUsageConversations(query: {
+      projectIds: string[];
+      periodStart: number;
+      periodEnd: number;
+    }) {
+      const rows = sqlite.query<{
+        id: string;
+        project_id: string;
+        visitor_name: string | null;
+        visitor_email: string | null;
+        status: string;
+        metadata: string | null;
+        created_at: number;
+        bot_count: number;
+      }, [string]>(`SELECT c.*, (
+          SELECT COUNT(*) FROM messages m
+          WHERE m.conversation_id = c.id AND m.role = 'bot'
+        ) AS bot_count
+        FROM conversations c WHERE c.project_id = ?
+        ORDER BY c.created_at DESC`).all(query.projectIds[0]!);
+      return {
+        rows: rows.map((row) => ({
+          conversation: {
+            id: row.id,
+            projectId: row.project_id,
+            visitorName: row.visitor_name,
+            visitorEmail: row.visitor_email,
+            status: row.status,
+            metadata: row.metadata ? JSON.parse(row.metadata) : {},
+            createdAt: row.created_at * 1_000,
+          },
+          botMessageCount: row.bot_count,
+        })),
+        total: rows.length,
+        metaKeys: [],
+      };
+    },
+  } as unknown as ConstructorParameters<typeof BillingService>[2];
   return {
     service: new BillingService(
       db as unknown as DrizzleD1Database<Record<string, unknown>>,
       env,
+      store,
     ),
     sqlite,
   };

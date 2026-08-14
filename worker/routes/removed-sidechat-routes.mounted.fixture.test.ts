@@ -56,10 +56,6 @@ if (process.env.REMOVED_SIDECHAT_ROUTES_FIXTURE === "1") {
     },
   }));
 
-  mock.module("../services/chat-service", () => ({
-    ChatService: class ChatService {},
-  }));
-
   mock.module("../services/billing-service", () => ({
     BillingService: class BillingService {
       static getPlanLimits() {

@@ -139,6 +139,7 @@ export class BillingService {
   constructor(
     private db: DrizzleD1Database<Record<string, unknown>>,
     private env: AppEnv,
+    conversationStore?: PublicConversationStore,
   ) {
     this.stripe = new Stripe(env.STRIPE_SECRET_KEY, {
       httpClient: Stripe.createFetchHttpClient(),
@@ -146,7 +147,8 @@ export class BillingService {
     const maps = buildPriceMaps(env);
     this.priceToMapping = maps.priceToMapping;
     this.planIntervalToPrice = maps.planIntervalToPrice;
-    this.conversationStore = createPublicConversationStore({ db, env });
+    this.conversationStore = conversationStore ??
+      createPublicConversationStore({ db, env });
   }
 
   // ─── Price Resolution ─────────────────────────────────────────────────────

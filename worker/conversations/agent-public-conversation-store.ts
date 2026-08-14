@@ -22,7 +22,7 @@ import {
 import { publicConversationImportChecksum } from "../../shared/public-transcript-checksum";
 import type { AppEnv } from "../types";
 import { projects } from "../db/schema";
-import { D1PublicConversationStore } from "./d1-public-conversation-store";
+import { LegacyConversationReader } from "./legacy-conversation-reader";
 import type {
   AppendPublicBotInput,
   AppendPublicHumanInput,
@@ -38,7 +38,6 @@ import type {
   PublicConversationActionInput,
   PublicConversationAnalytics,
   PublicBulkConversationActionResult,
-  PublicConversationCounts,
   PublicConversationListQuery,
   PublicConversationListResult,
   PublicCustomerLinkInput,
@@ -71,18 +70,21 @@ import type {
   ConversationChatState,
 } from "../chat-runtime/types";
 
-interface AgentPublicConversationStoreContext {
-  db: DrizzleD1Database<Record<string, unknown>>;
-  env: AppEnv;
-  legacy?: PublicConversationStore;
-  skipRuntimeCutoverGate?: boolean;
-}
-
-interface LegacyImportConversationStore extends PublicConversationStore {
-  getMigrationMessages?(
+interface LegacyConversationReaderLike {
+  get(
+    projectId: string,
+    conversationId: string,
+  ): Promise<PublicConversationRecord | null>;
+  getMigrationMessages(
     projectId: string,
     conversationId: string,
   ): Promise<PublicMessageRecord[]>;
+}
+
+interface AgentPublicConversationStoreContext {
+  db: DrizzleD1Database<Record<string, unknown>>;
+  env: AppEnv;
+  legacy?: LegacyConversationReaderLike;
 }
 
 interface PublicChildStub {
@@ -281,12 +283,6 @@ async function getPublicParent(
   context: AgentPublicConversationStoreContext,
   projectId: string,
 ): Promise<PublicParentStub> {
-  if (
-    !context.skipRuntimeCutoverGate &&
-    context.env.PUBLIC_CONVERSATION_STORE !== "agent"
-  ) {
-    throw new Error("Public Agent runtime is not cut over for this project");
-  }
   const { getAgentByName } = await import("agents");
   return await getAgentByName(
     context.env.MAVEN_PROJECT_AGENT,
@@ -424,10 +420,10 @@ function newMessage(
 }
 
 export class AgentPublicConversationStore implements PublicConversationStore {
-  private readonly legacy: LegacyImportConversationStore;
+  private readonly legacy: LegacyConversationReaderLike;
 
   constructor(private readonly context: AgentPublicConversationStoreContext) {
-    this.legacy = context.legacy ?? new D1PublicConversationStore(context.db);
+    this.legacy = context.legacy ?? new LegacyConversationReader(context.db);
   }
 
   async create(
@@ -527,29 +523,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     };
   }
 
-  async getConversationCounts(
-    projectId: string,
-  ): Promise<PublicConversationCounts> {
-    const summaries = await this.readEverySummary(projectId);
-    const closed = summaries.filter((summary) => summary.status === "closed").length;
-    return {
-      all: summaries.length,
-      open: summaries.length - closed,
-      closed,
-    };
-  }
 
-  async listUpdates(input: {
-    projectId: string;
-    since: number;
-    limit?: number;
-  }): Promise<PublicConversationRecord[]> {
-    const limit = Math.max(1, Math.min(100, input.limit ?? 100));
-    return (await this.readEverySummary(input.projectId))
-      .filter((summary) => summary.updatedAt > input.since)
-      .slice(0, limit)
-      .map((summary) => summaryToConversation(summary, input.projectId));
-  }
 
   async listNeedsReview(
     projectId: string,
@@ -617,37 +591,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     };
   }
 
-  async getLastMessagePreviews(
-    conversationIds: string[],
-  ): Promise<Map<string, PublicLastMessagePreview>> {
-    const requested = new Set(conversationIds);
-    const previews = new Map<string, PublicLastMessagePreview>();
-    const projectRows = await this.context.db
-      .select({ id: projects.id })
-      .from(projects);
-    for (const project of projectRows) {
-      const parent = await getPublicParent(
-        this.context,
-        project.id,
-      );
-      for (const summary of await parent.listAllPublicConversationSummaries()) {
-        if (
-          !requested.has(summary.conversationId) ||
-          !summary.lastMessageId ||
-          !summary.lastMessageAuthor
-        ) continue;
-        previews.set(summary.conversationId, {
-          id: summary.lastMessageId,
-          author: summary.lastMessageAuthor,
-          content: summary.lastMessagePreview ?? "",
-          senderName: summary.lastMessageSenderName,
-          emailedAt: summary.lastMessageEmailedAt,
-          createdAt: summary.lastMessageCreatedAt ?? summary.lastActivityAt,
-        });
-      }
-    }
-    return previews;
-  }
 
   async listByCustomer(
     projectId: string,
@@ -1150,41 +1093,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return this.setStatus(projectId, conversationId, status, null);
   }
 
-  async checkAndCloseStale(
-    projectId: string,
-    conversationId: string,
-    autoCloseMinutes: number,
-  ): Promise<{
-    closed: boolean;
-    conversation: PublicConversationRecord | null;
-  }> {
-    const child = await this.resolveChild(projectId, conversationId);
-    return child
-      ? child.checkAndClosePublicStale(autoCloseMinutes)
-      : { closed: false, conversation: null };
-  }
 
-  async checkAndCloseStaleForProject(
-    projectId: string,
-    conversationRecords: PublicConversationRecord[],
-    autoCloseMinutes: number,
-  ): Promise<string[]> {
-    const closedIds: string[] = [];
-    for (let offset = 0; offset < conversationRecords.length; offset += 25) {
-      const batch = conversationRecords.slice(offset, offset + 25);
-      const results = await Promise.all(batch.map((conversation) =>
-        this.checkAndCloseStale(
-          projectId,
-          conversation.id,
-          autoCloseMinutes,
-        )
-      ));
-      results.forEach((result, index) => {
-        if (result.closed) closedIds.push(batch[index]!.id);
-      });
-    }
-    return closedIds;
-  }
 
   async prepareContactSupportOwnership(
     projectId: string,
@@ -1446,31 +1355,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return this.create({ ...input, metadata });
   }
 
-  async getConversationsByProject(
-    projectId: string,
-    limit?: number,
-    offset?: number,
-    status?: "open" | "closed" | "all",
-    search?: string,
-    inboxFilter?: PublicConversationListQuery["inboxFilter"],
-  ): Promise<PublicConversationRecord[]> {
-    return (await this.list({
-      projectId,
-      limit,
-      offset,
-      status,
-      search,
-      inboxFilter,
-    })).conversations;
-  }
 
-  async getConversationUpdatesSince(
-    projectId: string,
-    since: Date,
-    limit?: number,
-  ): Promise<PublicConversationRecord[]> {
-    return this.listUpdates({ projectId, since: since.getTime(), limit });
-  }
 
   async getNeedsReviewSince(
     projectId: string,
@@ -1485,11 +1370,6 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     return this.listAgentMode(projectId);
   }
 
-  async getLastPublicMessagesByConversationIds(
-    conversationIds: string[],
-  ): Promise<Map<string, PublicLastMessagePreview>> {
-    return this.getLastMessagePreviews(conversationIds);
-  }
 
   async getPublicMessages(
     conversationId: string,
@@ -1911,10 +1791,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     projectId: string,
     conversationId: string,
   ): Promise<PublicMessageRecord[]> {
-    if (this.legacy.getMigrationMessages) {
-      return this.legacy.getMigrationMessages(projectId, conversationId);
-    }
-    return this.legacy.getMessages(projectId, conversationId);
+    return this.legacy.getMigrationMessages(projectId, conversationId);
   }
 
   private async readAllSummaries(

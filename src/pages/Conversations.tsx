@@ -32,8 +32,6 @@ import type {
 import type { SafeSidechatDataPart } from "@/lib/inbox/sidechat-message-adapter";
 import { cn } from "@/lib/utils";
 import { serializeMessageImageUrls } from "../../shared/message-images";
-import { useConversationWs } from "@/lib/use-conversation-ws";
-import { useCustomerWs } from "@/lib/use-customer-ws";
 import { passesInboxFilter, type InboxFilter, type InboxSort } from "@/lib/inbox/filters";
 import {
   moveRangeSelection,
@@ -50,7 +48,6 @@ import type {
   Conversation,
   Message,
   InboxCounts,
-  LastMessagePreview,
 } from "@/lib/inbox/types";
 import {
   deriveAddToReplyIntent,
@@ -100,40 +97,7 @@ interface ConversationsPage {
   counts: InboxCounts;
   hasMore: boolean;
   serverTime?: number;
-  runtime?: "legacy" | "agent";
   nextCursor?: string | null;
-}
-
-interface ConversationUpdate {
-  id: string;
-  projectId: string;
-  customerId: string | null;
-  visitorId: string;
-  visitorName: string | null;
-  visitorEmail: string | null;
-  status: string;
-  closeReason: string | null;
-  metadata: string | null;
-  lastActivityAt: string;
-  visitorLastSeenAt: string | null;
-  visitorPresence: string | null;
-  visitorLastOnlineAt: string | null;
-  snoozedUntil?: string | null;
-  archivedAt?: string | null;
-  purgeStartedAt?: string | null;
-  priority?: "low" | "medium" | "high" | null;
-  assigneeId?: string | null;
-  createdAt: string;
-  updatedAt: string;
-  lastMessage?: LastMessagePreview | null;
-}
-
-interface ConversationUpdatesResponse {
-  updates: ConversationUpdate[];
-  // The /updates endpoint still returns the legacy open/closed shape; the inbox
-  // counts that drive the sidebar/subtitle come from the list response instead.
-  counts: { all: number; open: number; closed: number };
-  serverTime: number;
 }
 
 interface ConversationDetail {
@@ -142,7 +106,6 @@ interface ConversationDetail {
   hasMore: boolean;
   botName: string | null;
   agentName: string | null;
-  runtime?: "legacy" | "agent";
 }
 
 interface BulkConversationMutationInput {
@@ -635,24 +598,6 @@ function Conversations() {
   const [loadedConversations, setLoadedConversations] = useState<Conversation[]>(
     [],
   );
-  const [serverTimeBaseline, setServerTimeBaseline] = useState<number | null>(
-    null,
-  );
-  // The `/updates` poll cursor lives in a ref, NOT in the query key. Each
-  // response carries a fresh `serverTime`; if that advanced value were in the
-  // query key it would churn the key on every response and React Query would
-  // refetch immediately, looping forever. The ref initialises from the first
-  // baseline and advances from each updates response, while the 5s interval
-  // drives the actual polling cadence.
-  const updatesSinceRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (serverTimeBaseline != null && updatesSinceRef.current == null) {
-      updatesSinceRef.current = serverTimeBaseline;
-    }
-  }, [serverTimeBaseline]);
-
-  useCustomerWs(projectId);
-
   // ── List query (drives the conversation column) ──────────────────────────
   const {
     data: convosPage,
@@ -685,106 +630,10 @@ function Conversations() {
     // rather than briefly re-displaying the previous filter's rows.
     if (!convosPage || isPlaceholderData) return;
     setLoadedConversations(convosPage.conversations);
-    if (convosPage.serverTime) setServerTimeBaseline(convosPage.serverTime);
     if (projectId) {
       queryClient.setQueryData(["inbox-counts", projectId], convosPage.counts);
     }
   }, [convosPage, isPlaceholderData, projectId, queryClient]);
-
-  // Lightweight polling: fetch conversation deltas (id + activity) and patch
-  // the local list in place. Brand-new conversations are prepended for the
-  // broad inbox views.
-  const { data: updatesData } = useQuery<ConversationUpdatesResponse>({
-    queryKey: ["conversation-updates", projectId],
-    queryFn: async () => {
-      const since = updatesSinceRef.current ?? serverTimeBaseline ?? 0;
-      const res = await fetch(
-        `/api/projects/${projectId}/conversations/updates?since=${since}`,
-      );
-      if (!res.ok) throw new Error("Failed to fetch updates");
-      return res.json();
-    },
-    enabled: !!projectId && serverTimeBaseline != null &&
-      convosPage?.runtime !== "agent",
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: false,
-  });
-
-  useEffect(() => {
-    if (!updatesData) return;
-    if (updatesData.serverTime) updatesSinceRef.current = updatesData.serverTime;
-    if (updatesData.updates.length === 0) return;
-
-    // The delta is updatedAt-gated server-side (every mutation, including a
-    // peer's snooze/flag/block, lands here) and each row carries the full
-    // filterable shape (status, closeReason, snoozedUntil). So every tab can
-    // evaluate the real predicate: brand-new matches are admitted live, and
-    // patched rows whose new state no longer belongs (snoozed away, flagged,
-    // blocked) are evicted — otherwise they'd haunt Needs You / All until the
-    // next full refetch. Rows NOT in the delta are left alone.
-    const nowMs = Date.now();
-
-    const updateMap = new Map(updatesData.updates.map((u) => [u.id, u]));
-
-    setLoadedConversations((prev) => {
-      const seen = new Set(prev.map((c) => c.id));
-      let changed = false;
-
-      const next: Conversation[] = [];
-      for (const c of prev) {
-        const u = updateMap.get(c.id);
-        if (!u) {
-          next.push(c);
-          continue;
-        }
-        changed = true;
-        updateMap.delete(c.id);
-        const merged = { ...c, ...u } as Conversation;
-        if (passesInboxFilter(filter, merged, nowMs)) next.push(merged);
-      }
-
-      for (const u of updateMap.values()) {
-        if (seen.has(u.id)) continue;
-        if (!passesInboxFilter(filter, u, nowMs)) continue;
-        changed = true;
-        next.push(u as Conversation);
-      }
-
-      if (!changed) return prev;
-      next.sort((a, b) => getActivityMs(b) - getActivityMs(a));
-      return next;
-    });
-
-    // Keep the cached page consistent so a filter switch / limit bump stays
-    // correct. debouncedSearch and listLimit are read from the closure here;
-    // their staleness window matches the 5-second poll interval (same pattern
-    // as the existing `filter` closure variable).
-    queryClient.setQueryData<ConversationsPage | undefined>(
-      ["conversations", projectId, filter, debouncedSearch, listLimit],
-      (old) => {
-        if (!old) return old;
-        const seen = new Set(old.conversations.map((c) => c.id));
-        const patched: Conversation[] = [];
-        for (const c of old.conversations) {
-          const u = updatesData.updates.find((x) => x.id === c.id);
-          if (!u) {
-            patched.push(c);
-            continue;
-          }
-          const merged = { ...c, ...u } as Conversation;
-          if (passesInboxFilter(filter, merged, nowMs)) patched.push(merged);
-        }
-        for (const u of updatesData.updates) {
-          if (seen.has(u.id)) continue;
-          if (!passesInboxFilter(filter, u, nowMs)) continue;
-          patched.push(u as Conversation);
-        }
-        patched.sort((a, b) => getActivityMs(b) - getActivityMs(a));
-        return { ...old, conversations: patched };
-      },
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [updatesData]);
 
   // ── Detail query (drives the reading pane / focus thread) ────────────────
   const { data: convoDetail, isLoading: detailLoading } = useQuery<ConversationDetail>({
@@ -803,24 +652,20 @@ function Conversations() {
     },
     enabled: !!selectedConvo,
     retry: 1,
-    // Detail is kept fresh in real time by useConversationWs; cache 60s so
+    // Detail is kept fresh in real time by the Agent session; cache 60s so
     // revisiting a conversation is instant.
     staleTime: 1000 * 60,
     structuralSharing: true,
   });
 
-  useConversationWs(
-    projectId,
-    convoDetail?.runtime === "agent" ? null : selectedConvo,
-  );
   const publicChatSession = usePublicChatSession({
     projectId,
     conversationId: selectedConvo,
-    enabled: convoDetail?.runtime === "agent" && Boolean(selectedConvo),
+    enabled: Boolean(selectedConvo),
   });
 
   const handleDirectoryEvent = useCallback((event: MavenProjectEvent) => {
-    if (!projectId || convosPage?.runtime !== "agent") return;
+    if (!projectId) return;
     if (event.type === "inbox-counts") {
       queryClient.setQueryData(["inbox-counts", projectId], event.counts);
       queryClient.setQueryData<ConversationsPage | undefined>(
@@ -860,7 +705,7 @@ function Conversations() {
     );
     queryClient.setQueryData<ConversationDetail | undefined>(
       ["conversation-detail", incoming.id],
-      (old) => old?.runtime === "agent"
+      (old) => old
         ? {
             ...old,
             conversation: { ...old.conversation, ...incoming },
@@ -868,7 +713,6 @@ function Conversations() {
         : old,
     );
   }, [
-    convosPage?.runtime,
     debouncedSearch,
     filter,
     listLimit,
@@ -882,7 +726,7 @@ function Conversations() {
   ) => {
     queryClient.setQueryData<ConversationDetail | undefined>(
       ["conversation-detail", conversationId],
-      (old) => old?.runtime === "agent"
+      (old) => old
         ? {
             ...old,
             messages: reconcilePublicMessages(messages, old.messages),
@@ -898,7 +742,7 @@ function Conversations() {
     if (!state) return;
     queryClient.setQueryData<ConversationDetail | undefined>(
       ["conversation-detail", conversationId],
-      (old) => old?.runtime === "agent"
+      (old) => old
         ? {
             ...old,
             conversation: {

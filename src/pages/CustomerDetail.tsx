@@ -41,7 +41,7 @@ import {
   updateCustomer,
   type CustomerFieldRow,
 } from "@/lib/customers";
-import { useCustomerWs } from "@/lib/use-customer-ws";
+import { CustomerRealtimeBridge } from "@/components/customers/CustomerRealtimeBridge";
 
 function formatDate(value: string | null): string {
   if (!value) return "Not recorded";
@@ -71,7 +71,6 @@ function CustomerDetail() {
   const [formError, setFormError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
-  useCustomerWs(projectId);
 
   const customerQuery = useQuery({
     queryKey: customerKeys.detail(projectId ?? "missing", customerId ?? "missing"),
@@ -202,6 +201,7 @@ function CustomerDetail() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <CustomerRealtimeBridge projectId={projectId} />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <MobileMenuButton />

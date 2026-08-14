@@ -64,12 +64,6 @@ async function preparePublicTurnDatabase(
       Math.floor(Date.now() / 1_000) - 60,
       Math.floor(Date.now() / 1_000) + 2_592_000,
     ),
-    db.prepare(`INSERT OR REPLACE INTO conversation_runtime_migrations (
-      project_id, directory_complete_at, last_verified_at, mismatch_count,
-      created_at, updated_at
-    ) VALUES (?, unixepoch(), unixepoch(), 0, unixepoch(), unixepoch())`).bind(
-      projectId,
-    ),
   ]);
 }
 
@@ -634,10 +628,6 @@ describe("native public MavenChatAgent child", () => {
       `https://example.test/agents/maven-project-agent/${projectId}/sub/maven-chat-agent/pub_${conversationId}?token=${token}`,
       { headers: { Upgrade: "websocket" } },
     ));
-    if (env.PUBLIC_CONVERSATION_STORE !== "agent") {
-      expect(response.status).toBe(409);
-      return;
-    }
     expect(response.status).toBe(101);
     const socket = response.webSocket;
     expect(socket).not.toBeNull();

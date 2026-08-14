@@ -14,18 +14,12 @@ describe("native Sidechat privacy boundary", () => {
     expect(schema).not.toContain("reply_draft");
   });
 
-  test("does not route private Agent events through public realtime or widget code", async () => {
-    const [realtime, durableObject, widget] = await Promise.all([
-      read("worker/realtime/broadcast.ts"),
-      read("worker/durable-objects/conversation-do.ts"),
-      read("widget/index.ts"),
-    ]);
-    for (const source of [realtime, durableObject, widget]) {
-      expect(source).not.toContain("MavenChatAgent");
-      expect(source).not.toContain("data-reply-draft");
-      expect(source).not.toContain("data-safe-activity");
-      expect(source).not.toContain("sidechat:status");
-    }
+  test("does not route private Agent events through widget code", async () => {
+    const widget = await read("widget/index.ts");
+    expect(widget).not.toContain("MavenChatAgent");
+    expect(widget).not.toContain("data-reply-draft");
+    expect(widget).not.toContain("data-safe-activity");
+    expect(widget).not.toContain("sidechat:status");
   });
 
   test("does not expose Sidechat through inbound public MCP, Telegram, or email", async () => {

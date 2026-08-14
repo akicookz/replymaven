@@ -8,15 +8,15 @@ import {
   toSidechatChildName,
 } from "../../shared/maven-conversation";
 import {
-  D1PublicConversationStore,
+  LegacyConversationReader,
   mapD1ConversationRow,
   mapD1MessageRow,
-} from "./d1-public-conversation-store";
+} from "./legacy-conversation-reader";
 import { schema, type ConversationRow, type MessageRow } from "../db";
 
 function createD1StoreHarness(): {
   sqlite: Database;
-  store: D1PublicConversationStore;
+  reader: LegacyConversationReader;
 } {
   const sqlite = new Database(":memory:");
   sqlite.exec(`CREATE TABLE conversations (
@@ -62,7 +62,7 @@ function createD1StoreHarness(): {
   const db = drizzleSqlite(sqlite, { schema });
   return {
     sqlite,
-    store: new D1PublicConversationStore(
+    reader: new LegacyConversationReader(
       db as unknown as DrizzleD1Database<Record<string, unknown>>,
     ),
   };
@@ -228,9 +228,9 @@ describe("public conversation storage conversion", () => {
   });
 });
 
-describe("D1 public conversation store", () => {
-  test("migration reads preserve ordered system rows hidden from public reads", async () => {
-    const { sqlite, store } = createD1StoreHarness();
+describe("legacy conversation reader", () => {
+  test("migration reads preserve ordered system rows", async () => {
+    const { sqlite, reader } = createD1StoreHarness();
     sqlite.query(`INSERT INTO conversations (
       id, project_id, visitor_id, status, last_activity_at, priority,
       created_at, updated_at
@@ -262,17 +262,15 @@ describe("D1 public conversation store", () => {
       10,
     );
 
-    expect(await store.getMessages("project-1", "conversation-1"))
-      .toMatchObject([{ id: "b-visitor" }]);
-    expect(await store.getMigrationMessages("project-1", "conversation-1"))
+    expect(await reader.getMigrationMessages("project-1", "conversation-1"))
       .toMatchObject([
         { id: "a-system", author: "system", systemKind: "joined" },
         { id: "b-visitor", author: "visitor" },
       ]);
   });
 
-  test("tenant-scopes transcript reads, receipts, and deletion", async () => {
-    const { sqlite, store } = createD1StoreHarness();
+  test("tenant-scopes conversation and transcript reads", async () => {
+    const { sqlite, reader } = createD1StoreHarness();
     sqlite.query(`INSERT INTO conversations (
       id, project_id, visitor_id, status, last_activity_at, priority,
       created_at, updated_at
@@ -283,36 +281,12 @@ describe("D1 public conversation store", () => {
     ) VALUES (?, ?, 'agent', 'secret', ?)`)
       .run("message-secret", "conversation-secret", 10);
 
-    expect(await store.getMessages("project-1", "conversation-secret")).toEqual([]);
+    expect(await reader.get("project-1", "conversation-secret")).toBeNull();
     expect(
-      await store.getMessage(
-        "project-1",
-        "conversation-secret",
-        "message-secret",
-      ),
-    ).toBeNull();
-    expect(
-      await store.markDelivery({
-        projectId: "project-1",
-        conversationId: "conversation-secret",
-        upToMessageId: "message-secret",
-        kind: "read",
-      }),
+      await reader.getMigrationMessages("project-1", "conversation-secret"),
     ).toEqual([]);
-    expect(
-      await store.deleteHumanMessage(
-        "project-1",
-        "conversation-secret",
-        "message-secret",
-      ),
-    ).toEqual({ deleted: false, reason: "not_found" });
-
-    const stored = sqlite
-      .query<{ read_at: number | null }, []>(
-        "SELECT read_at FROM messages WHERE id = 'message-secret'",
-      )
-      .get();
-    expect(stored).toEqual({ read_at: null });
+    expect(await reader.get("project-2", "conversation-secret"))
+      .toMatchObject({ id: "conversation-secret" });
   });
 });
 

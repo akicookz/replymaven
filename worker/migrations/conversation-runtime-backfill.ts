@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type {
   PublicConversationRecord,
@@ -7,19 +7,13 @@ import type {
 import { toPublicChildName } from "../../shared/maven-conversation";
 import { publicTranscriptChecksum } from "../../shared/public-transcript-checksum";
 import type { MavenConversationSummary } from "../../shared/sidechat-agent";
-import {
-  conversationRuntimeMigrations,
-  conversations,
-  messages,
-} from "../db";
-import type { ConversationRuntimeMigrationRow } from "../db";
+import { conversations, messages } from "../db";
 import type { AppEnv } from "../types";
 import { AgentPublicConversationStore } from "../conversations/agent-public-conversation-store";
 import {
-  D1PublicConversationStore,
   mapD1ConversationRow,
   mapD1MessageRow,
-} from "../conversations/d1-public-conversation-store";
+} from "../conversations/legacy-conversation-reader";
 
 const DEFAULT_BACKFILL_LIMIT = 100;
 const MAX_BACKFILL_LIMIT = 100;
@@ -37,21 +31,12 @@ interface ProjectAgentMigrationStub {
   }): Promise<MavenConversationSummary[]>;
 }
 
-export interface ConversationRuntimeCheckpoint {
-  projectId: string;
-  directoryCursor: string | null;
-  directoryCompleteAt: number | null;
-  lastVerifiedAt: number | null;
-  mismatchCount: number;
-}
-
 export interface LegacyDirectoryEntry {
   conversation: PublicConversationRecord;
   messages: PublicMessageRecord[];
 }
 
 export interface ConversationDirectoryBackfillPort {
-  loadCheckpoint(projectId: string): Promise<ConversationRuntimeCheckpoint>;
   readBatch(
     projectId: string,
     afterConversationId: string | null,
@@ -61,12 +46,6 @@ export interface ConversationDirectoryBackfillPort {
     projectId: string,
     summaries: MavenConversationSummary[],
   ): Promise<{ applied: number; skipped: number }>;
-  saveProgress(input: {
-    projectId: string;
-    directoryCursor: string | null;
-    complete: boolean;
-    now: number;
-  }): Promise<void>;
 }
 
 export interface ConversationDirectoryBackfillResult {
@@ -88,7 +67,6 @@ export interface ConversationRuntimeParityResult {
   operationalMismatchCount: number;
   transcriptMismatchCount: number;
   mismatchCount: number;
-  verifiedAt: number | null;
 }
 
 function parseMetadata(value: unknown): Record<string, unknown> {
@@ -167,49 +145,31 @@ export async function legacyEntryToSummary(
   };
 }
 
+// Stateless by design: the cursor rides the request/response loop instead of
+// a checkpoint table, and reruns are idempotent because the parent directory
+// upserts summaries by revision.
 export async function runConversationDirectoryBackfillBatch(
   port: ConversationDirectoryBackfillPort,
   projectId: string,
-  options: { limit?: number; now?: number } = {},
+  options: { cursor?: string | null; limit?: number } = {},
 ): Promise<ConversationDirectoryBackfillResult> {
   const limit = Math.max(
     1,
     Math.min(MAX_BACKFILL_LIMIT, options.limit ?? DEFAULT_BACKFILL_LIMIT),
   );
-  const checkpoint = await port.loadCheckpoint(projectId);
-  if (checkpoint.directoryCompleteAt !== null) {
-    return {
-      processed: 0,
-      applied: 0,
-      skipped: 0,
-      complete: true,
-      nextCursor: checkpoint.directoryCursor,
-    };
-  }
-  const entries = await port.readBatch(
-    projectId,
-    checkpoint.directoryCursor,
-    limit,
-  );
+  const cursor = options.cursor ?? null;
+  const entries = await port.readBatch(projectId, cursor, limit);
   const summaries = await Promise.all(entries.map(legacyEntryToSummary));
   const reconciled = summaries.length > 0
     ? await port.reconcile(projectId, summaries)
     : { applied: 0, skipped: 0 };
   const complete = entries.length < limit;
-  const nextCursor = entries.at(-1)?.conversation.id ??
-    checkpoint.directoryCursor;
-  await port.saveProgress({
-    projectId,
-    directoryCursor: nextCursor,
-    complete,
-    now: options.now ?? Date.now(),
-  });
   return {
     processed: entries.length,
     applied: reconciled.applied,
     skipped: reconciled.skipped,
     complete,
-    nextCursor,
+    nextCursor: entries.at(-1)?.conversation.id ?? cursor,
   };
 }
 
@@ -270,71 +230,42 @@ async function mapWithConcurrency<Input, Output>(
 }
 
 export class ConversationRuntimeMigrationService {
-  private readonly legacyStore: D1PublicConversationStore;
   private readonly agentStore: AgentPublicConversationStore;
 
   constructor(
     private readonly db: DrizzleD1Database<Record<string, unknown>>,
     private readonly env: AppEnv,
   ) {
-    this.legacyStore = new D1PublicConversationStore(db);
-    this.agentStore = new AgentPublicConversationStore({
-      db,
-      env,
-      legacy: this.legacyStore,
-      skipRuntimeCutoverGate: true,
-    });
+    this.agentStore = new AgentPublicConversationStore({ db, env });
   }
 
   async backfillProject(
     projectId: string,
-    limit = DEFAULT_BACKFILL_LIMIT,
+    options: { cursor?: string | null; limit?: number } = {},
   ): Promise<ConversationDirectoryBackfillResult> {
     return runConversationDirectoryBackfillBatch(
       {
-        loadCheckpoint: (id) => this.getOrCreateCheckpoint(id),
         readBatch: (id, cursor, pageLimit) =>
           this.readLegacyBatch(id, cursor, pageLimit),
         reconcile: async (id, summaries) => {
           const parent = await this.getProjectAgent(id);
           return parent.reconcileDirectory(summaries);
         },
-        saveProgress: (input) => this.saveBackfillProgress(input),
       },
       projectId,
-      { limit },
+      options,
     );
   }
 
   async verifyProject(
     projectId: string,
-    limit = MAX_VERIFY_BATCH_LIMIT,
+    options: { cursor?: string | null; limit?: number } = {},
   ): Promise<ConversationRuntimeParityResult> {
-    let migration = await this.getOrCreateMigrationRow(projectId);
-    const boundedLimit = Math.max(1, Math.min(MAX_VERIFY_BATCH_LIMIT, limit));
-    if (migration.verificationStartedAt === null) {
-      const startedAt = Date.now();
-      const started = await this.db.update(conversationRuntimeMigrations).set({
-        verificationCursor: null,
-        verificationStartedAt: new Date(startedAt),
-        verificationLegacyCount: 0,
-        verificationAgentCount: 0,
-        verificationLegacyOnlyCount: 0,
-        verificationAgentOnlyCount: 0,
-        verificationOperationalMismatchCount: 0,
-        verificationTranscriptMismatchCount: 0,
-        lastVerifiedAt: null,
-        updatedAt: new Date(startedAt),
-      }).where(
-        eq(conversationRuntimeMigrations.projectId, projectId),
-      ).returning();
-      if (started.length !== 1) {
-        throw new Error("Conversation runtime checkpoint unavailable");
-      }
-      migration = started[0]!;
-    }
-
-    const cursor = migration.verificationCursor;
+    const boundedLimit = Math.max(
+      1,
+      Math.min(MAX_VERIFY_BATCH_LIMIT, options.limit ?? MAX_VERIFY_BATCH_LIMIT),
+    );
+    const cursor = options.cursor ?? null;
     const parent = await this.getProjectAgent(projectId);
     const [legacyEntries, agentSummaries] = await Promise.all([
       this.readLegacyBatch(projectId, cursor, boundedLimit + 1),
@@ -400,117 +331,34 @@ export class ConversationRuntimeMigrationService {
         };
       },
     );
-    const batchLegacyCount = selectedIds.filter((id) => legacyById.has(id)).length;
-    const batchAgentCount = selectedIds.filter((id) => agentById.has(id)).length;
-    const batchLegacyOnlyCount = selectedIds.filter((id) =>
+    const legacyCount = selectedIds.filter((id) => legacyById.has(id)).length;
+    const agentCount = selectedIds.filter((id) => agentById.has(id)).length;
+    const legacyOnlyCount = selectedIds.filter((id) =>
       legacyById.has(id) && !agentById.has(id)
     ).length;
-    const batchAgentOnlyCount = selectedIds.filter((id) =>
+    const agentOnlyCount = selectedIds.filter((id) =>
       agentById.has(id) && !legacyById.has(id)
     ).length;
-    const batchOperationalMismatchCount = comparisons.reduce(
+    const operationalMismatchCount = comparisons.reduce(
       (total, result) => total + result.operational,
       0,
     );
-    const batchTranscriptMismatchCount = comparisons.reduce(
+    const transcriptMismatchCount = comparisons.reduce(
       (total, result) => total + result.transcript,
       0,
     );
-    const legacyCount = migration.verificationLegacyCount + batchLegacyCount;
-    const agentCount = migration.verificationAgentCount + batchAgentCount;
-    const legacyOnlyCount = migration.verificationLegacyOnlyCount +
-      batchLegacyOnlyCount;
-    const agentOnlyCount = migration.verificationAgentOnlyCount +
-      batchAgentOnlyCount;
-    const operationalMismatchCount =
-      migration.verificationOperationalMismatchCount +
-      batchOperationalMismatchCount;
-    const transcriptMismatchCount = migration.verificationTranscriptMismatchCount +
-      batchTranscriptMismatchCount;
-    const nextCursor = selectedIds.at(-1) ?? cursor;
-    const cursorCondition = cursor === null
-      ? isNull(conversationRuntimeMigrations.verificationCursor)
-      : eq(conversationRuntimeMigrations.verificationCursor, cursor);
-
-    if (!complete) {
-      const saved = await this.db.update(conversationRuntimeMigrations).set({
-        verificationCursor: nextCursor,
-        verificationLegacyCount: legacyCount,
-        verificationAgentCount: agentCount,
-        verificationLegacyOnlyCount: legacyOnlyCount,
-        verificationAgentOnlyCount: agentOnlyCount,
-        verificationOperationalMismatchCount: operationalMismatchCount,
-        verificationTranscriptMismatchCount: transcriptMismatchCount,
-        updatedAt: new Date(),
-      }).where(and(
-        eq(conversationRuntimeMigrations.projectId, projectId),
-        cursorCondition,
-      )).returning({ projectId: conversationRuntimeMigrations.projectId });
-      if (saved.length !== 1) {
-        throw new Error("Concurrent parity verification detected");
-      }
-      return {
-        processed: selectedIds.length,
-        complete: false,
-        nextCursor,
-        legacyCount,
-        agentCount,
-        legacyOnlyCount,
-        agentOnlyCount,
-        operationalMismatchCount,
-        transcriptMismatchCount,
-        mismatchCount: legacyOnlyCount + agentOnlyCount +
-          operationalMismatchCount + transcriptMismatchCount,
-        verifiedAt: null,
-      };
-    }
-
-    const verifiedAt = Date.now();
-    const mismatchCount = legacyOnlyCount + agentOnlyCount +
-      operationalMismatchCount + transcriptMismatchCount;
-    const committed = await this.db.update(conversationRuntimeMigrations).set({
-      lastVerifiedAt: new Date(verifiedAt),
-      mismatchCount,
-      verificationCursor: null,
-      verificationStartedAt: null,
-      verificationLegacyCount: 0,
-      verificationAgentCount: 0,
-      verificationLegacyOnlyCount: 0,
-      verificationAgentOnlyCount: 0,
-      verificationOperationalMismatchCount: 0,
-      verificationTranscriptMismatchCount: 0,
-      updatedAt: new Date(verifiedAt),
-    }).where(and(
-      eq(conversationRuntimeMigrations.projectId, projectId),
-      cursorCondition,
-    )).returning({ projectId: conversationRuntimeMigrations.projectId });
-    if (committed.length !== 1) {
-      throw new Error("Concurrent parity verification detected");
-    }
     return {
       processed: selectedIds.length,
-      complete: true,
-      nextCursor: null,
+      complete,
+      nextCursor: complete ? null : selectedIds.at(-1) ?? cursor,
       legacyCount,
       agentCount,
       legacyOnlyCount,
       agentOnlyCount,
       operationalMismatchCount,
       transcriptMismatchCount,
-      mismatchCount,
-      verifiedAt,
-    };
-  }
-
-  async getStatus(projectId: string): Promise<
-    ConversationRuntimeCheckpoint & { backfillComplete: boolean; verified: boolean }
-  > {
-    const checkpoint = await this.getOrCreateCheckpoint(projectId);
-    return {
-      ...checkpoint,
-      backfillComplete: checkpoint.directoryCompleteAt !== null,
-      verified: checkpoint.lastVerifiedAt !== null &&
-        checkpoint.mismatchCount === 0,
+      mismatchCount: legacyOnlyCount + agentOnlyCount +
+        operationalMismatchCount + transcriptMismatchCount,
     };
   }
 
@@ -522,49 +370,6 @@ export class ConversationRuntimeMigrationService {
       this.env.MAVEN_PROJECT_AGENT,
       projectId,
     ) as unknown as ProjectAgentMigrationStub;
-  }
-
-  private async ensureCheckpoint(projectId: string): Promise<void> {
-    await this.db.insert(conversationRuntimeMigrations).values({
-      projectId,
-    }).onConflictDoNothing();
-  }
-
-  private async getOrCreateMigrationRow(
-    projectId: string,
-  ): Promise<ConversationRuntimeMigrationRow> {
-    await this.ensureCheckpoint(projectId);
-    const rows = await this.db.select().from(conversationRuntimeMigrations)
-      .where(eq(conversationRuntimeMigrations.projectId, projectId)).limit(1);
-    const row = rows[0];
-    if (!row) throw new Error("Conversation runtime checkpoint unavailable");
-    return row;
-  }
-
-  private async getOrCreateCheckpoint(
-    projectId: string,
-  ): Promise<ConversationRuntimeCheckpoint> {
-    const row = await this.getOrCreateMigrationRow(projectId);
-    return {
-      projectId: row.projectId,
-      directoryCursor: row.directoryCursor,
-      directoryCompleteAt: row.directoryCompleteAt?.getTime() ?? null,
-      lastVerifiedAt: row.lastVerifiedAt?.getTime() ?? null,
-      mismatchCount: row.mismatchCount,
-    };
-  }
-
-  private async saveBackfillProgress(input: {
-    projectId: string;
-    directoryCursor: string | null;
-    complete: boolean;
-    now: number;
-  }): Promise<void> {
-    await this.db.update(conversationRuntimeMigrations).set({
-      directoryCursor: input.directoryCursor,
-      ...(input.complete ? { directoryCompleteAt: new Date(input.now) } : {}),
-      updatedAt: new Date(input.now),
-    }).where(eq(conversationRuntimeMigrations.projectId, input.projectId));
   }
 
   private async readLegacyBatch(

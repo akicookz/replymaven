@@ -49,21 +49,9 @@ export interface PublicConversationListResult {
   conversations: PublicConversationRecord[];
 }
 
-export interface PublicConversationCounts {
-  all: number;
-  open: number;
-  closed: number;
-}
-
 export interface PublicBulkConversationActionResult {
   updatedIds: string[];
   skippedIds: string[];
-}
-
-export interface PublicConversationUpdatesQuery {
-  projectId: string;
-  since: number;
-  limit?: number;
 }
 
 export type PublicInboxCounts = Record<PublicInboxFilter, number>;
@@ -346,16 +334,13 @@ export interface PublicConversationStore {
   getLastByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord | null>;
   getRecentByVisitorEmail(projectId: string, email: string): Promise<PublicConversationRecord | null>;
   list(query: PublicConversationListQuery): Promise<PublicConversationListResult>;
-  getConversationCounts(projectId: string): Promise<PublicConversationCounts>;
   bulkApplyActions(projectId: string, conversationIds: string[], action: PublicConversationAction): Promise<PublicBulkConversationActionResult>;
-  listUpdates(query: PublicConversationUpdatesQuery): Promise<PublicConversationRecord[]>;
   listNeedsReview(projectId: string, since: number): Promise<PublicConversationRecord[]>;
   listAgentMode(projectId: string): Promise<PublicConversationRecord[]>;
   listByCustomer(projectId: string, customerId: string): Promise<PublicConversationRecord[]>;
   getConversationCountsByCustomer(projectId: string, customerIds: string[]): Promise<Map<string, number>>;
   listByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord[]>;
   getInboxCounts(projectId: string): Promise<PublicInboxCounts>;
-  getLastMessagePreviews(conversationIds: string[]): Promise<Map<string, PublicLastMessagePreview>>;
   getMessages(projectId: string, conversationId: string): Promise<PublicMessageRecord[]>;
   getRecentMessages(projectId: string, conversationId: string, limit: number): Promise<PublicMessagePage>;
   getMessagesBefore(input: PublicMessagesBeforeInput): Promise<PublicMessagePage>;
@@ -374,8 +359,6 @@ export interface PublicConversationStore {
   resolveByAi(projectId: string, conversationId: string): Promise<boolean>;
   setStatus(projectId: string, conversationId: string, status: PublicConversationStatus, closeReason?: PublicConversationRecord["closeReason"]): Promise<PublicConversationRecord | null>;
   reopen(projectId: string, conversationId: string, status?: "active" | "agent_replied"): Promise<PublicConversationRecord | null>;
-  checkAndCloseStale(projectId: string, conversationId: string, autoCloseMinutes: number): Promise<{ closed: boolean; conversation: PublicConversationRecord | null }>;
-  checkAndCloseStaleForProject(projectId: string, conversations: PublicConversationRecord[], autoCloseMinutes: number): Promise<string[]>;
   prepareContactSupportOwnership(projectId: string, conversationId: string): Promise<"waiting_agent" | "agent_replied" | null>;
   closeOpenAsSpam(projectId: string, visitorId: string, visitorEmail?: string | null): Promise<string[]>;
   claimTeamRequest(input: PublicTeamRequestClaimInput): Promise<PublicTeamRequestClaimResult>;
@@ -413,11 +396,8 @@ export interface PublicConversationStore {
   getLastConversationByVisitor(projectId: string, visitorId: string): Promise<PublicConversationRecord | null>;
   getRecentConversationByVisitorEmail(projectId: string, email: string): Promise<PublicConversationRecord | null>;
   createConversation(input: LegacyPublicConversationCreateInput): Promise<PublicConversationRecord>;
-  getConversationsByProject(projectId: string, limit?: number, offset?: number, status?: "open" | "closed" | "all", search?: string, inboxFilter?: PublicInboxFilter): Promise<PublicConversationRecord[]>;
-  getConversationUpdatesSince(projectId: string, since: Date, limit?: number): Promise<PublicConversationRecord[]>;
   getNeedsReviewSince(projectId: string, since: number): Promise<PublicConversationRecord[]>;
   getAgentModeConversations(projectId: string): Promise<PublicConversationRecord[]>;
-  getLastPublicMessagesByConversationIds(conversationIds: string[]): Promise<Map<string, PublicLastMessagePreview>>;
   getPublicMessages(conversationId: string, projectId?: string): Promise<PublicMessageRecord[]>;
   getRecentPublicMessages(conversationId: string, limit?: number, projectId?: string): Promise<PublicMessagePage>;
   getPublicMessagesBefore(conversationId: string, beforeCreatedAt: Date, limit?: number, projectId?: string): Promise<PublicMessagePage>;

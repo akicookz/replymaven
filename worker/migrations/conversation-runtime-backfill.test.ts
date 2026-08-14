@@ -8,7 +8,6 @@ import {
   legacyEntryToSummary,
   runConversationDirectoryBackfillBatch,
   type ConversationDirectoryBackfillPort,
-  type ConversationRuntimeCheckpoint,
   type LegacyDirectoryEntry,
 } from "./conversation-runtime-backfill";
 
@@ -67,26 +66,11 @@ function entry(id: string): LegacyDirectoryEntry {
   };
 }
 
-function checkpoint(
-  overrides: Partial<ConversationRuntimeCheckpoint> = {},
-): ConversationRuntimeCheckpoint {
-  return {
-    projectId: "project-1",
-    directoryCursor: null,
-    directoryCompleteAt: null,
-    lastVerifiedAt: null,
-    mismatchCount: 0,
-    ...overrides,
-  };
-}
-
 describe("conversation runtime backfill", () => {
-  test("persists its cursor only after the parent confirms a batch", async () => {
-    let saved: ConversationRuntimeCheckpoint = checkpoint();
+  test("propagates a failed reconcile instead of advancing the cursor", async () => {
     let failReconcile = true;
     const directory = new Map<string, unknown>();
     const port: ConversationDirectoryBackfillPort = {
-      loadCheckpoint: async () => saved,
       readBatch: async (_projectId, cursor) =>
         cursor ? [] : [entry("a"), entry("b")],
       reconcile: async (_projectId, summaries) => {
@@ -96,26 +80,20 @@ describe("conversation runtime backfill", () => {
         );
         return { applied: summaries.length, skipped: 0 };
       },
-      saveProgress: async (input) => {
-        saved = checkpoint({
-          directoryCursor: input.directoryCursor,
-          directoryCompleteAt: input.complete ? input.now : null,
-        });
-      },
     };
 
     await expect(runConversationDirectoryBackfillBatch(
       port,
       "project-1",
-      { limit: 2, now: 500 },
+      { limit: 2 },
     )).rejects.toThrow("parent unavailable");
-    expect(saved.directoryCursor).toBeNull();
+    expect(directory.size).toBe(0);
 
     failReconcile = false;
     await expect(runConversationDirectoryBackfillBatch(
       port,
       "project-1",
-      { limit: 2, now: 500 },
+      { limit: 2 },
     )).resolves.toMatchObject({
       processed: 2,
       complete: false,
@@ -124,11 +102,11 @@ describe("conversation runtime backfill", () => {
     await expect(runConversationDirectoryBackfillBatch(
       port,
       "project-1",
-      { limit: 2, now: 600 },
-    )).resolves.toMatchObject({ processed: 0, complete: true });
-    expect(saved).toMatchObject({
-      directoryCursor: "b",
-      directoryCompleteAt: 600,
+      { cursor: "b", limit: 2 },
+    )).resolves.toMatchObject({
+      processed: 0,
+      complete: true,
+      nextCursor: "b",
     });
     expect(directory.size).toBe(2);
   });

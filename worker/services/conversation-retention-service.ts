@@ -1,11 +1,6 @@
 import { parseMessageImageUrls } from "../../shared/message-images";
 import { getLocalUploadKey } from "../../shared/upload-ownership";
-import {
-  buildClaimExpiredArchivesQuery,
-} from "../conversations/d1-public-conversation-store";
 import type { PublicConversationStore } from "../conversations/public-conversation-store";
-
-export { buildClaimExpiredArchivesQuery };
 
 export const ARCHIVE_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;
 const PURGE_CLAIM_LEASE_MS = 60 * 60 * 1000;
@@ -49,11 +44,6 @@ export interface ConversationRetentionResult {
   deleted: number;
   failed: number;
 }
-
-export type NativeSidechatCleanup = (
-  projectId: string,
-  conversationId: string,
-) => Promise<void>;
 
 export function collectOwnedUploadKeys(
   projectId: string,
@@ -166,7 +156,6 @@ export async function purgeOneClaimedConversation(
   store: ConversationRetentionStore,
   uploads: R2Bucket,
   claimed: ClaimedConversation,
-  cleanupSidechat: NativeSidechatCleanup,
 ): Promise<boolean> {
   const attachmentSources = await store.listMessageAttachments(claimed.id);
   const ownedKeys = collectOwnedUploadKeys(
@@ -181,7 +170,6 @@ export async function purgeOneClaimedConversation(
     }
   }
   await deleteUploadKeys(uploads, unreferencedKeys);
-  await cleanupSidechat(claimed.projectId, claimed.id);
   return store.deleteClaimedConversation(claimed.id, claimed.purgeStartedAt);
 }
 
@@ -189,7 +177,6 @@ export async function purgeClaimedConversations(
   store: ConversationRetentionStore,
   uploads: R2Bucket,
   claimed: ClaimedConversation[],
-  cleanupSidechat: NativeSidechatCleanup,
 ): Promise<ConversationRetentionResult> {
   let deleted = 0;
   let failed = 0;
@@ -199,7 +186,6 @@ export async function purgeClaimedConversations(
         store,
         uploads,
         conversation,
-        cleanupSidechat,
       )) {
         deleted += 1;
       }
@@ -214,7 +200,6 @@ export async function purgeClaimedConversations(
 export async function purgeExpiredArchivedConversations(
   conversationStore: PublicConversationStore,
   uploads: R2Bucket,
-  cleanupSidechat: NativeSidechatCleanup,
   now: Date = new Date(),
   batchSize = DEFAULT_PURGE_BATCH_SIZE,
 ): Promise<ConversationRetentionResult> {
@@ -232,6 +217,5 @@ export async function purgeExpiredArchivedConversations(
     store,
     uploads,
     claimed,
-    cleanupSidechat,
   );
 }
