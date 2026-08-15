@@ -80,6 +80,12 @@ import {
   const renderedMessageIds = new Set<string>();
   const pendingVisitorMessageIds = new Set<string>();
   const pendingIncomingResponseIds = new Set<string>();
+  // Delivery status element per locally submitted message, driven by outbox
+  // state transitions from the Agent runtime.
+  const visitorStatusElsByMessageId = new Map<string, HTMLElement>();
+  // Last rendered outbox state per message so unrelated publishes don't
+  // re-process settled entries (rebuilding Retry buttons, hiding typing).
+  const lastOutboxStateByMessageId = new Map<string, string>();
   const agentChatClient = createLazyWidgetAgentChatClient(
     `${scriptOrigin}/widget-agent-runtime.js`,
   );
@@ -932,6 +938,17 @@ import {
     }
     .rm-msg-status.failed {
       color: #ef4444;
+    }
+    .rm-msg-retry {
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      color: inherit;
+      font-weight: 600;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      cursor: pointer;
     }
     .rm-sender-label {
       font-size: 11px;
@@ -3212,10 +3229,11 @@ import {
     renderedMessageIds.clear();
     pendingVisitorMessageIds.clear();
     pendingIncomingResponseIds.clear();
+    visitorStatusElsByMessageId.clear();
+    lastOutboxStateByMessageId.clear();
     authoritativeMessageIds.clear();
     hasReceivedAgentSnapshot = false;
     newestResponseId = null;
-    lastVisitorStatusEl = null;
     messagesContainer.replaceChildren(typingRow);
     previewStack.replaceChildren();
     clearUnreadBadge();
@@ -4514,10 +4532,16 @@ import {
           } catch (error) {
             if (!identitySessions.isCurrent(identitySession)) return;
             console.error("[ReplyMaven] Image upload failed:", error);
-            if (lastVisitorStatusEl) {
-              lastVisitorStatusEl.textContent = "Image failed to upload";
-              lastVisitorStatusEl.classList.add("failed");
-              lastVisitorStatusEl = null;
+            // A separate note, not the delivery status line: the text still
+            // sends and its outbox transitions must not erase this notice.
+            const statusElement = optimisticMessageId
+              ? visitorStatusElsByMessageId.get(optimisticMessageId)
+              : null;
+            if (statusElement?.parentElement) {
+              const note = document.createElement("div");
+              note.className = "rm-msg-status failed";
+              note.textContent = "Image failed to upload";
+              statusElement.parentElement.insertBefore(note, statusElement);
             }
           }
         }
@@ -4529,34 +4553,32 @@ import {
         pageTitle: document.title,
         ...pageContext,
       };
+      // Enqueue only: the outbox owns delivery, retries, and the status
+      // transitions reported through handleAgentOutbox.
       await agentChatClient.send({
         id: optimisticMessageId,
         content: messageText,
         imageUrls: uploadedImageUrl ? [uploadedImageUrl] : [],
         pageContext: currentPageContext,
       });
-      if (!identitySessions.isCurrent(identitySession)) return;
-
-      if (lastVisitorStatusEl) {
-        const statusElement = lastVisitorStatusEl;
-        statusElement.textContent = "Sent";
-        setTimeout(() => {
-          statusElement.style.opacity = "0";
-        }, 2_000);
-      }
     } catch (error) {
       if (!identitySessions.isCurrent(identitySession)) return;
       console.error("[ReplyMaven] Agent message failed:", error);
       hideTyping();
-      if (lastVisitorStatusEl) {
-        lastVisitorStatusEl.textContent = "Failed to send";
-        lastVisitorStatusEl.style.opacity = "1";
-        lastVisitorStatusEl.classList.add("failed");
+      if (optimisticMessageId) {
+        const statusElement =
+          visitorStatusElsByMessageId.get(optimisticMessageId);
+        if (statusElement) {
+          statusElement.textContent = "Failed to send";
+          statusElement.style.opacity = "1";
+          statusElement.classList.add("failed");
+        }
+      } else if (text && !input.value) {
+        // Failed before anything rendered (e.g. transport unavailable):
+        // restore the draft so the typed message is not lost, and never
+        // touch the previous message's status element.
+        input.value = text;
       }
-      addMessageToUI(
-        "bot",
-        "Sorry, I couldn't connect. Please check your internet connection.",
-      );
     } finally {
       if (optimisticMessageId) {
         pendingVisitorMessageIds.delete(optimisticMessageId);
@@ -4577,18 +4599,48 @@ import {
 
   // Track previous message role for avatar grouping
   let lastMessageRole: string | null = null;
-  // Track the latest visitor message status element for iMessage-style delivery status
-  let lastVisitorStatusEl: HTMLElement | null = null;
 
-  // The server streaming a reply proves the submit was accepted, so flip the
-  // pending "Sending..." label without waiting for the full turn to resolve.
-  function markPendingVisitorMessageSent(): void {
-    const statusElement = lastVisitorStatusEl;
-    if (!statusElement || statusElement.textContent !== "Sending...") return;
-    statusElement.textContent = "Sent";
-    setTimeout(() => {
-      statusElement.style.opacity = "0";
-    }, 2_000);
+  // Outbox transitions drive each message's delivery label. "delivered" means
+  // the server sent the request's final frame; "undeliverable" offers a retry
+  // that re-enqueues the same message id in the Agent runtime.
+  function handleAgentOutbox(
+    entries: Array<{ id: string; state: string }>,
+  ): void {
+    for (const entry of entries) {
+      if (lastOutboxStateByMessageId.get(entry.id) === entry.state) continue;
+      lastOutboxStateByMessageId.set(entry.id, entry.state);
+      const statusElement = visitorStatusElsByMessageId.get(entry.id);
+      if (!statusElement) continue;
+      if (entry.state === "queued" || entry.state === "inflight") {
+        statusElement.replaceChildren();
+        statusElement.textContent = "Sending...";
+        statusElement.classList.remove("failed");
+        statusElement.style.opacity = "1";
+      } else if (entry.state === "delivered") {
+        statusElement.replaceChildren();
+        statusElement.textContent = "Sent";
+        statusElement.classList.remove("failed");
+        setTimeout(() => {
+          statusElement.style.opacity = "0";
+        }, 2_000);
+        visitorStatusElsByMessageId.delete(entry.id);
+        lastOutboxStateByMessageId.delete(entry.id);
+      } else if (entry.state === "undeliverable") {
+        statusElement.replaceChildren();
+        statusElement.append("Not delivered · ");
+        const retryButton = document.createElement("button");
+        retryButton.type = "button";
+        retryButton.className = "rm-msg-retry";
+        retryButton.textContent = "Retry";
+        retryButton.addEventListener("click", () => {
+          agentChatClient.retry(entry.id);
+        });
+        statusElement.appendChild(retryButton);
+        statusElement.classList.add("failed");
+        statusElement.style.opacity = "1";
+        hideTyping();
+      }
+    }
   }
 
   // Full-screen viewer for message images: backdrop/image click or Esc
@@ -4833,7 +4885,7 @@ import {
         statusEl.className = "rm-msg-status";
         statusEl.textContent = "Sending...";
         visitorCol.appendChild(statusEl);
-        lastVisitorStatusEl = statusEl;
+        if (messageId) visitorStatusElsByMessageId.set(messageId, statusEl);
       }
 
       row.appendChild(visitorCol);
@@ -5144,9 +5196,6 @@ import {
       activity.status === "streaming" ||
       activity.isServerStreaming
     ) {
-      if (activity.status === "streaming" || activity.isServerStreaming) {
-        markPendingVisitorMessageSent();
-      }
       showTyping(undefined, activity.statusPhase);
       return;
     }
@@ -5172,6 +5221,7 @@ import {
 
   agentChatClient.onMessages(handleAgentMessages);
   agentChatClient.onActivity(handleAgentActivity);
+  agentChatClient.onOutbox(handleAgentOutbox);
   agentChatClient.onConversationState(handleAgentConversationState);
 
   // Messages older than this never pop the preview — a stale reply shouldn't
@@ -5875,10 +5925,11 @@ import {
     renderedMessageIds.clear();
     pendingVisitorMessageIds.clear();
     pendingIncomingResponseIds.clear();
+    visitorStatusElsByMessageId.clear();
+    lastOutboxStateByMessageId.clear();
     authoritativeMessageIds.clear();
     hasReceivedAgentSnapshot = false;
     newestResponseId = null;
-    lastVisitorStatusEl = null;
     isSending = false;
     _isHandedOff = false;
     isBanned = false;

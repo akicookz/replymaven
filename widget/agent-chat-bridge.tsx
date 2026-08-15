@@ -17,6 +17,13 @@ import type {
 } from "../shared/public-chat-agent";
 import type { PublicMessageRecord } from "../shared/maven-conversation";
 import { adaptWidgetPublicMessages } from "./public-message-adapter";
+import {
+  createSendOutbox,
+  type SendAttemptOutcome,
+  type SendOutboxEntrySnapshot,
+} from "./send-outbox";
+
+export type WidgetOutboxEntry = SendOutboxEntrySnapshot;
 
 export interface WidgetPublicSendInput {
   id: string;
@@ -43,18 +50,24 @@ export interface WidgetChatActivity {
 export interface WidgetAgentChatClient {
   connect(session: PublicChatSessionResponse): void;
   disconnect(): void;
+  // Resolves on enqueue. Delivery progress arrives through onOutbox.
   send(input: WidgetPublicSendInput): Promise<void>;
+  retry(messageId: string): void;
   stop(): void;
   messages(): PublicMessageRecord[];
   onMessages(listener: (messages: PublicMessageRecord[]) => void): () => void;
   onActivity(listener: (activity: WidgetChatActivity) => void): () => void;
+  onOutbox(listener: (entries: WidgetOutboxEntry[]) => void): () => void;
   onConversationState(
     listener: (state: PublicChatChildState) => void,
   ): () => void;
 }
 
 interface NativeChatControls {
-  send(input: WidgetPublicSendInput): Promise<void>;
+  send(
+    input: WidgetPublicSendInput,
+    isCurrent: () => boolean,
+  ): Promise<SendAttemptOutcome>;
   stop(): void;
 }
 
@@ -226,8 +239,16 @@ function WidgetAgentBridge(props: WidgetAgentBridgeProps) {
 
   useLayoutEffect(() => {
     onControls({
-      async send(input: WidgetPublicSendInput): Promise<void> {
+      async send(
+        input: WidgetPublicSendInput,
+        isCurrent: () => boolean,
+      ): Promise<SendAttemptOutcome> {
         await waitForOpenSocket(socketRef.current);
+        // The open-wait can park an attempt across a reconnect during which
+        // the outbox requeued this entry; only the current attempt may write.
+        if (!isCurrent()) {
+          throw new Error("The send attempt was superseded");
+        }
         await sendMessage(buildMessage(input), {
           body: {
             token: session.token,
@@ -235,6 +256,13 @@ function WidgetAgentBridge(props: WidgetAgentBridgeProps) {
             pageContext: { ...input.pageContext },
           },
         });
+        // The transport also resolves sendMessage when the socket CLOSES, so
+        // resolution only proves delivery while the socket is still open. A
+        // resolution at/after a close is ambiguous and must be adjudicated by
+        // the post-recovery reconcile instead of trusted.
+        return socketRef.current.readyState === WebSocket.OPEN
+          ? "delivered"
+          : "ambiguous";
       },
       stop(): void {
         void stop();
@@ -307,17 +335,54 @@ export function createWidgetAgentChatClient(): WidgetAgentChatClient {
   const stateListeners = new Set<(
     state: PublicChatChildState,
   ) => void>();
+  const outboxListeners = new Set<(
+    entries: WidgetOutboxEntry[],
+  ) => void>();
+
+  const outbox = createSendOutbox<WidgetPublicSendInput>({
+    async attempt(input, isCurrent) {
+      await readyPromise;
+      if (!controls) throw new Error("The chat Agent is not connected");
+      return controls.send(input, isCurrent);
+    },
+    onChange(entries) {
+      for (const listener of outboxListeners) listener([...entries]);
+    },
+  });
+  let awaitingReconcile = false;
+
+  function reconcileOutbox(): void {
+    awaitingReconcile = false;
+    outbox.reconcile(new Set(currentMessages.map((message) => message.id)));
+  }
 
   function publishMessages(messages: PublicMessageRecord[]): void {
     currentMessages = structuredClone(messages);
     for (const listener of messageListeners) {
       listener(structuredClone(currentMessages));
     }
+    if (awaitingReconcile) reconcileOutbox();
   }
 
   function publishActivity(activity: WidgetChatActivity): void {
+    const recoveryCompleted = currentActivity.isRecovering &&
+      !activity.isRecovering;
     currentActivity = activity;
     for (const listener of activityListeners) listener(currentActivity);
+    if (recoveryCompleted) {
+      // The post-recovery message state is the server-authoritative snapshot
+      // that adjudicates delivery. The activity effect can run before the
+      // matching messages effect in the same commit, so defer one microtask;
+      // publishMessages clears the flag early when it lands first.
+      awaitingReconcile = true;
+      queueMicrotask(() => {
+        if (awaitingReconcile) reconcileOutbox();
+      });
+      return;
+    }
+    if (!activity.error && !activity.isRecovering && !awaitingReconcile) {
+      outbox.poke();
+    }
   }
 
   function publishConversationState(value: unknown): void {
@@ -372,6 +437,7 @@ export function createWidgetAgentChatClient(): WidgetAgentChatClient {
     root = null;
     container?.remove();
     container = null;
+    outbox.clear();
     publishMessages([]);
     publishActivity({
       status: "ready",
@@ -381,10 +447,16 @@ export function createWidgetAgentChatClient(): WidgetAgentChatClient {
     });
   }
 
+  // Enqueue only; delivery is tracked by the outbox and reported via
+  // onOutbox. Rejects when the queue is at capacity.
   async function send(input: WidgetPublicSendInput): Promise<void> {
-    await readyPromise;
-    if (!controls) throw new Error("The chat Agent is not connected");
-    await controls.send(input);
+    if (!outbox.enqueue(input.id, input)) {
+      throw new Error("Too many undelivered messages");
+    }
+  }
+
+  function retry(messageId: string): void {
+    outbox.retry(messageId);
   }
 
   function stop(): void {
@@ -410,6 +482,13 @@ export function createWidgetAgentChatClient(): WidgetAgentChatClient {
     return () => activityListeners.delete(listener);
   }
 
+  function onOutbox(
+    listener: (entries: WidgetOutboxEntry[]) => void,
+  ): () => void {
+    outboxListeners.add(listener);
+    return () => outboxListeners.delete(listener);
+  }
+
   function onConversationState(
     listener: (state: PublicChatChildState) => void,
   ): () => void {
@@ -421,10 +500,12 @@ export function createWidgetAgentChatClient(): WidgetAgentChatClient {
     connect,
     disconnect,
     send,
+    retry,
     stop,
     messages,
     onMessages,
     onActivity,
+    onOutbox,
     onConversationState,
   };
 }

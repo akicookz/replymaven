@@ -266,6 +266,8 @@ describe("widget native Agent chat bridge", () => {
       imageUrls: ["https://api.replymaven.test/api/uploads/image.png"],
       pageContext: { pageTitle: "Docs" },
     });
+    // send resolves on enqueue; the outbox attempt delivers asynchronously.
+    await flushReact();
     expect(chatContract.sendMessage).toHaveBeenCalledWith(
       {
         id: "visitor-2",

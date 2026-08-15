@@ -43,6 +43,7 @@ describe("lazy widget Agent runtime", () => {
     const connect = mock(() => {});
     const disconnect = mock(() => {});
     const send = mock(async () => {});
+    const retry = mock(() => {});
     const stop = mock(() => {});
     let emitMessages: ((messages: PublicMessageRecord[]) => void) | null = null;
     let emitActivity: ((activity: WidgetChatActivity) => void) | null = null;
@@ -50,6 +51,7 @@ describe("lazy widget Agent runtime", () => {
       connect,
       disconnect,
       send,
+      retry,
       stop,
       messages: () => [],
       onMessages(listener) {
@@ -58,6 +60,9 @@ describe("lazy widget Agent runtime", () => {
       },
       onActivity(listener) {
         emitActivity = listener;
+        return () => {};
+      },
+      onOutbox() {
         return () => {};
       },
       onConversationState() {

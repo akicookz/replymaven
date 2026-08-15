@@ -3,6 +3,7 @@ import type { PublicMessageRecord } from "../shared/maven-conversation";
 import type {
   WidgetAgentChatClient,
   WidgetChatActivity,
+  WidgetOutboxEntry,
   WidgetPublicSendInput,
 } from "./agent-chat-bridge";
 
@@ -66,6 +67,9 @@ export function createLazyWidgetAgentChatClient(
   const stateListeners = new Set<(
     state: PublicChatChildState,
   ) => void>();
+  const outboxListeners = new Set<(
+    entries: WidgetOutboxEntry[],
+  ) => void>();
 
   async function loadClient(): Promise<WidgetAgentChatClient> {
     if (delegate) return delegate;
@@ -78,6 +82,14 @@ export function createLazyWidgetAgentChatClient(
         delegate.onActivity((activity) => {
           for (const listener of activityListeners) listener(activity);
         });
+        // A cached pre-outbox runtime (R2 caches for 600s) lacks onOutbox;
+        // feature-detect so a version-skewed load degrades instead of
+        // throwing and killing the chat.
+        if (typeof delegate.onOutbox === "function") {
+          delegate.onOutbox((entries) => {
+            for (const listener of outboxListeners) listener(entries);
+          });
+        }
         delegate.onConversationState((state) => {
           for (const listener of stateListeners) listener(state);
         });
@@ -117,9 +129,32 @@ export function createLazyWidgetAgentChatClient(
     delegate?.disconnect();
   }
 
+  function emitOutbox(entries: WidgetOutboxEntry[]): void {
+    for (const listener of outboxListeners) listener(entries);
+  }
+
   async function send(input: WidgetPublicSendInput): Promise<void> {
     const client = await loadClient();
+    if (typeof client.onOutbox !== "function") {
+      // Old runtime: send resolves on completion and reports no outbox
+      // transitions, so synthesize them from the promise outcome to keep the
+      // status line honest.
+      try {
+        await client.send(input);
+        emitOutbox([{ id: input.id, state: "delivered", attempts: 1 }]);
+      } catch (error) {
+        emitOutbox([{ id: input.id, state: "undeliverable", attempts: 1 }]);
+        throw error;
+      }
+      return;
+    }
     await client.send(input);
+  }
+
+  function retry(messageId: string): void {
+    void loadClient().then((client) => {
+      if (typeof client.retry === "function") client.retry(messageId);
+    }).catch(() => undefined);
   }
 
   function stop(): void {
@@ -144,6 +179,13 @@ export function createLazyWidgetAgentChatClient(
     return () => activityListeners.delete(listener);
   }
 
+  function onOutbox(
+    listener: (entries: WidgetOutboxEntry[]) => void,
+  ): () => void {
+    outboxListeners.add(listener);
+    return () => outboxListeners.delete(listener);
+  }
+
   function onConversationState(
     listener: (state: PublicChatChildState) => void,
   ): () => void {
@@ -155,10 +197,12 @@ export function createLazyWidgetAgentChatClient(
     connect,
     disconnect,
     send,
+    retry,
     stop,
     messages,
     onMessages,
     onActivity,
+    onOutbox,
     onConversationState,
   };
 }

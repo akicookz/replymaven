@@ -1675,7 +1675,13 @@ const app = new Hono<HonoAppContext>()
   })
 
   // Apex embeds resolve the runtime from scriptOrigin, which is this host.
+  // Local dev serves the freshly built asset from public/ instead of the R2
+  // CDN copy so widget changes are testable before a widget deploy.
   .get("/widget-agent-runtime.js", (c) => {
+    const hostname = new URL(c.req.url).hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return c.env.ASSETS.fetch(c.req.raw);
+    }
     return c.redirect(
       "https://widget.replymaven.com/widget-agent-runtime.js",
       301,
