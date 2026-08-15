@@ -775,7 +775,7 @@ function Landing() {
           <div className="hidden md:flex items-center gap-0.5 text-[13px]">
             <a href="#platform" className="px-3 py-1.5 text-ink-5 hover:text-ink-1 rounded-md transition-colors">Platform</a>
             <a href="#pricing" className="px-3 py-1.5 text-ink-5 hover:text-ink-1 rounded-md transition-colors">Pricing</a>
-            <Link to="/docs" className="px-3 py-1.5 text-ink-5 hover:text-ink-1 rounded-md transition-colors">Docs</Link>
+            <a href="/docs" className="px-3 py-1.5 text-ink-5 hover:text-ink-1 rounded-md transition-colors">Docs</a>
             <a href="#faq" className="px-3 py-1.5 text-ink-5 hover:text-ink-1 rounded-md transition-colors">FAQ</a>
           </div>
 
@@ -997,7 +997,7 @@ function Landing() {
               <ArrowRight className="w-4 h-4" />
             </Button>
             <Button variant="outline" asChild>
-              <Link to="/docs"><BookOpen className="w-4 h-4" /> Read the docs</Link>
+              <a href="/docs"><BookOpen className="w-4 h-4" /> Read the docs</a>
             </Button>
           </div>
         </div>
@@ -1023,11 +1023,7 @@ function Landing() {
                 <ul className="space-y-2.5">
                   {col.links.map((l) => (
                     <li key={l.label}>
-                      {l.href.startsWith("/") ? (
-                        <Link to={l.href} className="text-sm text-ink-5 hover:text-ink-1 transition-colors">{l.label}</Link>
-                      ) : (
-                        <a href={l.href} className="text-sm text-ink-5 hover:text-ink-1 transition-colors">{l.label}</a>
-                      )}
+                      <a href={l.href} className="text-sm text-ink-5 hover:text-ink-1 transition-colors">{l.label}</a>
                     </li>
                   ))}
                 </ul>

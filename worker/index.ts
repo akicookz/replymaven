@@ -706,13 +706,21 @@ const app = new Hono<HonoAppContext>()
     });
   })
   // ─── Static SPA fallback ───────────────────────────────────────────────────
-  // /help/* is reserved for the helpdesk feature (see helpdesk-render/).
-  // Excluding it here lets the public help routes registered below intercept
+  // /help/* is reserved for the helpdesk feature (see helpdesk-render/), and
+  // /docs is our own project's help center served from the same routes.
+  // Excluding them here lets the public help routes registered below intercept
   // those paths before the SPA fallback fires.
   .use(
     "*",
     except(
-      ["/api/*", "/help/*", "/.well-known/*", "/widget-agent-runtime.js"],
+      [
+        "/api/*",
+        "/help/*",
+        "/docs",
+        "/docs/*",
+        "/.well-known/*",
+        "/widget-agent-runtime.js",
+      ],
       async (c) => {
         return c.env.ASSETS.fetch(c.req.raw);
       },
@@ -2053,6 +2061,14 @@ const app = new Hono<HonoAppContext>()
       "Cache-Control": "public, max-age=120, s-maxage=120",
     });
   })
+
+  // ─── Own docs (/docs) ────────────────────────────────────────────────────
+  // replymaven.com/docs is the "replymaven" project's help center, served by
+  // re-dispatching to the canonical /help routes above. The project's
+  // helpCustomUrl points at https://replymaven.com/docs so every rendered
+  // link, canonical tag, and sitemap entry stays on /docs.
+  .get("/docs", serveOwnDocs)
+  .get("/docs/*", serveOwnDocs)
 
   // ═══════════════════════════════════════════════════════════════════════════
   // INBOUND EMAIL WEBHOOK (public, no auth — Resend sends email.received events)
@@ -7747,6 +7763,16 @@ function handleScheduled(
   ctx: ExecutionContext,
 ): void {
   ctx.waitUntil(runArchivedConversationRetention(env));
+}
+
+// ─── Own docs re-dispatch ───────────────────────────────────────────────────
+const OWN_DOCS_HELP_PREFIX = "/help/replymaven";
+
+function serveOwnDocs(c: Context<HonoAppContext>): Response | Promise<Response> {
+  const url = new URL(c.req.url);
+  const suffix = url.pathname.replace(/\/+$/, "").slice("/docs".length);
+  url.pathname = `${OWN_DOCS_HELP_PREFIX}${suffix}`;
+  return app.fetch(new Request(url.toString(), c.req.raw), c.env, c.executionCtx);
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────

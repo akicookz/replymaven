@@ -37,7 +37,6 @@ import Tools from "./pages/Tools";
 import Settings from "./pages/Settings";
 import WidgetGreetings from "./pages/WidgetGreetings";
 import AuthCallback from "./pages/AuthCallback";
-import Docs from "./pages/Docs";
 import TeamAccept from "./pages/TeamAccept";
 import HelpCenterSettings from "./pages/HelpCenterSettings";
 import HelpArticleEditor from "./pages/HelpArticleEditor";
@@ -277,7 +276,6 @@ function App() {
     />
     <Routes>
       <Route path="/" element={<Landing />} />
-      <Route path="/docs" element={<Docs />} />
 
       <Route
         path="/api/auth/*"

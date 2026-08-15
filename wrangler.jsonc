@@ -12,6 +12,8 @@
       "/api/*",
       "/agents/*",
       "/help/*",
+      "/docs",
+      "/docs/*",
       "/.well-known/*",
       "/widget-agent-runtime.js",
     ],
