@@ -418,7 +418,7 @@ export class MavenChatAgent extends AIChatAgent<
 
   protected createSidechatLanguageModel(): LanguageModel {
     return createLanguageModel({
-      model: this.env.AI_MODEL,
+      model: this.env.SIDECHAT_AI_MODEL || this.env.AI_MODEL,
       geminiApiKey: this.env.GEMINI_API_KEY || null,
       openaiApiKey: this.env.OPENAI_API_KEY || null,
     });

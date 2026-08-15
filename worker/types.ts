@@ -41,6 +41,10 @@ export interface AppEnv extends Env {
   GEMINI_API_KEY: string;
   OPENAI_API_KEY: string;
   AI_MODEL: string;
+  // Sidechat override. MCP tool schemas (numeric enums etc.) are rejected by
+  // Gemini's function-declaration API, so the sidechat can pin an OpenAI
+  // model while AI_MODEL drives the public bot.
+  SIDECHAT_AI_MODEL?: string;
   BROWSER_RENDERING_API_TOKEN: string;
   AUTORAG_API_TOKEN: string;
   CF_ACCOUNT_ID: string;
