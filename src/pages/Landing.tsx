@@ -38,7 +38,7 @@ import {
   ActionsVisual,
   HelpCenterVisual,
 } from "@/components/marketing/marketing-visuals";
-import { Cta } from "@/components/ui/cta";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 // ─── FAQ Data ─────────────────────────────────────────────────────────────────
@@ -696,21 +696,17 @@ function LandingPricing({
                 ))}
               </ul>
 
-              <button
+              <Button
                 type="button"
+                variant={plan.highlighted ? "default" : "outline"}
+                className="w-full"
                 onClick={() => {
                   if (ctaLabel === "Manage Plan" && onManagePlan) onManagePlan();
                   else onCtaClick(plan.id, interval);
                 }}
-                className={cn(
-                  "w-full rounded-full h-11 text-sm font-medium transition-[transform,background-color,color,box-shadow] duration-150 active:scale-[0.96] motion-reduce:transition-none motion-reduce:active:scale-100 cursor-pointer",
-                  plan.highlighted
-                    ? "glow-surface text-card-foreground"
-                    : "border border-hairline-strong text-ink-2 hover:bg-white/[0.05]",
-                )}
               >
                 {ctaLabel}
-              </button>
+              </Button>
             </div>
           );
         })}
@@ -785,11 +781,11 @@ function Landing() {
 
           <div className="flex items-center gap-2">
             {isLoggedIn ? (
-              <Cta variant="ghost" size="sm" onClick={() => navigate("/app")}>Dashboard</Cta>
+              <Button variant="ghost" size="sm" onClick={() => navigate("/app")}>Dashboard</Button>
             ) : (
-              <Cta variant="ghost" size="sm" onClick={handleGenericCta}>Log in</Cta>
+              <Button variant="ghost" size="sm" onClick={handleGenericCta}>Log in</Button>
             )}
-            <Cta variant="primary" size="sm" onClick={handleGenericCta}>Start free</Cta>
+            <Button size="sm" onClick={handleGenericCta}>Start free</Button>
           </div>
         </nav>
       </header>
@@ -806,16 +802,16 @@ function Landing() {
             Hand troubleshooting, upgrades, refunds, account changes, and repetitive questions to your new AI support hire. Maven learns your docs and product, takes action for customers, and brings you in only when the stakes are high and judgment is needed.
           </p>
           <div className="mt-9 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 duration-700 delay-200 fill-mode-both">
-            <Cta variant="primary" size="lg" onClick={handleGenericCta}>
+            <Button onClick={handleGenericCta}>
               Start free trial
               <ArrowRight className="w-4 h-4" />
-            </Cta>
-            <Cta variant="outline" size="lg" asChild>
+            </Button>
+            <Button variant="outline" asChild>
               <a href="#platform">
                 See ReplyMaven in action
                 <ArrowRight className="w-4 h-4" />
               </a>
-            </Cta>
+            </Button>
           </div>
         </div>
 
@@ -965,10 +961,10 @@ function Landing() {
                   </span>
                 ))}
               </div>
-              <Cta variant="secondary" size="lg" onClick={handleGenericCta} className="shrink-0">
+              <Button variant="secondary" onClick={handleGenericCta} className="shrink-0">
                 Contact sales
                 <ArrowRight className="w-4 h-4" />
-              </Cta>
+              </Button>
             </div>
           </div>
         </div>
@@ -996,13 +992,13 @@ function Landing() {
             Turn support into a<br />word-of-mouth growth engine.
           </h2>
           <div className="mt-9 flex items-center justify-center gap-3">
-            <Cta variant="primary" size="lg" onClick={handleGenericCta}>
+            <Button onClick={handleGenericCta}>
               Start free trial
               <ArrowRight className="w-4 h-4" />
-            </Cta>
-            <Cta variant="outline" size="lg" asChild>
+            </Button>
+            <Button variant="outline" asChild>
               <Link to="/docs"><BookOpen className="w-4 h-4" /> Read the docs</Link>
-            </Cta>
+            </Button>
           </div>
         </div>
       </section>
