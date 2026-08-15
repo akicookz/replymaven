@@ -214,6 +214,18 @@ export function canPersistAiOutput(options: {
 export interface SupportTurnContext {
   kind: "standard" | "contact_support";
   isFirstVisitorTurn: boolean;
+  isReturningVisitor: boolean;
+}
+
+// A same-day pause continues mid-conversation; an overnight return greets.
+export const RETURNING_VISITOR_GAP_MS = 8 * 60 * 60 * 1000;
+
+export function isReturningVisitorGap(
+  previousActivityAt: number | null,
+  nowMs: number,
+): boolean {
+  return previousActivityAt !== null &&
+    nowMs - previousActivityAt >= RETURNING_VISITOR_GAP_MS;
 }
 
 export interface ContactAcceptedPayload {

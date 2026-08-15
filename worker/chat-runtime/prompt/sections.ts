@@ -35,7 +35,7 @@ export function buildSupportTurnOpening(
   visitorInfo: { name: string | null; email: string | null },
 ): string {
   let opening = "";
-  if (turnContext.isFirstVisitorTurn) {
+  if (turnContext.isFirstVisitorTurn || turnContext.isReturningVisitor) {
     const visitorName = visitorInfo.name?.replace(/\s+/g, " ").trim();
     opening += visitorName ? `Hi ${visitorName},\n\n` : "Hi,\n\n";
   }
@@ -53,7 +53,7 @@ export function buildSupportTurnSection(
   const openingRule =
     turnContext.kind === "contact_support"
       ? `The runtime has already added the complete administrative opener: the greeting when needed, the human-review notice, today's applicable reply expectation, and a blank line. Do not repeat the greeting, human-review notice, or reply expectation. Start immediately with the diagnosis, next step, or required question.`
-      : turnContext.isFirstVisitorTurn
+      : turnContext.isFirstVisitorTurn || turnContext.isReturningVisitor
         ? "The runtime has already added the visitor greeting. Do not add another greeting or a generic acknowledgement. Start your contribution with the substance of the support response."
         : "Continue the support conversation directly without a fresh greeting or generic acknowledgement.";
 

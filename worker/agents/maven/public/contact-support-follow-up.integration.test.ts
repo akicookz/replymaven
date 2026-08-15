@@ -138,6 +138,7 @@ describe("contact support follow-up", () => {
       conversation: prepared,
       formMessage,
       isFirstVisitorTurn: true,
+      isReturningVisitor: false,
     });
 
     const messages = await store.getMessages(PROJECT_ID, conversation.id);
@@ -194,6 +195,7 @@ describe("contact support follow-up", () => {
       conversation: prepared,
       formMessage,
       isFirstVisitorTurn: true,
+      isReturningVisitor: false,
     });
 
     const messages = await store.getMessages(PROJECT_ID, conversation.id);

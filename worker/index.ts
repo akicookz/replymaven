@@ -91,7 +91,7 @@ import {
 import { runContactSupportFollowUp } from "./chat-runtime/contact-support/run-contact-support-follow-up";
 import { createEscalation } from "./chat-runtime/post-turn/escalation";
 import { buildToolRegistry } from "./chat-runtime/tools/http-tool-executor";
-import { toToolDefinition } from "./chat-runtime/types";
+import { isReturningVisitorGap, toToolDefinition } from "./chat-runtime/types";
 import { logError, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
@@ -1243,6 +1243,7 @@ const app = new Hono<HonoAppContext>()
       });
     }
 
+    const previousActivityAt = created ? null : conversation.lastActivityAt;
     const formMessage = buildContactFormMessage(
       parsed.data.data,
       visitorName,
@@ -1262,6 +1263,8 @@ const app = new Hono<HonoAppContext>()
     }
     const formVisitorMessage = formVisitorResult.message;
     const isFirstVisitorTurn = formVisitorResult.isFirstVisitorTurn;
+    const isReturningVisitor = !isFirstVisitorTurn &&
+      isReturningVisitorGap(previousActivityAt, Date.now());
 
     const settings = await projectService.getSettings(project.id);
     const statusAfterTeamRequest = await chatService.prepareContactSupportOwnership(
@@ -1320,6 +1323,7 @@ const app = new Hono<HonoAppContext>()
       visitorEmail: conversation.visitorEmail,
       botName: settings?.botName ?? null,
       isFirstVisitorTurn,
+      isReturningVisitor,
     });
 
     // team_requested leaves the AI in assist_until_agent, so Maven answers in
@@ -1349,6 +1353,7 @@ const app = new Hono<HonoAppContext>()
         conversation,
         formMessage,
         isFirstVisitorTurn,
+        isReturningVisitor,
       }));
     }
     return c.json(

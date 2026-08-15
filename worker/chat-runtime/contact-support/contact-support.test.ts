@@ -27,6 +27,7 @@ describe("contact acknowledgement ownership", () => {
       visitorEmail: null,
       botName: "Maven",
       isFirstVisitorTurn: false,
+      isReturningVisitor: false,
     });
 
     expect(payload.aiWillRespond).toBe(false);
@@ -41,6 +42,7 @@ describe("contact acknowledgement ownership", () => {
       visitorEmail: null,
       botName: "Maven",
       isFirstVisitorTurn: false,
+      isReturningVisitor: false,
     });
 
     expect(markContactAiUnavailable(payload).aiWillRespond).toBe(false);

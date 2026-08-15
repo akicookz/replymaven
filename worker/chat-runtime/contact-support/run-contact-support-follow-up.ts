@@ -45,6 +45,7 @@ export interface ContactSupportFollowUpOptions {
   conversation: PublicConversationRecord;
   formMessage: string;
   isFirstVisitorTurn: boolean;
+  isReturningVisitor: boolean;
 }
 
 function getMetadataString(
@@ -89,6 +90,7 @@ export async function runContactSupportFollowUp(
   const turnContext = {
     kind: "contact_support",
     isFirstVisitorTurn: options.isFirstVisitorTurn,
+    isReturningVisitor: options.isReturningVisitor,
   } as const;
   const visitorInfo = {
     name: conversation.visitorName,

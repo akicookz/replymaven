@@ -63,11 +63,13 @@ export function buildContactAcceptedPayload(options: {
   visitorEmail: string | null;
   botName: string | null;
   isFirstVisitorTurn: boolean;
+  isReturningVisitor: boolean;
 }): ContactAcceptedPayload {
   const responseOpening = `${buildSupportTurnOpening(
     {
       kind: "contact_support",
       isFirstVisitorTurn: options.isFirstVisitorTurn,
+      isReturningVisitor: options.isReturningVisitor,
     },
     { name: options.visitorName, email: options.visitorEmail },
   )}${fallbackRenderContactTimingMessage()}\n\n`;

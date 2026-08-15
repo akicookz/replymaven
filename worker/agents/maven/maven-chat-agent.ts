@@ -65,6 +65,7 @@ import type {
 import {
   applyChatOwnershipEvent,
   fallbackAiParticipationForStatus,
+  isReturningVisitorGap,
   mergeChatStateForPersistence,
   parseChatState,
   type ChatOwnershipEvent,
@@ -842,6 +843,10 @@ export class MavenChatAgent extends AIChatAgent<
     const turnContext = {
       kind: "standard",
       isFirstVisitorTurn,
+      isReturningVisitor: !isFirstVisitorTurn && isReturningVisitorGap(
+        rawHistory.at(-2)?.createdAt ?? null,
+        Date.now(),
+      ),
     } as const;
     const openingText = buildSupportTurnOpening(turnContext, {
       name: currentState.visitorName,
