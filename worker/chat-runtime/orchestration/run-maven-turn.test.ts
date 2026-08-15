@@ -508,7 +508,7 @@ describe("runMavenTurn", () => {
     expect(primary.calls).toHaveLength(1);
     expect(fallback.calls).toHaveLength(1);
     expect(dependencies.modelRuntime.activeConfig.model).toBe(
-      "gemini-3-flash-preview",
+      "gemini-3.7-flash",
     );
     expect(dependencies.modelRuntime.hasUsedFallback).toBe(true);
     expect(dependencies.modelRuntime.modelCallsByStage).toEqual({

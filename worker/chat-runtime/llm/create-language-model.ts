@@ -5,7 +5,7 @@ import { type ChatRuntimeAiConfig } from "../types";
 import { logError, logInfo, logWarn } from "../../observability";
 
 const OPENAI_FALLBACK_MODEL = "gpt-5.6-terra";
-const GEMINI_FALLBACK_MODEL = "gemini-3-flash-preview";
+const GEMINI_FALLBACK_MODEL = "gemini-3.7-flash";
 
 export type AiProvider = "openai" | "google";
 
