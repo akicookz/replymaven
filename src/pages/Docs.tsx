@@ -343,6 +343,8 @@ function getMcpScopeLabel(scope: McpToolScope): string {
       return "Send agent replies";
     case "resources:write":
       return "Create and update knowledge resources";
+    case "helpdesk:write":
+      return "Create, publish, and manage help center content";
   }
 }
 
@@ -601,12 +603,13 @@ function Docs() {
               Permissions are approved during OAuth authorization and can be
               revoked at any time from the dashboard.
             </p>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               {(
                 [
                   "projects:read",
                   "conversations:reply",
                   "resources:write",
+                  "helpdesk:write",
                 ] as const
               ).map((scope) => (
                 <div key={scope} className="rounded-xl bg-muted/20 p-4">

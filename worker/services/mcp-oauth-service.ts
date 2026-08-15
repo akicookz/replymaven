@@ -18,6 +18,7 @@ export const MCP_OAUTH_SCOPES = [
   "projects:read",
   "conversations:reply",
   "resources:write",
+  "helpdesk:write",
 ] as const;
 
 export type McpOAuthScope = (typeof MCP_OAUTH_SCOPES)[number];

@@ -21,7 +21,8 @@ import {
 type McpScope =
   | "projects:read"
   | "conversations:reply"
-  | "resources:write";
+  | "resources:write"
+  | "helpdesk:write";
 
 interface McpConnection {
   id: string;
@@ -102,6 +103,8 @@ function getScopeLabel(scope: McpScope): string {
       return "Reply to conversations";
     case "resources:write":
       return "Manage knowledge";
+    case "helpdesk:write":
+      return "Manage help center";
   }
 }
 

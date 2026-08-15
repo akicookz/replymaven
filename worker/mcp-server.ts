@@ -1,7 +1,6 @@
 import { createLegacyMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type Context } from "hono";
-import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -17,7 +16,6 @@ import type {
 } from "../shared/maven-conversation";
 import { serializeMessageImageUrls } from "../shared/message-images";
 import { createPublicConversationStore } from "./conversations/create-public-conversation-store";
-import type { PublicConversationStore } from "./conversations/public-conversation-store";
 import { users } from "./db/auth.schema";
 import { type HonoAppContext } from "./types";
 import { buildMcpAuthenticateHeader } from "./mcp-oauth";
@@ -29,7 +27,6 @@ import { triggerAutoRagSync } from "./services/autorag-sync";
 import { getTeamContext } from "./services/team-context";
 import {
   MCP_OAUTH_SCOPES,
-  type McpOAuthScope,
   McpOAuthService,
 } from "./services/mcp-oauth-service";
 import {
@@ -37,34 +34,23 @@ import {
   createFaqResourceSchema,
   updateFaqResourceSchema,
 } from "./validation";
+import {
+  confirmedMutationSchema,
+  getAccessibleProject,
+  requireScope,
+  serializeDate,
+  textResult,
+  type McpRequestContext,
+} from "./mcp-tool-helpers";
+import { registerHelpdeskTools } from "./mcp-helpdesk-tools";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-type AppDb = DrizzleD1Database<Record<string, unknown>>;
-
-interface McpRequestContext {
-  db: AppDb;
-  conversationStore: PublicConversationStore;
-  env: HonoAppContext["Bindings"];
-  executionCtx: ExecutionContext;
-  userId: string;
-  userName: string;
-  effectiveUserId: string;
-  activeRole: "owner" | "admin" | "member" | null;
-  activeAccessAllProjects: boolean;
-  activeProjectIds: string[] | null;
-  scopes: McpOAuthScope[];
-}
 
 interface TruncatedText {
   text: string | null;
   truncated: boolean;
   originalLength: number;
 }
-
-const confirmedMutationSchema = z
-  .literal(true)
-  .describe("Must be true after the user explicitly confirms this mutation.");
 
 // ─── Request Handler ──────────────────────────────────────────────────────────
 
@@ -184,6 +170,7 @@ function createReplyMavenMcpServer(context: McpRequestContext): McpServer {
   registerUpdateFaqResourceTool(server, context);
   registerCreateWebpageResourceTool(server, context);
   registerReindexResourceTool(server, context);
+  registerHelpdeskTools(server, context);
 
   return server;
 }
@@ -840,12 +827,6 @@ function registerReindexResourceTool(
 
 // ─── Access Control ───────────────────────────────────────────────────────────
 
-function requireScope(context: McpRequestContext, scope: McpOAuthScope): void {
-  if (!context.scopes.includes(scope)) {
-    throw new Error(`MCP token is missing required scope: ${scope}`);
-  }
-}
-
 async function getVisibleProjects(
   context: McpRequestContext,
 ): Promise<ProjectRow[]> {
@@ -860,27 +841,6 @@ async function getVisibleProjects(
 
   const allowed = new Set(context.activeProjectIds ?? []);
   return projects.filter((project) => allowed.has(project.id));
-}
-
-async function getAccessibleProject(
-  context: McpRequestContext,
-  projectId: string,
-): Promise<ProjectRow> {
-  const projectService = new ProjectService(context.db);
-  const project = await projectService.getProjectById(projectId);
-
-  if (!project || project.userId !== context.effectiveUserId) {
-    throw new Error("Project not found");
-  }
-
-  if (context.activeRole === "member" && !context.activeAccessAllProjects) {
-    const allowed = context.activeProjectIds ?? [];
-    if (!allowed.includes(project.id)) {
-      throw new Error("Project not found");
-    }
-  }
-
-  return project;
 }
 
 async function getCurrentUserAvatar(
@@ -899,19 +859,6 @@ async function getCurrentUserAvatar(
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────
-
-function textResult(data: unknown): {
-  content: Array<{ type: "text"; text: string }>;
-} {
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(data, null, 2),
-      },
-    ],
-  };
-}
 
 function summarizeProject(project: ProjectRow): Record<string, unknown> {
   return {
@@ -1099,10 +1046,6 @@ function truncateText(input: string | null, maxChars: number): TruncatedText {
     truncated: true,
     originalLength: input.length,
   };
-}
-
-function serializeDate(value: Date | number | null | undefined): string | null {
-  return value ? new Date(value).toISOString() : null;
 }
 
 function parseJsonValue(raw: string | null): unknown {

@@ -1,7 +1,8 @@
 export type McpToolScope =
   | "projects:read"
   | "conversations:reply"
-  | "resources:write";
+  | "resources:write"
+  | "helpdesk:write";
 
 export interface McpToolInputDoc {
   name: string;
@@ -326,6 +327,360 @@ export const MCP_TOOL_DOCS: McpToolDoc[] = [
         type: "string",
         required: true,
         description: "Resource ID to reindex.",
+      },
+      {
+        name: "confirm",
+        type: "true",
+        required: true,
+        description: "Must be true after the user explicitly confirms the action.",
+      },
+    ],
+  },
+  {
+    name: "list_help_categories",
+    title: "List help categories",
+    description:
+      "List help center categories with per-category article counts.",
+    scope: "projects:read",
+    readOnly: true,
+    inputs: [
+      {
+        name: "projectId",
+        type: "string",
+        required: true,
+        description: "ReplyMaven project ID.",
+      },
+    ],
+  },
+  {
+    name: "list_help_articles",
+    title: "List help articles",
+    description:
+      "List help center articles as summaries, optionally filtered by category or status.",
+    scope: "projects:read",
+    readOnly: true,
+    inputs: [
+      {
+        name: "projectId",
+        type: "string",
+        required: true,
+        description: "ReplyMaven project ID.",
+      },
+      {
+        name: "categoryId",
+        type: "string",
+        required: false,
+        description: "Only list articles in this category.",
+      },
+      {
+        name: "status",
+        type: '"draft" | "published"',
+        required: false,
+        description: "Only list articles with this status.",
+      },
+    ],
+  },
+  {
+    name: "get_help_article",
+    title: "Get help article",
+    description:
+      "Read an article's full markdown content and, when published, its live URL.",
+    scope: "projects:read",
+    readOnly: true,
+    inputs: [
+      {
+        name: "projectId",
+        type: "string",
+        required: true,
+        description: "ReplyMaven project ID.",
+      },
+      {
+        name: "articleId",
+        type: "string",
+        required: true,
+        description: "Help article ID.",
+      },
+    ],
+  },
+  {
+    name: "create_help_category",
+    title: "Create help category",
+    description:
+      "Create a help center category. The slug is derived from the name when omitted.",
+    scope: "helpdesk:write",
+    readOnly: false,
+    inputs: [
+      {
+        name: "projectId",
+        type: "string",
+        required: true,
+        description: "ReplyMaven project ID.",
+      },
+      {
+        name: "name",
+        type: "string",
+        required: true,
+        description: "Category name, max 100 characters.",
+      },
+      {
+        name: "slug",
+        type: "string",
+        required: false,
+        description: "URL slug: lowercase letters, numbers, and hyphens.",
+      },
+      {
+        name: "description",
+        type: "string",
+        required: false,
+        description: "Category description, max 500 characters.",
+      },
+      {
+        name: "sortOrder",
+        type: "integer",
+        required: false,
+        description: "Position in the category list.",
+      },
+      {
+        name: "confirm",
+        type: "true",
+        required: true,
+        description: "Must be true after the user explicitly confirms the action.",
+      },
+    ],
+  },
+  {
+    name: "update_help_category",
+    title: "Update help category",
+    description:
+      "Update a category's name, slug, description, or position. Omitted fields are kept.",
+    scope: "helpdesk:write",
+    readOnly: false,
+    inputs: [
+      {
+        name: "projectId",
+        type: "string",
+        required: true,
+        description: "ReplyMaven project ID.",
+      },
+      {
+        name: "categoryId",
+        type: "string",
+        required: true,
+        description: "Help category ID.",
+      },
+      {
+        name: "name",
+        type: "string",
+        required: false,
+        description: "Replacement name.",
+      },
+      {
+        name: "slug",
+        type: "string",
+        required: false,
+        description: "Replacement URL slug. Changing it breaks existing links.",
+      },
+      {
+        name: "description",
+        type: "string | null",
+        required: false,
+        description: "Replacement description. Null clears it.",
+      },
+      {
+        name: "sortOrder",
+        type: "integer",
+        required: false,
+        description: "Replacement position in the category list.",
+      },
+      {
+        name: "confirm",
+        type: "true",
+        required: true,
+        description: "Must be true after the user explicitly confirms the action.",
+      },
+    ],
+  },
+  {
+    name: "archive_help_category",
+    title: "Archive help category",
+    description:
+      "Archive a category and unpublish its published articles. Articles are retained.",
+    scope: "helpdesk:write",
+    readOnly: false,
+    inputs: [
+      {
+        name: "projectId",
+        type: "string",
+        required: true,
+        description: "ReplyMaven project ID.",
+      },
+      {
+        name: "categoryId",
+        type: "string",
+        required: true,
+        description: "Help category ID.",
+      },
+      {
+        name: "confirm",
+        type: "true",
+        required: true,
+        description: "Must be true after the user explicitly confirms the action.",
+      },
+    ],
+  },
+  {
+    name: "create_help_article",
+    title: "Create help article",
+    description:
+      "Create a help center article with markdown content. Defaults to draft.",
+    scope: "helpdesk:write",
+    readOnly: false,
+    inputs: [
+      {
+        name: "projectId",
+        type: "string",
+        required: true,
+        description: "ReplyMaven project ID.",
+      },
+      {
+        name: "categoryId",
+        type: "string",
+        required: true,
+        description: "Help category ID the article belongs to.",
+      },
+      {
+        name: "title",
+        type: "string",
+        required: true,
+        description: "Article title, max 200 characters.",
+      },
+      {
+        name: "slug",
+        type: "string",
+        required: false,
+        description: "URL slug. Derived from the title when omitted.",
+      },
+      {
+        name: "excerpt",
+        type: "string",
+        required: false,
+        description: "Summary shown in listings and search, max 280 characters.",
+      },
+      {
+        name: "content",
+        type: "string (markdown)",
+        required: false,
+        description: "Markdown body, max 100,000 characters.",
+      },
+      {
+        name: "status",
+        type: '"draft" | "published"',
+        required: false,
+        description: 'Initial status. Defaults to "draft".',
+      },
+      {
+        name: "sortOrder",
+        type: "integer",
+        required: false,
+        description: "Position within the category.",
+      },
+      {
+        name: "confirm",
+        type: "true",
+        required: true,
+        description: "Must be true after the user explicitly confirms the action.",
+      },
+    ],
+  },
+  {
+    name: "update_help_article",
+    title: "Update help article",
+    description:
+      'Update an article. Status "published" puts it live; "draft" takes it down.',
+    scope: "helpdesk:write",
+    readOnly: false,
+    inputs: [
+      {
+        name: "projectId",
+        type: "string",
+        required: true,
+        description: "ReplyMaven project ID.",
+      },
+      {
+        name: "articleId",
+        type: "string",
+        required: true,
+        description: "Help article ID.",
+      },
+      {
+        name: "categoryId",
+        type: "string",
+        required: false,
+        description: "Move the article to this category.",
+      },
+      {
+        name: "title",
+        type: "string",
+        required: false,
+        description: "Replacement title.",
+      },
+      {
+        name: "slug",
+        type: "string",
+        required: false,
+        description: "Replacement URL slug. Changing it breaks existing links.",
+      },
+      {
+        name: "excerpt",
+        type: "string | null",
+        required: false,
+        description: "Replacement summary. Null clears it.",
+      },
+      {
+        name: "content",
+        type: "string (markdown)",
+        required: false,
+        description: "Replacement markdown body. Replaces the whole body.",
+      },
+      {
+        name: "status",
+        type: '"draft" | "published"',
+        required: false,
+        description: '"published" makes the article live; "draft" unpublishes.',
+      },
+      {
+        name: "sortOrder",
+        type: "integer",
+        required: false,
+        description: "Replacement position within the category.",
+      },
+      {
+        name: "confirm",
+        type: "true",
+        required: true,
+        description: "Must be true after the user explicitly confirms the action.",
+      },
+    ],
+  },
+  {
+    name: "delete_help_article",
+    title: "Delete help article",
+    description:
+      "Permanently delete an article. Prefer unpublishing unless deletion was explicitly requested.",
+    scope: "helpdesk:write",
+    readOnly: false,
+    inputs: [
+      {
+        name: "projectId",
+        type: "string",
+        required: true,
+        description: "ReplyMaven project ID.",
+      },
+      {
+        name: "articleId",
+        type: "string",
+        required: true,
+        description: "Help article ID.",
       },
       {
         name: "confirm",

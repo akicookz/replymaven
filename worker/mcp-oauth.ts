@@ -424,6 +424,8 @@ function formatScope(scope: string): string {
       return "Send agent replies to conversations";
     case "resources:write":
       return "Create and update webpage and FAQ knowledge resources";
+    case "helpdesk:write":
+      return "Create, publish, and manage help center articles and categories";
     default:
       return scope;
   }
