@@ -194,6 +194,9 @@ function registerCreateHelpCategoryTool(
         description: createHelpCategorySchema.shape.description.describe(
           "Optional category description, max 500 characters.",
         ),
+        icon: createHelpCategorySchema.shape.icon.describe(
+          'Optional icon: a PascalCase icon name (e.g. "Rocket", "Code", "Layers") or an uploaded image path.',
+        ),
         sortOrder: createHelpCategorySchema.shape.sortOrder.describe(
           "Optional position in the category list. Appended last when omitted.",
         ),
@@ -206,12 +209,18 @@ function registerCreateHelpCategoryTool(
         openWorldHint: false,
       },
     },
-    async ({ projectId, name, slug, description, sortOrder }) => {
+    async ({ projectId, name, slug, description, icon, sortOrder }) => {
       requireScope(context, "helpdesk:write");
 
       const project = await getAccessibleProject(context, projectId);
       const created = await helpdeskService(context).createCategory(
-        { name: name.trim(), slug, description: description ?? null, sortOrder },
+        {
+          name: name.trim(),
+          slug,
+          description: description ?? null,
+          icon: icon ?? null,
+          sortOrder,
+        },
         project.id,
       );
 
@@ -242,6 +251,9 @@ function registerUpdateHelpCategoryTool(
         description: updateHelpCategorySchema.shape.description.describe(
           "Replacement description, max 500 characters. Pass null to clear.",
         ),
+        icon: updateHelpCategorySchema.shape.icon.describe(
+          'Replacement icon: a PascalCase icon name (e.g. "Rocket", "Code", "Layers") or an uploaded image path. Pass null to clear.',
+        ),
         sortOrder: updateHelpCategorySchema.shape.sortOrder.describe(
           "Replacement position in the category list.",
         ),
@@ -254,14 +266,14 @@ function registerUpdateHelpCategoryTool(
         openWorldHint: false,
       },
     },
-    async ({ projectId, categoryId, name, slug, description, sortOrder }) => {
+    async ({ projectId, categoryId, name, slug, description, icon, sortOrder }) => {
       requireScope(context, "helpdesk:write");
 
       const project = await getAccessibleProject(context, projectId);
       const updated = await helpdeskService(context).updateCategory(
         categoryId,
         project.id,
-        { name, slug, description, sortOrder },
+        { name, slug, description, icon, sortOrder },
       );
       if (!updated) throw new Error("Category not found");
 
@@ -546,6 +558,7 @@ function summarizeHelpCategory(
     name: category.name,
     slug: category.slug,
     description: category.description,
+    icon: category.icon,
     sortOrder: category.sortOrder,
     ...(articleCount === undefined ? {} : { articleCount }),
     createdAt: serializeDate(category.createdAt),

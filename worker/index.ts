@@ -1800,7 +1800,13 @@ const app = new Hono<HonoAppContext>()
     }
     const projectSlug = c.req.param("projectSlug");
     const categorySlug = c.req.param("categorySlug");
-    const articleSlug = c.req.param("articleSlug");
+    const rawArticleSlug = c.req.param("articleSlug");
+    // "<article>.md" serves the raw markdown (slugs themselves never
+    // contain dots), used by the Copy page button and LLM deep links.
+    const wantsMarkdown = rawArticleSlug.endsWith(".md");
+    const articleSlug = wantsMarkdown
+      ? rawArticleSlug.slice(0, -3)
+      : rawArticleSlug;
     const db = drizzle(c.env.DB);
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectBySlugPublic(projectSlug);
@@ -1814,6 +1820,17 @@ const app = new Hono<HonoAppContext>()
     );
     if (!match || match.article.status !== "published") {
       return c.text("Not found", 404);
+    }
+
+    if (wantsMarkdown) {
+      const markdown = ensureArticleTitle(
+        match.article.content ?? "",
+        match.article.title,
+      );
+      return c.body(markdown, 200, {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Cache-Control": "public, max-age=120, s-maxage=120",
+      });
     }
 
     const widgetService = new WidgetService(db);

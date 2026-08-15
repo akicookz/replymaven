@@ -119,7 +119,7 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
                       </div>
                     ) : (
                       <div class="help-doc-card-thumb help-doc-card-thumb-fallback">
-                        <HelpIcon name="FileText" />
+                        <HelpIcon name={props.category.icon ?? "FileText"} />
                       </div>
                     )}
                     <div class="help-doc-card-body">

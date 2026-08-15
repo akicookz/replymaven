@@ -5,55 +5,64 @@
       "slug": "getting-started",
       "name": "Getting Started",
       "description": "Install the ReplyMaven widget and learn how it answers your visitors.",
-      "sortOrder": 0
+      "sortOrder": 0,
+      "icon": "Rocket"
     },
     {
       "slug": "widget-api",
       "name": "Widget API",
       "description": "Control the chat widget from your own JavaScript.",
-      "sortOrder": 1
+      "sortOrder": 1,
+      "icon": "Code"
     },
     {
       "slug": "customization",
       "name": "Customization",
       "description": "Make the widget match your brand and configure its home screen.",
-      "sortOrder": 2
+      "sortOrder": 2,
+      "icon": "Sparkles"
     },
     {
       "slug": "visitor-identity",
       "name": "Visitor Identity",
       "description": "Connect conversations to real users with identify() and metadata.",
-      "sortOrder": 3
+      "sortOrder": 3,
+      "icon": "User"
     },
     {
       "slug": "conversations",
       "name": "Conversations",
       "description": "How conversations flow, persist, notify, and hand off to a human.",
-      "sortOrder": 4
+      "sortOrder": 4,
+      "icon": "MessageSquare"
     },
     {
       "slug": "knowledge-base",
       "name": "Knowledge Base",
       "description": "Teach the AI with web pages, PDFs, FAQs, and help articles.",
-      "sortOrder": 5
+      "sortOrder": 5,
+      "icon": "Layers"
     },
     {
       "slug": "integrations",
       "name": "Integrations",
       "description": "Telegram handoff, the contact form, and tone of voice.",
-      "sortOrder": 6
+      "sortOrder": 6,
+      "icon": "Workflow"
     },
     {
       "slug": "mcp",
       "name": "MCP",
       "description": "Connect AI clients to ReplyMaven over the Model Context Protocol.",
-      "sortOrder": 7
+      "sortOrder": 7,
+      "icon": "Cpu"
     },
     {
       "slug": "advanced",
       "name": "Advanced",
       "description": "Single-page apps, Content Security Policy, and multiple widgets.",
-      "sortOrder": 8
+      "sortOrder": 8,
+      "icon": "Settings"
     }
   ]
 }
