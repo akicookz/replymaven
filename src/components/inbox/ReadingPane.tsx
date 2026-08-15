@@ -255,7 +255,7 @@ export default function ReadingPane({
             className="min-h-10 px-1 text-[13px] font-medium text-ink-5 hover:text-ink-2 motion-safe:transition-[color,scale] motion-safe:duration-150 motion-safe:active:scale-[0.96]"
             onClick={onStartSidechat}
           >
-            Open sidechat
+            Sidechat
           </button>
         </div>
       )}

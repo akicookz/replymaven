@@ -31,7 +31,7 @@ import ProfileSetupDialog from "@/components/ProfileSetupDialog";
 import { signOut, useSession } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { useSubscription } from "@/hooks/use-subscription";
-import { formatPlanName, getTrialDaysRemaining, usagePercent } from "@/lib/plan";
+import { getTrialDaysRemaining, usagePercent } from "@/lib/plan";
 import { canCreateProjects } from "@/lib/team-permissions";
 import { useNeedsYouPing } from "@/lib/use-needs-you-ping";
 import { formatTitleWithBadge } from "@/lib/title-badge";
@@ -452,50 +452,35 @@ function Layout() {
           )}
         </nav>
 
-        {/* Plan Status */}
-        {subData?.subscription && !collapsed && (
-          <div className="px-3 pb-1">
+        {/* Usage — bare bar + count above the user button; links to billing.
+            Trial and past-due states surface as a quiet suffix on the count. */}
+        {subData?.subscription && subData.limits && !collapsed && (
+          <div className="px-3">
             <Link
               to={currentProject ? `/app/projects/${currentProject.id}/settings?tab=billing` : "/app/account/billing"}
-              className="block px-3 py-2 rounded-lg bg-glass-button hover:bg-glass-raised transition-colors"
+              className="group block rounded-md px-2 py-1.5"
             >
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] font-semibold text-ink-7 uppercase tracking-wider">
-                  {formatPlanName(subData.subscription.plan)}
-                </span>
-                {subData.subscription.status === "trialing" && (
-                  <span className="text-[10px] font-medium text-blue-400 bg-blue-500/15 px-1.5 py-0.5 rounded-full">
-                    {getTrialDaysRemaining(subData.subscription.trialEndsAt)}d trial
-                  </span>
-                )}
-                {subData.subscription.status === "past_due" && (
-                  <span className="text-[10px] font-medium text-yellow-500 bg-yellow-500/15 px-1.5 py-0.5 rounded-full">
-                    Past due
-                  </span>
-                )}
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all",
+                    usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 90
+                      ? "bg-destructive"
+                      : usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 70
+                        ? "bg-yellow-500"
+                        : "bg-primary",
+                  )}
+                  style={{
+                    width: `${usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth)}%`,
+                  }}
+                />
               </div>
-              {subData.limits && (
-                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 90
-                        ? "bg-destructive"
-                        : usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth) >= 70
-                          ? "bg-yellow-500"
-                          : "bg-primary",
-                    )}
-                    style={{
-                      width: `${usagePercent(subData.usage.messagesUsed, subData.limits.maxMessagesPerMonth)}%`,
-                    }}
-                  />
-                </div>
-              )}
-              {subData.limits && (
-                <p className="text-[10px] text-ink-7 mt-1">
-                  {subData.usage.messagesUsed}/{subData.limits.maxMessagesPerMonth} messages
-                </p>
-              )}
+              <p className="mt-1.5 text-[10px] text-ink-7 transition-colors group-hover:text-ink-4">
+                {subData.usage.messagesUsed}/{subData.limits.maxMessagesPerMonth} messages
+                {subData.subscription.status === "trialing" &&
+                  ` · ${getTrialDaysRemaining(subData.subscription.trialEndsAt)}d trial`}
+                {subData.subscription.status === "past_due" && " · past due"}
+              </p>
             </Link>
           </div>
         )}

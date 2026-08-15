@@ -52,7 +52,7 @@ const SKELETON_BUBBLES: { side: "left" | "right"; w: string; h: string }[] = [
   { side: "left", w: "50%", h: "h-11" },
 ];
 
-function ChatThreadSkeleton() {
+export function ChatThreadSkeleton() {
   return (
     <div aria-hidden className="animate-in fade-in duration-200">
       {SKELETON_BUBBLES.map((b, i) => {

@@ -145,11 +145,13 @@ function CustomerAssignmentMenu({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="glass-button flex h-8 items-center gap-1.5 rounded-glass px-2.5 text-[11px] text-ink-3 transition-[color,scale] duration-150 ease-out hover:text-ink-1 active:scale-[0.96]"
+          aria-label="Add customer"
+          title="Add customer"
+          className="glass-button flex h-8 w-8 items-center justify-center rounded-glass text-[11px] text-ink-3 transition-[color,scale] duration-150 ease-out hover:text-ink-1 active:scale-[0.96] lg:w-auto lg:justify-start lg:gap-1.5 lg:px-2.5"
         >
           <UserPlusIcon className="size-3.5" />
-          Add customer
-          <ChevronDownIcon className="size-3" />
+          <span className="hidden lg:inline">Add customer</span>
+          <ChevronDownIcon className="hidden size-3 lg:block" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-48 rounded-xl p-1.5">
@@ -526,41 +528,39 @@ export default function ReadingHeader({
               ))}
             </div>
 
-            {shouldOfferCustomerAssignment(
-              conversation.customerId,
-              conversation.archivedAt,
-            ) ? (
-              <div className="mt-2 lg:hidden">
-                <CustomerAssignmentMenu
-                  onCreateCustomer={onCreateCustomer}
-                  onLinkCustomer={onLinkCustomer}
-                />
-              </div>
-            ) : null}
           </div>
         </div>
 
-        {/* Right: customer actions + priority */}
-        {shouldOfferCustomerAssignment(
-          conversation.customerId,
-          conversation.archivedAt,
-        ) ? (
-          <div className="hidden shrink-0 lg:block">
+        {/* Right: customer actions + priority. Below lg both collapse to
+            icon-only buttons sitting side by side. */}
+        <div className="mt-0.5 flex shrink-0 items-center gap-2">
+          {shouldOfferCustomerAssignment(
+            conversation.customerId,
+            conversation.archivedAt,
+          ) && (
             <CustomerAssignmentMenu
               onCreateCustomer={onCreateCustomer}
               onLinkCustomer={onLinkCustomer}
             />
-          </div>
-        ) : null}
-
-        {!isArchived && (
-          <div className="shrink-0 mt-0.5">
-            <PriorityMenu
-              value={conversation.priority ?? "medium"}
-              onChange={(p) => onPriority(conversation.id, p)}
-            />
-          </div>
-        )}
+          )}
+          {!isArchived && (
+            <>
+              <div className="lg:hidden">
+                <PriorityMenu
+                  value={conversation.priority ?? "medium"}
+                  onChange={(p) => onPriority(conversation.id, p)}
+                  compact
+                />
+              </div>
+              <div className="hidden lg:block">
+                <PriorityMenu
+                  value={conversation.priority ?? "medium"}
+                  onChange={(p) => onPriority(conversation.id, p)}
+                />
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

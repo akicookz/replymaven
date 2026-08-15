@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import Composer from "@/components/inbox/Composer";
-import ChatThread from "@/components/inbox/ChatThread";
+import ChatThread, { ChatThreadSkeleton } from "@/components/inbox/ChatThread";
+import { Skeleton } from "@/components/ui/skeleton";
 import { countryFlag } from "@/lib/inbox/country-flag";
 import {
   deriveConversationInteractionState,
@@ -13,6 +14,8 @@ import { cn } from "@/lib/utils";
 interface FocusViewProps {
   conversation: Conversation;
   messages: Message[];
+  /** True while the conversation detail (messages) is loading for the first time. */
+  messagesLoading?: boolean;
   index: number;
   total: number;
   onExit: () => void;
@@ -48,9 +51,52 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// Focus-mode first paint while the list or selection is still resolving:
+// the same centered stacked card at the same fixed height, so entering focus
+// mode never flashes the split view or changes the card's size.
+export function FocusViewSkeleton() {
+  return (
+    <div className="relative overflow-hidden -m-4 h-screen md:-m-8">
+      <div className="h-full flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-[780px]">
+          <div className="relative">
+            <div className="absolute top-[-9px] inset-x-[24px] h-5 rounded-t-[18px] bg-glass-peek-2" />
+            <div className="absolute top-[-4px] inset-x-[13px] h-5 rounded-t-[18px] bg-glass-peek-1" />
+
+            <div className="glass-focus rounded-[18px] relative z-[1] h-[82vh] overflow-hidden flex flex-col">
+              <div className="glass-bar pt-[20px] px-[28px] pb-3">
+                <div className="flex items-center gap-3">
+                  <Skeleton className="h-12 w-12 shrink-0 rounded-full" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Skeleton className="h-4 w-44 rounded" />
+                    <Skeleton className="h-3 w-60 rounded" />
+                  </div>
+                  <Skeleton className="h-[28px] w-28 shrink-0 rounded-full" />
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-hidden px-[28px] pt-3">
+                <ChatThreadSkeleton />
+              </div>
+
+              <div className="px-4 pt-3 pb-4">
+                <Skeleton className="h-[104px] w-full rounded-[16px]" />
+              </div>
+            </div>
+          </div>
+
+          {/* Keeps the below-card row's height so nothing shifts on load. */}
+          <div className="mt-4 flex h-5 items-center justify-between px-1" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function FocusView({
   conversation,
   messages,
+  messagesLoading,
   index,
   total,
   onExit,
@@ -121,12 +167,14 @@ export default function FocusView({
 
             {/* Main frosted card — ONE scroll container, so the sticky header
                 and floating composer read identically to the split reading
-                pane: thread scrolls behind both frosted bars. */}
-            <div className="glass-focus rounded-[18px] relative z-[1] max-h-[82vh] overflow-hidden flex flex-col">
+                pane: thread scrolls behind both frosted bars. Fixed height so
+                the card never resizes while messages load or stream in. */}
+            <div className="glass-focus rounded-[18px] relative z-[1] h-[82vh] overflow-hidden flex flex-col">
               <div
                 ref={threadRef}
                 className="overflow-y-auto relative flex-1 min-h-0"
               >
+                <div className="min-h-full flex flex-col">
                 {/* Sticky user header — same frosted glass (bg + blur) as the
                     composer pill, so both read identically. */}
                 <div className="sticky top-0 z-[5] glass-bar pt-[20px] px-[28px] pb-3">
@@ -169,10 +217,14 @@ export default function FocusView({
                 <ChatThread
                   messages={visible}
                   conversation={conversation}
+                  loading={messagesLoading}
                   onDeleteMessage={onDeleteMessage}
                   readOnly={!interaction.showMessageActions}
                   contentClassName="!px-[28px] !pt-3 !pb-3"
                 />
+
+                {/* Pushes the composer to the card bottom for short threads. */}
+                <div className="flex-1" />
 
                 {/* Composer — sticky bottom, floats over the thread (bleed) */}
                 {interaction.showComposer && (
@@ -192,6 +244,7 @@ export default function FocusView({
                     }}
                   />
                 )}
+                </div>
               </div>
             </div>
           </div>

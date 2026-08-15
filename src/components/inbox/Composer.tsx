@@ -283,10 +283,8 @@ export default function Composer(props: ComposerProps) {
     ? !mode.disabled && !mode.busy && draft.trim().length > 0
     : (draft.trim().length > 0 || pendingImages.length > 0) &&
       uploadingCount === 0;
-  const publicSidechatLabel = mode.kind === "public" &&
-      (mode.sidechatOpen || mode.sidechatExists)
-    ? "Open sidechat"
-    : "Start sidechat";
+  // The status dot next to the label already signals whether one exists.
+  const publicSidechatLabel = "Sidechat";
 
   return (
     <div className="sticky bottom-0 z-[5] px-4 pt-3 pb-4">

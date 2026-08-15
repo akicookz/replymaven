@@ -77,7 +77,7 @@ import {
 import { reconcilePublicMessages } from "@/lib/inbox/public-message-adapter";
 import MessageList from "@/components/inbox/MessageList";
 import ReadingPane from "@/components/inbox/ReadingPane";
-import FocusView from "@/components/inbox/FocusView";
+import FocusView, { FocusViewSkeleton } from "@/components/inbox/FocusView";
 import FocusSidechatLayout from "@/components/inbox/FocusSidechatLayout";
 import SidechatPane from "@/components/inbox/SidechatPane";
 import CustomerFormDialog from "@/components/customers/CustomerFormDialog";
@@ -430,7 +430,23 @@ function Conversations() {
   const [liveSidechatState, setLiveSidechatState] =
     useState<MavenProjectState | undefined>();
   const sidechatSummarySession = useSidechatSummarySession(projectId);
-  const view = searchParams.get("focus") === "true" ? "focus" : "split";
+  // Focus mode is desktop-only: on mobile viewports the URL's ?focus=true is
+  // ignored and the regular list/thread view renders instead. Reactive so
+  // resizing across the boundary switches live without touching the URL.
+  const [isMobileViewport, setIsMobileViewport] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 767px)").matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 767px)");
+    const onChange = () => setIsMobileViewport(query.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+  const view = !isMobileViewport && searchParams.get("focus") === "true"
+    ? "focus"
+    : "split";
   const setView = useCallback(
     (nextView: "split" | "focus") => {
       setSearchParams(
@@ -1981,11 +1997,35 @@ function Conversations() {
       )
     : null;
 
+  // Focus deep links (?focus=true) must never flash the split view: while the
+  // list is loading or the auto-select hasn't landed yet, hold the focus
+  // frame with a same-sized skeleton. An empty loaded inbox falls through to
+  // the split view, which is the only state with something useful to show.
+  if (
+    view === "focus" &&
+    !selected &&
+    (convosLoading || isPlaceholderData || conversations.length > 0)
+  ) {
+    return (
+      <>
+        {sidechatSummarySession.data && (
+          <ConversationDirectoryAgentBridge
+            session={sidechatSummarySession.data}
+            onState={handleSidechatParentState}
+            onEvent={handleDirectoryEvent}
+          />
+        )}
+        <FocusViewSkeleton />
+      </>
+    );
+  }
+
   if (view === "focus" && selected && !selected.archivedAt) {
     const focusView = (
       <FocusView
         conversation={selected}
         messages={messages}
+        messagesLoading={detailLoading}
         index={selectedIndex}
         total={counts[filter] ?? conversations.length}
         onExit={() => setView("split")}
