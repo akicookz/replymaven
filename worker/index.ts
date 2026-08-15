@@ -1264,8 +1264,8 @@ const app = new Hono<HonoAppContext>()
 
     const settings = await projectService.getSettings(project.id);
     const statusAfterTeamRequest = await chatService.prepareContactSupportOwnership(
-      conversation.id,
       project.id,
+      conversation.id,
     );
     if (!statusAfterTeamRequest) {
       return c.json({ error: "Conversation ownership changed. Try again." }, 409);
@@ -1305,8 +1305,8 @@ const app = new Hono<HonoAppContext>()
     });
     if (escalation.telegramThreadId) {
       await chatService.updateTelegramThreadId(
-        conversation.id,
         project.id,
+        conversation.id,
         escalation.telegramThreadId,
       );
     }
@@ -1560,8 +1560,8 @@ const app = new Hono<HonoAppContext>()
         } else if (result.action === "respond") {
           // One-shot AI response. Human ownership remains after it is sent.
           const directedResponseSnapshot = await chatService.takeHumanOwnership(
-            conversationId,
             projectId,
+            conversationId,
           );
           if (!directedResponseSnapshot) {
             return c.json({ ok: true });
