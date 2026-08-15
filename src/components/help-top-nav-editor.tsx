@@ -1,5 +1,5 @@
 import { type ChangeEvent } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,8 +25,8 @@ interface HelpTopNavEditorProps {
 }
 
 const MAX_ITEMS = 3;
-const DEFAULT_BUTTON_CLASSES =
-  "inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors";
+export const DEFAULT_BUTTON_CLASSES =
+  "inline-flex h-9 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors";
 
 type ItemStyle = "link" | "button" | "custom";
 
@@ -185,20 +185,19 @@ function TopNavItemRow({
         </Button>
       </div>
 
-      {style === "custom" && (
-        <div className="space-y-1.5">
-          <Label
-            htmlFor={`help-topnav-classes-${index}`}
-            className="text-xs"
-          >
-            Tailwind classes
-          </Label>
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+          <ChevronDown className="h-3.5 w-3.5 transition-transform duration-150 group-open:rotate-180" />
+          Style classes
+        </summary>
+        <div className="mt-2 space-y-1.5">
           <textarea
             id={`help-topnav-classes-${index}`}
+            aria-label="Style classes"
             value={item.classes ?? ""}
             maxLength={300}
             rows={2}
-            placeholder="inline-flex h-9 items-center px-4 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90"
+            placeholder="inline-flex h-9 items-center px-5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
             disabled={disabled}
             onChange={(e: ChangeEvent<HTMLTextAreaElement>) =>
               onChange({ classes: e.target.value })
@@ -208,11 +207,19 @@ function TopNavItemRow({
             )}
           />
           <p className="text-xs text-muted-foreground">
-            Power users only — write your own classes to fully control how this
-            link looks.
+            See the{" "}
+            <a
+              href="https://tailwindcss.com/docs/styling-with-utility-classes"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              Tailwind docs
+            </a>{" "}
+            for available styles.
           </p>
         </div>
-      )}
+      </details>
     </li>
   );
 }

@@ -15,12 +15,19 @@ interface PaletteOpts {
   mutedFg: number;
   /** % of the foreground made transparent for borders. */
   border: number;
+  /** % of white mixed into --brand: tenant primaries are picked for white
+   *  backgrounds, so dark mode lifts them for readable link text. Buttons
+   *  keep the raw primary via --primary either way. */
+  brandLift?: number;
 }
 
 // Emits the shared token set for one theme (light or dark) so the help center
 // can flip between them via a `.dark` class on <html>.
 function palette(o: PaletteOpts): string {
-  return `  --brand: ${o.primary};
+  const brand = o.brandLift
+    ? `color-mix(in oklch, ${o.primary}, white ${o.brandLift}%)`
+    : o.primary;
+  return `  --brand: ${brand};
   --brand-dark: color-mix(in oklch, ${o.primary}, black 12%);
   --brand-soft: color-mix(in oklch, ${o.primary}, white 25%);
   --background: ${o.bg};
@@ -62,7 +69,7 @@ ${palette({ bg: "#ffffff", fg: "#0a0a0a", primary, code: "#f6f8fa", codeFg: "#1f
   --font-heading: "${fontHeading}", system-ui, sans-serif;
 }
 .dark {
-${palette({ bg: "#08080a", fg: "#f0f0f5", primary, code: "#0d1117", codeFg: "#e6edf3", mutedFg: 45, border: 90 })}
+${palette({ bg: "#08080a", fg: "#f0f0f5", primary, code: "#0d1117", codeFg: "#e6edf3", mutedFg: 45, border: 90, brandLift: 30 })}
 }`;
 }
 
@@ -86,10 +93,16 @@ export function sanitizeFontName(input: string | null | undefined): string | nul
   return isAllowedFont(input) ? input : null;
 }
 
+// The widget's borderRadius is tuned for chat bubbles; on the help pages it
+// drives --radius, which sizes small controls (buttons, inputs). Clamp it so
+// a bubbly widget theme doesn't turn 36px buttons into capsules, while a
+// square brand (0) still renders sharp.
+const MAX_HELP_RADIUS_PX = 12;
+
 function normalizeRadius(value: number | string | null | undefined): string {
   if (value === null || value === undefined) return "0.75rem";
   if (typeof value === "number" && Number.isFinite(value)) {
-    return `${value}px`;
+    return `${Math.max(0, Math.min(MAX_HELP_RADIUS_PX, value))}px`;
   }
   const sanitized = sanitizeRadius(String(value));
   return sanitized ?? "0.75rem";
