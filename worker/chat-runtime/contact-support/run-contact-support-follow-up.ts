@@ -1,0 +1,251 @@
+import { type DrizzleD1Database } from "drizzle-orm/d1";
+import type {
+  PublicConversationRecord,
+  PublicSourceReference,
+} from "../../../shared/maven-conversation";
+import { type PublicConversationStore } from "../../conversations/public-conversation-store";
+import { BillingService } from "../../services/billing-service";
+import { GuidelineService } from "../../services/guideline-service";
+import { type ProjectService } from "../../services/project-service";
+import { TelegramService } from "../../services/telegram-service";
+import { ToolService } from "../../services/tool-service";
+import { type AppEnv } from "../../types";
+import {
+  createLanguageModel,
+  createModelRuntimeState,
+  runWithModelFallback,
+} from "../llm/create-language-model";
+import {
+  fallbackRenderContactTimingMessage,
+  renderContactTimingMessage,
+} from "../llm/render-contact-timing-message";
+import { logWarn } from "../../observability";
+import { normalizeConversationHistory } from "../orchestration/normalize-history";
+import { runMavenTurn } from "../orchestration/run-maven-turn";
+import { buildSupportTurnOpening } from "../prompt/sections";
+import {
+  createStreamingStripState,
+  flushStreamingStripState,
+  stripInternalTokensStreaming,
+} from "../streaming/internal-tokens";
+import {
+  type MavenStreamPart,
+  type SupportPromptSettings,
+} from "../types";
+import { buildContactFallbackMessage } from "./contact-support";
+
+export interface ContactSupportFollowUpOptions {
+  db: DrizzleD1Database<Record<string, unknown>>;
+  env: AppEnv;
+  executionCtx: ExecutionContext;
+  chatService: PublicConversationStore;
+  projectService: ProjectService;
+  project: { id: string; userId: string; name: string };
+  settings: (SupportPromptSettings & Record<string, unknown>) | null;
+  conversation: PublicConversationRecord;
+  formMessage: string;
+  isFirstVisitorTurn: boolean;
+}
+
+function getMetadataString(
+  metadata: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+async function collectVisibleText(
+  stream: AsyncIterable<MavenStreamPart>,
+): Promise<string> {
+  const stripState = createStreamingStripState();
+  let text = "";
+  for await (const part of stream) {
+    if (part.type !== "text-delta" || typeof part.text !== "string") continue;
+    const stripped = stripInternalTokensStreaming(stripState, part.text);
+    if (stripped.emit) text += stripped.emit;
+  }
+  const flushed = flushStreamingStripState(stripState);
+  if (flushed.emit) text += flushed.emit;
+  return text.trim();
+}
+
+// The route responds before this runs; deliver the reply through the child so
+// a connected widget receives it over its live agent session.
+export async function runContactSupportFollowUp(
+  options: ContactSupportFollowUpOptions,
+): Promise<void> {
+  const { db, env, conversation, project, settings } = options;
+  const logContext = {
+    projectId: project.id,
+    conversationId: conversation.id,
+  };
+  // Ownership snapshot from right after team_requested; a human joining while
+  // the model composes advances the chat state and voids the append below.
+  const ownershipSnapshot = {
+    status: conversation.status,
+    chatState: JSON.stringify(conversation.chatState),
+  };
+  const turnContext = {
+    kind: "contact_support",
+    isFirstVisitorTurn: options.isFirstVisitorTurn,
+  } as const;
+  const visitorInfo = {
+    name: conversation.visitorName,
+    email: conversation.visitorEmail,
+  };
+  const modelRuntime = createModelRuntimeState({
+    model: env.AI_MODEL,
+    geminiApiKey: env.GEMINI_API_KEY || null,
+    openaiApiKey: env.OPENAI_API_KEY || null,
+  });
+
+  const baseOpening = buildSupportTurnOpening(turnContext, visitorInfo);
+  let timingMessage = fallbackRenderContactTimingMessage();
+  if (settings?.avgResponseTime?.trim()) {
+    try {
+      timingMessage = await runWithModelFallback({
+        runtime: modelRuntime,
+        stage: "render_contact_timing",
+        operation: (config) =>
+          renderContactTimingMessage(createLanguageModel(config), {
+            nowMs: Date.now(),
+            currentMessage: options.formMessage,
+            workingHours: settings.workingHours,
+            avgResponseTime: settings.avgResponseTime,
+            companyContext: settings.companyContext,
+            visitorLocation: {
+              timezone: getMetadataString(conversation.metadata, "timezone"),
+              city: getMetadataString(conversation.metadata, "city"),
+              region: getMetadataString(conversation.metadata, "region"),
+              country: getMetadataString(conversation.metadata, "country"),
+            },
+          }, { throwOnModelError: true }),
+        logContext,
+      });
+    } catch (error) {
+      logWarn("contact_follow_up.timing_fallback", {
+        ...logContext,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  const responseOpening = `${baseOpening}${timingMessage}\n\n`;
+
+  let content: string;
+  let sources: PublicSourceReference[] = [];
+  try {
+    const rawHistory = (
+      await options.chatService.getPublicMessages(conversation.id, project.id)
+    ).map((message) => ({
+      role: message.author,
+      content: message.content,
+      createdAt: message.createdAt,
+    }));
+    const conversationHistory = normalizeConversationHistory({
+      rawHistory,
+      currentMessage: options.formMessage,
+      persistedCurrentMessage: options.formMessage,
+    });
+    const guidelines = await new GuidelineService(db).getEnabledByProject(
+      project.id,
+    );
+    let toolPermits = 0;
+    const turn = await runMavenTurn({
+      context: {
+        channel: "public",
+        projectId: project.id,
+        conversationId: conversation.id,
+        actorUserId: null,
+        customerId: conversation.customerId,
+        ownership: ownershipSnapshot,
+      },
+      dependencies: {
+        db,
+        env,
+        modelRuntime,
+        toolService: new ToolService(db),
+        projectName: project.name,
+        settings: settings ?? {
+          toneOfVoice: "professional",
+          customTonePrompt: null,
+          companyContext: null,
+          botName: null,
+          agentName: null,
+          workingHours: null,
+          avgResponseTime: null,
+        },
+        promptOptions: {
+          guidelines: guidelines.map((guideline) => ({
+            condition: guideline.condition,
+            instruction: guideline.instruction,
+          })),
+          agentHandbackInstructions: getMetadataString(
+            conversation.metadata,
+            "agentHandbackInstructions",
+          ),
+          visitorInfo,
+          timeContext: { nowMs: Date.now(), conversationHistory },
+          turnContext,
+          aiParticipation: "assist_until_agent",
+          escalated: true,
+        },
+        publicToolDependencies: {
+          executionCtx: options.executionCtx,
+          chatService: options.chatService,
+          projectService: options.projectService,
+          telegramService: new TelegramService(db),
+          acquireHttpRateLimitPermit: () => (toolPermits += 1) <= 100,
+          onTeamRequested() {},
+        },
+      },
+      conversationHistory,
+      currentMessage: options.formMessage,
+    });
+    const visibleText = await collectVisibleText(turn.fullStream);
+    sources = turn.collectedSources.map((source) => ({
+      title: source.title,
+      url: source.url ?? null,
+      type: source.type,
+    }));
+    content = visibleText
+      ? `${responseOpening}${visibleText}`
+      : buildContactFallbackMessage(responseOpening);
+    if (!visibleText) sources = [];
+  } catch (error) {
+    logWarn("contact_follow_up.turn_failed", {
+      ...logContext,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    content = buildContactFallbackMessage(responseOpening);
+    sources = [];
+  }
+
+  const botMessage = await options.chatService
+    .addPublicBotMessageIfOwnershipMatches(
+      {
+        conversationId: conversation.id,
+        content,
+        sources: sources.length > 0 ? JSON.stringify(sources) : null,
+        senderName: typeof settings?.botName === "string"
+          ? settings.botName
+          : null,
+      },
+      project.id,
+      ownershipSnapshot,
+    );
+  if (!botMessage) {
+    logWarn("contact_follow_up.skipped_ownership_changed", logContext);
+    return;
+  }
+
+  const billingService = new BillingService(db, env);
+  const subscription = await billingService.getSubscriptionByUserId(
+    project.userId,
+  );
+  await billingService.incrementMessageUsageOnce(
+    botMessage.id,
+    project.userId,
+    subscription,
+  );
+}

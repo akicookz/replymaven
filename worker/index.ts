@@ -88,6 +88,7 @@ import {
   extractFormName,
   markContactAiUnavailable,
 } from "./chat-runtime/contact-support/contact-support";
+import { runContactSupportFollowUp } from "./chat-runtime/contact-support/run-contact-support-follow-up";
 import { createEscalation } from "./chat-runtime/post-turn/escalation";
 import { buildToolRegistry } from "./chat-runtime/tools/http-tool-executor";
 import { toToolDefinition } from "./chat-runtime/types";
@@ -1320,13 +1321,43 @@ const app = new Hono<HonoAppContext>()
       botName: settings?.botName ?? null,
       isFirstVisitorTurn,
     });
-    // The conversation is already in human ownership (waiting_agent), so an
-    // AI turn would refuse to run; the team follow-up is the product path.
+
+    // team_requested leaves the AI in assist_until_agent, so Maven answers in
+    // the background while the team review is pending. agent_replied means a
+    // human already owns the conversation; the AI stays out.
+    const billingService = new BillingService(db, c.env);
+    const subscription = await billingService.getSubscriptionByUserId(
+      project.userId,
+    );
+    const aiAllowed = statusAfterTeamRequest === "waiting_agent" &&
+      Boolean(subscription && billingService.isSubscriptionActive(subscription)) &&
+      (await billingService.checkMessageLimit(project.userId, subscription))
+        .allowed;
+    if (aiAllowed) {
+      c.executionCtx.waitUntil(runContactSupportFollowUp({
+        db,
+        env: c.env,
+        executionCtx: c.executionCtx,
+        chatService,
+        projectService,
+        project: {
+          id: project.id,
+          userId: project.userId,
+          name: project.name,
+        },
+        settings,
+        conversation,
+        formMessage,
+        isFirstVisitorTurn,
+      }));
+    }
     return c.json(
       {
         id: conversation.id,
         created,
-        ...markContactAiUnavailable(contactAccepted),
+        ...(aiAllowed
+          ? contactAccepted
+          : markContactAiUnavailable(contactAccepted)),
       },
       201,
     );
