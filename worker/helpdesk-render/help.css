@@ -71,7 +71,6 @@
   background: var(--code);
   color: var(--code-foreground);
   padding: 1rem;
-  border: 1px solid var(--border);
   border-radius: 12px;
   overflow-x: auto;
   font-size: 0.8125rem;
@@ -106,7 +105,7 @@
   border-spacing: 0;
   font-size: 0.875rem;
   margin: 1.75rem 0;
-  border: 1px solid var(--border);
+  background: color-mix(in oklch, var(--muted), transparent 75%);
   border-radius: 16px;
   overflow: hidden;
 }
@@ -117,11 +116,10 @@
   vertical-align: top;
 }
 .help-prose thead th {
-  background: color-mix(in oklch, var(--muted), transparent 60%);
+  background: color-mix(in oklch, var(--muted), transparent 25%);
   font-weight: 600;
   font-size: 0.875rem;
   color: var(--foreground);
-  border-bottom: 1px solid var(--border);
 }
 .help-prose strong { font-weight: 600; color: var(--foreground); }
 .help-prose em { font-style: italic; }
@@ -358,6 +356,12 @@
   max-width: 80rem;
   width: 100%;
 }
+/* The card column responds to its own width (not the viewport) so the grid
+   stays 1 column whenever the Popular Articles rail squeezes it. */
+.help-index-main {
+  container-type: inline-size;
+  min-width: 0;
+}
 .help-index-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -365,7 +369,7 @@
   align-items: stretch;
   justify-content: start;
 }
-@media (min-width: 640px) {
+@container (min-width: 40rem) {
   .help-index-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (min-width: 1024px) {
@@ -626,19 +630,19 @@
   width: 100%;
   border-radius: 1rem;
   overflow: hidden;
-  background: var(--muted);
+  background: var(--card);
   text-decoration: none;
   color: inherit;
   transition: background-color 150ms ease;
 }
 .help-doc-card:hover {
-  background: color-mix(in oklch, var(--muted), var(--foreground) 6%);
+  background: color-mix(in oklch, var(--card), var(--foreground) 4%);
 }
 .help-doc-card-thumb {
   aspect-ratio: 16 / 9;
   width: 100%;
   overflow: hidden;
-  background: color-mix(in oklch, var(--muted), var(--foreground) 5%);
+  background: color-mix(in oklch, var(--card), var(--foreground) 3%);
 }
 .help-doc-card-thumb img {
   width: 100%;
@@ -709,25 +713,32 @@
   text-decoration: none;
   color: var(--foreground);
   transition: background-color 150ms ease;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
 }
 .help-article-nav a:hover {
   background: color-mix(in oklch, var(--card), var(--foreground) 4%);
 }
-.help-article-nav-direction {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 600;
+.help-article-nav-chevron {
   color: var(--muted-foreground);
+  font-size: 1.15rem;
+  line-height: 1;
+  flex-shrink: 0;
 }
 .help-article-nav-title {
-  margin: 0.25rem 0 0;
+  margin: 0;
   font-size: 0.95rem;
   font-weight: 500;
   color: var(--foreground);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .help-article-nav-next {
-  text-align: right;
+  justify-content: flex-end;
 }
 
 /* ─── Hero search (index + search page) ──────────────────────────────────── */
@@ -848,7 +859,6 @@
 .help-prose .callout {
   border-radius: var(--radius);
   padding: 0.85rem 1rem;
-  border: 1px solid var(--border);
   background: var(--muted);
   color: var(--foreground);
   font-style: normal;
@@ -856,21 +866,19 @@
 }
 .help-prose .callout > p { margin: 0; }
 .help-prose .callout > * + * { margin-top: 0.5em; }
+/* A bordered box needs more air than the uniform 1rem block gap. */
+.help-prose > .callout { margin-block: 1.5rem; }
 .help-prose .callout-info {
-  border-color: color-mix(in srgb, #3b82f6 25%, var(--border));
-  background: color-mix(in srgb, #3b82f6 5%, var(--background));
+  background: color-mix(in srgb, #3b82f6 9%, var(--background));
 }
 .help-prose .callout-warning {
-  border-color: color-mix(in srgb, #f59e0b 30%, var(--border));
-  background: color-mix(in srgb, #f59e0b 6%, var(--background));
+  background: color-mix(in srgb, #f59e0b 10%, var(--background));
 }
 .help-prose .callout-tip {
-  border-color: color-mix(in srgb, #10b981 25%, var(--border));
-  background: color-mix(in srgb, #10b981 5%, var(--background));
+  background: color-mix(in srgb, #10b981 9%, var(--background));
 }
 .help-prose .callout-danger {
-  border-color: color-mix(in srgb, #ef4444 30%, var(--border));
-  background: color-mix(in srgb, #ef4444 6%, var(--background));
+  background: color-mix(in srgb, #ef4444 10%, var(--background));
 }
 
 /* ─── Steps ──────────────────────────────────────────────────────────────── */

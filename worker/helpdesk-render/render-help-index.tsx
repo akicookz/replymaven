@@ -84,7 +84,7 @@ export function renderHelpIndex(props: RenderHelpIndexProps) {
                 : ""
             }
           >
-            <div>
+            <div class="help-index-main">
               <form
                 action={`${homeUrl}/search`}
                 method="get"

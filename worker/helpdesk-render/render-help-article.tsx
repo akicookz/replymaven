@@ -148,6 +148,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
           <nav class="help-article-nav" aria-label="Article pagination">
             {props.prevArticle ? (
               <a
+                aria-label={`Previous: ${props.prevArticle.title}`}
                 href={buildHelpUrl({
                   projectSlug: props.project.slug,
                   customUrl: props.helpCustomUrl,
@@ -155,8 +156,12 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
                   article: props.prevArticle.slug,
                 })}
               >
-                <p class="help-article-nav-direction">Previous</p>
-                <p class="help-article-nav-title">{props.prevArticle.title}</p>
+                <span class="help-article-nav-chevron" aria-hidden="true">
+                  ‹
+                </span>
+                <span class="help-article-nav-title">
+                  {props.prevArticle.title}
+                </span>
               </a>
             ) : (
               <div />
@@ -164,6 +169,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
             {props.nextArticle ? (
               <a
                 class="help-article-nav-next"
+                aria-label={`Next: ${props.nextArticle.title}`}
                 href={buildHelpUrl({
                   projectSlug: props.project.slug,
                   customUrl: props.helpCustomUrl,
@@ -171,8 +177,12 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
                   article: props.nextArticle.slug,
                 })}
               >
-                <p class="help-article-nav-direction">Next</p>
-                <p class="help-article-nav-title">{props.nextArticle.title}</p>
+                <span class="help-article-nav-title">
+                  {props.nextArticle.title}
+                </span>
+                <span class="help-article-nav-chevron" aria-hidden="true">
+                  ›
+                </span>
               </a>
             ) : (
               <div />
