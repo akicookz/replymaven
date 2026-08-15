@@ -735,6 +735,10 @@ function Conversations() {
     conversationId: string,
     messages: Message[],
   ) => {
+    // useAgentChat mounts with an empty list before it hydrates; an opened
+    // conversation always has at least the visitor message, so an empty
+    // emission is that transient and must not wipe the cached thread.
+    if (messages.length === 0) return;
     queryClient.setQueryData<ConversationDetail | undefined>(
       ["conversation-detail", conversationId],
       (old) => old
