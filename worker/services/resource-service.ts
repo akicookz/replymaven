@@ -11,7 +11,10 @@ import {
   type CrawledPageRow,
 } from "../db";
 import { CrawlService, type CrawlMessage } from "./crawl-service";
-import { rewriteHelpUrlIfNeeded } from "../helpdesk-render/build-help-url";
+import {
+  resolveHelpCustomUrl,
+  rewriteHelpUrlIfNeeded,
+} from "../helpdesk-render/build-help-url";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -578,7 +581,9 @@ export class ResourceService {
       .where(eq(projects.id, projectId))
       .limit(1);
     const projectSlug = projectMeta[0]?.slug ?? null;
-    const helpCustomUrl = projectMeta[0]?.helpCustomUrl ?? null;
+    const helpCustomUrl = projectSlug
+      ? resolveHelpCustomUrl(projectSlug, projectMeta[0]?.helpCustomUrl)
+      : null;
     const rewriteUrl = (url: string | null): string | null => {
       if (!url) return url;
       if (!projectSlug) return url;

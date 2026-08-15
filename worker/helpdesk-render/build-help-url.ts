@@ -1,5 +1,18 @@
 const CANONICAL_BASE = "https://replymaven.com";
 
+// Our own docs live on the apex domain, which tenant settings are forbidden
+// from pointing at — so the mapping is resolved in code, not stored config.
+const OWN_HELP_CUSTOM_URLS: Record<string, string> = {
+  replymaven: "https://replymaven.com/docs",
+};
+
+export function resolveHelpCustomUrl(
+  projectSlug: string,
+  stored: string | null | undefined,
+): string | null {
+  return OWN_HELP_CUSTOM_URLS[projectSlug] ?? stored ?? null;
+}
+
 export interface BuildHelpUrlInput {
   projectSlug: string;
   customUrl: string | null | undefined;

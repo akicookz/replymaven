@@ -4,7 +4,10 @@ import { type HelpArticleRow, type HelpCategoryRow } from "./db";
 import { HelpdeskService } from "./services/helpdesk-service";
 import { ProjectService } from "./services/project-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
-import { buildHelpUrl } from "./helpdesk-render/build-help-url";
+import {
+  buildHelpUrl,
+  resolveHelpCustomUrl,
+} from "./helpdesk-render/build-help-url";
 import {
   createHelpArticleSchema,
   createHelpCategorySchema,
@@ -575,7 +578,7 @@ async function liveArticleUrl(
   const settings = await new ProjectService(context.db).getSettings(project.id);
   return buildHelpUrl({
     projectSlug: project.slug,
-    customUrl: settings?.helpCustomUrl ?? null,
+    customUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
     category: category.slug,
     article: article.slug,
   });

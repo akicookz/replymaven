@@ -62,7 +62,11 @@ import {
   renderMarkdown,
   ensureArticleTitle,
 } from "./helpdesk-render/render-markdown";
-import { isOwnHelpCenterUrl, normalizeHelpCustomUrl } from "./helpdesk-render/build-help-url";
+import {
+  isOwnHelpCenterUrl,
+  normalizeHelpCustomUrl,
+  resolveHelpCustomUrl,
+} from "./helpdesk-render/build-help-url";
 import { groupArticlesByCategory } from "./helpdesk-render/group-articles";
 import {
   encryptHeaders,
@@ -1757,7 +1761,7 @@ const app = new Hono<HonoAppContext>()
       project,
       categories,
       articles,
-      helpCustomUrl: settings?.helpCustomUrl ?? null,
+      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
     });
     return new Response(xml, {
       headers: {
@@ -1780,7 +1784,7 @@ const app = new Hono<HonoAppContext>()
     const settings = await projectService.getSettings(project.id);
     const body = renderRobots({
       projectSlug: project.slug,
-      helpCustomUrl: settings?.helpCustomUrl ?? null,
+      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
     });
     return new Response(body, {
       headers: {
@@ -1842,7 +1846,7 @@ const app = new Hono<HonoAppContext>()
       ensureArticleTitle(match.article.content ?? "", match.article.title),
       {
         projectSlug: project.slug,
-        customUrl: settings?.helpCustomUrl ?? null,
+        customUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       },
     );
 
@@ -1859,7 +1863,7 @@ const app = new Hono<HonoAppContext>()
       prevArticle,
       nextArticle,
       widgetConfig: widgetConfigRow,
-      helpCustomUrl: settings?.helpCustomUrl ?? null,
+      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
@@ -1938,7 +1942,7 @@ const app = new Hono<HonoAppContext>()
       categories,
       articlesByCategory,
       widgetConfig: widgetConfigRow,
-      helpCustomUrl: settings?.helpCustomUrl ?? null,
+      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
@@ -1992,7 +1996,7 @@ const app = new Hono<HonoAppContext>()
       articles,
       articlesByCategory,
       widgetConfig: widgetConfigRow,
-      helpCustomUrl: settings?.helpCustomUrl ?? null,
+      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
@@ -2054,7 +2058,7 @@ const app = new Hono<HonoAppContext>()
       articlesByCategory,
       popularArticles,
       widgetConfig: widgetConfigRow,
-      helpCustomUrl: settings?.helpCustomUrl ?? null,
+      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
@@ -2064,9 +2068,10 @@ const app = new Hono<HonoAppContext>()
 
   // ─── Own docs (/docs) ────────────────────────────────────────────────────
   // replymaven.com/docs is the "replymaven" project's help center, served by
-  // re-dispatching to the canonical /help routes above. The project's
-  // helpCustomUrl points at https://replymaven.com/docs so every rendered
-  // link, canonical tag, and sitemap entry stays on /docs.
+  // re-dispatching to the canonical /help routes above. resolveHelpCustomUrl
+  // maps our project to https://replymaven.com/docs in code (tenant settings
+  // may not point at our domain), so every rendered link, canonical tag, and
+  // sitemap entry stays on /docs.
   .get("/docs", serveOwnDocs)
   .get("/docs/*", serveOwnDocs)
 
@@ -5176,7 +5181,7 @@ const app = new Hono<HonoAppContext>()
         isOwnHelpCenterUrl(
           parsed.data.url,
           project.slug,
-          settings?.helpCustomUrl,
+          resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
         )
       ) {
         return c.json(
@@ -6275,7 +6280,7 @@ const app = new Hono<HonoAppContext>()
       ensureArticleTitle(article.content ?? "", article.title),
       {
         projectSlug: project.slug,
-        customUrl: settings?.helpCustomUrl ?? null,
+        customUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       },
     );
 
@@ -6292,7 +6297,7 @@ const app = new Hono<HonoAppContext>()
       prevArticle,
       nextArticle,
       widgetConfig: widgetConfigRow,
-      helpCustomUrl: settings?.helpCustomUrl ?? null,
+      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {

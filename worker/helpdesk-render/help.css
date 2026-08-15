@@ -357,7 +357,9 @@
   width: 100%;
 }
 /* The card column responds to its own width (not the viewport) so the grid
-   stays 1 column whenever the Popular Articles rail squeezes it. */
+   drops to 1 column only when the Popular Articles rail truly squeezes it.
+   Under the 80rem shell the column is ~33rem at lg and ~28rem in narrower
+   frames, so the 31rem threshold separates those two cases. */
 .help-index-main {
   container-type: inline-size;
   min-width: 0;
@@ -369,7 +371,7 @@
   align-items: stretch;
   justify-content: start;
 }
-@container (min-width: 40rem) {
+@container (min-width: 31rem) {
   .help-index-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (min-width: 1024px) {
