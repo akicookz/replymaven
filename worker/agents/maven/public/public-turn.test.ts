@@ -135,6 +135,17 @@ describe("public Agent turn parity", () => {
     expect(body).toContain('"phase":"retrieval"');
     expect(body).toContain('"delta":"Hi Ada,\\n\\n"');
     expect(body).toContain('"delta":"Answer."');
+
+    // The greeting is held until reply text exists: phases first, then the
+    // text part opens with the greeting as its first delta — never a lone
+    // "Hi Name," bubble sitting through the model run.
+    const thinkingIndex = body.indexOf('"phase":"thinking"');
+    const retrievalIndex = body.indexOf('"phase":"retrieval"');
+    const textStartIndex = body.indexOf('"type":"text-start"');
+    const openingIndex = body.indexOf('"delta":"Hi Ada,\\n\\n"');
+    expect(retrievalIndex).toBeGreaterThan(thinkingIndex);
+    expect(textStartIndex).toBeGreaterThan(retrievalIndex);
+    expect(openingIndex).toBeGreaterThan(textStartIndex);
   });
 
   test("uses a goodbye fallback for an otherwise empty resolved response", async () => {

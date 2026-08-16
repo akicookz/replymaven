@@ -175,6 +175,11 @@ export function createPublicTurnResponse(
       // server-owned opening greeting does, or the whole model run would show
       // a frozen greeting with no status.
       let turnTextStarted = false;
+      // The opening greeting is held until real reply text exists. Emitting
+      // it upfront left a half bubble ("Hi Name,") sitting alone for the
+      // whole model run; held, the visitor sees phases first and the greeting
+      // arrives as the first words of the actual reply.
+      let pendingOpening = input.openingText ?? "";
       // Phase keys only; the widget owns the user-facing copy.
       function emitActivity(phase: string): void {
         if (turnTextStarted) return;
@@ -190,6 +195,11 @@ export function createPublicTurnResponse(
           writer.write({ type: "text-start", id: textPartId });
           textStarted = true;
         }
+        if (pendingOpening) {
+          const opening = pendingOpening;
+          pendingOpening = "";
+          writer.write({ type: "text-delta", id: textPartId, delta: opening });
+        }
         writer.write({ type: "text-delta", id: textPartId, delta });
       }
       function emitTurnText(delta: string): void {
@@ -203,9 +213,6 @@ export function createPublicTurnResponse(
       let internalTokens: InternalToken[] = [];
       let sources: PublicSourceReference[] = [];
       let httpExecutionIds: string[] = [];
-      if (input.openingText) {
-        emitText(input.openingText);
-      }
       if (input.immediateText !== undefined) {
         emitTurnText(input.immediateText);
       } else {

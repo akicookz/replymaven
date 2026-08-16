@@ -950,6 +950,12 @@ import {
       text-underline-offset: 2px;
       cursor: pointer;
     }
+    /* A reply that is still streaming hides its avatar/name footer so the
+       growing bubble and the phase indicator below it read as one message,
+       not a finished reply plus a second one being typed. */
+    .rm-message-row.rm-streaming .rm-msg-footer {
+      display: none;
+    }
     .rm-sender-label {
       font-size: 11px;
       font-weight: 500;
@@ -5143,6 +5149,31 @@ import {
     }
   }
 
+  let streamingResponseRowId: string | null = null;
+
+  function markStreamingResponseRow(id: string | null): void {
+    if (streamingResponseRowId === id) return;
+    if (streamingResponseRowId) {
+      messagesContainer.querySelector(
+        `[data-message-id="${CSS.escape(streamingResponseRowId)}"]`,
+      )?.classList.remove("rm-streaming");
+    }
+    streamingResponseRowId = id;
+    if (id) {
+      messagesContainer.querySelector(
+        `[data-message-id="${CSS.escape(id)}"]`,
+      )?.classList.add("rm-streaming");
+    }
+  }
+
+  function isTurnStreaming(): boolean {
+    return !latestAgentActivity.error &&
+      !latestAgentActivity.isRecovering &&
+      (latestAgentActivity.status === "submitted" ||
+        latestAgentActivity.status === "streaming" ||
+        latestAgentActivity.isServerStreaming);
+  }
+
   function handleAgentMessages(messages: PublicMessageRecord[]): void {
     const nextIds = new Set(messages.map((message) => message.id));
     for (const id of authoritativeMessageIds) {
@@ -5179,6 +5210,15 @@ import {
       ) hideTyping();
     }
     authoritativeMessageIds = nextIds;
+
+    const lastMessage = messages.at(-1);
+    markStreamingResponseRow(
+      lastMessage &&
+        (lastMessage.author === "bot" || lastMessage.author === "agent") &&
+        isTurnStreaming()
+        ? lastMessage.id
+        : null,
+    );
 
     if (messages.length > 0) {
       introMessageText = null;
@@ -5248,6 +5288,7 @@ import {
     latestAgentActivity = activity;
     if (activity.error) {
       hideTyping();
+      markStreamingResponseRow(null);
       console.error("[ReplyMaven] Conversation Agent connection failed:", activity.error);
       if (activity.errorSource === "turn") showTurnFailureNote();
       return;
@@ -5265,6 +5306,7 @@ import {
       return;
     }
     hideTyping();
+    markStreamingResponseRow(null);
     reportDelivered();
     queueMicrotask(() => {
       flushPendingIncomingResponses(agentChatClient.messages());
