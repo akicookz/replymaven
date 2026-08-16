@@ -6866,16 +6866,6 @@ const app = new Hono<HonoAppContext>()
     }).catch(() => null);
     if (!message) return c.json({ error: "Conversation not found" }, 404);
 
-    // Emit "joined" once — only when picking up an escalated conversation for the first time
-    if (conversation.status === "waiting_agent") {
-      await chatService.appendSystem({
-        projectId: project.id,
-        conversationId: conversation.id,
-        kind: "joined",
-        content: `${user.name} joined the conversation`,
-      }).catch(() => {});
-    }
-
     return c.json(toLegacyMessageDto(message), 201);
   })
   .post("/api/projects/:id/conversations/:convId/send-email", async (c) => {

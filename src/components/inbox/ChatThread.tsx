@@ -9,6 +9,7 @@ import {
 import { ArrowDown } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ChatPerspective } from "@/lib/inbox/sidechat";
+import { parseSystemKind } from "@/lib/inbox/system-events";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import { cn } from "@/lib/utils";
 import MessageBubble from "./MessageBubble";
@@ -144,7 +145,16 @@ export default function ChatThread({
     messages.length - visibleMessageCount,
   );
   const visibleMessages = useMemo(
-    () => messages.slice(firstVisibleIndex),
+    () =>
+      messages
+        .slice(firstVisibleIndex)
+        // "joined" pills carry no information; filtering here (not in the
+        // pill) keeps date dividers and grouping on the real messages.
+        .filter(
+          (message) =>
+            message.role !== "system" ||
+            parseSystemKind(message.sources) !== "joined",
+        ),
     [firstVisibleIndex, messages],
   );
 
