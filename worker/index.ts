@@ -208,6 +208,12 @@ import {
   reorderHelpItemsSchema,
   helpTestProxySchema,
 } from "./validation";
+import {
+  MAX_HELP_IMAGE_BYTES,
+  verifyHelpImageUploadToken,
+} from "./security/help-image-upload-token";
+import { BodyTooLargeError, readLimitedBody } from "./lib/read-limited-body";
+import { uploadExtensionFor } from "./lib/upload-extension";
 
 // ─── Simple IP-based rate limiter (in-memory, per-isolate) ────────────────────
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
@@ -2682,6 +2688,61 @@ const app = new Hono<HonoAppContext>()
       console.error("Stripe webhook error:", err);
       return c.json({ error: "Webhook verification failed" }, 400);
     }
+  })
+
+  // ─── Help Image Signed Upload ───────────────────────────────────────────────
+  // Public by design: the bearer of a valid short-lived token is authorized,
+  // because the MCP client PUTting the bytes has no dashboard session. The
+  // token pins one R2 key and one content type, so it cannot write anything
+  // else. Issued by the create_help_image_upload MCP tool.
+  .put("/api/help-images/upload", async (c) => {
+    const token = c.req.query("token");
+    if (!token) return c.json({ error: "Missing token" }, 400);
+
+    let payload;
+    try {
+      payload = await verifyHelpImageUploadToken({
+        token,
+        secret: c.env.ENCRYPTION_KEY,
+        nowSeconds: Math.floor(Date.now() / 1000),
+      });
+    } catch {
+      return c.json({ error: "Invalid or expired upload token" }, 401);
+    }
+
+    // Streamed with a running budget rather than buffered then measured: a
+    // token holder could otherwise declare a small Content-Length and stream
+    // enough bytes to kill the isolate before any check ran.
+    let bytes: Uint8Array;
+    try {
+      bytes = await readLimitedBody(
+        c.req.raw.body,
+        MAX_HELP_IMAGE_BYTES,
+        c.req.header("content-length"),
+      );
+    } catch (err) {
+      if (err instanceof BodyTooLargeError) {
+        return c.json({ error: "File too large (max 10MB)" }, 413);
+      }
+      throw err;
+    }
+    if (bytes.byteLength === 0) return c.json({ error: "Empty body" }, 400);
+
+    await c.env.UPLOADS.put(payload.key, bytes, {
+      // From the token, not the request header: the signature authorized this
+      // exact type, and a mismatched header must not change what we store.
+      httpMetadata: { contentType: payload.contentType },
+      customMetadata: {
+        ownerType: "help-image",
+        projectId: payload.projectId,
+      },
+    });
+
+    return c.json({
+      ok: true,
+      url: `/api/uploads/${payload.key}`,
+      bytes: bytes.byteLength,
+    });
   })
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -6393,10 +6454,16 @@ const app = new Hono<HonoAppContext>()
 
     const service = new HelpdeskService(db, c.env.UPLOADS);
     try {
+      const { expectedUpdatedAt, ...rest } = parsed.data;
       const updated = await service.updateArticle(
         c.req.param("artId"),
         project.id,
-        parsed.data,
+        {
+          ...rest,
+          expectedUpdatedAt: expectedUpdatedAt
+            ? new Date(expectedUpdatedAt)
+            : undefined,
+        },
         project.slug,
       );
       if (!updated) return c.json({ error: "Not found" }, 404);
@@ -6408,7 +6475,7 @@ const app = new Hono<HonoAppContext>()
       const code = (err as { code?: string }).code;
       const message =
         err instanceof Error ? err.message : "Failed to update article";
-      if (code === "slug_conflict") {
+      if (code === "slug_conflict" || code === "stale_article") {
         return c.json({ error: message, code }, 409);
       }
       return c.json({ error: message }, 400);
@@ -7621,11 +7688,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "File too large (max 10MB)" }, 400);
     }
 
-    // Sanitize the extension to ASCII alphanumerics — the returned URL is
-    // later validated against a strict same-origin path regex, and raw
-    // filename extensions can contain spaces/quotes that would fail it.
-    const rawExt = fileObj.name.split(".").pop() ?? "";
-    const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
+    const ext = uploadExtensionFor(fileObj.type, fileObj.name);
     const requestedProjectId = formData["projectId"];
     const requestedConversationId = formData["conversationId"];
     let uploadKey: string;

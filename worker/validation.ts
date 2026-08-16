@@ -1003,6 +1003,17 @@ export const updateHelpArticleSchema = createHelpArticleSchema
   .partial()
   .extend({
     categoryId: z.string().min(1).optional(),
+    // `.partial()` does NOT strip the `.default()` these carry in the create
+    // schema, so without re-declaring them a PATCH that omits `content` blanks
+    // the body and one that omits `status` unpublishes the article.
+    content: z.string().max(100_000).optional(),
+    status: z.enum(["draft", "published"]).optional(),
+    contentPatch: z.string().min(1).max(100_000).optional(),
+    expectedUpdatedAt: z.string().datetime().optional(),
+  })
+  .refine((data) => !(data.content !== undefined && data.contentPatch !== undefined), {
+    message: "Pass either content or contentPatch, not both",
+    path: ["contentPatch"],
   });
 
 export const previewHelpArticleSchema = z.object({

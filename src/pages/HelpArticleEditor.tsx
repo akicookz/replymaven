@@ -103,6 +103,9 @@ function HelpArticleEditorPage() {
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  // Body images upload asynchronously; until they land the content holds
+  // `blob:` URLs that would be persisted as dead links.
+  const [bodyImagesUploading, setBodyImagesUploading] = useState(false);
 
   const categoriesQuery = useQuery<CategoryResponse[]>({
     queryKey: ["help-categories", projectId],
@@ -295,6 +298,10 @@ function HelpArticleEditorPage() {
   }
 
   function handleSave() {
+    if (bodyImagesUploading) {
+      toast.error("Wait for the image uploads to finish");
+      return;
+    }
     if (!form.title.trim()) {
       toast.error("Article needs a title (type one in the H1 line)");
       return;
@@ -497,7 +504,7 @@ function HelpArticleEditorPage() {
             variant="outline"
             size="sm"
             onClick={handleTogglePublish}
-            disabled={isNew || saving || dirty}
+            disabled={isNew || saving || dirty || bodyImagesUploading}
             title={dirty ? "Save your changes before publishing" : undefined}
           >
             {form.status === "published" ? "Unpublish" : "Publish"}
@@ -506,7 +513,10 @@ function HelpArticleEditorPage() {
             type="button"
             size="sm"
             onClick={handleSave}
-            disabled={saving || (!dirty && !isNew)}
+            disabled={
+              saving || bodyImagesUploading || (!dirty && !isNew)
+            }
+            title={bodyImagesUploading ? "Uploading images" : undefined}
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
             {isNew ? "Create" : "Save"}
@@ -526,6 +536,7 @@ function HelpArticleEditorPage() {
             value={form.content}
             onChange={(md) => setForm((f) => ({ ...f, content: md }))}
             onMetaChange={handleMetaChange}
+            onUploadingChange={setBodyImagesUploading}
             variant="page"
             accentColor={widgetConfigQuery.data?.primaryColor}
           />

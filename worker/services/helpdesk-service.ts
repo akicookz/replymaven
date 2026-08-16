@@ -1,6 +1,7 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { and, asc, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { type SQLiteColumn } from "drizzle-orm/sqlite-core";
+import { applyPatch, parsePatch } from "diff";
 import {
   helpArticles,
   helpCategories,
@@ -47,8 +48,28 @@ interface UpdateArticleInput {
   slug?: string;
   excerpt?: string | null;
   content?: string;
+  /** Unified diff applied to the current body. Mutually exclusive with content. */
+  contentPatch?: string;
+  /** Optimistic concurrency guard: the updatedAt the caller last read. */
+  expectedUpdatedAt?: Date;
   status?: "draft" | "published";
   sortOrder?: number;
+}
+
+/** Thrown when a write is rejected rather than applied. `code` is surfaced to callers. */
+export class HelpArticleWriteError extends Error {
+  constructor(
+    message: string,
+    readonly code:
+      | "patch_did_not_apply"
+      | "malformed_patch"
+      | "patch_result_too_large"
+      | "stale_article",
+    readonly currentUpdatedAt?: Date,
+  ) {
+    super(message);
+    this.name = "HelpArticleWriteError";
+  }
 }
 
 interface ReorderItem {
@@ -416,11 +437,27 @@ export class HelpdeskService {
     const existing = await this.getArticleById(id, projectId);
     if (!existing) return null;
 
+    // Reject a stale write before doing any work. The same check is repeated in
+    // the UPDATE's WHERE clause so a write landing in between also fails.
+    if (
+      updates.expectedUpdatedAt !== undefined &&
+      existing.updatedAt.getTime() !== updates.expectedUpdatedAt.getTime()
+    ) {
+      throw new HelpArticleWriteError(
+        "The article changed since you read it. Re-read it and retry.",
+        "stale_article",
+        existing.updatedAt,
+      );
+    }
+
     const patch: Partial<NewHelpArticleRow> = {};
 
     if (updates.title !== undefined) patch.title = updates.title;
     if (updates.excerpt !== undefined) patch.excerpt = updates.excerpt;
     if (updates.content !== undefined) patch.content = updates.content;
+    if (updates.contentPatch !== undefined) {
+      patch.content = applyContentPatch(existing.content, updates.contentPatch);
+    }
     if (updates.sortOrder !== undefined) patch.sortOrder = updates.sortOrder;
 
     const targetCategoryId = updates.categoryId ?? existing.categoryId;
@@ -481,15 +518,30 @@ export class HelpdeskService {
     }
 
     if (Object.keys(patch).length > 0) {
-      await this.db
-        .update(helpArticles)
-        .set(patch)
-        .where(
-          and(
-            eq(helpArticles.id, id),
-            eq(helpArticles.projectId, projectId),
-          ),
-        );
+      const scope = and(
+        eq(helpArticles.id, id),
+        eq(helpArticles.projectId, projectId),
+      );
+
+      if (updates.expectedUpdatedAt === undefined) {
+        await this.db.update(helpArticles).set(patch).where(scope);
+      } else {
+        // RETURNING tells us the guard matched. Without it a losing write is
+        // indistinguishable from a successful one and would report success.
+        const applied = await this.db
+          .update(helpArticles)
+          .set(patch)
+          .where(and(scope, eq(helpArticles.updatedAt, updates.expectedUpdatedAt)))
+          .returning({ id: helpArticles.id });
+        if (applied.length === 0) {
+          const current = await this.getArticleById(id, projectId);
+          throw new HelpArticleWriteError(
+            "The article changed since you read it. Re-read it and retry.",
+            "stale_article",
+            current?.updatedAt,
+          );
+        }
+      }
     }
 
     const updated = await this.getArticleById(id, projectId);
@@ -674,5 +726,59 @@ export class HelpdeskService {
       slug = `${base.slice(0, 70)}-${suffix}`;
     }
   }
+}
+
+// ─── Content Patching ─────────────────────────────────────────────────────────
+
+/** Mirrors the `content` cap in worker/validation.ts. */
+const MAX_ARTICLE_CONTENT_CHARS = 100_000;
+
+/**
+ * Apply a unified diff to an article body with `patch(1)` semantics: the hunk
+ * header's line number is a hint, the context lines are the truth, and a hunk
+ * that fits nowhere fails the whole patch rather than landing approximately.
+ *
+ * fuzzFactor stays 0 — the caller just read the exact body, so a fuzzy match
+ * that lands slightly off is the silent wrong-place write we are avoiding.
+ */
+function applyContentPatch(current: string, unifiedDiff: string): string {
+  let parsed: ReturnType<typeof parsePatch>;
+  try {
+    parsed = parsePatch(unifiedDiff);
+  } catch (err) {
+    throw new HelpArticleWriteError(
+      `The patch could not be parsed as a unified diff: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      "malformed_patch",
+    );
+  }
+
+  // Text that parses to zero hunks applies cleanly as a no-op, which would
+  // report success for a patch that changed nothing. Reject it instead.
+  const hunks = parsed.reduce((total, file) => total + file.hunks.length, 0);
+  if (parsed.length !== 1 || hunks === 0) {
+    throw new HelpArticleWriteError(
+      "The patch is not a single-file unified diff with at least one hunk.",
+      "malformed_patch",
+    );
+  }
+
+  const next = applyPatch(current, parsed[0]!, { fuzzFactor: 0 });
+  if (next !== false && next.length > MAX_ARTICLE_CONTENT_CHARS) {
+    // `content` is capped in Zod; without this a patch could append past the
+    // ceiling the REST and MCP write paths both guarantee.
+    throw new HelpArticleWriteError(
+      `The patched body would be ${next.length} characters, over the ${MAX_ARTICLE_CONTENT_CHARS} character limit.`,
+      "patch_result_too_large",
+    );
+  }
+  if (next === false) {
+    throw new HelpArticleWriteError(
+      "No hunk in the patch matched the current article body. Re-read the article and rebuild the diff against it.",
+      "patch_did_not_apply",
+    );
+  }
+  return next;
 }
 

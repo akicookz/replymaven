@@ -1,7 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type HelpArticleRow, type HelpCategoryRow } from "./db";
-import { HelpdeskService } from "./services/helpdesk-service";
+import {
+  HelpArticleWriteError,
+  HelpdeskService,
+} from "./services/helpdesk-service";
 import { ProjectService } from "./services/project-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
 import {
@@ -22,6 +25,16 @@ import {
   textResult,
   type McpRequestContext,
 } from "./mcp-tool-helpers";
+import { BodyTooLargeError, readLimitedBody } from "./lib/read-limited-body";
+import {
+  buildHelpImageKey,
+  extensionForContentType,
+  HELP_IMAGE_CONTENT_TYPES,
+  HELP_IMAGE_UPLOAD_TTL_SECONDS,
+  isHelpImageContentType,
+  MAX_HELP_IMAGE_BYTES,
+  signHelpImageUploadToken,
+} from "./security/help-image-upload-token";
 
 export function registerHelpdeskTools(
   server: McpServer,
@@ -36,6 +49,8 @@ export function registerHelpdeskTools(
   registerCreateHelpArticleTool(server, context);
   registerUpdateHelpArticleTool(server, context);
   registerDeleteHelpArticleTool(server, context);
+  registerCreateHelpImageUploadTool(server, context);
+  registerImportHelpImageTool(server, context);
 }
 
 function helpdeskService(context: McpRequestContext): HelpdeskService {
@@ -353,7 +368,7 @@ function registerCreateHelpArticleTool(
           "Optional summary shown in listings and search, max 280 characters.",
         ),
         content: createHelpArticleSchema.shape.content.describe(
-          "Markdown body, max 100,000 characters. Images must be already-hosted URLs.",
+          "Markdown body, max 100,000 characters. Images must be hosted URLs — use create_help_image_upload or import_help_image to get one.",
         ),
         status: createHelpArticleSchema.shape.status.describe(
           'Initial status. Defaults to "draft".',
@@ -429,7 +444,7 @@ function registerUpdateHelpArticleTool(
     {
       title: "Update help article",
       description:
-        'Update a help center article. Omitted fields keep their current value. Publishing and unpublishing happen here: status "published" puts the article live and indexes it for the AI, status "draft" takes it down.',
+        'Update a help center article. Omitted fields keep their current value. Publishing and unpublishing happen here: status "published" puts the article live and indexes it for the AI, status "draft" takes it down. To change part of the body, prefer contentPatch over content: it leaves the untouched prose byte-identical and fails loudly if the article moved under you.',
       inputSchema: {
         projectId: z.string().min(1).describe("ReplyMaven project ID."),
         articleId: z.string().min(1).describe("Help article ID."),
@@ -446,7 +461,13 @@ function registerUpdateHelpArticleTool(
           "Replacement summary, max 280 characters. Pass null to clear.",
         ),
         content: updateHelpArticleSchema.shape.content.describe(
-          "Replacement markdown body, max 100,000 characters. Replaces the whole body.",
+          "Replacement markdown body, max 100,000 characters. Replaces the whole body. Use contentPatch instead for a partial edit.",
+        ),
+        contentPatch: updateHelpArticleSchema.shape.contentPatch.describe(
+          "A unified diff applied to the current body, for editing part of an article without resending all of it. Build it against the exact content returned by get_help_article, and put every change for this article in one patch. Hunk header line numbers are treated as hints and context lines as the truth, so a stale line number still applies but changed surrounding text fails the whole patch. Mutually exclusive with content.",
+        ),
+        expectedUpdatedAt: updateHelpArticleSchema.shape.expectedUpdatedAt.describe(
+          "The updatedAt value from your last get_help_article call. When set, the write is rejected if anyone changed the article since then. Recommended whenever you send content.",
         ),
         status: updateHelpArticleSchema.shape.status.describe(
           '"published" makes the article live; "draft" unpublishes it.',
@@ -471,19 +492,53 @@ function registerUpdateHelpArticleTool(
       slug,
       excerpt,
       content,
+      contentPatch,
+      expectedUpdatedAt,
       status,
       sortOrder,
     }) => {
       requireScope(context, "helpdesk:write");
 
+      if (content !== undefined && contentPatch !== undefined) {
+        throw new Error("Pass either content or contentPatch, not both");
+      }
+
       const project = await getAccessibleProject(context, projectId);
       const service = helpdeskService(context);
-      const updated = await service.updateArticle(
-        articleId,
-        project.id,
-        { categoryId, title, slug, excerpt, content, status, sortOrder },
-        project.slug,
-      );
+
+      let updated: HelpArticleRow | null;
+      try {
+        updated = await service.updateArticle(
+          articleId,
+          project.id,
+          {
+            categoryId,
+            title,
+            slug,
+            excerpt,
+            content,
+            contentPatch,
+            expectedUpdatedAt: expectedUpdatedAt
+              ? new Date(expectedUpdatedAt)
+              : undefined,
+            status,
+            sortOrder,
+          },
+          project.slug,
+        );
+      } catch (err) {
+        // Rejected writes carry the detail the caller needs to retry, so they
+        // come back as a structured result rather than a bare thrown message.
+        if (err instanceof HelpArticleWriteError) {
+          return textResult({
+            ok: false,
+            error: err.code,
+            message: err.message,
+            currentUpdatedAt: serializeDate(err.currentUpdatedAt),
+          });
+        }
+        throw err;
+      }
       if (!updated) throw new Error("Article not found");
 
       context.executionCtx.waitUntil(
@@ -543,6 +598,154 @@ function registerDeleteHelpArticleTool(
       );
 
       return textResult({ ok: true });
+    },
+  );
+}
+
+// ─── Image Tools ──────────────────────────────────────────────────────────────
+
+function registerCreateHelpImageUploadTool(
+  server: McpServer,
+  context: McpRequestContext,
+): void {
+  server.registerTool(
+    "create_help_image_upload",
+    {
+      title: "Create help image upload URL",
+      description:
+        "Get a short-lived URL for uploading one image to use in a help center article. Send the raw file bytes as the body of an HTTP PUT to uploadUrl (for example `curl -X PUT --data-binary @shot.png <uploadUrl>`); do not base64-encode the image into this or any other tool call. Once the PUT succeeds, put the returned `url` in the article markdown. Use import_help_image instead when the image is already reachable at a public URL.",
+      inputSchema: {
+        projectId: z.string().min(1).describe("ReplyMaven project ID."),
+        contentType: z
+          .enum(HELP_IMAGE_CONTENT_TYPES)
+          .describe("MIME type of the image you are about to upload."),
+        confirm: confirmedMutationSchema,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ projectId, contentType }) => {
+      requireScope(context, "helpdesk:write");
+
+      const project = await getAccessibleProject(context, projectId);
+      const key = buildHelpImageKey({
+        projectId: project.id,
+        extension: extensionForContentType(contentType),
+      });
+      const expSeconds =
+        Math.floor(Date.now() / 1000) + HELP_IMAGE_UPLOAD_TTL_SECONDS;
+      const token = await signHelpImageUploadToken({
+        payload: { v: 1, projectId: project.id, key, contentType, exp: expSeconds },
+        secret: context.env.ENCRYPTION_KEY,
+      });
+
+      const base = context.env.BETTER_AUTH_URL || "https://replymaven.com";
+      return textResult({
+        ok: true,
+        uploadUrl: `${base}/api/help-images/upload?token=${encodeURIComponent(token)}`,
+        url: `/api/uploads/${key}`,
+        contentType,
+        maxBytes: MAX_HELP_IMAGE_BYTES,
+        expiresAt: new Date(expSeconds * 1000).toISOString(),
+      });
+    },
+  );
+}
+
+function registerImportHelpImageTool(
+  server: McpServer,
+  context: McpRequestContext,
+): void {
+  server.registerTool(
+    "import_help_image",
+    {
+      title: "Import help image from a URL",
+      description:
+        "Fetch an image that is already published at an https URL, store it for this project, and return the hosted path to put in article markdown. Use create_help_image_upload instead for a file on disk.",
+      inputSchema: {
+        projectId: z.string().min(1).describe("ReplyMaven project ID."),
+        sourceUrl: z
+          .string()
+          .url()
+          .describe("Public https URL of a JPEG, PNG, WebP, or SVG image."),
+        confirm: confirmedMutationSchema,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    async ({ projectId, sourceUrl }) => {
+      requireScope(context, "helpdesk:write");
+
+      const project = await getAccessibleProject(context, projectId);
+      if (!sourceUrl.startsWith("https://")) {
+        throw new Error("sourceUrl must be an https URL");
+      }
+
+      const response = await fetch(sourceUrl);
+      if (!response.ok) {
+        throw new Error(
+          `Could not fetch the image (HTTP ${response.status} from the source)`,
+        );
+      }
+      // A redirect off https would defeat the scheme check above. `url` is the
+      // post-redirect URL; it is empty only for a synthesized Response, where
+      // the already-validated request URL stands.
+      if (response.url && !response.url.startsWith("https://")) {
+        throw new Error("The source redirected off https");
+      }
+
+      const contentType = (response.headers.get("content-type") ?? "")
+        .split(";")[0]!
+        .trim()
+        .toLowerCase();
+      if (!isHelpImageContentType(contentType)) {
+        throw new Error(
+          `Unsupported image type "${contentType || "unknown"}". Allowed: ${HELP_IMAGE_CONTENT_TYPES.join(", ")}`,
+        );
+      }
+
+      // Streamed with a running budget: buffering first would let a huge or
+      // endless source exhaust the isolate before any size check ran.
+      let bytes: Uint8Array;
+      try {
+        bytes = await readLimitedBody(
+          response.body,
+          MAX_HELP_IMAGE_BYTES,
+          response.headers.get("content-length"),
+        );
+      } catch (err) {
+        if (err instanceof BodyTooLargeError) {
+          throw new Error(
+            `Image is over the ${MAX_HELP_IMAGE_BYTES} byte limit`,
+          );
+        }
+        throw err;
+      }
+      if (bytes.byteLength === 0) throw new Error("The source returned no data");
+
+      const key = buildHelpImageKey({
+        projectId: project.id,
+        extension: extensionForContentType(contentType),
+      });
+      await context.env.UPLOADS.put(key, bytes, {
+        httpMetadata: { contentType },
+        customMetadata: { ownerType: "help-image", projectId: project.id },
+      });
+
+      return textResult({
+        ok: true,
+        url: `/api/uploads/${key}`,
+        contentType,
+        bytes: bytes.byteLength,
+      });
     },
   );
 }

@@ -7,6 +7,11 @@ import { schema } from "./db";
 import { registerHelpdeskTools } from "./mcp-helpdesk-tools";
 import type { McpRequestContext } from "./mcp-tool-helpers";
 import type { McpOAuthScope } from "./services/mcp-oauth-service";
+import {
+  MAX_HELP_IMAGE_BYTES,
+  verifyHelpImageUploadToken,
+} from "./security/help-image-upload-token";
+import { updateHelpArticleSchema } from "./validation";
 
 type ToolResult = { content: Array<{ type: string; text: string }> };
 type ToolHandler = (input: Record<string, unknown>) => Promise<ToolResult>;
@@ -144,7 +149,11 @@ function createHarness(options?: {
   const context = {
     db,
     conversationStore: {},
-    env: { UPLOADS: r2 },
+    env: {
+      UPLOADS: r2,
+      ENCRYPTION_KEY: "test-encryption-key",
+      BETTER_AUTH_URL: "https://replymaven.com",
+    },
     executionCtx: {
       waitUntil(promise: Promise<unknown>) {
         void Promise.resolve(promise).catch(() => {});
@@ -194,14 +203,16 @@ async function seedCategory(harness: Harness): Promise<string> {
 }
 
 describe("MCP helpdesk tools", () => {
-  test("registers all nine tools", () => {
+  test("registers all eleven tools", () => {
     const harness = createHarness();
     expect([...harness.tools.keys()].sort()).toEqual([
       "archive_help_category",
       "create_help_article",
       "create_help_category",
+      "create_help_image_upload",
       "delete_help_article",
       "get_help_article",
+      "import_help_image",
       "list_help_articles",
       "list_help_categories",
       "update_help_article",
@@ -409,5 +420,399 @@ describe("MCP helpdesk tools", () => {
     await expect(
       call(harness, "get_help_article", { projectId: "project-1", articleId }),
     ).rejects.toThrow("Article not found");
+  });
+});
+
+describe("update_help_article contentPatch", () => {
+  const BODY = [
+    "# Install",
+    "",
+    "Run the installer.",
+    "",
+    "## Pricing",
+    "",
+    "Plans start at $10.",
+    "",
+  ].join("\n");
+
+  async function seedArticle(
+    harness: Harness,
+    content = BODY,
+  ): Promise<string> {
+    const categoryId = await seedCategory(harness);
+    const created = await call(harness, "create_help_article", {
+      projectId: "project-1",
+      categoryId,
+      title: "Install",
+      content,
+    });
+    return (created.article as { id: string }).id;
+  }
+
+  async function readContent(
+    harness: Harness,
+    articleId: string,
+  ): Promise<string> {
+    const fetched = await call(harness, "get_help_article", {
+      projectId: "project-1",
+      articleId,
+    });
+    return (fetched.article as { content: string }).content;
+  }
+
+  test("applies a hunk and leaves the rest byte-identical", async () => {
+    const harness = createHarness();
+    const articleId = await seedArticle(harness);
+
+    await call(harness, "update_help_article", {
+      projectId: "project-1",
+      articleId,
+      contentPatch: [
+        "@@ -3,5 +3,7 @@",
+        " Run the installer.",
+        " ",
+        "+![Plan comparison](/api/uploads/owner-1/plans.png)",
+        "+",
+        " ## Pricing",
+        " ",
+        " Plans start at $10.",
+        "",
+      ].join("\n"),
+    });
+
+    expect(await readContent(harness, articleId)).toBe(
+      BODY.replace(
+        "## Pricing",
+        "![Plan comparison](/api/uploads/owner-1/plans.png)\n\n## Pricing",
+      ),
+    );
+  });
+
+  test("a stale hunk line number still applies via context", async () => {
+    const harness = createHarness();
+    // Same patch as above, but the header claims a line that has drifted.
+    const articleId = await seedArticle(harness, `Preamble.\n\n${BODY}`);
+
+    await call(harness, "update_help_article", {
+      projectId: "project-1",
+      articleId,
+      contentPatch: [
+        "@@ -3,5 +3,6 @@",
+        " Run the installer.",
+        " ",
+        "+![Plans](/api/uploads/owner-1/plans.png)",
+        " ## Pricing",
+        " ",
+        " Plans start at $10.",
+        "",
+      ].join("\n"),
+    });
+
+    expect(await readContent(harness, articleId)).toContain(
+      "![Plans](/api/uploads/owner-1/plans.png)\n## Pricing",
+    );
+  });
+
+  test("rejects a patch whose context no longer matches", async () => {
+    const harness = createHarness();
+    const articleId = await seedArticle(harness);
+
+    const result = await call(harness, "update_help_article", {
+      projectId: "project-1",
+      articleId,
+      contentPatch: [
+        "@@ -1,3 +1,3 @@",
+        " # Install",
+        " ",
+        "-Text that was never in this article.",
+        "+Replacement.",
+        "",
+      ].join("\n"),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("patch_did_not_apply");
+    expect(await readContent(harness, articleId)).toBe(BODY);
+  });
+
+  test("rejects a malformed patch without touching the article", async () => {
+    const harness = createHarness();
+    const articleId = await seedArticle(harness);
+
+    const result = await call(harness, "update_help_article", {
+      projectId: "project-1",
+      articleId,
+      contentPatch: "this is not a diff at all",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("malformed_patch");
+    expect(await readContent(harness, articleId)).toBe(BODY);
+  });
+
+  test("rejects content and contentPatch together", async () => {
+    const harness = createHarness();
+    const articleId = await seedArticle(harness);
+
+    await expect(
+      call(harness, "update_help_article", {
+        projectId: "project-1",
+        articleId,
+        content: "Whole new body",
+        contentPatch: "@@ -1,1 +1,1 @@\n-a\n+b\n",
+      }),
+    ).rejects.toThrow("not both");
+    expect(await readContent(harness, articleId)).toBe(BODY);
+  });
+});
+
+describe("update_help_article expectedUpdatedAt", () => {
+  async function seedArticle(harness: Harness): Promise<string> {
+    const categoryId = await seedCategory(harness);
+    const created = await call(harness, "create_help_article", {
+      projectId: "project-1",
+      categoryId,
+      title: "Guarded",
+      content: "Original body.",
+    });
+    return (created.article as { id: string }).id;
+  }
+
+  test("applies the write when the article has not moved", async () => {
+    const harness = createHarness();
+    const articleId = await seedArticle(harness);
+    const fetched = await call(harness, "get_help_article", {
+      projectId: "project-1",
+      articleId,
+    });
+
+    const result = await call(harness, "update_help_article", {
+      projectId: "project-1",
+      articleId,
+      content: "Edited body.",
+      expectedUpdatedAt: (fetched.article as { updatedAt: string }).updatedAt,
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  test("rejects the write when the article moved since the read", async () => {
+    const harness = createHarness();
+    const articleId = await seedArticle(harness);
+    const stale = new Date(Date.now() - 60_000).toISOString();
+
+    const result = await call(harness, "update_help_article", {
+      projectId: "project-1",
+      articleId,
+      content: "Edited from a stale read.",
+      expectedUpdatedAt: stale,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("stale_article");
+    expect(result.currentUpdatedAt).toBeString();
+
+    const fetched = await call(harness, "get_help_article", {
+      projectId: "project-1",
+      articleId,
+    });
+    expect((fetched.article as { content: string }).content).toBe(
+      "Original body.",
+    );
+  });
+});
+
+describe("help image tools", () => {
+  test("issues an upload URL whose key stays out of the RAG folder range", async () => {
+    const harness = createHarness();
+    const result = await call(harness, "create_help_image_upload", {
+      projectId: "project-1",
+      contentType: "image/png",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.url as string).toMatch(
+      /^\/api\/uploads\/help-images\/project-1\/[a-f0-9-]+\.png$/,
+    );
+    // Anything under `project-1/` is swept into AI Search retrieval.
+    expect(result.url as string).not.toContain("/api/uploads/project-1/");
+    expect(result.uploadUrl as string).toStartWith(
+      "https://replymaven.com/api/help-images/upload?token=",
+    );
+    expect(result.contentType).toBe("image/png");
+  });
+
+  test("issued tokens verify and pin the key and type", async () => {
+    const harness = createHarness();
+    const result = await call(harness, "create_help_image_upload", {
+      projectId: "project-1",
+      contentType: "image/webp",
+    });
+
+    const token = new URL(result.uploadUrl as string).searchParams.get("token");
+    const payload = await verifyHelpImageUploadToken({
+      token: token!,
+      secret: "test-encryption-key",
+      nowSeconds: Math.floor(Date.now() / 1000),
+    });
+    expect(payload.projectId).toBe("project-1");
+    expect(payload.contentType).toBe("image/webp");
+    expect(`/api/uploads/${payload.key}`).toBe(result.url);
+  });
+
+  test("refuses to issue an upload for another user's project", async () => {
+    const harness = createHarness();
+    await expect(
+      call(harness, "create_help_image_upload", {
+        projectId: "project-2",
+        contentType: "image/png",
+      }),
+    ).rejects.toThrow("Project not found");
+  });
+
+  test("imports an image from an https URL", async () => {
+    const harness = createHarness();
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(new Uint8Array([1, 2, 3, 4]), {
+        headers: { "content-type": "image/png" },
+      })) as typeof fetch;
+    try {
+      const result = await call(harness, "import_help_image", {
+        projectId: "project-1",
+        sourceUrl: "https://example.com/shot.png",
+      });
+      expect(result.ok).toBe(true);
+      expect(result.bytes).toBe(4);
+      expect(result.url as string).toStartWith(
+        "/api/uploads/help-images/project-1/",
+      );
+      expect(harness.r2.objects.size).toBe(1);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test("rejects a non-https source without fetching it", async () => {
+    const harness = createHarness();
+    const original = globalThis.fetch;
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return new Response("", { headers: { "content-type": "image/png" } });
+    }) as typeof fetch;
+    try {
+      await expect(
+        call(harness, "import_help_image", {
+          projectId: "project-1",
+          sourceUrl: "http://example.com/shot.png",
+        }),
+      ).rejects.toThrow("https");
+      expect(called).toBe(false);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test("rejects a source that is not an allowed image type", async () => {
+    const harness = createHarness();
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("<html></html>", {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      })) as typeof fetch;
+    try {
+      await expect(
+        call(harness, "import_help_image", {
+          projectId: "project-1",
+          sourceUrl: "https://example.com/not-an-image",
+        }),
+      ).rejects.toThrow("Unsupported image type");
+      expect(harness.r2.objects.size).toBe(0);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test("rejects a source larger than the cap", async () => {
+    const harness = createHarness();
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(new Uint8Array(MAX_HELP_IMAGE_BYTES + 1), {
+        headers: { "content-type": "image/png" },
+      })) as typeof fetch;
+    try {
+      await expect(
+        call(harness, "import_help_image", {
+          projectId: "project-1",
+          sourceUrl: "https://example.com/huge.png",
+        }),
+      ).rejects.toThrow("over the");
+      expect(harness.r2.objects.size).toBe(0);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+describe("updateHelpArticleSchema", () => {
+  // `.partial()` keeps the `.default()` a field carries in the create schema.
+  // Before this was pinned down, a partial PATCH blanked the body
+  // and unpublished the article.
+  test("a partial update injects no defaults", () => {
+    const parsed = updateHelpArticleSchema.parse({ excerpt: "Just the excerpt" });
+    expect(parsed).toEqual({ excerpt: "Just the excerpt" });
+    expect(parsed).not.toHaveProperty("content");
+    expect(parsed).not.toHaveProperty("status");
+  });
+
+  test("an empty update stays empty", () => {
+    expect(updateHelpArticleSchema.parse({})).toEqual({});
+  });
+
+  test("explicit values still come through", () => {
+    expect(
+      updateHelpArticleSchema.parse({ content: "Body", status: "published" }),
+    ).toEqual({ content: "Body", status: "published" });
+  });
+
+  test("content and contentPatch together are rejected", () => {
+    expect(
+      updateHelpArticleSchema.safeParse({
+        content: "Body",
+        contentPatch: "@@ -1,1 +1,1 @@\n-a\n+b\n",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("contentPatch size cap", () => {
+  test("rejects a patch whose result exceeds the content cap", async () => {
+    const harness = createHarness();
+    const categoryId = await seedCategory(harness);
+    const created = await call(harness, "create_help_article", {
+      projectId: "project-1",
+      categoryId,
+      title: "Growing",
+      content: "start\n",
+    });
+    const articleId = (created.article as { id: string }).id;
+
+    // One added line, just over the 100,000-character ceiling.
+    const huge = "x".repeat(100_001);
+    const result = await call(harness, "update_help_article", {
+      projectId: "project-1",
+      articleId,
+      contentPatch: ["@@ -1,1 +1,2 @@", " start", `+${huge}`, ""].join("\n"),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("patch_result_too_large");
+
+    const fetched = await call(harness, "get_help_article", {
+      projectId: "project-1",
+      articleId,
+    });
+    expect((fetched.article as { content: string }).content).toBe("start\n");
   });
 });
