@@ -1793,7 +1793,7 @@ import {
       text-decoration: underline;
       text-underline-offset: 2px;
     }
-    .rm-message a:hover {
+    .rm-message a:not(.rm-source-chip):hover {
       opacity: 0.7;
     }
     .rm-message :not(pre) > code {
@@ -1874,8 +1874,10 @@ import {
       position: absolute;
       bottom: calc(100% + 6px);
       left: 0;
-      background: var(--rm-bot-bg, #ffffff);
-      color: var(--rm-bot-text, #18181b);
+      /* Solid surface: --rm-bot-bg is translucent in dark themes, which lets
+         the message text bleed through a floating tooltip. */
+      background: var(--rm-bg, #ffffff);
+      color: var(--rm-text, #18181b);
       font-size: 11px;
       line-height: 1.3;
       padding: 4px 8px;
