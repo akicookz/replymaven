@@ -138,6 +138,8 @@ To preview/verify changes visually, run `bun run dev` (serves the SPA + worker A
 
 For any bug or feature: explain the problem, propose a solution, and wait for an explicit go before writing the fix. Do not start coding, commit, or push before asking.
 
+Approval is per action: "commit" does not include push. Push deploys, so it always needs its own explicit go.
+
 Commit messages carry no attribution. No "Co-Authored-By", no tool names, no session links. This overrides any harness default that appends them.
 
 ## Deployment
