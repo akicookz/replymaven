@@ -1,58 +1,10 @@
 import { useRef, useState } from "react";
 import {
-  Activity,
-  Bell,
-  Book,
-  BookOpen,
-  BookText,
-  Box,
-  CircleAlert,
-  CircleHelp,
-  Cloud,
-  Code,
-  Cog,
-  Cpu,
-  CreditCard,
-  Database,
-  DollarSign,
-  FileText,
-  Folder,
-  Globe,
-  GraduationCap,
-  Hammer,
-  Heart,
   Image as ImageIconLucide,
-  Key,
-  Layers,
-  Lightbulb,
   Loader2,
-  Lock,
-  type LucideIcon,
-  Mail,
-  MessageCircle,
-  MessageSquare,
-  Mic,
-  Package,
-  Phone,
-  Rocket,
   Search,
-  Settings,
-  Shield,
-  ShoppingCart,
-  Sparkles,
-  Star,
-  Tag,
-  Terminal,
-  TrendingUp,
   Upload,
-  User,
-  Users,
-  Video,
-  Wallet,
-  Workflow,
-  Wrench,
   X,
-  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -61,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
   HELP_ICON_NAMES,
+  HELP_ICON_SVGS,
   type HelpIconName,
   isHelpIconName,
   isImageIcon,
@@ -71,61 +24,24 @@ interface IconPickerProps {
   onChange: (value: string | null) => void;
 }
 
-const ICON_MAP: Record<HelpIconName, LucideIcon> = {
-  BookOpen,
-  Book,
-  BookText,
-  GraduationCap,
-  Lightbulb,
-  Rocket,
-  Settings,
-  Cog,
-  User,
-  Users,
-  CreditCard,
-  DollarSign,
-  Wallet,
-  MessageCircle,
-  MessageSquare,
-  Mail,
-  Phone,
-  Code,
-  Terminal,
-  Database,
-  Cloud,
-  Cpu,
-  Globe,
-  Lock,
-  Shield,
-  Key,
-  CircleAlert,
-  CircleHelp,
-  FileText,
-  Folder,
-  Image: ImageIconLucide,
-  Video,
-  Mic,
-  Tag,
-  Sparkles,
-  Wrench,
-  Hammer,
-  Box,
-  Package,
-  ShoppingCart,
-  Heart,
-  Star,
-  Zap,
-  Bell,
-  Activity,
-  Layers,
-  Workflow,
-  TrendingUp,
-};
-
-function getLucideIcon(name: HelpIconName): LucideIcon | null {
-  return Object.prototype.hasOwnProperty.call(ICON_MAP, name)
-    ? ICON_MAP[name]
-    : null;
+/** Inline one of the shared lucide-markup strings, sized by the wrapper. */
+function IconGlyph({
+  name,
+  className,
+}: {
+  name: HelpIconName;
+  className?: string;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "inline-block h-6 w-6 [&>svg]:h-full [&>svg]:w-full",
+        className,
+      )}
+      dangerouslySetInnerHTML={{ __html: HELP_ICON_SVGS[name] }}
+    />
+  );
 }
 
 /**
@@ -151,8 +67,7 @@ export function CategoryIcon({
   }
   const name: HelpIconName =
     icon && isHelpIconName(icon) ? icon : "BookOpen";
-  const Icon = getLucideIcon(name) ?? BookOpen;
-  return <Icon className={className} />;
+  return <IconGlyph name={name} className={className} />;
 }
 
 function IconPicker({ value, onChange }: IconPickerProps) {
@@ -234,8 +149,6 @@ function IconPicker({ value, onChange }: IconPickerProps) {
         </div>
         <div className="grid grid-cols-7 sm:grid-cols-9 gap-1.5 max-h-56 overflow-y-auto pr-1">
           {filtered.map((name) => {
-            const Icon = getLucideIcon(name);
-            if (!Icon) return null;
             const isSelected = selectedIcon === name;
             return (
               <button
@@ -252,7 +165,7 @@ function IconPicker({ value, onChange }: IconPickerProps) {
                     : "text-muted-foreground bg-muted/50 hover:bg-muted",
                 )}
               >
-                <Icon className="w-5 h-5" />
+                <IconGlyph name={name} className="w-5 h-5" />
               </button>
             );
           })}
