@@ -66,6 +66,9 @@ export interface SendOutbox<TInput> {
   reconcile(serverIds: ReadonlySet<string>): void;
   // Connection-usable trigger; starts a flush if anything is queued.
   poke(): void;
+  // Settle the head inflight entry as delivered on proof the server received
+  // it (its turn started streaming) without waiting for the final frame.
+  confirmInflight(): void;
   clear(): void;
   snapshot(): SendOutboxEntrySnapshot[];
 }
@@ -289,6 +292,19 @@ export function createSendOutbox<TInput>(
     void flush();
   }
 
+  // The server streaming a response proves it received the request that
+  // triggered it: the head inflight entry is either that turn's message or
+  // queued behind it server-side. Settling here flips "Sending..." to "Sent"
+  // at turn start instead of after the final frame.
+  function confirmInflight(): void {
+    const entry = entries.find((candidate) => candidate.state === "inflight");
+    if (!entry) return;
+    clearTimer(entry.adjudicationTimer);
+    entry.adjudicationTimer = null;
+    deliver(entry);
+    publishAndPrune();
+  }
+
   function clear(): void {
     for (const entry of entries) {
       clearEntryTimers(entry);
@@ -298,5 +314,5 @@ export function createSendOutbox<TInput>(
     options.onChange([]);
   }
 
-  return { enqueue, retry, reconcile, poke, clear, snapshot };
+  return { enqueue, retry, reconcile, poke, clear, snapshot, confirmInflight };
 }

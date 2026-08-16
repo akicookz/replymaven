@@ -101,6 +101,42 @@ describe("public Agent turn parity", () => {
     }]);
   });
 
+  test("keeps activity phases visible after the first-turn opening", async () => {
+    // The opening greeting streams before the model runs. It must not
+    // suppress the thinking/retrieval phases, or the first turn shows a
+    // frozen greeting with no status for the whole model run.
+    async function* parts(): AsyncGenerator<MavenStreamPart> {
+      yield {
+        type: "tool-call",
+        toolCallId: "tool-1",
+        toolName: "search_knowledge",
+      };
+      yield { type: "text-delta", text: "Answer." };
+    }
+    const response = createPublicTurnResponse({
+      originalMessages: [],
+      assistantMessageId: "assistant-phases",
+      projectId: "project-1",
+      conversationId: "conversation-1",
+      botName: "Maven",
+      ownershipRevision: 1,
+      openingText: "Hi Ada,\n\n",
+      runTurn: async () => ({
+        fullStream: parts(),
+        collectedSources: [],
+        toolActivity: [],
+        httpExecutionIds: [],
+      }),
+      onOutcome() {},
+    });
+
+    const body = await response.text();
+    expect(body).toContain('"phase":"thinking"');
+    expect(body).toContain('"phase":"retrieval"');
+    expect(body).toContain('"delta":"Hi Ada,\\n\\n"');
+    expect(body).toContain('"delta":"Answer."');
+  });
+
   test("uses a goodbye fallback for an otherwise empty resolved response", async () => {
     async function* parts(): AsyncGenerator<MavenStreamPart> {
       yield { type: "text-delta", text: "[RESOLVED]" };

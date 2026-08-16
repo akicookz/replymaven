@@ -171,9 +171,13 @@ export function createPublicTurnResponse(
         messageMetadata: botMetadata(input, [], createdAt),
       });
       let textStarted = false;
+      // Phases stop once the turn's own reply streams — not when the
+      // server-owned opening greeting does, or the whole model run would show
+      // a frozen greeting with no status.
+      let turnTextStarted = false;
       // Phase keys only; the widget owns the user-facing copy.
       function emitActivity(phase: string): void {
-        if (textStarted) return;
+        if (turnTextStarted) return;
         writer.write({
           type: "data-public-activity",
           data: { phase },
@@ -183,11 +187,18 @@ export function createPublicTurnResponse(
       function emitText(delta: string): void {
         if (!delta) return;
         if (!textStarted) {
-          emitActivity("compose");
           writer.write({ type: "text-start", id: textPartId });
           textStarted = true;
         }
         writer.write({ type: "text-delta", id: textPartId, delta });
+      }
+      function emitTurnText(delta: string): void {
+        if (!delta) return;
+        if (!turnTextStarted) {
+          emitActivity("compose");
+          turnTextStarted = true;
+        }
+        emitText(delta);
       }
       let internalTokens: InternalToken[] = [];
       let sources: PublicSourceReference[] = [];
@@ -196,7 +207,7 @@ export function createPublicTurnResponse(
         emitText(input.openingText);
       }
       if (input.immediateText !== undefined) {
-        emitText(input.immediateText);
+        emitTurnText(input.immediateText);
       } else {
         if (!input.runTurn) throw new Error("Public turn runner is required");
         emitActivity("thinking");
@@ -204,7 +215,7 @@ export function createPublicTurnResponse(
         httpExecutionIds = turn.httpExecutionIds;
         const collected = await collectPublicTurnStream(
           turn.fullStream,
-          emitText,
+          emitTurnText,
           emitActivity,
         );
         internalTokens = collected.internalTokens;

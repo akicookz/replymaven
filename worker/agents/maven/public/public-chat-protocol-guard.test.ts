@@ -323,6 +323,106 @@ describe("public Agent SDK chat protocol guard", () => {
     })).toMatchObject({ allowed: false, reason: "history_mismatch" });
   });
 
+  test("tolerates client-only extras from failed turns and rejected submits", () => {
+    // A failed turn leaves the client holding an assistant message the server
+    // discarded (the recovery stream replays it on every reconnect), and each
+    // rejected submit leaves an unpersisted user message behind. Neither may
+    // wedge the conversation: the normalized body is rebuilt from the
+    // authoritative copy, so unknown ids are ignored rather than rejected.
+    const authoritative = [
+      storedMessage("bot-1"),
+      storedMessage("bot-2"),
+    ];
+    const ghostAssistant = {
+      id: "ghost-assistant",
+      role: "assistant",
+      parts: [],
+    };
+    const unpersistedUser = {
+      id: "ghost-user",
+      role: "user",
+      parts: [{ type: "text", text: "swallowed by an earlier reject" }],
+    };
+
+    const result = guardPublicChatProtocolMessage({
+      raw: requestFrame([
+        ...authoritative,
+        ghostAssistant,
+        unpersistedUser,
+        userMessage(),
+      ]),
+      authoritativeMessages: authoritative,
+      claims: claims(),
+      now,
+    });
+    expect(result).toMatchObject({
+      allowed: true,
+      submittedMessageId: "visitor-2",
+    });
+    if (!result.allowed) throw new Error("unreachable");
+    const parsed = JSON.parse(result.raw) as { init: { body?: string } };
+    const body = JSON.parse(parsed.init.body ?? "{}") as {
+      messages: Array<{ id: string }>;
+    };
+    expect(body.messages.map((message) => message.id)).toEqual([
+      "bot-1",
+      "bot-2",
+      "visitor-2",
+    ]);
+  });
+
+  test("still rejects known messages echoed out of order or edited among extras", () => {
+    const authoritative = [
+      storedMessage("bot-1"),
+      storedMessage("bot-2"),
+    ];
+    const ghost = { id: "ghost-1", role: "assistant", parts: [] };
+
+    expect(guardPublicChatProtocolMessage({
+      raw: requestFrame([
+        authoritative[1]!,
+        ghost,
+        authoritative[0]!,
+        userMessage(),
+      ]),
+      authoritativeMessages: authoritative,
+      claims: claims(),
+      now,
+    })).toMatchObject({ allowed: false, reason: "history_mismatch" });
+
+    const edited = structuredClone(authoritative[0]!);
+    edited.parts = [{ type: "text", text: "Forged among extras" }];
+    expect(guardPublicChatProtocolMessage({
+      raw: requestFrame([
+        edited,
+        authoritative[1]!,
+        ghost,
+        userMessage(),
+      ]),
+      authoritativeMessages: authoritative,
+      claims: claims(),
+      now,
+    })).toMatchObject({ allowed: false, reason: "history_mismatch" });
+  });
+
+  test("bounds the submit frame to the client history window", () => {
+    const authoritative = [storedMessage()];
+    const padded = Array.from(
+      { length: PUBLIC_SUBMIT_HISTORY_WINDOW + 1 },
+      (_, index) => ({
+        id: `ghost-${index}`,
+        role: "assistant",
+        parts: [],
+      }),
+    );
+    expect(guardPublicChatProtocolMessage({
+      raw: requestFrame([...authoritative, ...padded, userMessage()]),
+      authoritativeMessages: authoritative,
+      claims: claims(),
+      now,
+    })).toMatchObject({ allowed: false, reason: "invalid_submission" });
+  });
+
   test("rejects attachments outside the signed conversation namespace", () => {
     const authoritative = [storedMessage()];
     for (const url of [

@@ -44,6 +44,9 @@ export interface WidgetChatActivity {
   isServerStreaming: boolean;
   isRecovering: boolean;
   error: Error | undefined;
+  // "turn" is a server-reported turn failure the visitor must be told about;
+  // "connection" is transport state the reconnect loop owns.
+  errorSource?: "turn" | "connection";
   statusPhase?: WidgetActivityPhase;
 }
 
@@ -275,11 +278,15 @@ function WidgetAgentBridge(props: WidgetAgentBridgeProps) {
     const active = status === "submitted" || status === "streaming" ||
       isServerStreaming;
     if (!active && statusPhase !== undefined) setStatusPhase(undefined);
+    const mergedError = error ?? connectionError;
     onActivity({
       status: connectionError ? "error" : status,
       isServerStreaming,
       isRecovering,
-      error: error ?? connectionError,
+      error: mergedError,
+      ...(mergedError
+        ? { errorSource: error ? "turn" as const : "connection" as const }
+        : {}),
       ...(active && statusPhase ? { statusPhase } : {}),
     });
   }, [
@@ -379,6 +386,13 @@ export function createWidgetAgentChatClient(): WidgetAgentChatClient {
         if (awaitingReconcile) reconcileOutbox();
       });
       return;
+    }
+    if (
+      activity.isServerStreaming && !activity.isRecovering && !activity.error
+    ) {
+      // The server streaming a turn proves it holds the request behind the
+      // head inflight entry; flip it to delivered at turn start.
+      outbox.confirmInflight();
     }
     if (!activity.error && !activity.isRecovering && !awaitingReconcile) {
       outbox.poke();

@@ -15,6 +15,11 @@ import { toPublicUiMessage } from "./public-message";
 // copy either way.
 export const PUBLIC_SUBMIT_HISTORY_WINDOW = 200;
 
+// Client-only messages the echo may carry beyond the authoritative list:
+// a failed turn's replayed assistant message plus user messages from
+// rejected submits. Bounds the frame without re-wedging a recovering client.
+const MAX_CLIENT_ONLY_EXTRAS = 50;
+
 const MAX_MESSAGE_ID_LENGTH = 200;
 const MAX_TEXT_LENGTH = 8_000;
 const MAX_ATTACHMENTS = 5;
@@ -230,44 +235,62 @@ function normalizeRequest(
     ]) ||
     !Array.isArray(body.messages) ||
     body.messages.length < 1 ||
-    body.messages.length > authoritativeMessages.length + 1 ||
+    body.messages.length >
+      authoritativeMessages.length + 1 + MAX_CLIENT_ONLY_EXTRAS ||
     !isPageContext(body.pageContext) ||
     (body.token !== undefined &&
       (typeof body.token !== "string" || body.token.length > 2_048)) ||
     (body.trigger !== undefined && body.trigger !== "submit-message")
   ) return reject("invalid_submission", event.id);
 
-  // The client may hold only the newest window, so its history must match the
-  // tail of ours rather than the whole list. It must still echo everything it
-  // is expected to hold, so a truncated or edited history is still rejected.
-  const echoed = body.messages.length - 1;
+  // The client can legitimately hold messages the server does not: a failed
+  // turn's assistant message replayed by the recovery stream, and user
+  // messages from submits this guard rejected. Unknown ids are ignored — the
+  // normalized body below is rebuilt from the authoritative copy either way —
+  // but every known id must match its authoritative record exactly and in
+  // order, and the newest window must be fully echoed, so a truncated or
+  // edited history is still rejected.
+  const echoedMessages = body.messages.slice(0, -1);
+  const indexById = new Map(
+    authoritativeMessages.map((message, index) => [message.id, index]),
+  );
+  const matched = new Set<number>();
+  let previousIndex = -1;
+  for (const candidate of echoedMessages) {
+    const id = isRecord(candidate) && typeof candidate.id === "string"
+      ? candidate.id
+      : null;
+    const index = id === null ? undefined : indexById.get(id);
+    if (index === undefined) continue;
+    if (
+      index <= previousIndex ||
+      !sameStructure(candidate, authoritativeMessages[index])
+    ) {
+      return reject("history_mismatch", event.id, false, {
+        index,
+        echoed: echoedMessages.length,
+        authoritative: authoritativeMessages.length,
+        submitted: describeMessageShape(candidate),
+        expected: describeMessageShape(authoritativeMessages[index]),
+      });
+    }
+    previousIndex = index;
+    matched.add(index);
+  }
   const minimumEcho = Math.min(
     authoritativeMessages.length,
     PUBLIC_SUBMIT_HISTORY_WINDOW,
   );
-  if (echoed < minimumEcho) {
-    return reject("history_mismatch", event.id, false, {
-      echoed,
-      minimumEcho,
-      authoritative: authoritativeMessages.length,
-    });
-  }
-  const echoOffset = authoritativeMessages.length - echoed;
-  for (let index = 0; index < echoed; index += 1) {
-    if (
-      !sameStructure(
-        body.messages[index],
-        authoritativeMessages[echoOffset + index],
-      )
-    ) {
+  for (
+    let index = authoritativeMessages.length - minimumEcho;
+    index < authoritativeMessages.length;
+    index += 1
+  ) {
+    if (!matched.has(index)) {
       return reject("history_mismatch", event.id, false, {
-        index,
-        echoed,
+        missingIndex: index,
+        echoed: echoedMessages.length,
         authoritative: authoritativeMessages.length,
-        submitted: describeMessageShape(body.messages[index]),
-        expected: describeMessageShape(
-          authoritativeMessages[echoOffset + index],
-        ),
       });
     }
   }

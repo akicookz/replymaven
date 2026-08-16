@@ -4434,6 +4434,22 @@ import {
     scrollToBottom();
   }
 
+  // A failed turn is invisible unless we say something: the server discards
+  // the partial reply and the error frame is otherwise console-only. A
+  // status note (not a bot bubble) is the honest surface.
+  function showTurnFailureNote(): void {
+    removeTurnFailureNote();
+    const note = document.createElement("div");
+    note.className = "rm-chat-note rm-turn-failed";
+    note.textContent = "The reply didn't come through. Please try again.";
+    messagesContainer.insertBefore(note, typingRow);
+    scrollToBottom();
+  }
+
+  function removeTurnFailureNote(): void {
+    messagesContainer.querySelector(".rm-turn-failed")?.remove();
+  }
+
   async function handleSendMessage(
     text: string,
     options: SendMessageOptions = {},
@@ -4452,9 +4468,41 @@ import {
     let optimisticMessageId: string | null = null;
     try {
       if (currentView === "home") showChatScreen();
+
+      const imageFile = pendingImageFile;
+      let uploadedImageUrl: string | null = null;
+      let localPreviewUrl: string | null = null;
+      if (imageFile) {
+        localPreviewUrl = imagePreviewImg.src;
+        pendingImageFile = null;
+        imagePreview.classList.remove("visible");
+        imagePreviewImg.src = "";
+      }
+
+      const messageText = text || (imageFile ? "Sent an image" : "");
+      if (!messageText && !imageFile) return;
+
+      // Render the bubble before conversation creation and the socket
+      // connect, or the first message shows a frozen composer with nothing
+      // on screen for the whole setup round-trip.
+      optimisticMessageId = crypto.randomUUID();
+      pendingVisitorMessageIds.add(optimisticMessageId);
+      addMessageToUI(
+        "visitor",
+        messageText,
+        optimisticMessageId,
+        localPreviewUrl ?? undefined,
+        undefined,
+        undefined,
+        true,
+      );
+      quickTopicsContainer.style.display = "none";
+      removeTurnFailureNote();
+
       if (!conversationId) await createConversation(identitySession);
-      if (!identitySessions.isCurrent(identitySession) || !conversationId) {
-        return;
+      if (!identitySessions.isCurrent(identitySession)) return;
+      if (!conversationId) {
+        throw new Error("The conversation could not be created");
       }
       const requestedConversationId = conversationId;
       const transport = await connectConversationAgent(
@@ -4473,32 +4521,6 @@ import {
         conversationStatus = "active";
         syncConversationModeUi();
       }
-
-      const imageFile = pendingImageFile;
-      let uploadedImageUrl: string | null = null;
-      let localPreviewUrl: string | null = null;
-      if (imageFile) {
-        localPreviewUrl = imagePreviewImg.src;
-        pendingImageFile = null;
-        imagePreview.classList.remove("visible");
-        imagePreviewImg.src = "";
-      }
-
-      const messageText = text || (imageFile ? "Sent an image" : "");
-      if (!messageText && !imageFile) return;
-
-      optimisticMessageId = crypto.randomUUID();
-      pendingVisitorMessageIds.add(optimisticMessageId);
-      addMessageToUI(
-        "visitor",
-        messageText,
-        optimisticMessageId,
-        localPreviewUrl ?? undefined,
-        undefined,
-        undefined,
-        true,
-      );
-      quickTopicsContainer.style.display = "none";
 
       if (imageFile) {
         async function tryUpload(): Promise<string> {
@@ -4972,6 +4994,7 @@ import {
   };
 
   function showTyping(message?: string, phase?: string) {
+    removeTurnFailureNote();
     typingRow.classList.add("visible");
     const label = (phase && PHASE_LABELS[phase]) || message || "Thinking";
     if (statusText.textContent !== label) {
@@ -5187,6 +5210,7 @@ import {
     if (activity.error) {
       hideTyping();
       console.error("[ReplyMaven] Conversation Agent connection failed:", activity.error);
+      if (activity.errorSource === "turn") showTurnFailureNote();
       return;
     }
     if (activity.isRecovering) {

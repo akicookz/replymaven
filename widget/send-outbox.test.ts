@@ -95,6 +95,42 @@ describe("widget send outbox", () => {
     expect(h.outbox.snapshot()).toHaveLength(0);
   });
 
+  test("confirmInflight settles the head entry at turn start", async () => {
+    const h = harness();
+    h.outbox.enqueue("m1", "hello");
+    await settle();
+    expect(lastState(h, "m1")).toBe("inflight");
+
+    // Server streaming proves receipt long before the final frame resolves
+    // the attempt.
+    h.outbox.confirmInflight();
+    expect(lastState(h, "m1")).toBe("delivered");
+    expect(h.outbox.snapshot()).toHaveLength(0);
+
+    // The superseded attempt's late resolution must not double-fire, and the
+    // next message flushes normally afterwards.
+    h.attempts[0]!.delivered();
+    await settle();
+    h.outbox.enqueue("m2", "next");
+    await settle();
+    expect(h.attempts).toHaveLength(2);
+    expect(lastState(h, "m2")).toBe("inflight");
+    h.outbox.confirmInflight();
+    expect(lastState(h, "m2")).toBe("delivered");
+  });
+
+  test("confirmInflight without an inflight entry is a no-op", async () => {
+    const h = harness();
+    h.outbox.confirmInflight();
+    expect(h.outbox.snapshot()).toHaveLength(0);
+    h.outbox.enqueue("m1", "hello");
+    await settle();
+    h.attempts[0]!.delivered();
+    await settle();
+    h.outbox.confirmInflight();
+    expect(lastState(h, "m1")).toBe("delivered");
+  });
+
   test("a rejected attempt requeues, invalidates the stale guard, and resends on the next trigger", async () => {
     const h = harness();
     h.outbox.enqueue("m1", "hello");
