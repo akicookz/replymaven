@@ -374,8 +374,16 @@ export function createWidgetAgentChatClient(): WidgetAgentChatClient {
   function publishActivity(activity: WidgetChatActivity): void {
     const recoveryCompleted = currentActivity.isRecovering &&
       !activity.isRecovering;
+    // The submitted → streaming transition is the first response chunk of the
+    // turn this client just sent (isServerStreaming only covers the resume
+    // path). It proves the server holds the head inflight entry's message.
+    const turnStartedStreaming = activity.status === "streaming" &&
+      currentActivity.status !== "streaming";
     currentActivity = activity;
     for (const listener of activityListeners) listener(currentActivity);
+    if (turnStartedStreaming && !activity.isRecovering && !activity.error) {
+      outbox.confirmInflight();
+    }
     if (recoveryCompleted) {
       // The post-recovery message state is the server-authoritative snapshot
       // that adjudicates delivery. The activity effect can run before the
@@ -386,13 +394,6 @@ export function createWidgetAgentChatClient(): WidgetAgentChatClient {
         if (awaitingReconcile) reconcileOutbox();
       });
       return;
-    }
-    if (
-      activity.isServerStreaming && !activity.isRecovering && !activity.error
-    ) {
-      // The server streaming a turn proves it holds the request behind the
-      // head inflight entry; flip it to delivered at turn start.
-      outbox.confirmInflight();
     }
     if (!activity.error && !activity.isRecovering && !awaitingReconcile) {
       outbox.poke();
