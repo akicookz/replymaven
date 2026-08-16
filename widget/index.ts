@@ -2023,6 +2023,17 @@ import {
       color: rgba(107, 114, 128, 0.9);
       margin: 6px 0 10px;
     }
+    .rm-turn-retry {
+      background: none;
+      border: 0;
+      padding: 0;
+      margin-left: 4px;
+      font: inherit;
+      color: var(--rm-primary, #2563eb);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      cursor: pointer;
+    }
 
     /* Quick action bar in home */
     .rm-home-actions {
@@ -4436,12 +4447,40 @@ import {
 
   // A failed turn is invisible unless we say something: the server discards
   // the partial reply and the error frame is otherwise console-only. A
-  // status note (not a bot bubble) is the honest surface.
+  // status note (not a bot bubble) is the honest surface. The visitor's
+  // message DID deliver — only the reply failed — so the retry re-sends the
+  // last visitor message as a fresh turn instead of asking them to retype.
+  function lastVisitorMessageText(): string | null {
+    const messages = agentChatClient.messages();
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index]!;
+      if (message.author !== "visitor") continue;
+      const content = message.content?.trim();
+      if (content && content !== "Sent an image") return content;
+      return null;
+    }
+    return null;
+  }
+
   function showTurnFailureNote(): void {
     removeTurnFailureNote();
     const note = document.createElement("div");
     note.className = "rm-chat-note rm-turn-failed";
-    note.textContent = "The reply didn't come through. Please try again.";
+    const retryText = lastVisitorMessageText();
+    if (retryText) {
+      note.append("The reply didn't come through.");
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "rm-turn-retry";
+      retry.textContent = "Try again";
+      retry.addEventListener("click", () => {
+        removeTurnFailureNote();
+        void handleSendMessage(retryText);
+      });
+      note.appendChild(retry);
+    } else {
+      note.textContent = "The reply didn't come through. Please try again.";
+    }
     messagesContainer.insertBefore(note, typingRow);
     scrollToBottom();
   }
