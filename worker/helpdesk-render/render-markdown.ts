@@ -95,6 +95,14 @@ function startsWithH1(markdown: string): boolean {
   }
 }
 
+/**
+ * Hover-revealed permalink beside a section heading. The article page turns a
+ * click into a clipboard copy; without JS it stays an ordinary fragment link.
+ */
+function sectionAnchor(id: string): string {
+  return `<a class="help-anchor" href="#${escapeAttr(id)}" aria-label="Copy link to this section">#</a>`;
+}
+
 /** TOC labels carry no inline markup, so drop the emphasis/code markers. */
 function tocText(headingText: string): string {
   return headingText.replace(/[*_`]/g, "").trim();
@@ -194,10 +202,13 @@ function headingIdExtension(
         const n = self.headingSeen.get(base) ?? 0;
         self.headingSeen.set(base, n + 1);
         const id = n === 0 ? base : `${base}-${n}`;
-        if (token.depth <= TOC_MAX_LEVEL && !nested.has(token)) {
+        const isSection = token.depth <= TOC_MAX_LEVEL && !nested.has(token);
+        if (isSection) {
           collect.push({ level: token.depth, id, text: tocText(plain) });
         }
-        return `<h${token.depth} id="${id}">${inner}</h${token.depth}>`;
+        // The h1 is the article title, and the page URL already points there.
+        const anchor = isSection && token.depth > 1 ? sectionAnchor(id) : "";
+        return `<h${token.depth} id="${id}">${inner}${anchor}</h${token.depth}>`;
       },
     },
   };
@@ -578,7 +589,16 @@ function sanitizeRenderedHtml(
       "input",
     ],
     allowedAttributes: {
-      a: ["href", "name", "target", "rel", "title", "data-warning"],
+      a: [
+        "href",
+        "name",
+        "target",
+        "rel",
+        "title",
+        "class",
+        "aria-label",
+        "data-warning",
+      ],
       img: [
         "src",
         "alt",
@@ -651,6 +671,13 @@ function sanitizeRenderedHtml(
       a: (tagName, attribs) => {
         const href = (attribs.href ?? "").trim();
         if (!href) return { tagName, attribs };
+        if (href.startsWith("#")) {
+          // A fragment stays on this page, so never send it to a new tab.
+          const samePage: Record<string, string> = { ...attribs };
+          delete samePage.target;
+          delete samePage.rel;
+          return { tagName, attribs: samePage };
+        }
         const host = safeHost(href);
         const internalHosts = new Set<string>();
         internalHosts.add("replymaven.com");
@@ -724,6 +751,9 @@ function rewriteAnchor(
     } else {
       resolved = `https://${canonicalHost}${trimmed}`;
     }
+    isInternal = true;
+  } else if (trimmed.startsWith("#")) {
+    // Same-page section link: keep the fragment as authored.
     isInternal = true;
   } else if (ALLOWED_PROTOCOLS.test(trimmed)) {
     const host = safeHost(trimmed);

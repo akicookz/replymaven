@@ -49,6 +49,35 @@
 .help-prose a:hover {
   text-decoration: underline;
 }
+/* Land a linked section below the sticky top bar, not behind it. */
+.help-prose :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: 4.5rem;
+}
+/* Section permalink: fades in on hover, copies the section URL on click. */
+.help-prose .help-anchor {
+  margin-left: 0.4rem;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.help-prose :is(h2, h3):hover > .help-anchor,
+.help-prose .help-anchor:focus-visible {
+  opacity: 1;
+}
+.help-prose .help-anchor:hover {
+  color: var(--brand);
+  text-decoration: none;
+}
+.help-prose .help-anchor.is-copied {
+  opacity: 1;
+  color: var(--brand);
+}
+/* Touch has no hover state, so keep the mark reachable there. */
+@media (hover: none) {
+  .help-prose .help-anchor { opacity: 0.45; }
+}
 .help-prose ul,
 .help-prose ol {
   padding-left: 1.5rem;
@@ -64,6 +93,13 @@
   padding: 0.125em 0.4em;
   border-radius: 10px;
   font-size: 0.8125rem;
+}
+/* In a heading, code sizes against the heading instead of the fixed body
+   size, so a term like `resources:write` reads as part of the title rather
+   than shrinking to half its height. Body and table code stay as they are. */
+.help-prose :is(h1, h2, h3, h4) code {
+  font-size: 0.85em;
+  border-radius: 0.5em;
 }
 /* Code block tracks the theme via tokens — light grey in light mode, soft dark
    in dark mode — so it never reads as a harsh blob either way. */
@@ -607,11 +643,25 @@
 
 /* ─── Copy page control ──────────────────────────────────────────────────── */
 
+/* Mobile: the control wraps to its own row, so it spans that row. It shrinks
+   back to its content width once the breadcrumb and button share a line. */
 .help-copy {
   position: relative;
   display: flex;
   flex-shrink: 0;
   margin-left: auto;
+  width: 100%;
+}
+.help-copy .help-copy-main {
+  flex: 1;
+  justify-content: center;
+}
+@media (min-width: 640px) {
+  .help-copy { width: auto; }
+  .help-copy .help-copy-main {
+    flex: 0 0 auto;
+    justify-content: flex-start;
+  }
 }
 .help-copy-main,
 .help-copy-toggle {

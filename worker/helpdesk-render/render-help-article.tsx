@@ -236,6 +236,11 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
           __html: COPY_PAGE_SCRIPT,
         }}
       />
+      <script
+        dangerouslySetInnerHTML={{
+          __html: SECTION_ANCHOR_SCRIPT,
+        }}
+      />
     </Layout>
   );
 }
@@ -415,6 +420,44 @@ const COPY_PAGE_SCRIPT = `
 })();
 `;
 
+const SECTION_ANCHOR_SCRIPT = `
+(function(){
+  var active = null;
+  var timer;
+  function reset(){
+    if (!active) return;
+    active.classList.remove('is-copied');
+    active.textContent = '#';
+    active = null;
+  }
+  document.addEventListener('click', function(e){
+    var t = e.target;
+    var a = t && t.closest ? t.closest('.help-anchor') : null;
+    if (!a) return;
+    var hash = a.getAttribute('href') || '';
+    if (!hash) return;
+    // Without the clipboard API the default fragment jump is the fallback.
+    if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+    e.preventDefault();
+    navigator.clipboard
+      .writeText(location.origin + location.pathname + hash)
+      .then(function(){
+        // replaceState keeps the address bar in sync without a scroll jump;
+        // the reader is already looking at this heading.
+        if (history.replaceState) history.replaceState(null, '', hash);
+        else location.hash = hash;
+        reset();
+        active = a;
+        a.classList.add('is-copied');
+        a.textContent = '\\u2713';
+        clearTimeout(timer);
+        timer = setTimeout(reset, 1500);
+      })
+      .catch(function(){ location.hash = hash; });
+  });
+})();
+`;
+
 const TOC_SCROLLSPY_SCRIPT = `
 (function(){
   var links = Array.prototype.slice.call(document.querySelectorAll('.help-toc-link'));
@@ -482,6 +525,11 @@ const TOC_SCROLLSPY_SCRIPT = `
   }
   window.addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('resize', onScroll, { passive: true });
+  // Arriving on a section link, the browser applies the fragment scroll after
+  // this script runs and fires no scroll event, so the first update would
+  // leave the rail pointing at the title. Re-run once the page has settled.
+  window.addEventListener('load', onScroll);
+  window.addEventListener('hashchange', onScroll);
   update();
 })();
 `;
