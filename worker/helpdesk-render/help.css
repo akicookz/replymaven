@@ -375,8 +375,7 @@
   .help-index-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (min-width: 1024px) {
-  .help-index-hero { padding: 4.5rem 3rem 2.5rem; }
-  .help-index-body { padding: 0 3rem 5rem; }
+  .help-index-hero { padding: 4.5rem 1.5rem 2.5rem; }
 }
 
 .help-category-card {
@@ -513,6 +512,14 @@
   padding: 2.5rem 0 5rem;
   max-width: 44rem;
 }
+/* With the sidebar visible, every page anchors 1.5rem right of it instead of
+   centering in the leftover space, so all page types share one left edge. */
+@media (min-width: 1024px) {
+  .help-page,
+  .help-article-layout > .help-page {
+    margin: 0;
+  }
+}
 .help-toc {
   display: none;
 }
@@ -558,17 +565,23 @@
   line-height: 1.4;
   transition: color 120ms ease;
 }
-/* H2-level entries read darker/heavier than their H3 children. */
-.help-toc-item:not(.is-h3) .help-toc-link {
-  color: color-mix(in oklch, var(--foreground), transparent 15%);
-  font-weight: 500;
+/* Depth ladder: H1 title leads, H2 indents one step, H3 two. Every level stays
+   below full-strength foreground so the active row still reads as active. */
+.help-toc-item.is-h1 .help-toc-link {
+  color: color-mix(in oklch, var(--foreground), transparent 20%);
+  font-weight: 600;
 }
+.help-toc-item.is-h2 .help-toc-link {
+  color: color-mix(in oklch, var(--foreground), transparent 35%);
+  font-weight: 500;
+  padding-left: 1rem;
+}
+.help-toc-item.is-h3 .help-toc-link { padding-left: 2rem; font-size: 0.8rem; }
 .help-toc-link:hover { color: var(--foreground); }
 .help-toc .help-toc-link.is-active {
   color: var(--foreground);
   font-weight: 600;
 }
-.help-toc-item.is-h3 .help-toc-link { padding-left: 1rem; font-size: 0.8rem; }
 .help-article-topline {
   display: flex;
   align-items: flex-start;

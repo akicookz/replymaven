@@ -9,7 +9,7 @@ import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
 import { extractFirstImage } from "./extract-first-image";
-import { extractToc } from "./render-markdown";
+import type { TocEntry } from "./render-markdown";
 import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
 import { MobileCategoryNav } from "./mobile-category-nav";
@@ -21,6 +21,7 @@ interface RenderHelpArticleProps {
   articlesByCategory: Map<string, HelpArticleRow[]>;
   article: HelpArticleRow;
   bodyHtml: string;
+  toc: TocEntry[];
   prevArticle: HelpArticleRow | null;
   nextArticle: HelpArticleRow | null;
   widgetConfig: WidgetConfigRow | null;
@@ -49,7 +50,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
       ? props.article.updatedAt.toISOString()
       : new Date().toISOString();
 
-  const toc = extractToc(props.article.content ?? "");
+  const toc = props.toc;
   const firstImage = extractFirstImage(props.article.content ?? "");
   const ogImage = firstImage
     ? {

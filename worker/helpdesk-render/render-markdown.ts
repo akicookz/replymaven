@@ -66,51 +66,38 @@ export interface TocEntry {
 
 export { splitGluedImageBlocks };
 
+/** Deepest heading level the "On this page" rail lists. */
+const TOC_MAX_LEVEL = 3;
+
 /**
  * Articles authored in the new editor carry their title as the first H1 in the
  * body. Legacy articles stored the title separately with no H1 in the body.
  * Guarantee a leading H1 so the published page always shows the title once.
+ *
+ * Detection lexes the body rather than matching `#`, so a setext title
+ * (`Title` over `=====`) is recognized as the H1 marked will render.
  */
 export function ensureArticleTitle(markdown: string, title: string): string {
-  const trimmed = (markdown ?? "").trimStart();
-  if (/^#[ \t]/.test(trimmed)) return markdown;
   const safeTitle = title.trim();
   if (!safeTitle) return markdown;
+  if (startsWithH1(markdown ?? "")) return markdown;
   return `# ${safeTitle}\n\n${markdown ?? ""}`;
 }
 
-/**
- * Walk the markdown to produce a flat list of h2/h3 headings with slugified
- * IDs that match what the renderer injects. Skips headings inside fenced
- * code blocks.
- */
-export function extractToc(markdown: string): TocEntry[] {
-  if (!markdown) return [];
-  const entries: TocEntry[] = [];
-  const seen = new Map<string, number>();
-  const lines = splitGluedImageBlocks(markdown).split(/\r?\n/);
-  let inFence = false;
-  for (const line of lines) {
-    const fence = /^\s*```/.test(line) || /^\s*~~~/.test(line);
-    if (fence) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
-    const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
-    if (!match) continue;
-    const level = match[1].length;
-    if (level < 2 || level > 3) continue;
-    const text = match[2].replace(/[*_`]/g, "").trim();
-    if (!text) continue;
-    const base = slugifyHeading(text);
-    if (!base) continue;
-    const n = seen.get(base) ?? 0;
-    seen.set(base, n + 1);
-    const id = n === 0 ? base : `${base}-${n}`;
-    entries.push({ level, id, text });
+function startsWithH1(markdown: string): boolean {
+  if (!markdown.trim()) return false;
+  try {
+    const tokens = new Lexer({ gfm: true, breaks: false }).lex(markdown);
+    const first = tokens.find((token) => token.type !== "space");
+    return first?.type === "heading" && (first as Tokens.Heading).depth === 1;
+  } catch {
+    return /^#[ \t]/.test(markdown.trimStart());
   }
-  return entries;
+}
+
+/** TOC labels carry no inline markup, so drop the emphasis/code markers. */
+function tocText(headingText: string): string {
+  return headingText.replace(/[*_`]/g, "").trim();
 }
 
 function calloutExtension(): MarkedExtension {
@@ -154,7 +141,44 @@ function calloutExtension(): MarkedExtension {
   };
 }
 
-function headingIdExtension(): MarkedExtension {
+/**
+ * A heading inside a callout, blockquote, list item, or step is body content,
+ * not a section of the article, so the rail skips it. Only headings at the
+ * document root stay unmarked: every other heading is a child of some
+ * container token, and walkTokens visits all of them before rendering starts.
+ */
+function nestedHeadingExtension(nested: WeakSet<Token>): MarkedExtension {
+  return {
+    walkTokens(token) {
+      if (token.type === "heading") return;
+      const container = token as { tokens?: Token[]; items?: Token[] };
+      markChildHeadings(container.tokens, nested);
+      markChildHeadings(container.items, nested);
+    },
+  };
+}
+
+function markChildHeadings(
+  children: Token[] | undefined,
+  nested: WeakSet<Token>,
+): void {
+  if (!children) return;
+  for (const child of children) {
+    if (child.type === "heading") nested.add(child);
+  }
+}
+
+/**
+ * Assigns heading IDs and records the TOC entries in the same pass, so an
+ * anchor in the rail can never point at a different heading than the one that
+ * carries the ID. `collect` receives entries in document order. Nested
+ * headings still get IDs — and still advance the slug counter — they just do
+ * not appear in the rail.
+ */
+function headingIdExtension(
+  collect: TocEntry[],
+  nested: WeakSet<Token>,
+): MarkedExtension {
   return {
     renderer: {
       heading(this: unknown, token: Tokens.Heading) {
@@ -170,6 +194,9 @@ function headingIdExtension(): MarkedExtension {
         const n = self.headingSeen.get(base) ?? 0;
         self.headingSeen.set(base, n + 1);
         const id = n === 0 ? base : `${base}-${n}`;
+        if (token.depth <= TOC_MAX_LEVEL && !nested.has(token)) {
+          collect.push({ level: token.depth, id, text: tocText(plain) });
+        }
         return `<h${token.depth} id="${id}">${inner}</h${token.depth}>`;
       },
     },
@@ -458,7 +485,8 @@ function highlightCode(code: string, lang: string): string {
   return escapeHtml(code);
 }
 
-function createMarked(): Marked {
+function createMarked(collect: TocEntry[]): Marked {
+  const nested = new WeakSet<Token>();
   return new Marked(
     markedHighlight({
       langPrefix: "hljs language-",
@@ -467,7 +495,8 @@ function createMarked(): Marked {
     apiBlocksExtension(),
     stepsExtension(),
     calloutExtension(),
-    headingIdExtension(),
+    nestedHeadingExtension(nested),
+    headingIdExtension(collect, nested),
     { gfm: true, breaks: false },
   );
 }
@@ -481,17 +510,27 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+export interface RenderedMarkdown {
+  html: string;
+  /**
+   * Document-root h1–h3 headings in order, matching the IDs emitted in `html`.
+   * Headings nested in callouts, quotes, lists, or steps are excluded.
+   */
+  toc: TocEntry[];
+}
+
 export async function renderMarkdown(
   markdown: string,
   options: RenderMarkdownOptions,
-): Promise<string> {
+): Promise<RenderedMarkdown> {
   void HLJS_REGISTERED;
-  const marked = createMarked();
+  const toc: TocEntry[] = [];
+  const marked = createMarked(toc);
   const rawHtml = await marked.parse(splitGluedImageBlocks(markdown ?? ""), {
     async: true,
   });
   const rewritten = postProcessLinksAndImages(rawHtml, options);
-  return sanitizeRenderedHtml(rewritten, options);
+  return { html: sanitizeRenderedHtml(rewritten, options), toc };
 }
 
 // Rewrite URLs FIRST so sanitize-html sees the final structure, then sanitize

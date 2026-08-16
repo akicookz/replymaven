@@ -1859,7 +1859,7 @@ const app = new Hono<HonoAppContext>()
         ? siblings[currentIndex + 1]
         : null;
 
-    const bodyHtml = await renderMarkdown(
+    const { html: bodyHtml, toc } = await renderMarkdown(
       ensureArticleTitle(match.article.content ?? "", match.article.title),
       {
         projectSlug: project.slug,
@@ -1877,6 +1877,7 @@ const app = new Hono<HonoAppContext>()
       articlesByCategory,
       article: match.article,
       bodyHtml,
+      toc,
       prevArticle,
       nextArticle,
       widgetConfig: widgetConfigRow,
@@ -6293,7 +6294,7 @@ const app = new Hono<HonoAppContext>()
         ? siblings[currentIndex + 1]
         : null;
 
-    const bodyHtml = await renderMarkdown(
+    const { html: bodyHtml, toc } = await renderMarkdown(
       ensureArticleTitle(article.content ?? "", article.title),
       {
         projectSlug: project.slug,
@@ -6311,6 +6312,7 @@ const app = new Hono<HonoAppContext>()
       articlesByCategory,
       article,
       bodyHtml,
+      toc,
       prevArticle,
       nextArticle,
       widgetConfig: widgetConfigRow,
