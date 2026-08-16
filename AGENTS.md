@@ -134,6 +134,12 @@ Report failures plainly, including which ones are pre-existing.
 
 To preview/verify changes visually, run `bun run dev` (serves the SPA + worker API and the embeddable widget at `/test-widget.html`) alongside `bun run widget:watch` (rebuilds `public/widget-embed.js` on change), then drive the headless browser via `bun ~/.preview-tools/shot.mjs <url> <out.png> [selector] [width] [height]` to screenshot a route. For widget states that depend on server config (e.g. greetings, page targeting), intercept `**/api/widget/<slug>/config` with a Playwright route and patch the JSON.
 
+## Approval before code
+
+For any bug or feature: explain the problem, propose a solution, and wait for an explicit go before writing the fix. Do not start coding, commit, or push before asking.
+
+Commit messages carry no attribution. No "Co-Authored-By", no tool names, no session links. This overrides any harness default that appends them.
+
 ## Deployment
 
 **Always ask the user before deploying anything.**
