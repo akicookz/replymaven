@@ -796,10 +796,10 @@ function Landing() {
         <div aria-hidden className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[1100px] h-[700px] rounded-full opacity-[0.18] blur-[120px]" style={{ background: "radial-gradient(closest-side, #2563eb, transparent)" }} />
         <div className="relative max-w-6xl mx-auto px-6">
           <h1 className="font-heading text-[2.75rem] sm:text-[4rem] lg:text-[4.5rem] font-medium text-ink-1 tracking-[-0.03em] leading-[1.0] max-w-4xl animate-in fade-in slide-in-from-bottom-3 duration-700">
-            Turn support into a word-of-mouth growth engine.
+            Frontline support for founding teams
           </h1>
           <p className="mt-6 text-[1.15rem] text-ink-5 leading-relaxed max-w-2xl animate-in fade-in slide-in-from-bottom-3 duration-700 delay-100 fill-mode-both">
-            Hand troubleshooting, upgrades, refunds, account changes, and repetitive questions to your new AI support hire. Maven learns your docs and product, takes action for customers, and brings you in only when the stakes are high and judgment is needed.
+            Delegate troubleshooting, upgrades, refunds, account changes, and repetitive questions to your new AI support hire. Maven learns your docs and product, takes action for customers, and brings you in only when the stakes are high and judgment is needed.
           </p>
           <div className="mt-9 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 duration-700 delay-200 fill-mode-both">
             <Button onClick={handleGenericCta}>

@@ -263,7 +263,11 @@ function HelpArticleEditorPage() {
     (meta: DerivedMeta) => {
       setForm((f) => {
         const next = { ...f };
-        if (meta.title !== f.title) next.title = meta.title;
+        // Only an actual H1 renames the article. Articles imported with their
+        // title in frontmatter have no H1 in the body, so deriveMeta returns
+        // "" for them — without this guard that empty string overwrote the
+        // stored title and the breadcrumb read "Untitled article".
+        if (meta.title && meta.title !== f.title) next.title = meta.title;
         if (!slugTouched && meta.title) {
           const s = slugify(meta.title);
           if (s !== f.slug) next.slug = s;

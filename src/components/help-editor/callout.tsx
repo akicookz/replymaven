@@ -5,7 +5,6 @@ import {
   ReactNodeViewRenderer,
 } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { Info, AlertTriangle, Lightbulb, AlertOctagon } from "lucide-react";
 import type { MarkdownSerializerState } from "prosemirror-markdown";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
@@ -20,16 +19,6 @@ const VARIANT_LABEL: Record<CalloutVariant, string> = {
   danger: "Danger",
 };
 
-const VARIANT_ICON: Record<
-  CalloutVariant,
-  React.ComponentType<{ className?: string }>
-> = {
-  info: Info,
-  warning: AlertTriangle,
-  tip: Lightbulb,
-  danger: AlertOctagon,
-};
-
 const VARIANT_CLASS: Record<CalloutVariant, string> = {
   info: "callout callout-info",
   warning: "callout callout-warning",
@@ -39,31 +28,29 @@ const VARIANT_CLASS: Record<CalloutVariant, string> = {
 
 function CalloutView({ node, updateAttributes }: NodeViewProps) {
   const variant = (node.attrs.variant as CalloutVariant) ?? "info";
-  const Icon = VARIANT_ICON[variant] ?? Info;
   return (
     <NodeViewWrapper
       className={VARIANT_CLASS[variant]}
       data-callout={variant}
     >
-      <div className="callout-header" contentEditable={false}>
-        <span className="callout-icon" aria-hidden="true">
-          <Icon className="w-4 h-4" />
-        </span>
-        <select
-          value={variant}
-          onChange={(e) =>
-            updateAttributes({ variant: e.target.value as CalloutVariant })
-          }
-          className="callout-variant-select"
-          aria-label="Callout type"
-        >
-          {VARIANTS.map((v) => (
-            <option key={v} value={v}>
-              {VARIANT_LABEL[v]}
-            </option>
-          ))}
-        </select>
-      </div>
+      {/* The published callout is body text and nothing else — no icon, no
+          header. The variant picker is authoring-only chrome, so it sits in
+          the corner out of the text flow and only appears on hover. */}
+      <select
+        value={variant}
+        onChange={(e) =>
+          updateAttributes({ variant: e.target.value as CalloutVariant })
+        }
+        className="callout-variant-select"
+        contentEditable={false}
+        aria-label="Callout type"
+      >
+        {VARIANTS.map((v) => (
+          <option key={v} value={v}>
+            {VARIANT_LABEL[v]}
+          </option>
+        ))}
+      </select>
       <NodeViewContent className="callout-body" />
     </NodeViewWrapper>
   );

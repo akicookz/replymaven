@@ -131,7 +131,10 @@ function calloutExtension(): MarkedExtension {
       } else {
         para.text = remainder;
         if (para.tokens) {
-          para.tokens = [{ type: "text", raw: remainder, text: remainder }];
+          // Re-lex rather than emitting one raw text token: a plain token is
+          // rendered verbatim, so `code`, **bold**, and links on the same line
+          // as the [!INFO] marker reached the page as literal markdown.
+          para.tokens = Lexer.lexInline(remainder);
         }
       }
     },
@@ -143,7 +146,9 @@ function calloutExtension(): MarkedExtension {
         const inner = (this as unknown as {
           parser: { parse: (tokens: Tokens.Generic[]) => string };
         }).parser.parse(token.tokens ?? []);
-        return `<div class="callout callout-${variant}" data-callout="${variant}">${inner}</div>`;
+        // Body wrapped so the CSS-drawn icon (::before) has a sibling to sit
+        // beside; the icon itself is a mask, since the sanitizer strips <svg>.
+        return `<div class="callout callout-${variant}" data-callout="${variant}"><div class="callout-body">${inner}</div></div>`;
       },
     },
   };
