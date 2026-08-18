@@ -25,3 +25,7 @@ public/widget-agent-runtime.js
 
 # TypeScript
 *.tsbuildinfo
+
+# Verification skill screenshots and run notes
+.cursor/skills/verify-replymaven/evidence/**
+!.cursor/skills/verify-replymaven/evidence/README.md
