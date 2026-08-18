@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { act, useEffect } from "react";
 import { JSDOM } from "jsdom";
 import type { UIMessage } from "ai";
+import * as AgentReact from "agents/react";
+import * as AiChatReact from "@cloudflare/ai-chat/react";
 import type {
   PublicChatChildState,
   PublicChatSessionResponse,
@@ -29,7 +31,11 @@ let capturedAgentOptions: Array<Record<string, unknown>> = [];
 let capturedChatOptions: Array<Record<string, unknown>> = [];
 let agentUnmounts = 0;
 
+// Bun's mock.module stays for the rest of the process. Keep the real named
+// exports (getToolCallId, getToolApproval, …) so later files can still import
+// them; only override the hooks this file needs to drive.
 mock.module("agents/react", () => ({
+  ...AgentReact,
   useAgent(options: Record<string, unknown>) {
     capturedAgentOptions.push(options);
     useEffect(() => () => {
@@ -51,6 +57,7 @@ mock.module("agents/react", () => ({
 }));
 
 mock.module("@cloudflare/ai-chat/react", () => ({
+  ...AiChatReact,
   useAgentChat(options: Record<string, unknown>) {
     capturedChatOptions.push(options);
     return chatContract;

@@ -3,6 +3,11 @@
 @source "./*.tsx";
 @source "./tailwind-safelist.ts";
 
+html {
+  font-optical-sizing: none;
+  font-family: var(--font-sans);
+}
+
 /* ─── Prose styles for marked output ─────────────────────────────────────── */
 
 .help-prose {

@@ -1,5 +1,5 @@
 import type { WidgetConfigRow } from "../db/schema";
-import { isAllowedFont } from "./build-font-link";
+import { resolveWidgetFont } from "../../shared/widget-fonts";
 
 const HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
 const COLOR_FN_RE = /^(oklch|rgb|rgba|hsl|hsla)\(\s*[0-9a-zA-Z%.,\-\s/+*]+\s*\)$/i;
@@ -55,18 +55,19 @@ function palette(o: PaletteOpts): string {
 export function renderProjectTheme(widgetConfig: WidgetConfigRow | null): string {
   const primary = sanitizeColor(widgetConfig?.primaryColor) ?? "#2563eb";
   const radius = normalizeRadius(widgetConfig?.borderRadius);
-  const fontSans = sanitizeFontName(widgetConfig?.fontFamily) ?? "Inter";
-  // Headings use Switzer (our display face) by default to match the marketing
-  // docs; a tenant's own font, when set, drives both body and headings.
-  const fontHeading = sanitizeFontName(widgetConfig?.fontFamily) ?? "Switzer";
+  const fontName = sanitizeFontName(widgetConfig?.fontFamily);
+  const fontStack = fontName
+    ? `"${fontName}", system-ui, sans-serif`
+    : "system-ui, sans-serif";
 
   // Light is the brand default; readers flip to dark via the top-bar toggle
   // (it adds `.dark` on <html>). Radii + fonts are theme-independent.
+  // Body and headings use the same widget font. No Inter/Switzer split.
   return `:root {
 ${palette({ bg: "#ffffff", fg: "#0a0a0a", primary, code: "#f6f8fa", codeFg: "#1f2328", mutedFg: 35, border: 88 })}
   --radius: ${radius};
-  --font-sans: "${fontSans}", system-ui, sans-serif;
-  --font-heading: "${fontHeading}", system-ui, sans-serif;
+  --font-sans: ${fontStack};
+  --font-heading: ${fontStack};
 }
 .dark {
 ${palette({ bg: "#08080a", fg: "#f0f0f5", primary, code: "#0d1117", codeFg: "#e6edf3", mutedFg: 45, border: 90, brandLift: 30 })}
@@ -90,7 +91,9 @@ export function sanitizeRadius(input: string | null | undefined): string | null 
 
 export function sanitizeFontName(input: string | null | undefined): string | null {
   if (!input) return null;
-  return isAllowedFont(input) ? input : null;
+  const font = resolveWidgetFont(input);
+  if (!font || font.faces.length === 0) return null;
+  return font.value;
 }
 
 // The widget's borderRadius is tuned for chat bubbles; on the help pages it

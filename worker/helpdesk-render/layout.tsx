@@ -2,7 +2,7 @@
 import type { WidgetConfigRow } from "../db/schema";
 import helpCss from "./help.css?inline";
 import { renderProjectTheme } from "./render-project-theme";
-import { buildFontLink } from "./build-font-link";
+import { buildFontFaceCss } from "./build-font-link";
 
 interface OgImage {
   url: string;
@@ -31,7 +31,7 @@ export interface LayoutProps {
 
 export function Layout(props: LayoutProps) {
   const themeOverrides = renderProjectTheme(props.widgetConfig);
-  const fontHref = buildFontLink(props.widgetConfig?.fontFamily ?? null);
+  const fontCss = buildFontFaceCss(props.widgetConfig?.fontFamily ?? null) ?? "";
 
   return (
     <html lang="en">
@@ -82,30 +82,11 @@ export function Layout(props: LayoutProps) {
         {props.articleMeta?.section && (
           <meta property="article:section" content={props.articleMeta.section} />
         )}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossorigin=""
-        />
-        <link rel="preconnect" href="https://api.fontshare.com" crossorigin="" />
-        {/* Default typography matches the marketing docs: Switzer headings +
-            Inter body. A tenant's custom font, when set, loads instead and
-            drives both roles. */}
-        {fontHref ? (
-          <link href={fontHref} rel="stylesheet" />
-        ) : (
-          <>
-            <link
-              href="https://api.fontshare.com/v2/css?f[]=switzer@300,400,500,600,700&display=swap"
-              rel="stylesheet"
-            />
-            <link
-              href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
-              rel="stylesheet"
-            />
-          </>
-        )}
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+        <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin="" />
+        {fontCss ? (
+          <style dangerouslySetInnerHTML={{ __html: fontCss }} />
+        ) : null}
         {props.jsonLd && (
           <script
             type="application/ld+json"

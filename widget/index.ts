@@ -13,7 +13,6 @@
  */
 
 import { renderMarkdown } from "../shared/chat-markdown";
-import { WIDGET_FONTS } from "../shared/widget-fonts";
 import {
   parseMessageImageUrls,
   serializeMessageImageUrls,
@@ -23,10 +22,9 @@ import type {
   PublicChatChildState,
   PublicChatSessionResponse,
 } from "../shared/public-chat-agent";
+import { fontFaceCss, resolveWidgetFont } from "../shared/widget-fonts";
 import type { PublicMessageRecord } from "../shared/maven-conversation";
-import {
-  createLazyWidgetAgentChatClient,
-} from "./lazy-agent-chat-client";
+import { createLazyWidgetAgentChatClient } from "./lazy-agent-chat-client";
 import type { WidgetChatActivity } from "./agent-chat-bridge";
 import { classifyAgentSessionFailure } from "./agent-session-response";
 import { claimWidgetInstance } from "./instance-guard";
@@ -66,8 +64,7 @@ import {
   let isOpen = false;
   let conversationId: string | null = null;
   let conversationStatus: string | null = null;
-  let visitorId =
-    localStorage.getItem("rm_visitor_id") || generateVisitorId();
+  let visitorId = localStorage.getItem("rm_visitor_id") || generateVisitorId();
   let visitorInfo: { name?: string; email?: string; phone?: string } = {};
   let customMetadata: Record<string, string> = {};
   let pageContext: Record<string, string> = {};
@@ -306,6 +303,7 @@ import {
       position: fixed;
       z-index: 999999;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-optical-sizing: none;
       visibility: hidden;
 
       /* ─── Theme tokens (light / solid default) ─────────────────────── */
@@ -2181,6 +2179,7 @@ import {
       width: 300px;
       max-width: calc(100% - 40px);
       z-index: 999999;
+      font-optical-sizing: none;
       border-radius: 26px;
       background: transparent;
       animation: rm-pill-glow 4s ease-in-out infinite;
@@ -2988,7 +2987,10 @@ import {
 
   let greetingsList: GreetingPublic[] = [];
   const greetingTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  const greetingDurationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const greetingDurationTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
 
   let placeholderTexts: string[] = ["Ask a question..."];
   let placeholderIndex = 0;
@@ -3429,7 +3431,9 @@ import {
   // child crossed — depth-count so the overlay doesn't flicker.
   let attachDragDepth = 0;
   function dragHasFiles(e: DragEvent): boolean {
-    return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files");
+    return (
+      !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")
+    );
   }
   chatView.addEventListener("dragenter", (e) => {
     if (!dragHasFiles(e)) return;
@@ -3734,25 +3738,26 @@ import {
         }
 
         // Font family
-        if (w.fontFamily && w.fontFamily !== "system-ui") {
-          const fontOption = WIDGET_FONTS.find(
-            (f) => f.value === w.fontFamily,
-          );
-          if (fontOption?.url && !document.getElementById("rm-widget-font")) {
-            const link = document.createElement("link");
-            link.id = "rm-widget-font";
-            link.rel = "stylesheet";
-            link.href = fontOption.url;
-            document.head.appendChild(link);
+        const resolvedFont = resolveWidgetFont(w.fontFamily);
+        if (resolvedFont && resolvedFont.faces.length > 0) {
+          const css = fontFaceCss(resolvedFont);
+          let fontStyle = document.getElementById("rm-widget-font");
+          if (!fontStyle) {
+            fontStyle = document.createElement("style");
+            fontStyle.id = "rm-widget-font";
+            document.head.appendChild(fontStyle);
           }
+          fontStyle.textContent = css;
           const fontStack =
             '"' +
-            w.fontFamily +
+            resolvedFont.value +
             '", -apple-system, BlinkMacSystemFont, sans-serif';
           container.style.fontFamily = fontStack;
           // The inline bar is its own top-level element — it does not
           // inherit from container, so it needs the font applied too.
           inlineBar.style.fontFamily = fontStack;
+        } else {
+          document.getElementById("rm-widget-font")?.remove();
         }
 
         // ─── Avatar (trigger, header, home screen) ────────────────────────────
@@ -4033,7 +4038,7 @@ import {
               return;
             }
 
-            const accepted = await res.json() as ContactAcceptedClientPayload;
+            const accepted = (await res.json()) as ContactAcceptedClientPayload;
             if (!identitySessions.isCurrent(identitySession)) return;
 
             // The form endpoint has already persisted the visitor message and
@@ -4055,7 +4060,6 @@ import {
             formError.style.display = "none";
             submitBtn2.disabled = false;
             submitBtn2.textContent = "Send message";
-
           } catch {
             if (!identitySessions.isCurrent(identitySession)) return;
             formError.textContent =
@@ -4301,7 +4305,8 @@ import {
       !forceRefresh &&
       connectedAgentConversationId === requestedConversationId &&
       agentSessionExpiresAt * 1_000 - Date.now() > 30_000
-    ) return "agent";
+    )
+      return "agent";
     const generation = agentSessionGeneration + 1;
     agentSessionGeneration = generation;
     if (agentSessionRefreshTimer) {
@@ -4322,9 +4327,10 @@ import {
         generation !== agentSessionGeneration ||
         !identitySessions.isCurrent(identitySession) ||
         conversationId !== requestedConversationId
-      ) return "unavailable";
+      )
+        return "unavailable";
       if (!response.ok) {
-        const errorPayload = await response.json().catch(() => null) as {
+        const errorPayload = (await response.json().catch(() => null)) as {
           error?: string;
         } | null;
         const action = classifyAgentSessionFailure(
@@ -4338,12 +4344,13 @@ import {
         }
         return "unavailable";
       }
-      const session = await response.json() as PublicChatSessionResponse;
+      const session = (await response.json()) as PublicChatSessionResponse;
       if (
         generation !== agentSessionGeneration ||
         !identitySessions.isCurrent(identitySession) ||
         conversationId !== requestedConversationId
-      ) return "unavailable";
+      )
+        return "unavailable";
       agentChatClient.connect(session);
       connectedAgentConversationId = requestedConversationId;
       agentSessionExpiresAt = session.expiresAt;
@@ -4361,7 +4368,10 @@ import {
       return "agent";
     } catch (error) {
       if (!identitySessions.isCurrent(identitySession)) return "unavailable";
-      console.error("[ReplyMaven] Failed to connect conversation Agent:", error);
+      console.error(
+        "[ReplyMaven] Failed to connect conversation Agent:",
+        error,
+      );
       return "unavailable";
     }
   }
@@ -4557,7 +4567,8 @@ import {
       if (
         !identitySessions.isCurrent(identitySession) ||
         conversationId !== requestedConversationId
-      ) return;
+      )
+        return;
       if (transport === "unavailable") {
         throw new Error("Conversation transport is unavailable");
       }
@@ -4584,7 +4595,7 @@ import {
           if (!uploadResponse.ok) {
             throw new Error(`upload ${uploadResponse.status}`);
           }
-          const upload = await uploadResponse.json() as { url: string };
+          const upload = (await uploadResponse.json()) as { url: string };
           if (!identitySessions.isCurrent(identitySession)) {
             throw new DOMException("Identity session reset", "AbortError");
           }
@@ -4799,8 +4810,7 @@ import {
       const img = document.createElement("img");
       img.className = "rm-message-image";
       img.src = src;
-      img.alt =
-        urls.length > 1 ? `Attached image ${i + 1}` : "Attached image";
+      img.alt = urls.length > 1 ? `Attached image ${i + 1}` : "Attached image";
       img.onclick = () => openImageLightbox(urls, i);
       host.appendChild(img);
     });
@@ -5093,9 +5103,10 @@ import {
   function updateRenderedPublicMessage(message: PublicMessageRecord): void {
     if (message.author === "system") return;
     const role = message.author;
-    const imageUrl = message.imageUrls.length > 0
-      ? serializeMessageImageUrls(message.imageUrls) ?? undefined
-      : undefined;
+    const imageUrl =
+      message.imageUrls.length > 0
+        ? (serializeMessageImageUrls(message.imageUrls) ?? undefined)
+        : undefined;
     const row = messagesContainer.querySelector<HTMLElement>(
       `[data-message-id="${CSS.escape(message.id)}"]`,
     );
@@ -5154,24 +5165,28 @@ import {
   function markStreamingResponseRow(id: string | null): void {
     if (streamingResponseRowId === id) return;
     if (streamingResponseRowId) {
-      messagesContainer.querySelector(
-        `[data-message-id="${CSS.escape(streamingResponseRowId)}"]`,
-      )?.classList.remove("rm-streaming");
+      messagesContainer
+        .querySelector(
+          `[data-message-id="${CSS.escape(streamingResponseRowId)}"]`,
+        )
+        ?.classList.remove("rm-streaming");
     }
     streamingResponseRowId = id;
     if (id) {
-      messagesContainer.querySelector(
-        `[data-message-id="${CSS.escape(id)}"]`,
-      )?.classList.add("rm-streaming");
+      messagesContainer
+        .querySelector(`[data-message-id="${CSS.escape(id)}"]`)
+        ?.classList.add("rm-streaming");
     }
   }
 
   function isTurnStreaming(): boolean {
-    return !latestAgentActivity.error &&
+    return (
+      !latestAgentActivity.error &&
       !latestAgentActivity.isRecovering &&
       (latestAgentActivity.status === "submitted" ||
         latestAgentActivity.status === "streaming" ||
-        latestAgentActivity.isServerStreaming);
+        latestAgentActivity.isServerStreaming)
+    );
   }
 
   function handleAgentMessages(messages: PublicMessageRecord[]): void {
@@ -5207,7 +5222,8 @@ import {
       if (
         (message.author === "bot" || message.author === "agent") &&
         message.content
-      ) hideTyping();
+      )
+        hideTyping();
     }
     authoritativeMessageIds = nextIds;
 
@@ -5226,9 +5242,11 @@ import {
       ensureLatestMessageVisible();
     }
 
-    const latestResponse = [...messages].reverse().find((message) =>
-      message.author === "bot" || message.author === "agent"
-    );
+    const latestResponse = [...messages]
+      .reverse()
+      .find(
+        (message) => message.author === "bot" || message.author === "agent",
+      );
     if (latestResponse) {
       const isNewLatestResponse = newestResponseId !== latestResponse.id;
       newestResponseId = latestResponse.id;
@@ -5237,7 +5255,8 @@ import {
         latestAgentActivity.status === "ready" &&
         !latestAgentActivity.isServerStreaming &&
         !latestAgentActivity.isRecovering
-      ) reportDelivered();
+      )
+        reportDelivered();
     } else {
       newestResponseId = null;
     }
@@ -5271,11 +5290,13 @@ import {
       latestAgentActivity.status !== "ready" ||
       latestAgentActivity.isServerStreaming ||
       latestAgentActivity.isRecovering
-    ) return;
-    const deliverable = messages.filter((message) =>
-      pendingIncomingResponseIds.has(message.id) &&
-      (message.author === "bot" || message.author === "agent") &&
-      (message.content.length > 0 || message.imageUrls.length > 0)
+    )
+      return;
+    const deliverable = messages.filter(
+      (message) =>
+        pendingIncomingResponseIds.has(message.id) &&
+        (message.author === "bot" || message.author === "agent") &&
+        (message.content.length > 0 || message.imageUrls.length > 0),
     );
     for (const message of deliverable) {
       pendingIncomingResponseIds.delete(message.id);
@@ -5289,7 +5310,10 @@ import {
     if (activity.error) {
       hideTyping();
       markStreamingResponseRow(null);
-      console.error("[ReplyMaven] Conversation Agent connection failed:", activity.error);
+      console.error(
+        "[ReplyMaven] Conversation Agent connection failed:",
+        activity.error,
+      );
       if (activity.errorSource === "turn") showTurnFailureNote();
       return;
     }
@@ -5380,12 +5404,9 @@ import {
       msg.senderName ||
       (msg.role === "agent"
         ? "Agent"
-        : config?.botName ||
-          config?.widget?.headerText ||
-          "New message");
+        : config?.botName || config?.widget?.headerText || "New message");
     const text = msg.content ?? "";
-    const preview =
-      text.length > 120 ? text.substring(0, 120) + "..." : text;
+    const preview = text.length > 120 ? text.substring(0, 120) + "..." : text;
 
     const card = document.createElement("div");
     card.className = "rm-greeting-card compact";
@@ -5614,7 +5635,8 @@ import {
     if (
       !identitySessions.isCurrent(identitySession) ||
       conversationId !== requestedConversationId
-    ) return;
+    )
+      return;
     startHeartbeat();
   }
 
@@ -5762,9 +5784,8 @@ import {
 
     const title = document.createElement("div");
     title.className = "rm-greeting-title";
-    title.textContent = greeting.author?.name && !isRich
-      ? greeting.author.name
-      : greeting.title;
+    title.textContent =
+      greeting.author?.name && !isRich ? greeting.author.name : greeting.title;
     text.appendChild(title);
 
     const desc = document.createElement("div");
@@ -5772,7 +5793,7 @@ import {
     desc.textContent =
       greeting.author?.name && !isRich
         ? greeting.title
-        : greeting.description ?? "";
+        : (greeting.description ?? "");
     if (desc.textContent) text.appendChild(desc);
 
     if (isRich && greeting.description) {

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap");
 @import url("https://api.fontshare.com/v2/css?f[]=switzer@300,400,500,600,700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -18,6 +18,7 @@
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    font-optical-sizing: none;
     background-color: var(--background);
   }
   body {

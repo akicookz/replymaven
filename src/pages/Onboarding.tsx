@@ -30,7 +30,11 @@ import {
 } from "@/components/ui/select";
 import { ColorPicker } from "@/components/ui/color-picker";
 import { Skeleton } from "@/components/ui/skeleton";
-import { WIDGET_FONTS as FONT_OPTIONS } from "../../shared/widget-fonts";
+import {
+  fontFaceCss,
+  resolveWidgetFont,
+  WIDGET_FONTS as FONT_OPTIONS,
+} from "../../shared/widget-fonts";
 import { INDUSTRIES } from "../../shared/industries";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -481,10 +485,11 @@ function hexToRgb(hex: string): string {
 }
 
 function widgetPreviewFontFamily(fontFamily: string): string {
-  if (fontFamily === "system-ui") {
+  const font = resolveWidgetFont(fontFamily);
+  if (!font || font.faces.length === 0) {
     return "system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   }
-  return `"${fontFamily}", system-ui, -apple-system, sans-serif`;
+  return `"${font.value}", system-ui, -apple-system, sans-serif`;
 }
 
 function formatPreviewDomain(url: string): string {
@@ -572,18 +577,20 @@ function WidgetStylePreview({
   const inputRadius = Math.min(style.borderRadius * 0.875, 14);
 
   useEffect(() => {
-    const font = FONT_OPTIONS.find((option) => option.value === style.fontFamily);
-    if (!font?.url) return;
-
-    const linkId = "onboarding-widget-preview-font";
-    let link = document.getElementById(linkId) as HTMLLinkElement | null;
-    if (!link) {
-      link = document.createElement("link");
-      link.id = linkId;
-      link.rel = "stylesheet";
-      document.head.appendChild(link);
+    const font = resolveWidgetFont(style.fontFamily);
+    const css = font && font.faces.length > 0 ? fontFaceCss(font) : "";
+    const styleId = "onboarding-widget-preview-font";
+    let el = document.getElementById(styleId);
+    if (!css) {
+      el?.remove();
+      return;
     }
-    link.href = font.url;
+    if (!el) {
+      el = document.createElement("style");
+      el.id = styleId;
+      document.head.appendChild(el);
+    }
+    el.textContent = css;
   }, [style.fontFamily]);
 
   const isInline = style.position === "center-inline";
