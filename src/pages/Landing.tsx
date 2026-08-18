@@ -755,6 +755,15 @@ function Landing() {
     navigate("/app/account");
   }
 
+  function chatWithMaven() {
+    const widget = (
+      window as Window & {
+        ReplyMaven?: { sendMessage: (text: string) => void };
+      }
+    ).ReplyMaven;
+    widget?.sendMessage("Hi Maven, what can you do?");
+  }
+
   const callbackParam = searchParams.get("callback");
   const authCallbackUrl = selectedPlan
     ? `/app/onboarding?plan=${selectedPlan.plan}&interval=${selectedPlan.interval}`
@@ -806,9 +815,9 @@ function Landing() {
               Start free trial
               <ArrowRight className="w-4 h-4" />
             </Button>
-            <Button variant="outline" onClick={() => window.ReplyMaven.open()}>
-                Chat with Maven
-                <ArrowDownRight className="w-4 h-4" /> 
+            <Button variant="outline" onClick={chatWithMaven}>
+              Chat with Maven
+              <ArrowDownRight className="w-4 h-4" />
             </Button>
           </div>
         </div>
