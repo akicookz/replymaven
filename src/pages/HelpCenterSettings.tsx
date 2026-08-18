@@ -23,13 +23,20 @@ import {
 import { Input } from "@/components/ui/input";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { ProxySetupBody } from "@/components/ProxySetupGuide";
+import {
+  CustomCssEditor,
+  HELP_CUSTOM_CSS_CLASSES,
+} from "@/components/custom-css-editor";
 import HelpTopNavEditor, {
   type HelpTopNavItem,
 } from "@/components/help-top-nav-editor";
+import { useSubscription } from "@/hooks/use-subscription";
+import { canAccessFeature } from "@/lib/plan";
 
 interface ProjectSettingsData {
   helpCustomUrl: string | null;
   helpTopNav: HelpTopNavItem[] | null;
+  helpCustomCss: string | null;
 }
 
 interface ProjectData {
@@ -53,6 +60,9 @@ function HelpCenterSettings() {
   const [testResult, setTestResult] = useState<TestProxyResponse | null>(null);
   const [topNav, setTopNav] = useState<HelpTopNavItem[]>([]);
   const [topNavError, setTopNavError] = useState<string | null>(null);
+  const [customCss, setCustomCss] = useState("");
+  const { data: subData } = useSubscription();
+  const canCustomCss = canAccessFeature(subData?.limits ?? null, "customCss");
 
   const { data: project } = useQuery<ProjectData>({
     queryKey: ["project", projectId],
@@ -76,6 +86,7 @@ function HelpCenterSettings() {
     if (settings) {
       setCustomUrl(settings.helpCustomUrl ?? "");
       setTopNav(Array.isArray(settings.helpTopNav) ? settings.helpTopNav : []);
+      setCustomCss(settings.helpCustomCss ?? "");
     }
   }, [settings]);
 
@@ -160,6 +171,7 @@ function HelpCenterSettings() {
           helpCustomUrl: trimmed || null,
           helpTopNav:
             normalizedTopNav.length === 0 ? null : normalizedTopNav,
+          helpCustomCss: customCss.trim() || null,
         }),
       });
       if (!res.ok) {
@@ -212,7 +224,8 @@ function HelpCenterSettings() {
   const savedTopNav = settings?.helpTopNav ?? [];
   const dirty =
     (settings?.helpCustomUrl ?? "") !== customUrl ||
-    JSON.stringify(savedTopNav) !== JSON.stringify(topNav);
+    JSON.stringify(savedTopNav) !== JSON.stringify(topNav) ||
+    (settings?.helpCustomCss ?? "") !== customCss;
 
   return (
     <div className="space-y-6">
@@ -377,6 +390,49 @@ function HelpCenterSettings() {
         {topNavError && (
           <p className="text-xs text-destructive">{topNavError}</p>
         )}
+      </div>
+
+      <div className="rounded-2xl bg-card/50 backdrop-blur-xl border border-border p-6 space-y-5">
+        <div>
+          <h2 className="text-base font-semibold tracking-tight">
+            Custom CSS
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Override help center styles. Type . to insert a class. Changes can
+            take up to two minutes to show on the live pages.
+          </p>
+        </div>
+
+        <CustomCssEditor
+          value={customCss}
+          onChange={setCustomCss}
+          classes={HELP_CUSTOM_CSS_CLASSES}
+          disabled={
+            isLoading ||
+            saveSettings.isPending ||
+            (!canCustomCss && !customCss.trim())
+          }
+          placeholder={`.help-index-title { font-weight: 800; }
+.help-sidebar-group-name { font-weight: 500; }`}
+        />
+
+        {!canCustomCss && (
+          <p className="text-xs text-muted-foreground">
+            Custom CSS is available on the Business plan.
+          </p>
+        )}
+
+        <Button
+          onClick={() => saveSettings.mutate()}
+          disabled={!dirty || saveSettings.isPending}
+        >
+          {saveSettings.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Save className="h-4 w-4" />
+          )}
+          Save
+        </Button>
       </div>
 
     </div>

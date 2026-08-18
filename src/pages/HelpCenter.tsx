@@ -475,8 +475,7 @@ function HelpCenter() {
               Help Center
             </h1>
             <p className="mt-1 text-pretty text-sm text-muted-foreground">
-              Write help center articles. Published articles are indexed for
-              the AI automatically.
+              Write help center articles. Published articles are indexed for automatically.
             </p>
           </div>
         </div>

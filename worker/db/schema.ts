@@ -86,6 +86,7 @@ export const projectSettings = sqliteTable(
     avgResponseTime: text("avg_response_time"),
     helpCustomUrl: text("help_custom_url"),
     helpTopNav: text("help_top_nav"),
+    helpCustomCss: text("help_custom_css"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),

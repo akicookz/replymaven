@@ -22,6 +22,7 @@ import type {
   PublicChatChildState,
   PublicChatSessionResponse,
 } from "../shared/public-chat-agent";
+import { sanitizeCustomCss } from "../shared/sanitize-custom-css";
 import { fontFaceCss, resolveWidgetFont } from "../shared/widget-fonts";
 import type { PublicMessageRecord } from "../shared/maven-conversation";
 import { createLazyWidgetAgentChatClient } from "./lazy-agent-chat-client";
@@ -2584,6 +2585,21 @@ import {
   `;
   document.head.appendChild(styles);
 
+  function applyWidgetCustomCss(css: string | null | undefined): void {
+    const safe = sanitizeCustomCss(css);
+    let el = document.getElementById("rm-widget-custom-css");
+    if (!safe) {
+      el?.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement("style");
+      el.id = "rm-widget-custom-css";
+      document.head.appendChild(el);
+    }
+    el.textContent = safe;
+  }
+
   // ─── Build UI ───────────────────────────────────────────────────────────────
 
   // Container
@@ -3759,6 +3775,10 @@ import {
         } else {
           document.getElementById("rm-widget-font")?.remove();
         }
+
+        applyWidgetCustomCss(
+          typeof w.customCss === "string" ? w.customCss : null,
+        );
 
         // ─── Avatar (trigger, header, home screen) ────────────────────────────
 

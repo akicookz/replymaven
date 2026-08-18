@@ -31,6 +31,7 @@ interface SaveState {
   isPending: boolean;
   isSuccess: boolean;
   isError: boolean;
+  error?: Error | null;
 }
 
 interface WidgetPageShellProps {
@@ -116,7 +117,8 @@ export function WidgetPageShell({
       {save?.isError && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-destructive/10 text-destructive text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
-          Failed to save widget settings. Please try again.
+          {save.error?.message ??
+            "Failed to save widget settings. Please try again."}
         </div>
       )}
 

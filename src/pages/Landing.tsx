@@ -31,6 +31,7 @@ import {
   MoreHorizontal,
   SlidersHorizontal,
   Search,
+  ArrowDownRight,
 } from "lucide-react";
 import { pricingPlans } from "@/components/PricingCards";
 import { LogoIcon } from "@/components/Logo";
@@ -104,7 +105,7 @@ function Window({
   return (
     <div
       className={cn(
-        "rounded-[18px] border border-hairline-strong bg-[#0d0e12] overflow-hidden shadow-[0_40px_120px_-40px_rgba(0,0,0,0.9)]",
+        "rounded-[18px] overflow-hidden",
         className,
       )}
     >
@@ -312,7 +313,6 @@ function InboxMock() {
   );
 }
 
-// ─── Section mock: Focus mode ─────────────────────────────────────────────────
 
 const FOCUS_THREAD: { who: "m" | "v"; body: string }[] = [
   { who: "v", body: "Hey, I just got charged $90 this month, but my plan is supposed to be $49. Can you check what happened?" },
@@ -323,10 +323,10 @@ const FOCUS_THREAD: { who: "m" | "v"; body: string }[] = [
 
 function FocusMock() {
   return (
-    <Window className="p-6 sm:p-9 flex items-center justify-center min-h-[400px] bg-[#0b0c10]">
+    <Window className="p-6 sm:p-9 flex items-center justify-center min-h-[400px]">
       <div className="w-full max-w-[440px]">
-        <div className="rounded-[16px] border border-hairline-strong bg-[#15161c] overflow-hidden shadow-[0_30px_80px_-30px_rgba(0,0,0,0.9)]">
-          <div className="flex items-center justify-between px-4 h-12 border-b border-hairline">
+        <div className="rounded-[16px] overflow-hidden">
+          <div className="flex items-center justify-between px-4 h-12">
             <div className="flex items-center gap-2.5">
               <span className="w-7 h-7 rounded-full bg-brand/15 text-brand text-[11px] font-semibold inline-flex items-center justify-center">MB</span>
               <div>
@@ -392,7 +392,7 @@ const MCP_CLIENTS = [
 
 function MCPMock() {
   return (
-    <Window className="min-h-[360px] bg-[#0d0e12] p-5 sm:p-8">
+    <Window className="p-5 sm:p-8">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2.5">
@@ -461,7 +461,7 @@ const AGENT_TRACE = [
 
 function AgentMock() {
   return (
-    <Window className="flex min-h-[460px] items-center bg-[#0b0c10] p-5 sm:p-9">
+    <Window className="flex min-h-[460px] items-center p-5 sm:p-9">
       <div className="w-full max-w-[580px] mx-auto">
         <div className="flex flex-col items-start mb-5">
           <span className="text-[11px] font-semibold text-ink-5 mb-1.5">Visitor</span>
@@ -795,22 +795,20 @@ function Landing() {
         {/* ambient blue glow */}
         <div aria-hidden className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[1100px] h-[700px] rounded-full opacity-[0.18] blur-[120px]" style={{ background: "radial-gradient(closest-side, #2563eb, transparent)" }} />
         <div className="relative max-w-6xl mx-auto px-6">
-          <h1 className="font-heading text-[2.75rem] sm:text-[4rem] lg:text-[4.5rem] font-medium text-ink-1 tracking-[-0.03em] leading-[1.0] max-w-4xl animate-in fade-in slide-in-from-bottom-3 duration-700">
-            Frontline support for founding teams
+          <h1 className="font-heading sm:text-4xl lg:text-6xl font-medium text-ink-1 tracking-[-0.03em] leading-[1.0] max-w-4xl animate-in fade-in slide-in-from-bottom-3 duration-700">
+            Frontline customer support for founding teams
           </h1>
-          <p className="mt-6 text-[1.15rem] text-ink-5 leading-relaxed max-w-2xl animate-in fade-in slide-in-from-bottom-3 duration-700 delay-100 fill-mode-both">
-            Delegate troubleshooting, upgrades, refunds, account changes, and repetitive questions to your new AI support hire. Maven learns your docs and product, takes action for customers, and brings you in only when the stakes are high and judgment is needed.
+          <p className="mt-6 text-[1.15rem] text-ink-5 leading-relaxed max-w-4xl animate-in fade-in slide-in-from-bottom-3 duration-700 delay-100 fill-mode-both">
+            Delegate troubleshooting, upgrades, refunds, account changes, and repetitive questions to Maven, your customer support AI agent. Maven learns your docs and product, takes action for customers, and brings you in only when the stakes are high and judgment is needed.
           </p>
           <div className="mt-9 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 duration-700 delay-200 fill-mode-both">
             <Button onClick={handleGenericCta}>
               Start free trial
               <ArrowRight className="w-4 h-4" />
             </Button>
-            <Button variant="outline" asChild>
-              <a href="#platform">
-                See ReplyMaven in action
-                <ArrowRight className="w-4 h-4" />
-              </a>
+            <Button variant="outline" onClick={() => window.ReplyMaven.open()}>
+                Chat with Maven
+                <ArrowDownRight className="w-4 h-4" /> 
             </Button>
           </div>
         </div>
@@ -820,7 +818,7 @@ function Landing() {
           {/* Desktop: real product screenshot. Small screens: the responsive
               in-code mock (a desktop screenshot would be unreadable on mobile). */}
           <div
-            className="hidden lg:block rounded-t-[18px] overflow-hidden"
+            className="hidden lg:block rounded-lg overflow-hidden"
             style={{
               // Dissolve the bottom of the mock into the page background. Fade
               // starts low so the composer stays faintly visible.
@@ -854,7 +852,7 @@ function Landing() {
             { n: "1.4", label: "Customer context" },
           ]}
         >
-          <div className="hidden lg:block rounded-[18px] border border-hairline-strong overflow-hidden shadow-[0_40px_120px_-40px_rgba(0,0,0,0.9)]">
+          <div className="hidden lg:block rounded-lg overflow-hidden">
             <img
               src="/mock-focus.webp"
               alt="ReplyMaven focus mode for distraction-free triage of a billing conversation"
@@ -882,7 +880,7 @@ function Landing() {
         </ValueSection>
 
         <ValueSection
-          title="Support agent that can take actions"
+          title="Maven can take actions and resolve tickets"
           body="Troubleshooting, upgrades, refunds, and account changes. Maven answers from your knowledge, calls the right tools, and brings you in when the stakes are high."
           index={[
             { n: "3.1", label: "Answers from your docs" },
@@ -895,7 +893,7 @@ function Landing() {
         </ValueSection>
 
         <ValueSection
-          title="Give Maven the tools to finish the job"
+          title="Delegate the information lookup to Maven"
           body="Connect ReplyMaven to your product and support stack. Maven pulls live customer data, triggers workflows, escalates urgent requests, and creates Linear or GitHub issues with the full conversation attached."
           index={[
             { n: "4.1", label: "Live customer data" },
@@ -908,7 +906,7 @@ function Landing() {
         </ValueSection>
 
         <ValueSection
-          title="Handle support with your AI agents"
+          title="Maven can collaborate with your AI agents"
           body="Connect ReplyMaven to Claude, ChatGPT, Cursor, and Conductor. Handle tickets, act on product feedback, ship fixes, and update docs from the agents you already use."
           index={[
             { n: "5.1", label: "Handle and reply to support" },
@@ -926,10 +924,10 @@ function Landing() {
         <div className="max-w-6xl mx-auto">
           <div className="max-w-2xl mb-14">
             <h2 className="font-heading text-[2.2rem] sm:text-[3rem] font-medium tracking-[-0.02em] leading-[1.04] text-ink-1">
-              Your first support hire starts at $19
+              Delegate support at $19/month
             </h2>
             <p className="mt-4 text-[1.05rem] text-ink-5 leading-relaxed">
-              Try the full support workflow for seven days. Upgrade when your customer volume grows.
+                Experience ReplyMaven for seven days free.
             </p>
           </div>
           <LandingPricing

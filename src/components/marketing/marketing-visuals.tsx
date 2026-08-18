@@ -26,11 +26,11 @@ function ProductFrame({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-[26px] bg-[#111218] p-2 shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_40px_100px_-48px_rgba(0,0,0,0.95)]",
+        "overflow-hidden rounded-[26px] p-2",
         className,
       )}
     >
-      <div className="overflow-hidden rounded-[18px] bg-[#0d0e13]">
+      <div className="overflow-hidden rounded-[18px]">
         {children}
       </div>
     </div>

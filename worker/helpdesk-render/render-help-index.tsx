@@ -30,6 +30,7 @@ interface RenderHelpIndexProps {
   widgetConfig: WidgetConfigRow | null;
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
+  customCss: string | null;
 }
 
 export function renderHelpIndex(props: RenderHelpIndexProps) {
@@ -48,6 +49,7 @@ export function renderHelpIndex(props: RenderHelpIndexProps) {
       canonicalUrl={canonical}
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
+      customCss={props.customCss}
       topBar={
         <HelpTopBar
           project={props.project}

@@ -1,5 +1,15 @@
-import { Globe, Image, Palette, Type, Upload, X } from "lucide-react";
+import { Image, Upload, X } from "lucide-react";
+import {
+  CustomCssEditor,
+  WIDGET_CUSTOM_CSS_CLASSES,
+} from "@/components/custom-css-editor";
 import PageVisibilityInput from "@/components/PageVisibilityInput";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { ColorPicker } from "@/components/ui/color-picker";
 import { ImagePositioner } from "@/components/ImagePositioner";
@@ -15,10 +25,12 @@ import {
   WidgetPreviewPanel,
   WidgetSectionCard,
 } from "@/components/WidgetSettings";
+import { useSubscription } from "@/hooks/use-subscription";
 import {
   BACKGROUND_STYLES,
   useWidgetSettings,
 } from "@/hooks/use-widget-settings";
+import { canAccessFeature } from "@/lib/plan";
 import { cn } from "@/lib/utils";
 import { WIDGET_FONTS } from "../../shared/widget-fonts";
 
@@ -31,6 +43,9 @@ interface WidgetAppearancePanelProps {
 }
 
 export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
+  const { data: subData } = useSubscription();
+  const canCustomCss = canAccessFeature(subData?.limits ?? null, "customCss");
+  const customCss = state.form.customCss ?? "";
   const widgetPages = (state.form.allowedPages ?? "")
     .split(",")
     .map((page) => page.trim())
@@ -64,7 +79,6 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
       <WidgetSectionCard
         title="Branding"
         description="Colors used across the widget."
-        icon={Palette}
       >
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
@@ -103,12 +117,39 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
           </p>
         </div>
 
+        <Accordion type="single" collapsible>
+          <AccordionItem value="custom-css" className="border-0">
+            <AccordionTrigger className="py-1 text-sm font-medium text-foreground hover:no-underline">
+              Custom CSS
+            </AccordionTrigger>
+            <AccordionContent className="space-y-3 pb-0">
+              <p className="text-xs text-muted-foreground">
+                Override widget styles. Type . to insert a class.
+              </p>
+              <CustomCssEditor
+                value={customCss}
+                onChange={(next) =>
+                  state.updateForm({ customCss: next || null })
+                }
+                classes={WIDGET_CUSTOM_CSS_CLASSES}
+                disabled={!canCustomCss && !customCss.trim()}
+                autoFocus
+                placeholder={`.rm-header { font-weight: 800; }
+.rm-chat-window { border-radius: 20px; }`}
+              />
+              {!canCustomCss && (
+                <p className="text-xs text-muted-foreground">
+                  Custom CSS is available on the Business plan.
+                </p>
+              )}
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </WidgetSectionCard>
 
       <WidgetSectionCard
         title="Launcher &amp; Header"
         description="Copy shown in the conversation header."
-        icon={Type}
       >
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">
@@ -144,7 +185,6 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
       <WidgetSectionCard
         title="Home View"
         description="Avatar, banner, and welcome text on the widget home."
-        icon={Image}
       >
         {state.form.position !== "center-inline" ? (
           <>
@@ -330,7 +370,6 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
       <WidgetSectionCard
         title="Layout &amp; Typography"
         description="Where the widget sits and how it reads."
-        icon={Type}
       >
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
@@ -458,7 +497,6 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
       <WidgetSectionCard
         title="Page Visibility"
         description="Control which pages the widget appears on."
-        icon={Globe}
       >
         <PageVisibilityInput
           value={widgetPages}

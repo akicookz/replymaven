@@ -27,6 +27,7 @@ interface RenderHelpArticleProps {
   widgetConfig: WidgetConfigRow | null;
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
+  customCss: string | null;
 }
 
 export function renderHelpArticle(props: RenderHelpArticleProps) {
@@ -83,6 +84,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
       widgetConfig={props.widgetConfig}
       jsonLd={jsonLd}
       ogImage={ogImage}
+      customCss={props.customCss}
       articleMeta={{
         publishedAt: datePublished,
         modifiedAt: dateModified,

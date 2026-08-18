@@ -159,6 +159,7 @@ export class ProjectService {
         | "introMessageDuration"
         | "helpCustomUrl"
         | "helpTopNav"
+        | "helpCustomCss"
       >
     >,
   ): Promise<ProjectSettingsRow | null> {

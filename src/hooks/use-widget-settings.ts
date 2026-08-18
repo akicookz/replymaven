@@ -467,7 +467,10 @@ export function useWidgetSettings(
         body: JSON.stringify(form),
       });
 
-      if (!res.ok) throw new Error("Failed to save widget config");
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(err.error ?? "Failed to save widget config");
+      }
       return res.json();
     },
     onSuccess: () => {

@@ -1,0 +1,1 @@
+ALTER TABLE `project_settings` ADD `help_custom_css` text;

@@ -3,6 +3,7 @@ import type { WidgetConfigRow } from "../db/schema";
 import helpCss from "./help.css?inline";
 import { renderProjectTheme } from "./render-project-theme";
 import { buildFontFaceCss } from "./build-font-link";
+import { sanitizeCustomCss } from "../../shared/sanitize-custom-css";
 
 interface OgImage {
   url: string;
@@ -24,6 +25,7 @@ export interface LayoutProps {
   jsonLd?: object | null;
   ogImage?: OgImage | null;
   articleMeta?: ArticleMeta | null;
+  customCss?: string | null;
   topBar?: unknown;
   sidebar?: unknown;
   children?: unknown;
@@ -32,6 +34,7 @@ export interface LayoutProps {
 export function Layout(props: LayoutProps) {
   const themeOverrides = renderProjectTheme(props.widgetConfig);
   const fontCss = buildFontFaceCss(props.widgetConfig?.fontFamily ?? null) ?? "";
+  const customCss = sanitizeCustomCss(props.customCss);
 
   return (
     <html lang="en">
@@ -95,6 +98,9 @@ export function Layout(props: LayoutProps) {
         )}
         <style dangerouslySetInnerHTML={{ __html: helpCss }} />
         <style dangerouslySetInnerHTML={{ __html: themeOverrides }} />
+        {customCss ? (
+          <style dangerouslySetInnerHTML={{ __html: customCss }} />
+        ) : null}
       </head>
       <body class="min-h-screen bg-background text-foreground antialiased">
         {props.topBar}

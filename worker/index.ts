@@ -33,6 +33,10 @@ import { ResourceService, type FaqPair } from "./services/resource-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
 import { FAQ_SET_MAX_CHARS } from "../shared/faq-limits";
 import {
+  findCustomCssViolation,
+  sanitizeCustomCss,
+} from "../shared/sanitize-custom-css";
+import {
   isConversationUploadUrl,
 } from "../shared/upload-ownership";
 import { AiService } from "./services/ai-service";
@@ -766,7 +770,13 @@ const app = new Hono<HonoAppContext>()
 
     const widgetService = new WidgetService(db);
     const config = await widgetService.getFullWidgetConfig(project.id);
-    return c.json({ ...config, projectName: project.name });
+    const widget = config.widget
+      ? {
+          ...config.widget,
+          customCss: sanitizeCustomCss(config.widget.customCss),
+        }
+      : config.widget;
+    return c.json({ ...config, widget, projectName: project.name });
   })
 
   // ─── Signed Customer Identity ──────────────────────────────────────────────
@@ -1889,6 +1899,7 @@ const app = new Hono<HonoAppContext>()
       widgetConfig: widgetConfigRow,
       helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
+      customCss: settings?.helpCustomCss ?? null,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
       "Cache-Control": "public, max-age=120, s-maxage=120",
@@ -1968,6 +1979,7 @@ const app = new Hono<HonoAppContext>()
       widgetConfig: widgetConfigRow,
       helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
+      customCss: settings?.helpCustomCss ?? null,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
       "Cache-Control": "no-store",
@@ -2022,6 +2034,7 @@ const app = new Hono<HonoAppContext>()
       widgetConfig: widgetConfigRow,
       helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
+      customCss: settings?.helpCustomCss ?? null,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
       "Cache-Control": "public, max-age=120, s-maxage=120",
@@ -2084,6 +2097,7 @@ const app = new Hono<HonoAppContext>()
       widgetConfig: widgetConfigRow,
       helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
+      customCss: settings?.helpCustomCss ?? null,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
       "Cache-Control": "public, max-age=120, s-maxage=120",
@@ -4423,6 +4437,29 @@ const app = new Hono<HonoAppContext>()
       );
     }
 
+    const helpCustomCssRaw = parsed.data.helpCustomCss;
+    let helpCustomCss: string | null | undefined;
+    if (helpCustomCssRaw === undefined) {
+      helpCustomCss = undefined;
+    } else if (helpCustomCssRaw?.trim()) {
+      helpCustomCss = helpCustomCssRaw;
+    } else {
+      helpCustomCss = null;
+    }
+    if (helpCustomCss) {
+      const violation = findCustomCssViolation(helpCustomCss);
+      if (violation) return c.json({ error: violation }, 400);
+      if (planLimits && !planLimits.customCss) {
+        return c.json(
+          {
+            error: "Custom CSS is available on the Business plan.",
+            code: "feature_not_available",
+          },
+          403,
+        );
+      }
+    }
+
     const db = c.get("db");
     const projectService = new ProjectService(db);
     const project = await projectService.getProjectById(c.req.param("id"));
@@ -4431,12 +4468,16 @@ const app = new Hono<HonoAppContext>()
     }
 
     const { helpTopNav, ...rest } = parsed.data;
+    delete rest.helpCustomCss;
     const updatePayload: Parameters<typeof projectService.updateSettings>[1] = {
       ...rest,
     };
     if (helpTopNav !== undefined) {
       updatePayload.helpTopNav =
         helpTopNav === null ? null : JSON.stringify(helpTopNav);
+    }
+    if (helpCustomCss !== undefined) {
+      updatePayload.helpCustomCss = helpCustomCss;
     }
 
     const settings = await projectService.updateSettings(
@@ -4561,16 +4602,29 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(updateWidgetConfigSchema, body);
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-    // Feature gate: custom CSS
+    const customCssRaw = parsed.data.customCss;
+    let customCss: string | null | undefined;
+    if (customCssRaw === undefined) {
+      customCss = undefined;
+    } else if (customCssRaw?.trim()) {
+      customCss = customCssRaw;
+    } else {
+      customCss = null;
+    }
+
     const planLimits = c.get("planLimits");
-    if (parsed.data.customCss && planLimits && !planLimits.customCss) {
-      return c.json(
-        {
-          error: "Custom CSS is available on the Business plan.",
-          code: "feature_not_available",
-        },
-        403,
-      );
+    if (customCss) {
+      const violation = findCustomCssViolation(customCss);
+      if (violation) return c.json({ error: violation }, 400);
+      if (planLimits && !planLimits.customCss) {
+        return c.json(
+          {
+            error: "Custom CSS is available on the Business plan.",
+            code: "feature_not_available",
+          },
+          403,
+        );
+      }
     }
 
     const db = c.get("db");
@@ -4581,10 +4635,10 @@ const app = new Hono<HonoAppContext>()
     }
 
     const widgetService = new WidgetService(db);
-    const config = await widgetService.updateWidgetConfig(
-      project.id,
-      parsed.data,
-    );
+    const config = await widgetService.updateWidgetConfig(project.id, {
+      ...parsed.data,
+      ...(customCss !== undefined ? { customCss } : {}),
+    });
     return c.json(config);
   })
 
@@ -5266,7 +5320,7 @@ const app = new Hono<HonoAppContext>()
         return c.json(
           {
             error:
-              "This page is part of your help center. Published articles are indexed for the AI automatically \u2014 no need to add them here.",
+              "This page is part of your help center. Published articles are indexed automatically \u2014 no need to add them here.",
             code: "own_help_center_url",
           },
           400,
@@ -6379,6 +6433,7 @@ const app = new Hono<HonoAppContext>()
       widgetConfig: widgetConfigRow,
       helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
+      customCss: settings?.helpCustomCss ?? null,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
       "Cache-Control": "no-store",
