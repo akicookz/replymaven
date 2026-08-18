@@ -929,7 +929,7 @@ import {
     .rm-msg-status {
       font-size: 11px;
       line-height: 1;
-      color: rgba(0, 0, 0, 0.35);
+      color: var(--rm-text-muted);
       text-align: right;
       margin-top: 3px;
       padding-right: 2px;
