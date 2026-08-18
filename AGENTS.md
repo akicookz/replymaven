@@ -664,7 +664,7 @@ Do NOT re-add conversation-message caching here -- prior attempts introduced sta
 | POST | `/api/widget/:projectSlug/identify` | Verify an opaque signed customer token and attach exact visitor history |
 | POST | `/api/widget/:projectSlug/conversations/:id/messages` | Send message (returns SSE stream, or JSON `{ agentMode: true }` when in agent mode) |
 | GET | `/api/widget/:projectSlug/conversations/:id/messages` | Get conversation history |
-| POST | `/api/telegram/webhook/:projectId` | Telegram bot webhook |
+| POST | `/api/telegram/webhook/:projectId` | Telegram bot webhook. Verified with the per-project `secret_token` Telegram echoes in `X-Telegram-Bot-Api-Secret-Token` (derived from `ENCRYPTION_KEY`, `worker/services/telegram-secrets.ts`). The first verified update from a project with no chat id binds that chat; there is no token-polling detect endpoint. |
 | GET | `/api/widget-embed.js` | 301 redirect to `widget.replymaven.com` (legacy) |
 
 ### Dashboard (session-authenticated)
@@ -771,17 +771,18 @@ Resource ingestion:
 
 ### Telegram Live Agent Handoff
 
-1. User configures Telegram bot token + chat ID, `botName`, and `agentName` in dashboard settings
-2. When the bot cannot answer confidently or visitor requests a human:
+1. User saves the Telegram bot token, `botName`, and `agentName` in dashboard settings. The token is encrypted at rest with `ENCRYPTION_KEY` (`worker/services/telegram-secrets.ts`); every read goes back through `resolveTelegramToken`, and `TelegramService` decrypts internally, so callers pass the stored value and never hold the credential.
+2. Saving registers the webhook with a per-project `secret_token`. The chat id is then learned from the first verified update: the user adds the bot to their group, sends any message, and the bot confirms in the chat. It binds once and is never repointed. A chat id can still be pasted by hand.
+3. When the bot cannot answer confidently or visitor requests a human:
    - Conversation status changes to `waiting_agent`
    - Worker sends Telegram notification via `notifyHandoff` with recent messages (last 4), dashboard link, and `@BotName` command hints
    - The Telegram notification's `message_id` is stored as `conversation.telegramThreadId` for reply threading
-3. While in agent mode (`waiting_agent` / `agent_replied`):
+4. While in agent mode (`waiting_agent` / `agent_replied`):
    - AI is completely silenced -- visitor messages bypass the entire AI pipeline
    - Visitor messages are forwarded to Telegram via `forwardVisitorMessage` (threaded using `telegramThreadId`)
    - The widget endpoint returns `{ ok: true, agentMode: true }` JSON instead of SSE
-4. Agent replies in Telegram (not prefixed with `@BotName`) -> stored as agent message, status set to `agent_replied`, visitor sees reply via polling
-5. Agent types `@BotName` commands in Telegram -> AI classifies intent via `classifyAgentCommand()`:
+5. Agent replies in Telegram (not prefixed with `@BotName`) -> stored as agent message, status set to `agent_replied`, visitor sees reply via polling
+6. Agent types `@BotName` commands in Telegram -> AI classifies intent via `classifyAgentCommand()`:
    - **`@BotName`** (no text) -- simple handback, status set to `active`, AI resumes
    - **`@BotName <close intent>`** (e.g. "we're done here", "resolved") -- `close` action, conversation closed, auto-draft canned response triggered
    - **`@BotName <private instructions>`** (e.g. "don't mention to user but cancel their account if they complain") -- `handback` action, instructions stored in `conversation.metadata.agentHandbackInstructions`, AI resumes and follows them silently

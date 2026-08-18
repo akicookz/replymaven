@@ -840,9 +840,6 @@ export function ToolsPanel({
   const [telegramChatId, setTelegramChatId] = useState("");
   const [telegramSaveStatus, setTelegramSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [telegramTestResult, setTelegramTestResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [detectingChatId, setDetectingChatId] = useState(false);
-  const [detectedChats, setDetectedChats] = useState<Array<{ id: string; type: string; title: string }> | null>(null);
-  const [detectError, setDetectError] = useState<string | null>(null);
 
   // ─── Queries ──────────────────────────────────────────────────────────────
 
@@ -1660,77 +1657,18 @@ export function ToolsPanel({
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-xs font-medium text-muted-foreground">
-                          Chat ID <span className="text-destructive">*</span>
+                          Chat ID
                         </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={telegramChatId}
-                            onChange={(e) => { setTelegramChatId(e.target.value); setDetectedChats(null); setDetectError(null); }}
-                            placeholder={telegramData?.telegramChatId ?? "Your Telegram chat or group ID"}
-                            className="flex-1 px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                          />
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={!telegramBotToken || detectingChatId}
-                            onClick={async () => {
-                              setDetectingChatId(true);
-                              setDetectError(null);
-                              setDetectedChats(null);
-                              try {
-                                const res = await fetch("/api/telegram/detect-chat-id", {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ botToken: telegramBotToken }),
-                                });
-                                const data = await res.json() as { chats?: Array<{ id: string; type: string; title: string }>; error?: string };
-                                if (!res.ok) {
-                                  setDetectError(data.error ?? "Detection failed");
-                                } else if (!data.chats?.length) {
-                                  setDetectError("No chats found. Send /start to your bot first, then try again.");
-                                } else if (data.chats.length === 1) {
-                                  setTelegramChatId(data.chats[0].id);
-                                  setDetectedChats(null);
-                                } else {
-                                  setDetectedChats(data.chats);
-                                }
-                              } catch {
-                                setDetectError("Failed to connect");
-                              } finally {
-                                setDetectingChatId(false);
-                              }
-                            }}
-                            className="shrink-0"
-                          >
-                            {detectingChatId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Detect"}
-                          </Button>
-                        </div>
+                        <input
+                          type="text"
+                          value={telegramChatId}
+                          onChange={(e) => setTelegramChatId(e.target.value)}
+                          placeholder={telegramData?.telegramChatId ?? "Connects on its own — or paste an ID"}
+                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
                         <p className="text-xs text-muted-foreground">
-                          Send <code className="bg-muted px-1 rounded">/start</code> to your bot in Telegram (or add it to a group and send a message), then click <strong>Detect</strong>.
+                          Save the token, then add the bot to your group and send any message. The chat connects itself and the bot confirms in the group. Paste an ID here only if you want a specific chat.
                         </p>
-                        {detectError && (
-                          <p className="text-xs text-destructive">{detectError}</p>
-                        )}
-                        {detectedChats && detectedChats.length > 1 && (
-                          <div className="space-y-1.5">
-                            <p className="text-xs font-medium text-muted-foreground">Multiple chats found — pick one:</p>
-                            <div className="space-y-1">
-                              {detectedChats.map((chat) => (
-                                <button
-                                  key={chat.id}
-                                  type="button"
-                                  onClick={() => { setTelegramChatId(chat.id); setDetectedChats(null); }}
-                                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-muted/30 hover:bg-muted/60 text-sm transition-colors"
-                                >
-                                  <span className="text-foreground">{chat.title}</span>
-                                  <span className="text-xs text-muted-foreground">{chat.type} · {chat.id}</span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
                       </div>
                     </div>
                     {telegramSaveStatus === "error" && (

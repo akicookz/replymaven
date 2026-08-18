@@ -925,7 +925,7 @@ export class BillingService {
       .innerJoin(projectSettings, eq(projects.id, projectSettings.projectId))
       .where(eq(projects.userId, userId));
 
-    const telegramService = new TelegramService(this.db);
+    const telegramService = new TelegramService(this.db, this.env.ENCRYPTION_KEY);
 
     const messages: Record<SubscriptionInactiveReason | "recovered", string> = {
       payment_failed:

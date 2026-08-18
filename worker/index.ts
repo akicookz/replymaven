@@ -6,6 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { users } from "./db/auth.schema";
 import {
+  projectSettings as projectSettingsTable,
   resources as resourcesTable,
   type HelpArticleRow,
   type HelpCategoryRow,
@@ -41,6 +42,13 @@ import {
 } from "../shared/upload-ownership";
 import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
+import { resolveTelegramChatBinding } from "./services/telegram-chat-binding";
+import { migrateTelegramSecrets } from "./migrations/telegram-secret-migration";
+import {
+  deriveTelegramWebhookSecret,
+  encryptTelegramToken,
+  matchesTelegramWebhookSecret,
+} from "./services/telegram-secrets";
 import { DashboardService } from "./services/dashboard-service";
 import { CrawlService, type CrawlMessage } from "./services/crawl-service";
 import { purgeExpiredArchivedConversations } from "./services/conversation-retention-service";
@@ -1314,7 +1322,7 @@ const app = new Hono<HonoAppContext>()
 
     const telegramService =
       settings?.telegramBotToken && settings.telegramChatId
-        ? new TelegramService(db)
+        ? new TelegramService(db, c.env.ENCRYPTION_KEY)
         : undefined;
     const escalation = await createEscalation({
       chatService,
@@ -1399,61 +1407,6 @@ const app = new Hono<HonoAppContext>()
     );
   })
 
-  // ─── Telegram Detect Chat ID ─────────────────────────────────────────────────
-  .post("/api/telegram/detect-chat-id", async (c) => {
-    const ip = getClientIp(c);
-    if (!checkRateLimit(`tg-detect:${ip}`, 10, 60_000)) {
-      return c.json({ error: "Rate limit exceeded" }, 429);
-    }
-
-    const body = await c.req.json<{ botToken?: string }>();
-    if (!body.botToken || typeof body.botToken !== "string") {
-      return c.json({ error: "botToken is required" }, 400);
-    }
-
-    try {
-      const res = await fetch(
-        `https://api.telegram.org/bot${body.botToken}/getUpdates?limit=20&allowed_updates=["message"]`,
-      );
-      const data = await res.json<{
-        ok: boolean;
-        result?: Array<{
-          message?: {
-            chat: {
-              id: number;
-              type: string;
-              title?: string;
-              first_name?: string;
-            };
-          };
-        }>;
-        description?: string;
-      }>();
-
-      if (!data.ok) {
-        return c.json({ error: data.description ?? "Invalid bot token" }, 400);
-      }
-
-      const seen = new Set<number>();
-      const chats: Array<{ id: string; type: string; title: string }> = [];
-
-      for (const update of data.result ?? []) {
-        const chat = update.message?.chat;
-        if (!chat || seen.has(chat.id)) continue;
-        seen.add(chat.id);
-        chats.push({
-          id: String(chat.id),
-          type: chat.type,
-          title: chat.title ?? chat.first_name ?? `Chat ${chat.id}`,
-        });
-      }
-
-      return c.json({ chats });
-    } catch {
-      return c.json({ error: "Failed to connect to Telegram API" }, 500);
-    }
-  })
-
   // ─── Telegram Webhook ───────────────────────────────────────────────────────
   .post("/api/telegram/webhook/:projectId", async (c) => {
     const ip = getClientIp(c);
@@ -1464,15 +1417,63 @@ const app = new Hono<HonoAppContext>()
     const projectId = c.req.param("projectId");
     const db = drizzle(c.env.DB);
 
-    const telegramService = new TelegramService(db);
+    const telegramService = new TelegramService(db, c.env.ENCRYPTION_KEY);
     const tgSettings = await telegramService.getTelegramSettings(projectId);
-    if (!tgSettings?.telegramBotToken || !tgSettings?.telegramChatId) {
+    if (!tgSettings?.telegramBotToken) {
       return c.json({ error: "Telegram not configured" }, 400);
+    }
+
+    // Only Telegram knows the secret it echoes here. Webhooks registered
+    // before the secret existed send nothing, so those updates are handled but
+    // treated as unverified, and the webhook is re-registered so the next one
+    // carries the header.
+    const webhookSecret = await deriveTelegramWebhookSecret(
+      projectId,
+      c.env.ENCRYPTION_KEY,
+    );
+    const trusted = matchesTelegramWebhookSecret(
+      webhookSecret,
+      c.req.header("x-telegram-bot-api-secret-token"),
+    );
+    if (!trusted) {
+      logWarn("telegram.webhook_unverified", { projectId });
+      c.executionCtx.waitUntil(
+        telegramService.setWebhook(
+          tgSettings.telegramBotToken,
+          `${c.env.BETTER_AUTH_URL}/api/telegram/webhook/${projectId}`,
+          webhookSecret,
+        ).then(() => undefined).catch((error: unknown) => {
+          logError("telegram.webhook_reregister_failed", error, { projectId });
+        }),
+      );
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body = (await c.req.json()) as { message?: any };
     const message = body.message;
+
+    // First verified update binds the chat the project posts to, which is why
+    // the owner never has to hand us a token to poll getUpdates with.
+    const binding = resolveTelegramChatBinding({
+      storedChatId: tgSettings.telegramChatId,
+      trusted,
+      chat: message?.chat,
+    });
+    if (binding.action === "bind") {
+      await new ProjectService(db).updateSettings(projectId, {
+        telegramChatId: binding.chatId,
+      });
+      await telegramService.sendMessage(
+        tgSettings.telegramBotToken,
+        binding.chatId,
+        "<b>Connected.</b> Conversations that need a human land here, and replies to them go back to the visitor.",
+        message?.message_id,
+      ).catch(() => undefined);
+      return c.json({ ok: true });
+    }
+    if (!tgSettings.telegramChatId) {
+      return c.json({ ok: true });
+    }
     if (!message?.text) {
       return c.json({ ok: true });
     }
@@ -2555,7 +2556,7 @@ const app = new Hono<HonoAppContext>()
         conversation.status === "agent_replied"
       ) {
         try {
-          const telegramService = new TelegramService(db);
+          const telegramService = new TelegramService(db, c.env.ENCRYPTION_KEY);
           const tgSettings = await telegramService.getTelegramSettings(
             project.id,
           );
@@ -7684,15 +7685,26 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    await projectService.updateSettings(project.id, parsed.data);
+    const storedBotToken = parsed.data.telegramBotToken
+      ? await encryptTelegramToken(
+        parsed.data.telegramBotToken,
+        c.env.ENCRYPTION_KEY,
+      )
+      : undefined;
+    await projectService.updateSettings(project.id, {
+      ...parsed.data,
+      ...(storedBotToken ? { telegramBotToken: storedBotToken } : {}),
+    });
 
-    // Set webhook if bot token is provided
-    if (parsed.data.telegramBotToken) {
-      const telegramService = new TelegramService(db);
+    // Registering the webhook is also what arms the secret Telegram echoes on
+    // every update, so a new token is trusted from its first message.
+    if (storedBotToken) {
+      const telegramService = new TelegramService(db, c.env.ENCRYPTION_KEY);
       const webhookUrl = `${c.env.BETTER_AUTH_URL}/api/telegram/webhook/${project.id}`;
       await telegramService.setWebhook(
-        parsed.data.telegramBotToken,
+        storedBotToken,
         webhookUrl,
+        await deriveTelegramWebhookSecret(project.id, c.env.ENCRYPTION_KEY),
       );
     }
 
@@ -7714,7 +7726,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Telegram not configured" }, 400);
     }
 
-    const telegramService = new TelegramService(db);
+    const telegramService = new TelegramService(db, c.env.ENCRYPTION_KEY);
     const success = await telegramService.testConnection(
       settings.telegramBotToken,
       settings.telegramChatId,
@@ -7927,12 +7939,44 @@ async function runArchivedConversationRetention(env: AppEnv): Promise<void> {
   });
 }
 
+async function runTelegramSecretMigration(env: AppEnv): Promise<void> {
+  const db = drizzle(env.DB);
+  const telegramService = new TelegramService(db, env.ENCRYPTION_KEY);
+  const result = await migrateTelegramSecrets({
+    encryptionKey: env.ENCRYPTION_KEY,
+    listProjects: async () =>
+      db
+        .select({
+          projectId: projectSettingsTable.projectId,
+          telegramBotToken: projectSettingsTable.telegramBotToken,
+        })
+        .from(projectSettingsTable),
+    storeToken: async (projectId, encrypted) => {
+      await db
+        .update(projectSettingsTable)
+        .set({ telegramBotToken: encrypted })
+        .where(eq(projectSettingsTable.projectId, projectId));
+    },
+    registerWebhook: ({ projectId, storedBotToken, secret }) =>
+      telegramService.setWebhook(
+        storedBotToken,
+        `${env.BETTER_AUTH_URL}/api/telegram/webhook/${projectId}`,
+        secret,
+      ),
+    onFailure: (projectId, error) => {
+      logError("telegram.secret_migration_failed", error, { projectId });
+    },
+  });
+  console.log("Telegram secret migration completed", result);
+}
+
 function handleScheduled(
   _controller: ScheduledController,
   env: AppEnv,
   ctx: ExecutionContext,
 ): void {
   ctx.waitUntil(runArchivedConversationRetention(env));
+  ctx.waitUntil(runTelegramSecretMigration(env));
 }
 
 // ─── Own docs re-dispatch ───────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { projectSettings } from "../db";
+import { resolveTelegramToken } from "./telegram-secrets";
 
 function escapeHtml(text: string): string {
   return text
@@ -47,16 +48,28 @@ export function buildBotResolvedNotificationText(
 }
 
 export class TelegramService {
-  constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
+  constructor(
+    private db: DrizzleD1Database<Record<string, unknown>>,
+    private encryptionKey: string,
+  ) {}
+
+  // Every method takes the token as it is stored, so callers can pass a row
+  // straight through without ever holding the decrypted credential.
+  private async botToken(storedBotToken: string): Promise<string> {
+    const token = await resolveTelegramToken(storedBotToken, this.encryptionKey);
+    if (!token) throw new Error("Telegram bot token could not be read");
+    return token;
+  }
 
   // ─── Send Message to Telegram ───────────────────────────────────────────────
 
   async sendMessage(
-    botToken: string,
+    storedBotToken: string,
     chatId: string,
     text: string,
     replyToMessageId?: number,
   ): Promise<{ ok: boolean; message_id?: number }> {
+    const botToken = await this.botToken(storedBotToken);
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
     const body: Record<string, unknown> = {
       chat_id: chatId,
@@ -87,7 +100,7 @@ export class TelegramService {
   // ─── Notify Escalation with Conversation Deep-Link ──────────────────────────
 
   async notifyEscalation(
-    botToken: string,
+    storedBotToken: string,
     chatId: string,
     params: {
       visitorName: string | null;
@@ -101,7 +114,7 @@ export class TelegramService {
   ): Promise<number | null> {
     const text = buildEscalationNotificationText(params);
     const result = await this.sendMessage(
-      botToken,
+      storedBotToken,
       chatId,
       text,
       params.replyToMessageId,
@@ -110,14 +123,14 @@ export class TelegramService {
   }
 
   async notifyBotResolved(
-    botToken: string,
+    storedBotToken: string,
     chatId: string,
     botName: string | null,
     conversationId: string,
     replyToMessageId?: number,
   ): Promise<void> {
     await this.sendMessage(
-      botToken,
+      storedBotToken,
       chatId,
       buildBotResolvedNotificationText(botName, conversationId),
       replyToMessageId,
@@ -127,7 +140,7 @@ export class TelegramService {
   // ─── Forward Visitor Message to Agent ─────────────────────────────────────
 
   async forwardVisitorMessage(
-    botToken: string,
+    storedBotToken: string,
     chatId: string,
     visitorName: string | null,
     content: string,
@@ -142,20 +155,22 @@ export class TelegramService {
       ``,
       `<b>Conversation:</b> <code>${conversationId}</code>`,
     ].join("\n");
-    await this.sendMessage(botToken, chatId, text, replyToMessageId);
+    await this.sendMessage(storedBotToken, chatId, text, replyToMessageId);
   }
 
   // ─── Set Webhook ────────────────────────────────────────────────────────────
 
   async setWebhook(
-    botToken: string,
+    storedBotToken: string,
     webhookUrl: string,
+    secretToken: string,
   ): Promise<boolean> {
+    const botToken = await this.botToken(storedBotToken);
     const url = `https://api.telegram.org/bot${botToken}/setWebhook`;
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: webhookUrl }),
+      body: JSON.stringify({ url: webhookUrl, secret_token: secretToken }),
     });
 
     const result = (await response.json()) as { ok: boolean };
@@ -165,11 +180,11 @@ export class TelegramService {
   // ─── Test Connection ────────────────────────────────────────────────────────
 
   async testConnection(
-    botToken: string,
+    storedBotToken: string,
     chatId: string,
   ): Promise<boolean> {
     const result = await this.sendMessage(
-      botToken,
+      storedBotToken,
       chatId,
       "ReplyMaven connection test successful!",
     );

@@ -196,7 +196,7 @@ export async function runContactSupportFollowUp(
           executionCtx: options.executionCtx,
           chatService: options.chatService,
           projectService: options.projectService,
-          telegramService: new TelegramService(db),
+          telegramService: new TelegramService(db, env.ENCRYPTION_KEY),
           acquireHttpRateLimitPermit: () => (toolPermits += 1) <= 100,
           onTeamRequested() {},
         },

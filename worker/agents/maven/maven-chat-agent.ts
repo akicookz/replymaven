@@ -778,7 +778,7 @@ export class MavenChatAgent extends AIChatAgent<
         settings.telegramChatId &&
         currentState.status !== "closed"
       ) {
-        const telegram = new TelegramService(db);
+        const telegram = new TelegramService(db, this.env.ENCRYPTION_KEY);
         this.ctx.waitUntil((async () => {
           const lease = await this.acquireExternalAction({
             projectId,
@@ -862,7 +862,7 @@ export class MavenChatAgent extends AIChatAgent<
       this.loadPublicMessageImage(submitted.imageUrls[0] ?? null),
     ]);
     const toolService = new ToolService(db);
-    const telegramService = new TelegramService(db);
+    const telegramService = new TelegramService(db, this.env.ENCRYPTION_KEY);
     const executionCtx = this.ctx as unknown as ExecutionContext;
     this.publicTurnOutcomeStore().begin({
       messageId: assistantMessageId,
