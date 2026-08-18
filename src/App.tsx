@@ -40,6 +40,7 @@ import AuthCallback from "./pages/AuthCallback";
 import TeamAccept from "./pages/TeamAccept";
 import HelpCenterSettings from "./pages/HelpCenterSettings";
 import HelpArticleEditor from "./pages/HelpArticleEditor";
+import HelpHomeEditor from "./pages/HelpHomeEditor";
 
 // ─── Redirect /app to first project's inbox ──────────────────────────────────
 function AppRedirect() {
@@ -499,6 +500,10 @@ function App() {
         <Route
           path="projects/:projectId/help/articles/:articleId"
           element={<LegacyHelpRedirect target="article" />}
+        />
+        <Route
+          path="projects/:projectId/knowledgebase/help-center/home"
+          element={<HelpHomeEditor />}
         />
         <Route
           path="projects/:projectId/knowledgebase/help-center/settings"

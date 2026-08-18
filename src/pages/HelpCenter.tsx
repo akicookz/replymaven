@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BookOpen, Plus, Settings } from "lucide-react";
+import { BookOpen, Home, Plus, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -512,45 +512,66 @@ function HelpCenter() {
           <div className="h-20 rounded-xl bg-muted/40 animate-pulse" />
           <div className="h-20 rounded-xl bg-muted/40 animate-pulse" />
         </div>
-      ) : categories.length === 0 ? (
-        <div className="rounded-2xl bg-card/50 backdrop-blur-xl border border-border px-8 py-16 text-center space-y-4">
-          <div className="w-12 h-12 mx-auto rounded-full bg-muted/50 flex items-center justify-center">
-            <BookOpen className="w-6 h-6 text-muted-foreground" />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-foreground">No categories yet</h2>
-            <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-              Categories group related articles. Create your first one to start
-              writing.
-            </p>
-          </div>
-          <Button type="button" onClick={openCreateCategory}>
-            <Plus className="w-4 h-4" />
-            Create your first category
-          </Button>
-        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 items-start">
           <aside className="space-y-3 md:sticky md:top-6">
-            <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-1">
+            <Link
+              to={`/app/projects/${projectId}/knowledgebase/help-center/home`}
+              className="flex items-center gap-2.5 rounded-lg py-1.5 pr-1 transition-colors hover:bg-muted/40"
+            >
+              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground">
+                <Home className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 truncate text-sm font-medium text-foreground/70">
+                Home
+              </span>
+            </Link>
+            <h2 className="px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Categories
             </h2>
-            <HelpCategoryList
-              projectId={projectId ?? ""}
-              categories={categoryItems}
-              articlesByCategory={articlesByCategory}
-              selectedId={selectedCategoryId}
-              onSelect={setSelectedCategoryId}
-              onNewArticle={handleNewArticleInCategory}
-              onEditCategory={openEditCategory}
-              onArchiveCategory={handleArchiveCategory}
-              onReorder={(items) => reorderCategories.mutate(items)}
-            />
+            {categories.length === 0 ? (
+              <div className="rounded-xl border-2 border-dashed border-muted bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
+                No categories yet.
+              </div>
+            ) : (
+              <HelpCategoryList
+                projectId={projectId ?? ""}
+                categories={categoryItems}
+                articlesByCategory={articlesByCategory}
+                selectedId={selectedCategoryId}
+                onSelect={setSelectedCategoryId}
+                onNewArticle={handleNewArticleInCategory}
+                onEditCategory={openEditCategory}
+                onArchiveCategory={handleArchiveCategory}
+                onReorder={(items) => reorderCategories.mutate(items)}
+              />
+            )}
           </aside>
 
-          <section className="space-y-4 min-w-0">
+          <section className="min-w-0 space-y-4">
+            {categories.length === 0 ? (
+              <div className="space-y-4 rounded-2xl border border-border bg-card/50 px-8 py-16 text-center backdrop-blur-xl">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-muted/50">
+                  <BookOpen className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-foreground">
+                    No categories yet
+                  </h2>
+                  <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                    Categories group related articles. Create your first one to
+                    start writing.
+                  </p>
+                </div>
+                <Button type="button" onClick={openCreateCategory}>
+                  <Plus className="h-4 w-4" />
+                  Create your first category
+                </Button>
+              </div>
+            ) : (
+              <>
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-foreground tracking-tight">
+              <h2 className="text-lg font-bold tracking-tight text-foreground">
                 {selectedCategory?.name ?? "Articles"}
               </h2>
               {selectedCategory?.description && (
@@ -560,9 +581,9 @@ function HelpCenter() {
               )}
             </div>
             {articlesQuery.isLoading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                <div className="h-48 rounded-xl bg-muted/40 animate-pulse" />
-                <div className="h-48 rounded-xl bg-muted/40 animate-pulse" />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="h-48 animate-pulse rounded-xl bg-muted/40" />
+                <div className="h-48 animate-pulse rounded-xl bg-muted/40" />
               </div>
             ) : (
               <HelpArticleList
@@ -571,6 +592,8 @@ function HelpCenter() {
                 onDelete={handleDeleteArticle}
                 onReorder={(items) => reorderArticles.mutate(items)}
               />
+            )}
+              </>
             )}
           </section>
         </div>

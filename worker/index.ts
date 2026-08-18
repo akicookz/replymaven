@@ -67,10 +67,13 @@ import {
   ensureArticleTitle,
 } from "./helpdesk-render/render-markdown";
 import {
+  buildHelpUrl,
   isOwnHelpCenterUrl,
   normalizeHelpCustomUrl,
   resolveHelpCustomUrl,
 } from "./helpdesk-render/build-help-url";
+import { defaultHelpHomeMarkdown } from "../shared/help-home-markdown";
+import { expandHelpHomeBlocks } from "./helpdesk-render/expand-help-home-blocks";
 import { groupArticlesByCategory } from "./helpdesk-render/group-articles";
 import {
   encryptHeaders,
@@ -2088,16 +2091,38 @@ const app = new Hono<HonoAppContext>()
 
     const articlesByCategory = groupArticlesByCategory(allPublished);
     const topNav = parseHelpTopNav(settings?.helpTopNav);
+    const helpCustomUrl = resolveHelpCustomUrl(
+      project.slug,
+      settings?.helpCustomUrl,
+    );
+    const homeUrl = buildHelpUrl({
+      projectSlug: project.slug,
+      customUrl: helpCustomUrl,
+    });
+    const source =
+      settings?.helpHomeMarkdown?.trim() ||
+      defaultHelpHomeMarkdown(project.name);
+    const rendered = await renderMarkdown(source, {
+      projectSlug: project.slug,
+      customUrl: helpCustomUrl,
+    });
+    const bodyHtml = expandHelpHomeBlocks(rendered.html, {
+      projectSlug: project.slug,
+      customUrl: helpCustomUrl,
+      searchAction: `${homeUrl}/search`,
+      categories: enriched,
+      popularArticles,
+    });
 
     const html = renderHelpIndex({
       project,
       categories: enriched,
       articlesByCategory,
-      popularArticles,
       widgetConfig: widgetConfigRow,
-      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
+      helpCustomUrl,
       topNav,
       customCss: settings?.helpCustomCss ?? null,
+      bodyHtml,
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
       "Cache-Control": "public, max-age=120, s-maxage=120",
@@ -4446,6 +4471,15 @@ const app = new Hono<HonoAppContext>()
     } else {
       helpCustomCss = null;
     }
+    const helpHomeMarkdownRaw = parsed.data.helpHomeMarkdown;
+    let helpHomeMarkdown: string | null | undefined;
+    if (helpHomeMarkdownRaw === undefined) {
+      helpHomeMarkdown = undefined;
+    } else if (helpHomeMarkdownRaw?.trim()) {
+      helpHomeMarkdown = helpHomeMarkdownRaw;
+    } else {
+      helpHomeMarkdown = null;
+    }
     if (helpCustomCss) {
       const violation = findCustomCssViolation(helpCustomCss);
       if (violation) return c.json({ error: violation }, 400);
@@ -4469,6 +4503,7 @@ const app = new Hono<HonoAppContext>()
 
     const { helpTopNav, ...rest } = parsed.data;
     delete rest.helpCustomCss;
+    delete rest.helpHomeMarkdown;
     const updatePayload: Parameters<typeof projectService.updateSettings>[1] = {
       ...rest,
     };
@@ -4478,6 +4513,9 @@ const app = new Hono<HonoAppContext>()
     }
     if (helpCustomCss !== undefined) {
       updatePayload.helpCustomCss = helpCustomCss;
+    }
+    if (helpHomeMarkdown !== undefined) {
+      updatePayload.helpHomeMarkdown = helpHomeMarkdown;
     }
 
     const settings = await projectService.updateSettings(

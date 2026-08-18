@@ -3,6 +3,7 @@ import { parseProtocolMessage } from "agents/chat";
 import type { UIMessage } from "ai";
 import type { PublicChatChildClaims } from "../../../../shared/public-chat-agent";
 import type { PublicMessageRecord } from "../../../../shared/maven-conversation";
+import { sanitizePageContext } from "../../../../shared/page-context";
 import {
   getLocalUploadKey,
   isConversationUploadKeyOwnedByConversation,
@@ -23,9 +24,6 @@ const MAX_CLIENT_ONLY_EXTRAS = 50;
 const MAX_MESSAGE_ID_LENGTH = 200;
 const MAX_TEXT_LENGTH = 8_000;
 const MAX_ATTACHMENTS = 5;
-const MAX_PAGE_CONTEXT_ENTRIES = 20;
-const MAX_PAGE_CONTEXT_KEY_LENGTH = 80;
-const MAX_PAGE_CONTEXT_VALUE_LENGTH = 1_000;
 
 interface PublicProtocolGuardInput {
   raw: string;
@@ -106,19 +104,6 @@ function readAttachmentUrls(
     urls.push(candidate);
   }
   return urls;
-}
-
-function isPageContext(value: unknown): boolean {
-  if (value === undefined) return true;
-  if (!isRecord(value)) return false;
-  const entries = Object.entries(value);
-  return entries.length <= MAX_PAGE_CONTEXT_ENTRIES && entries.every(
-    ([key, entry]) =>
-      key.length > 0 &&
-      key.length <= MAX_PAGE_CONTEXT_KEY_LENGTH &&
-      typeof entry === "string" &&
-      entry.length <= MAX_PAGE_CONTEXT_VALUE_LENGTH,
-  );
 }
 
 interface ValidatedUserMessage {
@@ -237,7 +222,6 @@ function normalizeRequest(
     body.messages.length < 1 ||
     body.messages.length >
       authoritativeMessages.length + 1 + MAX_CLIENT_ONLY_EXTRAS ||
-    !isPageContext(body.pageContext) ||
     (body.token !== undefined &&
       (typeof body.token !== "string" || body.token.length > 2_048)) ||
     (body.trigger !== undefined && body.trigger !== "submit-message")
@@ -328,6 +312,11 @@ function normalizeRequest(
   // message carries an id the server has not seen.
   const normalizedBody = {
     ...body,
+    // Host page context is prompt metadata, not history: repair a loose value
+    // instead of failing the visitor's turn over it.
+    ...(body.pageContext === undefined
+      ? {}
+      : { pageContext: sanitizePageContext(body.pageContext) }),
     messages: [
       ...structuredClone(
         authoritativeMessages.slice(-PUBLIC_SUBMIT_HISTORY_WINDOW),

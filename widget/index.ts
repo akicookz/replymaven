@@ -22,6 +22,7 @@ import type {
   PublicChatChildState,
   PublicChatSessionResponse,
 } from "../shared/public-chat-agent";
+import { sanitizePageContext } from "../shared/page-context";
 import { sanitizeCustomCss } from "../shared/sanitize-custom-css";
 import { fontFaceCss, resolveWidgetFont } from "../shared/widget-fonts";
 import type { PublicMessageRecord } from "../shared/maven-conversation";
@@ -4648,11 +4649,11 @@ import {
         if (!uploadedImageUrl && !text) return;
       }
 
-      const currentPageContext: Record<string, string> = {
+      const currentPageContext = sanitizePageContext({
         currentPageUrl: window.location.href,
         pageTitle: document.title,
         ...pageContext,
-      };
+      });
       // Enqueue only: the outbox owns delivery, retries, and the status
       // transitions reported through handleAgentOutbox.
       await agentChatClient.send({
@@ -6245,8 +6246,9 @@ import {
       customMetadata = { ...customMetadata, ...meta };
       if (conversationId) syncMetadataToServer();
     },
-    setPageContext: (ctx: Record<string, string>) => {
-      pageContext = { ...ctx };
+    // Hosts pass live app state, so values arrive as numbers and booleans too.
+    setPageContext: (ctx: Record<string, unknown>) => {
+      pageContext = sanitizePageContext(ctx);
     },
     requestNotifications: () => {
       requestNotificationPermission();

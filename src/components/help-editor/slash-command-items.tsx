@@ -20,6 +20,10 @@ import {
   Activity,
   SlidersHorizontal,
   FileCode,
+  LayoutGrid,
+  Search,
+  TrendingUp,
+  Columns2,
 } from "lucide-react";
 import type { CalloutVariant } from "./callout";
 
@@ -34,6 +38,7 @@ export interface SlashItem {
 
 export interface SlashItemContext {
   openImagePicker: () => void;
+  includeHomeBlocks?: boolean;
 }
 
 export function buildSlashItems(ctx: SlashItemContext): SlashItem[] {
@@ -214,6 +219,87 @@ export function buildSlashItems(ctx: SlashItemContext): SlashItem[] {
           })
           .run(),
     },
+    {
+      id: "columns",
+      title: "Columns",
+      description: "Two equal columns",
+      keywords: ["columns", "layout", "grid", "two"],
+      icon: Columns2,
+      command: ({ editor, range }) =>
+        editor
+          .chain()
+          .focus()
+          .deleteRange(range)
+          .insertContent({
+            type: "columns",
+            content: [
+              {
+                type: "column",
+                content: [{ type: "paragraph" }],
+              },
+              {
+                type: "column",
+                content: [{ type: "paragraph" }],
+              },
+            ],
+          })
+          .run(),
+    },
+    ...(ctx.includeHomeBlocks
+      ? [
+          {
+            id: "help-search",
+            title: "Search",
+            description: "Help center search bar",
+            keywords: ["search", "home"],
+            icon: Search,
+            command: ({ editor, range }: { editor: Editor; range: Range }) =>
+              editor
+                .chain()
+                .focus()
+                .deleteRange(range)
+                .insertContent({
+                  type: "helpHomeBlock",
+                  attrs: { kind: "search" },
+                })
+                .run(),
+          },
+          {
+            id: "help-categories",
+            title: "Categories",
+            description: "Category cards",
+            keywords: ["categories", "cards", "home"],
+            icon: LayoutGrid,
+            command: ({ editor, range }: { editor: Editor; range: Range }) =>
+              editor
+                .chain()
+                .focus()
+                .deleteRange(range)
+                .insertContent({
+                  type: "helpHomeBlock",
+                  attrs: { kind: "categories" },
+                })
+                .run(),
+          },
+          {
+            id: "help-popular",
+            title: "Popular articles",
+            description: "Recently published articles",
+            keywords: ["popular", "articles", "home"],
+            icon: TrendingUp,
+            command: ({ editor, range }: { editor: Editor; range: Range }) =>
+              editor
+                .chain()
+                .focus()
+                .deleteRange(range)
+                .insertContent({
+                  type: "helpHomeBlock",
+                  attrs: { kind: "popular" },
+                })
+                .run(),
+          },
+        ]
+      : []),
     {
       id: "api-endpoint",
       title: "API endpoint",

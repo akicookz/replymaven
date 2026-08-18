@@ -812,7 +812,7 @@ window.ReplyMaven.setPageContext({
 
 - Page context is sent **per-message** (not stored on the conversation) because it is transient -- the visitor may navigate pages mid-conversation.
 - The context is injected as a `<page-context>` section in the system prompt, so the AI can give contextually relevant answers.
-- Keys are freeform `Record<string, string>` -- site owners control what data is relevant.
+- Keys are freeform -- site owners control what data is relevant. Values are sanitized on both sides (`shared/page-context.ts`): numbers and booleans become text, anything else is dropped, keys are capped at 80 characters, values at 1,000, and the whole record at 20 entries. A loose value never fails the turn.
 - Unlike `setMetadata` (which is for analytics/dashboard tracking), `setPageContext` data is actively used by the AI when generating responses.
 
 ### Canned Response Auto-Drafting

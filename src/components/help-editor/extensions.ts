@@ -20,6 +20,8 @@ import sql from "highlight.js/lib/languages/sql";
 import { Markdown } from "tiptap-markdown";
 import { ImageWithAlt } from "./image-with-alt";
 import { Callout } from "./callout";
+import { Columns, Column } from "./columns";
+import { HelpHomeBlock } from "./help-home-blocks";
 import { Steps, Step } from "./steps";
 import { ApiEndpoint, ApiStatus, ApiParams, ApiExamples } from "./api-blocks";
 import { createSlashCommand } from "./slash-command";
@@ -74,13 +76,19 @@ export function buildExtensions(args: BuildExtensionsArgs) {
     TaskList,
     TaskItem.configure({ nested: true }),
     Callout,
+    Columns,
+    Column,
+    HelpHomeBlock,
     Steps,
     Step,
     ApiEndpoint,
     ApiStatus,
     ApiParams,
     ApiExamples,
-    createSlashCommand({ openImagePicker: args.openImagePicker }),
+    createSlashCommand({
+      openImagePicker: args.openImagePicker,
+      includeHomeBlocks: args.includeHomeBlocks,
+    }),
     Markdown.configure({
       // `html: true` lets us roundtrip <img width="..."> (resizable images).
       // The editor's parseDOM only accepts known schema nodes, so unknown

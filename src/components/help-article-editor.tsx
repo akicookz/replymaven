@@ -34,6 +34,8 @@ interface HelpArticleEditorProps {
   onUploadingChange?: (uploading: boolean) => void;
   placeholder?: string;
   variant?: "card" | "page";
+  /** Slash items for the help-center home page (search, categories, popular). */
+  includeHomeBlocks?: boolean;
   /** Project's published accent (widget primaryColor) so links/badges in the
    *  editor match the live help center. Defaults to the published default. */
   accentColor?: string | null;
@@ -86,6 +88,7 @@ function HelpArticleEditor({
   onUploadingChange,
   placeholder,
   variant = "card",
+  includeHomeBlocks = false,
   accentColor,
 }: HelpArticleEditorProps) {
   const accentStyle = accentColor
@@ -115,8 +118,9 @@ function HelpArticleEditor({
       buildExtensions({
         placeholder,
         openImagePicker,
+        includeHomeBlocks,
       }),
-    [placeholder, openImagePicker],
+    [placeholder, openImagePicker, includeHomeBlocks],
   );
 
   const editor = useEditor({

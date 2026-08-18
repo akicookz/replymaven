@@ -160,6 +160,7 @@ export class ProjectService {
         | "helpCustomUrl"
         | "helpTopNav"
         | "helpCustomCss"
+        | "helpHomeMarkdown"
       >
     >,
   ): Promise<ProjectSettingsRow | null> {

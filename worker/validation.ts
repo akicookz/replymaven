@@ -152,6 +152,7 @@ export const updateProjectSettingsSchema = z.object({
     .optional(),
   helpTopNav: helpTopNavSchema.optional(),
   helpCustomCss: z.string().max(5000).nullable().optional(),
+  helpHomeMarkdown: z.string().max(100_000).nullable().optional(),
 });
 
 // ─── Widget Config ────────────────────────────────────────────────────────────

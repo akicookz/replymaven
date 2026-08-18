@@ -454,4 +454,42 @@ describe("public Agent SDK chat protocol guard", () => {
       });
     }
   });
+
+  test("sanitizes host page context instead of failing the turn", () => {
+    // A host that passes a number (setPageContext({ sites: 8 })) used to fail
+    // every message on the page. Page context is metadata: repair it, and keep
+    // the hard rejects for history and identity.
+    const authoritative = [storedMessage()];
+    const result = guardPublicChatProtocolMessage({
+      raw: requestFrame([...authoritative, userMessage()], {
+        pageContext: { page: "Home", sites: 8, nested: { count: 1 } },
+      }),
+      authoritativeMessages: authoritative,
+      claims: claims(),
+      now,
+    });
+
+    expect(result).toMatchObject({ allowed: true });
+    if (!result.allowed) throw new Error("Expected an allowed frame");
+    const parsed = parseProtocolMessage(result.raw);
+    if (parsed?.type !== "chat-request") throw new Error("Expected request");
+    const body = JSON.parse(parsed.init.body ?? "{}") as {
+      pageContext?: Record<string, string>;
+    };
+    expect(body.pageContext).toEqual({ page: "Home", sites: "8" });
+
+    const withoutContext = guardPublicChatProtocolMessage({
+      raw: requestFrame([...authoritative, userMessage()]),
+      authoritativeMessages: authoritative,
+      claims: claims(),
+      now,
+    });
+    expect(withoutContext.allowed).toBe(true);
+    if (!withoutContext.allowed) throw new Error("unreachable");
+    const bare = parseProtocolMessage(withoutContext.raw);
+    if (bare?.type !== "chat-request") throw new Error("Expected request");
+    expect(
+      Object.hasOwn(JSON.parse(bare.init.body ?? "{}"), "pageContext"),
+    ).toBe(false);
+  });
 });

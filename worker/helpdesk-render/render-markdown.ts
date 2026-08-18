@@ -305,6 +305,106 @@ function stepsExtension(): MarkedExtension {
   };
 }
 
+interface ColumnToken {
+  type: "column";
+  raw: string;
+  tokens: Token[];
+}
+
+function columnsExtension(): MarkedExtension {
+  return {
+    extensions: [
+      {
+        name: "columns",
+        level: "block",
+        start(src: string) {
+          const i = src.indexOf(":::columns");
+          return i < 0 ? undefined : i;
+        },
+        tokenizer(src: string) {
+          const match = /^:::columns[ \t]*\n([\s\S]*?)\n:::[ \t]*(?=\n|$)/.exec(
+            src,
+          );
+          if (!match) return undefined;
+          const columns: ColumnToken[] = [];
+          let current: string[] | null = null;
+          const flush = () => {
+            if (!current) return;
+            const body = current.join("\n").trim();
+            columns.push({
+              type: "column",
+              raw: "",
+              tokens: body ? this.lexer.blockTokens(`${body}\n`, []) : [],
+            });
+            current = null;
+          };
+          for (const line of match[1].split("\n")) {
+            if (/^::column\b[ \t]*$/.test(line)) {
+              flush();
+              current = [];
+            } else if (current) {
+              current.push(line);
+            }
+          }
+          flush();
+          if (columns.length === 0) return undefined;
+          return { type: "columns", raw: match[0], tokens: columns };
+        },
+        childTokens: ["tokens"],
+        renderer(token) {
+          const inner = this.parser.parse(token.tokens ?? []);
+          return `<div class="help-columns">${inner}</div>`;
+        },
+      },
+      {
+        name: "column",
+        level: "block",
+        childTokens: ["tokens"],
+        renderer(token) {
+          const body = this.parser.parse(token.tokens ?? []);
+          return `<div class="help-column">${body}</div>`;
+        },
+      },
+    ],
+  };
+}
+
+function helpHomeBlockExtension(): MarkedExtension {
+  return {
+    extensions: [
+      {
+        name: "helpHomeBlock",
+        level: "block",
+        start(src: string) {
+          const i = src.search(/^::help-(?:search|categories|popular)[ \t]*$/m);
+          return i < 0 ? undefined : i;
+        },
+        tokenizer(src: string) {
+          const match =
+            /^::help-(search|categories|popular)[ \t]*(?:\n|$)/.exec(src);
+          if (!match) return undefined;
+          return {
+            type: "helpHomeBlock",
+            raw: match[0],
+            kind: match[1],
+          };
+        },
+        renderer(token) {
+          const kind = (token as { kind?: string }).kind;
+          if (
+            kind !== "search" &&
+            kind !== "categories" &&
+            kind !== "popular"
+          ) {
+            return "";
+          }
+          return `<div class="help-block" data-help-block="${kind}"></div>\n`;
+        },
+      },
+    ],
+  };
+}
+
 /* ─── API doc blocks: fenced code with api-* langs holding JSON ──────────── */
 
 const API_LANGS = new Set([
@@ -510,6 +610,8 @@ function createMarked(collect: TocEntry[]): Marked {
     }),
     apiBlocksExtension(),
     stepsExtension(),
+    columnsExtension(),
+    helpHomeBlockExtension(),
     calloutExtension(),
     nestedHeadingExtension(nested),
     headingIdExtension(collect, nested),
@@ -615,7 +717,7 @@ function sanitizeRenderedHtml(
         "data-warning",
       ],
       p: ["class"],
-      div: ["class", "data-callout"],
+      div: ["class", "data-callout", "data-help-block"],
       span: ["class"],
       code: ["class"],
       pre: ["class"],

@@ -33,7 +33,7 @@ export function HelpSidebar(props: HelpSidebarProps) {
             category: category.slug,
           });
           return (
-            <details open={isActiveCategory} class="help-sidebar-group">
+            <details open={true} class="help-sidebar-group">
               <summary class="help-sidebar-group-summary">
                 <span class="help-sidebar-group-icon" aria-hidden="true">
                   {renderCategoryIcon(category.icon)}

@@ -362,7 +362,7 @@ html {
   flex-direction: column;
 }
 .help-index-hero {
-  padding: 4rem 1.5rem 2.5rem;
+  padding: 2.5rem 1.5rem 2.5rem;
   background: var(--background);
   display: flex;
   align-items: flex-start;
@@ -397,6 +397,90 @@ html {
   max-width: 80rem;
   width: 100%;
 }
+
+.help-home {
+  padding: 2.5rem 1.5rem 5rem;
+  max-width: 80rem;
+  width: 100%;
+}
+.help-home > h1:first-child {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 2.25rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  color: var(--foreground);
+}
+.help-home > h1:first-child + p {
+  margin: 0.75rem 0 0;
+  font-size: 1rem;
+  color: var(--muted-foreground);
+  max-width: 40rem;
+}
+.help-columns {
+  display: grid;
+  gap: 2.5rem;
+  align-items: start;
+  margin-top: 2.5rem;
+}
+.help-column {
+  min-width: 0;
+  container-type: inline-size;
+}
+.help-popular {
+  border-radius: 0.75rem;
+  background: var(--muted);
+  overflow: hidden;
+}
+.help-popular-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 1rem 1rem 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.help-popular-icon {
+  display: inline-flex;
+  width: 1rem;
+  height: 1rem;
+  color: var(--brand);
+}
+.help-popular-icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+.help-popular-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0.5rem;
+}
+.help-popular-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+.help-popular-link span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.help-popular-link:hover {
+  color: var(--foreground);
+}
+@media (min-width: 1024px) {
+  .help-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 /* The card column responds to its own width (not the viewport) so the grid
    drops to 1 column only when the Popular Articles rail truly squeezes it.
    Under the 80rem shell the column is ~33rem at lg and ~28rem in narrower
@@ -414,9 +498,6 @@ html {
 }
 @container (min-width: 31rem) {
   .help-index-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (min-width: 1024px) {
-  .help-index-hero { padding: 4.5rem 1.5rem 2.5rem; }
 }
 
 .help-category-card {

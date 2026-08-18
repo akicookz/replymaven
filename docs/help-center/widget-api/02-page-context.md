@@ -34,7 +34,9 @@ useEffect(() => {
 
 - Context is sent **per message**, not stored on the conversation. It reflects where the visitor is right now.
 - Each call **replaces** the previous context. It does not merge.
-- Keys are freeform `Record<string, string>`. You decide what data is relevant.
+- Keys are freeform. You decide what data is relevant.
+- Values are text. Numbers and booleans are converted for you (`sites: 8` arrives as `"8"`); anything else, such as nested objects or arrays, is dropped.
+- Limits: 20 entries per call, 80 characters per key, 1,000 characters per value. Extra entries are dropped and long values are trimmed. Your messages still send either way.
 
 > [!WARNING]
 > Do not put secrets or sensitive personal data in page context. Treat it as prompt input, not private storage.
