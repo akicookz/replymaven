@@ -303,6 +303,7 @@ export class EmailService {
   async sendEscalationNotification(details: {
     ownerEmail: string;
     projectName: string;
+    projectSlug: string;
     visitorName?: string | null;
     visitorEmail?: string | null;
     visitorId?: string | null;
@@ -318,8 +319,12 @@ export class EmailService {
       });
       const styles = buildAccentStyles(details.accentColor);
       const summaryHtml = escapeHtml(details.summary).replace(/\n/g, "<br/>");
+      // Sent from the project address, not the platform one: replies to
+      // `support@` are dropped as a reserved local part, so answering this
+      // notification from an inbox would go nowhere.
       await this.send({
-        from: `${details.projectName} <${PLATFORM_SENDER_LOCAL_PART}@${EMAIL_DOMAIN}>`,
+        from: `${details.projectName} <${details.projectSlug}@${EMAIL_DOMAIN}>`,
+        replyTo: `${details.projectSlug}@${EMAIL_DOMAIN}`,
         to: details.ownerEmail,
         subject: `Needs human review - ${visitor}`,
         html: wrapEmail(
@@ -329,6 +334,7 @@ export class EmailService {
 <p class="email-value" style="font-size: 15px; color: #1f2937; margin: 0;">${summaryHtml}</p>
 </div>
 <a href="${details.conversationUrl}" class="email-button" style="${styles.button}">Open conversation</a>
+<p class="email-muted" style="${MUTED_TEXT} font-size: 13px; margin: 24px 0 0;">Reply to this email to answer &mdash; your reply is added to the conversation, and sent to the visitor when we have their address.</p>
         `,
           details.accentColor,
         ),

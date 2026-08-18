@@ -49,7 +49,7 @@ export async function createEscalation(params: {
   chatService: PublicConversationStore;
   projectService: ProjectService;
   telegramService?: TelegramService;
-  project: { id: string; name: string };
+  project: { id: string; name: string; slug: string };
   conversation: {
     id: string;
     visitorId: string | null;
@@ -360,6 +360,7 @@ export async function createEscalation(params: {
               await emailService.sendEscalationNotification({
                 ownerEmail,
                 projectName,
+                projectSlug: params.project.slug,
                 visitorName: params.conversation.visitorName,
                 visitorEmail: params.conversation.visitorEmail,
                 visitorId: params.conversation.visitorId,

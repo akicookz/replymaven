@@ -43,6 +43,7 @@ import {
 import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
 import { resolveTelegramChatBinding } from "./services/telegram-chat-binding";
+import { parseConversationReference } from "./services/inbound-email-routing";
 import { migrateTelegramSecrets } from "./migrations/telegram-secret-migration";
 import {
   deriveTelegramWebhookSecret,
@@ -1328,7 +1329,7 @@ const app = new Hono<HonoAppContext>()
       chatService,
       projectService,
       telegramService,
-      project: { id: project.id, name: project.name },
+      project: { id: project.id, name: project.name, slug: project.slug },
       conversation: {
         id: conversation.id,
         visitorId: conversation.visitorId,
@@ -1517,10 +1518,15 @@ const app = new Hono<HonoAppContext>()
       }
     }
 
-    // If we still don't have a conversation and there's no reply, ignore
+    // Every drop below is logged: a reply that never lands is invisible to the
+    // person who typed it, so the reason has to be visible to us.
     if (!conversationId) {
-      if (!message.reply_to_message) return c.json({ ok: true });
-      // Had a reply_to_message but no conversation ID found — ignore
+      logWarn("telegram.reply_dropped", {
+        projectId,
+        reason: message.reply_to_message
+          ? "no_conversation_id_in_replied_message"
+          : "not_a_reply",
+      });
       return c.json({ ok: true });
     }
 
@@ -1529,6 +1535,11 @@ const app = new Hono<HonoAppContext>()
       projectId,
     );
     if (!conversation) {
+      logWarn("telegram.reply_dropped", {
+        projectId,
+        conversationId,
+        reason: "conversation_not_found",
+      });
       return c.json({ ok: true });
     }
     const operationalConversationId = conversation.id;
@@ -1731,8 +1742,22 @@ const app = new Hono<HonoAppContext>()
       externalReplyTo: message.reply_to_message?.message_id === undefined
         ? null
         : String(message.reply_to_message.message_id),
-    }).catch(() => null);
-    if (!agentMessage) return c.json({ ok: true });
+    }).catch((error: unknown) => {
+      logError("telegram.reply_append_failed", error, {
+        projectId,
+        conversationId,
+      });
+      return null;
+    });
+    if (!agentMessage) {
+      // Say so in the thread. The person who typed the reply is the only one
+      // who can act on it, and to them a dropped reply looks delivered.
+      await sendConversationTelegramMessage(
+        "That reply did not reach the visitor. Open the conversation in the dashboard and send it from there.",
+        message.message_id,
+      ).catch(() => undefined);
+      return c.json({ ok: true });
+    }
 
     return c.json({ ok: true });
   })
@@ -2315,14 +2340,25 @@ const app = new Hono<HonoAppContext>()
         precedenceHeader = readHeader("precedence");
         returnPathHeader = readHeader("return-path");
       } else {
-        console.error(
-          `[InboundEmail] Failed to fetch email content: ${emailRes.status}`,
+        // 401 here means RESEND_API_KEY cannot read inbound mail (a
+        // sending-only key), which drops every reply. Answer 5xx so Resend
+        // retries and the failure is visible in its webhook dashboard instead
+        // of looking delivered.
+        logError(
+          "inbound_email.fetch_failed",
+          new Error(`Resend returned ${emailRes.status}`),
+          {
+            emailId,
+            status: emailRes.status,
+            projectSlug,
+            restrictedKey: emailRes.status === 401,
+          },
         );
-        return c.json({ ok: true });
+        return c.json({ error: "Could not read the inbound email" }, 502);
       }
     } catch (err) {
-      console.error("[InboundEmail] Error fetching email content:", err);
-      return c.json({ ok: true });
+      logError("inbound_email.fetch_failed", err, { emailId, projectSlug });
+      return c.json({ error: "Could not read the inbound email" }, 502);
     }
 
     // Drop auto-responders to prevent feedback loops between the two sides.
@@ -2414,6 +2450,22 @@ const app = new Hono<HonoAppContext>()
         }
       }
     }
+    // Every reply quotes the conversation link we sent, which is the only
+    // routing signal that survives: Resend replaces our `Message-ID`, so the
+    // `In-Reply-To` above references the sending provider's id, never ours.
+    if (!conversation) {
+      const referencedConversationId = parseConversationReference(emailText);
+      if (referencedConversationId) {
+        const conv = await chatService.getConversationById(
+          referencedConversationId,
+          project.id,
+        );
+        if (conv?.archivedAt) return c.json({ ok: true });
+        if (conv) conversation = conv;
+      }
+    }
+    // Last resort, and visitors only: a team member replying from their own
+    // inbox is never the visitor on any conversation.
     if (!conversation) {
       conversation = await chatService.getRecentConversationByVisitorEmail(
         project.id,
@@ -2421,9 +2473,11 @@ const app = new Hono<HonoAppContext>()
       );
     }
     if (!conversation) {
-      console.error(
-        `[InboundEmail] No conversation found for email: ${senderEmail} in project: ${project.id}`,
-      );
+      logWarn("inbound_email.unroutable", {
+        emailId,
+        projectId: project.id,
+        hasReferencedMessageId: referencedMessageId !== null,
+      });
       return c.json({ ok: true });
     }
 

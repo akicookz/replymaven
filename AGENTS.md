@@ -665,6 +665,7 @@ Do NOT re-add conversation-message caching here -- prior attempts introduced sta
 | POST | `/api/widget/:projectSlug/conversations/:id/messages` | Send message (returns SSE stream, or JSON `{ agentMode: true }` when in agent mode) |
 | GET | `/api/widget/:projectSlug/conversations/:id/messages` | Get conversation history |
 | POST | `/api/telegram/webhook/:projectId` | Telegram bot webhook. Verified with the per-project `secret_token` Telegram echoes in `X-Telegram-Bot-Api-Secret-Token` (derived from `ENCRYPTION_KEY`, `worker/services/telegram-secrets.ts`). The first verified update from a project with no chat id binds that chat; there is no token-polling detect endpoint. |
+| POST | `/api/webhooks/inbound-mail` | Resend inbound webhook (svix-signed). Fetching the body needs a Resend key with read access, not a sending-only one; a failed fetch answers 502 so Resend retries. Replies are routed by the conversation link they quote (`worker/services/inbound-email-routing.ts`) because Resend replaces our `Message-ID` with the sending provider's, so `In-Reply-To` never references an id we issued. Sender-email lookup is the last resort and only ever matches visitors. |
 | GET | `/api/widget-embed.js` | 301 redirect to `widget.replymaven.com` (legacy) |
 
 ### Dashboard (session-authenticated)
