@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertCircle, Copy, RefreshCw, Save } from "lucide-react";
 import { MobileMenuButton } from "@/components/PageHeader";
+import { WidgetSectionCard } from "@/components/WidgetSettings";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -30,6 +33,12 @@ interface ProjectSettingsData {
   avgResponseTime: string | null;
 }
 
+interface ProjectData {
+  id: string;
+  name: string;
+  slug: string;
+}
+
 const toneOptions: ToneOfVoice[] = [
   "professional",
   "friendly",
@@ -47,25 +56,32 @@ const AUTO_CLOSE_OPTIONS = [
   { value: 1440, label: "After 1 day" },
 ];
 
-const inputClass =
-  "w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring";
+const textareaClass =
+  "w-full min-h-0 rounded-lg border border-border bg-input-background px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 resize-none";
 
-function SectionCard({
-  title,
-  description,
+function Field({
+  label,
+  hint,
+  optional,
+  htmlFor,
   children,
 }: {
-  title: string;
-  description: string;
-  children: React.ReactNode;
+  label: string;
+  hint?: string;
+  optional?: boolean;
+  htmlFor?: string;
+  children: ReactNode;
 }) {
   return (
-    <div className="bg-card rounded-2xl p-6 space-y-4">
-      <div>
-        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
-      </div>
+    <div className="space-y-2">
+      <Label htmlFor={htmlFor}>
+        {label}
+        {optional ? (
+          <span className="font-normal text-muted-foreground">(optional)</span>
+        ) : null}
+      </Label>
       {children}
+      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
@@ -75,6 +91,7 @@ function GeneralSettings() {
   const queryClient = useQueryClient();
 
   const [form, setForm] = useState({
+    projectName: "",
     companyName: "",
     companyUrl: "",
     companyContext: "",
@@ -96,7 +113,7 @@ function GeneralSettings() {
     },
   });
 
-  const { data: project } = useQuery<{ slug: string }>({
+  const { data: project } = useQuery<ProjectData>({
     queryKey: ["project", projectId],
     queryFn: async () => {
       const res = await fetch(`/api/projects/${projectId}`);
@@ -107,7 +124,8 @@ function GeneralSettings() {
 
   useEffect(() => {
     if (!settings) return;
-    setForm({
+    setForm((prev) => ({
+      ...prev,
       companyName: settings.companyName ?? "",
       companyUrl: settings.companyUrl ?? "",
       companyContext: settings.companyContext ?? "",
@@ -118,8 +136,13 @@ function GeneralSettings() {
       autoCloseMinutes: settings.autoCloseMinutes ?? 30,
       workingHours: settings.workingHours ?? "",
       avgResponseTime: settings.avgResponseTime ?? "",
-    });
+    }));
   }, [settings]);
+
+  useEffect(() => {
+    if (!project) return;
+    setForm((prev) => ({ ...prev, projectName: project.name }));
+  }, [project]);
 
   const { data: resources } = useQuery<{ id: string }[]>({
     queryKey: ["resources", projectId],
@@ -133,6 +156,28 @@ function GeneralSettings() {
 
   const save = useMutation({
     mutationFn: async () => {
+      const projectName = form.projectName.trim();
+      if (!projectName) {
+        throw new Error("Project name is required");
+      }
+      if (projectName.length > 100) {
+        throw new Error("Project name must be 100 characters or less");
+      }
+
+      const projectRes = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: projectName }),
+      });
+      if (!projectRes.ok) {
+        const err = await projectRes
+          .json()
+          .catch(() => ({ error: "Failed to save project name" }));
+        throw new Error(
+          (err as { error?: string }).error ?? "Failed to save project name",
+        );
+      }
+
       const body = {
         companyName: form.companyName.trim() || null,
         companyUrl: form.companyUrl.trim() || null,
@@ -164,6 +209,8 @@ function GeneralSettings() {
       return res.json();
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
       queryClient.invalidateQueries({
         queryKey: ["project-settings", projectId],
       });
@@ -214,9 +261,11 @@ function GeneralSettings() {
       .catch(() => toast.error("Failed to copy"));
   }
 
+  const canRefreshContext = hasResources || Boolean(form.companyUrl.trim());
+
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
           <MobileMenuButton />
           <div>
@@ -224,91 +273,120 @@ function GeneralSettings() {
               Company info
             </h1>
             <p className="mt-1 text-pretty text-xs text-muted-foreground md:text-sm">
-              Company profile, voice, and conversation behavior.
+              Names, voice, and how conversations behave.
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Button
-            variant="outline"
-            onClick={() => refreshContext.mutate()}
-            disabled={
-              refreshContext.isPending ||
-              (!hasResources && !form.companyUrl.trim())
-            }
-          >
-            <RefreshCw
-              className={cn(
-                "w-4 h-4 mr-2",
-                refreshContext.isPending && "animate-spin",
-              )}
-            />
-            {hasResources ? "Regenerate Context" : "Refresh from Website"}
-          </Button>
-          <Button
-            onClick={() => save.mutate()}
-            disabled={save.isPending || isLoading}
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {save.isPending ? "Saving..." : "Save"}
-          </Button>
-        </div>
+        <Button
+          onClick={() => save.mutate()}
+          disabled={save.isPending || isLoading}
+          className="w-full transition-transform active:scale-[0.96] sm:w-auto"
+        >
+          <Save className="w-4 h-4 mr-2" />
+          {save.isPending ? "Saving..." : "Save Changes"}
+        </Button>
       </div>
 
       {save.isError && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
-          <AlertCircle className="w-4 h-4 shrink-0" />
+        <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
           {save.error.message}
         </div>
       )}
       {refreshContext.isError && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
-          <AlertCircle className="w-4 h-4 shrink-0" />
+        <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
           {refreshContext.error.message}
         </div>
       )}
 
-      <SectionCard
+      <WidgetSectionCard
+        title="Project"
+        description="Dashboard switcher and help center navbar."
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Field
+            htmlFor="project-name"
+            label="Project name"
+            hint="Shown in the project switcher and on the public help center."
+          >
+            <Input
+              id="project-name"
+              type="text"
+              value={form.projectName}
+              maxLength={100}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  projectName: e.target.value.slice(0, 100),
+                }))
+              }
+              placeholder="LovableHTML"
+            />
+          </Field>
+          <Field
+            label="Project slug"
+            hint="Widget embed, help URL, and inbound email. This cannot change."
+          >
+            <div className="flex h-9 items-center gap-1 rounded-lg bg-muted/40 px-3">
+              <span className="min-w-0 flex-1 truncate font-mono text-sm text-foreground">
+                {project?.slug ?? ""}
+              </span>
+              <button
+                type="button"
+                aria-label="Copy slug"
+                onClick={copySlug}
+                className="-mr-1.5 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+            </div>
+          </Field>
+        </div>
+      </WidgetSectionCard>
+
+      <WidgetSectionCard
         title="Company"
         description="Who the assistant is representing."
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Company Name
-            </label>
-            <input
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Field htmlFor="company-name" label="Company name">
+            <Input
+              id="company-name"
               type="text"
               value={form.companyName}
               onChange={(e) =>
                 setForm((prev) => ({ ...prev, companyName: e.target.value }))
               }
               placeholder="Your company name"
-              className={inputClass}
             />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Website URL
-            </label>
-            <input
+          </Field>
+          <Field htmlFor="company-url" label="Website URL">
+            <Input
+              id="company-url"
               type="url"
               value={form.companyUrl}
               onChange={(e) =>
                 setForm((prev) => ({ ...prev, companyUrl: e.target.value }))
               }
               placeholder="https://example.com"
-              className={inputClass}
             />
-          </div>
+          </Field>
         </div>
+      </WidgetSectionCard>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Assistant Name
-            </label>
-            <input
+      <WidgetSectionCard
+        title="Assistant"
+        description="How the bot names itself and how it sounds."
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Field
+            htmlFor="bot-name"
+            label="Assistant name"
+            hint="No spaces, max 16 characters. Used in chat and Telegram commands."
+          >
+            <Input
+              id="bot-name"
               type="text"
               value={form.botName}
               onChange={(e) => {
@@ -316,18 +394,15 @@ function GeneralSettings() {
                 setForm((prev) => ({ ...prev, botName: val.slice(0, 16) }));
               }}
               placeholder="e.g. Luna, Alex, Maya"
-              className={inputClass}
             />
-            <p className="text-xs text-muted-foreground">
-              No spaces, max 16 characters. Used in conversations and Telegram
-              commands.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Human Agent Label
-            </label>
-            <input
+          </Field>
+          <Field
+            htmlFor="agent-name"
+            label="Human agent label"
+            hint="What the bot calls your team when handing off to a human."
+          >
+            <Input
+              id="agent-name"
               type="text"
               value={form.agentName}
               onChange={(e) =>
@@ -336,60 +411,32 @@ function GeneralSettings() {
                   agentName: e.target.value.slice(0, 50),
                 }))
               }
-              placeholder="e.g. a team member, an engineer, our support team"
-              className={inputClass}
+              placeholder="e.g. a team member, an engineer"
             />
-            <p className="text-xs text-muted-foreground">
-              What the bot calls your team when handing off to a human.
-            </p>
-          </div>
+          </Field>
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-xl bg-muted/30 px-4 py-3">
-          <div>
-            <p className="text-sm font-medium text-foreground">Project Slug</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Used in your widget embed, help center URL, and inbound email
-              address, so it can't be changed.
-            </p>
+        <Field label="Tone of voice">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {toneOptions.map((tone) => (
+              <button
+                key={tone}
+                type="button"
+                onClick={() =>
+                  setForm((prev) => ({ ...prev, toneOfVoice: tone }))
+                }
+                className={cn(
+                  "rounded-lg px-3 py-2 text-sm capitalize transition-colors",
+                  form.toneOfVoice === tone
+                    ? "bg-primary/10 font-medium text-foreground"
+                    : "bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+              >
+                {tone}
+              </button>
+            ))}
           </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <span className="font-mono text-sm text-foreground">
-              {project?.slug ?? ""}
-            </span>
-            <button
-              type="button"
-              aria-label="Copy slug"
-              onClick={copySlug}
-              className="p-1.5 rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <Copy className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </SectionCard>
-
-      <SectionCard
-        title="Tone of Voice"
-        description="How the assistant sounds in every reply."
-      >
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-          {toneOptions.map((tone) => (
-            <button
-              key={tone}
-              onClick={() =>
-                setForm((prev) => ({ ...prev, toneOfVoice: tone }))
-              }
-              className={`px-4 py-2.5 rounded-xl border text-sm capitalize transition-colors ${
-                form.toneOfVoice === tone
-                  ? "border-primary bg-primary/10 text-foreground font-medium"
-                  : "border-input bg-background text-muted-foreground hover:border-primary/50"
-              }`}
-            >
-              {tone}
-            </button>
-          ))}
-        </div>
+        </Field>
         {form.toneOfVoice === "custom" && (
           <textarea
             value={form.customTonePrompt}
@@ -401,14 +448,30 @@ function GeneralSettings() {
             }
             rows={3}
             placeholder="Describe the tone you want your bot to use..."
-            className={cn(inputClass, "resize-none")}
+            className={textareaClass}
           />
         )}
-      </SectionCard>
+      </WidgetSectionCard>
 
-      <SectionCard
-        title="Company Context"
-        description="Background knowledge the assistant uses when the knowledge base doesn't cover a topic."
+      <WidgetSectionCard
+        title="Company context"
+        description="Background the assistant uses when the knowledge base does not cover a topic."
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refreshContext.mutate()}
+            disabled={refreshContext.isPending || !canRefreshContext}
+          >
+            <RefreshCw
+              className={cn(
+                "h-4 w-4",
+                refreshContext.isPending && "animate-spin",
+              )}
+            />
+            {hasResources ? "Regenerate" : "Refresh"}
+          </Button>
+        }
       >
         {refreshContext.isSuccess && (
           <p className="text-sm text-success">
@@ -424,67 +487,61 @@ function GeneralSettings() {
           }
           rows={8}
           placeholder="Describe your business, products, policies, and anything the assistant should know."
-          className={cn(inputClass, "resize-none px-4 py-3")}
+          className={textareaClass}
         />
-      </SectionCard>
+      </WidgetSectionCard>
 
-      <SectionCard
+      <WidgetSectionCard
         title="Conversation"
         description="Lifecycle and availability details shared with visitors."
       >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-xl bg-muted/30 px-4 py-3">
-          <div>
-            <p className="text-sm font-medium text-foreground">
-              Auto-Close Inactive Conversations
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Close conversations automatically after this much inactivity.
-            </p>
-          </div>
-          <Select
-            value={
-              form.autoCloseMinutes === null
-                ? "disabled"
-                : String(form.autoCloseMinutes)
-            }
-            onValueChange={(v) =>
-              setForm((prev) => ({
-                ...prev,
-                autoCloseMinutes: v === "disabled" ? null : parseInt(v, 10),
-              }))
-            }
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Field
+            label="Auto-close inactive conversations"
+            hint="Close conversations automatically after this much inactivity."
           >
-            <SelectTrigger className="w-full sm:w-48 shrink-0">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="disabled">Disabled</SelectItem>
-              {AUTO_CLOSE_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={String(o.value)}>
-                  {o.label}
-                </SelectItem>
-              ))}
-              {form.autoCloseMinutes !== null &&
-                !AUTO_CLOSE_OPTIONS.some(
-                  (o) => o.value === form.autoCloseMinutes,
-                ) && (
-                  <SelectItem value={String(form.autoCloseMinutes)}>
-                    {form.autoCloseMinutes} minutes
+            <Select
+              value={
+                form.autoCloseMinutes === null
+                  ? "disabled"
+                  : String(form.autoCloseMinutes)
+              }
+              onValueChange={(v) =>
+                setForm((prev) => ({
+                  ...prev,
+                  autoCloseMinutes: v === "disabled" ? null : parseInt(v, 10),
+                }))
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="disabled">Disabled</SelectItem>
+                {AUTO_CLOSE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={String(o.value)}>
+                    {o.label}
                   </SelectItem>
-                )}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Working Hours{" "}
-              <span className="text-muted-foreground font-normal">
-                (optional)
-              </span>
-            </label>
-            <input
+                ))}
+                {form.autoCloseMinutes !== null &&
+                  !AUTO_CLOSE_OPTIONS.some(
+                    (o) => o.value === form.autoCloseMinutes,
+                  ) && (
+                    <SelectItem value={String(form.autoCloseMinutes)}>
+                      {form.autoCloseMinutes} minutes
+                    </SelectItem>
+                  )}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field
+            htmlFor="working-hours"
+            label="Working hours"
+            optional
+            hint="Shared when visitors ask when your team is available."
+          >
+            <Input
+              id="working-hours"
               type="text"
               value={form.workingHours}
               onChange={(e) =>
@@ -494,21 +551,16 @@ function GeneralSettings() {
                 }))
               }
               placeholder="e.g. Mon-Fri, 9:00-18:00 CET"
-              className={inputClass}
             />
-            <p className="text-xs text-muted-foreground">
-              The assistant shares this when visitors ask when your team is
-              available.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">
-              Average Response Time{" "}
-              <span className="text-muted-foreground font-normal">
-                (optional)
-              </span>
-            </label>
-            <input
+          </Field>
+          <Field
+            htmlFor="avg-response-time"
+            label="Average response time"
+            optional
+            hint="Sets visitor expectations for human follow-ups."
+          >
+            <Input
+              id="avg-response-time"
               type="text"
               value={form.avgResponseTime}
               onChange={(e) =>
@@ -518,14 +570,10 @@ function GeneralSettings() {
                 }))
               }
               placeholder="e.g. under 2 hours on business days"
-              className={inputClass}
             />
-            <p className="text-xs text-muted-foreground">
-              Sets visitor expectations for human follow-ups.
-            </p>
-          </div>
+          </Field>
         </div>
-      </SectionCard>
+      </WidgetSectionCard>
     </div>
   );
 }
