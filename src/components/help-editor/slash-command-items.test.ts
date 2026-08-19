@@ -14,4 +14,9 @@ describe("help editor slash items", () => {
     expect(filterSlashItems(items, "body")[0]?.id).toBe("body");
     expect(filterSlashItems(items, "paragraph")[0]?.id).toBe("body");
   });
+
+  test("includes Link", () => {
+    expect(items.some((item) => item.id === "link")).toBe(true);
+    expect(filterSlashItems(items, "url")[0]?.id).toBe("link");
+  });
 });

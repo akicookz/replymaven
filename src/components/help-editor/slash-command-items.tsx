@@ -12,6 +12,7 @@ import {
   Table as TableIcon,
   Minus,
   ImageIcon,
+  Link as LinkIcon,
   Info,
   AlertTriangle,
   Lightbulb,
@@ -26,6 +27,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import type { CalloutVariant } from "./callout";
+import { linkLabelFromHref, normalizeLinkHref } from "./link-href";
 
 export interface SlashItem {
   id: string;
@@ -194,6 +196,29 @@ export function buildSlashItems(ctx: SlashItemContext): SlashItem[] {
       command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).run();
         ctx.openImagePicker();
+      },
+    },
+    {
+      id: "link",
+      title: "Link",
+      description: "Inline URL",
+      keywords: ["link", "url", "href", "anchor"],
+      icon: LinkIcon,
+      command: ({ editor, range }) => {
+        editor.chain().focus().deleteRange(range).run();
+        const raw = window.prompt("Link URL", "https://");
+        if (raw === null) return;
+        const href = normalizeLinkHref(raw);
+        if (!href) return;
+        editor
+          .chain()
+          .focus()
+          .insertContent({
+            type: "text",
+            text: linkLabelFromHref(href),
+            marks: [{ type: "link", attrs: { href } }],
+          })
+          .run();
       },
     },
     {

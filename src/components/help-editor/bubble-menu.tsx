@@ -9,13 +9,14 @@ import {
   Code,
   Link as LinkIcon,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+import { normalizeLinkHref } from "./link-href";
 
 interface EditorBubbleMenuProps {
   editor: Editor;
@@ -58,7 +59,9 @@ export function EditorBubbleMenu({ editor }: EditorBubbleMenuProps) {
       editor.chain().focus().extendMarkRange("link").unsetLink().run();
       return;
     }
-    editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
+    const href = normalizeLinkHref(url);
+    if (!href) return;
+    editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
   }
 
   const style = TEXT_STYLES.find((item) => item.id === activeTextStyle(editor));
