@@ -55,6 +55,7 @@ export function renderHelpIndex(props: RenderHelpIndexProps) {
           activeArticleSlug={null}
           helpCustomUrl={props.helpCustomUrl}
           widgetConfig={props.widgetConfig}
+          topNav={props.topNav}
         />
       }
     >

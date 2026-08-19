@@ -106,12 +106,29 @@ export function Layout(props: LayoutProps) {
         {props.topBar}
         {props.sidebar ? (
           <div class="help-shell">
+            <button
+              type="button"
+              class="help-nav-overlay"
+              id="rm-help-nav-overlay"
+              aria-label="Close menu"
+              tabindex={-1}
+            />
             {props.sidebar}
             <main class="help-main">{props.children}</main>
           </div>
         ) : (
           props.children
         )}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: HELP_NAV_SCRIPT,
+          }}
+        />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: IMAGE_ZOOM_SCRIPT,
+          }}
+        />
         <script
           src="https://widget.replymaven.com/widget-embed.js"
           data-project={props.projectSlug}
@@ -121,6 +138,82 @@ export function Layout(props: LayoutProps) {
     </html>
   );
 }
+
+const HELP_NAV_SCRIPT = `
+(function(){
+  var menu = document.getElementById('rm-help-menu');
+  var sidebar = document.getElementById('rm-help-sidebar');
+  var overlay = document.getElementById('rm-help-nav-overlay');
+  if (!menu || !sidebar) return;
+  var desktop = window.matchMedia('(min-width: 1024px)');
+  function isDesktop(){ return desktop.matches; }
+  function setOpen(open){
+    if (isDesktop()) open = false;
+    document.documentElement.classList.toggle('help-nav-open', open);
+    menu.setAttribute('aria-expanded', String(open));
+    menu.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+    if (isDesktop()) sidebar.removeAttribute('inert');
+    else if (open) sidebar.removeAttribute('inert');
+    else sidebar.setAttribute('inert', '');
+  }
+  setOpen(false);
+  menu.addEventListener('click', function(e){
+    e.stopPropagation();
+    setOpen(!document.documentElement.classList.contains('help-nav-open'));
+  });
+  if (overlay) overlay.addEventListener('click', function(){ setOpen(false); });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') setOpen(false);
+  });
+  desktop.addEventListener('change', function(){ setOpen(false); });
+})();
+`;
+
+const IMAGE_ZOOM_SCRIPT = `
+(function(){
+  var dialog, zoomImg;
+  function ensure(){
+    if (dialog) return;
+    dialog = document.createElement('dialog');
+    dialog.className = 'help-img-zoom';
+    dialog.setAttribute('aria-label', 'Zoomed image');
+    zoomImg = document.createElement('img');
+    dialog.appendChild(zoomImg);
+    dialog.addEventListener('click', function(){ dialog.close(); });
+    document.body.appendChild(dialog);
+  }
+  function open(img){
+    var src = img.currentSrc || img.src;
+    if (!src) return;
+    ensure();
+    zoomImg.src = src;
+    zoomImg.alt = img.alt || '';
+    requestAnimationFrame(function(){ dialog.showModal(); });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.help-img img'), function(img){
+    img.tabIndex = 0;
+    img.setAttribute('role', 'button');
+    img.setAttribute('aria-haspopup', 'dialog');
+    img.setAttribute('aria-label', img.alt ? img.alt + ' (view larger)' : 'View larger image');
+  });
+  document.addEventListener('click', function(e){
+    var t = e.target;
+    var img = t && t.closest ? t.closest('.help-img img') : null;
+    if (!img) return;
+    e.preventDefault();
+    e.stopPropagation();
+    open(img);
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var t = e.target;
+    var img = t && t.closest ? t.closest('.help-img img') : null;
+    if (!img) return;
+    e.preventDefault();
+    open(img);
+  });
+})();
+`;
 
 function safeJsonLd(value: unknown): string {
   return JSON.stringify(value)

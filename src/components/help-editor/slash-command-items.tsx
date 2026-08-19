@@ -23,7 +23,6 @@ import {
   LayoutGrid,
   Search,
   TrendingUp,
-  Columns2,
 } from "lucide-react";
 import type { CalloutVariant } from "./callout";
 
@@ -219,32 +218,6 @@ export function buildSlashItems(ctx: SlashItemContext): SlashItem[] {
           })
           .run(),
     },
-    {
-      id: "columns",
-      title: "Columns",
-      description: "Two equal columns",
-      keywords: ["columns", "layout", "grid", "two"],
-      icon: Columns2,
-      command: ({ editor, range }) =>
-        editor
-          .chain()
-          .focus()
-          .deleteRange(range)
-          .insertContent({
-            type: "columns",
-            content: [
-              {
-                type: "column",
-                content: [{ type: "paragraph" }],
-              },
-              {
-                type: "column",
-                content: [{ type: "paragraph" }],
-              },
-            ],
-          })
-          .run(),
-    },
     ...(ctx.includeHomeBlocks
       ? [
           {
@@ -284,7 +257,7 @@ export function buildSlashItems(ctx: SlashItemContext): SlashItem[] {
           {
             id: "help-popular",
             title: "Popular articles",
-            description: "Recently published articles",
+            description: "Pick articles to feature",
             keywords: ["popular", "articles", "home"],
             icon: TrendingUp,
             command: ({ editor, range }: { editor: Editor; range: Range }) =>
@@ -294,7 +267,7 @@ export function buildSlashItems(ctx: SlashItemContext): SlashItem[] {
                 .deleteRange(range)
                 .insertContent({
                   type: "helpHomeBlock",
-                  attrs: { kind: "popular" },
+                  attrs: { kind: "popular", articleIds: [] },
                 })
                 .run(),
           },

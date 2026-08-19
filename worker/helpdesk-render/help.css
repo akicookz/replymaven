@@ -8,6 +8,15 @@ html {
   font-family: var(--font-sans);
 }
 
+/* One knob for tenant CSS: `:root { --help-heading-weight: 600; }`
+   Per-level vars still work (`--help-h2-weight`) and win over the shared knob. */
+:root {
+  --help-h1-weight: var(--help-heading-weight, 700);
+  --help-h2-weight: var(--help-heading-weight, 700);
+  --help-h3-weight: var(--help-heading-weight, 600);
+  --help-h4-weight: var(--help-heading-weight, 600);
+}
+
 /* ─── Prose styles for marked output ─────────────────────────────────────── */
 
 .help-prose {
@@ -25,13 +34,35 @@ html {
 .help-prose h4 {
   font-family: var(--font-heading);
   color: var(--foreground);
-  font-weight: 600;
-  line-height: 1.3;
 }
-.help-prose h1 { font-size: 2.25rem; font-weight: 700; letter-spacing: -0.025em; line-height: 1.1; margin: 0 0 1rem; }
-.help-prose h2 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; line-height: 1.33; margin: 3.5rem 0 1rem; }
-.help-prose h3 { font-size: 1.125rem; font-weight: 600; letter-spacing: 0; line-height: 1.55; margin: 2.5rem 0 0.75rem; }
-.help-prose h4 { font-size: 1rem; font-weight: 600; letter-spacing: 0; line-height: 1.5; margin: 1.5rem 0 0.5rem; }
+.help-prose h1 {
+  font-size: 2.25rem;
+  font-weight: var(--help-h1-weight);
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  margin: 0 0 1rem;
+}
+.help-prose h2 {
+  font-size: 1.5rem;
+  font-weight: var(--help-h2-weight);
+  letter-spacing: -0.025em;
+  line-height: 1.33;
+  margin: 3.5rem 0 1rem;
+}
+.help-prose h3 {
+  font-size: 1.125rem;
+  font-weight: var(--help-h3-weight);
+  letter-spacing: 0;
+  line-height: 1.55;
+  margin: 2.5rem 0 0.75rem;
+}
+.help-prose h4 {
+  font-size: 1rem;
+  font-weight: var(--help-h4-weight);
+  letter-spacing: 0;
+  line-height: 1.5;
+  margin: 1.5rem 0 0.5rem;
+}
 /* Tight gap between a heading and the text that follows it. */
 .help-prose > h1 + *,
 .help-prose > h2 + *,
@@ -131,39 +162,192 @@ html {
   margin: 0;
 }
 .help-prose img {
+  display: block;
   max-width: 100%;
   height: auto;
-  border-radius: var(--radius);
+}
+:is(.help-prose, .help-home) .help-img {
+  display: block;
+  overflow: hidden;
+  /* Widget --radius is clamped for buttons and can be 0. Media keeps a
+     card radius so screenshots match the editor clip. */
+  border-radius: 0.75rem;
+  margin: 1.5rem 0;
+}
+:is(.help-prose, .help-home) p:has(> .help-img) {
+  margin: 1.5rem 0;
+}
+:is(.help-prose, .help-home) p:has(> .help-img) > .help-img {
+  margin: 0;
+}
+:is(.help-prose, .help-home) .help-img img {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-radius: 0;
+  cursor: zoom-in;
+}
+.help-img-zoom {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  width: fit-content;
+  height: fit-content;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  margin: auto;
+}
+.help-img-zoom::backdrop {
+  background: oklch(0 0 0 / 0.72);
+}
+.help-img-zoom img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100vh - 2rem);
+  object-fit: contain;
+  border-radius: 0.75rem;
+  cursor: zoom-out;
+}
+:is(.help-prose, .help-home) .help-img img[data-aspect],
+:is(.help-prose, .help-home) .help-img img[height] {
+  object-fit: cover;
+  height: auto;
 }
 .help-prose hr {
   border: 0;
   border-top: 1px solid var(--border);
   margin: 2.5em 0;
 }
-.help-prose table {
+/* Clip on a wrapper, not <table>: table overflow only rounds the top and
+   shears the stroke at the corners. Same media radius as .help-img. */
+:is(.help-prose, .help-home) .help-table {
+  margin: 1.75rem 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: color-mix(in oklch, var(--muted), transparent 75%);
+}
+:is(.help-prose, .help-home) .help-table table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.875rem;
-  margin: 1.75rem 0;
-  background: color-mix(in oklch, var(--muted), transparent 75%);
-  border-radius: 16px;
-  overflow: hidden;
+  margin: 0;
+  background: transparent;
 }
-.help-prose th,
-.help-prose td {
+:is(.help-prose, .help-home) .help-table th,
+:is(.help-prose, .help-home) .help-table td {
   padding: 0.625rem 1rem;
   text-align: left;
   vertical-align: top;
 }
-.help-prose thead th {
+:is(.help-prose, .help-home) .help-table thead th,
+:is(.help-prose, .help-home) .help-table tr:first-child > th {
   background: color-mix(in oklch, var(--muted), transparent 25%);
   font-weight: 600;
   font-size: 0.875rem;
   color: var(--foreground);
+  border-bottom: 1px solid var(--border);
 }
 .help-prose strong { font-weight: 600; color: var(--foreground); }
 .help-prose em { font-style: italic; }
+
+/* ─── Top bar ────────────────────────────────────────────────────────────── */
+
+.help-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: 3.5rem;
+  background: var(--background);
+  box-shadow: 0 1px 0 var(--border);
+}
+.help-topbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 100%;
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: 0 1rem;
+  width: 100%;
+}
+.help-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-left: -0.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.help-menu-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.help-menu-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.help-menu-icon-close { display: none; }
+html.help-nav-open .help-menu-icon-open { display: none; }
+html.help-nav-open .help-menu-icon-close { display: inline-flex; }
+.help-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+  font-weight: 600;
+  color: var(--foreground);
+  text-decoration: none;
+}
+.help-topbar-brand:hover { opacity: 0.8; }
+.help-topbar-logo {
+  height: 1.75rem;
+  width: 1.75rem;
+  flex-shrink: 0;
+  border-radius: 0.375rem;
+  background: var(--muted);
+  object-fit: cover;
+}
+.help-topbar-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+}
+.help-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.help-topbar-nav {
+  display: none;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@media (min-width: 1024px) {
+  .help-topbar-inner {
+    gap: 1rem;
+    padding: 0 1.5rem;
+  }
+  .help-menu-btn { display: none; }
+  .help-topbar-brand { flex: 0 1 auto; }
+  .help-topbar-nav { display: flex; }
+}
 
 /* ─── Shell + sidebar layout ─────────────────────────────────────────────── */
 
@@ -176,34 +360,121 @@ html {
   margin: 0 auto;
   width: 100%;
 }
-.help-sidebar {
+.help-nav-overlay {
   display: none;
-  width: 260px;
-  flex-shrink: 0;
+}
+.help-sidebar {
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  z-index: 45;
+  top: 3.5rem;
+  left: 0;
+  bottom: 0;
+  width: min(20rem, 88vw);
+  padding: 1.25rem 0.75rem 0.5rem;
+  gap: 1.25rem;
   background: var(--background);
+  overflow: hidden;
+  transform: translateX(-100%);
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 180ms ease, visibility 0s 180ms;
+}
+html.help-nav-open .help-sidebar {
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+  transition: transform 180ms ease, visibility 0s;
+  box-shadow: 12px 0 40px oklch(0 0 0 / 0.22);
+}
+html.help-nav-open,
+html.help-nav-open body {
+  overflow: hidden;
+}
+html.help-nav-open .help-nav-overlay {
+  display: block;
+  position: fixed;
+  inset: 3.5rem 0 0 0;
+  z-index: 40;
+  border: 0;
+  padding: 0;
+  background: oklch(0 0 0 / 0.45);
+  cursor: pointer;
+}
+.help-sidebar-topnav {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex-shrink: 0;
+  gap: 0.35rem;
+  padding: 0 0.25rem 0.25rem;
+}
+.help-sidebar-topnav a {
+  justify-content: flex-start;
 }
 
 @media (min-width: 1024px) {
+  html.help-nav-open,
+  html.help-nav-open body {
+    overflow: visible;
+  }
+  .help-nav-overlay { display: none !important; }
+  .help-sidebar-topnav { display: none; }
   .help-sidebar {
-    display: block;
-    position: sticky;
-    top: 3.5rem;
-    align-self: flex-start;
-    height: calc(100vh - 3.5rem);
-    overflow-y: auto;
-    padding: 2.5rem 0.75rem 1.25rem;
     display: flex;
     flex-direction: column;
+    position: sticky;
+    z-index: auto;
+    top: 3.5rem;
+    left: auto;
+    bottom: auto;
+    align-self: flex-start;
+    width: 260px;
+    flex-shrink: 0;
+    height: calc(100vh - 3.5rem);
+    padding: 0.5rem 0.75rem 0.5rem;
     gap: 1.25rem;
+    transform: none;
+    visibility: visible;
+    pointer-events: auto;
+    box-shadow: none;
+    transition: none;
+  }
+  .help-sidebar::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1.75rem;
+    z-index: 1;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      var(--background) 15%,
+      color-mix(in oklch, var(--background) 70%, transparent) 55%,
+      transparent
+    );
+  }
+  /* Block scroller: flex overflow uses Chromium's classic gray bar. */
+  .help-sidebar-nav {
+    min-height: 0;
+    overflow-y: auto;
+    padding-top: 2rem;
   }
 }
 
 .help-sidebar-nav {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  /* Keep the last leaf clear of the floating credit. */
+  padding-bottom: 2.75rem;
+}
+.help-sidebar-nav > * + * {
+  margin-top: 0.25rem;
 }
 
 .help-sidebar-group {
@@ -310,10 +581,19 @@ html {
 }
 
 .help-sidebar-footer {
-  padding: 0 0.5rem;
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 1;
+  padding: 0.45rem 0.75rem;
   font-size: 0.72rem;
   color: var(--muted-foreground);
-  opacity: 0.7;
+  background: color-mix(in oklch, var(--background) 55%, transparent);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border-radius: 0.75rem;
+  box-shadow: inset 0 0 0 0.5px color-mix(in oklch, var(--foreground) 10%, transparent);
 }
 .help-sidebar-footer a {
   color: var(--muted-foreground);
@@ -329,10 +609,10 @@ html {
   min-width: 0;
 }
 
-/* Mobile category dropdown shown above main content */
+/* Mobile category jump — sits under the excerpt / category subtitle. */
 .help-mobile-cats {
   display: block;
-  padding: 1rem 1.5rem 0;
+  margin: 0.75rem 0 0.25rem;
 }
 .help-mobile-cats select {
   width: 100%;
@@ -342,13 +622,17 @@ html {
   font-size: 0.9rem;
   padding: 0.55rem 2.25rem 0.55rem 0.875rem;
   border-radius: 0.625rem;
-  border: 1px solid var(--border);
-  background: var(--card);
+  border: 0;
+  cursor: pointer;
+  background-color: var(--muted);
   color: var(--foreground);
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   background-size: 1rem;
+}
+.help-mobile-cats + .help-prose > :first-child {
+  margin-top: 1.5rem;
 }
 
 @media (min-width: 1024px) {
@@ -378,7 +662,7 @@ html {
   margin: 0;
   font-family: var(--font-heading);
   font-size: 2.25rem;
-  font-weight: 700;
+  font-weight: var(--help-h1-weight);
   letter-spacing: -0.025em;
   line-height: 1.1;
   color: var(--foreground);
@@ -407,7 +691,7 @@ html {
   margin: 0;
   font-family: var(--font-heading);
   font-size: 2.25rem;
-  font-weight: 700;
+  font-weight: var(--help-h1-weight);
   letter-spacing: -0.025em;
   line-height: 1.1;
   color: var(--foreground);
@@ -417,16 +701,6 @@ html {
   font-size: 1rem;
   color: var(--muted-foreground);
   max-width: 40rem;
-}
-.help-columns {
-  display: grid;
-  gap: 2.5rem;
-  align-items: start;
-  margin-top: 2.5rem;
-}
-.help-column {
-  min-width: 0;
-  container-type: inline-size;
 }
 .help-popular {
   border-radius: 0.75rem;
@@ -476,28 +750,25 @@ html {
 .help-popular-link:hover {
   color: var(--foreground);
 }
-@media (min-width: 1024px) {
-  .help-columns {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-/* The card column responds to its own width (not the viewport) so the grid
-   drops to 1 column only when the Popular Articles rail truly squeezes it.
-   Under the 80rem shell the column is ~33rem at lg and ~28rem in narrower
-   frames, so the 31rem threshold separates those two cases. */
-.help-index-main {
-  container-type: inline-size;
-  min-width: 0;
-}
 .help-index-grid {
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   align-items: stretch;
-  justify-content: start;
+  margin-top: 1.5rem;
 }
-@container (min-width: 31rem) {
-  .help-index-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.help-index-grid > .help-category-card {
+  flex: 1 1 14rem;
+  min-width: min(100%, 14rem);
+}
+.help-home > .help-hero-search {
+  margin-top: 2.5rem;
+}
+.help-home > .help-empty {
+  margin-top: 1.5rem;
+}
+.help-home > .help-popular {
+  margin-top: 2.5rem;
 }
 
 .help-category-card {
@@ -547,7 +818,7 @@ html {
   margin: 0;
   font-family: var(--font-heading);
   font-size: 1.0625rem;
-  font-weight: 600;
+  font-weight: var(--help-h3-weight);
   letter-spacing: -0.01em;
   color: var(--foreground);
   line-height: 1.3;
@@ -608,7 +879,7 @@ html {
   margin: 0;
   font-family: var(--font-heading);
   font-size: 1.125rem;
-  font-weight: 600;
+  font-weight: var(--help-h3-weight);
   letter-spacing: -0.01em;
   color: var(--on-overlay);
   line-height: 1.2;
@@ -859,7 +1130,7 @@ html {
   margin: 0;
   font-family: var(--font-heading);
   font-size: 2.25rem;
-  font-weight: 700;
+  font-weight: var(--help-h1-weight);
   letter-spacing: -0.025em;
   line-height: 1.1;
   color: var(--foreground);
@@ -934,7 +1205,7 @@ html {
   margin: 0;
   font-family: var(--font-heading);
   font-size: 1.0625rem;
-  font-weight: 600;
+  font-weight: var(--help-h3-weight);
   letter-spacing: -0.01em;
   color: var(--foreground);
   line-height: 1.3;
@@ -1102,7 +1373,7 @@ html {
   margin: 0.3rem 0 0;
   font-family: var(--font-heading);
   font-size: 1.05rem;
-  font-weight: 600;
+  font-weight: var(--help-h3-weight);
   letter-spacing: -0.01em;
   color: var(--foreground);
   line-height: 1.3;

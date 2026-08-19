@@ -398,7 +398,8 @@ function HelpCenterSettings() {
             Custom CSS
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Override help center styles. Type . to insert a class. Changes can
+            Override help center styles. Type . to insert a class. Set
+            --help-heading-weight on :root to change all headings. Changes can
             take up to two minutes to show on the live pages.
           </p>
         </div>
@@ -412,8 +413,9 @@ function HelpCenterSettings() {
             saveSettings.isPending ||
             (!canCustomCss && !customCss.trim())
           }
-          placeholder={`.help-index-title { font-weight: 800; }
-.help-sidebar-group-name { font-weight: 500; }`}
+          placeholder={`:root {
+  --help-heading-weight: 600;
+}`}
         />
 
         {!canCustomCss && (

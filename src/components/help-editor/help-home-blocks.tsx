@@ -6,17 +6,17 @@ import {
 import type { NodeViewProps } from "@tiptap/react";
 import type { MarkdownSerializerState } from "prosemirror-markdown";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { LayoutGrid, Search, TrendingUp } from "lucide-react";
+import { X } from "lucide-react";
+import {
+  parseHelpHomeBlockLine,
+  parsePopularArticleIds,
+  serializeHelpHomeBlock,
+} from "../../../shared/help-home-markdown";
+import { HelpHomeBlockPreview } from "./help-home-previews";
 
 export type HelpHomeBlockKind = "search" | "categories" | "popular";
 
 const KINDS: HelpHomeBlockKind[] = ["search", "categories", "popular"];
-
-const KIND_LABEL: Record<HelpHomeBlockKind, string> = {
-  search: "Search",
-  categories: "Categories",
-  popular: "Popular articles",
-};
 
 interface MdState {
   src: string;
@@ -56,28 +56,65 @@ function helpHomeBlockRule(
   _endLine: number,
   silent: boolean,
 ): boolean {
-  const match = /^::help-(search|categories|popular)\s*$/.exec(
-    getLine(state, startLine),
-  );
-  if (!match) return false;
+  const parsed = parseHelpHomeBlockLine(getLine(state, startLine));
+  if (!parsed) return false;
   if (silent) return true;
+  const idsAttr =
+    parsed.kind === "popular" && parsed.articleIds.length > 0
+      ? ` data-article-ids="${parsed.articleIds.join(",")}"`
+      : "";
   const open = state.push("html_block", "", 0) as { content: string };
-  open.content = `<div data-help-block="${match[1]}"></div>\n`;
+  open.content = `<div data-help-block="${parsed.kind}"${idsAttr}></div>\n`;
   state.line = startLine + 1;
   return true;
 }
 
-function HelpHomeBlockView({ node }: NodeViewProps) {
+function articleIdsFromAttrs(value: unknown): string[] {
+  if (Array.isArray(value)) return parsePopularArticleIds(value.join(","));
+  if (typeof value === "string") return parsePopularArticleIds(value);
+  return [];
+}
+
+function HelpHomeBlockView({
+  node,
+  deleteNode,
+  selected,
+  updateAttributes,
+}: NodeViewProps) {
   const kind = (node.attrs.kind as HelpHomeBlockKind) ?? "search";
-  const Icon =
-    kind === "search" ? Search : kind === "popular" ? TrendingUp : LayoutGrid;
+  const articleIds = articleIdsFromAttrs(node.attrs.articleIds);
   return (
     <NodeViewWrapper
-      className="help-editor-home-block"
+      className={selected ? "help-editor-live is-selected" : "help-editor-live"}
       data-help-block={kind}
     >
-      <Icon className="h-4 w-4 shrink-0" />
-      <span>{KIND_LABEL[kind]}</span>
+      <div className="help-editor-live-toolbar" contentEditable={false}>
+        <button
+          type="button"
+          className="help-editor-live-remove"
+          contentEditable={false}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => deleteNode()}
+          aria-label="Remove block"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div
+        className={
+          kind === "popular"
+            ? "help-editor-live-preview is-editable"
+            : "help-editor-live-preview"
+        }
+        contentEditable={false}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <HelpHomeBlockPreview
+          kind={kind}
+          articleIds={articleIds}
+          onArticleIdsChange={(ids) => updateAttributes({ articleIds: ids })}
+        />
+      </div>
     </NodeViewWrapper>
   );
 }
@@ -86,6 +123,7 @@ export const HelpHomeBlock = Node.create({
   name: "helpHomeBlock",
   group: "block",
   atom: true,
+  selectable: false,
 
   addAttributes() {
     return {
@@ -96,6 +134,16 @@ export const HelpHomeBlock = Node.create({
           return KINDS.includes(raw as HelpHomeBlockKind) ? raw : "search";
         },
         renderHTML: (attrs) => ({ "data-help-block": attrs.kind }),
+      },
+      articleIds: {
+        default: [] as string[],
+        parseHTML: (element) =>
+          parsePopularArticleIds(element.getAttribute("data-article-ids")),
+        renderHTML: (attrs) => {
+          const ids = articleIdsFromAttrs(attrs.articleIds);
+          if (ids.length === 0) return {};
+          return { "data-article-ids": ids.join(",") };
+        },
       },
     };
   },
@@ -117,7 +165,9 @@ export const HelpHomeBlock = Node.create({
       markdown: {
         serialize(state: MarkdownSerializerState, node: PMNode) {
           const kind = (node.attrs.kind as HelpHomeBlockKind) ?? "search";
-          state.write(`::help-${kind}`);
+          state.write(
+            serializeHelpHomeBlock(kind, articleIdsFromAttrs(node.attrs.articleIds)),
+          );
           state.closeBlock(node);
         },
         parse: {

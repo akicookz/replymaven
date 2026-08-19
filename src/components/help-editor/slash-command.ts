@@ -1,4 +1,5 @@
 import { Extension } from "@tiptap/core";
+import { PluginKey } from "@tiptap/pm/state";
 import Suggestion, { type SuggestionOptions } from "@tiptap/suggestion";
 import { ReactRenderer } from "@tiptap/react";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
@@ -14,6 +15,8 @@ export interface SlashCommandOptions {
   suggestion: Omit<SuggestionOptions<SlashItem>, "editor">;
 }
 
+const slashPluginKey = new PluginKey("helpSlashCommand");
+
 export function createSlashCommand(ctx: SlashItemContext) {
   const allItems = buildSlashItems(ctx);
 
@@ -23,6 +26,7 @@ export function createSlashCommand(ctx: SlashItemContext) {
     addOptions() {
       return {
         suggestion: {
+          pluginKey: slashPluginKey,
           char: "/",
           startOfLine: false,
           allowSpaces: false,

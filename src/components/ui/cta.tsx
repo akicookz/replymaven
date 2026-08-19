@@ -1,5 +1,7 @@
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
+
+import { wrapAsChildControl, wrapControlLabel } from "@/components/ui/control-label";
 import { cn } from "@/lib/utils";
 
 // Marketing button primitive (landing + docs). One primitive, four roles —
@@ -34,18 +36,21 @@ export function Cta({
   size = "lg",
   className,
   asChild,
+  children,
   ...props
 }: CtaProps) {
   const Comp = asChild ? Slot : "button";
   return (
     <Comp
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-full font-medium whitespace-nowrap transition-[transform,background-color,color,opacity,box-shadow] duration-150 ease-out active:scale-[0.96] motion-reduce:transition-none motion-reduce:active:scale-100 cursor-pointer disabled:opacity-50 disabled:active:scale-100",
+        "inline-flex items-center justify-center gap-2 rounded-full font-medium leading-none whitespace-nowrap transition-[transform,background-color,color,opacity,box-shadow] duration-150 ease-out active:scale-[0.96] motion-reduce:transition-none motion-reduce:active:scale-100 cursor-pointer disabled:opacity-50 disabled:active:scale-100",
         CTA_VARIANTS[variant],
         CTA_SIZES[size],
         className,
       )}
       {...props}
-    />
+    >
+      {asChild ? wrapAsChildControl(children) : wrapControlLabel(children)}
+    </Comp>
   );
 }

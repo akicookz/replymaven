@@ -17,6 +17,10 @@ import python from "highlight.js/lib/languages/python";
 import sql from "highlight.js/lib/languages/sql";
 import sanitizeHtml from "sanitize-html";
 import { buildHelpUrl } from "./build-help-url";
+import {
+  parseHelpHomeBlockLine,
+  parsePopularArticleIds,
+} from "../../shared/help-home-markdown";
 import { splitGluedImageBlocks } from "../../shared/markdown-repair";
 
 interface RenderMarkdownOptions {
@@ -305,70 +309,6 @@ function stepsExtension(): MarkedExtension {
   };
 }
 
-interface ColumnToken {
-  type: "column";
-  raw: string;
-  tokens: Token[];
-}
-
-function columnsExtension(): MarkedExtension {
-  return {
-    extensions: [
-      {
-        name: "columns",
-        level: "block",
-        start(src: string) {
-          const i = src.indexOf(":::columns");
-          return i < 0 ? undefined : i;
-        },
-        tokenizer(src: string) {
-          const match = /^:::columns[ \t]*\n([\s\S]*?)\n:::[ \t]*(?=\n|$)/.exec(
-            src,
-          );
-          if (!match) return undefined;
-          const columns: ColumnToken[] = [];
-          let current: string[] | null = null;
-          const flush = () => {
-            if (!current) return;
-            const body = current.join("\n").trim();
-            columns.push({
-              type: "column",
-              raw: "",
-              tokens: body ? this.lexer.blockTokens(`${body}\n`, []) : [],
-            });
-            current = null;
-          };
-          for (const line of match[1].split("\n")) {
-            if (/^::column\b[ \t]*$/.test(line)) {
-              flush();
-              current = [];
-            } else if (current) {
-              current.push(line);
-            }
-          }
-          flush();
-          if (columns.length === 0) return undefined;
-          return { type: "columns", raw: match[0], tokens: columns };
-        },
-        childTokens: ["tokens"],
-        renderer(token) {
-          const inner = this.parser.parse(token.tokens ?? []);
-          return `<div class="help-columns">${inner}</div>`;
-        },
-      },
-      {
-        name: "column",
-        level: "block",
-        childTokens: ["tokens"],
-        renderer(token) {
-          const body = this.parser.parse(token.tokens ?? []);
-          return `<div class="help-column">${body}</div>`;
-        },
-      },
-    ],
-  };
-}
-
 function helpHomeBlockExtension(): MarkedExtension {
   return {
     extensions: [
@@ -376,17 +316,21 @@ function helpHomeBlockExtension(): MarkedExtension {
         name: "helpHomeBlock",
         level: "block",
         start(src: string) {
-          const i = src.search(/^::help-(?:search|categories|popular)[ \t]*$/m);
+          const i = src.search(
+            /^::help-(?:search|categories|popular)(?:\[[^\]]*\])?[ \t]*\r?$/m,
+          );
           return i < 0 ? undefined : i;
         },
         tokenizer(src: string) {
-          const match =
-            /^::help-(search|categories|popular)[ \t]*(?:\n|$)/.exec(src);
-          if (!match) return undefined;
+          const newline = src.indexOf("\n");
+          const line = newline < 0 ? src : src.slice(0, newline);
+          const parsed = parseHelpHomeBlockLine(line);
+          if (!parsed) return undefined;
           return {
             type: "helpHomeBlock",
-            raw: match[0],
-            kind: match[1],
+            raw: newline < 0 ? line : src.slice(0, newline + 1),
+            kind: parsed.kind,
+            articleIds: parsed.articleIds,
           };
         },
         renderer(token) {
@@ -398,7 +342,17 @@ function helpHomeBlockExtension(): MarkedExtension {
           ) {
             return "";
           }
-          return `<div class="help-block" data-help-block="${kind}"></div>\n`;
+          const rawIds = (token as { articleIds?: unknown }).articleIds;
+          const ids =
+            kind === "popular"
+              ? parsePopularArticleIds(
+                  Array.isArray(rawIds) ? rawIds.join(",") : "",
+                )
+              : [];
+          if (ids.length === 0) {
+            return `<div class="help-block" data-help-block="${kind}"></div>\n`;
+          }
+          return `<div class="help-block" data-help-block="popular" data-article-ids="${ids.join(",")}"></div>\n`;
         },
       },
     ],
@@ -610,7 +564,6 @@ function createMarked(collect: TocEntry[]): Marked {
     }),
     apiBlocksExtension(),
     stepsExtension(),
-    columnsExtension(),
     helpHomeBlockExtension(),
     calloutExtension(),
     nestedHeadingExtension(nested),
@@ -648,7 +601,12 @@ export async function renderMarkdown(
     async: true,
   });
   const rewritten = postProcessLinksAndImages(rawHtml, options);
-  return { html: sanitizeRenderedHtml(rewritten, options), toc };
+  return {
+    html: wrapHelpTables(
+      wrapHelpImages(sanitizeRenderedHtml(rewritten, options)),
+    ),
+    toc,
+  };
 }
 
 // Rewrite URLs FIRST so sanitize-html sees the final structure, then sanitize
@@ -714,10 +672,13 @@ function sanitizeRenderedHtml(
         "height",
         "loading",
         "decoding",
+        "style",
         "data-warning",
+        "data-object-position",
+        "data-aspect",
       ],
       p: ["class"],
-      div: ["class", "data-callout", "data-help-block"],
+      div: ["class", "data-callout", "data-help-block", "data-article-ids"],
       span: ["class"],
       code: ["class"],
       pre: ["class"],
@@ -749,7 +710,15 @@ function sanitizeRenderedHtml(
     allowedSchemesAppliedToAttributes: ["href", "src", "cite"],
     allowProtocolRelative: false,
     disallowedTagsMode: "discard",
-    allowedStyles: {},
+    allowedStyles: {
+      img: {
+        "object-fit": [/^cover$/i],
+        "object-position": [/^\d{1,3}%\s+\d{1,3}%$/],
+        width: [/^\d{1,3}%$/],
+        height: [/^auto$/],
+        "aspect-ratio": [/^\d+(\.\d+)?\s*\/\s*\d+(\.\d+)?$/],
+      },
+    },
     transformTags: {
       input: (tagName, attribs) => {
         // Only allow task-list checkboxes
@@ -773,6 +742,7 @@ function sanitizeRenderedHtml(
         }
         if (!next.loading) next.loading = "lazy";
         if (!next.decoding) next.decoding = "async";
+        applyHelpImageLayout(next);
         return { tagName, attribs: next };
       },
       a: (tagName, attribs) => {
@@ -893,6 +863,133 @@ function rewriteImage(attrs: string): string {
     return `<img${attrs.replace(srcMatch[0], "")} data-warning="unsafe-src" alt="">`;
   }
   return `<img${attrs}>`;
+}
+
+function wrapHelpImages(html: string): string {
+  return html.replace(/<img\b[^>]*>/gi, (tag) => {
+    if (/\bdata-warning\s*=/i.test(tag) || /\bclass="help-img"/i.test(tag)) {
+      return tag;
+    }
+    return `<span class="help-img">${tag}</span>`;
+  });
+}
+
+function wrapHelpTables(html: string): string {
+  return html.replace(/<table\b[\s\S]*?<\/table>/gi, (tag) => {
+    if (/\bclass="help-table"/i.test(tag)) return tag;
+    return `<div class="help-table">${tag}</div>`;
+  });
+}
+
+const OBJECT_POSITION_RE = /^(\d{1,3})%\s+(\d{1,3})%$/;
+const WIDTH_PCT_RE = /^(\d{1,3})%$/;
+const ASPECT_RE = /^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/;
+
+function clampPct(value: number): number {
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+function parseWidthPercent(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const pct = WIDTH_PCT_RE.exec(raw.trim());
+  if (pct) {
+    const n = Number(pct[1]);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.min(100, Math.round(n));
+  }
+  return null;
+}
+
+function parseLegacyPx(raw: string | undefined): number | null {
+  if (!raw || raw.includes("%")) return null;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(4000, n);
+}
+
+function parseAspect(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const match = ASPECT_RE.exec(raw.trim());
+  if (!match) return null;
+  const w = Number(match[1]);
+  const h = Number(match[2]);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    return null;
+  }
+  return `${w} / ${h}`;
+}
+
+function aspectFromLegacyPx(
+  widthPx: number | null,
+  heightPx: number | null,
+): string | null {
+  if (!widthPx || !heightPx) return null;
+  return `${widthPx} / ${heightPx}`;
+}
+
+function sanitizeObjectPosition(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const match = OBJECT_POSITION_RE.exec(raw.trim());
+  if (!match) return null;
+  const x = clampPct(Number(match[1]));
+  const y = clampPct(Number(match[2]));
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return `${x}% ${y}%`;
+}
+
+function objectPositionFromStyle(style: string | undefined): string | null {
+  if (!style) return null;
+  const match =
+    /(?:^|;)\s*object-position\s*:\s*(\d{1,3}%)\s+(\d{1,3}%)\s*(?:;|$)/i.exec(
+      style,
+    );
+  if (!match) return null;
+  return sanitizeObjectPosition(`${match[1]} ${match[2]}`);
+}
+
+function applyHelpImageLayout(attrs: Record<string, string>): void {
+  const widthPct = parseWidthPercent(attrs.width);
+  const legacyW = parseLegacyPx(attrs.width);
+  const legacyH = parseLegacyPx(attrs.height);
+  const aspect =
+    parseAspect(attrs["data-aspect"]) ?? aspectFromLegacyPx(legacyW, legacyH);
+
+  const pos =
+    sanitizeObjectPosition(attrs["data-object-position"]) ??
+    objectPositionFromStyle(attrs.style) ??
+    (aspect ? "50% 50%" : null);
+
+  delete attrs.height;
+  delete attrs.style;
+
+  const style: string[] = [];
+  if (widthPct != null && widthPct < 100) {
+    attrs.width = `${widthPct}%`;
+    style.push(`width:${widthPct}%`);
+  } else if (aspect || widthPct === 100) {
+    attrs.width = "100%";
+    style.push("width:100%");
+  } else if (legacyW && !aspect) {
+    // Old pixel-only width. Stretch to the column.
+    attrs.width = "100%";
+    style.push("width:100%");
+  } else {
+    delete attrs.width;
+  }
+
+  if (aspect) {
+    attrs["data-aspect"] = aspect;
+    attrs["data-object-position"] = pos ?? "50% 50%";
+    style.push(`aspect-ratio:${aspect}`);
+    style.push("height:auto");
+    style.push("object-fit:cover");
+    style.push(`object-position:${pos ?? "50% 50%"}`);
+  } else {
+    delete attrs["data-aspect"];
+    delete attrs["data-object-position"];
+  }
+
+  if (style.length > 0) attrs.style = style.join(";");
 }
 
 function stripAttr(attrs: string, name: string): string {

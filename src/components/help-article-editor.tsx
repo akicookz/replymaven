@@ -133,7 +133,7 @@ function HelpArticleEditor({
         class:
           variant === "page"
             ? "prose prose-lg max-w-none min-h-[60vh] focus:outline-none help-editor-surface help-editor-surface-page"
-            : "prose prose-sm max-w-none min-h-[420px] px-5 py-6 focus:outline-none help-editor-surface",
+            : "prose prose-sm max-w-none min-h-[420px] pl-10 pr-5 py-6 focus:outline-none help-editor-surface",
       },
       handlePaste: (_view, event) => {
         const images = imageFilesFrom(event.clipboardData?.files);
@@ -309,7 +309,7 @@ function HelpArticleEditor({
   if (variant === "page") {
     return (
       <div className="help-editor-page" style={accentStyle}>
-        <EditorContent editor={editor} />
+        <EditorContent editor={editor} className="help-editor-canvas help-editor-canvas-page" />
         <EditorBubbleMenu editor={editor} />
         <div className="help-editor-floating-tools" contentEditable={false}>
           <Button
@@ -410,7 +410,7 @@ function HelpArticleEditor({
           </Button>
         </div>
       </div>
-      <EditorContent editor={editor} />
+      <EditorContent editor={editor} className="help-editor-canvas" />
       <EditorBubbleMenu editor={editor} />
       <input
         ref={fileInputRef}

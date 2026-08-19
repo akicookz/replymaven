@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { and, asc, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { type SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { applyPatch, parsePatch } from "diff";
 import {
@@ -318,23 +318,6 @@ export class HelpdeskService {
         asc(helpArticles.sortOrder),
         asc(helpArticles.createdAt),
       );
-  }
-
-  async listRecentlyPublishedArticles(
-    projectId: string,
-    limit = 6,
-  ): Promise<HelpArticleRow[]> {
-    return this.db
-      .select()
-      .from(helpArticles)
-      .where(
-        and(
-          eq(helpArticles.projectId, projectId),
-          eq(helpArticles.status, "published"),
-        ),
-      )
-      .orderBy(desc(helpArticles.publishedAt))
-      .limit(limit);
   }
 
   async getArticleById(

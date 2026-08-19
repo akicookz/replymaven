@@ -20,11 +20,11 @@ import sql from "highlight.js/lib/languages/sql";
 import { Markdown } from "tiptap-markdown";
 import { ImageWithAlt } from "./image-with-alt";
 import { Callout } from "./callout";
-import { Columns, Column } from "./columns";
 import { HelpHomeBlock } from "./help-home-blocks";
 import { Steps, Step } from "./steps";
 import { ApiEndpoint, ApiStatus, ApiParams, ApiExamples } from "./api-blocks";
 import { createSlashCommand } from "./slash-command";
+import { createHelpDragHandle } from "./drag-handle";
 import type { SlashItemContext } from "./slash-command-items";
 
 const lowlight = createLowlight();
@@ -76,8 +76,6 @@ export function buildExtensions(args: BuildExtensionsArgs) {
     TaskList,
     TaskItem.configure({ nested: true }),
     Callout,
-    Columns,
-    Column,
     HelpHomeBlock,
     Steps,
     Step,
@@ -89,8 +87,9 @@ export function buildExtensions(args: BuildExtensionsArgs) {
       openImagePicker: args.openImagePicker,
       includeHomeBlocks: args.includeHomeBlocks,
     }),
+    createHelpDragHandle(),
     Markdown.configure({
-      // `html: true` lets us roundtrip <img width="..."> (resizable images).
+      // `html: true` lets us roundtrip <img width="80%" data-aspect data-object-position>.
       // The editor's parseDOM only accepts known schema nodes, so unknown
       // tags are filtered; sanitize-html still runs on public output.
       html: true,

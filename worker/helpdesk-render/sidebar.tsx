@@ -5,9 +5,11 @@ import type {
   ProjectRow,
   WidgetConfigRow,
 } from "../db/schema";
+import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { buildHelpUrl } from "./build-help-url";
 import { HelpIcon } from "./icons";
 import { isHelpIconName, isImageIcon } from "../../shared/help-icons";
+import { HelpTopNavLinks } from "./top-nav-links";
 
 export interface HelpSidebarProps {
   project: ProjectRow;
@@ -17,11 +19,13 @@ export interface HelpSidebarProps {
   activeArticleSlug: string | null;
   helpCustomUrl: string | null;
   widgetConfig: WidgetConfigRow | null;
+  topNav: HelpTopNavItem[];
 }
 
 export function HelpSidebar(props: HelpSidebarProps) {
   return (
-    <aside class="help-sidebar">
+    <aside class="help-sidebar" id="rm-help-sidebar" aria-label="Help menu">
+      <HelpTopNavLinks items={props.topNav} class="help-sidebar-topnav" />
       <nav class="help-sidebar-nav" aria-label="Help categories">
         {props.categories.map((category) => {
           const articles = props.articlesByCategory.get(category.id) ?? [];

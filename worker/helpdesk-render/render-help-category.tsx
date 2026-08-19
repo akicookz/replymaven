@@ -62,16 +62,10 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
           activeArticleSlug={null}
           helpCustomUrl={props.helpCustomUrl}
           widgetConfig={props.widgetConfig}
+          topNav={props.topNav}
         />
       }
     >
-      <MobileCategoryNav
-        project={props.project}
-        categories={props.categories}
-        activeCategorySlug={props.category.slug}
-        helpCustomUrl={props.helpCustomUrl}
-      />
-
       <div class="help-page">
         <nav class="help-breadcrumb" aria-label="Breadcrumb">
           <a
@@ -92,6 +86,13 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
             <p class="help-page-subtitle">{props.category.description}</p>
           )}
         </header>
+
+        <MobileCategoryNav
+          project={props.project}
+          categories={props.categories}
+          activeCategorySlug={props.category.slug}
+          helpCustomUrl={props.helpCustomUrl}
+        />
 
         {props.articles.length === 0 ? (
           <div class="help-empty">No articles yet in this category.</div>

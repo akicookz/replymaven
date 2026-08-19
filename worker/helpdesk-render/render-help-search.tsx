@@ -67,6 +67,7 @@ export function renderHelpSearch(props: RenderHelpSearchProps) {
           activeArticleSlug={null}
           helpCustomUrl={props.helpCustomUrl}
           widgetConfig={props.widgetConfig}
+          topNav={props.topNav}
         />
       }
     >

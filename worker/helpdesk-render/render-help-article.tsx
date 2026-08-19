@@ -6,13 +6,14 @@ import type {
   WidgetConfigRow,
 } from "../db/schema";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
-import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
 import { extractFirstImage } from "./extract-first-image";
+import { Layout } from "./layout";
+import { MobileCategoryNav } from "./mobile-category-nav";
 import type { TocEntry } from "./render-markdown";
 import { HelpSidebar } from "./sidebar";
+import { splitHelpArticleLead } from "./split-help-article-lead";
 import { HelpTopBar } from "./top-bar";
-import { MobileCategoryNav } from "./mobile-category-nav";
 
 interface RenderHelpArticleProps {
   project: ProjectRow;
@@ -52,6 +53,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
       : new Date().toISOString();
 
   const toc = props.toc;
+  const { head: leadHtml, tail: restHtml } = splitHelpArticleLead(props.bodyHtml);
   const firstImage = extractFirstImage(props.article.content ?? "");
   const ogImage = firstImage
     ? {
@@ -107,16 +109,10 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
           activeArticleSlug={props.article.slug}
           helpCustomUrl={props.helpCustomUrl}
           widgetConfig={props.widgetConfig}
+          topNav={props.topNav}
         />
       }
     >
-      <MobileCategoryNav
-        project={props.project}
-        categories={props.categories}
-        activeCategorySlug={props.category.slug}
-        helpCustomUrl={props.helpCustomUrl}
-      />
-
       <div class="help-article-layout">
       <article class="help-page">
         <div class="help-article-topline">
@@ -147,8 +143,20 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
 
         <div
           class="help-prose"
-          dangerouslySetInnerHTML={{ __html: props.bodyHtml }}
+          dangerouslySetInnerHTML={{ __html: leadHtml }}
         />
+        <MobileCategoryNav
+          project={props.project}
+          categories={props.categories}
+          activeCategorySlug={props.category.slug}
+          helpCustomUrl={props.helpCustomUrl}
+        />
+        {restHtml ? (
+          <div
+            class="help-prose"
+            dangerouslySetInnerHTML={{ __html: restHtml }}
+          />
+        ) : null}
 
         {(props.prevArticle || props.nextArticle) && (
           <nav class="help-article-nav" aria-label="Article pagination">
