@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { buildExtensions } from "@/components/help-editor/extensions";
 import { EditorBubbleMenu } from "@/components/help-editor/bubble-menu";
+import { pastedImageUrl } from "@/components/help-editor/pasted-image-url";
 import { splitGluedImageBlocks } from "../../shared/markdown-repair";
 
 export interface DerivedMeta {
@@ -108,6 +109,7 @@ function HelpArticleEditor({
   const uploadFilesRef = useRef<
     ((files: File[], insertPos?: number) => void) | null
   >(null);
+  const insertImageUrlRef = useRef<((url: string) => void) | null>(null);
 
   const openImagePicker = useCallback(() => {
     fileInputRef.current?.click();
@@ -135,11 +137,24 @@ function HelpArticleEditor({
             ? "prose prose-lg max-w-none min-h-[60vh] focus:outline-none help-editor-surface help-editor-surface-page"
             : "prose prose-sm max-w-none min-h-[420px] pl-10 pr-5 py-6 focus:outline-none help-editor-surface",
       },
-      handlePaste: (_view, event) => {
+      handlePaste: (view, event) => {
         const images = imageFilesFrom(event.clipboardData?.files);
-        if (images.length === 0) return false;
+        if (images.length > 0) {
+          event.preventDefault();
+          uploadFilesRef.current?.(images);
+          return true;
+        }
+        // Code stays literal. ImageWithAlt is the same node uploads use, so a
+        // hotlinked URL still gets crop, resize, pan, and alt.
+        if (view.state.selection.$from.parent.type.name === "codeBlock") {
+          return false;
+        }
+        const url = pastedImageUrl(
+          event.clipboardData?.getData("text/plain") ?? "",
+        );
+        if (!url) return false;
         event.preventDefault();
-        uploadFilesRef.current?.(images);
+        insertImageUrlRef.current?.(url);
         return true;
       },
       handleDrop: (view, event, _slice, moved) => {
@@ -208,6 +223,19 @@ function HelpArticleEditor({
       await new Promise((r) => setTimeout(r, 600));
       return attempt();
     }
+  }
+
+  function insertImageFromUrl(src: string) {
+    const editor = pendingEditorRef.current;
+    if (!editor) return;
+    editor
+      .chain()
+      .focus()
+      .insertContent({
+        type: "image",
+        attrs: { src, alt: "" },
+      })
+      .run();
   }
 
   function findImagePos(editor: TiptapEditor, url: string): number | null {
@@ -290,6 +318,9 @@ function HelpArticleEditor({
 
   uploadFilesRef.current = (files, insertPos) => {
     void uploadFiles(files, insertPos);
+  };
+  insertImageUrlRef.current = (url) => {
+    insertImageFromUrl(url);
   };
 
   if (!editor) {
