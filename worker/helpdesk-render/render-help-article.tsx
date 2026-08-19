@@ -7,7 +7,7 @@ import type {
 } from "../db/schema";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { buildHelpUrl } from "./build-help-url";
-import { extractFirstImage } from "./extract-first-image";
+import { extractFirstImage } from "../../shared/extract-first-image";
 import { Layout } from "./layout";
 import { MobileCategoryNav } from "./mobile-category-nav";
 import type { TocEntry } from "./render-markdown";
@@ -38,10 +38,8 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
     category: props.category.slug,
     article: props.article.slug,
   });
-  const title = `${props.article.title} — ${props.project.name} Help`;
-  const description =
-    props.article.excerpt ??
-    `${props.article.title} — help article from ${props.project.name}.`;
+  const title = props.article.title;
+  const description = props.article.excerpt?.trim() ?? "";
 
   const datePublished =
     props.article.publishedAt instanceof Date
@@ -54,11 +52,13 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
 
   const toc = props.toc;
   const { head: leadHtml, tail: restHtml } = splitHelpArticleLead(props.bodyHtml);
+  const storedOg = props.article.ogImageUrl?.trim() ?? "";
   const firstImage = extractFirstImage(props.article.content ?? "");
-  const ogImage = firstImage
+  const ogImageUrl = storedOg || firstImage?.url || "";
+  const ogImage = ogImageUrl
     ? {
-        url: resolveAbsolute(firstImage.url, canonical),
-        alt: firstImage.alt || props.article.title,
+        url: resolveAbsolute(ogImageUrl, canonical),
+        alt: firstImage?.alt || props.article.title,
       }
     : null;
 
@@ -66,7 +66,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
     "@context": "https://schema.org",
     "@type": "Article",
     headline: props.article.title,
-    description: props.article.excerpt ?? "",
+    description: description,
     url: canonical,
     datePublished,
     dateModified,

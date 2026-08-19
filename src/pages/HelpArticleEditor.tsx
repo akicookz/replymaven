@@ -1,8 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Eye, Loader2, RefreshCw, Settings2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Eye, ImagePlus, Loader2, RefreshCw, Settings2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +29,13 @@ import {
 import { MobileMenuButton } from "@/components/PageHeader";
 import { cn } from "@/lib/utils";
 import type { DerivedMeta } from "@/components/help-article-editor";
+import { extractFirstImage } from "../../shared/extract-first-image";
+import {
+  dimensionOgImageWarnings,
+  sizeOgImageWarnings,
+  staticOgImageWarnings,
+  typeOgImageWarnings,
+} from "@/lib/help-og-image-warnings";
 
 const HelpArticleEditor = lazy(
   () => import("@/components/help-article-editor"),
@@ -47,6 +54,7 @@ interface ArticleResponse {
   title: string;
   slug: string;
   excerpt: string | null;
+  ogImageUrl: string | null;
   content: string;
   status: "draft" | "published";
   sortOrder: number;
@@ -59,12 +67,96 @@ interface ArticleFormState {
   title: string;
   slug: string;
   excerpt: string;
+  ogImageUrl: string;
   content: string;
   categoryId: string;
   status: "draft" | "published";
 }
 
+const TITLE_MAX = 200;
+const TITLE_WARN = 60;
 const EXCERPT_MAX = 280;
+const EXCERPT_WARN = 160;
+const OG_IMAGE_MAX = 2048;
+
+function formFromArticle(a: ArticleResponse): ArticleFormState {
+  return {
+    title: a.title,
+    slug: a.slug,
+    excerpt: a.excerpt ?? "",
+    ogImageUrl: a.ogImageUrl ?? "",
+    content: a.content,
+    categoryId: a.categoryId,
+    status: a.status,
+  };
+}
+
+function SeoWarnings({ items }: { items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <ul className="space-y-1">
+      {items.map((warning) => (
+        <li
+          key={warning}
+          className="flex gap-1.5 text-xs text-amber-700 dark:text-amber-400"
+        >
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span>{warning}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function useOgImageWarnings(url: string): string[] {
+  const [probed, setProbed] = useState<string[]>([]);
+
+  useEffect(() => {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      setProbed([]);
+      return;
+    }
+    let cancelled = false;
+
+    async function run() {
+      const extra: string[] = [];
+      try {
+        const size = await new Promise<{ width: number; height: number }>(
+          (resolve, reject) => {
+            const img = new Image();
+            img.onload = () =>
+              resolve({ width: img.naturalWidth, height: img.naturalHeight });
+            img.onerror = () => reject(new Error("load failed"));
+            img.src = trimmed;
+          },
+        );
+        extra.push(...dimensionOgImageWarnings(size.width, size.height));
+      } catch {
+        extra.push("Could not load this image. Check the URL.");
+      }
+      try {
+        const res = await fetch(trimmed, { method: "HEAD" });
+        if (res.ok) {
+          const type = res.headers.get("content-type");
+          if (type) extra.push(...typeOgImageWarnings(type));
+          const len = res.headers.get("content-length");
+          if (len) extra.push(...sizeOgImageWarnings(Number(len)));
+        }
+      } catch {
+        // Missing HEAD or CORS. Dimensions already cover the common case.
+      }
+      if (!cancelled) setProbed(extra);
+    }
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  return [...staticOgImageWarnings(url), ...probed];
+}
 
 function slugify(value: string): string {
   return value
@@ -90,11 +182,13 @@ function HelpArticleEditorPage() {
     title: "",
     slug: "",
     excerpt: "",
+    ogImageUrl: "",
     content: "",
     categoryId: initialCategoryId,
     status: "draft",
   });
   const [slugTouched, setSlugTouched] = useState(false);
+  const [titleTouched, setTitleTouched] = useState(false);
   const [excerptTouched, setExcerptTouched] = useState(false);
   const [savedSnapshot, setSavedSnapshot] = useState<ArticleFormState | null>(
     null,
@@ -106,6 +200,15 @@ function HelpArticleEditorPage() {
   // Body images upload asynchronously; until they land the content holds
   // `blob:` URLs that would be persisted as dead links.
   const [bodyImagesUploading, setBodyImagesUploading] = useState(false);
+  const [ogImageUploading, setOgImageUploading] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const ogImageInputRef = useRef<HTMLInputElement | null>(null);
+
+  const defaultOgImageUrl = extractFirstImage(form.content)?.url ?? "";
+  const effectiveOgImageUrl = form.ogImageUrl.trim() || defaultOgImageUrl;
+  const ogImageWarnings = useOgImageWarnings(
+    settingsOpen ? effectiveOgImageUrl : "",
+  );
 
   const categoriesQuery = useQuery<CategoryResponse[]>({
     queryKey: ["help-categories", projectId],
@@ -143,15 +246,7 @@ function HelpArticleEditorPage() {
 
   useEffect(() => {
     if (articleQuery.data) {
-      const a = articleQuery.data;
-      const next: ArticleFormState = {
-        title: a.title,
-        slug: a.slug,
-        excerpt: a.excerpt ?? "",
-        content: a.content,
-        categoryId: a.categoryId,
-        status: a.status,
-      };
+      const next = formFromArticle(articleQuery.data);
       setForm(next);
       setSavedSnapshot(next);
       setSlugTouched(true);
@@ -177,6 +272,7 @@ function HelpArticleEditorPage() {
       };
       if (input.slug.trim()) body.slug = input.slug.trim();
       if (input.excerpt.trim()) body.excerpt = input.excerpt.trim();
+      if (input.ogImageUrl.trim()) body.ogImageUrl = input.ogImageUrl.trim();
       const res = await fetch(`/api/projects/${projectId}/help/articles`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -215,6 +311,9 @@ function HelpArticleEditorPage() {
       if (input.excerpt !== undefined) {
         body.excerpt = input.excerpt.trim() || null;
       }
+      if (input.ogImageUrl !== undefined) {
+        body.ogImageUrl = input.ogImageUrl.trim() || null;
+      }
       if (input.content !== undefined) body.content = input.content;
       if (input.categoryId !== undefined) body.categoryId = input.categoryId;
       if (input.status !== undefined) body.status = input.status;
@@ -246,14 +345,9 @@ function HelpArticleEditorPage() {
       queryClient.invalidateQueries({
         queryKey: ["help-categories", projectId],
       });
-      setSavedSnapshot({
-        title: updated.title,
-        slug: updated.slug,
-        excerpt: updated.excerpt ?? "",
-        content: updated.content,
-        categoryId: updated.categoryId,
-        status: updated.status,
-      });
+      setSavedSnapshot(formFromArticle(updated));
+      setForm(formFromArticle(updated));
+      setExcerptTouched(true);
       toast.success("Saved");
     },
     onError: (err: Error) => toast.error(err.message),
@@ -267,7 +361,9 @@ function HelpArticleEditorPage() {
         // title in frontmatter have no H1 in the body, so deriveMeta returns
         // "" for them — without this guard that empty string overwrote the
         // stored title and the breadcrumb read "Untitled article".
-        if (meta.title && meta.title !== f.title) next.title = meta.title;
+        if (meta.title && meta.title !== f.title && !titleTouched) {
+          next.title = meta.title;
+        }
         if (!slugTouched && meta.title) {
           const s = slugify(meta.title);
           if (s !== f.slug) next.slug = s;
@@ -285,8 +381,13 @@ function HelpArticleEditorPage() {
         return next;
       });
     },
-    [slugTouched, excerptTouched],
+    [slugTouched, titleTouched, excerptTouched],
   );
+
+  function handleTitleChange(value: string) {
+    setTitleTouched(true);
+    setForm((f) => ({ ...f, title: value.slice(0, TITLE_MAX) }));
+  }
 
   function handleSlugChange(value: string) {
     setSlugTouched(true);
@@ -301,13 +402,34 @@ function HelpArticleEditorPage() {
     setForm((f) => ({ ...f, excerpt: value.slice(0, EXCERPT_MAX) }));
   }
 
+  async function handleOgImageUpload(file: File) {
+    setOgImageUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(err?.error ?? "Upload failed");
+      }
+      const body = (await res.json()) as { url: string };
+      setForm((f) => ({ ...f, ogImageUrl: body.url.slice(0, OG_IMAGE_MAX) }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setOgImageUploading(false);
+    }
+  }
+
   function handleSave() {
-    if (bodyImagesUploading) {
+    if (bodyImagesUploading || ogImageUploading) {
       toast.error("Wait for the image uploads to finish");
       return;
     }
     if (!form.title.trim()) {
-      toast.error("Article needs a title (type one in the H1 line)");
+      toast.error("Article needs a title");
       return;
     }
     if (!form.categoryId) {
@@ -335,6 +457,7 @@ function HelpArticleEditorPage() {
             title: form.title,
             slug: form.slug || undefined,
             excerpt: form.excerpt || null,
+            ogImageUrl: form.ogImageUrl || null,
             content: form.content,
           }),
         },
@@ -385,6 +508,7 @@ function HelpArticleEditorPage() {
       savedSnapshot.title !== form.title ||
       savedSnapshot.slug !== form.slug ||
       savedSnapshot.excerpt !== form.excerpt ||
+      savedSnapshot.ogImageUrl !== form.ogImageUrl ||
       savedSnapshot.content !== form.content ||
       savedSnapshot.categoryId !== form.categoryId ||
       savedSnapshot.status !== form.status,
@@ -400,6 +524,18 @@ function HelpArticleEditorPage() {
   }
 
   const categories = categoriesQuery.data ?? [];
+  const titleWarnings =
+    form.title.length > TITLE_WARN
+      ? [
+          `Title is ${form.title.length} characters. Keep it under ${TITLE_WARN} so search and social results do not cut it off.`,
+        ]
+      : [];
+  const descriptionWarnings =
+    form.excerpt.length > EXCERPT_WARN
+      ? [
+          `Description is ${form.excerpt.length} characters. Keep it under ${EXCERPT_WARN} for search snippets.`,
+        ]
+      : [];
 
   return (
     <div className="help-editor-page-shell">
@@ -440,14 +576,17 @@ function HelpArticleEditorPage() {
             <span className="hidden sm:inline">Preview</span>
           </Button>
 
-          <Popover>
+          <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
             <PopoverTrigger asChild>
               <Button type="button" variant="outline" size="sm">
                 <Settings2 className="w-4 h-4" />
                 <span className="hidden sm:inline">Publish settings</span>
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-80">
+            <PopoverContent
+              align="end"
+              className="w-96 max-h-[min(36rem,calc(100vh-4rem))] overflow-y-auto"
+            >
               <div className="space-y-4">
                 <div className="space-y-1.5">
                   <Label htmlFor="article-category">Category</Label>
@@ -480,24 +619,103 @@ function HelpArticleEditorPage() {
                     maxLength={80}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Auto-generated from the title — edit to override.
+                    Auto-generated from the title. Edit to override.
                   </p>
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label htmlFor="article-excerpt">Excerpt</Label>
+                  <Label htmlFor="article-title">Title</Label>
+                  <Input
+                    id="article-title"
+                    value={form.title}
+                    onChange={(e) => handleTitleChange(e.target.value)}
+                    placeholder="Follows the H1 until you edit it"
+                    maxLength={TITLE_MAX}
+                  />
+                  <p className="text-xs text-muted-foreground text-right">
+                    {form.title.length} / {TITLE_MAX}
+                  </p>
+                  <SeoWarnings items={titleWarnings} />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="article-description">Description</Label>
                   <textarea
-                    id="article-excerpt"
+                    id="article-description"
                     value={form.excerpt}
                     onChange={(e) => handleExcerptChange(e.target.value)}
                     maxLength={EXCERPT_MAX}
-                    rows={4}
-                    placeholder="One-line summary shown in listings and search."
+                    rows={3}
+                    placeholder="First text line of the article, filled on save if empty."
                     className="w-full rounded-lg bg-card border border-border px-3 py-2 text-sm placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
                   />
                   <p className="text-xs text-muted-foreground text-right">
                     {form.excerpt.length} / {EXCERPT_MAX}
                   </p>
+                  <SeoWarnings items={descriptionWarnings} />
+                </div>
+
+                <div className="space-y-3 pt-1">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Open Graph
+                  </p>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="article-og-image">OG image</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="article-og-image"
+                        value={form.ogImageUrl}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            ogImageUrl: e.target.value.slice(0, OG_IMAGE_MAX),
+                          }))
+                        }
+                        placeholder={
+                          defaultOgImageUrl ||
+                          "First image in the article, filled on save"
+                        }
+                        maxLength={OG_IMAGE_MAX}
+                      />
+                      <input
+                        ref={ogImageInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/svg+xml"
+                        className="sr-only"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          e.target.value = "";
+                          if (file) void handleOgImageUpload(file);
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="shrink-0"
+                        disabled={ogImageUploading}
+                        onClick={() => ogImageInputRef.current?.click()}
+                        aria-label="Upload OG image"
+                      >
+                        {ogImageUploading ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <ImagePlus className="w-4 h-4" />
+                        )}
+                      </Button>
+                    </div>
+                    {effectiveOgImageUrl ? (
+                      <div className="mt-1 w-full overflow-hidden rounded-lg bg-muted aspect-[1200/630]">
+                        <img
+                          src={effectiveOgImageUrl}
+                          alt=""
+                          className="h-full w-full object-contain"
+                        />
+                      </div>
+                    ) : null}
+                    <SeoWarnings items={ogImageWarnings} />
+                  </div>
                 </div>
               </div>
             </PopoverContent>
@@ -508,7 +726,9 @@ function HelpArticleEditorPage() {
             variant="outline"
             size="sm"
             onClick={handleTogglePublish}
-            disabled={isNew || saving || dirty || bodyImagesUploading}
+            disabled={
+              isNew || saving || dirty || bodyImagesUploading || ogImageUploading
+            }
             title={dirty ? "Save your changes before publishing" : undefined}
           >
             {form.status === "published" ? "Unpublish" : "Publish"}
@@ -518,9 +738,16 @@ function HelpArticleEditorPage() {
             size="sm"
             onClick={handleSave}
             disabled={
-              saving || bodyImagesUploading || (!dirty && !isNew)
+              saving ||
+              bodyImagesUploading ||
+              ogImageUploading ||
+              (!dirty && !isNew)
             }
-            title={bodyImagesUploading ? "Uploading images" : undefined}
+            title={
+              bodyImagesUploading || ogImageUploading
+                ? "Uploading images"
+                : undefined
+            }
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
             {isNew ? "Create" : "Save"}

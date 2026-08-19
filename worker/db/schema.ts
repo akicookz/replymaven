@@ -242,6 +242,7 @@ export const helpArticles = sqliteTable(
     title: text("title").notNull(),
     slug: text("slug").notNull(),
     excerpt: text("excerpt"),
+    ogImageUrl: text("og_image_url"),
     content: text("content").notNull().default(""),
     status: text("status", { enum: ["draft", "published"] })
       .notNull()

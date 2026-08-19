@@ -95,6 +95,7 @@ function createTestDb(): { db: DrizzleD1Database<Record<string, unknown>>; sqlit
     title text NOT NULL,
     slug text NOT NULL,
     excerpt text,
+    og_image_url text,
     content text DEFAULT '' NOT NULL,
     status text DEFAULT 'draft' NOT NULL,
     sort_order integer DEFAULT 0 NOT NULL,
@@ -291,6 +292,21 @@ describe("MCP helpdesk tools", () => {
     const article = fetched.article as Record<string, unknown>;
     expect(article.content).toBe("# Install\n\nRun the thing.");
     expect(article.url).toBeNull();
+  });
+
+  test("create fills description and og fields from the body when omitted", async () => {
+    const harness = createHarness();
+    const categoryId = await seedCategory(harness);
+    const created = await call(harness, "create_help_article", {
+      projectId: "project-1",
+      categoryId,
+      title: "Install Guide",
+      content:
+        "# Install\n\nRun the installer.\n\n![setup](https://cdn.example/setup.png)\n",
+    });
+    const article = created.article as Record<string, unknown>;
+    expect(article.excerpt).toBe("Run the installer.");
+    expect(article.ogImageUrl).toBe("https://cdn.example/setup.png");
   });
 
   test("publishing sets publishedAt, mirrors to R2, and returns the live URL", async () => {

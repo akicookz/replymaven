@@ -30,6 +30,9 @@ export function buildFrontmatterMarkdown(
   if (article.excerpt && article.excerpt.trim()) {
     fields.push(["excerpt", yamlString(article.excerpt.trim())]);
   }
+  if (article.ogImageUrl && article.ogImageUrl.trim()) {
+    fields.push(["ogImage", yamlString(article.ogImageUrl.trim())]);
+  }
   fields.push(["status", article.status]);
   const published = isoDate(article.publishedAt);
   if (published) fields.push(["publishedAt", published]);

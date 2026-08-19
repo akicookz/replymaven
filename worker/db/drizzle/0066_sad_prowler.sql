@@ -1,0 +1,1 @@
+ALTER TABLE `help_articles` ADD `og_image_url` text;

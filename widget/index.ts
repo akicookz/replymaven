@@ -2601,6 +2601,15 @@ import {
     el.textContent = safe;
   }
 
+  function setOptionalLine(
+    el: HTMLElement,
+    text: string | null | undefined,
+  ): void {
+    const value = typeof text === "string" ? text.trim() : "";
+    el.textContent = value;
+    el.hidden = value.length === 0;
+  }
+
   // ─── Build UI ───────────────────────────────────────────────────────────────
 
   // Container
@@ -2746,7 +2755,7 @@ import {
 
   const headerSubtitle = document.createElement("div");
   headerSubtitle.className = "rm-header-subtitle";
-  headerSubtitle.textContent = "We typically reply instantly";
+  setOptionalLine(headerSubtitle, null);
 
   headerInfo.appendChild(headerTitle);
   headerInfo.appendChild(headerSubtitle);
@@ -3741,8 +3750,7 @@ import {
         // Header text
         headerTitle.textContent =
           w.headerText || loadedConfig.botName || "Ask AI";
-        headerSubtitle.textContent =
-          w.headerSubtitle || "We typically reply instantly";
+        setOptionalLine(headerSubtitle, w.headerSubtitle);
 
         // Position
         if (isCenterInline) {

@@ -365,7 +365,10 @@ function registerCreateHelpArticleTool(
           "Optional URL slug: lowercase letters, numbers, and hyphens, max 80 characters. Derived from the title and de-duplicated when omitted.",
         ),
         excerpt: createHelpArticleSchema.shape.excerpt.describe(
-          "Optional summary shown in listings and search, max 280 characters.",
+          "Optional description shown in listings, search, and meta tags, max 280 characters. Filled from the first text line of the body when omitted.",
+        ),
+        ogImageUrl: createHelpArticleSchema.shape.ogImageUrl.describe(
+          "Optional Open Graph image URL, max 2048 characters. Defaults to the first image in the body when omitted.",
         ),
         content: createHelpArticleSchema.shape.content.describe(
           "Markdown body, max 100,000 characters. Images must be hosted URLs — use create_help_image_upload or import_help_image to get one.",
@@ -391,6 +394,7 @@ function registerCreateHelpArticleTool(
       title,
       slug,
       excerpt,
+      ogImageUrl,
       content,
       status,
       sortOrder,
@@ -405,6 +409,7 @@ function registerCreateHelpArticleTool(
           title: title.trim(),
           slug,
           excerpt: excerpt ?? null,
+          ogImageUrl: ogImageUrl ?? null,
           content,
           status,
           sortOrder,
@@ -458,7 +463,10 @@ function registerUpdateHelpArticleTool(
           "Replacement URL slug: lowercase letters, numbers, and hyphens, max 80 characters. Changing it breaks existing links.",
         ),
         excerpt: updateHelpArticleSchema.shape.excerpt.describe(
-          "Replacement summary, max 280 characters. Pass null to clear.",
+          "Replacement description, max 280 characters. Pass null or omit empty to fill from the first text line of the body.",
+        ),
+        ogImageUrl: updateHelpArticleSchema.shape.ogImageUrl.describe(
+          "Replacement Open Graph image URL, max 2048 characters. Pass null or omit empty to fill from the first image in the body.",
         ),
         content: updateHelpArticleSchema.shape.content.describe(
           "Replacement markdown body, max 100,000 characters. Replaces the whole body. Use contentPatch instead for a partial edit.",
@@ -491,6 +499,7 @@ function registerUpdateHelpArticleTool(
       title,
       slug,
       excerpt,
+      ogImageUrl,
       content,
       contentPatch,
       expectedUpdatedAt,
@@ -516,6 +525,7 @@ function registerUpdateHelpArticleTool(
             title,
             slug,
             excerpt,
+            ogImageUrl,
             content,
             contentPatch,
             expectedUpdatedAt: expectedUpdatedAt
@@ -776,6 +786,7 @@ function summarizeHelpArticle(article: HelpArticleRow): Record<string, unknown> 
     title: article.title,
     slug: article.slug,
     excerpt: article.excerpt,
+    ogImageUrl: article.ogImageUrl,
     status: article.status,
     sortOrder: article.sortOrder,
     publishedAt: serializeDate(article.publishedAt),

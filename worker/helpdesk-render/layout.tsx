@@ -53,12 +53,16 @@ export function Layout(props: LayoutProps) {
           <link rel="icon" href={props.widgetConfig.avatarUrl} />
         )}
         <title>{props.title}</title>
-        <meta name="description" content={props.description} />
+        {props.description ? (
+          <meta name="description" content={props.description} />
+        ) : null}
         <link rel="canonical" href={props.canonicalUrl} />
         <meta name="replymaven:help" content={props.projectSlug} />
         <meta property="og:type" content="article" />
         <meta property="og:title" content={props.title} />
-        <meta property="og:description" content={props.description} />
+        {props.description ? (
+          <meta property="og:description" content={props.description} />
+        ) : null}
         <meta property="og:url" content={props.canonicalUrl} />
         {props.ogImage && <meta property="og:image" content={props.ogImage.url} />}
         {props.ogImage?.alt && (
@@ -66,7 +70,9 @@ export function Layout(props: LayoutProps) {
         )}
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={props.title} />
-        <meta name="twitter:description" content={props.description} />
+        {props.description ? (
+          <meta name="twitter:description" content={props.description} />
+        ) : null}
         {props.ogImage && (
           <meta name="twitter:image" content={props.ogImage.url} />
         )}

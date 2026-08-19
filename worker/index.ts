@@ -84,6 +84,7 @@ import {
 import { defaultHelpHomeMarkdown } from "../shared/help-home-markdown";
 import { expandHelpHomeBlocks } from "./helpdesk-render/expand-help-home-blocks";
 import { groupArticlesByCategory } from "./helpdesk-render/group-articles";
+import { applyHelpArticleSeoDefaults } from "./helpdesk-render/apply-help-article-seo-defaults";
 import {
   encryptHeaders,
   decryptHeaders,
@@ -6467,14 +6468,21 @@ const app = new Hono<HonoAppContext>()
       : [...categories, category];
 
     const title = parsed.data.title.trim() || "Untitled article";
+    const content = parsed.data.content;
+    const seo = applyHelpArticleSeoDefaults({
+      excerpt: parsed.data.excerpt,
+      ogImageUrl: parsed.data.ogImageUrl,
+      content,
+    });
     const article: HelpArticleRow = {
       id: "preview",
       projectId: project.id,
       categoryId: category.id,
       title,
       slug: parsed.data.slug?.trim() || "preview",
-      excerpt: parsed.data.excerpt ?? null,
-      content: parsed.data.content,
+      excerpt: seo.excerpt,
+      ogImageUrl: seo.ogImageUrl,
+      content,
       status: "draft",
       sortOrder: 0,
       publishedAt: null,

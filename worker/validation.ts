@@ -996,6 +996,7 @@ export const createHelpArticleSchema = z.object({
     .regex(/^[a-z0-9-]+$/, "Slug may only contain lowercase letters, numbers, and hyphens")
     .optional(),
   excerpt: z.string().max(280).nullable().optional(),
+  ogImageUrl: z.string().max(2048).nullable().optional(),
   content: z.string().max(100_000).optional().default(""),
   status: z.enum(["draft", "published"]).optional().default("draft"),
   sortOrder: z.number().int().min(0).optional(),
@@ -1027,6 +1028,7 @@ export const previewHelpArticleSchema = z.object({
     .regex(/^[a-z0-9-]*$/, "Slug may only contain lowercase letters, numbers, and hyphens")
     .optional(),
   excerpt: z.string().max(280).nullable().optional(),
+  ogImageUrl: z.string().max(2048).nullable().optional(),
   content: z.string().max(100_000).optional().default(""),
 });
 

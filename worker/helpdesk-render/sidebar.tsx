@@ -95,13 +95,16 @@ export function HelpSidebar(props: HelpSidebarProps) {
         })}
       </nav>
       <footer class="help-sidebar-footer">
-        Powered by{" "}
         <a
           href="https://replymaven.com"
           target="_blank"
           rel="noopener noreferrer"
         >
-          ReplyMaven
+          Powered by
+          <span class="help-sidebar-footer-brand">
+            <ReplyMavenMark />
+            ReplyMaven
+          </span>
         </a>
       </footer>
     </aside>
@@ -126,4 +129,31 @@ function renderCategoryIcon(icon: string | null) {
     return <HelpIcon name={icon} />;
   }
   return <HelpIcon name="BookOpen" />;
+}
+
+function ReplyMavenMark() {
+  return (
+    <svg
+      class="help-sidebar-footer-mark"
+      viewBox="0 0 28 32"
+      fill="none"
+      aria-hidden="true"
+    >
+      <mask id="rm-help-mark-mask">
+        <rect width="28" height="32" fill="white" />
+        <path
+          d="M6 14C11.3333 19.3333 16.6667 19.3333 22 14"
+          stroke="black"
+          stroke-width="1.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </mask>
+      <path
+        mask="url(#rm-help-mark-mask)"
+        d="M24 32H6C2.6875 32 0 29.3125 0 26V6C0 2.6875 2.6875 0 6 0H25C26.6562 0 28 1.34375 28 3V21C28 22.3062 27.1625 23.4187 26 23.8312V28C27.1063 28 28 28.8937 28 30C28 31.1063 27.1063 32 26 32H24ZM6 24C4.89375 24 4 24.8937 4 26C4 27.1063 4.89375 28 6 28H22V24H6Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
 }

@@ -181,8 +181,7 @@ function buildPreviewHtml(options: {
       backgroundColor: options.form.backgroundColor ?? "#ffffff",
       textColor: options.form.textColor ?? "#ffffff",
       headerText: options.form.headerText ?? "Chat with us",
-      headerSubtitle:
-        options.form.headerSubtitle ?? "We typically reply instantly",
+      headerSubtitle: options.form.headerSubtitle ?? "",
       avatarUrl: options.form.avatarUrl ?? null,
       position: options.form.position ?? "bottom-right",
       borderRadius: options.form.borderRadius ?? 16,

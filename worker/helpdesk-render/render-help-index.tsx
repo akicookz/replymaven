@@ -27,8 +27,8 @@ export function renderHelpIndex(props: RenderHelpIndexProps) {
     projectSlug: props.project.slug,
     customUrl: props.helpCustomUrl,
   });
-  const title = `${props.project.name} Help Center`;
-  const description = `Browse help articles and guides for ${props.project.name}.`;
+  const title = props.project.name;
+  const description = "";
 
   return (
     <Layout

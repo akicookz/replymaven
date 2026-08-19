@@ -15,6 +15,7 @@ import {
 import { slugify } from "../lib/slugify";
 import { buildHelpUrl } from "../helpdesk-render/build-help-url";
 import { buildFrontmatterMarkdown } from "../helpdesk-render/build-frontmatter-md";
+import { applyHelpArticleSeoDefaults } from "../helpdesk-render/apply-help-article-seo-defaults";
 
 interface CreateCategoryInput {
   name: string;
@@ -37,6 +38,7 @@ interface CreateArticleInput {
   title: string;
   slug?: string;
   excerpt?: string | null;
+  ogImageUrl?: string | null;
   content?: string;
   status?: "draft" | "published";
   sortOrder?: number;
@@ -47,6 +49,7 @@ interface UpdateArticleInput {
   title?: string;
   slug?: string;
   excerpt?: string | null;
+  ogImageUrl?: string | null;
   content?: string;
   /** Unified diff applied to the current body. Mutually exclusive with content. */
   contentPatch?: string;
@@ -388,6 +391,12 @@ export class HelpdeskService {
       data.sortOrder ?? (await this.nextArticleSortOrder(data.categoryId));
     const id = crypto.randomUUID();
     const publishedAt = status === "published" ? new Date() : null;
+    const content = data.content ?? "";
+    const seo = applyHelpArticleSeoDefaults({
+      excerpt: data.excerpt,
+      ogImageUrl: data.ogImageUrl,
+      content,
+    });
 
     const row: NewHelpArticleRow = {
       id,
@@ -395,8 +404,9 @@ export class HelpdeskService {
       categoryId: data.categoryId,
       title: data.title,
       slug,
-      excerpt: data.excerpt ?? null,
-      content: data.content ?? "",
+      excerpt: seo.excerpt,
+      ogImageUrl: seo.ogImageUrl,
+      content,
       status,
       sortOrder,
       publishedAt,
@@ -437,6 +447,7 @@ export class HelpdeskService {
 
     if (updates.title !== undefined) patch.title = updates.title;
     if (updates.excerpt !== undefined) patch.excerpt = updates.excerpt;
+    if (updates.ogImageUrl !== undefined) patch.ogImageUrl = updates.ogImageUrl;
     if (updates.content !== undefined) patch.content = updates.content;
     if (updates.contentPatch !== undefined) {
       patch.content = applyContentPatch(existing.content, updates.contentPatch);
@@ -500,6 +511,21 @@ export class HelpdeskService {
       }
     }
 
+    const mergedContent = patch.content ?? existing.content;
+    const seo = applyHelpArticleSeoDefaults({
+      excerpt:
+        patch.excerpt !== undefined ? patch.excerpt : existing.excerpt,
+      ogImageUrl:
+        patch.ogImageUrl !== undefined
+          ? patch.ogImageUrl
+          : existing.ogImageUrl,
+      content: mergedContent,
+    });
+    if (seo.excerpt !== existing.excerpt) patch.excerpt = seo.excerpt;
+    if (seo.ogImageUrl !== existing.ogImageUrl) {
+      patch.ogImageUrl = seo.ogImageUrl;
+    }
+
     if (Object.keys(patch).length > 0) {
       const scope = and(
         eq(helpArticles.id, id),
@@ -541,8 +567,11 @@ export class HelpdeskService {
         updates.title !== undefined ||
         updates.content !== undefined ||
         updates.excerpt !== undefined ||
+        updates.ogImageUrl !== undefined ||
         updates.slug !== undefined ||
-        updates.categoryId !== undefined;
+        updates.categoryId !== undefined ||
+        patch.excerpt !== undefined ||
+        patch.ogImageUrl !== undefined;
 
       if (transitionedToPublished || (stayedPublished && contentLikeChanged)) {
         const category =

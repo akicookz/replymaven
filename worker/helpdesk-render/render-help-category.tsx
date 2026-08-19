@@ -8,7 +8,7 @@ import type {
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
-import { extractFirstImage } from "./extract-first-image";
+import { extractFirstImage } from "../../shared/extract-first-image";
 import { HelpIcon } from "./icons";
 import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
@@ -32,10 +32,8 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
     customUrl: props.helpCustomUrl,
     category: props.category.slug,
   });
-  const title = `${props.category.name} — ${props.project.name} Help`;
-  const description =
-    props.category.description ??
-    `Help articles in the ${props.category.name} category.`;
+  const title = props.category.name;
+  const description = props.category.description?.trim() ?? "";
 
   return (
     <Layout

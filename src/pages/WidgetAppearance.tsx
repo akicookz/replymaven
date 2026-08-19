@@ -174,7 +174,7 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
             type="text"
             value={state.form.headerSubtitle ?? ""}
             onChange={(e) =>
-              state.updateForm({ headerSubtitle: e.target.value || null })
+              state.updateForm({ headerSubtitle: e.target.value })
             }
             placeholder="We typically reply instantly"
             className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"

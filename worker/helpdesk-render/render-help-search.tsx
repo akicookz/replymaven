@@ -35,9 +35,7 @@ export function renderHelpSearch(props: RenderHelpSearchProps) {
     customUrl: props.helpCustomUrl,
   });
   const canonical = homeUrl;
-  const title = props.query
-    ? `Search: ${props.query} — ${props.project.name} Help`
-    : `Search — ${props.project.name} Help`;
+  const title = props.query ? `Search: ${props.query}` : "Search";
   const description = props.query
     ? `Search results for "${props.query}".`
     : "Search the help center.";
