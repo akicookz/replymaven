@@ -76,6 +76,9 @@ html {
   margin-top: 0;
 }
 .help-prose p { margin: 0; }
+/* Enter starts a new <p>; match the editor's 0.75rem gap. Shift+Enter is a
+   <br> inside the same paragraph, so it does not get this. */
+.help-prose > p + p { margin-top: 0.75rem; }
 .help-prose a {
   color: var(--brand);
   text-decoration: none;

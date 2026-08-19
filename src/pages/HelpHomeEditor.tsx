@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MobileMenuButton } from "@/components/PageHeader";
+import { useSaveHotkey } from "@/hooks/use-save-hotkey";
 import { defaultHelpHomeMarkdown } from "../../shared/help-home-markdown";
 
 const HelpArticleEditor = lazy(
@@ -98,6 +99,11 @@ function HelpHomeEditorPage() {
     : projectQuery.data
       ? `/help/${projectQuery.data.slug}`
       : null;
+
+  useSaveHotkey(() => {
+    if (save.isPending || bodyImagesUploading || !dirty) return;
+    save.mutate(content);
+  });
 
   if (!ready || projectQuery.isLoading || settingsQuery.isLoading) {
     return (

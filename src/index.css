@@ -330,6 +330,9 @@ input[type="color"]::-moz-color-swatch {
   margin: 1.75rem 0 0.5rem;
 }
 .help-editor-surface-page p { margin: 0.75rem 0; }
+/* Heading bottom margin is the only gap. p's 0.75rem top plus that margin
+   reads as two blank lines after Enter. */
+.help-editor-surface-page :is(h1, h2, h3) + p { margin-top: 0; }
 .help-editor-surface-page ul,
 .help-editor-surface-page ol { margin: 0.75rem 0; padding-left: 1.5rem; }
 .help-editor-surface-page ul { list-style: disc; }
@@ -1106,6 +1109,13 @@ input[type="color"]::-moz-color-swatch {
   border: none;
   cursor: pointer;
   color: var(--muted-foreground);
+}
+.bubble-menu-btn.is-label {
+  width: auto;
+  gap: 0.15rem;
+  padding: 0 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 .bubble-menu-btn:hover { background: var(--accent); color: var(--foreground); }
 .bubble-menu-btn.is-active { background: var(--accent); color: var(--foreground); }

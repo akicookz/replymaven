@@ -24,6 +24,7 @@ import { HelpHomeBlock } from "./help-home-blocks";
 import { Steps, Step } from "./steps";
 import { ApiEndpoint, ApiStatus, ApiParams, ApiExamples } from "./api-blocks";
 import { createSlashCommand } from "./slash-command";
+import { HeadingEnterParagraph } from "./heading-enter";
 import { createHelpDragHandle } from "./drag-handle";
 import type { SlashItemContext } from "./slash-command-items";
 
@@ -87,6 +88,7 @@ export function buildExtensions(args: BuildExtensionsArgs) {
       openImagePicker: args.openImagePicker,
       includeHomeBlocks: args.includeHomeBlocks,
     }),
+    HeadingEnterParagraph,
     createHelpDragHandle(),
     Markdown.configure({
       // `html: true` lets us roundtrip <img width="80%" data-aspect data-object-position>.

@@ -1,5 +1,6 @@
 import type { Editor, Range } from "@tiptap/core";
 import {
+  Type,
   Heading1,
   Heading2,
   Heading3,
@@ -57,6 +58,15 @@ export function buildSlashItems(ctx: SlashItemContext): SlashItem[] {
     };
 
   return [
+    {
+      id: "body",
+      title: "Body",
+      description: "Normal paragraph text",
+      keywords: ["body", "paragraph", "text", "p"],
+      icon: Type,
+      command: ({ editor, range }) =>
+        editor.chain().focus().deleteRange(range).setParagraph().run(),
+    },
     {
       id: "h1",
       title: "Heading 1",

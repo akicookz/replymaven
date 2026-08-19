@@ -15,7 +15,11 @@ export interface SlashCommandOptions {
   suggestion: Omit<SuggestionOptions<SlashItem>, "editor">;
 }
 
-const slashPluginKey = new PluginKey("helpSlashCommand");
+export interface SlashMenuState {
+  active: boolean;
+}
+
+export const slashPluginKey = new PluginKey<SlashMenuState>("helpSlashCommand");
 
 export function createSlashCommand(ctx: SlashItemContext) {
   const allItems = buildSlashItems(ctx);

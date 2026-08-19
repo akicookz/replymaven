@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { cn } from "@/lib/utils";
+import { useSaveHotkey } from "@/hooks/use-save-hotkey";
 import type { DerivedMeta } from "@/components/help-article-editor";
 import { extractFirstImage } from "../../shared/extract-first-image";
 import {
@@ -514,6 +515,19 @@ function HelpArticleEditorPage() {
       savedSnapshot.status !== form.status,
     [savedSnapshot, form],
   );
+
+  useSaveHotkey(() => {
+    if (
+      isLoading ||
+      saving ||
+      bodyImagesUploading ||
+      ogImageUploading ||
+      (!dirty && !isNew)
+    ) {
+      return;
+    }
+    handleSave();
+  });
 
   if (isLoading) {
     return (
