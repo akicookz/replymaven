@@ -154,9 +154,8 @@ export function htmlToText(html: string): string {
 
 const EMAIL_DOMAIN = "updates.replymaven.com";
 
-// Absolute origin for links/images embedded in emails. Uploaded attachments
-// are stored as app-relative paths (/api/uploads/...) but email clients need
-// absolute URLs to load them.
+// Absolute origin for leftover relative attachment paths in emails.
+// New uploads already store https://replymaven.com/api/uploads/....
 const APP_ORIGIN = "https://replymaven.com";
 
 // Platform emails come from a monitored, replyable alias — "noreply" senders

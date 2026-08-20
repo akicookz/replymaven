@@ -33,6 +33,9 @@ describe("uploadExtensionFor", () => {
     for (const type of ["image/jpeg", "image/png", "image/webp"]) {
       const ext = uploadExtensionFor(type, "whatever.jfif");
       expect(iconUrlAccepted(`/api/uploads/user-1/abc.${ext}`)).toBe(true);
+      expect(
+        iconUrlAccepted(`https://replymaven.com/api/uploads/user-1/abc.${ext}`),
+      ).toBe(true);
     }
   });
 

@@ -93,6 +93,11 @@ export const projectSettings = sqliteTable(
     helpHomeBackgroundFit: text("help_home_background_fit", {
       enum: ["cover", "contain", "repeat"],
     }),
+    helpThemeDefault: text("help_theme_default", {
+      enum: ["system", "light", "dark"],
+    })
+      .notNull()
+      .default("system"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),

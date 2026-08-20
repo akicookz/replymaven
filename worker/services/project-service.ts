@@ -21,6 +21,7 @@ export interface HelpPresentationSettings {
   helpHomeBackgroundUrl: string | null;
   helpHomeBackgroundPosition: string | null;
   helpHomeBackgroundFit: string | null;
+  helpThemeDefault: string;
 }
 
 export interface PublicHelpProject {
@@ -85,6 +86,7 @@ export class ProjectService {
         helpHomeBackgroundUrl: projectSettings.helpHomeBackgroundUrl,
         helpHomeBackgroundPosition: projectSettings.helpHomeBackgroundPosition,
         helpHomeBackgroundFit: projectSettings.helpHomeBackgroundFit,
+        helpThemeDefault: projectSettings.helpThemeDefault,
         widgetConfig,
       })
       .from(projects)
@@ -105,6 +107,7 @@ export class ProjectService {
             helpHomeBackgroundUrl: row.helpHomeBackgroundUrl,
             helpHomeBackgroundPosition: row.helpHomeBackgroundPosition,
             helpHomeBackgroundFit: row.helpHomeBackgroundFit,
+            helpThemeDefault: row.helpThemeDefault ?? "system",
           }
         : null,
       widgetConfig: row.widgetConfig,
@@ -219,6 +222,7 @@ export class ProjectService {
         | "helpHomeBackgroundUrl"
         | "helpHomeBackgroundPosition"
         | "helpHomeBackgroundFit"
+        | "helpThemeDefault"
       >
     >,
   ): Promise<ProjectSettingsRow | null> {

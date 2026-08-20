@@ -42,6 +42,7 @@ import {
 import {
   isConversationUploadUrl,
 } from "../shared/upload-ownership";
+import { publicUploadUrl } from "./lib/public-upload-url";
 import { AiService } from "./services/ai-service";
 import { TelegramService } from "./services/telegram-service";
 import { resolveTelegramChatBinding } from "./services/telegram-chat-binding";
@@ -90,6 +91,7 @@ import {
   sanitizeHelpHomeBackgroundPosition,
   sanitizeHelpHomeBackgroundUrl,
 } from "./helpdesk-render/sanitize-help-home-background-url";
+import { sanitizeHelpThemeDefault } from "./helpdesk-render/help-theme-default";
 import { groupArticlesByCategory } from "./helpdesk-render/group-articles";
 import {
   dispatchPublicHelp,
@@ -1926,6 +1928,7 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      themeDefault: page.themeDefault,
       noindex: started.noindex,
     });
     return c.html(
@@ -1990,6 +1993,7 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      themeDefault: page.themeDefault,
       noindex: started.noindex,
     });
     return c.html(
@@ -2022,6 +2026,7 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      themeDefault: page.themeDefault,
       noindex: started.noindex,
     });
     return c.html(
@@ -2076,6 +2081,7 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      themeDefault: page.themeDefault,
       homeBackgroundUrl: page.settings?.helpHomeBackgroundUrl ?? null,
       homeBackgroundPosition: page.settings?.helpHomeBackgroundPosition ?? null,
       homeBackgroundFit: page.settings?.helpHomeBackgroundFit ?? null,
@@ -2768,7 +2774,7 @@ const app = new Hono<HonoAppContext>()
 
     return c.json({
       ok: true,
-      url: `/api/uploads/${payload.key}`,
+      url: publicUploadUrl(payload.key),
       bytes: bytes.byteLength,
     });
   })
@@ -4577,7 +4583,8 @@ const app = new Hono<HonoAppContext>()
       parsed.data.helpHomeMarkdown !== undefined ||
       parsed.data.helpHomeBackgroundUrl !== undefined ||
       parsed.data.helpHomeBackgroundPosition !== undefined ||
-      parsed.data.helpHomeBackgroundFit !== undefined
+      parsed.data.helpHomeBackgroundFit !== undefined ||
+      parsed.data.helpThemeDefault !== undefined
     ) {
       scheduleHelpPageCachePurge(c.executionCtx, project.id);
     }
@@ -6530,6 +6537,7 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
       customCss: settings?.helpCustomCss ?? null,
+      themeDefault: sanitizeHelpThemeDefault(settings?.helpThemeDefault),
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {
       "Cache-Control": "no-store",
@@ -7918,7 +7926,7 @@ const app = new Hono<HonoAppContext>()
       customMetadata,
     });
 
-    return c.json({ key: uploadKey, url: `/api/uploads/${uploadKey}` }, 201);
+    return c.json({ key: uploadKey, url: publicUploadUrl(uploadKey) }, 201);
   })
 
   // ─── Serve Uploads ──────────────────────────────────────────────────────────

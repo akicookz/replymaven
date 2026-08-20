@@ -8,10 +8,14 @@ import {
   CheckCircle2,
   ExternalLink,
   Loader2,
+  Monitor,
+  Moon,
   Save,
+  Sun,
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
@@ -21,6 +25,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProxySetupBody } from "@/components/ProxySetupGuide";
 import {
   CustomCssEditor,
@@ -32,10 +37,18 @@ import HelpTopNavEditor, {
 import { useSubscription } from "@/hooks/use-subscription";
 import { canAccessFeature } from "@/lib/plan";
 
+type HelpThemeDefault = "system" | "light" | "dark";
+
+function parseHelpThemeDefault(value: string): HelpThemeDefault {
+  if (value === "light" || value === "dark" || value === "system") return value;
+  return "system";
+}
+
 interface ProjectSettingsData {
   helpCustomUrl: string | null;
   helpTopNav: HelpTopNavItem[] | null;
   helpCustomCss: string | null;
+  helpThemeDefault?: HelpThemeDefault;
 }
 
 interface ProjectData {
@@ -60,6 +73,8 @@ function HelpCenterSettings() {
   const [topNav, setTopNav] = useState<HelpTopNavItem[]>([]);
   const [topNavError, setTopNavError] = useState<string | null>(null);
   const [customCss, setCustomCss] = useState("");
+  const [themeDefault, setThemeDefault] =
+    useState<HelpThemeDefault>("system");
   const { data: subData } = useSubscription();
   const canCustomCss = canAccessFeature(subData?.limits ?? null, "customCss");
 
@@ -86,6 +101,7 @@ function HelpCenterSettings() {
       setCustomUrl(settings.helpCustomUrl ?? "");
       setTopNav(Array.isArray(settings.helpTopNav) ? settings.helpTopNav : []);
       setCustomCss(settings.helpCustomCss ?? "");
+      setThemeDefault(parseHelpThemeDefault(settings.helpThemeDefault ?? "system"));
     }
   }, [settings]);
 
@@ -171,6 +187,7 @@ function HelpCenterSettings() {
           helpTopNav:
             normalizedTopNav.length === 0 ? null : normalizedTopNav,
           helpCustomCss: customCss.trim() || null,
+          helpThemeDefault: themeDefault,
         }),
       });
       if (!res.ok) {
@@ -224,7 +241,8 @@ function HelpCenterSettings() {
   const dirty =
     (settings?.helpCustomUrl ?? "") !== customUrl ||
     JSON.stringify(savedTopNav) !== JSON.stringify(topNav) ||
-    (settings?.helpCustomCss ?? "") !== customCss;
+    (settings?.helpCustomCss ?? "") !== customCss ||
+    (settings?.helpThemeDefault ?? "system") !== themeDefault;
 
   return (
     <div className="space-y-6">
@@ -398,15 +416,67 @@ function HelpCenterSettings() {
       </div>
 
       <div className="rounded-2xl bg-card/50 backdrop-blur-xl border border-border p-6 space-y-5">
-        <div>
-          <h2 className="text-base font-semibold tracking-tight">
-            Custom CSS
-          </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Override help center styles. Type . to insert a class. Set
-            --help-heading-weight on :root to change all headings. Changes can
-            take up to two minutes to show on the live pages.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">
+              Custom CSS
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Override help center styles. Changes can take a minute to show.
+              Full details in the{" "}
+              <a
+                href="/docs/customization/custom-css"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                docs
+              </a>
+              .
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-sm text-muted-foreground">
+              Default theme
+            </Label>
+            <Tabs
+              value={themeDefault}
+              onValueChange={(value) =>
+                setThemeDefault(parseHelpThemeDefault(value))
+              }
+              className="gap-0"
+            >
+              <TabsList aria-label="Default theme">
+                <TabsTrigger
+                  value="system"
+                  aria-label="System"
+                  title="System"
+                  disabled={isLoading || saveSettings.isPending}
+                  className="px-2.5"
+                >
+                  <Monitor className="size-4" />
+                </TabsTrigger>
+                <TabsTrigger
+                  value="light"
+                  aria-label="Light"
+                  title="Light"
+                  disabled={isLoading || saveSettings.isPending}
+                  className="px-2.5"
+                >
+                  <Sun className="size-4" />
+                </TabsTrigger>
+                <TabsTrigger
+                  value="dark"
+                  aria-label="Dark"
+                  title="Dark"
+                  disabled={isLoading || saveSettings.isPending}
+                  className="px-2.5"
+                >
+                  <Moon className="size-4" />
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
         </div>
 
         <CustomCssEditor

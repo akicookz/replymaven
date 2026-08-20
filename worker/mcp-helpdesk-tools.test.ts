@@ -653,7 +653,7 @@ describe("help image tools", () => {
 
     expect(result.ok).toBe(true);
     expect(result.url as string).toMatch(
-      /^\/api\/uploads\/help-images\/project-1\/[a-f0-9-]+\.png$/,
+      /^https:\/\/replymaven\.com\/api\/uploads\/help-images\/project-1\/[a-f0-9-]+\.png$/,
     );
     // Anything under `project-1/` is swept into AI Search retrieval.
     expect(result.url as string).not.toContain("/api/uploads/project-1/");
@@ -678,7 +678,7 @@ describe("help image tools", () => {
     });
     expect(payload.projectId).toBe("project-1");
     expect(payload.contentType).toBe("image/webp");
-    expect(`/api/uploads/${payload.key}`).toBe(result.url);
+    expect(`https://replymaven.com/api/uploads/${payload.key}`).toBe(result.url);
   });
 
   test("refuses to issue an upload for another user's project", async () => {
@@ -706,7 +706,7 @@ describe("help image tools", () => {
       expect(result.ok).toBe(true);
       expect(result.bytes).toBe(4);
       expect(result.url as string).toStartWith(
-        "/api/uploads/help-images/project-1/",
+        "https://replymaven.com/api/uploads/help-images/project-1/",
       );
       expect(harness.r2.objects.size).toBe(1);
     } finally {

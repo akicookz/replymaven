@@ -6,6 +6,7 @@ import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
 import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
+import type { HelpThemeDefault } from "./help-theme-default";
 
 interface RenderHelpIndexProps {
   project: ProjectRow;
@@ -18,6 +19,7 @@ interface RenderHelpIndexProps {
   homeBackgroundUrl: string | null;
   homeBackgroundPosition: string | null;
   homeBackgroundFit: string | null;
+  themeDefault: HelpThemeDefault;
   bodyHtml: string;
   noindex?: boolean;
 }
@@ -41,6 +43,7 @@ export function renderHelpIndex(props: RenderHelpIndexProps) {
       homeBackgroundUrl={props.homeBackgroundUrl}
       homeBackgroundPosition={props.homeBackgroundPosition}
       homeBackgroundFit={props.homeBackgroundFit}
+      themeDefault={props.themeDefault}
       noindex={props.noindex}
       topBar={
         <HelpTopBar

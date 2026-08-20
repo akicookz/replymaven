@@ -804,8 +804,8 @@ function Landing() {
         {/* ambient blue glow */}
         <div aria-hidden className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[1100px] h-[700px] rounded-full opacity-[0.18] blur-[120px]" style={{ background: "radial-gradient(closest-side, #2563eb, transparent)" }} />
         <div className="relative max-w-6xl mx-auto px-6">
-          <h1 className="font-heading sm:text-4xl lg:text-6xl font-medium text-ink-1 tracking-[-0.03em] leading-[1.0] max-w-4xl animate-in fade-in slide-in-from-bottom-3 duration-700">
-            Frontline customer support for founding teams
+          <h1 className="font-heading text-5xl lg:text-7xl font-medium text-ink-1 tracking-[-0.03em] max-w-4xl animate-in fade-in slide-in-from-bottom-3 duration-700">
+            Frontline customer support <br /> for founding teams
           </h1>
           <p className="mt-6 text-[1.15rem] text-ink-5 leading-relaxed max-w-4xl animate-in fade-in slide-in-from-bottom-3 duration-700 delay-100 fill-mode-both">
             Delegate troubleshooting, upgrades, refunds, account changes, and repetitive questions to Maven, your customer support AI agent. Maven learns your docs and product, takes action for customers, and brings you in only when the stakes are high and judgment is needed.
@@ -936,7 +936,7 @@ function Landing() {
               Delegate support at $19/month
             </h2>
             <p className="mt-4 text-[1.05rem] text-ink-5 leading-relaxed">
-                Experience ReplyMaven for seven days free.
+              Experience ReplyMaven for seven days free.
             </p>
           </div>
           <LandingPricing

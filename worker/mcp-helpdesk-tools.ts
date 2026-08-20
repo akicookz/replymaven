@@ -30,6 +30,7 @@ import {
   type McpRequestContext,
 } from "./mcp-tool-helpers";
 import { BodyTooLargeError, readLimitedBody } from "./lib/read-limited-body";
+import { publicUploadUrl } from "./lib/public-upload-url";
 import {
   buildHelpImageKey,
   extensionForContentType,
@@ -677,7 +678,7 @@ function registerCreateHelpImageUploadTool(
       return textResult({
         ok: true,
         uploadUrl: `${base}/api/help-images/upload?token=${encodeURIComponent(token)}`,
-        url: `/api/uploads/${key}`,
+        url: publicUploadUrl(key),
         contentType,
         maxBytes: MAX_HELP_IMAGE_BYTES,
         expiresAt: new Date(expSeconds * 1000).toISOString(),
@@ -772,7 +773,7 @@ function registerImportHelpImageTool(
 
       return textResult({
         ok: true,
-        url: `/api/uploads/${key}`,
+        url: publicUploadUrl(key),
         contentType,
         bytes: bytes.byteLength,
       });

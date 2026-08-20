@@ -6,6 +6,7 @@ import {
   getFaqSetTotalLength,
 } from "../shared/faq-limits";
 import { INDUSTRIES } from "../shared/industries";
+import { isAllowedStoredUploadUrl } from "./lib/public-upload-url";
 
 // ─── Host Allow/Deny Helpers (shared by helpCustomUrl + helpTestProxy) ───────
 function isLikelyIp(host: string): boolean {
@@ -161,13 +162,7 @@ export const updateProjectSettingsSchema = z.object({
   helpHomeBackgroundUrl: z
     .string()
     .max(500)
-    .refine(
-      (u) =>
-        !u.includes("..") &&
-        !u.includes("//") &&
-        /^\/api\/uploads\/[A-Za-z0-9._/-]+$/.test(u),
-      "Must be an uploaded image path",
-    )
+    .refine(isAllowedStoredUploadUrl, "Must be an uploaded image path")
     .nullable()
     .optional(),
   helpHomeBackgroundPosition: imagePositionSchema.nullable().optional(),
@@ -175,6 +170,7 @@ export const updateProjectSettingsSchema = z.object({
     .enum(["cover", "contain", "repeat"])
     .nullable()
     .optional(),
+  helpThemeDefault: z.enum(["system", "light", "dark"]).optional(),
 });
 
 // ─── Widget Config ────────────────────────────────────────────────────────────
@@ -490,7 +486,10 @@ export const updateConversationPublicSchema = z.object({
 const uploadPathSchema = z
   .string()
   .max(500)
-  .regex(/^\/api\/uploads\/[^\s"'<>\\]+$/, "Invalid image URL");
+  .regex(
+    /^(?:https:\/\/replymaven\.com)?\/api\/uploads\/[^\s"'<>\\]+$/,
+    "Invalid image URL",
+  );
 
 export const agentReplySchema = z
   .object({
@@ -991,7 +990,7 @@ export const createHelpCategorySchema = z.object({
       z
         .string()
         .regex(
-          /^\/api\/uploads\/[A-Za-z0-9._/-]+\.(jpe?g|png|webp)$/i,
+          /^(?:https:\/\/replymaven\.com)?\/api\/uploads\/[A-Za-z0-9._/-]+\.(jpe?g|png|webp)$/i,
           "Invalid icon image path",
         ),
     ])

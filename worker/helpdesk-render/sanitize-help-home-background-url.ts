@@ -1,5 +1,6 @@
+import { isAllowedStoredUploadUrl } from "../lib/public-upload-url";
+
 const HELP_HOME_BACKGROUND_URL_MAX = 500;
-const HELP_HOME_BACKGROUND_URL_RE = /^\/api\/uploads\/[A-Za-z0-9._/-]+$/;
 const HELP_HOME_BACKGROUND_POSITION_RE =
   /^(?:100|\d{1,2})% (?:100|\d{1,2})%$/;
 
@@ -13,8 +14,7 @@ export function sanitizeHelpHomeBackgroundUrl(
   const trimmed = input.trim();
   if (!trimmed) return null;
   if (trimmed.length > HELP_HOME_BACKGROUND_URL_MAX) return null;
-  if (trimmed.includes("..") || trimmed.includes("//")) return null;
-  if (!HELP_HOME_BACKGROUND_URL_RE.test(trimmed)) return null;
+  if (!isAllowedStoredUploadUrl(trimmed)) return null;
   return trimmed;
 }
 

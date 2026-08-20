@@ -2613,6 +2613,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "help_theme_default": {
+          "name": "help_theme_default",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'system'"
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",

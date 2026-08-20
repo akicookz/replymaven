@@ -20,6 +20,9 @@ describe("resolveHelpUploadUrl", () => {
     expect(resolveHelpUploadUrl("https://encited.com/marketing/hero.webp")).toBe(
       "https://encited.com/marketing/hero.webp",
     );
+    expect(
+      resolveHelpUploadUrl("https://encited.com/api/uploads/foo.png"),
+    ).toBe("https://encited.com/api/uploads/foo.png");
   });
 
   test("does not prefix a traversal upload path", () => {

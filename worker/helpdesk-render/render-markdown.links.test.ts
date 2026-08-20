@@ -69,4 +69,12 @@ describe("help markdown images on a custom domain", () => {
       'src="https://replymaven.com/api/uploads/help-images/p1/a.jpg"',
     );
   });
+
+  test("does not rewrite a foreign-host /api/uploads src", async () => {
+    const out = await html(
+      "![Shot](https://encited.com/api/uploads/foo.png)",
+    );
+    expect(out).toContain('src="https://encited.com/api/uploads/foo.png"');
+    expect(out).not.toContain("replymaven.com/api/uploads/foo.png");
+  });
 });

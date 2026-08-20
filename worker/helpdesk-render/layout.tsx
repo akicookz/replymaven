@@ -10,6 +10,11 @@ import {
   sanitizeHelpHomeBackgroundUrl,
 } from "./sanitize-help-home-background-url";
 import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
+import {
+  helpThemeBootScript,
+  sanitizeHelpThemeDefault,
+  type HelpThemeDefault,
+} from "./help-theme-default";
 
 interface OgImage {
   url: string;
@@ -35,6 +40,7 @@ export interface LayoutProps {
   homeBackgroundUrl?: string | null;
   homeBackgroundPosition?: string | null;
   homeBackgroundFit?: string | null;
+  themeDefault?: HelpThemeDefault;
   noindex?: boolean;
   topBar?: unknown;
   sidebar?: unknown;
@@ -65,12 +71,13 @@ export function Layout(props: LayoutProps) {
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        {/* Set the theme before first paint (saved choice → system pref → light)
-            and wire the top-bar toggle via event delegation. */}
+        {/* Set the theme before first paint (saved choice → project default →
+            system pref) and wire the top-bar toggle via event delegation. */}
         <script
           dangerouslySetInnerHTML={{
-            __html:
-              "(function(){try{var s=localStorage.getItem('rm-help-theme');var d=s?s==='dark':matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');}catch(e){}document.addEventListener('click',function(e){var t=e.target;var b=t&&t.closest?t.closest('#rm-theme-toggle'):null;if(!b)return;var dk=document.documentElement.classList.toggle('dark');try{localStorage.setItem('rm-help-theme',dk?'dark':'light');}catch(_){}});})();",
+            __html: helpThemeBootScript(
+              sanitizeHelpThemeDefault(props.themeDefault),
+            ),
           }}
         />
         {avatarUrl && <link rel="icon" href={avatarUrl} />}

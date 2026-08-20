@@ -12,6 +12,10 @@ import {
 } from "../services/project-service";
 import { resolveHelpCustomUrl } from "./build-help-url";
 import { groupArticlesByCategory } from "./group-articles";
+import {
+  sanitizeHelpThemeDefault,
+  type HelpThemeDefault,
+} from "./help-theme-default";
 
 export interface PublicHelpPageContext {
   project: ProjectRow;
@@ -23,6 +27,7 @@ export interface PublicHelpPageContext {
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
   customCss: string | null;
+  themeDefault: HelpThemeDefault;
   helpService: HelpdeskService;
 }
 
@@ -54,6 +59,7 @@ export async function loadPublicHelpPage(
     ),
     topNav: parseHelpTopNav(loaded.settings?.helpTopNav),
     customCss: loaded.settings?.helpCustomCss ?? null,
+    themeDefault: sanitizeHelpThemeDefault(loaded.settings?.helpThemeDefault),
     helpService,
   };
 }

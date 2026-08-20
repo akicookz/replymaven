@@ -11,6 +11,11 @@ describe("sanitizeHelpHomeBackgroundUrl", () => {
     expect(
       sanitizeHelpHomeBackgroundUrl("/api/uploads/user-1/grid.png"),
     ).toBe("/api/uploads/user-1/grid.png");
+    expect(
+      sanitizeHelpHomeBackgroundUrl(
+        "https://replymaven.com/api/uploads/user-1/grid.png",
+      ),
+    ).toBe("https://replymaven.com/api/uploads/user-1/grid.png");
   });
 
   test("rejects anything that is not an upload path", () => {
