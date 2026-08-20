@@ -15,6 +15,9 @@ html {
   --help-h2-weight: var(--help-heading-weight, 700);
   --help-h3-weight: var(--help-heading-weight, 600);
   --help-h4-weight: var(--help-heading-weight, 600);
+  --help-ring-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 4%, transparent),
+    0 0 12px color-mix(in oklch, var(--foreground) 5%, transparent);
 }
 
 /* ─── Prose styles for marked output ─────────────────────────────────────── */
@@ -729,8 +732,8 @@ html.help-nav-open .help-nav-overlay {
 }
 .help-popular {
   border-radius: 0.75rem;
-  background: var(--muted);
-  overflow: hidden;
+  background: var(--background);
+  box-shadow: var(--help-ring-shadow);
 }
 .help-popular-title {
   display: flex;
@@ -776,15 +779,14 @@ html.help-nav-open .help-nav-overlay {
   color: var(--foreground);
 }
 .help-index-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(100%, max(14rem, calc((100% - 2rem) / 3))), 1fr)
+  );
   gap: 1rem;
   align-items: stretch;
   margin-top: 1.5rem;
-}
-.help-index-grid > .help-category-card {
-  flex: 1 1 14rem;
-  min-width: min(100%, 14rem);
 }
 .help-home > .help-hero-search {
   margin-top: 2.5rem;
@@ -804,15 +806,15 @@ html.help-nav-open .help-nav-overlay {
   min-height: 150px;
   padding: 1.5rem;
   border-radius: 1rem;
-  background: var(--muted);
+  background: var(--background);
+  box-shadow: var(--help-ring-shadow);
   text-decoration: none;
   color: inherit;
-  overflow: hidden;
   isolation: isolate;
   transition: background-color 150ms ease;
 }
 .help-category-card:hover {
-  background: color-mix(in oklch, var(--muted), var(--foreground) 6%);
+  background: color-mix(in oklch, var(--muted) 40%, var(--background));
 }
 
 .help-category-card-icon-mark {
@@ -865,6 +867,7 @@ html.help-nav-open .help-nav-overlay {
   color: var(--on-overlay);
   border: 0;
   padding: 0;
+  overflow: hidden;
 }
 .help-category-card-image-bg {
   position: absolute;
@@ -1187,14 +1190,14 @@ html.help-nav-open .help-nav-overlay {
   flex-direction: column;
   width: 100%;
   border-radius: 1rem;
-  overflow: hidden;
-  background: var(--card);
+  background: var(--background);
+  box-shadow: var(--help-ring-shadow);
   text-decoration: none;
   color: inherit;
   transition: background-color 150ms ease;
 }
 .help-doc-card:hover {
-  background: color-mix(in oklch, var(--card), var(--foreground) 4%);
+  background: color-mix(in oklch, var(--muted) 40%, var(--background));
 }
 .help-doc-card-thumb {
   aspect-ratio: 16 / 9;
@@ -1248,7 +1251,8 @@ html.help-nav-open .help-nav-overlay {
   margin-top: 2rem;
   padding: 2.5rem;
   border-radius: 1.25rem;
-  background: var(--card);
+  background: var(--background);
+  box-shadow: var(--help-ring-shadow);
   text-align: center;
   color: var(--muted-foreground);
 }
@@ -1267,7 +1271,8 @@ html.help-nav-open .help-nav-overlay {
 .help-article-nav a {
   padding: 1rem 1.125rem;
   border-radius: 0.875rem;
-  background: var(--card);
+  background: var(--background);
+  box-shadow: var(--help-ring-shadow);
   text-decoration: none;
   color: var(--foreground);
   transition: background-color 150ms ease;
@@ -1277,7 +1282,7 @@ html.help-nav-open .help-nav-overlay {
   min-width: 0;
 }
 .help-article-nav a:hover {
-  background: color-mix(in oklch, var(--card), var(--foreground) 4%);
+  background: color-mix(in oklch, var(--muted) 40%, var(--background));
 }
 .help-article-nav-chevron {
   color: var(--muted-foreground);
@@ -1308,14 +1313,15 @@ html.help-nav-open .help-nav-overlay {
   gap: 0.5rem;
   width: 100%;
   padding: 0.5rem 0.5rem 0.5rem 1rem;
-  background: var(--muted);
+  background: var(--background);
+  box-shadow: var(--help-ring-shadow);
   border-radius: 999px;
   transition: box-shadow 150ms ease;
 }
 .help-hero-search:focus-within {
   box-shadow:
-    0 0 0 3px color-mix(in oklch, var(--brand), transparent 80%),
-    0 1px 2px color-mix(in oklch, var(--foreground), transparent 92%);
+    var(--help-ring-shadow),
+    0 0 0 3px color-mix(in oklch, var(--brand), transparent 80%);
 }
 .help-hero-search-icon {
   display: inline-flex;

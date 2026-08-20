@@ -59,7 +59,10 @@
   gap: 0.5rem;
   width: 100%;
   padding: 0.5rem 0.5rem 0.5rem 1rem;
-  background: var(--muted);
+  background: var(--background);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 4%, transparent),
+    0 0 12px color-mix(in oklch, var(--foreground) 5%, transparent);
   border-radius: 999px;
 }
 .help-editor-live .help-hero-search-icon {
@@ -99,15 +102,14 @@
 }
 
 .help-editor-live .help-index-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(100%, max(14rem, calc((100% - 2rem) / 3))), 1fr)
+  );
   gap: 1rem;
   align-items: stretch;
   margin: 0;
-}
-.help-editor-live .help-index-grid > .help-category-card {
-  flex: 1 1 14rem;
-  min-width: min(100%, 14rem);
 }
 .help-editor-live .help-empty {
   margin: 0;
@@ -123,9 +125,11 @@
   min-height: 150px;
   padding: 1.5rem;
   border-radius: 1rem;
-  background: var(--muted);
+  background: var(--background);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 4%, transparent),
+    0 0 12px color-mix(in oklch, var(--foreground) 5%, transparent);
   color: inherit;
-  overflow: hidden;
   isolation: isolate;
 }
 .help-editor-live .help-category-card-icon-mark {
@@ -171,6 +175,7 @@
   min-height: 200px;
   color: var(--on-overlay);
   padding: 0;
+  overflow: hidden;
 }
 .help-editor-live .help-category-card-image-bg {
   position: absolute;
@@ -206,8 +211,10 @@
 
 .help-editor-live .help-popular {
   border-radius: 0.75rem;
-  background: var(--muted);
-  overflow: hidden;
+  background: var(--background);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 4%, transparent),
+    0 0 12px color-mix(in oklch, var(--foreground) 5%, transparent);
 }
 .help-editor-live .help-popular-title {
   display: flex;

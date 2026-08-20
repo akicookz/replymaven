@@ -47,6 +47,7 @@ function palette(o: PaletteOpts): string {
   --destructive: oklch(60% 0.2 25);
   --border: color-mix(in oklch, ${o.fg}, transparent ${o.border}%);
   --input: color-mix(in oklch, ${o.fg}, transparent ${o.border}%);
+  --ring-shadow-color: color-mix(in oklch, ${o.fg}, transparent 92%);
   --ring: ${o.primary};
   --code: ${o.code};
   --code-foreground: ${o.codeFg};`;
