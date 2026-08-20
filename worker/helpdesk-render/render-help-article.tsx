@@ -8,6 +8,7 @@ import type {
 import type { HelpArticleNav } from "../services/helpdesk-service";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { buildHelpUrl } from "./build-help-url";
+import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
 import { extractFirstImage } from "../../shared/extract-first-image";
 import { Layout } from "./layout";
 import { MobileCategoryNav } from "./mobile-category-nav";
@@ -56,7 +57,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
   const { head: leadHtml, tail: restHtml } = splitHelpArticleLead(props.bodyHtml);
   const storedOg = props.article.ogImageUrl?.trim() ?? "";
   const firstImage = extractFirstImage(props.article.content ?? "");
-  const ogImageUrl = storedOg || firstImage?.url || "";
+  const ogImageUrl = resolveHelpUploadUrl(storedOg || firstImage?.url || "") ?? "";
   const ogImage = ogImageUrl
     ? {
         url: resolveAbsolute(ogImageUrl, canonical),

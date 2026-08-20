@@ -85,6 +85,11 @@ import {
 } from "./helpdesk-render/build-help-url";
 import { defaultHelpHomeMarkdown } from "../shared/help-home-markdown";
 import { expandHelpHomeBlocks } from "./helpdesk-render/expand-help-home-blocks";
+import {
+  sanitizeHelpHomeBackgroundFit,
+  sanitizeHelpHomeBackgroundPosition,
+  sanitizeHelpHomeBackgroundUrl,
+} from "./helpdesk-render/sanitize-help-home-background-url";
 import { groupArticlesByCategory } from "./helpdesk-render/group-articles";
 import {
   dispatchPublicHelp,
@@ -2071,6 +2076,9 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      homeBackgroundUrl: page.settings?.helpHomeBackgroundUrl ?? null,
+      homeBackgroundPosition: page.settings?.helpHomeBackgroundPosition ?? null,
+      homeBackgroundFit: page.settings?.helpHomeBackgroundFit ?? null,
       bodyHtml,
       noindex: started.noindex,
     });
@@ -4466,6 +4474,19 @@ const app = new Hono<HonoAppContext>()
     } else {
       helpHomeMarkdown = null;
     }
+    const helpHomeBackgroundUrlRaw = parsed.data.helpHomeBackgroundUrl;
+    let helpHomeBackgroundUrl: string | null | undefined;
+    if (helpHomeBackgroundUrlRaw === undefined) {
+      helpHomeBackgroundUrl = undefined;
+    } else if (helpHomeBackgroundUrlRaw === null) {
+      helpHomeBackgroundUrl = null;
+    } else {
+      const sanitized = sanitizeHelpHomeBackgroundUrl(helpHomeBackgroundUrlRaw);
+      if (!sanitized) {
+        return c.json({ error: "Invalid background image URL" }, 400);
+      }
+      helpHomeBackgroundUrl = sanitized;
+    }
     if (helpCustomCss) {
       const violation = findCustomCssViolation(helpCustomCss);
       if (violation) return c.json({ error: violation }, 400);
@@ -4490,6 +4511,9 @@ const app = new Hono<HonoAppContext>()
     const { helpTopNav, ...rest } = parsed.data;
     delete rest.helpCustomCss;
     delete rest.helpHomeMarkdown;
+    delete rest.helpHomeBackgroundUrl;
+    delete rest.helpHomeBackgroundPosition;
+    delete rest.helpHomeBackgroundFit;
     const updatePayload: Parameters<typeof projectService.updateSettings>[1] = {
       ...rest,
     };
@@ -4502,6 +4526,31 @@ const app = new Hono<HonoAppContext>()
     }
     if (helpHomeMarkdown !== undefined) {
       updatePayload.helpHomeMarkdown = helpHomeMarkdown;
+    }
+    if (helpHomeBackgroundUrl !== undefined) {
+      updatePayload.helpHomeBackgroundUrl = helpHomeBackgroundUrl;
+      if (helpHomeBackgroundUrl === null) {
+        updatePayload.helpHomeBackgroundPosition = null;
+        updatePayload.helpHomeBackgroundFit = null;
+      }
+    }
+    if (
+      parsed.data.helpHomeBackgroundPosition !== undefined &&
+      helpHomeBackgroundUrl !== null
+    ) {
+      updatePayload.helpHomeBackgroundPosition =
+        sanitizeHelpHomeBackgroundPosition(
+          parsed.data.helpHomeBackgroundPosition,
+        );
+    }
+    if (
+      parsed.data.helpHomeBackgroundFit !== undefined &&
+      helpHomeBackgroundUrl !== null
+    ) {
+      updatePayload.helpHomeBackgroundFit =
+        parsed.data.helpHomeBackgroundFit === null
+          ? null
+          : sanitizeHelpHomeBackgroundFit(parsed.data.helpHomeBackgroundFit);
     }
 
     const settings = await projectService.updateSettings(
@@ -4525,7 +4574,10 @@ const app = new Hono<HonoAppContext>()
       parsed.data.helpCustomUrl !== undefined ||
       parsed.data.helpTopNav !== undefined ||
       parsed.data.helpCustomCss !== undefined ||
-      parsed.data.helpHomeMarkdown !== undefined
+      parsed.data.helpHomeMarkdown !== undefined ||
+      parsed.data.helpHomeBackgroundUrl !== undefined ||
+      parsed.data.helpHomeBackgroundPosition !== undefined ||
+      parsed.data.helpHomeBackgroundFit !== undefined
     ) {
       scheduleHelpPageCachePurge(c.executionCtx, project.id);
     }

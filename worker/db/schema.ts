@@ -88,6 +88,11 @@ export const projectSettings = sqliteTable(
     helpTopNav: text("help_top_nav"),
     helpCustomCss: text("help_custom_css"),
     helpHomeMarkdown: text("help_home_markdown"),
+    helpHomeBackgroundUrl: text("help_home_background_url"),
+    helpHomeBackgroundPosition: text("help_home_background_position"),
+    helpHomeBackgroundFit: text("help_home_background_fit", {
+      enum: ["cover", "contain", "repeat"],
+    }),
     createdAt: integer("created_at", { mode: "timestamp" })
       .default(sql`(unixepoch())`)
       .notNull(),

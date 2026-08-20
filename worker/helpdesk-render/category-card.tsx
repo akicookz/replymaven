@@ -2,6 +2,7 @@
 import type { HelpCategoryRow } from "../db/schema";
 import { HelpIcon } from "./icons";
 import { isImageIcon } from "../../shared/help-icons";
+import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
 
 export interface CategoryCardProps {
   category: HelpCategoryRow;
@@ -11,13 +12,16 @@ export interface CategoryCardProps {
 
 export function CategoryCard(props: CategoryCardProps) {
   const iconValue = props.category.icon;
+  const iconSrc = isImageIcon(iconValue)
+    ? resolveHelpUploadUrl(iconValue)
+    : null;
 
-  if (isImageIcon(iconValue)) {
+  if (iconSrc) {
     return (
       <a class="help-category-card help-category-card-image" href={props.href}>
         <img
           class="help-category-card-image-bg"
-          src={iconValue!}
+          src={iconSrc}
           alt=""
           role="presentation"
           loading="lazy"

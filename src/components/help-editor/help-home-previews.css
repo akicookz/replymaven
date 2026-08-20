@@ -63,7 +63,7 @@
   box-shadow:
     0 0 0 1px color-mix(in oklch, var(--foreground) 4%, transparent),
     0 0 12px color-mix(in oklch, var(--foreground) 5%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius);
 }
 .help-editor-live .help-hero-search-icon {
   display: inline-flex;
@@ -94,7 +94,7 @@
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: var(--brand);
   color: color-mix(in oklch, var(--brand), white 90%);
   border: 0;

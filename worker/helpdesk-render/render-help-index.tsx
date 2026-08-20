@@ -15,6 +15,9 @@ interface RenderHelpIndexProps {
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
   customCss: string | null;
+  homeBackgroundUrl: string | null;
+  homeBackgroundPosition: string | null;
+  homeBackgroundFit: string | null;
   bodyHtml: string;
   noindex?: boolean;
 }
@@ -35,6 +38,9 @@ export function renderHelpIndex(props: RenderHelpIndexProps) {
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
       customCss={props.customCss}
+      homeBackgroundUrl={props.homeBackgroundUrl}
+      homeBackgroundPosition={props.homeBackgroundPosition}
+      homeBackgroundFit={props.homeBackgroundFit}
       noindex={props.noindex}
       topBar={
         <HelpTopBar

@@ -5,6 +5,7 @@ import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { buildHelpUrl } from "./build-help-url";
 import { HelpIcon } from "./icons";
 import { isHelpIconName, isImageIcon } from "../../shared/help-icons";
+import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
 import { HelpTopNavLinks } from "./top-nav-links";
 
 export interface HelpSidebarProps {
@@ -110,9 +111,11 @@ export function HelpSidebar(props: HelpSidebarProps) {
 function renderCategoryIcon(icon: string | null) {
   if (!icon) return <HelpIcon name="BookOpen" />;
   if (isImageIcon(icon)) {
+    const iconSrc = resolveHelpUploadUrl(icon);
+    if (!iconSrc) return <HelpIcon name="BookOpen" />;
     return (
       <img
-        src={icon}
+        src={iconSrc}
         alt=""
         class="help-sidebar-group-icon-img"
         role="presentation"

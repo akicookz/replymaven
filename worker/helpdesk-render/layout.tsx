@@ -4,6 +4,12 @@ import helpCss from "./help.css?inline";
 import { renderProjectTheme } from "./render-project-theme";
 import { buildFontFaceCss } from "./build-font-link";
 import { sanitizeCustomCss } from "../../shared/sanitize-custom-css";
+import {
+  helpHomeBackgroundImageCss,
+  sanitizeHelpHomeBackgroundFit,
+  sanitizeHelpHomeBackgroundUrl,
+} from "./sanitize-help-home-background-url";
+import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
 
 interface OgImage {
   url: string;
@@ -26,6 +32,9 @@ export interface LayoutProps {
   ogImage?: OgImage | null;
   articleMeta?: ArticleMeta | null;
   customCss?: string | null;
+  homeBackgroundUrl?: string | null;
+  homeBackgroundPosition?: string | null;
+  homeBackgroundFit?: string | null;
   noindex?: boolean;
   topBar?: unknown;
   sidebar?: unknown;
@@ -36,9 +45,23 @@ export function Layout(props: LayoutProps) {
   const themeOverrides = renderProjectTheme(props.widgetConfig);
   const fontCss = buildFontFaceCss(props.widgetConfig?.fontFamily ?? null) ?? "";
   const customCss = sanitizeCustomCss(props.customCss);
+  const homeBackgroundUrl = resolveHelpUploadUrl(
+    sanitizeHelpHomeBackgroundUrl(props.homeBackgroundUrl),
+  );
+  const avatarUrl = resolveHelpUploadUrl(props.widgetConfig?.avatarUrl);
+  const homeBackgroundFit = sanitizeHelpHomeBackgroundFit(
+    props.homeBackgroundFit,
+  );
+  const homeBackgroundCss = homeBackgroundUrl
+    ? helpHomeBackgroundImageCss({
+        url: homeBackgroundUrl,
+        position: props.homeBackgroundPosition,
+        fit: homeBackgroundFit,
+      })
+    : "";
 
   return (
-    <html lang="en">
+    <html lang="en" class={homeBackgroundUrl ? "help-page-home" : undefined}>
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -50,9 +73,7 @@ export function Layout(props: LayoutProps) {
               "(function(){try{var s=localStorage.getItem('rm-help-theme');var d=s?s==='dark':matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');}catch(e){}document.addEventListener('click',function(e){var t=e.target;var b=t&&t.closest?t.closest('#rm-theme-toggle'):null;if(!b)return;var dk=document.documentElement.classList.toggle('dark');try{localStorage.setItem('rm-help-theme',dk?'dark':'light');}catch(_){}});})();",
           }}
         />
-        {props.widgetConfig?.avatarUrl && (
-          <link rel="icon" href={props.widgetConfig.avatarUrl} />
-        )}
+        {avatarUrl && <link rel="icon" href={avatarUrl} />}
         <title>{props.title}</title>
         {props.description ? (
           <meta name="description" content={props.description} />
@@ -111,8 +132,28 @@ export function Layout(props: LayoutProps) {
         {customCss ? (
           <style dangerouslySetInnerHTML={{ __html: customCss }} />
         ) : null}
+        {homeBackgroundCss ? (
+          <style dangerouslySetInnerHTML={{ __html: homeBackgroundCss }} />
+        ) : null}
       </head>
       <body class="min-h-screen bg-background text-foreground antialiased">
+        {homeBackgroundUrl ? (
+          <div
+            class="help-home-bg"
+            data-fit={homeBackgroundFit}
+            aria-hidden="true"
+          >
+            {homeBackgroundFit === "repeat" ? (
+              <div class="help-home-bg-fill" />
+            ) : (
+              <img
+                class="help-home-bg-img"
+                src={homeBackgroundUrl}
+                alt=""
+              />
+            )}
+          </div>
+        ) : null}
         {props.topBar}
         {props.sidebar ? (
           <div class="help-shell">

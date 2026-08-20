@@ -449,27 +449,13 @@ html.help-nav-open .help-nav-overlay {
     box-shadow: none;
     transition: none;
   }
-  .help-sidebar::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1.75rem;
-    z-index: 1;
-    pointer-events: none;
-    background: linear-gradient(
-      to bottom,
-      var(--background) 15%,
-      color-mix(in oklch, var(--background) 70%, transparent) 55%,
-      transparent
-    );
-  }
-  /* Block scroller: flex overflow uses Chromium's classic gray bar. */
+  /* Fade the scrolled items, not a painted --background bar. */
   .help-sidebar-nav {
     min-height: 0;
     overflow-y: auto;
     padding-top: 2rem;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 1.75rem);
+    mask-image: linear-gradient(to bottom, transparent, #000 1.75rem);
   }
 }
 
@@ -665,6 +651,77 @@ html.help-nav-open .help-nav-overlay {
 
 @media (min-width: 1024px) {
   .help-mobile-cats { display: none; }
+}
+
+/* Home-only fading background. The fade is on the image box so
+   contain/cover both lose their hard left and right edges. */
+.help-home-bg {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.help-home-bg[data-fit="contain"] {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.help-home-bg-img,
+.help-home-bg-fill {
+  -webkit-mask-image:
+    linear-gradient(to right, transparent 0%, #000 16%, #000 84%, transparent 100%),
+    linear-gradient(to bottom, transparent 0%, #000 14%, #000 86%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to right, transparent 0%, #000 16%, #000 84%, transparent 100%),
+    linear-gradient(to bottom, transparent 0%, #000 14%, #000 86%, transparent 100%);
+  mask-composite: intersect;
+}
+.help-home-bg[data-fit="cover"] .help-home-bg-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: var(--help-home-bg-position, 50% 50%);
+}
+.help-home-bg[data-fit="contain"] .help-home-bg-img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 92%;
+  max-height: 70vh;
+}
+.help-home-bg-fill {
+  position: absolute;
+  inset: 0;
+  background-image: var(--help-home-bg-image);
+  background-repeat: repeat;
+  background-position: var(--help-home-bg-position, 50% 50%);
+  background-size: auto;
+}
+.dark .help-home-bg {
+  opacity: 0.32;
+}
+html.help-page-home,
+html.help-page-home body {
+  position: relative;
+}
+html.help-page-home .help-topbar,
+html.help-page-home .help-shell {
+  background: transparent;
+}
+html.help-page-home .help-shell {
+  position: relative;
+  z-index: 1;
+}
+html.help-page-home .help-topbar {
+  box-shadow: none;
+}
+@media (min-width: 1024px) {
+  html.help-page-home .help-sidebar {
+    background: transparent;
+  }
 }
 
 /* ─── Index page: hero banner + body ─────────────────────────────────────── */
@@ -1315,7 +1372,7 @@ html.help-nav-open .help-nav-overlay {
   padding: 0.5rem 0.5rem 0.5rem 1rem;
   background: var(--background);
   box-shadow: var(--help-ring-shadow);
-  border-radius: 999px;
+  border-radius: var(--radius);
   transition: box-shadow 150ms ease;
 }
 .help-hero-search:focus-within {
@@ -1352,7 +1409,7 @@ html.help-nav-open .help-nav-overlay {
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: var(--brand);
   color: color-mix(in oklch, var(--brand), white 90%);
   border: 0;

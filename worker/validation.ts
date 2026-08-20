@@ -83,6 +83,11 @@ export const helpTopNavSchema = z
 
 export type HelpTopNavItem = z.infer<typeof helpTopNavItemSchema>;
 
+// Image focal point as "X% Y%" with integer percentages (e.g. "50% 25%").
+const imagePositionSchema = z
+  .string()
+  .regex(/^(?:100|\d{1,2})% (?:100|\d{1,2})%$/, "Must be 'X% Y%'");
+
 // ─── Projects ─────────────────────────────────────────────────────────────────
 export const createProjectSchema = z.object({
   name: z.string().min(1, "Project name is required").max(100),
@@ -153,14 +158,26 @@ export const updateProjectSettingsSchema = z.object({
   helpTopNav: helpTopNavSchema.optional(),
   helpCustomCss: z.string().max(5000).nullable().optional(),
   helpHomeMarkdown: z.string().max(100_000).nullable().optional(),
+  helpHomeBackgroundUrl: z
+    .string()
+    .max(500)
+    .refine(
+      (u) =>
+        !u.includes("..") &&
+        !u.includes("//") &&
+        /^\/api\/uploads\/[A-Za-z0-9._/-]+$/.test(u),
+      "Must be an uploaded image path",
+    )
+    .nullable()
+    .optional(),
+  helpHomeBackgroundPosition: imagePositionSchema.nullable().optional(),
+  helpHomeBackgroundFit: z
+    .enum(["cover", "contain", "repeat"])
+    .nullable()
+    .optional(),
 });
 
 // ─── Widget Config ────────────────────────────────────────────────────────────
-// Image focal point as "X% Y%" with integer percentages (e.g. "50% 25%").
-const imagePositionSchema = z
-  .string()
-  .regex(/^(?:100|\d{1,2})% (?:100|\d{1,2})%$/, "Must be 'X% Y%'");
-
 export const updateWidgetConfigSchema = z.object({
   primaryColor: z
     .string()

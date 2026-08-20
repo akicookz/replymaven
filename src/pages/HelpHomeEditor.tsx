@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -6,6 +6,11 @@ import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MobileMenuButton } from "@/components/PageHeader";
 import { HelpEditorSkeleton } from "@/components/help-editor/editor-skeleton";
+import {
+  HomeBackgroundControl,
+  parseHomeBackgroundFit,
+  type HomeBackgroundValue,
+} from "@/components/help-editor/home-background-control";
 import { useSaveHotkey } from "@/hooks/use-save-hotkey";
 import { defaultHelpHomeMarkdown } from "../../shared/help-home-markdown";
 
@@ -21,7 +26,20 @@ interface ProjectData {
 
 interface ProjectSettingsData {
   helpHomeMarkdown: string | null;
+  helpHomeBackgroundUrl: string | null;
+  helpHomeBackgroundPosition: string | null;
+  helpHomeBackgroundFit: string | null;
   helpCustomUrl: string | null;
+}
+
+function homeBackgroundStyle(value: HomeBackgroundValue): CSSProperties {
+  const fit = value.fit;
+  return {
+    "--help-home-bg-image": `url(${JSON.stringify(value.url)})`,
+    "--help-home-bg-position": value.position ?? "50% 50%",
+    "--help-home-bg-size": fit === "repeat" ? "auto" : fit,
+    "--help-home-bg-repeat": fit === "repeat" ? "repeat" : "no-repeat",
+  } as CSSProperties;
 }
 
 function appendHelpLiveCacheBust(href: string, version: number): string {
@@ -46,6 +64,16 @@ function HelpHomeEditorPage() {
   const queryClient = useQueryClient();
   const [content, setContent] = useState("");
   const [saved, setSaved] = useState("");
+  const [background, setBackground] = useState<HomeBackgroundValue>({
+    url: null,
+    position: null,
+    fit: "cover",
+  });
+  const [savedBackground, setSavedBackground] = useState<HomeBackgroundValue>({
+    url: null,
+    position: null,
+    fit: "cover",
+  });
   const [ready, setReady] = useState(false);
   const [bodyImagesUploading, setBodyImagesUploading] = useState(false);
 
@@ -86,23 +114,43 @@ function HelpHomeEditorPage() {
       defaultHelpHomeMarkdown(projectQuery.data.name);
     setContent(initial);
     setSaved(initial);
+    const nextBackground: HomeBackgroundValue = {
+      url: settingsQuery.data.helpHomeBackgroundUrl ?? null,
+      position: settingsQuery.data.helpHomeBackgroundPosition ?? null,
+      fit: parseHomeBackgroundFit(settingsQuery.data.helpHomeBackgroundFit),
+    };
+    setBackground(nextBackground);
+    setSavedBackground(nextBackground);
     setReady(true);
   }, [projectQuery.data, settingsQuery.data]);
 
   const save = useMutation({
-    mutationFn: async (markdown: string) => {
+    mutationFn: async (input: {
+      markdown: string;
+      background: HomeBackgroundValue;
+    }) => {
       const res = await fetch(`/api/projects/${projectId}/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ helpHomeMarkdown: markdown }),
+        body: JSON.stringify({
+          helpHomeMarkdown: input.markdown,
+          helpHomeBackgroundUrl: input.background.url,
+          helpHomeBackgroundPosition: input.background.url
+            ? input.background.position
+            : null,
+          helpHomeBackgroundFit: input.background.url
+            ? input.background.fit
+            : null,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Failed to save" }));
         throw new Error((err as { error?: string }).error ?? "Failed to save");
       }
     },
-    onSuccess: (_data, markdown) => {
-      setSaved(markdown);
+    onSuccess: (_data, input) => {
+      setSaved(input.markdown);
+      setSavedBackground(input.background);
       queryClient.invalidateQueries({
         queryKey: ["project-settings", projectId],
       });
@@ -111,7 +159,14 @@ function HelpHomeEditorPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const dirty = useMemo(() => content !== saved, [content, saved]);
+  const dirty = useMemo(
+    () =>
+      content !== saved ||
+      background.url !== savedBackground.url ||
+      background.position !== savedBackground.position ||
+      background.fit !== savedBackground.fit,
+    [content, saved, background, savedBackground],
+  );
   const liveHref = settingsQuery.data?.helpCustomUrl
     ? settingsQuery.data.helpCustomUrl
     : projectQuery.data
@@ -120,13 +175,37 @@ function HelpHomeEditorPage() {
 
   useSaveHotkey(() => {
     if (save.isPending || bodyImagesUploading || !dirty) return;
-    save.mutate(content);
+    save.mutate({ markdown: content, background });
   });
 
   const isLoading = !ready || projectQuery.isLoading || settingsQuery.isLoading;
 
   return (
-    <div className="help-editor-page-shell">
+    <div
+      className={
+        background.url
+          ? "help-editor-page-shell help-editor-page-shell-home"
+          : "help-editor-page-shell"
+      }
+      style={background.url ? homeBackgroundStyle(background) : undefined}
+    >
+      {background.url ? (
+        <div
+          className="help-editor-home-bg"
+          data-fit={background.fit}
+          aria-hidden="true"
+        >
+          {background.fit === "repeat" ? (
+            <div className="help-editor-home-bg-fill" />
+          ) : (
+            <img
+              className="help-editor-home-bg-img"
+              src={background.url}
+              alt=""
+            />
+          )}
+        </div>
+      ) : null}
       <header className="help-editor-page-bar">
         <div className="flex min-w-0 items-center gap-2">
           <MobileMenuButton />
@@ -142,6 +221,11 @@ function HelpHomeEditorPage() {
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <HomeBackgroundControl
+            value={background}
+            onChange={setBackground}
+            disabled={isLoading || save.isPending}
+          />
           {liveHref && (
             <Button asChild variant="outline" size="sm">
               <a
@@ -161,7 +245,9 @@ function HelpHomeEditorPage() {
           <Button
             type="button"
             size="sm"
-            onClick={() => save.mutate(content)}
+            onClick={() =>
+              save.mutate({ markdown: content, background })
+            }
             disabled={isLoading || save.isPending || bodyImagesUploading || !dirty}
           >
             {save.isPending ? (

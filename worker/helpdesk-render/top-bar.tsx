@@ -2,6 +2,7 @@
 import type { ProjectRow, WidgetConfigRow } from "../db/schema";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { buildHelpUrl } from "./build-help-url";
+import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
 import { HelpTopNavLinks } from "./top-nav-links";
 
 const MOON_SVG =
@@ -25,6 +26,7 @@ export function HelpTopBar(props: HelpTopBarProps) {
     projectSlug: props.project.slug,
     customUrl: props.helpCustomUrl,
   });
+  const avatarUrl = resolveHelpUploadUrl(props.widgetConfig?.avatarUrl);
   return (
     <header class="help-topbar">
       <div class="help-topbar-inner">
@@ -48,10 +50,10 @@ export function HelpTopBar(props: HelpTopBarProps) {
           />
         </button>
         <a class="help-topbar-brand" href={homeHref}>
-          {props.widgetConfig?.avatarUrl && (
+          {avatarUrl && (
             <img
               class="help-topbar-logo"
-              src={props.widgetConfig.avatarUrl}
+              src={avatarUrl}
               alt=""
               role="presentation"
               loading="lazy"

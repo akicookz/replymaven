@@ -16,7 +16,8 @@ import bash from "highlight.js/lib/languages/bash";
 import python from "highlight.js/lib/languages/python";
 import sql from "highlight.js/lib/languages/sql";
 import sanitizeHtml from "sanitize-html";
-import { buildHelpUrl } from "./build-help-url";
+import { buildHelpUrl, rewriteHelpUrlIfNeeded } from "./build-help-url";
+import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
 import {
   parseHelpHomeBlockLine,
   parsePopularArticleIds,
@@ -821,6 +822,9 @@ function rewriteAnchor(
       });
       isInternal = parts[1] === options.projectSlug;
     }
+  } else if (trimmed.startsWith("/api/uploads/")) {
+    resolved = resolveHelpUploadUrl(trimmed) ?? trimmed;
+    isInternal = true;
   } else if (trimmed.startsWith("/")) {
     if (options.customUrl) {
       const base = options.customUrl.replace(/\/+$/, "");
@@ -833,7 +837,12 @@ function rewriteAnchor(
     // Same-page section link: keep the fragment as authored.
     isInternal = true;
   } else if (ALLOWED_PROTOCOLS.test(trimmed)) {
-    const host = safeHost(trimmed);
+    resolved = rewriteHelpUrlIfNeeded(
+      trimmed,
+      options.projectSlug,
+      options.customUrl,
+    );
+    const host = safeHost(resolved);
     if (host && (host === canonicalHost || host === customHost)) {
       isInternal = true;
     }
@@ -861,6 +870,10 @@ function rewriteImage(attrs: string): string {
     !rawSrc.startsWith("/")
   ) {
     return `<img${attrs.replace(srcMatch[0], "")} data-warning="unsafe-src" alt="">`;
+  }
+  const resolved = resolveHelpUploadUrl(rawSrc);
+  if (resolved && resolved !== rawSrc) {
+    return `<img${attrs.replace(srcMatch[0], ` src="${escapeAttr(resolved)}"`)}>`;
   }
   return `<img${attrs}>`;
 }

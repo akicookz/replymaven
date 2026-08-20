@@ -5,6 +5,7 @@ import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
 import { HelpIcon } from "./icons";
+import { resolveHelpUploadUrl } from "./resolve-help-upload-url";
 import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
 import { MobileCategoryNav } from "./mobile-category-nav";
@@ -94,7 +95,7 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
         ) : (
           <ul class="help-doc-grid">
             {props.articles.map((article) => {
-              const thumb = article.ogImageUrl?.trim() ?? "";
+              const thumb = resolveHelpUploadUrl(article.ogImageUrl) ?? "";
               return (
                 <li>
                   <a

@@ -73,6 +73,11 @@ function createTestDb(): { db: DrizzleD1Database<Record<string, unknown>>; sqlit
     avg_response_time text,
     help_custom_url text,
     help_top_nav text,
+    help_custom_css text,
+    help_home_markdown text,
+    help_home_background_url text,
+    help_home_background_position text,
+    help_home_background_fit text,
     created_at integer DEFAULT (unixepoch()) NOT NULL,
     updated_at integer DEFAULT (unixepoch()) NOT NULL
   )`);

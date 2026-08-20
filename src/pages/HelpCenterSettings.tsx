@@ -350,19 +350,19 @@ function HelpCenterSettings() {
               ) : (
                 <XCircle className="h-4 w-4 mt-0.5 text-destructive" />
               )}
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <p className="font-medium">
                   {testResult.ok
                     ? `Connected (HTTP ${testResult.status})`
                     : `Failed (HTTP ${testResult.status})`}
                 </p>
                 {testResult.error && (
-                  <p className="text-xs text-muted-foreground mt-1">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     {testResult.error}
                   </p>
                 )}
                 {testResult.snippet && (
-                  <pre className="text-xs text-muted-foreground mt-2 overflow-x-auto rounded bg-muted/40 p-2">
+                  <pre className="mt-2 truncate rounded bg-muted/40 p-2 text-xs text-muted-foreground">
                     <code>{testResult.snippet}</code>
                   </pre>
                 )}

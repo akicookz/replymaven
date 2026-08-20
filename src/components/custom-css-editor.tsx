@@ -39,6 +39,8 @@ export const HELP_CUSTOM_CSS_CLASSES = [
   "help-sidebar-group-name",
   "help-sidebar-leaf",
   "help-main",
+  "help-home",
+  "help-home-bg",
   "help-index-title",
   "help-index-subtitle",
   "help-category-card",
