@@ -1,10 +1,6 @@
 /** @jsxImportSource hono/jsx */
-import type {
-  HelpArticleRow,
-  HelpCategoryRow,
-  ProjectRow,
-  WidgetConfigRow,
-} from "../db/schema";
+import type { HelpCategoryRow, ProjectRow, WidgetConfigRow } from "../db/schema";
+import type { HelpArticleNav } from "../services/helpdesk-service";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
@@ -14,7 +10,7 @@ import { HelpTopBar } from "./top-bar";
 interface RenderHelpIndexProps {
   project: ProjectRow;
   categories: HelpCategoryRow[];
-  articlesByCategory: Map<string, HelpArticleRow[]>;
+  articlesByCategory: Map<string, HelpArticleNav[]>;
   widgetConfig: WidgetConfigRow | null;
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];

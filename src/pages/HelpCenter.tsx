@@ -22,7 +22,9 @@ import HelpCategoryList, {
 import HelpArticleList, {
   type HelpArticleItem,
 } from "@/components/help-article-list";
-import IconPicker from "@/components/icon-picker";
+import IconPicker, { CategoryIcon } from "@/components/icon-picker";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 interface CategoryResponse {
   id: string;
@@ -467,10 +469,10 @@ function HelpCenter() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-2">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2">
           <MobileMenuButton />
-          <div>
+          <div className="min-w-0">
             <h1 className="text-balance text-xl font-bold tracking-tight text-foreground md:text-2xl">
               Help Center
             </h1>
@@ -479,11 +481,12 @@ function HelpCenter() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button asChild variant="outline" size="sm">
             <Link to={`/app/projects/${projectId}/knowledgebase/help-center/settings`}>
               <Settings className="w-4 h-4" />
-              Site settings
+              <span className="hidden sm:inline">Site settings</span>
+              <span className="sr-only sm:hidden">Site settings</span>
             </Link>
           </Button>
           <Button
@@ -493,7 +496,8 @@ function HelpCenter() {
             onClick={openCreateCategory}
           >
             <Plus className="w-4 h-4" />
-            New Category
+            <span className="hidden sm:inline">New Category</span>
+            <span className="sr-only sm:hidden">New Category</span>
           </Button>
           <Button
             type="button"
@@ -502,19 +506,47 @@ function HelpCenter() {
             disabled={!selectedCategoryId}
           >
             <Plus className="w-4 h-4" />
-            New Article
+            <span className="hidden sm:inline">New Article</span>
+            <span className="sr-only sm:hidden">New Article</span>
           </Button>
         </div>
       </div>
 
       {categoriesQuery.isLoading ? (
-        <div className="space-y-2">
-          <div className="h-20 rounded-xl bg-muted/40 animate-pulse" />
-          <div className="h-20 rounded-xl bg-muted/40 animate-pulse" />
-        </div>
+        <HelpCenterSkeleton />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 items-start">
-          <aside className="space-y-3 md:sticky md:top-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-6 items-start">
+          {categories.length > 0 ? (
+            <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
+              <Link
+                to={`/app/projects/${projectId}/knowledgebase/help-center/home`}
+                className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-muted/50 px-2.5 py-1.5 text-sm font-medium text-foreground/70"
+              >
+                <Home className="h-4 w-4" />
+                Home
+              </Link>
+              {categoryItems.map((cat) => (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setSelectedCategoryId(cat.id)}
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm",
+                    selectedCategoryId === cat.id
+                      ? "bg-muted font-semibold text-foreground"
+                      : "bg-muted/40 font-medium text-foreground/70",
+                  )}
+                >
+                  <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden">
+                    <CategoryIcon icon={cat.icon} className="h-4 w-4" />
+                  </span>
+                  {cat.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          <aside className="hidden space-y-3 lg:sticky lg:top-6 lg:block">
             <Link
               to={`/app/projects/${projectId}/knowledgebase/help-center/home`}
               className="flex items-center gap-2.5 rounded-lg py-1.5 pr-1 transition-colors hover:bg-muted/40"
@@ -540,9 +572,9 @@ function HelpCenter() {
                 articlesByCategory={articlesByCategory}
                 selectedId={selectedCategoryId}
                 onSelect={setSelectedCategoryId}
-                onNewArticle={handleNewArticleInCategory}
                 onEditCategory={openEditCategory}
                 onArchiveCategory={handleArchiveCategory}
+                onNewArticle={handleNewArticleInCategory}
                 onReorder={(items) => reorderCategories.mutate(items)}
               />
             )}
@@ -581,9 +613,9 @@ function HelpCenter() {
               )}
             </div>
             {articlesQuery.isLoading ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <div className="h-48 animate-pulse rounded-xl bg-muted/40" />
-                <div className="h-48 animate-pulse rounded-xl bg-muted/40" />
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3">
+                <Skeleton className="h-48 rounded-xl" />
+                <Skeleton className="h-48 rounded-xl" />
               </div>
             ) : (
               <HelpArticleList
@@ -709,6 +741,35 @@ function HelpCenter() {
           </form>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function HelpCenterSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[240px_1fr] lg:items-start">
+      <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
+        <Skeleton className="h-9 w-20 shrink-0 rounded-lg" />
+        <Skeleton className="h-9 w-28 shrink-0 rounded-lg" />
+        <Skeleton className="h-9 w-24 shrink-0 rounded-lg" />
+      </div>
+      <aside className="hidden space-y-3 lg:block">
+        <Skeleton className="h-8 w-full rounded-lg" />
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-10 w-full rounded-lg" />
+        <Skeleton className="h-10 w-full rounded-lg" />
+        <Skeleton className="h-10 w-full rounded-lg" />
+      </aside>
+      <section className="min-w-0 space-y-4">
+        <div className="space-y-2">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-4 w-full max-w-md" />
+        </div>
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3">
+          <Skeleton className="h-48 rounded-xl" />
+          <Skeleton className="h-48 rounded-xl" />
+        </div>
+      </section>
     </div>
   );
 }

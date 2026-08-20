@@ -8,6 +8,7 @@ if (process.env.REMOVED_SIDECHAT_ROUTES_FIXTURE === "1") {
   mock.module("cloudflare:workers", () => ({
     DurableObject: class DurableObject {},
     RpcTarget: class RpcTarget {},
+    WorkerEntrypoint: class WorkerEntrypoint {},
     env: {},
     exports: {},
   }));

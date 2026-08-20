@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MobileMenuButton } from "@/components/PageHeader";
+import { HelpEditorSkeleton } from "@/components/help-editor/editor-skeleton";
 import { cn } from "@/lib/utils";
 import { useSaveHotkey } from "@/hooks/use-save-hotkey";
 import type { DerivedMeta } from "@/components/help-article-editor";
@@ -529,14 +530,6 @@ function HelpArticleEditorPage() {
     handleSave();
   });
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
   const categories = categoriesQuery.data ?? [];
   const titleWarnings =
     form.title.length > TITLE_WARN
@@ -568,7 +561,7 @@ function HelpArticleEditorPage() {
           </span>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
           <span
             className={cn(
               "text-xs font-medium px-2 py-1 rounded-full",
@@ -585,6 +578,7 @@ function HelpArticleEditorPage() {
             variant="outline"
             size="sm"
             onClick={handleOpenPreview}
+            disabled={isLoading}
           >
             <Eye className="w-4 h-4" />
             <span className="hidden sm:inline">Preview</span>
@@ -741,7 +735,12 @@ function HelpArticleEditorPage() {
             size="sm"
             onClick={handleTogglePublish}
             disabled={
-              isNew || saving || dirty || bodyImagesUploading || ogImageUploading
+              isLoading ||
+              isNew ||
+              saving ||
+              dirty ||
+              bodyImagesUploading ||
+              ogImageUploading
             }
             title={dirty ? "Save your changes before publishing" : undefined}
           >
@@ -752,6 +751,7 @@ function HelpArticleEditorPage() {
             size="sm"
             onClick={handleSave}
             disabled={
+              isLoading ||
               saving ||
               bodyImagesUploading ||
               ogImageUploading ||
@@ -770,22 +770,20 @@ function HelpArticleEditorPage() {
       </header>
 
       <main className="help-editor-page-main">
-        <Suspense
-          fallback={
-            <div className="min-h-[60vh] flex items-center justify-center">
-              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-            </div>
-          }
-        >
-          <HelpArticleEditor
-            value={form.content}
-            onChange={(md) => setForm((f) => ({ ...f, content: md }))}
-            onMetaChange={handleMetaChange}
-            onUploadingChange={setBodyImagesUploading}
-            variant="page"
-            accentColor={widgetConfigQuery.data?.primaryColor}
-          />
-        </Suspense>
+        {isLoading ? (
+          <HelpEditorSkeleton />
+        ) : (
+          <Suspense fallback={<HelpEditorSkeleton />}>
+            <HelpArticleEditor
+              value={form.content}
+              onChange={(md) => setForm((f) => ({ ...f, content: md }))}
+              onMetaChange={handleMetaChange}
+              onUploadingChange={setBodyImagesUploading}
+              variant="page"
+              accentColor={widgetConfigQuery.data?.primaryColor}
+            />
+          </Suspense>
+        )}
       </main>
 
       <Sheet open={previewOpen} onOpenChange={setPreviewOpen}>

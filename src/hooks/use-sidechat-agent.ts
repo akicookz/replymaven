@@ -421,8 +421,9 @@ export function useSidechatAgent(
   }, [options.session.token, sendMessage]);
 
   const retry = useCallback(async () => {
+    await stop();
     await regenerate({ body: { token: options.session.token } });
-  }, [options.session.token, regenerate]);
+  }, [options.session.token, regenerate, stop]);
 
   const approve = useCallback(async (
     approvalId: string,

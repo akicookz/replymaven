@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MobileMenuButton } from "@/components/PageHeader";
+import { HelpEditorSkeleton } from "@/components/help-editor/editor-skeleton";
 import { useSaveHotkey } from "@/hooks/use-save-hotkey";
 import { defaultHelpHomeMarkdown } from "../../shared/help-home-markdown";
 
@@ -105,13 +106,7 @@ function HelpHomeEditorPage() {
     save.mutate(content);
   });
 
-  if (!ready || projectQuery.isLoading || settingsQuery.isLoading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+  const isLoading = !ready || projectQuery.isLoading || settingsQuery.isLoading;
 
   return (
     <div className="help-editor-page-shell">
@@ -142,7 +137,7 @@ function HelpHomeEditorPage() {
             type="button"
             size="sm"
             onClick={() => save.mutate(content)}
-            disabled={save.isPending || bodyImagesUploading || !dirty}
+            disabled={isLoading || save.isPending || bodyImagesUploading || !dirty}
           >
             {save.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -152,23 +147,21 @@ function HelpHomeEditorPage() {
         </div>
       </header>
       <main className="help-editor-page-main">
-        <Suspense
-          fallback={
-            <div className="flex min-h-[60vh] items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          }
-        >
-          <HelpArticleEditor
-            value={content}
-            onChange={setContent}
-            onUploadingChange={setBodyImagesUploading}
-            variant="page"
-            includeHomeBlocks
-            placeholder="Write your home page…"
-            accentColor={widgetConfigQuery.data?.primaryColor}
-          />
-        </Suspense>
+        {isLoading ? (
+          <HelpEditorSkeleton />
+        ) : (
+          <Suspense fallback={<HelpEditorSkeleton />}>
+            <HelpArticleEditor
+              value={content}
+              onChange={setContent}
+              onUploadingChange={setBodyImagesUploading}
+              variant="page"
+              includeHomeBlocks
+              placeholder="Write your home page…"
+              accentColor={widgetConfigQuery.data?.primaryColor}
+            />
+          </Suspense>
+        )}
       </main>
     </div>
   );

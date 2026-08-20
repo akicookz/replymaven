@@ -8,6 +8,10 @@ import {
 import { ProjectService } from "./services/project-service";
 import { triggerAutoRagSync } from "./services/autorag-sync";
 import {
+  publicHelpHtmlChanged,
+  scheduleHelpPageCachePurge,
+} from "./helpdesk-render/help-page-cache";
+import {
   buildHelpUrl,
   resolveHelpCustomUrl,
 } from "./helpdesk-render/build-help-url";
@@ -238,6 +242,7 @@ function registerCreateHelpCategoryTool(
         },
         project.id,
       );
+      scheduleHelpPageCachePurge(context.executionCtx, project.id);
 
       return textResult({ ok: true, category: summarizeHelpCategory(created) });
     },
@@ -291,6 +296,7 @@ function registerUpdateHelpCategoryTool(
         { name, slug, description, icon, sortOrder },
       );
       if (!updated) throw new Error("Category not found");
+      scheduleHelpPageCachePurge(context.executionCtx, project.id);
 
       return textResult({ ok: true, category: summarizeHelpCategory(updated) });
     },
@@ -328,6 +334,7 @@ function registerArchiveHelpCategoryTool(
         project.id,
       );
       if (!archived) throw new Error("Category not found");
+      scheduleHelpPageCachePurge(context.executionCtx, project.id);
 
       context.executionCtx.waitUntil(
         triggerAutoRagSync(context.env, "mcp.helpdesk.category.archive"),
@@ -419,6 +426,7 @@ function registerCreateHelpArticleTool(
       );
 
       if (created.status === "published") {
+        scheduleHelpPageCachePurge(context.executionCtx, project.id);
         context.executionCtx.waitUntil(
           triggerAutoRagSync(context.env, "mcp.helpdesk.article.create"),
         );
@@ -514,6 +522,7 @@ function registerUpdateHelpArticleTool(
 
       const project = await getAccessibleProject(context, projectId);
       const service = helpdeskService(context);
+      const existing = await service.getArticleById(articleId, project.id);
 
       let updated: HelpArticleRow | null;
       try {
@@ -550,6 +559,14 @@ function registerUpdateHelpArticleTool(
         throw err;
       }
       if (!updated) throw new Error("Article not found");
+      if (
+        publicHelpHtmlChanged({
+          beforeStatus: existing?.status,
+          afterStatus: updated.status,
+        })
+      ) {
+        scheduleHelpPageCachePurge(context.executionCtx, project.id);
+      }
 
       context.executionCtx.waitUntil(
         triggerAutoRagSync(context.env, "mcp.helpdesk.article.update"),
@@ -602,6 +619,9 @@ function registerDeleteHelpArticleTool(
         project.id,
       );
       if (!deleted) throw new Error("Article not found");
+      if (deleted.status === "published") {
+        scheduleHelpPageCachePurge(context.executionCtx, project.id);
+      }
 
       context.executionCtx.waitUntil(
         triggerAutoRagSync(context.env, "mcp.helpdesk.article.delete"),

@@ -1,14 +1,9 @@
 /** @jsxImportSource hono/jsx */
-import type {
-  HelpArticleRow,
-  HelpCategoryRow,
-  ProjectRow,
-  WidgetConfigRow,
-} from "../db/schema";
+import type { HelpCategoryRow, ProjectRow, WidgetConfigRow } from "../db/schema";
+import type { HelpArticleNav } from "../services/helpdesk-service";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { Layout } from "./layout";
 import { buildHelpUrl } from "./build-help-url";
-import { extractFirstImage } from "../../shared/extract-first-image";
 import { HelpIcon } from "./icons";
 import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
@@ -18,8 +13,8 @@ interface RenderHelpCategoryProps {
   project: ProjectRow;
   category: HelpCategoryRow;
   categories: HelpCategoryRow[];
-  articles: HelpArticleRow[];
-  articlesByCategory: Map<string, HelpArticleRow[]>;
+  articles: HelpArticleNav[];
+  articlesByCategory: Map<string, HelpArticleNav[]>;
   widgetConfig: WidgetConfigRow | null;
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
@@ -97,7 +92,7 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
         ) : (
           <ul class="help-doc-grid">
             {props.articles.map((article) => {
-              const thumb = extractFirstImage(article.content ?? "");
+              const thumb = article.ogImageUrl?.trim() ?? "";
               return (
                 <li>
                   <a
@@ -112,8 +107,8 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
                     {thumb ? (
                       <div class="help-doc-card-thumb">
                         <img
-                          src={thumb.url}
-                          alt={thumb.alt}
+                          src={thumb}
+                          alt=""
                           loading="lazy"
                           decoding="async"
                         />

@@ -5,6 +5,7 @@ import type {
   ExecuteProjectToolResult,
   SidechatToolAuditMetadata,
   SidechatToolDescriptor,
+  SidechatToolPresentation,
   SidechatToolSafety,
 } from "../../../shared/sidechat-agent";
 import type { ToolRow } from "../../db";
@@ -30,6 +31,7 @@ interface SidechatDynamicToolOptions {
     data: {
       label: string;
       status: "started" | "success" | "error";
+      tool?: SidechatToolPresentation;
     };
     transient: true;
   }): void;
@@ -79,12 +81,44 @@ export type AgentSqlTag = <
   ...values: Array<string | number | boolean | null>
 ) => T[];
 
+export function sidechatToolPresentation(
+  descriptor: SidechatToolDescriptor,
+): SidechatToolPresentation {
+  if (descriptor.source) {
+    return {
+      displayName: descriptor.displayName,
+      source: descriptor.source,
+    };
+  }
+  if (descriptor.connectionId.startsWith("mcp-")) {
+    return {
+      displayName: descriptor.displayName,
+      source: { kind: "mcp", name: "MCP", icon: null },
+    };
+  }
+  if (descriptor.connectionId === INTERNAL_KNOWLEDGE_CONNECTION_ID) {
+    return {
+      displayName: descriptor.displayName,
+      source: { kind: "http", name: "Docs", icon: null },
+    };
+  }
+  return {
+    displayName: descriptor.displayName,
+    source: { kind: "http", name: "Custom tool", icon: null },
+  };
+}
+
 function knowledgeDescriptor(): SidechatToolDescriptor {
   return {
     connectionId: INTERNAL_KNOWLEDGE_CONNECTION_ID,
     toolName: "search_knowledge",
     exposedName: "search_knowledge",
-    displayName: "Search knowledge",
+    displayName: "Search",
+    source: {
+      kind: "http",
+      name: "Docs",
+      icon: null,
+    },
     description:
       "Search the project's knowledge base for documented facts needed to help the human agent.",
     inputSchema: {
@@ -270,12 +304,17 @@ export async function buildSidechatToolDescriptors(
 }
 
 function activityPart(
-  label: string,
+  descriptor: SidechatToolDescriptor,
   status: "started" | "success" | "error",
+  label: string,
 ) {
   return {
     type: "data-safe-activity" as const,
-    data: { label: label.slice(0, MAX_SAFE_ACTIVITY_CHARS), status },
+    data: {
+      label: label.slice(0, MAX_SAFE_ACTIVITY_CHARS),
+      status,
+      tool: sidechatToolPresentation(descriptor),
+    },
     transient: true as const,
   };
 }
@@ -301,7 +340,9 @@ export function buildSidechatDynamicTools(
       needsApproval:
         descriptor.access === "write" && descriptor.alwaysAllowed !== true,
       async execute(input) {
-        options.emitActivity(activityPart(descriptor.displayName, "started"));
+        options.emitActivity(
+          activityPart(descriptor, "started", descriptor.displayName),
+        );
         try {
           const result = await options.execute({
             childName: options.childName,
@@ -322,15 +363,18 @@ export function buildSidechatDynamicTools(
           const completed = result.status === "completed";
           options.emitActivity(
             activityPart(
-              completed ? result.safeActivity : descriptor.displayName,
+              descriptor,
               completed ? "success" : "error",
+              completed ? result.safeActivity : descriptor.displayName,
             ),
           );
           return completed
             ? result.output
             : { error: result.errorCode ?? "tool_unavailable" };
         } catch {
-          options.emitActivity(activityPart(descriptor.displayName, "error"));
+          options.emitActivity(
+            activityPart(descriptor, "error", descriptor.displayName),
+          );
           return { error: "tool_unavailable" };
         }
       },

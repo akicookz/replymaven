@@ -1,8 +1,6 @@
 /** @jsxImportSource hono/jsx */
-import type {
-  HelpArticleRow,
-  HelpCategoryRow,
-} from "../db/schema";
+import type { HelpCategoryRow } from "../db/schema";
+import type { HelpArticleNav } from "../services/helpdesk-service";
 import { buildHelpUrl } from "./build-help-url";
 import { CategoryCard } from "./category-card";
 import { HelpIcon } from "./icons";
@@ -12,7 +10,7 @@ export interface CategoryWithCount extends HelpCategoryRow {
 }
 
 export interface PopularArticleEntry {
-  article: HelpArticleRow;
+  article: HelpArticleNav;
   category: HelpCategoryRow;
 }
 

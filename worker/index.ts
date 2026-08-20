@@ -1,3 +1,4 @@
+import { WorkerEntrypoint } from "cloudflare:workers";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { getAgentByName, routeAgentRequest } from "agents";
 import { cors } from "hono/cors";
@@ -19,6 +20,7 @@ import { getAssignableUsers } from "./services/assignable-users";
 import { ContactFormService } from "./services/contact-form-service";
 import { createPublicConversationStore } from "./conversations/create-public-conversation-store";
 import { AgentPublicConversationStore } from "./conversations/agent-public-conversation-store";
+import { dashboardReplyIdentity } from "./conversations/dashboard-reply-identity";
 import {
   toLegacyConversationDto,
   toLegacyLastMessagePreviewDto,
@@ -60,7 +62,7 @@ import {
 } from "./services/email-service";
 import { ToolService } from "./services/tool-service";
 import { GuidelineService } from "./services/guideline-service";
-import { HelpdeskService } from "./services/helpdesk-service";
+import { HelpdeskService, type HelpArticleNav } from "./services/helpdesk-service";
 import { McpOAuthService } from "./services/mcp-oauth-service";
 import { renderHelpIndex } from "./helpdesk-render/render-help-index";
 import { renderHelpCategory } from "./helpdesk-render/render-help-category";
@@ -84,6 +86,20 @@ import {
 import { defaultHelpHomeMarkdown } from "../shared/help-home-markdown";
 import { expandHelpHomeBlocks } from "./helpdesk-render/expand-help-home-blocks";
 import { groupArticlesByCategory } from "./helpdesk-render/group-articles";
+import {
+  dispatchPublicHelp,
+  helpNotFoundCacheHeaders,
+  helpPageCacheHeaders,
+  helpSitemapCacheHeaders,
+  helpUncachedHeaders,
+  isPublicHelpPath,
+  publicHelpHtmlChanged,
+  scheduleHelpPageCachePurge,
+} from "./helpdesk-render/help-page-cache";
+import {
+  loadPublicHelpPage,
+  type PublicHelpPageContext,
+} from "./helpdesk-render/load-public-help-page";
 import { applyHelpArticleSeoDefaults } from "./helpdesk-render/apply-help-article-seo-defaults";
 import {
   encryptHeaders,
@@ -310,7 +326,7 @@ async function readBodyCapped(
 // ─── Help search result resolver ──────────────────────────────────────────────
 function resolveHelpSearchResults(
   response: unknown,
-  articles: HelpArticleRow[],
+  articles: HelpArticleNav[],
   categories: HelpCategoryRow[],
   projectId: string,
 ): HelpSearchResult[] {
@@ -356,7 +372,7 @@ function resolveHelpSearchResults(
   const prefix = `${projectId}/articles/`;
   const bestByArticleId = new Map<
     string,
-    { article: HelpArticleRow; score: number | null }
+    { article: HelpArticleNav; score: number | null }
   >();
   for (const { filename, score } of filenames) {
     if (!filename.startsWith(prefix)) continue;
@@ -1786,65 +1802,41 @@ const app = new Hono<HonoAppContext>()
   // PUBLIC HELP CENTER (HTML, no auth)
   // ═══════════════════════════════════════════════════════════════════════════
   .get("/help/:projectSlug/sitemap.xml", async (c) => {
-    const ip = getClientIp(c);
-    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
-      return c.text("Rate limit exceeded", 429);
-    }
-    const slug = c.req.param("projectSlug");
-    const db = drizzle(c.env.DB);
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectBySlugPublic(slug);
-    if (!project) return c.text("Not found", 404);
-
-    const helpService = new HelpdeskService(db, c.env.UPLOADS);
-    const settings = await projectService.getSettings(project.id);
-    const categories = await helpService.listCategories(project.id);
-    const articles = await helpService.listArticles(project.id, {
-      status: "published",
-    });
+    const started = await beginPublicHelpRequest(c);
+    if (!started.ok) return started.response;
 
     const xml = renderSitemap({
-      project,
-      categories,
-      articles,
-      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
+      project: started.page.project,
+      categories: started.page.categories,
+      articles: started.page.publishedArticles,
+      helpCustomUrl: started.page.helpCustomUrl,
     });
     return new Response(xml, {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
-        "Cache-Control": "public, max-age=300, s-maxage=300",
+        ...helpSitemapCacheHeaders(started.page.project.id),
       },
     });
   })
   .get("/help/:projectSlug/robots.txt", async (c) => {
-    const ip = getClientIp(c);
-    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
-      return c.text("Rate limit exceeded", 429);
-    }
-    const slug = c.req.param("projectSlug");
-    const db = drizzle(c.env.DB);
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectBySlugPublic(slug);
-    if (!project) return c.text("Not found", 404);
+    const started = await beginPublicHelpRequest(c);
+    if (!started.ok) return started.response;
 
-    const settings = await projectService.getSettings(project.id);
     const body = renderRobots({
-      projectSlug: project.slug,
-      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
+      projectSlug: started.page.project.slug,
+      helpCustomUrl: started.page.helpCustomUrl,
     });
     return new Response(body, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "public, max-age=300, s-maxage=300",
+        ...helpSitemapCacheHeaders(started.page.project.id),
       },
     });
   })
   .get("/help/:projectSlug/:categorySlug/:articleSlug", async (c) => {
-    const ip = getClientIp(c);
-    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
-      return c.text("Rate limit exceeded", 429);
-    }
-    const projectSlug = c.req.param("projectSlug");
+    const started = await beginPublicHelpRequest(c);
+    if (!started.ok) return started.response;
+    const { page } = started;
     const categorySlug = c.req.param("categorySlug");
     const rawArticleSlug = c.req.param("articleSlug");
     // "<article>.md" serves the raw markdown (slugs themselves never
@@ -1853,52 +1845,44 @@ const app = new Hono<HonoAppContext>()
     const articleSlug = wantsMarkdown
       ? rawArticleSlug.slice(0, -3)
       : rawArticleSlug;
-    const db = drizzle(c.env.DB);
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectBySlugPublic(projectSlug);
-    if (!project) return c.text("Not found", 404);
-
-    const helpService = new HelpdeskService(db, c.env.UPLOADS);
-    const match = await helpService.getArticleBySlug(
-      project.id,
-      categorySlug,
-      articleSlug,
+    const category = page.categories.find((item) => item.slug === categorySlug);
+    const navArticle = category
+      ? (page.articlesByCategory.get(category.id) ?? []).find(
+          (item) => item.slug === articleSlug,
+        )
+      : undefined;
+    if (!category || !navArticle) {
+      return c.text(
+        "Not found",
+        404,
+        helpNotFoundCacheHeaders(page.project.id),
+      );
+    }
+    const article = await page.helpService.getArticleById(
+      navArticle.id,
+      page.project.id,
     );
-    if (!match || match.article.status !== "published") {
-      return c.text("Not found", 404);
+    if (!article || article.status !== "published") {
+      return c.text(
+        "Not found",
+        404,
+        helpNotFoundCacheHeaders(page.project.id),
+      );
     }
 
     if (wantsMarkdown) {
       const markdown = ensureArticleTitle(
-        match.article.content ?? "",
-        match.article.title,
+        article.content ?? "",
+        article.title,
       );
       return c.body(markdown, 200, {
         "Content-Type": "text/markdown; charset=utf-8",
-        "Cache-Control": "public, max-age=120, s-maxage=120",
+        ...helpPageCacheHeaders(page.project.id),
       });
     }
 
-    const widgetService = new WidgetService(db);
-    const [
-      widgetConfigRow,
-      settings,
-      siblings,
-      categories,
-      allPublished,
-    ] = await Promise.all([
-      widgetService.getWidgetConfig(project.id),
-      projectService.getSettings(project.id),
-      helpService.listArticles(project.id, {
-        categoryId: match.category.id,
-        status: "published",
-      }),
-      helpService.listCategories(project.id),
-      helpService.listAllPublishedArticles(project.id),
-    ]);
-
-    const orderedIds = siblings.map((a) => a.id);
-    const currentIndex = orderedIds.indexOf(match.article.id);
+    const siblings = page.articlesByCategory.get(category.id) ?? [];
+    const currentIndex = siblings.findIndex((a) => a.id === article.id);
     const prevArticle = currentIndex > 0 ? siblings[currentIndex - 1] : null;
     const nextArticle =
       currentIndex >= 0 && currentIndex < siblings.length - 1
@@ -1906,56 +1890,39 @@ const app = new Hono<HonoAppContext>()
         : null;
 
     const { html: bodyHtml, toc } = await renderMarkdown(
-      ensureArticleTitle(match.article.content ?? "", match.article.title),
+      ensureArticleTitle(article.content ?? "", article.title),
       {
-        projectSlug: project.slug,
-        customUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
+        projectSlug: page.project.slug,
+        customUrl: page.helpCustomUrl,
       },
     );
 
-    const articlesByCategory = groupArticlesByCategory(allPublished);
-    const topNav = parseHelpTopNav(settings?.helpTopNav);
-
     const html = renderHelpArticle({
-      project,
-      category: match.category,
-      categories,
-      articlesByCategory,
-      article: match.article,
+      project: page.project,
+      category,
+      categories: page.categories,
+      articlesByCategory: page.articlesByCategory,
+      article,
       bodyHtml,
       toc,
       prevArticle,
       nextArticle,
-      widgetConfig: widgetConfigRow,
-      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
-      topNav,
-      customCss: settings?.helpCustomCss ?? null,
+      widgetConfig: page.widgetConfig,
+      helpCustomUrl: page.helpCustomUrl,
+      topNav: page.topNav,
+      customCss: page.customCss,
     });
-    return c.html(`<!doctype html>${html.toString()}`, 200, {
-      "Cache-Control": "public, max-age=120, s-maxage=120",
-    });
+    return c.html(
+      `<!doctype html>${html.toString()}`,
+      200,
+      helpPageCacheHeaders(page.project.id),
+    );
   })
   .get("/help/:projectSlug/search", async (c) => {
-    const ip = getClientIp(c);
-    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
-      return c.text("Rate limit exceeded", 429);
-    }
-    const projectSlug = c.req.param("projectSlug");
+    const started = await beginPublicHelpRequest(c);
+    if (!started.ok) return started.response;
+    const { page } = started;
     const query = (c.req.query("q") ?? "").trim().slice(0, 200);
-    const db = drizzle(c.env.DB);
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectBySlugPublic(projectSlug);
-    if (!project) return c.text("Not found", 404);
-
-    const helpService = new HelpdeskService(db, c.env.UPLOADS);
-    const widgetService = new WidgetService(db);
-    const [widgetConfigRow, settings, categories, allPublished] =
-      await Promise.all([
-        widgetService.getWidgetConfig(project.id),
-        projectService.getSettings(project.id),
-        helpService.listCategories(project.id),
-        helpService.listAllPublishedArticles(project.id),
-      ]);
 
     let results: HelpSearchResult[] = [];
     if (query.length > 0) {
@@ -1971,7 +1938,7 @@ const app = new Hono<HonoAppContext>()
                   // Help articles live in the `articles/` subfolder. AutoRAG's
                   // folder $eq matches a folder exactly (not recursively), so
                   // filtering on `${project.id}/` misses every article.
-                  folder: { $eq: `${project.id}/articles/` },
+                  folder: { $eq: `${page.project.id}/articles/` },
                 } as never,
                 max_num_results: 12,
                 match_threshold: 0.2,
@@ -1985,168 +1952,119 @@ const app = new Hono<HonoAppContext>()
           });
         results = resolveHelpSearchResults(
           response,
-          allPublished,
-          categories,
-          project.id,
+          page.publishedArticles,
+          page.categories,
+          page.project.id,
         );
       } catch (err) {
         logWarn("help_search.failed", {
-          projectId: project.id,
+          projectId: page.project.id,
           error: err instanceof Error ? err.message : String(err),
         });
       }
     }
 
-    const articlesByCategory = groupArticlesByCategory(allPublished);
-    const topNav = parseHelpTopNav(settings?.helpTopNav);
-
     const html = renderHelpSearch({
-      project,
+      project: page.project,
       query,
       results,
-      categories,
-      articlesByCategory,
-      widgetConfig: widgetConfigRow,
-      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
-      topNav,
-      customCss: settings?.helpCustomCss ?? null,
+      categories: page.categories,
+      articlesByCategory: page.articlesByCategory,
+      widgetConfig: page.widgetConfig,
+      helpCustomUrl: page.helpCustomUrl,
+      topNav: page.topNav,
+      customCss: page.customCss,
     });
-    return c.html(`<!doctype html>${html.toString()}`, 200, {
-      "Cache-Control": "no-store",
-    });
+    return c.html(
+      `<!doctype html>${html.toString()}`,
+      200,
+      helpUncachedHeaders(),
+    );
   })
   .get("/help/:projectSlug/:categorySlug", async (c) => {
-    const ip = getClientIp(c);
-    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
-      return c.text("Rate limit exceeded", 429);
-    }
-    const projectSlug = c.req.param("projectSlug");
+    const started = await beginPublicHelpRequest(c);
+    if (!started.ok) return started.response;
+    const { page } = started;
     const categorySlug = c.req.param("categorySlug");
-    const db = drizzle(c.env.DB);
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectBySlugPublic(projectSlug);
-    if (!project) return c.text("Not found", 404);
-
-    const helpService = new HelpdeskService(db, c.env.UPLOADS);
-    const category = await helpService.getCategoryBySlug(
-      project.id,
-      categorySlug,
-    );
-    if (!category) return c.text("Not found", 404);
-
-    const widgetService = new WidgetService(db);
-    const [
-      widgetConfigRow,
-      settings,
-      articles,
-      categories,
-      allPublished,
-    ] = await Promise.all([
-      widgetService.getWidgetConfig(project.id),
-      projectService.getSettings(project.id),
-      helpService.listArticles(project.id, {
-        categoryId: category.id,
-        status: "published",
-      }),
-      helpService.listCategories(project.id),
-      helpService.listAllPublishedArticles(project.id),
-    ]);
-
-    const articlesByCategory = groupArticlesByCategory(allPublished);
-    const topNav = parseHelpTopNav(settings?.helpTopNav);
+    const category = page.categories.find((item) => item.slug === categorySlug);
+    if (!category) {
+      return c.text(
+        "Not found",
+        404,
+        helpNotFoundCacheHeaders(page.project.id),
+      );
+    }
 
     const html = renderHelpCategory({
-      project,
+      project: page.project,
       category,
-      categories,
-      articles,
-      articlesByCategory,
-      widgetConfig: widgetConfigRow,
-      helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
-      topNav,
-      customCss: settings?.helpCustomCss ?? null,
+      categories: page.categories,
+      articles: page.articlesByCategory.get(category.id) ?? [],
+      articlesByCategory: page.articlesByCategory,
+      widgetConfig: page.widgetConfig,
+      helpCustomUrl: page.helpCustomUrl,
+      topNav: page.topNav,
+      customCss: page.customCss,
     });
-    return c.html(`<!doctype html>${html.toString()}`, 200, {
-      "Cache-Control": "public, max-age=120, s-maxage=120",
-    });
+    return c.html(
+      `<!doctype html>${html.toString()}`,
+      200,
+      helpPageCacheHeaders(page.project.id),
+    );
   })
   .get("/help/:projectSlug", async (c) => {
-    const ip = getClientIp(c);
-    if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
-      return c.text("Rate limit exceeded", 429);
-    }
-    const projectSlug = c.req.param("projectSlug");
-    const db = drizzle(c.env.DB);
-    const projectService = new ProjectService(db);
-    const project = await projectService.getProjectBySlugPublic(projectSlug);
-    if (!project) return c.text("Not found", 404);
+    const started = await beginPublicHelpRequest(c);
+    if (!started.ok) return started.response;
+    const { page } = started;
 
-    const helpService = new HelpdeskService(db, c.env.UPLOADS);
-    const widgetService = new WidgetService(db);
-    const [
-      widgetConfigRow,
-      settings,
-      categories,
-      counts,
-      allPublished,
-    ] = await Promise.all([
-      widgetService.getWidgetConfig(project.id),
-      projectService.getSettings(project.id),
-      helpService.listCategories(project.id),
-      helpService.getArticleCountsByCategory(project.id),
-      helpService.listAllPublishedArticles(project.id),
-    ]);
-
-    const enriched = categories.map((cat) => ({
+    const enriched = page.categories.map((cat) => ({
       ...cat,
-      articleCount: counts.get(cat.id) ?? 0,
+      articleCount: page.articlesByCategory.get(cat.id)?.length ?? 0,
     }));
 
-    const categoryById = new Map(categories.map((cat) => [cat.id, cat]));
-    const publishedArticles = allPublished.flatMap((article) => {
+    const categoryById = new Map(
+      page.categories.map((cat) => [cat.id, cat]),
+    );
+    const publishedArticles = page.publishedArticles.flatMap((article) => {
       const category = categoryById.get(article.categoryId);
       if (!category) return [];
       return [{ article, category }];
     });
 
-    const articlesByCategory = groupArticlesByCategory(allPublished);
-    const topNav = parseHelpTopNav(settings?.helpTopNav);
-    const helpCustomUrl = resolveHelpCustomUrl(
-      project.slug,
-      settings?.helpCustomUrl,
-    );
     const homeUrl = buildHelpUrl({
-      projectSlug: project.slug,
-      customUrl: helpCustomUrl,
+      projectSlug: page.project.slug,
+      customUrl: page.helpCustomUrl,
     });
     const source =
-      settings?.helpHomeMarkdown?.trim() ||
-      defaultHelpHomeMarkdown(project.name);
+      page.settings?.helpHomeMarkdown?.trim() ||
+      defaultHelpHomeMarkdown(page.project.name);
     const rendered = await renderMarkdown(source, {
-      projectSlug: project.slug,
-      customUrl: helpCustomUrl,
+      projectSlug: page.project.slug,
+      customUrl: page.helpCustomUrl,
     });
     const bodyHtml = expandHelpHomeBlocks(rendered.html, {
-      projectSlug: project.slug,
-      customUrl: helpCustomUrl,
+      projectSlug: page.project.slug,
+      customUrl: page.helpCustomUrl,
       searchAction: `${homeUrl}/search`,
       categories: enriched,
       publishedArticles,
     });
 
     const html = renderHelpIndex({
-      project,
+      project: page.project,
       categories: enriched,
-      articlesByCategory,
-      widgetConfig: widgetConfigRow,
-      helpCustomUrl,
-      topNav,
-      customCss: settings?.helpCustomCss ?? null,
+      articlesByCategory: page.articlesByCategory,
+      widgetConfig: page.widgetConfig,
+      helpCustomUrl: page.helpCustomUrl,
+      topNav: page.topNav,
+      customCss: page.customCss,
       bodyHtml,
     });
-    return c.html(`<!doctype html>${html.toString()}`, 200, {
-      "Cache-Control": "public, max-age=120, s-maxage=120",
-    });
+    return c.html(
+      `<!doctype html>${html.toString()}`,
+      200,
+      helpPageCacheHeaders(page.project.id),
+    );
   })
 
   // ─── Own docs (/docs) ────────────────────────────────────────────────────
@@ -3271,6 +3189,7 @@ const app = new Hono<HonoAppContext>()
         await projectService.updateProject(project.id, project.userId, {
           name: profile.websiteName,
         });
+        scheduleHelpPageCachePurge(c.executionCtx, project.id);
       }
 
       return c.json({
@@ -3311,6 +3230,7 @@ const app = new Hono<HonoAppContext>()
     await projectService.updateProject(project.id, project.userId, {
       name: parsed.data.websiteName,
     });
+    scheduleHelpPageCachePurge(c.executionCtx, project.id);
 
     return c.json({ ok: true });
   })
@@ -3335,6 +3255,7 @@ const app = new Hono<HonoAppContext>()
 
     const widgetService = new WidgetService(db);
     await widgetService.updateWidgetConfig(project.id, parsed.data);
+    scheduleHelpPageCachePurge(c.executionCtx, project.id);
 
     return c.json({ ok: true });
   })
@@ -4430,6 +4351,7 @@ const app = new Hono<HonoAppContext>()
       parsed.data,
     );
     if (!project) return c.json({ error: "Not found" }, 404);
+    scheduleHelpPageCachePurge(c.executionCtx, project.id);
     return c.json(project);
   })
   .delete("/api/projects/:id", async (c) => {
@@ -4458,6 +4380,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Project cleanup failed" }, 502);
     }
     if (!deleted) return c.json({ error: "Not found" }, 404);
+    scheduleHelpPageCachePurge(c.executionCtx, projectId);
     return c.json({ ok: true });
   })
 
@@ -4584,6 +4507,14 @@ const app = new Hono<HonoAppContext>()
     const serialized = serializeProjectSettings(
       settings as unknown as Record<string, unknown>,
     );
+    if (
+      parsed.data.helpCustomUrl !== undefined ||
+      parsed.data.helpTopNav !== undefined ||
+      parsed.data.helpCustomCss !== undefined ||
+      parsed.data.helpHomeMarkdown !== undefined
+    ) {
+      scheduleHelpPageCachePurge(c.executionCtx, project.id);
+    }
     return c.json({
       ...serialized,
       telegramBotToken: settings.telegramBotToken ? "••••••••" : null,
@@ -4726,6 +4657,7 @@ const app = new Hono<HonoAppContext>()
       ...parsed.data,
       ...(customCss !== undefined ? { customCss } : {}),
     });
+    scheduleHelpPageCachePurge(c.executionCtx, project.id);
     return c.json(config);
   })
 
@@ -6264,6 +6196,7 @@ const app = new Hono<HonoAppContext>()
     const service = new HelpdeskService(db, c.env.UPLOADS);
     try {
       const created = await service.createCategory(parsed.data, project.id);
+      scheduleHelpPageCachePurge(c.executionCtx, project.id);
       return c.json(created, 201);
     } catch (err) {
       const message =
@@ -6288,6 +6221,7 @@ const app = new Hono<HonoAppContext>()
 
     const service = new HelpdeskService(db, c.env.UPLOADS);
     await service.reorderCategories(project.id, parsed.data.items);
+    scheduleHelpPageCachePurge(c.executionCtx, project.id);
     return c.json({ ok: true });
   })
   .patch("/api/projects/:id/help/categories/:catId", async (c) => {
@@ -6313,6 +6247,7 @@ const app = new Hono<HonoAppContext>()
         parsed.data,
       );
       if (!updated) return c.json({ error: "Not found" }, 404);
+      scheduleHelpPageCachePurge(c.executionCtx, project.id);
       return c.json(updated);
     } catch (err) {
       const message =
@@ -6338,6 +6273,7 @@ const app = new Hono<HonoAppContext>()
       project.id,
     );
     if (!archived) return c.json({ error: "Not found" }, 404);
+    scheduleHelpPageCachePurge(c.executionCtx, project.id);
     c.executionCtx.waitUntil(
       triggerAutoRagSync(c.env, "helpdesk.category.archive"),
     );
@@ -6415,6 +6351,7 @@ const app = new Hono<HonoAppContext>()
       parsed.data.categoryId,
       parsed.data.items,
     );
+    scheduleHelpPageCachePurge(c.executionCtx, project.id);
     return c.json({ ok: true });
   })
   .post("/api/projects/:id/help/articles/preview", async (c) => {
@@ -6439,7 +6376,7 @@ const app = new Hono<HonoAppContext>()
         widgetService.getWidgetConfig(project.id),
         projectService.getSettings(project.id),
         service.listCategories(project.id),
-        service.listAllPublishedArticles(project.id),
+        service.listPublishedArticleNav(project.id),
       ]);
 
     const now = new Date();
@@ -6492,10 +6429,9 @@ const app = new Hono<HonoAppContext>()
 
     // Prev/next mirror the live page: derived from published siblings. When the
     // draft shares a slug with an existing published article, surround it.
-    const siblings = await service.listArticles(project.id, {
-      categoryId: category.id,
-      status: "published",
-    });
+    const siblings = allPublished.filter(
+      (article) => article.categoryId === category.id,
+    );
     const currentIndex = siblings.findIndex((a) => a.slug === article.slug);
     const prevArticle = currentIndex > 0 ? siblings[currentIndex - 1] : null;
     const nextArticle =
@@ -6556,6 +6492,7 @@ const app = new Hono<HonoAppContext>()
         project.slug,
       );
       if (created.status === "published") {
+        scheduleHelpPageCachePurge(c.executionCtx, project.id);
         c.executionCtx.waitUntil(
           triggerAutoRagSync(c.env, "helpdesk.article.create"),
         );
@@ -6603,6 +6540,10 @@ const app = new Hono<HonoAppContext>()
 
     const service = new HelpdeskService(db, c.env.UPLOADS);
     try {
+      const existing = await service.getArticleById(
+        c.req.param("artId"),
+        project.id,
+      );
       const { expectedUpdatedAt, ...rest } = parsed.data;
       const updated = await service.updateArticle(
         c.req.param("artId"),
@@ -6616,6 +6557,14 @@ const app = new Hono<HonoAppContext>()
         project.slug,
       );
       if (!updated) return c.json({ error: "Not found" }, 404);
+      if (
+        publicHelpHtmlChanged({
+          beforeStatus: existing?.status,
+          afterStatus: updated.status,
+        })
+      ) {
+        scheduleHelpPageCachePurge(c.executionCtx, project.id);
+      }
       c.executionCtx.waitUntil(
         triggerAutoRagSync(c.env, "helpdesk.article.update"),
       );
@@ -6647,6 +6596,9 @@ const app = new Hono<HonoAppContext>()
       project.id,
     );
     if (!deleted) return c.json({ error: "Not found" }, 404);
+    if (deleted.status === "published") {
+      scheduleHelpPageCachePurge(c.executionCtx, project.id);
+    }
     c.executionCtx.waitUntil(
       triggerAutoRagSync(c.env, "helpdesk.article.delete"),
     );
@@ -6671,6 +6623,7 @@ const app = new Hono<HonoAppContext>()
       project.slug,
     );
     if (!updated) return c.json({ error: "Not found" }, 404);
+    scheduleHelpPageCachePurge(c.executionCtx, project.id);
     c.executionCtx.waitUntil(
       triggerAutoRagSync(c.env, "helpdesk.article.publish"),
     );
@@ -6695,6 +6648,7 @@ const app = new Hono<HonoAppContext>()
       project.slug,
     );
     if (!updated) return c.json({ error: "Not found" }, 404);
+    scheduleHelpPageCachePurge(c.executionCtx, project.id);
     c.executionCtx.waitUntil(
       triggerAutoRagSync(c.env, "helpdesk.article.unpublish"),
     );
@@ -7062,7 +7016,12 @@ const app = new Hono<HonoAppContext>()
       await chatService.reopenConversation(conversation.id, project.id);
     }
 
-    const requestId = c.req.header("idempotency-key")?.trim();
+    const replyIds = dashboardReplyIdentity({
+      projectId: project.id,
+      conversationId: conversation.id,
+      userId: user.id,
+      requestId: c.req.header("idempotency-key"),
+    });
     const message = await chatService.appendHuman({
       projectId: project.id,
       conversationId: conversation.id,
@@ -7077,9 +7036,8 @@ const app = new Hono<HonoAppContext>()
       userId: user.id,
       senderName: user.name,
       senderAvatar: avatar,
-      idempotencyKey: requestId
-        ? `dashboard:${project.id}:${conversation.id}:${user.id}:${requestId.slice(0, 200)}`
-        : null,
+      id: replyIds.id,
+      idempotencyKey: replyIds.idempotencyKey,
       origin: "dashboard",
     }).catch(() => null);
     if (!message) return c.json({ error: "Conversation not found" }, 404);
@@ -8044,9 +8002,49 @@ function serveOwnDocs(c: Context<HonoAppContext>): Response | Promise<Response> 
   return app.fetch(new Request(url.toString(), c.req.raw), c.env, c.executionCtx);
 }
 
+async function beginPublicHelpRequest(c: Context<HonoAppContext>): Promise<
+  | { ok: true; page: PublicHelpPageContext }
+  | { ok: false; response: Response }
+> {
+  const ip = getClientIp(c);
+  if (!checkRateLimit(`help:${ip}`, 200, 60_000)) {
+    return {
+      ok: false,
+      response: c.text("Rate limit exceeded", 429, helpUncachedHeaders()),
+    };
+  }
+  const page = await loadPublicHelpPage(
+    drizzle(c.env.DB),
+    c.env.UPLOADS,
+    c.req.param("projectSlug"),
+  );
+  if (!page) {
+    return {
+      ok: false,
+      response: c.text("Not found", 404, helpNotFoundCacheHeaders()),
+    };
+  }
+  return { ok: true, page };
+}
+
+export class HelpPages extends WorkerEntrypoint<AppEnv> {
+  fetch(request: Request): Response | Promise<Response> {
+    return app.fetch(request, this.env, this.ctx);
+  }
+}
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 export default {
-  fetch: app.fetch,
+  fetch(
+    request: Request,
+    env: AppEnv,
+    ctx: ExecutionContext,
+  ): Response | Promise<Response> {
+    if (isPublicHelpPath(new URL(request.url).pathname)) {
+      return dispatchPublicHelp(request, env, ctx, app.fetch);
+    }
+    return app.fetch(request, env, ctx);
+  },
   queue: handleQueue,
   scheduled: handleScheduled,
 };

@@ -2,6 +2,7 @@ import type {
   MessagePresentationAction,
   MessageRole,
   SidechatToolTraceState,
+  SidechatTraceItem,
 } from "./types";
 import type {
   MavenProjectState,
@@ -222,6 +223,76 @@ export function isSidechatToolRunning(state: SidechatToolTraceState): boolean {
   return state === "input-streaming" ||
     state === "input-available" ||
     state === "approval-responded";
+}
+
+export type SidechatCompletedToolKind = "docs" | "other";
+
+export function readLastCompletedSidechatToolKind(
+  trace: SidechatTraceItem[] | undefined,
+): SidechatCompletedToolKind | null {
+  if (!trace) return null;
+  for (let index = trace.length - 1; index >= 0; index -= 1) {
+    const item = trace[index];
+    if (item?.type !== "tool") continue;
+    if (
+      item.state !== "output-available" &&
+      item.state !== "output-error" &&
+      item.state !== "output-denied"
+    ) {
+      continue;
+    }
+    if (
+      item.tool.source.name === "Docs" &&
+      item.tool.displayName === "Search"
+    ) {
+      return "docs";
+    }
+    return "other";
+  }
+  return null;
+}
+
+interface SidechatWorkingTailInput {
+  busy: boolean;
+  status: "submitted" | "streaming" | "ready" | "error";
+  hasError: boolean;
+  hasRunningTool: boolean;
+  hasStreamingReasoning: boolean;
+  hasVisibleAnswer: boolean;
+  lastCompletedToolKind: SidechatCompletedToolKind | null;
+}
+
+interface SidechatWorkingTail {
+  showWorking: boolean;
+  showError: boolean;
+  workingLabel: string;
+}
+
+function sidechatWorkingLabel(
+  lastCompletedToolKind: SidechatCompletedToolKind | null,
+): string {
+  if (lastCompletedToolKind === "docs") return "Reading the docs…";
+  if (lastCompletedToolKind === "other") return "Reading the results…";
+  return "Reading the conversation…";
+}
+
+// A completed tool row is not the same as a finished turn. Keep a plain
+// phase line after a tool returns until reasoning, text, a draft, or an
+// error arrives. Never repeat the tool row (icon + source · name).
+export function deriveSidechatWorkingTail(
+  input: SidechatWorkingTailInput,
+): SidechatWorkingTail {
+  const showError = input.status === "error" && input.hasError;
+  const showWorking = input.busy &&
+    !input.hasRunningTool &&
+    !input.hasStreamingReasoning &&
+    !input.hasVisibleAnswer &&
+    !showError;
+  return {
+    showWorking,
+    showError,
+    workingLabel: sidechatWorkingLabel(input.lastCompletedToolKind),
+  };
 }
 
 interface SidechatPresentationInput {

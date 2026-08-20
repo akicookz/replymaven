@@ -7,6 +7,8 @@ import {
   deriveMessagePresentation,
   deriveSidechatPaneMode,
   deriveSidechatPresentation,
+  deriveSidechatWorkingTail,
+  readLastCompletedSidechatToolKind,
   deriveSidechatStatusDot,
   isSidechatToolRunning,
 } from "./sidechat";
@@ -244,6 +246,112 @@ describe("Sidechat presentation helpers", () => {
       presentationStatus: "idle",
       serverFailure: false,
     });
+  });
+
+  test("keeps a plain phase line after a finished tool while the turn is still open", () => {
+    expect(deriveSidechatWorkingTail({
+      busy: true,
+      status: "streaming",
+      hasError: false,
+      hasRunningTool: false,
+      hasStreamingReasoning: false,
+      hasVisibleAnswer: false,
+      lastCompletedToolKind: "docs",
+    })).toEqual({
+      showWorking: true,
+      showError: false,
+      workingLabel: "Reading the docs…",
+    });
+    expect(deriveSidechatWorkingTail({
+      busy: true,
+      status: "streaming",
+      hasError: false,
+      hasRunningTool: false,
+      hasStreamingReasoning: false,
+      hasVisibleAnswer: false,
+      lastCompletedToolKind: "other",
+    })).toEqual({
+      showWorking: true,
+      showError: false,
+      workingLabel: "Reading the results…",
+    });
+    expect(deriveSidechatWorkingTail({
+      busy: true,
+      status: "submitted",
+      hasError: false,
+      hasRunningTool: false,
+      hasStreamingReasoning: false,
+      hasVisibleAnswer: false,
+      lastCompletedToolKind: null,
+    })).toEqual({
+      showWorking: true,
+      showError: false,
+      workingLabel: "Reading the conversation…",
+    });
+    expect(deriveSidechatWorkingTail({
+      busy: true,
+      status: "streaming",
+      hasError: false,
+      hasRunningTool: true,
+      hasStreamingReasoning: false,
+      hasVisibleAnswer: false,
+      lastCompletedToolKind: null,
+    })).toEqual({
+      showWorking: false,
+      showError: false,
+      workingLabel: "Reading the conversation…",
+    });
+    expect(deriveSidechatWorkingTail({
+      busy: true,
+      status: "streaming",
+      hasError: false,
+      hasRunningTool: false,
+      hasStreamingReasoning: true,
+      hasVisibleAnswer: false,
+      lastCompletedToolKind: "docs",
+    }).showWorking).toBe(false);
+    expect(deriveSidechatWorkingTail({
+      busy: false,
+      status: "error",
+      hasError: true,
+      hasRunningTool: false,
+      hasStreamingReasoning: false,
+      hasVisibleAnswer: false,
+      lastCompletedToolKind: "docs",
+    })).toEqual({
+      showWorking: false,
+      showError: true,
+      workingLabel: "Reading the docs…",
+    });
+  });
+
+  test("classifies a finished Docs search without repeating the tool chrome", () => {
+    expect(readLastCompletedSidechatToolKind([
+      {
+        type: "tool",
+        id: "search-1",
+        toolCallId: "search-1",
+        state: "output-available",
+        tool: {
+          displayName: "Search",
+          safety: "read",
+          source: { kind: "http", name: "Docs", icon: null },
+        },
+      },
+    ])).toBe("docs");
+    expect(readLastCompletedSidechatToolKind([
+      {
+        type: "tool",
+        id: "events-1",
+        toolCallId: "events-1",
+        state: "output-available",
+        tool: {
+          displayName: "Query events",
+          safety: "read",
+          source: { kind: "mcp", name: "PostHog", icon: "/integrations/posthog.svg" },
+        },
+      },
+    ])).toBe("other");
   });
 
   test("marks executing tool states as running, including approved continuations", () => {

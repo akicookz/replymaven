@@ -141,7 +141,8 @@ html {
   border-radius: 0.5em;
 }
 /* Code block tracks the theme via tokens — light grey in light mode, soft dark
-   in dark mode — so it never reads as a harsh blob either way. */
+   in dark mode — so it never reads as a harsh blob either way. Same 1.25rem
+   vertical margin as the editor; p { margin: 0 } would otherwise sit flush. */
 .help-prose pre {
   background: var(--code);
   color: var(--code-foreground);
@@ -150,6 +151,7 @@ html {
   overflow-x: auto;
   font-size: 0.8125rem;
   line-height: 1.625;
+  margin: 1.25rem 0;
 }
 .help-prose pre code {
   background: transparent;

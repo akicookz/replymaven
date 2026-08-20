@@ -1,7 +1,3 @@
-import type {
-  HelpArticleRow,
-  HelpCategoryRow,
-} from "../db/schema";
 import { parsePopularArticleIds } from "../../shared/help-home-markdown";
 import {
   HelpCategoryGrid,
@@ -69,4 +65,4 @@ export function expandHelpHomeBlocks(
   });
 }
 
-export type { HelpArticleRow, HelpCategoryRow, CategoryWithCount, PopularArticleEntry };
+export type { CategoryWithCount, PopularArticleEntry };

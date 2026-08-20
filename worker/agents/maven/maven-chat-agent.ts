@@ -89,6 +89,7 @@ import { buildSidechatSystemPrompt } from "../sidechat/sidechat-prompt";
 import {
   buildSidechatDynamicTools,
   resolveSidechatToolSafety,
+  sidechatToolPresentation,
 } from "../sidechat/project-tool-proxy";
 import {
   PublicConversationStateStore,
@@ -546,18 +547,7 @@ export class MavenChatAgent extends AIChatAgent<
                   descriptor.exposedName,
                   {
                     safety: resolveSidechatToolSafety(descriptor),
-                    tool: {
-                      displayName: descriptor.displayName,
-                      source: descriptor.source ?? {
-                        kind: descriptor.connectionId.startsWith("mcp-")
-                          ? "mcp"
-                          : "http",
-                        name: descriptor.connectionId.startsWith("mcp-")
-                          ? "MCP"
-                          : "Custom tool",
-                        icon: null,
-                      },
-                    },
+                    tool: sidechatToolPresentation(descriptor),
                   },
                 ] as const),
             ),

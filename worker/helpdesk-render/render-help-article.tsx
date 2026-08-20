@@ -5,6 +5,7 @@ import type {
   ProjectRow,
   WidgetConfigRow,
 } from "../db/schema";
+import type { HelpArticleNav } from "../services/helpdesk-service";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { buildHelpUrl } from "./build-help-url";
 import { extractFirstImage } from "../../shared/extract-first-image";
@@ -19,12 +20,12 @@ interface RenderHelpArticleProps {
   project: ProjectRow;
   category: HelpCategoryRow;
   categories: HelpCategoryRow[];
-  articlesByCategory: Map<string, HelpArticleRow[]>;
+  articlesByCategory: Map<string, HelpArticleNav[]>;
   article: HelpArticleRow;
   bodyHtml: string;
   toc: TocEntry[];
-  prevArticle: HelpArticleRow | null;
-  nextArticle: HelpArticleRow | null;
+  prevArticle: HelpArticleNav | null;
+  nextArticle: HelpArticleNav | null;
   widgetConfig: WidgetConfigRow | null;
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];

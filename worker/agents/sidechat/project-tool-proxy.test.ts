@@ -10,6 +10,7 @@ import {
   buildSidechatToolDescriptors,
   executeSidechatProjectTool,
   persistSidechatActionAudit,
+  sidechatToolPresentation,
 } from "./project-tool-proxy";
 
 function toolRow(overrides: Partial<ToolRow> = {}): ToolRow {
@@ -101,6 +102,25 @@ function executionDependencies(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Sidechat project tool descriptors", () => {
+  test("presents knowledge search as Docs · Search", () => {
+    expect(sidechatToolPresentation({
+      connectionId: "internal:replymaven",
+      toolName: "search_knowledge",
+      exposedName: "search_knowledge",
+      displayName: "Search",
+      description: "Search docs",
+      inputSchema: { type: "object" },
+      catalogFingerprint: "internal-search-knowledge-v1",
+      audience: "sidechat",
+      access: "read",
+      enabled: true,
+      source: { kind: "http", name: "Docs", icon: null },
+    })).toEqual({
+      displayName: "Search",
+      source: { kind: "http", name: "Docs", icon: null },
+    });
+  });
+
   test("includes knowledge and only safe serializable Sidechat HTTP descriptors", async () => {
     const descriptors = await buildSidechatToolDescriptors("project-1", [
       toolRow(),
@@ -119,6 +139,10 @@ describe("Sidechat project tool descriptors", () => {
       "search_knowledge",
       "lookup_customer",
     ]);
+    expect(descriptors[0]).toMatchObject({
+      displayName: "Search",
+      source: { kind: "http", name: "Docs", icon: null },
+    });
     expect(JSON.stringify(descriptors)).not.toContain("api.example.com");
     expect(JSON.stringify(descriptors)).not.toContain("encrypted-secret");
     expect(descriptors[1]).toMatchObject({
@@ -178,12 +202,26 @@ describe("Sidechat project tool descriptors", () => {
     expect(activities).toEqual([
       {
         type: "data-safe-activity",
-        data: { label: "Look up customer", status: "started" },
+        data: {
+          label: "Look up customer",
+          status: "started",
+          tool: {
+            displayName: "Look up customer",
+            source: { kind: "http", name: "Custom tool", icon: null },
+          },
+        },
         transient: true,
       },
       {
         type: "data-safe-activity",
-        data: { label: "Look up customer · Done", status: "success" },
+        data: {
+          label: "Look up customer · Done",
+          status: "success",
+          tool: {
+            displayName: "Look up customer",
+            source: { kind: "http", name: "Custom tool", icon: null },
+          },
+        },
         transient: true,
       },
     ]);

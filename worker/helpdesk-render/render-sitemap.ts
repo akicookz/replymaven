@@ -1,14 +1,11 @@
-import type {
-  HelpArticleRow,
-  HelpCategoryRow,
-  ProjectRow,
-} from "../db/schema";
+import type { HelpCategoryRow, ProjectRow } from "../db/schema";
+import type { HelpArticleNav } from "../services/helpdesk-service";
 import { buildHelpUrl } from "./build-help-url";
 
 interface RenderSitemapInput {
   project: ProjectRow;
   categories: HelpCategoryRow[];
-  articles: HelpArticleRow[];
+  articles: HelpArticleNav[];
   helpCustomUrl: string | null;
 }
 

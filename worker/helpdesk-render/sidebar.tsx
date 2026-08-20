@@ -1,10 +1,6 @@
 /** @jsxImportSource hono/jsx */
-import type {
-  HelpArticleRow,
-  HelpCategoryRow,
-  ProjectRow,
-  WidgetConfigRow,
-} from "../db/schema";
+import type { HelpCategoryRow, ProjectRow, WidgetConfigRow } from "../db/schema";
+import type { HelpArticleNav } from "../services/helpdesk-service";
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { buildHelpUrl } from "./build-help-url";
 import { HelpIcon } from "./icons";
@@ -14,7 +10,7 @@ import { HelpTopNavLinks } from "./top-nav-links";
 export interface HelpSidebarProps {
   project: ProjectRow;
   categories: HelpCategoryRow[];
-  articlesByCategory: Map<string, HelpArticleRow[]>;
+  articlesByCategory: Map<string, HelpArticleNav[]>;
   activeCategorySlug: string | null;
   activeArticleSlug: string | null;
   helpCustomUrl: string | null;

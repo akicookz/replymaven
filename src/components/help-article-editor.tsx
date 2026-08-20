@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { buildExtensions } from "@/components/help-editor/extensions";
 import { EditorBubbleMenu } from "@/components/help-editor/bubble-menu";
+import { HelpEditorSkeleton } from "@/components/help-editor/editor-skeleton";
 import { pastedImageUrl } from "@/components/help-editor/pasted-image-url";
 import { splitGluedImageBlocks } from "../../shared/markdown-repair";
 
@@ -126,6 +127,7 @@ function HelpArticleEditor({
   );
 
   const editor = useEditor({
+    immediatelyRender: false,
     extensions,
     // Repair legacy image-glued markdown on the way in so corrupted articles
     // parse correctly — they heal permanently on the next save.
@@ -324,17 +326,7 @@ function HelpArticleEditor({
   };
 
   if (!editor) {
-    return (
-      <div
-        className={
-          variant === "page"
-            ? "min-h-[60vh] flex items-center justify-center"
-            : "rounded-xl bg-card border border-border min-h-[480px] flex items-center justify-center"
-        }
-      >
-        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <HelpEditorSkeleton variant={variant} />;
   }
 
   if (variant === "page") {

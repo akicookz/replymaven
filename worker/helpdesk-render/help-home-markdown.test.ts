@@ -6,7 +6,8 @@ import {
   parsePopularArticleIds,
   serializeHelpHomeBlock,
 } from "../../shared/help-home-markdown";
-import type { HelpArticleRow, HelpCategoryRow } from "../db/schema";
+import type { HelpCategoryRow } from "../db/schema";
+import type { HelpArticleNav } from "../services/helpdesk-service";
 import { expandHelpHomeBlocks } from "./expand-help-home-blocks";
 import { renderMarkdown } from "./render-markdown";
 import type { PopularArticleEntry } from "./help-home-widgets";
@@ -31,7 +32,7 @@ function entry(
       id,
       title,
       slug,
-    } as HelpArticleRow,
+    } as HelpArticleNav,
     category: { slug: "guides" } as HelpCategoryRow,
   };
 }

@@ -86,7 +86,7 @@ function SortableArticleCard({
         )}
         <div className="flex flex-col gap-1.5 p-3">
           <div className="flex items-start justify-between gap-2">
-            <span className="text-sm font-medium line-clamp-1">
+            <span className="min-w-0 text-sm font-medium line-clamp-1">
               {article.title || "(untitled)"}
             </span>
             <span
@@ -192,7 +192,7 @@ function HelpArticleList({
       onDragEnd={handleDragEnd}
     >
       <SortableContext items={ids} strategy={rectSortingStrategy}>
-        <ul className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+        <ul className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-3">
           {articles.map((article) => (
             <SortableArticleCard
               key={article.id}

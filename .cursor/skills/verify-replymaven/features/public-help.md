@@ -31,4 +31,4 @@ Preconditions:
 - `/docs` canonical links and the search form action point at `https://replymaven.com/docs` even locally. Drive search with `GET /docs/search?q=...` on `VERIFY_BASE`.
 - Custom help domains are not this recipe.
 - `font-optical-sizing` and family checks belong in `help-widget-font`, not here.
-- Cached `Cache-Control` on help HTML is 120s. After a font save, wait or hard-reload.
+- Help HTML is edge-cached with a 60s browser TTL. After a font or article save, hard-reload. Search stays uncached.

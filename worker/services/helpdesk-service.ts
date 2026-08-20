@@ -85,6 +85,23 @@ interface ListArticlesOptions {
   status?: "draft" | "published";
 }
 
+export type HelpArticleNav = Omit<HelpArticleRow, "content">;
+
+const helpArticleNavColumns = {
+  id: helpArticles.id,
+  projectId: helpArticles.projectId,
+  categoryId: helpArticles.categoryId,
+  title: helpArticles.title,
+  slug: helpArticles.slug,
+  excerpt: helpArticles.excerpt,
+  ogImageUrl: helpArticles.ogImageUrl,
+  status: helpArticles.status,
+  sortOrder: helpArticles.sortOrder,
+  publishedAt: helpArticles.publishedAt,
+  createdAt: helpArticles.createdAt,
+  updatedAt: helpArticles.updatedAt,
+} as const;
+
 export class HelpdeskService {
   constructor(
     private db: DrizzleD1Database<Record<string, unknown>>,
@@ -304,11 +321,11 @@ export class HelpdeskService {
       .orderBy(asc(helpArticles.sortOrder), asc(helpArticles.createdAt));
   }
 
-  async listAllPublishedArticles(
+  async listPublishedArticleNav(
     projectId: string,
-  ): Promise<HelpArticleRow[]> {
+  ): Promise<HelpArticleNav[]> {
     return this.db
-      .select()
+      .select(helpArticleNavColumns)
       .from(helpArticles)
       .where(
         and(
@@ -592,9 +609,12 @@ export class HelpdeskService {
     return updated;
   }
 
-  async deleteArticle(id: string, projectId: string): Promise<boolean> {
+  async deleteArticle(
+    id: string,
+    projectId: string,
+  ): Promise<HelpArticleRow | null> {
     const existing = await this.getArticleById(id, projectId);
-    if (!existing) return false;
+    if (!existing) return null;
 
     if (existing.status === "published") {
       await this.r2.delete(`${projectId}/articles/${existing.id}.md`);
@@ -608,7 +628,7 @@ export class HelpdeskService {
           eq(helpArticles.projectId, projectId),
         ),
       );
-    return true;
+    return existing;
   }
 
   async reorderArticles(

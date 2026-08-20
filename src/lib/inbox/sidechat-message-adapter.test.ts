@@ -58,6 +58,45 @@ describe("Sidechat native message protocol adapter", () => {
     expect(JSON.stringify(messages)).not.toContain("private-provider-metadata");
   });
 
+  test("labels knowledge search as Docs · Search", () => {
+    const [message] = adaptSidechatMessages([
+      uiMessage("maven-1", "assistant", [
+        {
+          type: "data-tool-trace",
+          id: "search-1:trace",
+          data: {
+            toolCallId: "search-1",
+            startedAt: 1_000,
+            safety: "read",
+            tool: {
+              displayName: "Search",
+              source: { kind: "http", name: "Docs", icon: null },
+            },
+          },
+        },
+        {
+          type: "tool-search_knowledge",
+          toolCallId: "search-1",
+          state: "output-available",
+          input: { query: "hosted sitemap" },
+          output: { found: true },
+        },
+      ] as UIMessage["parts"]),
+    ]);
+
+    expect(message?.sidechatTrace).toEqual([
+      expect.objectContaining({
+        type: "tool",
+        toolCallId: "search-1",
+        tool: {
+          displayName: "Search",
+          source: { kind: "http", name: "Docs", icon: null },
+          safety: "read",
+        },
+      }),
+    ]);
+  });
+
   test("hides the internal reply-draft tool from the execution trace", () => {
     const messages = adaptSidechatMessages([
       uiMessage("maven-1", "assistant", [

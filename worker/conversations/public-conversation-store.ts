@@ -77,6 +77,7 @@ interface AppendPublicMessageFields {
   senderName?: string | null;
   senderAvatar?: string | null;
   userId?: string | null;
+  id?: string;
   idempotencyKey?: string | null;
   origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
   externalReplyTo?: string | null;

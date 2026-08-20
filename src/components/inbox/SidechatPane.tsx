@@ -1,9 +1,12 @@
 import type { Dispatch, SetStateAction } from "react";
-import { Plug, X } from "lucide-react";
+import { X } from "lucide-react";
 import type { Conversation, Message } from "@/lib/inbox/types";
 import type { SafeSidechatDataPart } from "@/lib/inbox/sidechat-message-adapter";
 import {
   deriveConversationInteractionState,
+  deriveSidechatWorkingTail,
+  isSidechatToolRunning,
+  readLastCompletedSidechatToolKind,
   type SidechatPresentationStatus,
 } from "@/lib/inbox/sidechat";
 import { cn } from "@/lib/utils";
@@ -51,7 +54,7 @@ export default function SidechatPane({
   status,
   presentationStatus = "idle",
   error,
-  safeActivity,
+  safeActivity: _safeActivity,
   onSend,
   onStop,
   onRetry,
@@ -64,14 +67,27 @@ export default function SidechatPane({
     ? `${customerFirstName}'s`
     : "this conversation's";
   const busy = status === "submitted" || status === "streaming";
-  const safeActivityTool = safeActivity && typeof safeActivity === "object"
-    ? safeActivity.tool
-    : undefined;
-  const safeActivityLabel = typeof safeActivity === "string"
-    ? safeActivity
-    : safeActivity?.label;
-  const latestTrace = messages.at(-1)?.sidechatTrace;
-  const hasLatestTrace = Boolean(latestTrace?.length);
+  const latestMessage = messages.at(-1);
+  const latestTrace = latestMessage?.sidechatTrace;
+  const hasRunningTool = latestTrace?.some(
+    (item) => item.type === "tool" && isSidechatToolRunning(item.state),
+  ) === true;
+  const hasStreamingReasoning = latestTrace?.some(
+    (item) => item.type === "reasoning" && item.state === "streaming",
+  ) === true;
+  const hasVisibleAnswer = Boolean(
+    latestMessage?.presentationAction?.type === "add_to_reply" ||
+      latestMessage?.content.trim(),
+  ) && latestMessage?.role === "bot";
+  const tail = deriveSidechatWorkingTail({
+    busy,
+    status,
+    hasError: Boolean(error),
+    hasRunningTool,
+    hasStreamingReasoning,
+    hasVisibleAnswer,
+    lastCompletedToolKind: readLastCompletedSidechatToolKind(latestTrace),
+  });
 
   function handleApprovalAction(
     approvalId: string,
@@ -138,51 +154,16 @@ export default function SidechatPane({
           contentClassName="!px-4 !pt-3 !pb-3"
           tail={!loading && (
             <div className="my-3 min-h-10 text-pretty text-[12px] leading-normal text-ink-6">
-              {safeActivity && !hasLatestTrace && (
-                <div
-                  data-sidechat-safe-activity
-                  className="flex min-w-0 items-center gap-2"
-                >
-                  {safeActivityTool && (
-                    <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-ink-1/5">
-                      {safeActivityTool.source.icon ? (
-                        <img
-                          src={safeActivityTool.source.icon}
-                          alt=""
-                          aria-hidden="true"
-                          className="size-full object-contain p-1"
-                        />
-                      ) : (
-                        <Plug
-                          aria-hidden="true"
-                          className="size-3.5 text-ink-5"
-                        />
-                      )}
-                    </span>
-                  )}
-                  <p className="min-w-0 text-pretty">
-                    {safeActivityTool ? (
-                      <>
-                        <span>{safeActivityTool.source.name}</span>
-                        <span aria-hidden="true"> · </span>
-                        <strong className="font-semibold text-ink-3">
-                          {safeActivityTool.displayName}
-                        </strong>
-                      </>
-                    ) : safeActivityLabel}
-                  </p>
-                </div>
-              )}
-              {!safeActivity && busy && !hasLatestTrace && (
+              {tail.showWorking && (
                 <div
                   data-sidechat-working
-                  aria-label="Maven is working"
+                  aria-label={tail.workingLabel}
                   className="flex min-w-0 items-center gap-2"
                 >
-                  <span className="rm-text-sweep">Maven is working…</span>
+                  <span className="rm-text-sweep">{tail.workingLabel}</span>
                 </div>
               )}
-              {status === "error" && error && (
+              {tail.showError && (
                 <div className="flex min-h-10 items-center gap-3">
                   <span>Sidechat could not finish.</span>
                   <button

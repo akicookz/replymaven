@@ -1,5 +1,5 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, and } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   projects,
   projectSettings,
@@ -8,9 +8,23 @@ import {
   type ProjectRow,
   type NewProjectRow,
   type ProjectSettingsRow,
+  type WidgetConfigRow,
 } from "../db";
 import { RESERVED_INBOUND_LOCAL_PARTS } from "./email-service";
 import { encrypt } from "./encryption-service";
+
+export interface HelpPresentationSettings {
+  helpCustomUrl: string | null;
+  helpTopNav: string | null;
+  helpCustomCss: string | null;
+  helpHomeMarkdown: string | null;
+}
+
+export interface PublicHelpProject {
+  project: ProjectRow;
+  settings: HelpPresentationSettings | null;
+  widgetConfig: WidgetConfigRow | null;
+}
 
 function encodeBase64Url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes))
@@ -54,6 +68,38 @@ export class ProjectService {
       .where(eq(projects.slug, slug))
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  async getPublicHelpProject(slug: string): Promise<PublicHelpProject | null> {
+    const rows = await this.db
+      .select({
+        project: projects,
+        settingsProjectId: projectSettings.projectId,
+        helpCustomUrl: projectSettings.helpCustomUrl,
+        helpTopNav: projectSettings.helpTopNav,
+        helpCustomCss: projectSettings.helpCustomCss,
+        helpHomeMarkdown: projectSettings.helpHomeMarkdown,
+        widgetConfig,
+      })
+      .from(projects)
+      .leftJoin(projectSettings, eq(projectSettings.projectId, projects.id))
+      .leftJoin(widgetConfig, eq(widgetConfig.projectId, projects.id))
+      .where(eq(projects.slug, slug))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      project: row.project,
+      settings: row.settingsProjectId
+        ? {
+            helpCustomUrl: row.helpCustomUrl,
+            helpTopNav: row.helpTopNav,
+            helpCustomCss: row.helpCustomCss,
+            helpHomeMarkdown: row.helpHomeMarkdown,
+          }
+        : null,
+      widgetConfig: row.widgetConfig,
+    };
   }
 
   async generateUniqueSlug(_userId: string, baseSlug: string): Promise<string> {

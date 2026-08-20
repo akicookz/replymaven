@@ -388,6 +388,7 @@ interface NewMessageInput {
   senderName?: string | null;
   senderAvatar?: string | null;
   userId?: string | null;
+  id?: string;
   idempotencyKey?: string | null;
   origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
@@ -399,7 +400,7 @@ function newMessage(
   options: { systemKind?: string | null; id?: string } = {},
 ): PublicMessageRecord {
   return {
-    id: options.id ?? input.idempotencyKey ?? crypto.randomUUID(),
+    id: options.id ?? input.id ?? input.idempotencyKey ?? crypto.randomUUID(),
     conversationId: input.conversationId,
     author,
     content: input.content,
