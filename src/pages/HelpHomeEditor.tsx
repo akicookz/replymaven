@@ -24,6 +24,23 @@ interface ProjectSettingsData {
   helpCustomUrl: string | null;
 }
 
+function appendHelpLiveCacheBust(href: string, version: number): string {
+  const parsed = new URL(href, "https://replymaven.com");
+  parsed.searchParams.set("v", String(version));
+  if (href.startsWith("http://") || href.startsWith("https://")) {
+    return parsed.toString();
+  }
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
+function openHelpLivePreview(href: string): void {
+  window.open(
+    appendHelpLiveCacheBust(href, Date.now()),
+    "_blank",
+    "noopener,noreferrer",
+  );
+}
+
 function HelpHomeEditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
@@ -127,7 +144,15 @@ function HelpHomeEditorPage() {
         <div className="flex shrink-0 items-center gap-2">
           {liveHref && (
             <Button asChild variant="outline" size="sm">
-              <a href={liveHref} target="_blank" rel="noreferrer">
+              <a
+                href={liveHref}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => {
+                  event.preventDefault();
+                  openHelpLivePreview(liveHref);
+                }}
+              >
                 <ExternalLink className="h-4 w-4" />
                 <span className="hidden sm:inline">View live</span>
               </a>

@@ -88,14 +88,24 @@ import { expandHelpHomeBlocks } from "./helpdesk-render/expand-help-home-blocks"
 import { groupArticlesByCategory } from "./helpdesk-render/group-articles";
 import {
   dispatchPublicHelp,
+  helpHtmlHeaders,
   helpNotFoundCacheHeaders,
-  helpPageCacheHeaders,
+  helpSearchHeaders,
   helpSitemapCacheHeaders,
   helpUncachedHeaders,
+  invalidateHelpPageCache,
   isPublicHelpPath,
   publicHelpHtmlChanged,
   scheduleHelpPageCachePurge,
 } from "./helpdesk-render/help-page-cache";
+import {
+  OWN_DOCS_DISPATCH_HEADER,
+  hostedHelpRedirectUrl,
+  hostedHelpShouldNoindex,
+  isHelpProxyPass,
+  isOwnDocsDispatch,
+  stripOwnDocsDispatchHeader,
+} from "./helpdesk-render/hosted-help-seo";
 import {
   loadPublicHelpPage,
   type PublicHelpPageContext,
@@ -1877,7 +1887,7 @@ const app = new Hono<HonoAppContext>()
       );
       return c.body(markdown, 200, {
         "Content-Type": "text/markdown; charset=utf-8",
-        ...helpPageCacheHeaders(page.project.id),
+        ...helpHtmlHeaders(page.project.id, { noindex: started.noindex }),
       });
     }
 
@@ -1911,11 +1921,12 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      noindex: started.noindex,
     });
     return c.html(
       `<!doctype html>${html.toString()}`,
       200,
-      helpPageCacheHeaders(page.project.id),
+      helpHtmlHeaders(page.project.id, { noindex: started.noindex }),
     );
   })
   .get("/help/:projectSlug/search", async (c) => {
@@ -1974,11 +1985,12 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      noindex: started.noindex,
     });
     return c.html(
       `<!doctype html>${html.toString()}`,
       200,
-      helpUncachedHeaders(),
+      helpSearchHeaders({ noindex: started.noindex }),
     );
   })
   .get("/help/:projectSlug/:categorySlug", async (c) => {
@@ -2005,11 +2017,12 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      noindex: started.noindex,
     });
     return c.html(
       `<!doctype html>${html.toString()}`,
       200,
-      helpPageCacheHeaders(page.project.id),
+      helpHtmlHeaders(page.project.id, { noindex: started.noindex }),
     );
   })
   .get("/help/:projectSlug", async (c) => {
@@ -2059,11 +2072,12 @@ const app = new Hono<HonoAppContext>()
       topNav: page.topNav,
       customCss: page.customCss,
       bodyHtml,
+      noindex: started.noindex,
     });
     return c.html(
       `<!doctype html>${html.toString()}`,
       200,
-      helpPageCacheHeaders(page.project.id),
+      helpHtmlHeaders(page.project.id, { noindex: started.noindex }),
     );
   })
 
@@ -6698,7 +6712,7 @@ const app = new Hono<HonoAppContext>()
         error:
           "Marker not found. Make sure your reverse proxy forwards the request to https://replymaven.com/help/" +
           project.slug +
-          " and returns the response body unchanged.",
+          " with header X-ReplyMaven-Help-Proxy: 1 and returns the response body unchanged.",
       });
     } catch (err) {
       const isAbort =
@@ -7999,11 +8013,21 @@ function serveOwnDocs(c: Context<HonoAppContext>): Response | Promise<Response> 
   const url = new URL(c.req.url);
   const suffix = url.pathname.replace(/\/+$/, "").slice("/docs".length);
   url.pathname = `${OWN_DOCS_HELP_PREFIX}${suffix}`;
-  return app.fetch(new Request(url.toString(), c.req.raw), c.env, c.executionCtx);
+  const headers = new Headers(c.req.raw.headers);
+  headers.set(OWN_DOCS_DISPATCH_HEADER, "1");
+  return app.fetch(
+    new Request(url.toString(), {
+      method: c.req.raw.method,
+      headers,
+      redirect: c.req.raw.redirect,
+    }),
+    c.env,
+    c.executionCtx,
+  );
 }
 
 async function beginPublicHelpRequest(c: Context<HonoAppContext>): Promise<
-  | { ok: true; page: PublicHelpPageContext }
+  | { ok: true; page: PublicHelpPageContext; noindex: boolean }
   | { ok: false; response: Response }
 > {
   const ip = getClientIp(c);
@@ -8024,12 +8048,44 @@ async function beginPublicHelpRequest(c: Context<HonoAppContext>): Promise<
       response: c.text("Not found", 404, helpNotFoundCacheHeaders()),
     };
   }
-  return { ok: true, page };
+
+  const ownDocsDispatch = isOwnDocsDispatch(c.req.raw, page.project.slug);
+  const proxyPass = isHelpProxyPass(c.req.raw, page.helpCustomUrl);
+  if (!ownDocsDispatch && page.helpCustomUrl && !proxyPass) {
+    return {
+      ok: false,
+      response: new Response(null, {
+        status: 301,
+        headers: {
+          Location: hostedHelpRedirectUrl({
+            requestUrl: c.req.url,
+            projectSlug: page.project.slug,
+            customUrl: page.helpCustomUrl,
+          }),
+          "Cache-Control": "no-store",
+        },
+      }),
+    };
+  }
+
+  return {
+    ok: true,
+    page,
+    noindex: hostedHelpShouldNoindex({
+      ownDocsDispatch,
+      proxyPass,
+      helpCustomUrl: page.helpCustomUrl,
+    }),
+  };
 }
 
 export class HelpPages extends WorkerEntrypoint<AppEnv> {
   fetch(request: Request): Response | Promise<Response> {
-    return app.fetch(request, this.env, this.ctx);
+    return app.fetch(stripOwnDocsDispatchHeader(request), this.env, this.ctx);
+  }
+
+  invalidate(projectId: string): Promise<void> {
+    return invalidateHelpPageCache(this.ctx, projectId);
   }
 }
 
@@ -8040,10 +8096,11 @@ export default {
     env: AppEnv,
     ctx: ExecutionContext,
   ): Response | Promise<Response> {
-    if (isPublicHelpPath(new URL(request.url).pathname)) {
-      return dispatchPublicHelp(request, env, ctx, app.fetch);
+    const incoming = stripOwnDocsDispatchHeader(request);
+    if (isPublicHelpPath(new URL(incoming.url).pathname)) {
+      return dispatchPublicHelp(incoming, env, ctx, app.fetch);
     }
-    return app.fetch(request, env, ctx);
+    return app.fetch(incoming, env, ctx);
   },
   queue: handleQueue,
   scheduled: handleScheduled,

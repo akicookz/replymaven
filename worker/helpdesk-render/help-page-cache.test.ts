@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   dispatchPublicHelp,
+  helpHtmlHeaders,
   helpPageCacheHeaders,
   helpPageCacheTag,
+  helpSearchHeaders,
   helpUncachedHeaders,
+  invalidateHelpPageCache,
   isPublicHelpPath,
   publicHelpHtmlChanged,
   scheduleHelpPageCachePurge,
@@ -32,6 +35,16 @@ describe("help page cache headers", () => {
     );
     expect(helpUncachedHeaders()).toEqual({ "Cache-Control": "no-store" });
   });
+
+  test("marks hosted HTML noindex and varies on the proxy header", () => {
+    const headers = helpHtmlHeaders("proj-1", { noindex: true });
+    expect(headers["X-Robots-Tag"]).toBe("noindex, nofollow");
+    expect(headers.Vary).toContain("X-ReplyMaven-Help-Proxy");
+    expect(helpHtmlHeaders("proj-1", { noindex: false })["X-Robots-Tag"]).toBeUndefined();
+    expect(helpSearchHeaders({ noindex: true })["X-Robots-Tag"]).toBe(
+      "noindex, nofollow",
+    );
+  });
 });
 
 describe("publicHelpHtmlChanged", () => {
@@ -59,23 +72,121 @@ describe("publicHelpHtmlChanged", () => {
   });
 });
 
-describe("scheduleHelpPageCachePurge", () => {
-  test("no-ops when the runtime has no cache API", () => {
-    const ctx = {
-      waitUntil() {
-        throw new Error("should not schedule");
-      },
-    } as unknown as ExecutionContext;
-    scheduleHelpPageCachePurge(ctx, "proj-1");
+describe("invalidateHelpPageCache", () => {
+  test("logs skip when the runtime has no cache API", async () => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message?: unknown) => {
+      warnings.push(String(message));
+    };
+    try {
+      await invalidateHelpPageCache({} as ExecutionContext, "proj-1");
+    } finally {
+      console.warn = originalWarn;
+    }
+    expect(
+      warnings.some((line) => line.includes("help.cache_purge_skipped")),
+    ).toBe(true);
   });
 
   test("purges the project tag", async () => {
     const tags: string[][] = [];
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (message?: unknown) => {
+      errors.push(String(message));
+    };
+    try {
+      await invalidateHelpPageCache(
+        {
+          cache: {
+            async purge(options: { tags: string[] }) {
+              tags.push(options.tags);
+              return { success: true };
+            },
+          },
+        } as unknown as ExecutionContext,
+        "proj-1",
+      );
+    } finally {
+      console.error = originalError;
+    }
+    expect(tags).toEqual([[helpPageCacheTag("proj-1")]]);
+    expect(errors).toEqual([]);
+  });
+
+  test("logs failure when purge resolves with success false", async () => {
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (message?: unknown) => {
+      errors.push(String(message));
+    };
+    try {
+      await invalidateHelpPageCache(
+        {
+          cache: {
+            async purge() {
+              return {
+                success: false,
+                errors: [{ code: 10000, message: "rate limited" }],
+              };
+            },
+          },
+        } as unknown as ExecutionContext,
+        "proj-1",
+      );
+    } finally {
+      console.error = originalError;
+    }
+    expect(
+      errors.some((line) => line.includes("help.cache_purge_failed")),
+    ).toBe(true);
+  });
+});
+
+describe("scheduleHelpPageCachePurge", () => {
+  test("logs skip when HelpPages export is missing", () => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message?: unknown) => {
+      warnings.push(String(message));
+    };
+    const ctx = {
+      cache: {
+        async purge() {
+          throw new Error("default cache must not purge");
+        },
+      },
+      waitUntil() {
+        throw new Error("should not schedule");
+      },
+    } as unknown as ExecutionContext;
+    try {
+      scheduleHelpPageCachePurge(ctx, "proj-1");
+    } finally {
+      console.warn = originalWarn;
+    }
+    expect(
+      warnings.some((line) => line.includes("help.cache_purge_skipped")),
+    ).toBe(true);
+  });
+
+  test("calls HelpPages.invalidate instead of default cache.purge", async () => {
+    const invalidated: string[] = [];
+    const defaultTags: string[][] = [];
     const pending: Promise<unknown>[] = [];
     const ctx = {
       cache: {
         async purge(options: { tags: string[] }) {
-          tags.push(options.tags);
+          defaultTags.push(options.tags);
+        },
+      },
+      exports: {
+        HelpPages: {
+          fetch: async () => new Response("ok"),
+          async invalidate(projectId: string) {
+            invalidated.push(projectId);
+          },
         },
       },
       waitUntil(promise: Promise<unknown>) {
@@ -84,7 +195,8 @@ describe("scheduleHelpPageCachePurge", () => {
     } as unknown as ExecutionContext;
     scheduleHelpPageCachePurge(ctx, "proj-1");
     await Promise.all(pending);
-    expect(tags).toEqual([[helpPageCacheTag("proj-1")]]);
+    expect(invalidated).toEqual(["proj-1"]);
+    expect(defaultTags).toEqual([]);
   });
 });
 

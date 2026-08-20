@@ -6,6 +6,11 @@ interface RenderRobotsInput {
 }
 
 export function renderRobots(input: RenderRobotsInput): string {
+  if (!input.helpCustomUrl) {
+    return `User-agent: *
+Allow: /
+`;
+  }
   const sitemap = buildHelpSitemapUrl({
     projectSlug: input.projectSlug,
     customUrl: input.helpCustomUrl,

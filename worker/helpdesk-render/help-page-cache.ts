@@ -1,17 +1,25 @@
-import { logError } from "../observability";
+import { logError, logWarn } from "../observability";
 
 export const HELP_PAGE_CACHE_TAG_PREFIX = "help-";
 
+interface CachePurgeResult {
+  success: boolean;
+  errors?: unknown;
+}
+
 interface CachePurgeApi {
-  purge: (options: { tags: string[] }) => Promise<unknown>;
+  purge: (options: { tags: string[] }) => Promise<CachePurgeResult | unknown>;
+}
+
+interface HelpPagesExport {
+  fetch: (request: Request) => Response | Promise<Response>;
+  invalidate?: (projectId: string) => void | Promise<void>;
 }
 
 interface ExecutionContextWithCache extends ExecutionContext {
   cache?: CachePurgeApi;
   exports?: {
-    HelpPages?: {
-      fetch: (request: Request) => Response | Promise<Response>;
-    };
+    HelpPages?: HelpPagesExport;
   };
 }
 
@@ -63,6 +71,27 @@ export function helpUncachedHeaders(): Record<string, string> {
   return { "Cache-Control": "no-store" };
 }
 
+export const HELP_PROXY_VARY = "X-ReplyMaven-Help-Proxy, X-ReplyMaven-Own-Docs";
+
+export function helpHtmlHeaders(
+  projectId: string,
+  options: { noindex: boolean },
+): Record<string, string> {
+  return {
+    ...helpPageCacheHeaders(projectId),
+    Vary: HELP_PROXY_VARY,
+    ...(options.noindex ? { "X-Robots-Tag": "noindex, nofollow" } : {}),
+  };
+}
+
+export function helpSearchHeaders(options: { noindex: boolean }): Record<string, string> {
+  return {
+    ...helpUncachedHeaders(),
+    Vary: HELP_PROXY_VARY,
+    ...(options.noindex ? { "X-Robots-Tag": "noindex, nofollow" } : {}),
+  };
+}
+
 export function publicHelpHtmlChanged(input: {
   beforeStatus?: "draft" | "published" | null;
   afterStatus?: "draft" | "published" | null;
@@ -72,14 +101,65 @@ export function publicHelpHtmlChanged(input: {
   );
 }
 
+export function invalidateHelpPageCache(
+  ctx: ExecutionContext,
+  projectId: string,
+): Promise<void> {
+  const cache = (ctx as ExecutionContextWithCache).cache;
+  if (!cache || typeof cache.purge !== "function") {
+    logWarn("help.cache_purge_skipped", {
+      projectId,
+      reason: "cache_api_missing",
+    });
+    return Promise.resolve();
+  }
+  return cache
+    .purge({ tags: [helpPageCacheTag(projectId)] })
+    .then((result) => {
+      if (isSuccessfulCachePurge(result)) return;
+      logError(
+        "help.cache_purge_failed",
+        new Error("Cache purge rejected"),
+        {
+          projectId,
+          errors: cachePurgeErrors(result),
+        },
+      );
+    })
+    .catch((error: unknown) => {
+      logError("help.cache_purge_failed", error, { projectId });
+    });
+}
+
+function isSuccessfulCachePurge(result: unknown): result is CachePurgeResult {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    "success" in result &&
+    (result as CachePurgeResult).success === true
+  );
+}
+
+function cachePurgeErrors(result: unknown): unknown {
+  if (typeof result !== "object" || result === null) return result;
+  if ("errors" in result) return (result as CachePurgeResult).errors;
+  return result;
+}
+
 export function scheduleHelpPageCachePurge(
   ctx: ExecutionContext,
   projectId: string,
 ): void {
-  const cache = (ctx as ExecutionContextWithCache).cache;
-  if (!cache || typeof cache.purge !== "function") return;
+  const helpPages = (ctx as ExecutionContextWithCache).exports?.HelpPages;
+  if (!helpPages || typeof helpPages.invalidate !== "function") {
+    logWarn("help.cache_purge_skipped", {
+      projectId,
+      reason: "helppages_export_missing",
+    });
+    return;
+  }
   ctx.waitUntil(
-    cache.purge({ tags: [helpPageCacheTag(projectId)] }).catch((error: unknown) => {
+    Promise.resolve(helpPages.invalidate(projectId)).catch((error: unknown) => {
       logError("help.cache_purge_failed", error, { projectId });
     }),
   );

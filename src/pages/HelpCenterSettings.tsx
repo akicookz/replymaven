@@ -13,15 +13,14 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
-import { MobileMenuButton } from "@/components/PageHeader";
 import { ProxySetupBody } from "@/components/ProxySetupGuide";
 import {
   CustomCssEditor,
@@ -229,22 +228,19 @@ function HelpCenterSettings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-2">
-        <MobileMenuButton />
-        <div className="flex-1">
-          <Button asChild variant="ghost" size="sm" className="-ml-2 mb-2">
-            <Link to={`/app/projects/${projectId}/knowledgebase/help-center`}>
-              <ArrowLeft className="w-4 h-4" />
-              Back to Articles
-            </Link>
-          </Button>
-          <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
-            Help Center Settings
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Configure how your help center is served.
-          </p>
-        </div>
+      <div>
+        <Button asChild variant="ghost" size="sm" className="-ml-2 mb-2">
+          <Link to={`/app/projects/${projectId}/knowledgebase/help-center`}>
+            <ArrowLeft className="w-4 h-4" />
+            Back to Articles
+          </Link>
+        </Button>
+        <h1 className="text-xl md:text-2xl font-bold text-foreground tracking-tight">
+          Help Center Settings
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Configure how your help center is served.
+        </p>
       </div>
 
       <div className="rounded-2xl bg-card/50 backdrop-blur-xl border border-border p-6 space-y-5">
@@ -253,9 +249,12 @@ function HelpCenterSettings() {
             Custom Domain
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Host your help center under your own domain. Configure a reverse
-            proxy on your side to forward requests here. Leave empty to use
-            replymaven.com/help/{project?.slug ?? "your-slug"}.
+            Serve help on your domain with a 200 rewrite, then save that URL
+            here. Set up the rewrite first. After you save,{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5">
+              replymaven.com/help/{project?.slug ?? "your-slug"}
+            </code>{" "}
+            301s to your path. Leave empty to keep the hosted URL.
           </p>
         </div>
 
@@ -310,24 +309,30 @@ function HelpCenterSettings() {
             Test connection
           </Button>
           {project?.slug && (
-            <Dialog>
-              <DialogTrigger asChild>
+            <Sheet>
+              <SheetTrigger asChild>
                 <Button variant="ghost" size="sm" className="ml-auto">
                   <BookOpen className="h-4 w-4" />
                   Reverse proxy setup
                 </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl">
-                <DialogHeader>
-                  <DialogTitle>How to set up a reverse proxy</DialogTitle>
-                  <DialogDescription>
-                    Forward <code>/docs/*</code> from your domain to ReplyMaven.
-                    Pick a snippet for your host below.
-                  </DialogDescription>
-                </DialogHeader>
-                <ProxySetupBody projectSlug={project.slug} />
-              </DialogContent>
-            </Dialog>
+              </SheetTrigger>
+              <SheetContent
+                side="right"
+                className="inset-y-3 right-3 h-[calc(100%-1.5rem)] w-[calc(100%-1.5rem)] sm:max-w-xl rounded-2xl border border-border p-0 gap-0 overflow-hidden"
+              >
+                <SheetHeader className="px-6 pt-6 pb-4 pr-14">
+                  <SheetTitle>Reverse proxy setup</SheetTitle>
+                  <SheetDescription>
+                    Rewrite <code>/docs</code> on your domain to ReplyMaven
+                    with a 200. Do not 301. Send the proxy header, test the
+                    connection, then save the custom URL.
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="flex-1 overflow-y-auto px-6 pb-6">
+                  <ProxySetupBody projectSlug={project.slug} />
+                </div>
+              </SheetContent>
+            </Sheet>
           )}
         </div>
 

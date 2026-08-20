@@ -23,6 +23,7 @@ interface RenderHelpSearchProps {
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
   customCss: string | null;
+  noindex?: boolean;
 }
 
 export function renderHelpSearch(props: RenderHelpSearchProps) {
@@ -44,6 +45,7 @@ export function renderHelpSearch(props: RenderHelpSearchProps) {
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
       customCss={props.customCss}
+      noindex={props.noindex}
       topBar={
         <HelpTopBar
           project={props.project}

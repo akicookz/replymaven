@@ -30,6 +30,7 @@ interface RenderHelpArticleProps {
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
   customCss: string | null;
+  noindex?: boolean;
 }
 
 export function renderHelpArticle(props: RenderHelpArticleProps) {
@@ -88,6 +89,7 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
       jsonLd={jsonLd}
       ogImage={ogImage}
       customCss={props.customCss}
+      noindex={props.noindex}
       articleMeta={{
         publishedAt: datePublished,
         modifiedAt: dateModified,

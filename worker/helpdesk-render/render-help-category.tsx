@@ -19,6 +19,7 @@ interface RenderHelpCategoryProps {
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
   customCss: string | null;
+  noindex?: boolean;
 }
 
 export function renderHelpCategory(props: RenderHelpCategoryProps) {
@@ -38,6 +39,7 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
       customCss={props.customCss}
+      noindex={props.noindex}
       topBar={
         <HelpTopBar
           project={props.project}

@@ -26,6 +26,7 @@ export interface LayoutProps {
   ogImage?: OgImage | null;
   articleMeta?: ArticleMeta | null;
   customCss?: string | null;
+  noindex?: boolean;
   topBar?: unknown;
   sidebar?: unknown;
   children?: unknown;
@@ -57,6 +58,9 @@ export function Layout(props: LayoutProps) {
           <meta name="description" content={props.description} />
         ) : null}
         <link rel="canonical" href={props.canonicalUrl} />
+        {props.noindex ? (
+          <meta name="robots" content="noindex, nofollow" />
+        ) : null}
         <meta name="replymaven:help" content={props.projectSlug} />
         <meta property="og:type" content="article" />
         <meta property="og:title" content={props.title} />
