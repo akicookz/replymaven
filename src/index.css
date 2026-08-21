@@ -11,6 +11,9 @@
   --help-radius-lg: var(--radius);
   --help-radius-xl: calc(var(--radius) * 1.33);
   --help-radius-2xl: calc(var(--radius) * 1.67);
+  --help-ring-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 4%, transparent),
+    0 0 12px color-mix(in oklch, var(--foreground) 5%, transparent);
 }
 
 /* Docs contain code snippets whose class-like strings would otherwise be
@@ -491,10 +494,13 @@ input[type="color"]::-moz-color-swatch {
 .help-editor-surface .hljs-selector-pseudo { color: #79c0ff; }
 
 /* Tables (TipTap renders these inside .tableWrapper). Match the published
-   open .help-table: no box, no header fill, no cell grid. */
+   .help-table ring card: no header fill, no cell grid. */
 .help-editor-surface .tableWrapper {
   margin: 1.25rem 0;
-  overflow: auto;
+  padding: 0.375rem 0;
+  border-radius: var(--help-radius-lg);
+  background: var(--background);
+  box-shadow: var(--help-ring-shadow);
 }
 .help-editor-surface table {
   width: 100%;
@@ -511,14 +517,6 @@ input[type="color"]::-moz-color-swatch {
   vertical-align: top;
   position: relative;
   min-width: 3rem;
-}
-.help-editor-surface th:first-child,
-.help-editor-surface td:first-child {
-  padding-left: 0;
-}
-.help-editor-surface th:last-child,
-.help-editor-surface td:last-child {
-  padding-right: 0;
 }
 .help-editor-surface th {
   font-weight: 600;

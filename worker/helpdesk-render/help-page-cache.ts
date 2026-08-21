@@ -92,15 +92,6 @@ export function helpSearchHeaders(options: { noindex: boolean }): Record<string,
   };
 }
 
-export function helpSearchAnswerHeaders(options: { noindex: boolean }): Record<string, string> {
-  return {
-    "Content-Type": "text/event-stream; charset=utf-8",
-    "Cache-Control": "no-store",
-    Vary: HELP_PROXY_VARY,
-    ...(options.noindex ? { "X-Robots-Tag": "noindex, nofollow" } : {}),
-  };
-}
-
 export function publicHelpHtmlChanged(input: {
   beforeStatus?: "draft" | "published" | null;
   afterStatus?: "draft" | "published" | null;

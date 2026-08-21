@@ -890,7 +890,7 @@ function wrapHelpImages(html: string): string {
 function wrapHelpTables(html: string): string {
   return html.replace(/<table\b[\s\S]*?<\/table>/gi, (tag) => {
     if (/\bclass="help-table"/i.test(tag)) return tag;
-    return `<div class="help-table">${tag}</div>`;
+    return `<div class="help-table"><div class="help-table-scroll">${tag}</div></div>`;
   });
 }
 

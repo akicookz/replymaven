@@ -104,7 +104,6 @@ import {
   dispatchPublicHelp,
   helpHtmlHeaders,
   helpNotFoundCacheHeaders,
-  helpSearchAnswerHeaders,
   helpSearchHeaders,
   helpSitemapCacheHeaders,
   helpUncachedHeaders,
@@ -114,11 +113,6 @@ import {
   scheduleHelpPageCachePurge,
 } from "./helpdesk-render/help-page-cache";
 import { matchHelpArticlesFromQuery } from "./helpdesk-render/help-search";
-import {
-  encodeHelpExplainEvent,
-  startHelpExplainSource,
-  transformHelpExplainStream,
-} from "./helpdesk-render/help-search-explain";
 import {
   OWN_DOCS_DISPATCH_HEADER,
   hostedHelpRedirectUrl,
@@ -1644,46 +1638,6 @@ const app = new Hono<HonoAppContext>()
         ...helpSitemapCacheHeaders(started.page.project.id),
       },
     });
-  })
-  .get("/help/:projectSlug/search/answer", async (c) => {
-    const started = await beginPublicHelpRequest(c);
-    if (!started.ok) return started.response;
-    const { page } = started;
-    const query = (c.req.query("q") ?? "").trim().slice(0, 200);
-    const headers = helpSearchAnswerHeaders({ noindex: started.noindex });
-
-    if (query.length === 0) {
-      return new Response(encodeHelpExplainEvent("done", {}), { headers });
-    }
-
-    try {
-      const source = await startHelpExplainSource(
-        c.env.AI,
-        page.project.id,
-        query,
-      );
-      const stream = transformHelpExplainStream({
-        source,
-        articles: page.publishedArticles,
-        categories: page.categories,
-        projectId: page.project.id,
-        projectSlug: page.project.slug,
-        customUrl: page.helpCustomUrl,
-      });
-      return new Response(stream, { headers });
-    } catch (err) {
-      logWarn("help_search.explain_failed", {
-        projectId: page.project.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      const empty = new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(encodeHelpExplainEvent("done", {}));
-          controller.close();
-        },
-      });
-      return new Response(empty, { headers });
-    }
   })
   .get("/help/:projectSlug/:categorySlug/:articleSlug", async (c) => {
     const started = await beginPublicHelpRequest(c);

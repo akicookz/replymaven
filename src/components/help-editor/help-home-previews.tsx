@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, X } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,21 +34,6 @@ interface ArticleRow {
   publishedAt: string | null;
 }
 
-const SEARCH_SPARKLE = (
-  <svg
-    viewBox="0 0 24 24"
-    width="20"
-    height="20"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" />
-  </svg>
-);
-
 const SEARCH_ARROW = (
   <svg
     viewBox="0 0 24 24"
@@ -68,10 +53,12 @@ const SEARCH_ARROW = (
 function SearchPreview() {
   return (
     <div className="help-hero-search" aria-hidden="true">
-      <span className="help-hero-search-icon">{SEARCH_SPARKLE}</span>
+      <span className="help-hero-search-icon">
+        <Search size={20} />
+      </span>
       <input
         type="search"
-        placeholder="Ask, search, or explain..."
+        placeholder="Search help center"
         readOnly
         tabIndex={-1}
       />
