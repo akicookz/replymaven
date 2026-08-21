@@ -45,6 +45,12 @@ import {
 } from "../shared/upload-ownership";
 import { publicUploadUrl } from "./lib/public-upload-url";
 import { AiService } from "./services/ai-service";
+import { applyBotNameCommand } from "./services/apply-bot-name-command";
+import {
+  mergePublicMetadata,
+  readTelegramCommandClaim,
+  telegramCommandClaimPatch,
+} from "./services/bot-name-decision";
 import { TelegramService } from "./services/telegram-service";
 import { resolveTelegramChatBinding } from "./services/telegram-chat-binding";
 import { parseConversationReference } from "./services/inbound-email-routing";
@@ -1599,164 +1605,148 @@ const app = new Hono<HonoAppContext>()
       if (message.text.toLowerCase().startsWith(mentionPrefix.toLowerCase())) {
         const commandText = message.text.slice(mentionPrefix.length).trim();
 
+        const commandNow = Date.now();
+        const telegramCommandId =
+          `telegram:${projectId}:${String(message.chat?.id ?? "unknown")}:${String(message.message_id)}`;
         if (!commandText) {
-          // Simple handback — @BotName with no text
+          const replayed = readTelegramCommandClaim(
+            conversation.metadata,
+            telegramCommandId,
+          );
+          if (replayed) {
+            await sendConversationTelegramMessage(
+              replayed,
+              message.message_id,
+            );
+            return c.json({ ok: true });
+          }
           await chatService.transitionChatOwnership(
             conversationId,
             projectId,
             "ai_handed_back",
           );
-          // Clear any existing handback instructions
+          const confirmation = "Bot resumed.";
           await chatService.updateConversation(conversationId, projectId, {
-            metadata: JSON.stringify({ agentHandbackInstructions: null }),
+            metadata: JSON.stringify(mergePublicMetadata(conversation.metadata, {
+              agentHandbackInstructions: null,
+              lastHumanCommandAt: commandNow,
+              ...telegramCommandClaimPatch(telegramCommandId, confirmation),
+            })),
           });
           await sendConversationTelegramMessage(
-            "Bot resumed.",
+            confirmation,
             message.message_id,
           );
           return c.json({ ok: true });
         }
 
-        // Use AI to classify: close vs handback with instructions
         const aiService = new AiService({
           model: c.env.AI_MODEL,
           geminiApiKey: c.env.GEMINI_API_KEY,
           openaiApiKey: c.env.OPENAI_API_KEY,
         });
-
-        const result = await aiService.classifyAgentCommand(commandText);
-
-        if (result.action === "close") {
-          await chatService.updateConversationStatus(
-            conversationId,
-            projectId,
-            "closed",
-            "resolved",
-          );
-          await sendConversationTelegramMessage(
-            "Conversation closed.",
-            message.message_id,
-          );
-        } else if (result.action === "ban") {
-          const banService = new VisitorBanService(db);
-          await banService.banVisitor({
-            projectId,
-            visitorId: conversation.visitorId,
-            visitorEmail: conversation.visitorEmail ?? null,
-            reason: result.reason,
-            bannedBy: "agent",
-            bannedFromConversationId: conversationId,
-            expiresAt: null,
-          });
-
-          await chatService.updateConversationStatus(
-            conversationId,
-            projectId,
-            "closed",
-            "spam",
-          );
-
-          // Sweep the visitor's other open conversations too — the ban 403s
-          // them, so anything left open would sit in Needs You forever.
-          await chatService.closeOpenConversationsAsSpam(
-            projectId,
-            conversation.visitorId,
-            conversation.visitorEmail ?? null,
-          );
-
-          await sendConversationTelegramMessage(
-            `Visitor banned and conversation closed.${result.reason ? ` Reason: ${result.reason}` : ""}`,
-            message.message_id,
-          );
-        } else if (result.action === "respond") {
-          // One-shot AI response. Human ownership remains after it is sent.
-          const directedResponseSnapshot = await chatService.takeHumanOwnership(
-            projectId,
-            conversationId,
-          );
-          if (!directedResponseSnapshot) {
-            return c.json({ ok: true });
-          }
-
-          // Generate a bot response using the agent's instruction
-          const msgs = await chatService.getPublicMessages(
-            conversationId,
-            projectId,
-          );
-          const history = msgs
-            .filter((m) => m.author !== "bot" || m.content)
-            .slice(-20)
-            .map((m) => ({ role: m.author, content: m.content }));
-
-          const defaultSettings = {
-            toneOfVoice: "professional" as const,
-            customTonePrompt: null,
-            companyContext: null,
-            botName: null,
-            agentName: null,
-          };
-          const project = await projectService.getProjectById(projectId);
-          const responseText = await aiService.generateDirectedResponse(
-            projectSettings ?? defaultSettings,
-            project?.name ?? "Support",
-            history,
-            result.instructions,
-          );
-
-          // Store the bot response as a message
-          const botMessage = await chatService.addPublicBotMessageIfOwnershipMatches(
-            {
-              conversationId,
-              content: responseText,
-              senderName: projectSettings?.botName ?? null,
+        const decision = await aiService.interpretBotNameCommand(commandText);
+        const defaultSettings = {
+          toneOfVoice: "professional" as const,
+          customTonePrompt: null,
+          companyContext: null,
+          botName: null,
+          agentName: null,
+        };
+        const project = await projectService.getProjectById(projectId);
+        const applied = await applyBotNameCommand({
+          rawAgentText: commandText,
+          decision,
+          metadata: conversation.metadata,
+          now: commandNow,
+          commandId: telegramCommandId,
+          deps: {
+            async transitionChatOwnership(event) {
+              const result = await chatService.transitionOwnership({
+                projectId,
+                conversationId,
+                event,
+              });
+              return result.conversation
+                ? {
+                    status: result.conversation.status,
+                    chatState: JSON.stringify(result.conversation.chatState),
+                  }
+                : null;
             },
-            projectId,
-            {
-              status: directedResponseSnapshot.status,
-              chatState: directedResponseSnapshot.chatState,
+            async takeHumanOwnership() {
+              return chatService.takeHumanOwnership(projectId, conversationId);
             },
-          );
-          if (!botMessage) {
-            await sendConversationTelegramMessage(
-              "Bot response canceled because the conversation changed.",
-              message.message_id,
-            );
-            return c.json({ ok: true });
-          }
-
-          await sendConversationTelegramMessage(
-            "Bot responded.",
-            message.message_id,
-          );
-        } else {
-          // Handback — silent instructions for future messages
-          await chatService.transitionChatOwnership(
-            conversationId,
-            projectId,
-            "ai_handed_back",
-          );
-
-          if (result.instructions) {
-            await chatService.updateConversation(conversationId, projectId, {
-              metadata: JSON.stringify({
-                agentHandbackInstructions: result.instructions,
-              }),
-            });
-          } else {
-            await chatService.updateConversation(conversationId, projectId, {
-              metadata: JSON.stringify({ agentHandbackInstructions: null }),
-            });
-          }
-
-          const confirmText = result.instructions
-            ? "Bot resumed with instructions."
-            : "Bot resumed.";
-          await sendConversationTelegramMessage(
-            confirmText,
-            message.message_id,
-          );
-        }
-
+            async updateConversation(input) {
+              await chatService.updateConversation(
+                conversationId,
+                projectId,
+                input,
+              );
+            },
+            async updateConversationStatus(status, closeReason) {
+              await chatService.updateConversationStatus(
+                conversationId,
+                projectId,
+                status,
+                closeReason,
+              );
+            },
+            async closeOpenConversationsAsSpam() {
+              await chatService.closeOpenConversationsAsSpam(
+                projectId,
+                conversation.visitorId,
+                conversation.visitorEmail ?? null,
+              );
+            },
+            async banVisitor(reason) {
+              await new VisitorBanService(db).banVisitor({
+                projectId,
+                visitorId: conversation.visitorId,
+                visitorEmail: conversation.visitorEmail ?? null,
+                reason,
+                bannedBy: "agent",
+                bannedFromConversationId: conversationId,
+                expiresAt: null,
+              });
+            },
+            async generateDirectedResponse(instruction) {
+              const msgs = await chatService.getPublicMessages(
+                conversationId,
+                projectId,
+              );
+              return aiService.generateDirectedResponse(
+                projectSettings ?? defaultSettings,
+                project?.name ?? "Support",
+                msgs
+                  .filter((entry) => entry.author !== "bot" || entry.content)
+                  .slice(-20)
+                  .map((entry) => ({
+                    role: entry.author,
+                    content: entry.content,
+                  })),
+                instruction,
+              );
+            },
+            async addPublicBotMessage(input) {
+              const botMessage = await chatService
+                .addPublicBotMessageIfOwnershipMatches(
+                  {
+                    conversationId,
+                    content: input.content,
+                    senderName: projectSettings?.botName ?? null,
+                  },
+                  projectId,
+                  input.expected,
+                );
+              return Boolean(botMessage);
+            },
+          },
+        });
+        await sendConversationTelegramMessage(
+          applied.confirmation,
+          message.message_id,
+        );
         return c.json({ ok: true });
       }
     }

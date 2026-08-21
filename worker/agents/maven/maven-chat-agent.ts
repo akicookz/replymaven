@@ -64,6 +64,10 @@ import type {
 } from "../../conversations/public-conversation-store";
 import { canAutoCloseConversationStatus } from "../../conversations/conversation-staleness";
 import {
+  clearHumanCommandClock,
+  preserveReservedPublicMetadata,
+} from "../../services/bot-name-decision";
+import {
   applyChatOwnershipEvent,
   fallbackAiParticipationForStatus,
   isReturningVisitorGap,
@@ -743,6 +747,10 @@ export class MavenChatAgent extends AIChatAgent<
         submittedMessageId: submitted.id,
         botName: settings?.botName,
         snoozedUntil: currentState.snoozedUntil,
+        lastHumanCommandAt: typeof currentState.metadata.lastHumanCommandAt ===
+            "number"
+          ? currentState.metadata.lastHumanCommandAt
+          : null,
       })
     ) {
       try {
@@ -1787,6 +1795,9 @@ export class MavenChatAgent extends AIChatAgent<
         autoCloseScheduleId: status === "waiting_agent"
           ? null
           : state.autoCloseScheduleId,
+        ...(event === "human_joined"
+          ? { metadata: clearHumanCommandClock(state.metadata) }
+          : {}),
         updatedAt: Date.now(),
       });
       await this.publishPublicProjection(saved, this.readPublicMessages());
@@ -2302,7 +2313,9 @@ export class MavenChatAgent extends AIChatAgent<
     return this.runExclusivePublicMutation(async () => {
       const state = this.requirePublicState();
       this.assertPublicInput(input.projectId, input.conversationId);
-      const nextMetadata = input.metadata ?? state.metadata;
+      const nextMetadata = input.metadata === undefined
+        ? state.metadata
+        : preserveReservedPublicMetadata(input.metadata, state.metadata);
       if (
         (input.visitorName === undefined ||
           input.visitorName === state.visitorName) &&

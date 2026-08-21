@@ -783,11 +783,7 @@ Resource ingestion:
    - Visitor messages are forwarded to Telegram via `forwardVisitorMessage` (threaded using `telegramThreadId`)
    - The widget endpoint returns `{ ok: true, agentMode: true }` JSON instead of SSE
 5. Agent replies in Telegram (not prefixed with `@BotName`) -> stored as agent message, status set to `agent_replied`, visitor sees reply via polling
-6. Agent types `@BotName` commands in Telegram -> AI classifies intent via `classifyAgentCommand()`:
-   - **`@BotName`** (no text) -- simple handback, status set to `active`, AI resumes
-   - **`@BotName <close intent>`** (e.g. "we're done here", "resolved") -- `close` action, conversation closed, auto-draft canned response triggered
-   - **`@BotName <private instructions>`** (e.g. "don't mention to user but cancel their account if they complain") -- `handback` action, instructions stored in `conversation.metadata.agentHandbackInstructions`, AI resumes and follows them silently
-   - **`@BotName <respond request>`** (e.g. "explain how pricing works", "take over") -- `respond` action, AI immediately generates a bot response via `generateDirectedResponse()`, visitor sees it via polling
+6. Agent types `@BotName` commands in Telegram. Bare `@BotName` hands the thread back to AI. Any other text is read as ordinary language by `interpretBotNameCommand()` and applied as one decision: keep or hand off ownership, store or clear instructions, speak now or stay silent, close, or ban. Speak-now uses `generateDirectedResponse()`. There is no keyword list.
 
 #### Telegram Notification Methods
 

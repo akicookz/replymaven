@@ -9,6 +9,10 @@ import {
   buildSummarizeConversationPrompt,
 } from "../chat-runtime/llm/support-prompt-builders";
 import { buildSupportSystemPrompt } from "../chat-runtime/prompt/build-support-system-prompt";
+import {
+  parseBotNameDecision,
+  type BotNameDecision,
+} from "./bot-name-decision";
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -169,74 +173,39 @@ export class AiService {
     return { name: extractedName, email: extractedEmail };
   }
 
-  // ─── Classify Agent Command ──────────────────────────────────────────────────
+  // ─── Interpret @BotName Command ─────────────────────────────────────────────
 
-  async classifyAgentCommand(
+  async interpretBotNameCommand(
     agentText: string,
-  ): Promise<
-    | { action: "close" }
-    | { action: "handback"; instructions: string }
-    | { action: "respond"; instructions: string }
-    | { action: "ban"; reason: string }
-  > {
-    try {
-      const { text } = await generateText({
-        model: this.model,
-        prompt: `A human support agent typed the following message directed at their AI assistant (chatbot). The agent is telling the bot what to do next for a customer conversation.
+  ): Promise<BotNameDecision | null> {
+    const parsed = await this.generateJsonObject({
+      prompt: `A human support agent wrote this message to their website chatbot. Read the words in whatever language they used. Decide what the worker should do.
 
-"${agentText}"
+Agent text:
+${agentText}
 
-Determine the agent's intent. There are exactly four possible intents:
+Return only this JSON object:
+{
+  "ownership": "human" | "ai",
+  "instructions": "set" | "clear" | "keep",
+  "speak": "now" | "silent",
+  "effect": "none" | "close" | "ban",
+  "reason": string | null
+}
 
-1. CLOSE — The agent is saying the conversation is done, resolved, finished, or should be closed.
-   Examples: "we're done here", "this is resolved", "all sorted, customer is happy", "close this one"
+Meaning:
+- ownership: who should own the thread after this command. human keeps or takes the human. ai hands the thread to the bot.
+- instructions: set stores the agent text for later turns. clear removes stored instructions. keep leaves them unchanged.
+- speak: now means reply to the visitor now. silent means do not send a visitor-visible reply.
+- effect: close ends the conversation. ban blocks the visitor and closes as spam. none means no close or ban.
+- reason: required when effect is ban. Otherwise null.
 
-2. HANDBACK — The agent is giving the bot private/internal instructions to follow silently going forward. The visitor should NOT see or know about these instructions. The bot should just keep them in mind for future messages.
-   Examples: "don't mention to user but if they keep complaining, cancel their account", "offer them 20% off if they ask about pricing", "be extra careful with this customer, they're a VIP"
-
-3. RESPOND — The agent wants the bot to immediately respond to the visitor with specific information or in a specific way. The visitor WILL see the bot's response.
-   Examples: "explain how the refund process works", "tell them about our pricing plans", "answer their question about shipping", "take over", "you handle it from here"
-
-4. BAN — The agent wants to ban/block this visitor from using the chat. Used for spam, abuse, or harassment.
-   Examples: "ban this user", "block them", "this is spam, ban", "ban for harassment", "block this spammer"
-
-Key distinction between HANDBACK and RESPOND:
-- HANDBACK = secret instructions for the bot's behavior (visitor never sees the instruction itself)
-- RESPOND = the agent wants the bot to generate a visible response to the visitor right now
-
-Respond with ONLY a valid JSON object, no other text:
-
-For CLOSE: {"action":"close"}
-For HANDBACK: {"action":"handback","instructions":"<the private instructions>"}
-For RESPOND: {"action":"respond","instructions":"<what the bot should respond about>"}
-For BAN: {"action":"ban","reason":"<reason for the ban>"}
+The worker applies this object. Do not match English keywords. A request to stay quiet, take over, remember a private note, close, or ban may be written in any language.
 
 JSON:`,
-        temperature: 0,
-        maxOutputTokens: 256,
-      });
-
-      const parsed = JSON.parse(text.trim());
-      if (parsed.action === "close") return { action: "close" };
-      if (parsed.action === "ban") {
-        return {
-          action: "ban",
-          reason: parsed.reason ?? "Banned by agent",
-        };
-      }
-      if (parsed.action === "respond") {
-        return {
-          action: "respond",
-          instructions: parsed.instructions ?? agentText,
-        };
-      }
-      return {
-        action: "handback",
-        instructions: parsed.instructions ?? "",
-      };
-    } catch {
-      return { action: "respond", instructions: agentText };
-    }
+      maxOutputTokens: 256,
+    });
+    return parseBotNameDecision(parsed);
   }
 
   // ─── Generate Directed Response ─────────────────────────────────────────────
@@ -255,7 +224,7 @@ JSON:`,
     projectName: string,
     conversationHistory: Array<{ role: string; content: string }>,
     agentInstruction: string,
-  ): Promise<string> {
+  ): Promise<string | null> {
     const systemPrompt = buildSupportSystemPrompt(
       settings,
       projectName,
@@ -288,9 +257,10 @@ JSON:`,
         maxOutputTokens: 1024,
       });
 
-      return text.trim() || "I'm here to help! What can I assist you with?";
+      const trimmed = text.trim();
+      return trimmed || null;
     } catch {
-      return "I'm here to help! What can I assist you with?";
+      return null;
     }
   }
 

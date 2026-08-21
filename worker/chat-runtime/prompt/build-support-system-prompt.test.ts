@@ -72,3 +72,11 @@ test("adds the trusted Maven channel contract to the common prompt", () => {
   expect(publicPrompt).toContain("call request_team_help");
   expect(publicPrompt).toContain("[RESOLVED]");
 });
+
+test("lets stored agent instructions keep the bot silent", () => {
+  const prompt = buildSupportSystemPrompt(settings, "Acme", "", "", {
+    agentHandbackInstructions: "stay quiet",
+  });
+  expect(prompt).toContain("If they tell you to stay silent");
+  expect(prompt).not.toContain("Use them only to shape the visible reply");
+});

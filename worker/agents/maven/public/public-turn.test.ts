@@ -274,6 +274,35 @@ describe("idle human handoff takeover", () => {
     })).toBe(false);
   });
 
+  test("counts an applied @BotName command as human activity without an agent row", () => {
+    const messages = [
+      publicRecord("visitor-1", "visitor", 5 * hour),
+      publicRecord("visitor-2", "visitor", (5 * hour) + 1),
+    ];
+
+    expect(shouldResumeAiAfterHumanIdle({
+      messages,
+      submittedMessageId: "visitor-2",
+      botName: "Maven",
+      lastHumanCommandAt: hour,
+    })).toBe(true);
+  });
+
+  test("a later @BotName command resets the idle clock", () => {
+    const messages = [
+      publicRecord("agent-1", "agent", hour),
+      publicRecord("visitor-1", "visitor", 5 * hour),
+      publicRecord("visitor-2", "visitor", (5 * hour) + 1),
+    ];
+
+    expect(shouldResumeAiAfterHumanIdle({
+      messages,
+      submittedMessageId: "visitor-2",
+      botName: "Maven",
+      lastHumanCommandAt: (5 * hour) + 1,
+    })).toBe(false);
+  });
+
   test("requires a prior human-agent message", () => {
     const messages = [
       publicRecord("visitor-1", "visitor", 5 * hour),

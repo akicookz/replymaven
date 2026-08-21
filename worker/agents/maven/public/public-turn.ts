@@ -40,6 +40,7 @@ interface ResumeAiAfterHumanIdleInput {
   submittedMessageId: string;
   botName: string | null | undefined;
   snoozedUntil?: number | null;
+  lastHumanCommandAt?: number | null;
 }
 
 export function shouldResumeAiAfterHumanIdle(
@@ -63,9 +64,16 @@ export function shouldResumeAiAfterHumanIdle(
       break;
     }
   }
-  if (!latestAgentMessage) return false;
+  const commandAt = typeof input.lastHumanCommandAt === "number"
+    ? input.lastHumanCommandAt
+    : null;
+  const originAt = Math.max(
+    latestAgentMessage?.createdAt ?? 0,
+    commandAt ?? 0,
+  );
+  if (originAt === 0) return false;
 
-  const cutoff = latestAgentMessage.createdAt + HUMAN_IDLE_TAKEOVER_MS;
+  const cutoff = originAt + HUMAN_IDLE_TAKEOVER_MS;
   const qualifyingVisitors = input.messages.filter((message) =>
     message.author === "visitor" &&
     message.origin !== "email" &&
