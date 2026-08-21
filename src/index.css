@@ -4,6 +4,15 @@
 @import "tw-animate-css";
 @import "./theme.css";
 
+:root {
+  --help-radius-xs: calc(var(--radius) * 0.33);
+  --help-radius-sm: calc(var(--radius) * 0.5);
+  --help-radius-md: calc(var(--radius) * 0.67);
+  --help-radius-lg: var(--radius);
+  --help-radius-xl: calc(var(--radius) * 1.33);
+  --help-radius-2xl: calc(var(--radius) * 1.67);
+}
+
 /* Docs contain code snippets whose class-like strings would otherwise be
    picked up by automatic source detection and emitted as (dead) utilities. */
 @source not "../docs";
@@ -428,24 +437,25 @@ input[type="color"]::-moz-color-swatch {
   margin: 2rem 0;
 }
 /* Mirrors .help-prose code: the published chip is --muted, not the dark
-   --code surface, and sits at a fixed 0.8125rem with a 10px radius. */
+   --code surface, and sits at a fixed 0.8125rem. */
 .help-editor-surface :not(pre) > code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   background: var(--muted);
   color: var(--foreground);
   padding: 0.125em 0.4em;
-  border-radius: 10px;
+  border-radius: var(--help-radius-md);
   font-size: 0.8125rem;
 }
 .help-editor-surface :is(h1, h2, h3, h4) code {
   font-size: 0.85em;
+  border-radius: var(--help-radius-sm);
 }
 .help-editor-surface pre {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   background: var(--code);
   color: var(--code-foreground);
   padding: 1rem;
-  border-radius: 12px;
+  border-radius: var(--help-radius-lg);
   overflow-x: auto;
   font-size: 0.8125rem;
   line-height: 1.625;
@@ -481,13 +491,10 @@ input[type="color"]::-moz-color-swatch {
 .help-editor-surface .hljs-selector-pseudo { color: #79c0ff; }
 
 /* Tables (TipTap renders these inside .tableWrapper). Match the published
-   .help-table card: outer stroke on the wrapper, header rule, no cell grid. */
+   open .help-table: no box, no header fill, no cell grid. */
 .help-editor-surface .tableWrapper {
   margin: 1.25rem 0;
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: color-mix(in oklch, var(--muted), transparent 75%);
 }
 .help-editor-surface table {
   width: 100%;
@@ -505,10 +512,18 @@ input[type="color"]::-moz-color-swatch {
   position: relative;
   min-width: 3rem;
 }
+.help-editor-surface th:first-child,
+.help-editor-surface td:first-child {
+  padding-left: 0;
+}
+.help-editor-surface th:last-child,
+.help-editor-surface td:last-child {
+  padding-right: 0;
+}
 .help-editor-surface th {
-  background: color-mix(in oklch, var(--muted), transparent 25%);
   font-weight: 600;
-  border-bottom: 1px solid var(--border);
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
 }
 .help-editor-surface th > p,
 .help-editor-surface td > p {
@@ -570,19 +585,19 @@ input[type="color"]::-moz-color-swatch {
   max-width: 100%;
   width: 100%;
   height: auto;
-  border-radius: var(--radius);
+  border-radius: var(--help-radius-lg);
   display: block;
 }
 .help-editor-image-frame.is-cropped {
   position: relative;
   width: 100%;
-  border-radius: var(--radius);
+  border-radius: var(--help-radius-lg);
 }
 .help-editor-image-clip.is-cropped {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  border-radius: var(--radius);
+  border-radius: var(--help-radius-lg);
   touch-action: none;
   cursor: grab;
 }
@@ -711,7 +726,7 @@ input[type="color"]::-moz-color-swatch {
    the published page is the reference. No border there, so none here. */
 .callout {
   display: block;
-  border-radius: var(--radius);
+  border-radius: var(--help-radius-lg);
   padding: 0.85rem 1rem;
   background: var(--muted);
   color: var(--foreground);
