@@ -43,6 +43,7 @@ import {
   type McpRequestContext,
 } from "./mcp-tool-helpers";
 import { registerHelpdeskTools } from "./mcp-helpdesk-tools";
+import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -494,7 +495,7 @@ function registerSendAgentReplyTool(
     {
       title: "Send agent reply",
       description:
-        "Send an agent reply to a ReplyMaven conversation and notify the live widget.",
+        "Send an agent reply to a ReplyMaven conversation and notify the live widget. A leading @BotName line is a command, not a visitor-visible reply.",
       inputSchema: {
         projectId: z.string().min(1).describe("ReplyMaven project ID."),
         conversationId: z
@@ -521,6 +522,38 @@ function registerSendAgentReplyTool(
         conversationId,
       );
       if (!conversation) throw new Error("Conversation not found");
+
+      const projectService = new ProjectService(context.db);
+      const [project, projectSettings] = await Promise.all([
+        projectService.getProjectById(projectId),
+        projectService.getSettings(projectId),
+      ]);
+      const command = await executeChannelBotNameCommand({
+        text: content.trim(),
+        botName: projectSettings?.botName,
+        actorName: context.userName,
+        commandId: `mcp:${projectId}:${context.userId}:${conversation.id}:${crypto.randomUUID()}`,
+        now: Date.now(),
+        projectId,
+        conversation: {
+          id: conversation.id,
+          visitorId: conversation.visitorId,
+          visitorEmail: conversation.visitorEmail,
+          metadata: conversation.metadata,
+        },
+        chatService: context.conversationStore,
+        db: context.db,
+        env: context.env,
+        projectSettings,
+        projectName: project?.name ?? "Support",
+      });
+      if (command.handled) {
+        return textResult({
+          ok: true,
+          command: true,
+          confirmation: command.confirmation,
+        });
+      }
 
       const avatar = await getCurrentUserAvatar(context);
 

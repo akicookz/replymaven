@@ -75,6 +75,7 @@ import {
   usePublicChatSession,
 } from "@/hooks/use-public-chat-agent";
 import { reconcilePublicMessages } from "@/lib/inbox/public-message-adapter";
+import { looksLikeAgentBotNameCommand } from "@/lib/inbox/bot-name-command";
 import MessageList from "@/components/inbox/MessageList";
 import ReadingPane from "@/components/inbox/ReadingPane";
 import FocusView, { FocusViewSkeleton } from "@/components/inbox/FocusView";
@@ -806,7 +807,15 @@ function Conversations() {
         },
       );
       if (!res.ok) throw new Error("Failed to send reply");
-      const data = (await res.json()) as { id: string };
+      const data = (await res.json()) as {
+        id?: string;
+        command?: boolean;
+        confirmation?: string;
+      };
+      if (data.command) {
+        toast.success(data.confirmation || "Command applied");
+        return data;
+      }
       // After a successful send, optionally email the message to the visitor.
       if (asEmail && data.id) {
         try {
@@ -841,6 +850,12 @@ function Conversations() {
         ["conversation-detail", selectedConvo],
         (old) => {
           if (!old) return old;
+          if (
+            looksLikeAgentBotNameCommand(content, old.botName) &&
+            (imageUrls?.length ?? 0) === 0
+          ) {
+            return old;
+          }
           // _optimistic lets the WS hook swap this row for the server's copy
           // (message:new) instead of appending a duplicate.
           const optimistic = {

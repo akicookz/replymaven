@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ProjectService } from "./project-service";
+import { isBotNameLocked, ProjectService } from "./project-service";
 import { RESERVED_INBOUND_LOCAL_PARTS } from "./email-service";
 import { decrypt } from "./encryption-service";
 
@@ -52,6 +52,66 @@ describe("customer identity secret rotation", () => {
       result.secret,
     );
     expect(Object.keys(stored ?? {})).toEqual(["customerIdentitySecret"]);
+  });
+});
+
+describe("bot name lock", () => {
+  test("locks a stored name and leaves an empty name writable", () => {
+    expect(isBotNameLocked("Maven")).toBe(true);
+    expect(isBotNameLocked("  Luna  ")).toBe(true);
+    expect(isBotNameLocked("")).toBe(false);
+    expect(isBotNameLocked(null)).toBe(false);
+  });
+
+  test("updateSettings drops a botName change after the first set", async () => {
+    let written: Record<string, unknown> | null = null;
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [{ botName: "Maven" }],
+          }),
+        }),
+      }),
+      update: () => ({
+        set: (values: Record<string, unknown>) => {
+          written = values;
+          return { where: async () => undefined };
+        },
+      }),
+    };
+
+    await new ProjectService(db as never).updateSettings("project-1", {
+      botName: "Luna",
+      agentName: "an engineer",
+    });
+
+    expect(written).toEqual({ agentName: "an engineer" });
+  });
+
+  test("updateSettings keeps the first botName write", async () => {
+    let written: Record<string, unknown> | null = null;
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [{ botName: null }],
+          }),
+        }),
+      }),
+      update: () => ({
+        set: (values: Record<string, unknown>) => {
+          written = values;
+          return { where: async () => undefined };
+        },
+      }),
+    };
+
+    await new ProjectService(db as never).updateSettings("project-1", {
+      botName: "Maven",
+    });
+
+    expect(written).toEqual({ botName: "Maven" });
   });
 });
 

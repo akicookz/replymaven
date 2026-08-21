@@ -1,5 +1,6 @@
 import { type DrizzleD1Database } from "drizzle-orm/d1";
 import { eq, and, inArray } from "drizzle-orm";
+import { MAVEN_ASSIGNEE_ID } from "../../shared/maven-assignee";
 import { projects, teamMembers, teamMemberProjects } from "../db";
 import { users } from "../db/auth.schema";
 
@@ -8,7 +9,28 @@ export interface AssignableUser {
   name: string;
   email: string;
   image: string | null;
-  role: "owner" | "admin" | "member";
+  role: "owner" | "admin" | "member" | "bot";
+}
+
+export function mavenAssignableUser(
+  botName: string | null | undefined,
+): AssignableUser {
+  return {
+    id: MAVEN_ASSIGNEE_ID,
+    name: botName?.trim() || "Maven",
+    email: "",
+    image: null,
+    role: "bot",
+  };
+}
+
+export function isAllowedAssignee(
+  assigneeId: string | null,
+  humans: AssignableUser[],
+): boolean {
+  if (assigneeId === null) return true;
+  if (assigneeId === MAVEN_ASSIGNEE_ID) return true;
+  return humans.some((member) => member.id === assigneeId);
 }
 
 /**

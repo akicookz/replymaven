@@ -16,7 +16,11 @@ import { createAuth } from "./auth";
 import { type AppEnv, type HonoAppContext, type Plan } from "./types";
 import { ProjectService } from "./services/project-service";
 import { WidgetService } from "./services/widget-service";
-import { getAssignableUsers } from "./services/assignable-users";
+import {
+  getAssignableUsers,
+  isAllowedAssignee,
+  mavenAssignableUser,
+} from "./services/assignable-users";
 import { ContactFormService } from "./services/contact-form-service";
 import { createPublicConversationStore } from "./conversations/create-public-conversation-store";
 import { AgentPublicConversationStore } from "./conversations/agent-public-conversation-store";
@@ -45,12 +49,12 @@ import {
 } from "../shared/upload-ownership";
 import { publicUploadUrl } from "./lib/public-upload-url";
 import { AiService } from "./services/ai-service";
-import { applyBotNameCommand } from "./services/apply-bot-name-command";
+import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
 import {
-  mergePublicMetadata,
-  readTelegramCommandClaim,
-  telegramCommandClaimPatch,
-} from "./services/bot-name-decision";
+  canHandConversationToMaven,
+  recordMavenAssignment,
+} from "./services/maven-assignment";
+import { isMavenAssignee } from "../shared/maven-assignee";
 import { TelegramService } from "./services/telegram-service";
 import { resolveTelegramChatBinding } from "./services/telegram-chat-binding";
 import { parseConversationReference } from "./services/inbound-email-routing";
@@ -1599,156 +1603,33 @@ const app = new Hono<HonoAppContext>()
       );
     }
 
-    // Check if message is an @botName command
-    if (botName) {
-      const mentionPrefix = `@${botName}`;
-      if (message.text.toLowerCase().startsWith(mentionPrefix.toLowerCase())) {
-        const commandText = message.text.slice(mentionPrefix.length).trim();
-
-        const commandNow = Date.now();
-        const telegramCommandId =
-          `telegram:${projectId}:${String(message.chat?.id ?? "unknown")}:${String(message.message_id)}`;
-        if (!commandText) {
-          const replayed = readTelegramCommandClaim(
-            conversation.metadata,
-            telegramCommandId,
-          );
-          if (replayed) {
-            await sendConversationTelegramMessage(
-              replayed,
-              message.message_id,
-            );
-            return c.json({ ok: true });
-          }
-          await chatService.transitionChatOwnership(
-            conversationId,
-            projectId,
-            "ai_handed_back",
-          );
-          const confirmation = "Bot resumed.";
-          await chatService.updateConversation(conversationId, projectId, {
-            metadata: JSON.stringify(mergePublicMetadata(conversation.metadata, {
-              agentHandbackInstructions: null,
-              lastHumanCommandAt: commandNow,
-              ...telegramCommandClaimPatch(telegramCommandId, confirmation),
-            })),
-          });
-          await sendConversationTelegramMessage(
-            confirmation,
-            message.message_id,
-          );
-          return c.json({ ok: true });
-        }
-
-        const aiService = new AiService({
-          model: c.env.AI_MODEL,
-          geminiApiKey: c.env.GEMINI_API_KEY,
-          openaiApiKey: c.env.OPENAI_API_KEY,
-        });
-        const decision = await aiService.interpretBotNameCommand(commandText);
-        const defaultSettings = {
-          toneOfVoice: "professional" as const,
-          customTonePrompt: null,
-          companyContext: null,
-          botName: null,
-          agentName: null,
-        };
-        const project = await projectService.getProjectById(projectId);
-        const applied = await applyBotNameCommand({
-          rawAgentText: commandText,
-          decision,
-          metadata: conversation.metadata,
-          now: commandNow,
-          commandId: telegramCommandId,
-          deps: {
-            async transitionChatOwnership(event) {
-              const result = await chatService.transitionOwnership({
-                projectId,
-                conversationId,
-                event,
-              });
-              return result.conversation
-                ? {
-                    status: result.conversation.status,
-                    chatState: JSON.stringify(result.conversation.chatState),
-                  }
-                : null;
-            },
-            async takeHumanOwnership() {
-              return chatService.takeHumanOwnership(projectId, conversationId);
-            },
-            async updateConversation(input) {
-              await chatService.updateConversation(
-                conversationId,
-                projectId,
-                input,
-              );
-            },
-            async updateConversationStatus(status, closeReason) {
-              await chatService.updateConversationStatus(
-                conversationId,
-                projectId,
-                status,
-                closeReason,
-              );
-            },
-            async closeOpenConversationsAsSpam() {
-              await chatService.closeOpenConversationsAsSpam(
-                projectId,
-                conversation.visitorId,
-                conversation.visitorEmail ?? null,
-              );
-            },
-            async banVisitor(reason) {
-              await new VisitorBanService(db).banVisitor({
-                projectId,
-                visitorId: conversation.visitorId,
-                visitorEmail: conversation.visitorEmail ?? null,
-                reason,
-                bannedBy: "agent",
-                bannedFromConversationId: conversationId,
-                expiresAt: null,
-              });
-            },
-            async generateDirectedResponse(instruction) {
-              const msgs = await chatService.getPublicMessages(
-                conversationId,
-                projectId,
-              );
-              return aiService.generateDirectedResponse(
-                projectSettings ?? defaultSettings,
-                project?.name ?? "Support",
-                msgs
-                  .filter((entry) => entry.author !== "bot" || entry.content)
-                  .slice(-20)
-                  .map((entry) => ({
-                    role: entry.author,
-                    content: entry.content,
-                  })),
-                instruction,
-              );
-            },
-            async addPublicBotMessage(input) {
-              const botMessage = await chatService
-                .addPublicBotMessageIfOwnershipMatches(
-                  {
-                    conversationId,
-                    content: input.content,
-                    senderName: projectSettings?.botName ?? null,
-                  },
-                  projectId,
-                  input.expected,
-                );
-              return Boolean(botMessage);
-            },
-          },
-        });
-        await sendConversationTelegramMessage(
-          applied.confirmation,
-          message.message_id,
-        );
-        return c.json({ ok: true });
-      }
+    const project = await projectService.getProjectById(projectId);
+    const telegramCommand = await executeChannelBotNameCommand({
+      text: message.text,
+      botName,
+      actorName: message.from?.first_name ?? null,
+      commandId:
+        `telegram:${projectId}:${String(message.chat?.id ?? "unknown")}:${String(message.message_id)}`,
+      now: Date.now(),
+      projectId,
+      conversation: {
+        id: operationalConversationId,
+        visitorId: conversation.visitorId,
+        visitorEmail: conversation.visitorEmail,
+        metadata: conversation.metadata,
+      },
+      chatService,
+      db,
+      env: c.env,
+      projectSettings,
+      projectName: project?.name ?? "Support",
+    });
+    if (telegramCommand.handled) {
+      await sendConversationTelegramMessage(
+        telegramCommand.confirmation,
+        message.message_id,
+      );
+      return c.json({ ok: true });
     }
 
     // Normal agent reply — store and forward to visitor
@@ -5232,8 +5113,11 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const assignable = await getAssignableUsers(db, project.id);
-    return c.json(assignable);
+    const [assignable, settings] = await Promise.all([
+      getAssignableUsers(db, project.id),
+      projectService.getSettings(project.id),
+    ]);
+    return c.json([mavenAssignableUser(settings?.botName), ...assignable]);
   })
 
   // ─── Resources ─────────────────────────────────────────────────────────────
@@ -7074,6 +6958,39 @@ const app = new Hono<HonoAppContext>()
       userProfile[0]?.profilePicture ?? userProfile[0]?.image ?? null;
 
     // Reopen closed conversations before adding the message
+    const replyContent = parsed.data.content?.trim() ?? "";
+    if (replyContent && replyImageUrls.length === 0) {
+      const projectSettings = await projectService.getSettings(project.id);
+      const command = await executeChannelBotNameCommand({
+        text: replyContent,
+        botName: projectSettings?.botName,
+        actorName: user.name,
+        commandId: `dashboard:${project.id}:${user.id}:${
+          c.req.header("idempotency-key") ?? crypto.randomUUID()
+        }`,
+        now: Date.now(),
+        projectId: project.id,
+        conversation: {
+          id: conversation.id,
+          visitorId: conversation.visitorId,
+          visitorEmail: conversation.visitorEmail,
+          metadata: conversation.metadata,
+        },
+        chatService,
+        db,
+        env: c.env,
+        projectSettings,
+        projectName: project.name,
+      });
+      if (command.handled) {
+        return c.json({
+          ok: true,
+          command: true,
+          confirmation: command.confirmation,
+        });
+      }
+    }
+
     if (conversation.status === "closed") {
       await chatService.reopenConversation(conversation.id, project.id);
     }
@@ -7258,10 +7175,9 @@ const app = new Hono<HonoAppContext>()
     const parsed = validate(bulkConversationActionSchema, await c.req.json());
     if (!parsed.success) return c.json({ error: parsed.error }, 400);
 
-    if (parsed.data.action === "assign" && parsed.data.assigneeId) {
-      const assigneeId = parsed.data.assigneeId;
+    if (parsed.data.action === "assign") {
       const assignable = await getAssignableUsers(db, project.id);
-      if (!assignable.some((member) => member.id === assigneeId)) {
+      if (!isAllowedAssignee(parsed.data.assigneeId, assignable)) {
         return c.json(
           { error: "Assignee is not a member of this project's team" },
           400,
@@ -7290,6 +7206,34 @@ const app = new Hono<HonoAppContext>()
           console.error("Native Sidechat archive enforcement failed");
         }
       }
+    }
+
+    if (
+      parsed.data.action === "assign" &&
+      isMavenAssignee(parsed.data.assigneeId)
+    ) {
+      const settings = await projectService.getSettings(project.id);
+      await Promise.all(result.updatedIds.map(async (conversationId) => {
+        const target = await chatService.getOperationalConversationById(
+          conversationId,
+          project.id,
+        );
+        if (target && canHandConversationToMaven(target)) {
+          await chatService.transitionOwnership({
+            projectId: project.id,
+            conversationId,
+            event: "ai_handed_back",
+          });
+        }
+        await recordMavenAssignment({
+          chatService,
+          conversationId,
+          projectId: project.id,
+          botName: settings?.botName,
+          actorName: user.name,
+          reason: "manual",
+        });
+      }));
     }
 
     if (parsed.data.action === "snooze") {
@@ -7474,16 +7418,35 @@ const app = new Hono<HonoAppContext>()
     );
     if (!conversation) return c.json({ error: "Not found" }, 404);
 
-    // Validate the assignee belongs to the owner's assignable users (owner +
-    // accepted team members with access to this project).
-    if (parsed.data.assigneeId) {
-      const assignable = await getAssignableUsers(db, project.id);
-      if (!assignable.some((u) => u.id === parsed.data.assigneeId)) {
-        return c.json(
-          { error: "Assignee is not a member of this project's team" },
-          400,
-        );
+    const assignable = await getAssignableUsers(db, project.id);
+    if (!isAllowedAssignee(parsed.data.assigneeId, assignable)) {
+      return c.json(
+        { error: "Assignee is not a member of this project's team" },
+        400,
+      );
+    }
+
+    if (isMavenAssignee(parsed.data.assigneeId)) {
+      if (isMavenAssignee(conversation.assigneeId)) {
+        return c.json({ ok: true });
       }
+      if (canHandConversationToMaven(conversation)) {
+        await chatService.transitionOwnership({
+          projectId: project.id,
+          conversationId: conversation.id,
+          event: "ai_handed_back",
+        });
+      }
+      const settings = await projectService.getSettings(project.id);
+      await recordMavenAssignment({
+        chatService,
+        conversationId: conversation.id,
+        projectId: project.id,
+        botName: settings?.botName,
+        actorName: user.name,
+        reason: "manual",
+      });
+      return c.json({ ok: true });
     }
 
     await chatService.setAssignee(

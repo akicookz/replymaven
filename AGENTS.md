@@ -42,7 +42,7 @@ Read whole files, not the matched lines. Half-read context is where the bugs com
 
 ## Product Overview
 
-ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbot platform built on Cloudflare Workers. Users sign up, create a project/bot, customize its appearance and behavior, add knowledge resources (web pages, PDFs, FAQs), and embed a lightweight chat widget on their website. The bot uses configurable AI models (Google Gemini 3 Flash or OpenAI GPT-5, controlled via the `AI_MODEL` env var) for AI responses, Cloudflare AI Search for RAG over user-uploaded resources, and supports Telegram-based live agent handoff when the bot cannot confidently answer. Users can name their bot (e.g. "Luna") and configure a human agent label (e.g. "an engineer") for personalized handoff messages. Agents interact with the bot via `@BotName` commands in Telegram to hand back control, close conversations, or instruct the bot to respond directly.
+ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbot platform built on Cloudflare Workers. Users sign up, create a project/bot, customize its appearance and behavior, add knowledge resources (web pages, PDFs, FAQs), and embed a lightweight chat widget on their website. The bot uses configurable AI models (Google Gemini 3 Flash or OpenAI GPT-5, controlled via the `AI_MODEL` env var) for AI responses, Cloudflare AI Search for RAG over user-uploaded resources, and supports Telegram-based live agent handoff when the bot cannot confidently answer. Users can set the bot name once (e.g. "Luna") and configure a human agent label (e.g. "an engineer") for personalized handoff messages. Agents interact with the bot via `@BotName` commands in Telegram, the dashboard composer, or MCP to hand back control, close conversations, or instruct the bot to respond directly. A command is never stored as a visitor-visible agent row. Handing the thread to AI assigns Maven and writes a dashboard system pill.
 
 ### Core Features
 
@@ -52,7 +52,7 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 - **Tone of voice** -- configurable AI personality (professional, friendly, casual, formal, or custom prompt).
 - **Quick actions and quick topics** -- configurable buttons and topic suggestions shown above the chat input.
 - **Intro message** -- the first bot message visitors see when they open the widget.
-- **Telegram live agent handoff** -- when the bot cannot answer or the visitor requests a human, the conversation is relayed to the user's Telegram. Agent replies in Telegram are synced back to the widget. When a conversation is in agent mode, the AI is completely silenced and visitor messages are forwarded to Telegram. Agents use `@BotName` commands to hand back to AI (with optional instructions), close conversations, or instruct the bot to respond immediately. New bookings, conversations, and contact form submissions also trigger Telegram notifications when configured.
+- **Telegram live agent handoff** -- when the bot cannot answer or the visitor requests a human, the conversation is relayed to the user's Telegram. Agent replies in Telegram are synced back to the widget. When a conversation is in agent mode, the AI is completely silenced and visitor messages are forwarded to Telegram. Agents use `@BotName` commands (Telegram, dashboard, or MCP) to hand back to AI (with optional instructions), close conversations, or instruct the bot to respond immediately. The inbox Assign menu includes Maven; picking it hands the thread back. Idle takeover after four quiet hours also assigns Maven. New bookings, conversations, and contact form submissions also trigger Telegram notifications when configured.
 - **Canned response auto-drafting** -- after a conversation ends, the AI analyzes it and generates draft canned responses. Users approve or reject drafts from the dashboard.
 - **Customer continuity** -- anonymous widget visitor IDs can be connected to project-scoped customer profiles. Signed server-issued tokens keep exact visitor history together across devices without trusting browser-supplied email.
 
@@ -772,7 +772,7 @@ Resource ingestion:
 
 ### Telegram Live Agent Handoff
 
-1. User saves the Telegram bot token, `botName`, and `agentName` in dashboard settings. The token is encrypted at rest with `ENCRYPTION_KEY` (`worker/services/telegram-secrets.ts`); every read goes back through `resolveTelegramToken`, and `TelegramService` decrypts internally, so callers pass the stored value and never hold the credential.
+1. User saves the Telegram bot token and `agentName` in dashboard settings. `botName` can be set once, then it is locked. The token is encrypted at rest with `ENCRYPTION_KEY` (`worker/services/telegram-secrets.ts`); every read goes back through `resolveTelegramToken`, and `TelegramService` decrypts internally, so callers pass the stored value and never hold the credential.
 2. Saving registers the webhook with a per-project `secret_token`. The chat id is then learned from the first verified update: the user adds the bot to their group, sends any message, and the bot confirms in the chat. It binds once and is never repointed. A chat id can still be pasted by hand.
 3. When the bot cannot answer confidently or visitor requests a human:
    - Conversation status changes to `waiting_agent`
@@ -783,7 +783,7 @@ Resource ingestion:
    - Visitor messages are forwarded to Telegram via `forwardVisitorMessage` (threaded using `telegramThreadId`)
    - The widget endpoint returns `{ ok: true, agentMode: true }` JSON instead of SSE
 5. Agent replies in Telegram (not prefixed with `@BotName`) -> stored as agent message, status set to `agent_replied`, visitor sees reply via polling
-6. Agent types `@BotName` commands in Telegram. Bare `@BotName` hands the thread back to AI. Any other text is read as ordinary language by `interpretBotNameCommand()` and applied as one decision: keep or hand off ownership, store or clear instructions, speak now or stay silent, close, or ban. Speak-now uses `generateDirectedResponse()`. There is no keyword list.
+6. Agent types `@BotName` commands in Telegram, the dashboard composer, or MCP. Bare `@BotName` hands the thread back to AI, assigns Maven, and writes `{name} assigned {botName}`. Any other text is read as ordinary language by `interpretBotNameCommand()` and applied as one decision: keep or hand off ownership, store or clear instructions, speak now or stay silent, close, or ban. Speak-now uses `generateDirectedResponse()`. There is no keyword list. Dashboard and MCP commands are not stored as visitor-visible agent rows. Idle takeover writes `{botName} self-assigned because the human seemed away`.
 
 #### Telegram Notification Methods
 
@@ -889,7 +889,7 @@ Secrets (via `.dev.vars` locally, `wrangler secret put` for production):
 24. Implement `@BotName` command parsing with AI intent classification (`close`, `handback`, `respond`)
 25. Implement `generateDirectedResponse()` for agent-directed bot replies
 26. Add Telegram notification methods (`notifyNewConversation`, `notifyNewBooking`, `notifyContactForm`, `forwardVisitorMessage`) with reply threading via `telegramThreadId`
-27. Add configurable `botName` and `agentName` in project settings + dashboard UI
+27. Add `botName` (set once, then locked) and configurable `agentName` in project settings + dashboard UI
 
 ### Phase 6 -- Canned Responses
 28. Build canned response management page

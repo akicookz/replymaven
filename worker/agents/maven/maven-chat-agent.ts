@@ -138,6 +138,8 @@ import { ProjectService } from "../../services/project-service";
 import { TelegramService } from "../../services/telegram-service";
 import { ToolService } from "../../services/tool-service";
 import { VisitorBanService } from "../../services/visitor-ban-service";
+import { MAVEN_ASSIGNEE_ID } from "../../../shared/maven-assignee";
+import { mavenAssignedSystemContent } from "../../services/maven-assignment";
 import { logError } from "../../observability";
 import { resolvePendingPublicContactUpdate } from "./public/public-human-mode";
 
@@ -771,6 +773,19 @@ export class MavenChatAgent extends AIChatAgent<
               closeReason: currentState.closeReason,
               aiParticipation: currentChatState.aiParticipation,
               aiInvoked: false,
+            });
+            await this.applyConversationAction({
+              action: "assign",
+              assigneeId: MAVEN_ASSIGNEE_ID,
+            });
+            await this.appendSystem({
+              projectId,
+              conversationId: currentState.id,
+              kind: "assigned",
+              content: mavenAssignedSystemContent({
+                botName: settings?.botName,
+                reason: "idle",
+              }),
             });
           }
         }
@@ -1486,6 +1501,7 @@ export class MavenChatAgent extends AIChatAgent<
         lastActivityAt: Math.max(state.lastActivityAt, message.createdAt),
         updatedAt: Math.max(state.updatedAt, message.createdAt),
         autoCloseScheduleId: null,
+        assigneeId: message.userId ?? null,
       });
       await this.publishPublicProjection(saved, updated);
       return structuredClone(message);

@@ -178,6 +178,7 @@ function GeneralSettings() {
         );
       }
 
+      const botNameLocked = Boolean(settings?.botName?.trim());
       const body = {
         companyName: form.companyName.trim() || null,
         companyUrl: form.companyUrl.trim() || null,
@@ -187,7 +188,7 @@ function GeneralSettings() {
           form.toneOfVoice === "custom"
             ? form.customTonePrompt.trim() || null
             : null,
-        botName: form.botName.trim() || null,
+        ...(botNameLocked ? {} : { botName: form.botName.trim() || null }),
         agentName: form.agentName.trim() || null,
         autoCloseMinutes: form.autoCloseMinutes,
         workingHours: form.workingHours.trim() || null,
@@ -383,18 +384,28 @@ function GeneralSettings() {
           <Field
             htmlFor="bot-name"
             label="Assistant name"
-            hint="No spaces, max 16 characters. Used in chat and Telegram commands."
+            hint={
+              settings?.botName?.trim()
+                ? "Used in chat and Telegram commands. This name cannot be changed."
+                : "No spaces, max 16 characters. Used in chat and Telegram commands. You can set this once."
+            }
           >
-            <Input
-              id="bot-name"
-              type="text"
-              value={form.botName}
-              onChange={(e) => {
-                const val = e.target.value.replace(/[^a-zA-Z0-9_-]/g, "");
-                setForm((prev) => ({ ...prev, botName: val.slice(0, 16) }));
-              }}
-              placeholder="e.g. Luna, Alex, Maya"
-            />
+            {settings?.botName?.trim() ? (
+              <p id="bot-name" className="text-sm">
+                {settings.botName}
+              </p>
+            ) : (
+              <Input
+                id="bot-name"
+                type="text"
+                value={form.botName}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/[^a-zA-Z0-9_-]/g, "");
+                  setForm((prev) => ({ ...prev, botName: val.slice(0, 16) }));
+                }}
+                placeholder="e.g. Luna, Alex, Maya"
+              />
+            )}
           </Field>
           <Field
             htmlFor="agent-name"

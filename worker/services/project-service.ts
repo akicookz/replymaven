@@ -37,6 +37,12 @@ function encodeBase64Url(bytes: Uint8Array): string {
     .replace(/=+$/u, "");
 }
 
+export function isBotNameLocked(
+  current: string | null | undefined,
+): boolean {
+  return Boolean(current?.trim());
+}
+
 export class ProjectService {
   constructor(private db: DrizzleD1Database<Record<string, unknown>>) {}
 
@@ -226,9 +232,20 @@ export class ProjectService {
       >
     >,
   ): Promise<ProjectSettingsRow | null> {
+    const next = { ...updates };
+    if (next.botName !== undefined) {
+      const current = await this.getSettings(projectId);
+      if (isBotNameLocked(current?.botName)) {
+        delete next.botName;
+      }
+    }
+    if (Object.keys(next).length === 0) {
+      return this.getSettings(projectId);
+    }
+
     await this.db
       .update(projectSettings)
-      .set(updates)
+      .set(next)
       .where(eq(projectSettings.projectId, projectId));
 
     return this.getSettings(projectId);

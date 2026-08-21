@@ -6,6 +6,7 @@ import type {
   PublicConversationRecord,
   PublicMessageRecord,
 } from "../../../../shared/maven-conversation";
+import { MAVEN_ASSIGNEE_ID } from "../../../../shared/maven-assignee";
 
 const isBunTest = "Bun" in globalThis;
 const nativeTest = isBunTest ? test.skip : test;
@@ -888,8 +889,14 @@ describe("native public MavenChatAgent child", () => {
     expect(botMessages[0]?.content).toBe(
       "I can help with questions about this product, website, account, or support task, but I can't help with unrelated general-purpose requests here.",
     );
-    expect(
-      secondSnapshot.messages.filter((message) => message.author === "system"),
-    ).toHaveLength(0);
+    expect(secondSnapshot.conversation.assigneeId).toBe(MAVEN_ASSIGNEE_ID);
+    const systemMessages = secondSnapshot.messages.filter(
+      (message) => message.author === "system",
+    );
+    expect(systemMessages).toHaveLength(1);
+    expect(systemMessages[0]?.systemKind).toBe("assigned");
+    expect(systemMessages[0]?.content).toBe(
+      "Maven self-assigned because the human seemed away",
+    );
   }, 30_000);
 });

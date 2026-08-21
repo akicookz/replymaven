@@ -70,6 +70,7 @@ describe("applyBotNameCommand", () => {
       deps,
     });
     expect(result.confirmation).toBe("Instructions saved.");
+    expect(result.handedToAi).toBe(false);
     expect(deps.calls).toEqual(["ownership:human", "metadata"]);
     expect(deps.metadataWrites[0]).toEqual({
       timezone: "UTC",
@@ -91,6 +92,7 @@ describe("applyBotNameCommand", () => {
       deps,
     });
     expect(result.confirmation).toBe("Bot responded.");
+    expect(result.handedToAi).toBe(true);
     expect(deps.calls).toEqual([
       "ownership:ai_handed_back",
       "speak:take over",
@@ -158,6 +160,7 @@ describe("applyBotNameCommand", () => {
       deps,
     });
     expect(result.confirmation).toBe("Bot resumed.");
+    expect(result.handedToAi).toBe(true);
     expect(deps.calls).toEqual(["ownership:ai_handed_back", "metadata"]);
   });
 
@@ -205,6 +208,7 @@ describe("applyBotNameCommand", () => {
       deps,
     });
     expect(result.confirmation).toBe("Instructions saved.");
+    expect(result.handedToAi).toBe(false);
     expect(deps.calls).toEqual(["ownership:human", "metadata"]);
     expect(deps.metadataWrites[0]).toMatchObject({
       agentHandbackInstructions: "keep them as a VIP",

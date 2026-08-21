@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   identifyHardGate,
+  parseAgentBotNameCommand,
   parseVisitorAiInvocation,
 } from "./public-turn-gates";
 
@@ -43,4 +44,23 @@ test("AI invocation requires a non-empty leading bot mention", () => {
     false,
   );
   expect(parseVisitorAiInvocation("@Maven", "Maven").invoked).toBe(false);
+});
+
+test("agent @BotName commands allow a bare mention", () => {
+  expect(parseAgentBotNameCommand("@Maven", "Maven")).toEqual({
+    isCommand: true,
+    commandText: "",
+  });
+  expect(parseAgentBotNameCommand(
+    "@Maven, this is yours when they come back",
+    "Maven",
+  )).toEqual({
+    isCommand: true,
+    commandText: "this is yours when they come back",
+  });
+  expect(parseAgentBotNameCommand("Hi Maven, how can I verify?", "Maven"))
+    .toEqual({
+      isCommand: false,
+      commandText: "Hi Maven, how can I verify?",
+    });
 });

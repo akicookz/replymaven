@@ -41,11 +41,11 @@ interface ApplyBotNameCommandInput {
 
 export async function applyBotNameCommand(
   input: ApplyBotNameCommandInput,
-): Promise<{ confirmation: string }> {
+): Promise<{ confirmation: string; handedToAi: boolean }> {
   const { rawAgentText, metadata, now, commandId, deps } = input;
   if (commandId) {
     const replayed = readTelegramCommandClaim(metadata, commandId);
-    if (replayed) return { confirmation: replayed };
+    if (replayed) return { confirmation: replayed, handedToAi: false };
   }
 
   if (!input.decision) {
@@ -58,7 +58,7 @@ export async function applyBotNameCommand(
       agentHandbackInstructions: rawAgentText,
       lastHumanCommandAt: now,
     }, commandId, confirmation);
-    return { confirmation };
+    return { confirmation, handedToAi: false };
   }
 
   const decision = input.decision;
@@ -66,7 +66,7 @@ export async function applyBotNameCommand(
     await deps.updateConversationStatus("closed", "resolved");
     const confirmation = confirmBotNameDecision({ effect: "close" });
     await writeClaim(deps, metadata, commandId, confirmation);
-    return { confirmation };
+    return { confirmation, handedToAi: false };
   }
   if (decision.effect === "ban") {
     const reason = resolveBanReason(decision.reason, rawAgentText);
@@ -75,7 +75,7 @@ export async function applyBotNameCommand(
     await deps.closeOpenConversationsAsSpam();
     const confirmation = confirmBotNameDecision({ effect: "ban", reason });
     await writeClaim(deps, metadata, commandId, confirmation);
-    return { confirmation };
+    return { confirmation, handedToAi: false };
   }
 
   let snapshot: BotNameOwnershipSnapshot | null = null;
@@ -126,7 +126,10 @@ export async function applyBotNameCommand(
   }
 
   await writeMetadata(deps, metadata, instructionPatch, commandId, confirmation);
-  return { confirmation };
+  return {
+    confirmation,
+    handedToAi: decision.ownership === "ai",
+  };
 }
 
 async function writeClaim(

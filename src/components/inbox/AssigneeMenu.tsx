@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import { Check, ChevronDownIcon, UserIcon } from "lucide-react";
+import { Bot, Check, ChevronDownIcon, UserIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,7 +16,7 @@ interface AssignableUser {
   name: string;
   email: string;
   image: string | null;
-  role: "owner" | "admin" | "member";
+  role: "owner" | "admin" | "member" | "bot";
 }
 
 interface AssigneeMenuProps {
@@ -34,6 +34,16 @@ function initials(name: string, email: string): string {
 }
 
 function Avatar({ user, size = 18 }: { user: AssignableUser; size?: number }) {
+  if (user.role === "bot") {
+    return (
+      <span
+        className="rounded-full bg-glass-raised text-ink-2 flex items-center justify-center shrink-0"
+        style={{ width: size, height: size }}
+      >
+        <Bot style={{ width: size * 0.55, height: size * 0.55 }} />
+      </span>
+    );
+  }
   if (user.image) {
     return (
       <img
@@ -91,7 +101,7 @@ export default function AssigneeMenu({
               : "gap-1.5 pl-1.5 pr-2",
             current ? "text-brand bg-glass-raised" : "text-ink-3",
           )}
-          title="Assign to a teammate"
+          title="Assign conversation"
         >
           {current ? (
             <Avatar user={current} />

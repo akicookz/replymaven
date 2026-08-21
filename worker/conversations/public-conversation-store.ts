@@ -101,7 +101,8 @@ export interface AppendPublicSystemInput {
     | "snoozed"
     | "snooze_ended"
     | "drafted"
-    | "review_summary";
+    | "review_summary"
+    | "assigned";
   content: string;
   idempotencyKey?: string;
 }

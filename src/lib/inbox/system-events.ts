@@ -1,4 +1,11 @@
-export type SystemEventKind = "flagged" | "joined" | "snoozed" | "snooze_ended" | "drafted" | "review_summary";
+export type SystemEventKind =
+  | "flagged"
+  | "joined"
+  | "snoozed"
+  | "snooze_ended"
+  | "drafted"
+  | "review_summary"
+  | "assigned";
 export function parseSystemKind(sources?: string | null): SystemEventKind | null {
   if (!sources) return null;
   try { return (JSON.parse(sources).systemKind as SystemEventKind) ?? null; } catch { return null; }
@@ -10,6 +17,7 @@ export function systemEventDot(kind: SystemEventKind | null): string {
     case "snooze_ended": return "bg-dot-green";
     case "drafted": return "bg-dot-blue";
     case "review_summary": return "bg-dot-orange";
+    case "assigned": return "bg-dot-blue";
     case "snoozed": default: return "bg-dot-gray";
   }
 }

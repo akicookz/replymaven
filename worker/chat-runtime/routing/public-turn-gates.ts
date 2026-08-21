@@ -6,23 +6,39 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function parseVisitorAiInvocation(
+function matchBotNameMention(
   message: string,
   botName: string | null | undefined,
-): { invoked: boolean; content: string } {
+): { matched: boolean; content: string } {
   const normalizedBotName = botName?.trim();
-  if (!normalizedBotName) return { invoked: false, content: message };
+  if (!normalizedBotName) return { matched: false, content: message };
 
   const mention = new RegExp(
     `^@${escapeRegExp(normalizedBotName)}(?:\\s+|[,:]\\s*|$)`,
     "i",
   );
-  if (!mention.test(message)) return { invoked: false, content: message };
+  if (!mention.test(message)) return { matched: false, content: message };
+  return { matched: true, content: message.replace(mention, "").trim() };
+}
 
-  const content = message.replace(mention, "").trim();
-  if (!content) return { invoked: false, content: message };
+export function parseVisitorAiInvocation(
+  message: string,
+  botName: string | null | undefined,
+): { invoked: boolean; content: string } {
+  const mention = matchBotNameMention(message, botName);
+  if (!mention.matched || !mention.content) {
+    return { invoked: false, content: message };
+  }
+  return { invoked: true, content: mention.content };
+}
 
-  return { invoked: true, content };
+export function parseAgentBotNameCommand(
+  message: string,
+  botName: string | null | undefined,
+): { isCommand: boolean; commandText: string } {
+  const mention = matchBotNameMention(message.trim(), botName);
+  if (!mention.matched) return { isCommand: false, commandText: message };
+  return { isCommand: true, commandText: mention.content };
 }
 
 export function identifyHardGate(input: {
