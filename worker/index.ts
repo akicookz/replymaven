@@ -10,7 +10,6 @@ import {
   projectSettings as projectSettingsTable,
   resources as resourcesTable,
   type HelpArticleRow,
-  type HelpCategoryRow,
 } from "./db/schema";
 import { createAuth } from "./auth";
 import { type AppEnv, type HonoAppContext, type Plan } from "./types";
@@ -74,15 +73,12 @@ import {
 } from "./services/email-service";
 import { ToolService } from "./services/tool-service";
 import { GuidelineService } from "./services/guideline-service";
-import { HelpdeskService, type HelpArticleNav } from "./services/helpdesk-service";
+import { HelpdeskService } from "./services/helpdesk-service";
 import { McpOAuthService } from "./services/mcp-oauth-service";
 import { renderHelpIndex } from "./helpdesk-render/render-help-index";
 import { renderHelpCategory } from "./helpdesk-render/render-help-category";
 import { renderHelpArticle } from "./helpdesk-render/render-help-article";
-import {
-  renderHelpSearch,
-  type HelpSearchResult,
-} from "./helpdesk-render/render-help-search";
+import { renderHelpSearch } from "./helpdesk-render/render-help-search";
 import { renderSitemap } from "./helpdesk-render/render-sitemap";
 import { renderRobots } from "./helpdesk-render/render-robots";
 import {
@@ -108,6 +104,7 @@ import {
   dispatchPublicHelp,
   helpHtmlHeaders,
   helpNotFoundCacheHeaders,
+  helpSearchAnswerHeaders,
   helpSearchHeaders,
   helpSitemapCacheHeaders,
   helpUncachedHeaders,
@@ -116,6 +113,12 @@ import {
   publicHelpHtmlChanged,
   scheduleHelpPageCachePurge,
 } from "./helpdesk-render/help-page-cache";
+import { matchHelpArticlesFromQuery } from "./helpdesk-render/help-search";
+import {
+  encodeHelpExplainEvent,
+  startHelpExplainSource,
+  transformHelpExplainStream,
+} from "./helpdesk-render/help-search-explain";
 import {
   OWN_DOCS_DISPATCH_HEADER,
   hostedHelpRedirectUrl,
@@ -350,84 +353,6 @@ async function readBodyCapped(
     }
   }
   return new TextDecoder("utf-8", { fatal: false, ignoreBOM: false }).decode(buf);
-}
-
-// ─── Help search result resolver ──────────────────────────────────────────────
-function resolveHelpSearchResults(
-  response: unknown,
-  articles: HelpArticleNav[],
-  categories: HelpCategoryRow[],
-  projectId: string,
-): HelpSearchResult[] {
-  if (typeof response !== "object" || response === null) return [];
-  const articlesById = new Map(articles.map((a) => [a.id, a]));
-  const categoriesById = new Map(categories.map((c) => [c.id, c]));
-  const filenames: Array<{ filename: string; score: number | null }> = [];
-
-  const record = response as Record<string, unknown>;
-  const result =
-    typeof record.result === "object" && record.result !== null
-      ? (record.result as Record<string, unknown>)
-      : null;
-
-  const collectFromArray = (arr: unknown[]): void => {
-    for (const entry of arr) {
-      if (typeof entry !== "object" || entry === null) continue;
-      const r = entry as Record<string, unknown>;
-      const item =
-        typeof r.item === "object" && r.item !== null
-          ? (r.item as Record<string, unknown>)
-          : null;
-      const filename =
-        typeof r.filename === "string"
-          ? r.filename
-          : typeof item?.key === "string"
-            ? (item.key as string)
-            : null;
-      if (!filename) continue;
-      const score = typeof r.score === "number" ? r.score : null;
-      filenames.push({ filename, score });
-    }
-  };
-
-  if (result && Array.isArray(result.chunks)) {
-    collectFromArray(result.chunks);
-  } else if (Array.isArray(record.chunks)) {
-    collectFromArray(record.chunks);
-  } else if (Array.isArray(record.data)) {
-    collectFromArray(record.data);
-  }
-
-  const prefix = `${projectId}/articles/`;
-  const bestByArticleId = new Map<
-    string,
-    { article: HelpArticleNav; score: number | null }
-  >();
-  for (const { filename, score } of filenames) {
-    if (!filename.startsWith(prefix)) continue;
-    const tail = filename.slice(prefix.length);
-    const articleId = tail.endsWith(".md") ? tail.slice(0, -3) : tail;
-    const article = articlesById.get(articleId);
-    if (!article) continue;
-    const existing = bestByArticleId.get(articleId);
-    if (!existing) {
-      bestByArticleId.set(articleId, { article, score });
-    } else if (
-      score !== null &&
-      (existing.score === null || score > existing.score)
-    ) {
-      bestByArticleId.set(articleId, { article, score });
-    }
-  }
-
-  const results: HelpSearchResult[] = [];
-  for (const { article, score } of bestByArticleId.values()) {
-    const category = categoriesById.get(article.categoryId);
-    if (!category) continue;
-    results.push({ article, category, score });
-  }
-  results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  return results;
 }
 
 // ─── Zod validation helper ────────────────────────────────────────────────────
@@ -1720,6 +1645,46 @@ const app = new Hono<HonoAppContext>()
       },
     });
   })
+  .get("/help/:projectSlug/search/answer", async (c) => {
+    const started = await beginPublicHelpRequest(c);
+    if (!started.ok) return started.response;
+    const { page } = started;
+    const query = (c.req.query("q") ?? "").trim().slice(0, 200);
+    const headers = helpSearchAnswerHeaders({ noindex: started.noindex });
+
+    if (query.length === 0) {
+      return new Response(encodeHelpExplainEvent("done", {}), { headers });
+    }
+
+    try {
+      const source = await startHelpExplainSource(
+        c.env.AI,
+        page.project.id,
+        query,
+      );
+      const stream = transformHelpExplainStream({
+        source,
+        articles: page.publishedArticles,
+        categories: page.categories,
+        projectId: page.project.id,
+        projectSlug: page.project.slug,
+        customUrl: page.helpCustomUrl,
+      });
+      return new Response(stream, { headers });
+    } catch (err) {
+      logWarn("help_search.explain_failed", {
+        projectId: page.project.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      const empty = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encodeHelpExplainEvent("done", {}));
+          controller.close();
+        },
+      });
+      return new Response(empty, { headers });
+    }
+  })
   .get("/help/:projectSlug/:categorySlug/:articleSlug", async (c) => {
     const started = await beginPublicHelpRequest(c);
     if (!started.ok) return started.response;
@@ -1814,45 +1779,14 @@ const app = new Hono<HonoAppContext>()
     const { page } = started;
     const query = (c.req.query("q") ?? "").trim().slice(0, 200);
 
-    let results: HelpSearchResult[] = [];
-    if (query.length > 0) {
-      try {
-        const response = await c.env.AI.aiSearch()
-          .get("supportbot")
-          .search({
-            messages: [{ role: "user", content: query }],
-            ai_search_options: {
-              retrieval: {
-                retrieval_type: "vector",
-                filters: {
-                  // Help articles live in the `articles/` subfolder. AutoRAG's
-                  // folder $eq matches a folder exactly (not recursively), so
-                  // filtering on `${project.id}/` misses every article.
-                  folder: { $eq: `${page.project.id}/articles/` },
-                } as never,
-                max_num_results: 12,
-                match_threshold: 0.2,
-              },
-              query_rewrite: { enabled: false },
-              reranking: {
-                enabled: true,
-                model: "@cf/baai/bge-reranker-base",
-              },
-            },
-          });
-        results = resolveHelpSearchResults(
-          response,
-          page.publishedArticles,
-          page.categories,
-          page.project.id,
-        );
-      } catch (err) {
-        logWarn("help_search.failed", {
-          projectId: page.project.id,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    const results =
+      query.length > 0
+        ? matchHelpArticlesFromQuery(
+            query,
+            page.publishedArticles,
+            page.categories,
+          )
+        : [];
 
     const html = renderHelpSearch({
       project: page.project,

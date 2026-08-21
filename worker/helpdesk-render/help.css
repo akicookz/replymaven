@@ -1423,6 +1423,33 @@ html.help-page-home .help-topbar {
 
 /* ─── Search results page ────────────────────────────────────────────────── */
 
+.help-search-explain {
+  margin: 1.5rem 0 0;
+  padding: 1.15rem 1.2rem;
+  border-radius: 0.875rem;
+  background: color-mix(in oklch, var(--background), var(--foreground) 4%);
+}
+.help-search-explain[hidden] {
+  display: none;
+}
+.help-search-explain-label {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.help-search-explain-body {
+  margin: 0.45rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--foreground);
+  white-space: pre-wrap;
+}
+.help-search-explain.is-loading .help-search-explain-body {
+  color: var(--muted-foreground);
+}
 .help-search-meta {
   margin: 1.5rem 0 0;
   font-size: 0.9rem;
@@ -1435,6 +1462,9 @@ html.help-page-home .help-topbar {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+.help-search-results:empty {
+  display: none;
 }
 .help-search-result {
   display: block;

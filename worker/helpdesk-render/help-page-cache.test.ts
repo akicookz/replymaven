@@ -4,6 +4,7 @@ import {
   helpHtmlHeaders,
   helpPageCacheHeaders,
   helpPageCacheTag,
+  helpSearchAnswerHeaders,
   helpSearchHeaders,
   helpUncachedHeaders,
   invalidateHelpPageCache,
@@ -18,6 +19,7 @@ describe("isPublicHelpPath", () => {
     expect(isPublicHelpPath("/help/acme/guides/install")).toBe(true);
     expect(isPublicHelpPath("/docs")).toBe(true);
     expect(isPublicHelpPath("/docs/search")).toBe(true);
+    expect(isPublicHelpPath("/docs/search/answer")).toBe(true);
     expect(isPublicHelpPath("/helpful")).toBe(false);
     expect(isPublicHelpPath("/api/help/acme")).toBe(false);
     expect(isPublicHelpPath("/app/projects/1/help")).toBe(false);
@@ -43,6 +45,9 @@ describe("help page cache headers", () => {
     expect(helpHtmlHeaders("proj-1", { noindex: false })["X-Robots-Tag"]).toBeUndefined();
     expect(helpSearchHeaders({ noindex: true })["X-Robots-Tag"]).toBe(
       "noindex, nofollow",
+    );
+    expect(helpSearchAnswerHeaders({ noindex: true })["Content-Type"]).toBe(
+      "text/event-stream; charset=utf-8",
     );
   });
 });

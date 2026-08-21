@@ -23,7 +23,7 @@ Preconditions:
 - Local D1 contains the `replymaven` project with at least the help index (empty categories still render the heading).
 
 - **Open home.** Run `bun .cursor/skills/verify-replymaven/scripts/verify.mjs drive help`. The page heading is `How can we help?`. Title contains `Help Center` or the project name. Screenshot: `evidence/help/before.png`.
-- **Search.** Confirm the searchbox `Search help center` is present, then open `GET /docs/search?q=widget` on the local origin (the form action attribute is `https://replymaven.com/docs/search`). Notes record the search meta line (`N results for "widget"` or `No results for "widget"`). Screenshot: `evidence/help/after.png`.
+- **Search.** Confirm the searchbox `Search help center` is present, then open `GET /docs/search?q=widget` on the local origin (the form action attribute is `https://replymaven.com/docs/search`). The page lists D1 title/excerpt hits first and an Explain box. Notes record the search meta line (`N results for "widget"`, `Looking for matching articles…`, or `No results for "widget"`). Screenshot: `evidence/help/after.png`.
 - **Theme.** Click `Toggle dark mode`. `html` gains or loses class `dark`. Record the class before and after.
 
 ## Gotchas
