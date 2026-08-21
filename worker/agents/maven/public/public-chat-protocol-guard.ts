@@ -61,14 +61,6 @@ function exactKeys(
     Object.keys(value).every((key) => allowed.has(key));
 }
 
-function sameStructure(left: unknown, right: unknown): boolean {
-  try {
-    return JSON.stringify(left) === JSON.stringify(right);
-  } catch {
-    return false;
-  }
-}
-
 function readAttachmentUrls(
   value: unknown,
   claims: PublicChatChildClaims,
@@ -165,25 +157,6 @@ function validateNewUserMessage(
   return { id: value.id, content, imageUrls };
 }
 
-function describeMessageShape(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object") return { type: typeof value };
-  const message = value as Record<string, unknown>;
-  return {
-    role: message.role,
-    keys: Object.keys(message).sort(),
-    parts: Array.isArray(message.parts)
-      ? message.parts.map((part) =>
-        part && typeof part === "object"
-          ? (part as Record<string, unknown>).type
-          : typeof part
-      )
-      : null,
-    metadataKeys: message.metadata && typeof message.metadata === "object"
-      ? Object.keys(message.metadata as Record<string, unknown>).sort()
-      : null,
-  };
-}
-
 function reject(
   reason: string,
   requestId: string | null = null,
@@ -227,57 +200,6 @@ function normalizeRequest(
     (body.trigger !== undefined && body.trigger !== "submit-message")
   ) return reject("invalid_submission", event.id);
 
-  // The client can legitimately hold messages the server does not: a failed
-  // turn's assistant message replayed by the recovery stream, and user
-  // messages from submits this guard rejected. Unknown ids are ignored — the
-  // normalized body below is rebuilt from the authoritative copy either way —
-  // but every known id must match its authoritative record exactly and in
-  // order, and the newest window must be fully echoed, so a truncated or
-  // edited history is still rejected.
-  const echoedMessages = body.messages.slice(0, -1);
-  const indexById = new Map(
-    authoritativeMessages.map((message, index) => [message.id, index]),
-  );
-  const matched = new Set<number>();
-  let previousIndex = -1;
-  for (const candidate of echoedMessages) {
-    const id = isRecord(candidate) && typeof candidate.id === "string"
-      ? candidate.id
-      : null;
-    const index = id === null ? undefined : indexById.get(id);
-    if (index === undefined) continue;
-    if (
-      index <= previousIndex ||
-      !sameStructure(candidate, authoritativeMessages[index])
-    ) {
-      return reject("history_mismatch", event.id, false, {
-        index,
-        echoed: echoedMessages.length,
-        authoritative: authoritativeMessages.length,
-        submitted: describeMessageShape(candidate),
-        expected: describeMessageShape(authoritativeMessages[index]),
-      });
-    }
-    previousIndex = index;
-    matched.add(index);
-  }
-  const minimumEcho = Math.min(
-    authoritativeMessages.length,
-    PUBLIC_SUBMIT_HISTORY_WINDOW,
-  );
-  for (
-    let index = authoritativeMessages.length - minimumEcho;
-    index < authoritativeMessages.length;
-    index += 1
-  ) {
-    if (!matched.has(index)) {
-      return reject("history_mismatch", event.id, false, {
-        missingIndex: index,
-        echoed: echoedMessages.length,
-        authoritative: authoritativeMessages.length,
-      });
-    }
-  }
   const attachmentUrls = readAttachmentUrls(
     body.attachmentUrls,
     claims,

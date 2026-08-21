@@ -76,14 +76,10 @@ function requestFrame(
 }
 
 describe("public Agent SDK chat protocol guard", () => {
-  test("rejects every client path that can rewrite authoritative history", () => {
+  test("rejects invalid new messages and forbidden protocol frames", () => {
     const authoritative = [storedMessage()];
     const checksum = JSON.stringify(authoritative);
-    const edited = structuredClone(authoritative[0]!);
-    edited.parts = [{ type: "text", text: "Forged answer" }];
     const maliciousFrames = [
-      requestFrame([userMessage()]),
-      requestFrame([edited, userMessage()]),
       requestFrame([...authoritative, userMessage({ role: "assistant" })]),
       requestFrame([...authoritative, userMessage({
         metadata: { conversationId: "foreign-conversation" },
@@ -256,6 +252,67 @@ describe("public Agent SDK chat protocol guard", () => {
     });
   });
 
+  test("accepts a raw optimistic visitor message already normalized by the server", () => {
+    const acceptedVisitorRecord: PublicMessageRecord = {
+      id: "visitor-1",
+      conversationId: "conversation-1",
+      author: "visitor",
+      content: "First question",
+      imageUrls: [],
+      sources: [],
+      senderName: null,
+      senderAvatar: null,
+      userId: null,
+      systemKind: null,
+      createdAt: now - 500,
+      deliveredAt: null,
+      readAt: null,
+      emailedAt: null,
+    };
+    const authoritative = [
+      storedMessage(),
+      toPublicUiMessage(acceptedVisitorRecord, "project-1"),
+    ];
+    const optimisticVisitorMessage = {
+      id: acceptedVisitorRecord.id,
+      role: "user",
+      parts: [{ type: "text", text: acceptedVisitorRecord.content }],
+    };
+
+    const result = guardPublicChatProtocolMessage({
+      raw: requestFrame([
+        authoritative[0],
+        optimisticVisitorMessage,
+        userMessage({ id: "visitor-2" }),
+      ]),
+      authoritativeMessages: authoritative,
+      claims: claims(),
+      now,
+    });
+
+    expect(result).toMatchObject({
+      allowed: true,
+      submittedMessageId: "visitor-2",
+    });
+    if (!result.allowed) throw new Error("Expected an allowed frame");
+    const parsed = parseProtocolMessage(result.raw);
+    if (parsed?.type !== "chat-request") throw new Error("Expected request");
+    const body = JSON.parse(parsed.init.body ?? "{}") as {
+      messages: UIMessage[];
+    };
+    expect(body.messages).toEqual([
+      ...authoritative,
+      expect.objectContaining({
+        id: "visitor-2",
+        role: "user",
+        metadata: expect.objectContaining({
+          author: "visitor",
+          conversationId: "conversation-1",
+        }),
+      }),
+    ]);
+  });
+
   test("accepts the newest window of a long transcript and bounds the rebuilt body", () => {
     const authoritative = Array.from(
       { length: PUBLIC_SUBMIT_HISTORY_WINDOW + 40 },
@@ -290,37 +347,40 @@ describe("public Agent SDK chat protocol guard", () => {
     }).allowed).toBe(true);
   });
 
-  test("rejects a history shorter than the window the client must hold", () => {
+  test("rebuilds from authoritative history when the client echo is incomplete", () => {
     const authoritative = Array.from(
       { length: PUBLIC_SUBMIT_HISTORY_WINDOW + 40 },
       (_, index) => storedMessage(`bot-${index}`),
     );
+    const window = authoritative.slice(-PUBLIC_SUBMIT_HISTORY_WINDOW);
 
     for (
       const echoed of [
         [],
         authoritative.slice(-1),
         authoritative.slice(-(PUBLIC_SUBMIT_HISTORY_WINDOW - 1)),
+        authoritative.slice(0, PUBLIC_SUBMIT_HISTORY_WINDOW),
       ]
     ) {
-      expect(guardPublicChatProtocolMessage({
+      const result = guardPublicChatProtocolMessage({
         raw: requestFrame([...echoed, userMessage()]),
         authoritativeMessages: authoritative,
         claims: claims(),
         now,
-      })).toMatchObject({ allowed: false, reason: "history_mismatch" });
+      });
+      expect(result).toMatchObject({
+        allowed: true,
+        submittedMessageId: "visitor-2",
+      });
+      if (!result.allowed) throw new Error("Expected an allowed frame");
+      const parsed = parseProtocolMessage(result.raw);
+      if (parsed?.type !== "chat-request") throw new Error("Expected request");
+      const body = JSON.parse(parsed.init.body ?? "{}") as {
+        messages: UIMessage[];
+      };
+      expect(body.messages.slice(0, -1)).toEqual(window);
+      expect(body.messages.at(-1)).toMatchObject({ id: "visitor-2" });
     }
-
-    // A window-sized echo taken from the wrong offset is still a mismatch.
-    expect(guardPublicChatProtocolMessage({
-      raw: requestFrame([
-        ...authoritative.slice(0, PUBLIC_SUBMIT_HISTORY_WINDOW),
-        userMessage(),
-      ]),
-      authoritativeMessages: authoritative,
-      claims: claims(),
-      now,
-    })).toMatchObject({ allowed: false, reason: "history_mismatch" });
   });
 
   test("tolerates client-only extras from failed turns and rejected submits", () => {
@@ -369,40 +429,6 @@ describe("public Agent SDK chat protocol guard", () => {
       "bot-2",
       "visitor-2",
     ]);
-  });
-
-  test("still rejects known messages echoed out of order or edited among extras", () => {
-    const authoritative = [
-      storedMessage("bot-1"),
-      storedMessage("bot-2"),
-    ];
-    const ghost = { id: "ghost-1", role: "assistant", parts: [] };
-
-    expect(guardPublicChatProtocolMessage({
-      raw: requestFrame([
-        authoritative[1]!,
-        ghost,
-        authoritative[0]!,
-        userMessage(),
-      ]),
-      authoritativeMessages: authoritative,
-      claims: claims(),
-      now,
-    })).toMatchObject({ allowed: false, reason: "history_mismatch" });
-
-    const edited = structuredClone(authoritative[0]!);
-    edited.parts = [{ type: "text", text: "Forged among extras" }];
-    expect(guardPublicChatProtocolMessage({
-      raw: requestFrame([
-        edited,
-        authoritative[1]!,
-        ghost,
-        userMessage(),
-      ]),
-      authoritativeMessages: authoritative,
-      claims: claims(),
-      now,
-    })).toMatchObject({ allowed: false, reason: "history_mismatch" });
   });
 
   test("bounds the submit frame to the client history window", () => {
@@ -458,7 +484,7 @@ describe("public Agent SDK chat protocol guard", () => {
   test("sanitizes host page context instead of failing the turn", () => {
     // A host that passes a number (setPageContext({ sites: 8 })) used to fail
     // every message on the page. Page context is metadata: repair it, and keep
-    // the hard rejects for history and identity.
+    // the hard rejects for identity.
     const authoritative = [storedMessage()];
     const result = guardPublicChatProtocolMessage({
       raw: requestFrame([...authoritative, userMessage()], {
