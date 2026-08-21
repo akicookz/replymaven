@@ -7,6 +7,7 @@ import { buildHelpUrl } from "./build-help-url";
 import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
 import type { HelpThemeDefault } from "./help-theme-default";
+import type { HelpAnalyticsEmbed } from "../lib/help-analytics";
 
 export interface HelpSearchResult {
   article: HelpArticleNav;
@@ -24,6 +25,7 @@ interface RenderHelpSearchProps {
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
   customCss: string | null;
+  analytics: HelpAnalyticsEmbed[];
   themeDefault: HelpThemeDefault;
   noindex?: boolean;
 }
@@ -47,6 +49,8 @@ export function renderHelpSearch(props: RenderHelpSearchProps) {
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
       customCss={props.customCss}
+      analytics={props.analytics}
+      helpCustomUrl={props.helpCustomUrl}
       themeDefault={props.themeDefault}
       noindex={props.noindex}
       topBar={

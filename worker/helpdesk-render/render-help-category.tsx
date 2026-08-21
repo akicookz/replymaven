@@ -10,6 +10,7 @@ import { HelpSidebar } from "./sidebar";
 import { HelpTopBar } from "./top-bar";
 import { MobileCategoryNav } from "./mobile-category-nav";
 import type { HelpThemeDefault } from "./help-theme-default";
+import type { HelpAnalyticsEmbed } from "../lib/help-analytics";
 
 interface RenderHelpCategoryProps {
   project: ProjectRow;
@@ -21,6 +22,7 @@ interface RenderHelpCategoryProps {
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
   customCss: string | null;
+  analytics: HelpAnalyticsEmbed[];
   themeDefault: HelpThemeDefault;
   noindex?: boolean;
 }
@@ -42,6 +44,8 @@ export function renderHelpCategory(props: RenderHelpCategoryProps) {
       projectSlug={props.project.slug}
       widgetConfig={props.widgetConfig}
       customCss={props.customCss}
+      analytics={props.analytics}
+      helpCustomUrl={props.helpCustomUrl}
       themeDefault={props.themeDefault}
       noindex={props.noindex}
       topBar={

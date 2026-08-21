@@ -3,6 +3,10 @@ import type { HelpCategoryRow, ProjectRow, WidgetConfigRow } from "../db/schema"
 import type { HelpTopNavItem } from "../lib/help-top-nav";
 import { parseHelpTopNav } from "../lib/help-top-nav";
 import {
+  parseHelpAnalytics,
+  type HelpAnalyticsEmbed,
+} from "../lib/help-analytics";
+import {
   HelpdeskService,
   type HelpArticleNav,
 } from "../services/helpdesk-service";
@@ -27,6 +31,7 @@ export interface PublicHelpPageContext {
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
   customCss: string | null;
+  analytics: HelpAnalyticsEmbed[];
   themeDefault: HelpThemeDefault;
   helpService: HelpdeskService;
 }
@@ -59,6 +64,7 @@ export async function loadPublicHelpPage(
     ),
     topNav: parseHelpTopNav(loaded.settings?.helpTopNav),
     customCss: loaded.settings?.helpCustomCss ?? null,
+    analytics: parseHelpAnalytics(loaded.settings?.helpAnalytics),
     themeDefault: sanitizeHelpThemeDefault(loaded.settings?.helpThemeDefault),
     helpService,
   };

@@ -87,6 +87,7 @@ export const projectSettings = sqliteTable(
     helpCustomUrl: text("help_custom_url"),
     helpTopNav: text("help_top_nav"),
     helpCustomCss: text("help_custom_css"),
+    helpAnalytics: text("help_analytics"),
     helpHomeMarkdown: text("help_home_markdown"),
     helpHomeBackgroundUrl: text("help_home_background_url"),
     helpHomeBackgroundPosition: text("help_home_background_position"),

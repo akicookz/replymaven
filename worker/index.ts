@@ -160,6 +160,7 @@ import { isReturningVisitorGap, toToolDefinition } from "./chat-runtime/types";
 import { logError, logWarn } from "./observability";
 import { slugify } from "./lib/slugify";
 import { parseHelpTopNav } from "./lib/help-top-nav";
+import { parseHelpAnalytics } from "./lib/help-analytics";
 import {
   handleConversationCustomer,
   handleCreateCustomer,
@@ -1797,6 +1798,7 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      analytics: page.analytics,
       themeDefault: page.themeDefault,
       noindex: started.noindex,
     });
@@ -1862,6 +1864,7 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      analytics: page.analytics,
       themeDefault: page.themeDefault,
       noindex: started.noindex,
     });
@@ -1895,6 +1898,7 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      analytics: page.analytics,
       themeDefault: page.themeDefault,
       noindex: started.noindex,
     });
@@ -1950,6 +1954,7 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: page.helpCustomUrl,
       topNav: page.topNav,
       customCss: page.customCss,
+      analytics: page.analytics,
       themeDefault: page.themeDefault,
       homeBackgroundUrl: page.settings?.helpHomeBackgroundUrl ?? null,
       homeBackgroundPosition: page.settings?.helpHomeBackgroundPosition ?? null,
@@ -4303,6 +4308,7 @@ const app = new Hono<HonoAppContext>()
         ...serialized,
         telegramBotToken: settings.telegramBotToken ? "••••••••" : null,
         helpTopNav: parseHelpTopNav(settings.helpTopNav),
+        helpAnalytics: parseHelpAnalytics(settings.helpAnalytics),
       });
     }
     return c.json(null);
@@ -4365,7 +4371,7 @@ const app = new Hono<HonoAppContext>()
     if (helpCustomCss) {
       const violation = findCustomCssViolation(helpCustomCss);
       if (violation) return c.json({ error: violation }, 400);
-      if (planLimits && !planLimits.customCss) {
+      if (planLimits?.customCss !== true) {
         return c.json(
           {
             error: "Custom CSS is available on the Business plan.",
@@ -4375,6 +4381,19 @@ const app = new Hono<HonoAppContext>()
         );
       }
     }
+    if (
+      parsed.data.helpAnalytics &&
+      parsed.data.helpAnalytics.length > 0 &&
+      planLimits?.customCss !== true
+    ) {
+      return c.json(
+        {
+          error: "Help analytics embeds are available on the Business plan.",
+          code: "feature_not_available",
+        },
+        403,
+      );
+    }
 
     const db = c.get("db");
     const projectService = new ProjectService(db);
@@ -4383,7 +4402,7 @@ const app = new Hono<HonoAppContext>()
       return c.json({ error: "Not found" }, 404);
     }
 
-    const { helpTopNav, ...rest } = parsed.data;
+    const { helpTopNav, helpAnalytics, ...rest } = parsed.data;
     delete rest.helpCustomCss;
     delete rest.helpHomeMarkdown;
     delete rest.helpHomeBackgroundUrl;
@@ -4398,6 +4417,12 @@ const app = new Hono<HonoAppContext>()
     }
     if (helpCustomCss !== undefined) {
       updatePayload.helpCustomCss = helpCustomCss;
+    }
+    if (helpAnalytics !== undefined) {
+      updatePayload.helpAnalytics =
+        helpAnalytics === null || helpAnalytics.length === 0
+          ? null
+          : JSON.stringify(helpAnalytics);
     }
     if (helpHomeMarkdown !== undefined) {
       updatePayload.helpHomeMarkdown = helpHomeMarkdown;
@@ -4453,7 +4478,8 @@ const app = new Hono<HonoAppContext>()
       parsed.data.helpHomeBackgroundUrl !== undefined ||
       parsed.data.helpHomeBackgroundPosition !== undefined ||
       parsed.data.helpHomeBackgroundFit !== undefined ||
-      parsed.data.helpThemeDefault !== undefined
+      parsed.data.helpThemeDefault !== undefined ||
+      parsed.data.helpAnalytics !== undefined
     ) {
       scheduleHelpPageCachePurge(c.executionCtx, project.id);
     }
@@ -4461,6 +4487,7 @@ const app = new Hono<HonoAppContext>()
       ...serialized,
       telegramBotToken: settings.telegramBotToken ? "••••••••" : null,
       helpTopNav: parseHelpTopNav(settings.helpTopNav),
+      helpAnalytics: parseHelpAnalytics(settings.helpAnalytics),
     });
   })
   .post("/api/projects/:id/context/refresh", async (c) => {
@@ -6409,6 +6436,7 @@ const app = new Hono<HonoAppContext>()
       helpCustomUrl: resolveHelpCustomUrl(project.slug, settings?.helpCustomUrl),
       topNav,
       customCss: settings?.helpCustomCss ?? null,
+      analytics: [],
       themeDefault: sanitizeHelpThemeDefault(settings?.helpThemeDefault),
     });
     return c.html(`<!doctype html>${html.toString()}`, 200, {

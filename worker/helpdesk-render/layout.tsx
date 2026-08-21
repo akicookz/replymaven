@@ -15,6 +15,11 @@ import {
   sanitizeHelpThemeDefault,
   type HelpThemeDefault,
 } from "./help-theme-default";
+import {
+  buildHelpAnalyticsScripts,
+  helpAnalyticsCustomHost,
+  type HelpAnalyticsEmbed,
+} from "../lib/help-analytics";
 
 interface OgImage {
   url: string;
@@ -37,6 +42,8 @@ export interface LayoutProps {
   ogImage?: OgImage | null;
   articleMeta?: ArticleMeta | null;
   customCss?: string | null;
+  analytics?: HelpAnalyticsEmbed[];
+  helpCustomUrl?: string | null;
   homeBackgroundUrl?: string | null;
   homeBackgroundPosition?: string | null;
   homeBackgroundFit?: string | null;
@@ -51,6 +58,9 @@ export function Layout(props: LayoutProps) {
   const themeOverrides = renderProjectTheme(props.widgetConfig);
   const fontCss = buildFontFaceCss(props.widgetConfig?.fontFamily ?? null) ?? "";
   const customCss = sanitizeCustomCss(props.customCss);
+  const analyticsScripts = buildHelpAnalyticsScripts(props.analytics ?? [], {
+    customHost: helpAnalyticsCustomHost(props.helpCustomUrl),
+  });
   const homeBackgroundUrl = resolveHelpUploadUrl(
     sanitizeHelpHomeBackgroundUrl(props.homeBackgroundUrl),
   );
@@ -142,8 +152,36 @@ export function Layout(props: LayoutProps) {
         {homeBackgroundCss ? (
           <style dangerouslySetInnerHTML={{ __html: homeBackgroundCss }} />
         ) : null}
+        {analyticsScripts.flatMap((script) => {
+          const nodes = [];
+          if (script.src) {
+            nodes.push(
+              <script src={script.src} async={script.async ? true : undefined} />,
+            );
+          }
+          if (script.js) {
+            nodes.push(
+              <script dangerouslySetInnerHTML={{ __html: script.js }} />,
+            );
+          }
+          return nodes;
+        })}
       </head>
       <body class="min-h-screen bg-background text-foreground antialiased">
+        {analyticsScripts.flatMap((script) => {
+          if (!script.noscriptImgSrc) return [];
+          return [
+            <noscript>
+              <img
+                height="1"
+                width="1"
+                alt=""
+                src={script.noscriptImgSrc}
+                style="display:none"
+              />
+            </noscript>,
+          ];
+        })}
         {homeBackgroundUrl ? (
           <div
             class="help-home-bg"

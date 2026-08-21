@@ -74,6 +74,7 @@ function createTestDb(): { db: DrizzleD1Database<Record<string, unknown>>; sqlit
     help_custom_url text,
     help_top_nav text,
     help_custom_css text,
+    help_analytics text,
     help_home_markdown text,
     help_home_background_url text,
     help_home_background_position text,

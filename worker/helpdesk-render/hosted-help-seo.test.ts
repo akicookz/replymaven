@@ -120,5 +120,13 @@ describe("hosted help SEO", () => {
         "https://replymaven.com/docs",
       ),
     ).toBe(false);
+    expect(
+      isHelpProxyPass(
+        new Request("https://replymaven.com/help/acme", {
+          headers: { "x-forwarded-host": "replymaven.com." },
+        }),
+        "https://replymaven.com.",
+      ),
+    ).toBe(false);
   });
 });

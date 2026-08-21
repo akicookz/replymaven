@@ -1,0 +1,1 @@
+ALTER TABLE `project_settings` ADD `help_analytics` text;

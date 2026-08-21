@@ -477,6 +477,13 @@
       "when": 1787242276021,
       "tag": "0067_tired_dreaming_celestial",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1787324109348,
+      "tag": "0068_rainy_bastion",
+      "breakpoints": true
     }
   ]
 }

@@ -17,6 +17,7 @@ import { HelpSidebar } from "./sidebar";
 import { splitHelpArticleLead } from "./split-help-article-lead";
 import { HelpTopBar } from "./top-bar";
 import type { HelpThemeDefault } from "./help-theme-default";
+import type { HelpAnalyticsEmbed } from "../lib/help-analytics";
 
 interface RenderHelpArticleProps {
   project: ProjectRow;
@@ -32,6 +33,7 @@ interface RenderHelpArticleProps {
   helpCustomUrl: string | null;
   topNav: HelpTopNavItem[];
   customCss: string | null;
+  analytics: HelpAnalyticsEmbed[];
   themeDefault: HelpThemeDefault;
   noindex?: boolean;
 }
@@ -92,6 +94,8 @@ export function renderHelpArticle(props: RenderHelpArticleProps) {
       jsonLd={jsonLd}
       ogImage={ogImage}
       customCss={props.customCss}
+      analytics={props.analytics}
+      helpCustomUrl={props.helpCustomUrl}
       themeDefault={props.themeDefault}
       noindex={props.noindex}
       articleMeta={{

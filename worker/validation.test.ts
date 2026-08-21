@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   bulkConversationActionSchema,
   conversationCustomerSchema,
+  helpAnalyticsEmbedSchema,
+  helpTestProxySchema,
+  updateProjectSettingsSchema,
   createToolSchema,
   createCustomerSchema,
   customerListQuerySchema,
@@ -287,5 +290,52 @@ describe("bulkConversationActionSchema", () => {
         conversationIds,
       }).success).toBe(false);
     }
+  });
+});
+
+describe("help analytics and custom URL validation", () => {
+  test("trims provider ids before the regex", () => {
+    expect(
+      helpAnalyticsEmbedSchema.parse({
+        provider: "posthog",
+        apiKey: "  phc_abcdefghij1234567890  ",
+        host: "us",
+      }),
+    ).toEqual({
+      provider: "posthog",
+      apiKey: "phc_abcdefghij1234567890",
+      host: "us",
+    });
+    expect(
+      helpAnalyticsEmbedSchema.parse({
+        provider: "gtag",
+        measurementId: "  g-abc123  ",
+      }),
+    ).toEqual({
+      provider: "gtag",
+      measurementId: "G-ABC123",
+    });
+    expect(
+      helpAnalyticsEmbedSchema.parse({
+        provider: "meta",
+        pixelId: "  1234567890  ",
+      }),
+    ).toEqual({
+      provider: "meta",
+      pixelId: "1234567890",
+    });
+  });
+
+  test("rejects trailing-dot ReplyMaven custom URLs", () => {
+    expect(
+      updateProjectSettingsSchema.safeParse({
+        helpCustomUrl: "https://replymaven.com.",
+      }).success,
+    ).toBe(false);
+    expect(
+      helpTestProxySchema.safeParse({
+        customUrl: "https://help.replymaven.com.",
+      }).success,
+    ).toBe(false);
   });
 });

@@ -7,6 +7,17 @@ import {
 } from "../shared/faq-limits";
 import { INDUSTRIES } from "../shared/industries";
 import { isAllowedStoredUploadUrl } from "./lib/public-upload-url";
+import {
+  GTAG_MEASUREMENT_ID_RE,
+  MAX_HELP_ANALYTICS_EMBEDS,
+  META_PIXEL_ID_RE,
+  POSTHOG_API_KEY_RE,
+  sanitizeCustomScriptSrc,
+} from "./lib/help-analytics";
+import {
+  isReplyMavenHostname,
+  normalizeDnsHostname,
+} from "./lib/help-host";
 
 // ─── Host Allow/Deny Helpers (shared by helpCustomUrl + helpTestProxy) ───────
 function isLikelyIp(host: string): boolean {
@@ -42,13 +53,18 @@ function isAllowedHelpHost(host: string): boolean {
   return true;
 }
 
-function isPermittedHelpUrl(url: string): boolean {
+function helpUrlHostname(url: string): string | null {
   try {
-    const host = new URL(url).hostname.toLowerCase();
-    return isAllowedHelpHost(host);
+    return normalizeDnsHostname(new URL(url).hostname);
   } catch {
-    return false;
+    return null;
   }
+}
+
+function isPermittedHelpUrl(url: string): boolean {
+  const host = helpUrlHostname(url);
+  if (!host) return false;
+  return isAllowedHelpHost(host);
 }
 
 // ─── Help Top Nav (shared by project settings) ───────────────────────────────
@@ -62,12 +78,8 @@ export const helpTopNavItemSchema = z.object({
     .max(2048)
     .refine((u) => u.startsWith("https://"), "Must be HTTPS")
     .refine((u) => {
-      try {
-        const host = new URL(u).hostname.toLowerCase();
-        return host !== "replymaven.com" && !host.endsWith(".replymaven.com");
-      } catch {
-        return false;
-      }
+      const host = helpUrlHostname(u);
+      return host !== null && !isReplyMavenHostname(host);
     }, "Cannot point at replymaven.com"),
   classes: z
     .string()
@@ -83,6 +95,63 @@ export const helpTopNavSchema = z
   .nullable();
 
 export type HelpTopNavItem = z.infer<typeof helpTopNavItemSchema>;
+
+export const helpAnalyticsEmbedSchema = z.discriminatedUnion("provider", [
+  z.object({
+    provider: z.literal("posthog"),
+    apiKey: z.string().trim().regex(POSTHOG_API_KEY_RE).max(204),
+    host: z.enum(["us", "eu"]),
+  }),
+  z.object({
+    provider: z.literal("gtag"),
+    measurementId: z
+      .string()
+      .trim()
+      .transform((value) => value.toUpperCase())
+      .pipe(z.string().regex(GTAG_MEASUREMENT_ID_RE).max(22)),
+  }),
+  z.object({
+    provider: z.literal("meta"),
+    pixelId: z.string().trim().regex(META_PIXEL_ID_RE),
+  }),
+  z.object({
+    provider: z.literal("custom"),
+    src: z
+      .string()
+      .max(2048)
+      .transform((value, ctx) => {
+        const src = sanitizeCustomScriptSrc(value);
+        if (!src) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Invalid script URL",
+          });
+          return z.NEVER;
+        }
+        return src;
+      }),
+  }),
+]);
+
+export const helpAnalyticsSchema = z
+  .array(helpAnalyticsEmbedSchema)
+  .max(MAX_HELP_ANALYTICS_EMBEDS)
+  .superRefine((embeds, ctx) => {
+    const seen = new Set<string>();
+    for (const [index, embed] of embeds.entries()) {
+      if (seen.has(embed.provider)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Only one ${embed.provider} embed is allowed`,
+          path: [index, "provider"],
+        });
+      }
+      seen.add(embed.provider);
+    }
+  })
+  .nullable();
+
+export type HelpAnalyticsEmbedInput = z.infer<typeof helpAnalyticsEmbedSchema>;
 
 // Image focal point as "X% Y%" with integer percentages (e.g. "50% 25%").
 const imagePositionSchema = z
@@ -144,12 +213,8 @@ export const updateProjectSettingsSchema = z.object({
     .refine((u) => !u.endsWith("/"), "Must not end with a trailing slash")
     .refine(
       (u) => {
-        try {
-          const host = new URL(u).hostname.toLowerCase();
-          return host !== "replymaven.com" && !host.endsWith(".replymaven.com");
-        } catch {
-          return false;
-        }
+        const host = helpUrlHostname(u);
+        return host !== null && !isReplyMavenHostname(host);
       },
       "Cannot point at replymaven.com",
     )
@@ -171,6 +236,9 @@ export const updateProjectSettingsSchema = z.object({
     .nullable()
     .optional(),
   helpThemeDefault: z.enum(["system", "light", "dark"]).optional(),
+  helpAnalytics: helpAnalyticsSchema
+    .transform((embeds) => (embeds && embeds.length > 0 ? embeds : null))
+    .optional(),
 });
 
 // ─── Widget Config ────────────────────────────────────────────────────────────
@@ -1069,12 +1137,8 @@ export const helpTestProxySchema = z.object({
     .refine((u) => !u.endsWith("/"), "Must not end with a trailing slash")
     .refine(
       (u) => {
-        try {
-          const host = new URL(u).hostname.toLowerCase();
-          return host !== "replymaven.com" && !host.endsWith(".replymaven.com");
-        } catch {
-          return false;
-        }
+        const host = helpUrlHostname(u);
+        return host !== null && !isReplyMavenHostname(host);
       },
       "Cannot point at replymaven.com",
     )

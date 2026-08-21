@@ -17,6 +17,7 @@ export interface HelpPresentationSettings {
   helpCustomUrl: string | null;
   helpTopNav: string | null;
   helpCustomCss: string | null;
+  helpAnalytics: string | null;
   helpHomeMarkdown: string | null;
   helpHomeBackgroundUrl: string | null;
   helpHomeBackgroundPosition: string | null;
@@ -88,6 +89,7 @@ export class ProjectService {
         helpCustomUrl: projectSettings.helpCustomUrl,
         helpTopNav: projectSettings.helpTopNav,
         helpCustomCss: projectSettings.helpCustomCss,
+        helpAnalytics: projectSettings.helpAnalytics,
         helpHomeMarkdown: projectSettings.helpHomeMarkdown,
         helpHomeBackgroundUrl: projectSettings.helpHomeBackgroundUrl,
         helpHomeBackgroundPosition: projectSettings.helpHomeBackgroundPosition,
@@ -109,6 +111,7 @@ export class ProjectService {
             helpCustomUrl: row.helpCustomUrl,
             helpTopNav: row.helpTopNav,
             helpCustomCss: row.helpCustomCss,
+            helpAnalytics: row.helpAnalytics,
             helpHomeMarkdown: row.helpHomeMarkdown,
             helpHomeBackgroundUrl: row.helpHomeBackgroundUrl,
             helpHomeBackgroundPosition: row.helpHomeBackgroundPosition,
@@ -224,6 +227,7 @@ export class ProjectService {
         | "helpCustomUrl"
         | "helpTopNav"
         | "helpCustomCss"
+        | "helpAnalytics"
         | "helpHomeMarkdown"
         | "helpHomeBackgroundUrl"
         | "helpHomeBackgroundPosition"

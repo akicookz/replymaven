@@ -34,10 +34,25 @@ import {
 import HelpTopNavEditor, {
   type HelpTopNavItem,
 } from "@/components/help-top-nav-editor";
+import {
+  HelpAnalyticsEditor,
+  type HelpAnalyticsEmbed,
+} from "@/components/help-analytics-editor";
 import { useSubscription } from "@/hooks/use-subscription";
 import { canAccessFeature } from "@/lib/plan";
 
 type HelpThemeDefault = "system" | "light" | "dark";
+
+function readyHelpAnalytics(
+  embeds: HelpAnalyticsEmbed[],
+): HelpAnalyticsEmbed[] {
+  return embeds.filter((embed) => {
+    if (embed.provider === "posthog") return embed.apiKey.trim().length > 0;
+    if (embed.provider === "gtag") return embed.measurementId.trim().length > 0;
+    if (embed.provider === "meta") return embed.pixelId.trim().length > 0;
+    return embed.src.trim().length > 0;
+  });
+}
 
 function parseHelpThemeDefault(value: string): HelpThemeDefault {
   if (value === "light" || value === "dark" || value === "system") return value;
@@ -49,6 +64,7 @@ interface ProjectSettingsData {
   helpTopNav: HelpTopNavItem[] | null;
   helpCustomCss: string | null;
   helpThemeDefault?: HelpThemeDefault;
+  helpAnalytics?: HelpAnalyticsEmbed[] | null;
 }
 
 interface ProjectData {
@@ -73,6 +89,7 @@ function HelpCenterSettings() {
   const [topNav, setTopNav] = useState<HelpTopNavItem[]>([]);
   const [topNavError, setTopNavError] = useState<string | null>(null);
   const [customCss, setCustomCss] = useState("");
+  const [analytics, setAnalytics] = useState<HelpAnalyticsEmbed[]>([]);
   const [themeDefault, setThemeDefault] =
     useState<HelpThemeDefault>("system");
   const { data: subData } = useSubscription();
@@ -101,6 +118,9 @@ function HelpCenterSettings() {
       setCustomUrl(settings.helpCustomUrl ?? "");
       setTopNav(Array.isArray(settings.helpTopNav) ? settings.helpTopNav : []);
       setCustomCss(settings.helpCustomCss ?? "");
+      setAnalytics(
+        Array.isArray(settings.helpAnalytics) ? settings.helpAnalytics : [],
+      );
       setThemeDefault(parseHelpThemeDefault(settings.helpThemeDefault ?? "system"));
     }
   }, [settings]);
@@ -124,7 +144,7 @@ function HelpCenterSettings() {
       if (parsed.protocol !== "https:") {
         return `Link ${i + 1}: must use HTTPS`;
       }
-      const host = parsed.hostname.toLowerCase();
+      const host = parsed.hostname.toLowerCase().replace(/\.+$/u, "");
       if (host === "replymaven.com" || host.endsWith(".replymaven.com")) {
         return `Link ${i + 1}: cannot point at replymaven.com`;
       }
@@ -150,7 +170,7 @@ function HelpCenterSettings() {
     }
     if (parsed.protocol !== "https:") return "Must use HTTPS";
     if (value.endsWith("/")) return "Must not end with a trailing slash";
-    const host = parsed.hostname.toLowerCase();
+    const host = parsed.hostname.toLowerCase().replace(/\.+$/u, "");
     if (host === "replymaven.com" || host.endsWith(".replymaven.com")) {
       return "Cannot point at replymaven.com";
     }
@@ -188,6 +208,7 @@ function HelpCenterSettings() {
             normalizedTopNav.length === 0 ? null : normalizedTopNav,
           helpCustomCss: customCss.trim() || null,
           helpThemeDefault: themeDefault,
+          helpAnalytics: readyHelpAnalytics(analytics),
         }),
       });
       if (!res.ok) {
@@ -242,7 +263,8 @@ function HelpCenterSettings() {
     (settings?.helpCustomUrl ?? "") !== customUrl ||
     JSON.stringify(savedTopNav) !== JSON.stringify(topNav) ||
     (settings?.helpCustomCss ?? "") !== customCss ||
-    (settings?.helpThemeDefault ?? "system") !== themeDefault;
+    (settings?.helpThemeDefault ?? "system") !== themeDefault ||
+    JSON.stringify(settings?.helpAnalytics ?? []) !== JSON.stringify(analytics);
 
   return (
     <div className="space-y-6">
@@ -496,6 +518,46 @@ function HelpCenterSettings() {
         {!canCustomCss && (
           <p className="text-xs text-muted-foreground">
             Custom CSS is available on the Business plan.
+          </p>
+        )}
+
+        <Button
+          onClick={() => saveSettings.mutate()}
+          disabled={!dirty || saveSettings.isPending}
+        >
+          {saveSettings.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Save className="h-4 w-4" />
+          )}
+          Save
+        </Button>
+      </div>
+
+      <div className="rounded-2xl bg-card/50 backdrop-blur-xl border border-border p-6 space-y-5">
+        <div>
+          <h2 className="text-base font-semibold tracking-tight">
+            Analytics
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Load PostHog, Google Analytics, or Meta Pixel on help pages.
+            Custom script URLs run only on your custom domain.
+          </p>
+        </div>
+
+        <HelpAnalyticsEditor
+          value={analytics}
+          onChange={setAnalytics}
+          disabled={
+            isLoading ||
+            saveSettings.isPending ||
+            (!canCustomCss && analytics.length === 0)
+          }
+        />
+
+        {!canCustomCss && (
+          <p className="text-xs text-muted-foreground">
+            Analytics embeds are available on the Business plan.
           </p>
         )}
 

@@ -1,4 +1,8 @@
 import { normalizeHelpCustomUrl } from "./build-help-url";
+import {
+  isReplyMavenHostname,
+  normalizeUrlHost,
+} from "../lib/help-host";
 
 export const HELP_PROXY_HEADER = "x-replymaven-help-proxy";
 export const OWN_DOCS_DISPATCH_HEADER = "x-replymaven-own-docs";
@@ -32,22 +36,18 @@ export function isHelpProxyPass(
   if (!customUrl) return false;
   let customHost: string;
   try {
-    customHost = new URL(customUrl).host.toLowerCase();
+    const url = new URL(customUrl);
+    if (isReplyMavenHostname(url.hostname)) return false;
+    customHost = normalizeUrlHost(url.host);
   } catch {
-    return false;
-  }
-  if (
-    customHost === "replymaven.com" ||
-    customHost.endsWith(".replymaven.com")
-  ) {
     return false;
   }
   const forwarded = request.headers
     .get("x-forwarded-host")
     ?.split(",")[0]
-    ?.trim()
-    .toLowerCase();
-  return forwarded === customHost;
+    ?.trim();
+  if (!forwarded) return false;
+  return normalizeUrlHost(forwarded) === customHost;
 }
 
 export function hostedHelpShouldNoindex(input: {
