@@ -1,10 +1,36 @@
 import { describe, expect, test } from "bun:test";
+import type { PublicMessageRecord } from "../../../../shared/maven-conversation";
 import type { MavenStreamPart } from "../../../chat-runtime/types";
 import {
   collectPublicTurnStream,
   createPublicTurnResponse,
   evaluatePublicTurnGate,
+  shouldResumeAiAfterHumanIdle,
 } from "./public-turn";
+
+function publicRecord(
+  id: string,
+  author: PublicMessageRecord["author"],
+  createdAt: number,
+  content = id,
+): PublicMessageRecord {
+  return {
+    id,
+    conversationId: "conversation-1",
+    author,
+    content,
+    imageUrls: [],
+    sources: [],
+    senderName: author === "agent" ? "Grace" : null,
+    senderAvatar: null,
+    userId: author === "agent" ? "agent-1" : null,
+    systemKind: null,
+    createdAt,
+    deliveredAt: null,
+    readAt: null,
+    emailedAt: null,
+  };
+}
 
 describe("public Agent turn parity", () => {
   test("preserves subscription, quota, ban, archive, and ownership gates", () => {
@@ -201,5 +227,144 @@ describe("public Agent turn parity", () => {
     const body = await response.text();
     expect(body).not.toContain('"type":"text-start"');
     expect(body).not.toContain('"type":"source-url"');
+  });
+});
+
+describe("idle human handoff takeover", () => {
+  const hour = 60 * 60 * 1_000;
+
+  test("resumes AI on the second ordinary visitor message after four idle hours", () => {
+    const messages = [
+      publicRecord("agent-1", "agent", hour),
+      publicRecord("visitor-1", "visitor", 5 * hour),
+      publicRecord("visitor-2", "visitor", (5 * hour) + 1),
+    ];
+
+    expect(shouldResumeAiAfterHumanIdle({
+      messages,
+      submittedMessageId: "visitor-2",
+      botName: "Maven",
+    })).toBe(true);
+  });
+
+  test("keeps human ownership on the first visitor message after four idle hours", () => {
+    const messages = [
+      publicRecord("agent-1", "agent", hour),
+      publicRecord("visitor-1", "visitor", 5 * hour),
+    ];
+
+    expect(shouldResumeAiAfterHumanIdle({
+      messages,
+      submittedMessageId: "visitor-1",
+      botName: "Maven",
+    })).toBe(false);
+  });
+
+  test("does not count visitor messages sent before four idle hours", () => {
+    const messages = [
+      publicRecord("agent-1", "agent", hour),
+      publicRecord("visitor-1", "visitor", (5 * hour) - 2),
+      publicRecord("visitor-2", "visitor", (5 * hour) - 1),
+    ];
+
+    expect(shouldResumeAiAfterHumanIdle({
+      messages,
+      submittedMessageId: "visitor-2",
+      botName: "Maven",
+    })).toBe(false);
+  });
+
+  test("requires a prior human-agent message", () => {
+    const messages = [
+      publicRecord("visitor-1", "visitor", 5 * hour),
+      publicRecord("visitor-2", "visitor", (5 * hour) + 1),
+    ];
+
+    expect(shouldResumeAiAfterHumanIdle({
+      messages,
+      submittedMessageId: "visitor-2",
+      botName: "Maven",
+    })).toBe(false);
+  });
+
+  test("uses a later human reply as the new timeout and message-count origin", () => {
+    const messages = [
+      publicRecord("agent-1", "agent", hour),
+      publicRecord("visitor-1", "visitor", 5 * hour),
+      publicRecord("agent-2", "agent", (5 * hour) + 1),
+      publicRecord("visitor-2", "visitor", (5 * hour) + 2),
+    ];
+
+    expect(shouldResumeAiAfterHumanIdle({
+      messages,
+      submittedMessageId: "visitor-2",
+      botName: "Maven",
+    })).toBe(false);
+  });
+
+  test("does not count an explicit one-turn AI invocation", () => {
+    const messages = [
+      publicRecord("agent-1", "agent", hour),
+      publicRecord(
+        "visitor-1",
+        "visitor",
+        5 * hour,
+        "@Maven answer this",
+      ),
+      publicRecord("visitor-2", "visitor", (5 * hour) + 1),
+    ];
+
+    expect(shouldResumeAiAfterHumanIdle({
+      messages,
+      submittedMessageId: "visitor-2",
+      botName: "Maven",
+    })).toBe(false);
+  });
+
+  test("does not count inbound email as a widget visitor message", () => {
+    const messages = [
+      publicRecord("agent-1", "agent", hour),
+      {
+        ...publicRecord("visitor-email", "visitor", 5 * hour),
+        origin: "email" as const,
+      },
+      publicRecord("visitor-widget", "visitor", (5 * hour) + 1),
+    ];
+
+    expect(shouldResumeAiAfterHumanIdle({
+      messages,
+      submittedMessageId: "visitor-widget",
+      botName: "Maven",
+    })).toBe(false);
+  });
+
+  test("does not resume AI while the conversation is snoozed", () => {
+    const messages = [
+      publicRecord("agent-1", "agent", hour),
+      publicRecord("visitor-1", "visitor", 5 * hour),
+      publicRecord("visitor-2", "visitor", (5 * hour) + 1),
+    ];
+
+    expect(shouldResumeAiAfterHumanIdle({
+      messages,
+      submittedMessageId: "visitor-2",
+      botName: "Maven",
+      snoozedUntil: 6 * hour,
+    })).toBe(false);
+  });
+
+  test("allows takeover after a snooze expires", () => {
+    const messages = [
+      publicRecord("agent-1", "agent", hour),
+      publicRecord("visitor-1", "visitor", 5 * hour),
+      publicRecord("visitor-2", "visitor", (5 * hour) + 1),
+    ];
+
+    expect(shouldResumeAiAfterHumanIdle({
+      messages,
+      submittedMessageId: "visitor-2",
+      botName: "Maven",
+      snoozedUntil: (5 * hour) - 1,
+    })).toBe(true);
   });
 });

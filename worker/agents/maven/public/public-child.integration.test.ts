@@ -517,6 +517,57 @@ describe("native public MavenChatAgent child", () => {
     expect(remainingAutoCloses).toHaveLength(0);
   });
 
+  nativeTest("does not auto-close a human-owned conversation", async () => {
+    const [
+      { env },
+      { getSubAgentByName },
+      { MavenChatAgent },
+    ] = await Promise.all([
+      import("cloudflare:workers"),
+      import("agents"),
+      import("../maven-chat-agent"),
+    ]);
+    const projectId = "public-child-project";
+    const conversationId = "conversation-human-auto-close";
+    const parent = env.MAVEN_PROJECT_AGENT.get(
+      env.MAVEN_PROJECT_AGENT.idFromName(projectId),
+    );
+    await parent.registerPublicConversation(conversationId);
+    const child = await getSubAgentByName(
+      parent,
+      MavenChatAgent,
+      `pub_${conversationId}`,
+    );
+    await child.importLegacyPublicConversation({
+      conversation: conversation(conversationId),
+      messages: [],
+      checksum: "checksum-human-auto-close",
+    });
+    const humanCreatedAt = Date.now() - (6 * 60 * 1_000);
+    await child.appendHumanMessage({
+      ...publicMessage("human-auto-close", "agent", "I am handling this."),
+      conversationId,
+      createdAt: humanCreatedAt,
+    });
+
+    await child.reconcilePublicAutoClose(5);
+    expect(
+      (await child.listSchedules()).filter(
+        (schedule) => schedule.callback === "autoClosePublicConversation",
+      ),
+    ).toHaveLength(0);
+    await child.autoClosePublicConversation({
+      lastActivityAt: humanCreatedAt,
+      autoCloseMinutes: 5,
+    });
+    await expect(child.getPublicSnapshot()).resolves.toMatchObject({
+      conversation: {
+        status: "agent_replied",
+        chatState: { aiParticipation: "human_only" },
+      },
+    });
+  });
+
   nativeTest("persists a human reply in the same ownership mutation", async () => {
     const [
       { env },
@@ -687,5 +738,158 @@ describe("native public MavenChatAgent child", () => {
     socket.send(JSON.stringify({ type: MessageType.CF_AGENT_CHAT_CLEAR }));
     await closed;
     await expect(child.getPublicMessages()).resolves.toHaveLength(3);
+  }, 30_000);
+
+  nativeTest("hands an idle human-owned conversation back to AI on the second visitor message", async () => {
+    const [
+      { env, exports },
+      { getSubAgentByName },
+      { MavenChatAgent },
+      { signPublicChatToken },
+      { toPublicUiMessage },
+    ] = await Promise.all([
+      import("cloudflare:workers"),
+      import("agents"),
+      import("../maven-chat-agent"),
+      import("./public-agent-auth"),
+      import("./public-message"),
+    ]);
+    const projectId = "public-idle-handback-project";
+    const conversationId = "public-idle-handback-conversation";
+    const visitorId = "public-idle-handback-visitor";
+    await preparePublicTurnDatabase(env.DB, projectId);
+    const parent = env.MAVEN_PROJECT_AGENT.get(
+      env.MAVEN_PROJECT_AGENT.idFromName(projectId),
+    );
+    await parent.registerPublicConversation(conversationId);
+    const child = await getSubAgentByName(
+      parent,
+      MavenChatAgent,
+      `pub_${conversationId}`,
+    );
+    const record = conversation(conversationId);
+    record.projectId = projectId;
+    record.visitorId = visitorId;
+    record.status = "agent_replied";
+    record.chatState = {
+      state: "agent_mode",
+      aiParticipation: "human_only",
+      ownershipRevision: 1,
+    };
+    record.ownershipRevision = 1;
+    const human = {
+      ...publicMessage("public-idle-human", "agent", "I can help from here."),
+      conversationId,
+      createdAt: Date.now() - (4 * 60 * 60 * 1_000) - 1,
+    };
+    await child.importLegacyPublicConversation({
+      conversation: record,
+      messages: [human],
+      checksum: "public-idle-handback-checksum",
+    });
+    const issuedAt = Math.floor(Date.now() / 1_000);
+    const token = await signPublicChatToken({
+      v: 1,
+      aud: "replymaven-public-chat",
+      scope: "child",
+      actor: "visitor",
+      projectId,
+      parentName: projectId,
+      conversationId,
+      childName: `pub_${conversationId}`,
+      visitorId,
+      canSubmitVisitor: true,
+      canRead: true,
+      iat: issuedAt,
+      exp: issuedAt + 120,
+    }, env.SIDECHAT_TOKEN_SECRET);
+    const response = await exports.default.fetch(new Request(
+      `https://example.test/agents/maven-project-agent/${projectId}/sub/maven-chat-agent/pub_${conversationId}?token=${token}`,
+      { headers: { Upgrade: "websocket" } },
+    ));
+    expect(response.status).toBe(101);
+    const socket = response.webSocket;
+    expect(socket).not.toBeNull();
+    if (!socket) throw new Error("Expected a WebSocket");
+    socket.accept();
+
+    async function sendVisitorMessage(
+      requestId: string,
+      messageId: string,
+      content: string,
+    ): Promise<void> {
+      const responseFrame = new Promise<MessageEvent>((resolve) => {
+        socket.addEventListener("message", function handleMessage(event) {
+          if (typeof event.data !== "string") return;
+          const parsed = JSON.parse(event.data) as Record<string, unknown>;
+          if (
+            parsed.type === MessageType.CF_AGENT_USE_CHAT_RESPONSE &&
+            parsed.id === requestId &&
+            parsed.done === true
+          ) {
+            socket.removeEventListener("message", handleMessage);
+            resolve(event);
+          }
+        });
+      });
+      const snapshot = await child.getPublicSnapshot();
+      socket.send(JSON.stringify({
+        type: MessageType.CF_AGENT_USE_CHAT_REQUEST,
+        id: requestId,
+        init: {
+          method: "POST",
+          body: JSON.stringify({
+            messages: [
+              ...snapshot.messages.map((message) =>
+                toPublicUiMessage(message, projectId)
+              ),
+              {
+                id: messageId,
+                role: "user",
+                parts: [{ type: "text", text: content }],
+              },
+            ],
+          }),
+        },
+      }));
+      await responseFrame;
+    }
+
+    await sendVisitorMessage(
+      "public-idle-request-1",
+      "public-idle-visitor-1",
+      "Are you still there?",
+    );
+    const firstSnapshot = await child.getPublicSnapshot();
+    expect(firstSnapshot.conversation.status).toBe("agent_replied");
+    expect(firstSnapshot.conversation.chatState.aiParticipation).toBe(
+      "human_only",
+    );
+    expect(
+      firstSnapshot.messages.filter((message) => message.author === "bot"),
+    ).toHaveLength(0);
+
+    await sendVisitorMessage(
+      "public-idle-request-2",
+      "public-idle-visitor-2",
+      // The scope gate returns a deterministic bot reply for this request, so
+      // the ownership integration test does not depend on a live model.
+      "Write a poem about the moon.",
+    );
+    const secondSnapshot = await child.getPublicSnapshot();
+    expect(secondSnapshot.conversation.status).toBe("active");
+    expect(secondSnapshot.conversation.chatState.aiParticipation).toBe(
+      "continuous",
+    );
+    const botMessages = secondSnapshot.messages.filter(
+      (message) => message.author === "bot",
+    );
+    expect(botMessages).toHaveLength(1);
+    expect(botMessages[0]?.content).toBe(
+      "I can help with questions about this product, website, account, or support task, but I can't help with unrelated general-purpose requests here.",
+    );
+    expect(
+      secondSnapshot.messages.filter((message) => message.author === "system"),
+    ).toHaveLength(0);
   }, 30_000);
 });

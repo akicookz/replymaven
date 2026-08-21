@@ -5,9 +5,11 @@ import {
 import type {
   PublicConversationRecord,
   PublicMessageMetadata,
+  PublicMessageRecord,
   PublicSourceReference,
 } from "../../../../shared/maven-conversation";
 import type { MavenTurnResult } from "../../../chat-runtime/orchestration/run-maven-turn";
+import { parseVisitorAiInvocation } from "../../../chat-runtime/routing/public-turn-gates";
 import {
   createStreamingStripState,
   flushStreamingStripState,
@@ -29,6 +31,50 @@ export type PublicTurnGate =
   | "human_mode"
   | "reopen_and_run_ai"
   | "run_ai";
+
+const HUMAN_IDLE_TAKEOVER_MS = 4 * 60 * 60 * 1_000;
+
+interface ResumeAiAfterHumanIdleInput {
+  /** Complete public transcript in persisted oldest-to-newest order. */
+  messages: PublicMessageRecord[];
+  submittedMessageId: string;
+  botName: string | null | undefined;
+  snoozedUntil?: number | null;
+}
+
+export function shouldResumeAiAfterHumanIdle(
+  input: ResumeAiAfterHumanIdleInput,
+): boolean {
+  const submitted = input.messages.find((message) =>
+    message.id === input.submittedMessageId
+  );
+  if (!submitted || submitted.author !== "visitor") return false;
+  if (
+    input.snoozedUntil !== null &&
+    input.snoozedUntil !== undefined &&
+    input.snoozedUntil > submitted.createdAt
+  ) return false;
+
+  let latestAgentMessage: PublicMessageRecord | null = null;
+  for (let index = input.messages.length - 1; index >= 0; index--) {
+    const message = input.messages[index];
+    if (message?.author === "agent") {
+      latestAgentMessage = message;
+      break;
+    }
+  }
+  if (!latestAgentMessage) return false;
+
+  const cutoff = latestAgentMessage.createdAt + HUMAN_IDLE_TAKEOVER_MS;
+  const qualifyingVisitors = input.messages.filter((message) =>
+    message.author === "visitor" &&
+    message.origin !== "email" &&
+    message.createdAt >= cutoff &&
+    !parseVisitorAiInvocation(message.content, input.botName).invoked
+  );
+  return qualifyingVisitors.length >= 2 &&
+    qualifyingVisitors.at(-1)?.id === input.submittedMessageId;
+}
 
 interface PublicTurnGateInput {
   subscriptionActive: boolean;

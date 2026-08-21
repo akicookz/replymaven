@@ -30,6 +30,7 @@ import {
   type PublicConversationStore,
   type PublicInboxFilter as InboxFilter,
 } from "./conversations/public-conversation-store";
+import { canAutoCloseConversationStatus } from "./conversations/conversation-staleness";
 import { CustomerIdentityService } from "./services/customer-identity-service";
 import { CustomerService } from "./services/customer-service";
 import { ResourceService, type FaqPair } from "./services/resource-service";
@@ -458,10 +459,7 @@ function isConversationStale(
   },
   autoCloseMinutes: number,
 ): boolean {
-  if (conv.status === "closed") return false;
-  // Flagged-for-review conversations stay in Needs You until a human acts
-  // (mirrors the guard in ChatService.checkAndCloseStale).
-  if (conv.status === "waiting_agent") return false;
+  if (!canAutoCloseConversationStatus(conv.status)) return false;
   const activity = conv.lastActivityAt ?? conv.createdAt;
   const last = activity instanceof Date ? activity.getTime() : activity;
   return last < Date.now() - autoCloseMinutes * 60_000;

@@ -111,6 +111,25 @@ describe("native public conversation operations", () => {
     });
   });
 
+  nativeTest("does not hand back AI ownership after the human revision changes", async () => {
+    const projectId = "public-operations-handback-race";
+    const conversationId = "conversation-handback-race";
+    const { child } = await createChild(projectId, conversationId);
+    const message = humanMessage(conversationId, "human-handback-race");
+    await child.appendHumanMessage(message);
+
+    await expect(
+      child.transitionPublicOwnership("ai_handed_back", 0),
+    ).resolves.toMatchObject({ status: "agent_replied" });
+    await expect(child.getPublicSnapshot()).resolves.toMatchObject({
+      conversation: {
+        status: "agent_replied",
+        chatState: { aiParticipation: "human_only" },
+        ownershipRevision: 1,
+      },
+    });
+  });
+
   nativeTest("keeps repeated actions idempotent", async () => {
     const projectId = "public-operations-action";
     const conversationId = "conversation-action";

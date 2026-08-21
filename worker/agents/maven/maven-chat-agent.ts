@@ -62,6 +62,7 @@ import type {
   PublicTeamRequestClaimResult,
   PublicTeamRequestSummaryInput,
 } from "../../conversations/public-conversation-store";
+import { canAutoCloseConversationStatus } from "../../conversations/conversation-staleness";
 import {
   applyChatOwnershipEvent,
   fallbackAiParticipationForStatus,
@@ -119,6 +120,7 @@ import {
 import {
   createPublicTurnResponse,
   evaluatePublicTurnGate,
+  shouldResumeAiAfterHumanIdle,
 } from "./public/public-turn";
 import {
   PublicTurnOutcomeStore,
@@ -733,6 +735,43 @@ export class MavenChatAgent extends AIChatAgent<
     if (gate === "archived") {
       await this.discardPublicSubmission(submitted.id);
       return new Response(null, { status: 410 });
+    }
+    if (
+      gate === "human_mode" &&
+      shouldResumeAiAfterHumanIdle({
+        messages: this.readPublicMessages(),
+        submittedMessageId: submitted.id,
+        botName: settings?.botName,
+        snoozedUntil: currentState.snoozedUntil,
+      })
+    ) {
+      try {
+        if (!options?.abortSignal?.aborted) {
+          const handback = await this.transitionPublicOwnership(
+            "ai_handed_back",
+            currentState.revision,
+          );
+          if (handback.status === "active") {
+            currentState = this.requirePublicState();
+            currentChatState = this.parseStoredChatState(currentState);
+            gate = evaluatePublicTurnGate({
+              subscriptionActive,
+              messageAllowed,
+              banned: false,
+              archived: currentState.archivedAt !== null,
+              status: currentState.status,
+              closeReason: currentState.closeReason,
+              aiParticipation: currentChatState.aiParticipation,
+              aiInvoked: false,
+            });
+          }
+        }
+      } catch (error) {
+        logError("agent_public_turn.idle_handback_failed", error, {
+          projectId,
+          conversationId: currentState.id,
+        });
+      }
     }
 
     const operationalStore = this as unknown as PublicConversationStore;
@@ -1705,6 +1744,7 @@ export class MavenChatAgent extends AIChatAgent<
 
   async transitionPublicOwnership(
     event: ChatOwnershipEvent,
+    expectedRevision?: number,
   ): Promise<PublicOwnershipTransitionResult> {
     if (event === "human_joined") {
       this.abortAllRequests("Human takeover");
@@ -1716,6 +1756,13 @@ export class MavenChatAgent extends AIChatAgent<
         return { status: null, conversation: null };
       }
       const currentChatState = this.parseStoredChatState(state);
+      if (
+        expectedRevision !== undefined &&
+        state.revision !== expectedRevision
+      ) {
+        const conversation = this.toPublicConversation(state);
+        return { status: conversation.status, conversation };
+      }
       const nextChatState = applyChatOwnershipEvent(currentChatState, event);
       const status = event === "human_joined"
         ? "agent_replied"
@@ -1793,7 +1840,7 @@ export class MavenChatAgent extends AIChatAgent<
       if (state.archivedAt !== null || state.purgeStartedAt !== null) {
         return { closed: false, conversation: null };
       }
-      if (state.status === "closed" || state.status === "waiting_agent") {
+      if (!canAutoCloseConversationStatus(state.status)) {
         return {
           closed: false,
           conversation: this.toPublicConversation(state),
@@ -2324,8 +2371,7 @@ export class MavenChatAgent extends AIChatAgent<
       const state = this.requirePublicState();
       if (
         state.archivedAt !== null ||
-        state.status === "closed" ||
-        state.status === "waiting_agent" ||
+        !canAutoCloseConversationStatus(state.status) ||
         state.lastActivityAt !== payload.lastActivityAt ||
         Date.now() <
           payload.lastActivityAt + payload.autoCloseMinutes * 60_000
@@ -2387,8 +2433,7 @@ export class MavenChatAgent extends AIChatAgent<
       if (
         autoCloseMinutes === null ||
         state.archivedAt !== null ||
-        state.status === "closed" ||
-        state.status === "waiting_agent"
+        !canAutoCloseConversationStatus(state.status)
       ) {
         if (state.autoCloseScheduleId) {
           this.saveInternalPublicState(state, { autoCloseScheduleId: null });
