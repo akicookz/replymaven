@@ -12,6 +12,9 @@
   --help-radius-xl: calc(var(--radius) * 1.33);
   --help-radius-2xl: calc(var(--radius) * 1.67);
 }
+.help-editor-live svg[stroke] {
+  stroke-width: var(--help-icon-stroke-width);
+}
 .help-editor-live-preview {
   pointer-events: none;
 }
@@ -66,9 +69,7 @@
   width: 100%;
   padding: 0.5rem 0.5rem 0.5rem 1rem;
   background: var(--background);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--foreground) 4%, transparent),
-    0 0 12px color-mix(in oklch, var(--foreground) 5%, transparent);
+  box-shadow: var(--help-ring-shadow);
   border-radius: var(--help-radius-2xl);
 }
 .help-editor-live .help-hero-search-icon {
@@ -93,6 +94,11 @@
 }
 .help-editor-live .help-hero-search input::placeholder {
   color: var(--muted-foreground);
+}
+.help-editor-live .help-hero-search input[type="search"]::-webkit-search-cancel-button,
+.help-editor-live .help-hero-search input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
 }
 .help-editor-live .help-hero-search button {
   display: inline-flex;
@@ -132,9 +138,7 @@
   padding: 1.5rem;
   border-radius: var(--help-radius-xl);
   background: var(--background);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--foreground) 4%, transparent),
-    0 0 12px color-mix(in oklch, var(--foreground) 5%, transparent);
+  box-shadow: var(--help-ring-shadow);
   color: inherit;
   isolation: isolate;
 }
@@ -218,9 +222,7 @@
 .help-editor-live .help-popular {
   border-radius: var(--help-radius-lg);
   background: var(--background);
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--foreground) 4%, transparent),
-    0 0 12px color-mix(in oklch, var(--foreground) 5%, transparent);
+  box-shadow: var(--help-ring-shadow);
 }
 .help-editor-live .help-popular-title {
   display: flex;

@@ -136,7 +136,7 @@ function HelpArticleEditor({
       attributes: {
         class:
           variant === "page"
-            ? "prose prose-lg max-w-none min-h-[60vh] focus:outline-none help-editor-surface help-editor-surface-page"
+            ? "max-w-none min-h-[60vh] focus:outline-none help-prose help-editor-surface help-editor-surface-page"
             : "prose prose-sm max-w-none min-h-[420px] pl-10 pr-5 py-6 focus:outline-none help-editor-surface",
       },
       handlePaste: (view, event) => {

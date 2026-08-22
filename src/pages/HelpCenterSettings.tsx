@@ -511,7 +511,7 @@ function HelpCenterSettings() {
             (!canCustomCss && !customCss.trim())
           }
           placeholder={`:root {
-  --help-heading-weight: 600;
+  --help-heading-weight: 700;
 }`}
         />
 
