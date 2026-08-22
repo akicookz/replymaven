@@ -1,20 +1,39 @@
-export type InboxFilter =
-  | "needs-you"
-  | "all"
-  | "snoozed"
-  | "resolved"
-  | "archived"
-  | "flagged";
+export const INBOX_FILTER_IDS = [
+  "needs-you",
+  "inbox",
+  "snoozed",
+  "resolved",
+  "archived",
+  "flagged",
+] as const;
+
+export type InboxFilter = (typeof INBOX_FILTER_IDS)[number];
+
 export const INBOX_FILTERS: { id: InboxFilter; title: string }[] = [
   { id: "needs-you", title: "Needs You" },
-  { id: "all", title: "All Conversations" },
+  { id: "inbox", title: "Inbox" },
   { id: "snoozed", title: "Snoozed" },
   { id: "resolved", title: "Resolved" },
   { id: "archived", title: "Archived" },
   { id: "flagged", title: "Flagged" },
 ];
+
 export function filterTitle(f: InboxFilter): string {
   return INBOX_FILTERS.find((x) => x.id === f)?.title ?? "Needs You";
+}
+
+// Bookmarks and old notifications still send `?filter=all`.
+export function parseInboxFilter(
+  value: string | null | undefined,
+): InboxFilter | undefined {
+  if (value === "all") return "inbox";
+  if (
+    value != null &&
+    (INBOX_FILTER_IDS as readonly string[]).includes(value)
+  ) {
+    return value as InboxFilter;
+  }
+  return undefined;
 }
 
 // Client-side mirror of the server's inboxFilterConditions (see
@@ -40,8 +59,8 @@ export function passesInboxFilter(
   switch (filter) {
     case "needs-you":
       return row.status === "waiting_agent" && !snoozed && !archived;
-    case "all":
-      return !snoozed && !spam && !archived;
+    case "inbox":
+      return row.status !== "closed" && !snoozed && !spam && !archived;
     case "snoozed":
       return snoozed && !archived;
     case "resolved":

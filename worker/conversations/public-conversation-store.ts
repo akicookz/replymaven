@@ -10,13 +10,29 @@ import type {
   ConversationChatState,
 } from "../chat-runtime/types";
 
-export type PublicInboxFilter =
-  | "needs-you"
-  | "all"
-  | "snoozed"
-  | "resolved"
-  | "archived"
-  | "flagged";
+export const PUBLIC_INBOX_FILTERS = [
+  "needs-you",
+  "inbox",
+  "snoozed",
+  "resolved",
+  "archived",
+  "flagged",
+] as const;
+
+export type PublicInboxFilter = (typeof PUBLIC_INBOX_FILTERS)[number];
+
+export function parsePublicInboxFilter(
+  value: string | undefined,
+): PublicInboxFilter | undefined {
+  if (value === "all") return "inbox";
+  if (
+    value != null &&
+    (PUBLIC_INBOX_FILTERS as readonly string[]).includes(value)
+  ) {
+    return value as PublicInboxFilter;
+  }
+  return undefined;
+}
 
 export type PublicConversationAction =
   | { action: "archive" }

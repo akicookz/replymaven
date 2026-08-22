@@ -88,12 +88,12 @@ describe("ConversationDirectory", () => {
     ]);
 
     const first = directory.listConversations({
-      filter: "all",
+      filter: "inbox",
       sort: "newest",
       limit: 2,
     });
     const second = directory.listConversations({
-      filter: "all",
+      filter: "inbox",
       sort: "newest",
       limit: 2,
       cursor: first.nextCursor ?? undefined,
@@ -103,7 +103,7 @@ describe("ConversationDirectory", () => {
     expect(ids(second)).toEqual(["a"]);
     expect(second.nextCursor).toBeNull();
     expect(ids(directory.listConversations({
-      filter: "all",
+      filter: "inbox",
       sort: "oldest",
     }))).toEqual(["a", "b", "c"]);
   });
@@ -181,6 +181,7 @@ describe("ConversationDirectory", () => {
     const directory = createDirectory();
     await insertAll(directory, [
       makeSummary("needs", { status: "waiting_agent" }),
+      makeSummary("open", { status: "active" }),
       makeSummary("snoozed", { snoozedUntil: now + 1 }),
       makeSummary("resolved", {
         status: "closed",
@@ -197,14 +198,14 @@ describe("ConversationDirectory", () => {
       ids(directory.listConversations({ filter, now }));
 
     expect(query("needs-you")).toEqual(["needs"]);
-    expect(query("all").sort()).toEqual(["needs", "resolved"]);
+    expect(query("inbox").sort()).toEqual(["needs", "open"]);
     expect(query("snoozed")).toEqual(["snoozed"]);
     expect(query("resolved")).toEqual(["resolved"]);
     expect(query("archived")).toEqual(["archived"]);
     expect(query("flagged")).toEqual(["flagged"]);
     expect(directory.getInboxCounts(now)).toEqual({
       "needs-you": 1,
-      all: 2,
+      inbox: 2,
       snoozed: 1,
       resolved: 1,
       archived: 1,
@@ -280,15 +281,15 @@ describe("ConversationDirectory", () => {
     ]);
 
     expect(ids(directory.listConversations({
-      filter: "all",
+      filter: "inbox",
       search: "ADA",
     }))).toEqual(["low"]);
     expect(ids(directory.listConversations({
-      filter: "all",
+      filter: "inbox",
       search: "grace@example.com",
     }))).toEqual(["medium"]);
     expect(ids(directory.listConversations({
-      filter: "all",
+      filter: "inbox",
       sort: "priority",
     }))).toEqual(["high", "medium", "low"]);
   });
@@ -411,7 +412,7 @@ describe("ConversationDirectory", () => {
 
     expect(directory.findByTelegramThreadId("123")?.conversationId).toBe("a");
     expect(ids(directory.listConversations({
-      filter: "all",
+      filter: "inbox",
       metadataKey: "source",
       metadataValue: "pricing",
       sort: "botMessages",

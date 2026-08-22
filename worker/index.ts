@@ -31,7 +31,7 @@ import {
 } from "./conversations/public-conversation-dto";
 import {
   type PublicConversationStore,
-  type PublicInboxFilter as InboxFilter,
+  parsePublicInboxFilter,
 } from "./conversations/public-conversation-store";
 import { canAutoCloseConversationStatus } from "./conversations/conversation-staleness";
 import { CustomerIdentityService } from "./services/customer-identity-service";
@@ -6592,7 +6592,7 @@ const app = new Hono<HonoAppContext>()
 
     const statusFilter =
       (c.req.query("status") as "open" | "closed" | "all") ?? "all";
-    const inboxFilter = c.req.query("filter") as InboxFilter | undefined;
+    const inboxFilter = parsePublicInboxFilter(c.req.query("filter"));
     const limit = Math.min(
       parseInt(c.req.query("limit") ?? "25", 10) || 25,
       100,

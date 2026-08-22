@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import { Bot, Check, ChevronDownIcon, UserIcon } from "lucide-react";
+import { Check, ChevronDownIcon, UserIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { LogoIcon } from "@/components/Logo";
 import { cn } from "@/lib/utils";
 
 // Mirrors the shape returned by GET /api/projects/:id/assignable-users
@@ -40,7 +41,7 @@ function Avatar({ user, size = 18 }: { user: AssignableUser; size?: number }) {
         className="rounded-full bg-glass-raised text-ink-2 flex items-center justify-center shrink-0"
         style={{ width: size, height: size }}
       >
-        <Bot style={{ width: size * 0.55, height: size * 0.55 }} />
+        <LogoIcon className="h-[62%] w-auto" />
       </span>
     );
   }

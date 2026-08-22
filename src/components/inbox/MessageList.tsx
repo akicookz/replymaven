@@ -77,7 +77,7 @@ interface MessageListProps {
 // Filter-appropriate noun for the "N <noun> · M unread" subtitle.
 const FILTER_NOUN: Record<InboxFilter, string> = {
   "needs-you": "open",
-  all: "total",
+  inbox: "open",
   snoozed: "snoozed",
   resolved: "resolved",
   archived: "archived",

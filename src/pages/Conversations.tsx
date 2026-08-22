@@ -32,7 +32,11 @@ import type {
 import type { SafeSidechatDataPart } from "@/lib/inbox/sidechat-message-adapter";
 import { cn } from "@/lib/utils";
 import { serializeMessageImageUrls } from "../../shared/message-images";
-import { passesInboxFilter, type InboxFilter, type InboxSort } from "@/lib/inbox/filters";
+import {
+  parseInboxFilter,
+  passesInboxFilter,
+  type InboxSort,
+} from "@/lib/inbox/filters";
 import {
   moveRangeSelection,
   selectInclusiveRange,
@@ -332,7 +336,7 @@ function NativeSidechatPane({
 
 const EMPTY_COUNTS: InboxCounts = {
   "needs-you": 0,
-  all: 0,
+  inbox: 0,
   snoozed: 0,
   resolved: 0,
   archived: 0,
@@ -412,8 +416,18 @@ function Conversations() {
   const queryClient = useQueryClient();
 
   // Active inbox filter is owned by the URL (the sidebar deep-links to
-  // `?filter=<id>`); default to "needs-you" when absent.
-  const filter = (searchParams.get("filter") as InboxFilter) ?? "needs-you";
+  // `?filter=<id>`). `all` is the old All Conversations id.
+  const rawFilter = searchParams.get("filter");
+  const filter = parseInboxFilter(rawFilter) ?? "needs-you";
+
+  useEffect(() => {
+    if (rawFilter !== "all") return;
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("filter", "inbox");
+      return next;
+    }, { replace: true });
+  }, [rawFilter, setSearchParams]);
 
   const [selectedConvo, setSelectedConvo] = useState<string | null>(
     searchParams.get("id"),

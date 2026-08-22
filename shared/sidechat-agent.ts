@@ -22,7 +22,7 @@ export interface MavenProjectState {
 
 export type MavenConversationFilter =
   | "needs-you"
-  | "all"
+  | "inbox"
   | "snoozed"
   | "resolved"
   | "archived"

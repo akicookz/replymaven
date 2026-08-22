@@ -40,7 +40,7 @@ export function getInboxDestination(
 ): string {
   return (inboxCounts?.["needs-you"] ?? 0) > 0
     ? `/app/projects/${projectId}/conversations?filter=needs-you&focus=true`
-    : `/app/projects/${projectId}/conversations?filter=all`;
+    : `/app/projects/${projectId}/conversations?filter=inbox`;
 }
 
 export function normalizeChatWidgetTab(value: string | null): ChatWidgetTab {

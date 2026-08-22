@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { passesInboxFilter, type InboxFilterableRow } from "./filters";
+import {
+  parseInboxFilter,
+  passesInboxFilter,
+  type InboxFilterableRow,
+} from "./filters";
 
 describe("passesInboxFilter", () => {
   const now = Date.parse("2026-07-07T12:00:00.000Z");
@@ -19,7 +23,10 @@ describe("passesInboxFilter", () => {
     expect(
       passesInboxFilter("needs-you", row({ status: "waiting_agent" }), now),
     ).toBe(true);
-    expect(passesInboxFilter("all", row({ status: "active" }), now)).toBe(true);
+    expect(passesInboxFilter("inbox", row({ status: "active" }), now)).toBe(true);
+    expect(passesInboxFilter("inbox", row({ status: "agent_replied" }), now)).toBe(
+      true,
+    );
     expect(
       passesInboxFilter("snoozed", row({ snoozedUntil: future }), now),
     ).toBe(true);
@@ -44,7 +51,14 @@ describe("passesInboxFilter", () => {
 
   test("rejects flagged/blocked (spam) conversations", () => {
     expect(
-      passesInboxFilter("all", row({ status: "closed", closeReason: "spam" }), now),
+      passesInboxFilter("inbox", row({ status: "closed", closeReason: "spam" }), now),
+    ).toBe(false);
+    expect(
+      passesInboxFilter(
+        "inbox",
+        row({ status: "closed", closeReason: "resolved" }),
+        now,
+      ),
     ).toBe(false);
   });
 
@@ -75,9 +89,17 @@ describe("passesInboxFilter", () => {
 
     expect(passesInboxFilter("archived", archived, now)).toBe(true);
     expect(passesInboxFilter("needs-you", archived, now)).toBe(false);
-    expect(passesInboxFilter("all", archived, now)).toBe(false);
+    expect(passesInboxFilter("inbox", archived, now)).toBe(false);
     expect(passesInboxFilter("snoozed", archived, now)).toBe(false);
     expect(passesInboxFilter("resolved", archived, now)).toBe(false);
     expect(passesInboxFilter("flagged", archived, now)).toBe(false);
+  });
+
+  test("maps the retired all filter onto inbox", () => {
+    expect(parseInboxFilter("all")).toBe("inbox");
+    expect(parseInboxFilter("inbox")).toBe("inbox");
+    expect(parseInboxFilter("needs-you")).toBe("needs-you");
+    expect(parseInboxFilter("nope")).toBeUndefined();
+    expect(parseInboxFilter(null)).toBeUndefined();
   });
 });

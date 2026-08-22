@@ -10,7 +10,7 @@ import {
   BookOpen,
   Heart,
   Inbox,
-  Mail,
+  Hand,
   Clock,
   Flag,
   CheckCircle2,
@@ -117,8 +117,8 @@ function Window({
 // ─── Inbox mock: faithful 3-pane support dashboard ───────────────────────────
 
 const NAV_INBOX = [
-  { icon: Inbox, label: "Needs You", count: "3" },
-  { icon: Mail, label: "All Conversations", count: "871", active: true },
+  { icon: Hand, label: "Needs You", count: "3" },
+  { icon: Inbox, label: "Inbox", count: "12", active: true },
   { icon: Clock, label: "Snoozed", count: "0" },
   { icon: CheckCircle2, label: "Resolved", count: "871" },
   { icon: Flag, label: "Flagged", count: "1" },
@@ -214,8 +214,8 @@ function InboxMock() {
       <div className="hidden sm:flex flex-col border-r border-hairline min-h-0">
         <div className="px-3.5 pt-3.5 pb-2 flex items-start justify-between">
           <div>
-            <h3 className="text-[17px] font-bold tracking-[-0.3px] text-ink-1">All Conversations</h3>
-            <p className="text-[11px] text-ink-7 mt-0.5">871 total · 0 unread</p>
+            <h3 className="text-[17px] font-bold tracking-[-0.3px] text-ink-1">Inbox</h3>
+            <p className="text-[11px] text-ink-7 mt-0.5">12 open · 0 unread</p>
           </div>
           <div className="flex items-center gap-1.5 mt-1">
             <span className="w-6 h-6 rounded-md bg-white/[0.05] inline-flex items-center justify-center text-ink-5"><SlidersHorizontal className="w-3 h-3" /></span>

@@ -14,7 +14,10 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
-import type { CustomerListItem } from "../../shared/customer-types";
+import type {
+  CustomerConversationDto,
+  CustomerListItem,
+} from "../../shared/customer-types";
 import { MobileMenuButton } from "@/components/PageHeader";
 import CustomerFieldsEditor from "@/components/customers/CustomerFieldsEditor";
 import CustomerPickerDialog from "@/components/customers/CustomerPickerDialog";
@@ -53,6 +56,16 @@ function formatDate(value: string | null): string {
 
 function visitorLinkLabel(linkedBy: "dashboard" | "signed_widget"): string {
   return linkedBy === "dashboard" ? "Dashboard" : "Signed widget";
+}
+
+function customerConversationFilter(
+  conversation: CustomerConversationDto,
+): string {
+  if (conversation.archivedAt) return "archived";
+  if (conversation.closeReason === "spam") return "flagged";
+  if (conversation.status === "closed") return "resolved";
+  if (conversation.status === "waiting_agent") return "needs-you";
+  return "inbox";
 }
 
 function CustomerDetail() {
@@ -401,7 +414,7 @@ function CustomerDetail() {
                 customer.conversations.map((conversation) => (
                   <Link
                     key={conversation.id}
-                    to={`/app/projects/${projectId}/conversations?filter=all&id=${conversation.id}`}
+                    to={`/app/projects/${projectId}/conversations?filter=${customerConversationFilter(conversation)}&id=${conversation.id}`}
                     className="group flex min-h-14 items-center gap-3 rounded-2xl bg-muted/30 px-3 py-2.5 transition-[background-color,scale] duration-150 ease-out hover:bg-muted/50 active:scale-[0.96]"
                   >
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-background/55 text-muted-foreground">

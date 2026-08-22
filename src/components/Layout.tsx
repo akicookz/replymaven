@@ -21,7 +21,7 @@ import {
   CreditCard,
   BookOpen,
   Inbox,
-  Mail,
+  Hand,
   Archive,
   Flag,
   Clock,
@@ -147,8 +147,8 @@ function Layout() {
   }, [inboxCounts]);
 
   const inboxNav = currentProject ? [
-    { label: "Needs You",         filter: "needs-you", icon: Inbox },
-    { label: "All Conversations", filter: "all",       icon: Mail },
+    { label: "Needs You", filter: "needs-you", icon: Hand },
+    { label: "Inbox",     filter: "inbox",     icon: Inbox },
     { label: "Snoozed",           filter: "snoozed",   icon: Clock },
     { label: "Resolved",          filter: "resolved",  icon: CheckCircle2 },
     { label: "Archived",          filter: "archived",  icon: Archive },

@@ -201,10 +201,10 @@ function addInboxFilter(
       );
       bindings.push(now);
       return;
-    case "all":
+    case "inbox":
       conditions.push(
+        "status != 'closed'",
         "(snoozed_until IS NULL OR snoozed_until <= ?)",
-        "(close_reason IS NULL OR close_reason != 'spam')",
         "archived_at IS NULL",
       );
       bindings.push(now);
@@ -602,7 +602,7 @@ export class ConversationDirectory {
     const counts = {} as MavenInboxCounts;
     for (const filter of [
       "needs-you",
-      "all",
+      "inbox",
       "snoozed",
       "resolved",
       "archived",

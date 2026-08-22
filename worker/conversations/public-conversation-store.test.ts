@@ -7,6 +7,7 @@ import {
   toPublicChildName,
   toSidechatChildName,
 } from "../../shared/maven-conversation";
+import { parsePublicInboxFilter } from "./public-conversation-store";
 import {
   LegacyConversationReader,
   mapD1ConversationRow,
@@ -308,5 +309,15 @@ describe("Maven child names", () => {
     for (const name of ["", "pub_", "sc_", "conversation-1", "side_conversation-1"]) {
       expect(() => parseMavenChildName(name)).toThrow("Invalid Maven child name");
     }
+  });
+});
+
+describe("parsePublicInboxFilter", () => {
+  test("maps the retired all filter onto inbox", () => {
+    expect(parsePublicInboxFilter("all")).toBe("inbox");
+    expect(parsePublicInboxFilter("inbox")).toBe("inbox");
+    expect(parsePublicInboxFilter("needs-you")).toBe("needs-you");
+    expect(parsePublicInboxFilter("nope")).toBeUndefined();
+    expect(parsePublicInboxFilter(undefined)).toBeUndefined();
   });
 });

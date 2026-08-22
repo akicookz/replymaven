@@ -75,7 +75,7 @@ describe("conversation directory Agent client", () => {
       type: "inbox-counts",
       counts: {
         "needs-you": 1,
-        all: 2,
+        inbox: 2,
         snoozed: 0,
         resolved: 1,
         archived: 0,

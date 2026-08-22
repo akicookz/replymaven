@@ -37,7 +37,7 @@ function isSummary(value: unknown): value is MavenConversationSummary {
 
 function isInboxCounts(value: unknown): value is MavenInboxCounts {
   if (!isRecord(value)) return false;
-  return ["needs-you", "all", "snoozed", "resolved", "archived", "flagged"]
+  return ["needs-you", "inbox", "snoozed", "resolved", "archived", "flagged"]
     .every((key) =>
       typeof value[key] === "number" && Number.isFinite(value[key]) &&
       value[key] >= 0

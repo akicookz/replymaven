@@ -176,7 +176,7 @@ describe("native AgentPublicConversationStore", () => {
       });
     await expect(store.getDashboardConversationPage(
       legacyRecord.projectId,
-      { filter: "all", limit: 25 },
+      { filter: "inbox", limit: 25 },
     )).resolves.toMatchObject({
       conversations: [{
         conversation: {
@@ -189,7 +189,7 @@ describe("native AgentPublicConversationStore", () => {
           createdAt: 100,
         },
       }],
-      counts: { all: 1 },
+      counts: { inbox: 1 },
       nextCursor: null,
     });
   }, 30_000);
