@@ -1191,7 +1191,7 @@ html.help-page-home .help-topbar {
   height: 2.25rem;
   border-radius: var(--help-radius-lg);
   background: var(--brand);
-  color: color-mix(in oklch, var(--brand), white 90%);
+  color: var(--primary-foreground);
   border: 0;
   cursor: pointer;
   flex-shrink: 0;
