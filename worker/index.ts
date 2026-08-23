@@ -49,6 +49,8 @@ import {
 import { publicUploadUrl } from "./lib/public-upload-url";
 import { AiService } from "./services/ai-service";
 import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
+import { runAgentChannelInbound } from "./services/run-agent-channel-inbound";
+import { createTelegramAgentChannel } from "./services/telegram-agent-channel";
 import {
   canHandConversationToMaven,
   recordMavenAssignment,
@@ -1444,143 +1446,78 @@ const app = new Hono<HonoAppContext>()
     const chatService = createPublicConversationStore({ db, env: c.env });
     const projectService = new ProjectService(db);
     const projectSettings = await projectService.getSettings(projectId);
-    const botName = projectSettings?.botName;
-
-    // ─── Resolve conversation from message context ────────────────────────────
-    let conversationId: string | null = null;
-
-    // Try extracting conversation ID from the replied-to message
-    if (message.reply_to_message) {
-      const originalText = message.reply_to_message.text ?? "";
-      const convMatch = originalText.match(/Conversation:\s*(\S+)/);
-      if (convMatch) {
-        conversationId = convMatch[1];
-      }
-    }
-
-    // Fallback for standalone @BotName messages (no reply) or replies to
-    // messages that don't contain a conversation ID
-    if (!conversationId && botName) {
-      const mentionPrefix = `@${botName}`;
-      if (message.text.toLowerCase().startsWith(mentionPrefix.toLowerCase())) {
-        const agentConvs =
-          await chatService.getAgentModeConversations(projectId);
-        if (agentConvs.length === 1) {
-          conversationId = agentConvs[0].id;
-        } else if (agentConvs.length > 1) {
-          // Ambiguous — tell the agent how to target a specific conversation
-          await telegramService.sendMessage(
-            tgSettings.telegramBotToken,
-            tgSettings.telegramChatId,
-            `Multiple active conversations. Please reply directly to a forwarded visitor message or notification to use @${botName} commands.`,
-            message.message_id,
-          );
-          return c.json({ ok: true });
-        }
-      }
-    }
-
-    // Every drop below is logged: a reply that never lands is invisible to the
-    // person who typed it, so the reason has to be visible to us.
-    if (!conversationId) {
-      logWarn("telegram.reply_dropped", {
-        projectId,
-        reason: message.reply_to_message
-          ? "no_conversation_id_in_replied_message"
-          : "not_a_reply",
-      });
-      return c.json({ ok: true });
-    }
-
-    const conversation = await chatService.getOperationalConversationById(
-      conversationId,
-      projectId,
-    );
-    if (!conversation) {
-      logWarn("telegram.reply_dropped", {
-        projectId,
-        conversationId,
-        reason: "conversation_not_found",
-      });
-      return c.json({ ok: true });
-    }
-    const operationalConversationId = conversation.id;
-
-    async function sendConversationTelegramMessage(
-      text: string,
-      replyToMessageId: number,
-    ): Promise<void> {
-      await runWithConversationExternalAction(
-        chatService,
-        projectId,
-        operationalConversationId,
-        () => telegramService.sendMessage(
-          tgSettings.telegramBotToken!,
-          tgSettings.telegramChatId!,
-          text,
-          replyToMessageId,
-        ),
-      );
-    }
-
     const project = await projectService.getProjectById(projectId);
-    const telegramCommand = await executeChannelBotNameCommand({
-      text: message.text,
+    const botName = projectSettings?.botName;
+    const adapter = createTelegramAgentChannel({
       botName,
-      actorName: message.from?.first_name ?? null,
-      commandId:
-        `telegram:${projectId}:${String(message.chat?.id ?? "unknown")}:${String(message.message_id)}`,
-      now: Date.now(),
-      projectId,
-      conversation: {
-        id: operationalConversationId,
-        visitorId: conversation.visitorId,
-        visitorEmail: conversation.visitorEmail,
-        metadata: conversation.metadata,
+      storedBotToken: tgSettings.telegramBotToken,
+      chatId: tgSettings.telegramChatId,
+      service: telegramService,
+    });
+    await runAgentChannelInbound({
+      adapter,
+      inbound: {
+        channel: "telegram",
+        text: message.text,
+        actorName: message.from?.first_name ?? null,
+        commandId:
+          `telegram:${projectId}:${String(message.chat?.id ?? "unknown")}:${String(message.message_id)}`,
+        externalMessageId: String(message.message_id),
+        replyToExternalId: message.reply_to_message?.message_id === undefined
+          ? null
+          : String(message.reply_to_message.message_id),
+        replyToText: message.reply_to_message?.text ?? null,
       },
-      chatService,
-      db,
-      env: c.env,
-      projectSettings,
-      projectName: project?.name ?? "Support",
+      botName,
+      getAgentModeConversations: () =>
+        chatService.getAgentModeConversations(projectId),
+      findByChannelThread: async () => null,
+      getOperationalConversation: async (conversationId) => {
+        const conversation = await chatService.getOperationalConversationById(
+          conversationId,
+          projectId,
+        );
+        return conversation
+          ? {
+              id: conversation.id,
+              visitorId: conversation.visitorId,
+              visitorEmail: conversation.visitorEmail,
+              metadata: conversation.metadata,
+            }
+          : null;
+      },
+      executeCommand: async (fields) =>
+        executeChannelBotNameCommand({
+          text: fields.text,
+          botName,
+          actorName: fields.actorName,
+          commandId: fields.commandId,
+          now: Date.now(),
+          projectId,
+          conversation: fields.conversation,
+          chatService,
+          db,
+          env: c.env,
+          projectSettings,
+          projectName: project?.name ?? "Support",
+        }),
+      appendHuman: async (fields) =>
+        chatService.appendHuman({
+          projectId,
+          conversationId: fields.conversationId,
+          content: fields.content,
+          senderName: fields.senderName,
+          idempotencyKey: fields.idempotencyKey,
+          origin: "telegram",
+          externalReplyTo: fields.externalReplyTo,
+        }).catch((error: unknown) => {
+          logError("telegram.reply_append_failed", error, {
+            projectId,
+            conversationId: fields.conversationId,
+          });
+          return null;
+        }),
     });
-    if (telegramCommand.handled) {
-      await sendConversationTelegramMessage(
-        telegramCommand.confirmation,
-        message.message_id,
-      );
-      return c.json({ ok: true });
-    }
-
-    // Normal agent reply — store and forward to visitor
-    const telegramIdempotencyKey =
-      `telegram:${projectId}:${String(message.chat?.id ?? "unknown")}:${String(message.message_id)}`;
-    const agentMessage = await chatService.appendHuman({
-      projectId,
-      conversationId,
-      content: message.text,
-      senderName: message.from?.first_name ?? null,
-      idempotencyKey: telegramIdempotencyKey,
-      origin: "telegram",
-      externalReplyTo: message.reply_to_message?.message_id === undefined
-        ? null
-        : String(message.reply_to_message.message_id),
-    }).catch((error: unknown) => {
-      logError("telegram.reply_append_failed", error, {
-        projectId,
-        conversationId,
-      });
-      return null;
-    });
-    if (!agentMessage) {
-      // Say so in the thread. The person who typed the reply is the only one
-      // who can act on it, and to them a dropped reply looks delivered.
-      await sendConversationTelegramMessage(
-        "That reply did not reach the visitor. Open the conversation in the dashboard and send it from there.",
-        message.message_id,
-      ).catch(() => undefined);
-      return c.json({ ok: true });
-    }
 
     return c.json({ ok: true });
   })
