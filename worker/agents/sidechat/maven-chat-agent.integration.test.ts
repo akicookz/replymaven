@@ -168,6 +168,7 @@ describe("native MavenChatAgent transcript", () => {
       secret,
     );
     const summaryStatuses: string[] = [];
+    const originClears: Array<string | null> = [];
     let failContext = false;
     const fakeAgent = {
       name: "sc_conversation-1",
@@ -203,8 +204,11 @@ describe("native MavenChatAgent transcript", () => {
           async getSidechatToolDescriptors() {
             return [];
           },
-          async setLastSidechatTurnOrigin() {
-            return;
+          async setLastSidechatTurnOrigin(
+            _conversationId: string,
+            origin: string | null,
+          ) {
+            originClears.push(origin);
           },
           async executeProjectTool() {
             throw new Error("unexpected tool");
@@ -229,6 +233,7 @@ describe("native MavenChatAgent transcript", () => {
     expect(body).not.toContain('"messageId":"transport-request-42"');
     expect(body).toContain("Working draft");
     expect(summaryStatuses).toEqual(["working"]);
+    expect(originClears).toEqual([null]);
 
     failContext = true;
     fakeAgent.messages = [userMessage("submitted-message-43", "Try again")];
@@ -257,6 +262,86 @@ describe("native MavenChatAgent transcript", () => {
     );
     const mismatchedBody = await mismatchedResponse.text();
     expect(mismatchedBody).not.toContain('"type":"data-turn-accepted"');
+    expect(originClears).toEqual([null, null, null]);
+  });
+
+  nativeTest("keeps last Sidechat origin on a dashboard approval continuation", async () => {
+    const [{ MavenChatAgent }, { signSidechatToken }] = await Promise.all([
+      import("./maven-chat-agent"),
+      import("./agent-auth"),
+    ]);
+    const now = Math.floor(Date.now() / 1_000);
+    const secret = "native-sidechat-continuation-test-secret-32";
+    const token = await signSidechatToken({
+      userId: "user-1",
+      effectiveUserId: "owner-1",
+      projectId: "project-1",
+      parentName: "project-1",
+      role: "owner",
+      iat: now,
+      exp: now + 120,
+      aud: "replymaven-sidechat",
+      v: 1,
+      scope: "child",
+      conversationId: "conversation-1",
+      childName: "sc_conversation-1",
+      canSubmit: true,
+      canApproveOnce: true,
+      canAlwaysAllow: true,
+    }, secret);
+    const originClears: Array<string | null> = [];
+    const fakeAgent = {
+      name: "sc_conversation-1",
+      parentPath: [{ className: "MavenProjectAgent", name: "project-1" }],
+      env: {
+        SIDECHAT_TOKEN_SECRET: secret,
+        AI_MODEL: "test-model",
+        GEMINI_API_KEY: "",
+        OPENAI_API_KEY: "",
+      },
+      messages: [userMessage("approved-message-1", "Continue")],
+      createSidechatLanguageModel() {
+        return createTextModel("Continued draft");
+      },
+      async parentAgent() {
+        return {
+          async isSidechatOperational() {
+            return true;
+          },
+          async updateSidechatSummary() {
+            return true;
+          },
+          async getSidechatContext() {
+            return sidechatContext();
+          },
+          async getSidechatToolDescriptors() {
+            return [];
+          },
+          async setLastSidechatTurnOrigin(
+            _conversationId: string,
+            origin: string | null,
+          ) {
+            originClears.push(origin);
+          },
+          async executeProjectTool() {
+            throw new Error("unexpected tool");
+          },
+        };
+      },
+    };
+
+    const response = await MavenChatAgent.prototype.onChatMessage.call(
+      fakeAgent as never,
+      async () => undefined,
+      {
+        requestId: "continuation-request-1",
+        continuation: true,
+        body: { token, submittedMessageId: "approved-message-1" },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(originClears).toEqual([]);
   });
 
   nativeTest("rejects a previously-issued submit token after archive", async () => {
@@ -341,6 +426,43 @@ describe("native MavenChatAgent transcript", () => {
       { text: "check his billing", actorUserId: "user-1" },
     );
     expect(result).toEqual({ accepted: false });
+  });
+
+  nativeTest("persists the server turn before scheduling it", async () => {
+    const { MavenChatAgent } = await import("./maven-chat-agent");
+    const events: string[] = [];
+    const fakeAgent = {
+      name: "sc_conversation-1",
+      messages: [],
+      ctx: {
+        waitUntil() {
+          events.push("waitUntil");
+        },
+      },
+      async persistMessages(messages: UIMessage[]) {
+        events.push("persist");
+        fakeAgent.messages = messages;
+      },
+      async runServerSidechatTurn() {
+        return;
+      },
+      async parentAgent() {
+        return {
+          async isSidechatOperational() {
+            return true;
+          },
+        };
+      },
+    };
+    const result = await MavenChatAgent.prototype.submitServerSidechatTurn.call(
+      fakeAgent as never,
+      { text: "check his billing", actorUserId: "user-1" },
+    );
+    expect(result).toEqual({ accepted: true });
+    expect(events).toEqual(["persist", "waitUntil"]);
+    expect(fakeAgent.messages[0]?.parts).toEqual([
+      { type: "text", text: "check his billing" },
+    ]);
   });
 
   nativeTest(

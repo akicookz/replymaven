@@ -633,7 +633,10 @@ export class MavenChatAgent extends AIChatAgent<
       await discardArchivedSubmission(this, submittedMessageId);
       return new Response(null, { status: 409 });
     }
-    if (typeof parent.setLastSidechatTurnOrigin === "function") {
+    if (
+      options.continuation !== true &&
+      typeof parent.setLastSidechatTurnOrigin === "function"
+    ) {
       await parent.setLastSidechatTurnOrigin(conversationId, null);
     }
 
@@ -2553,7 +2556,7 @@ export class MavenChatAgent extends AIChatAgent<
         ...(input.visitorEmail !== undefined
           ? { visitorEmail: input.visitorEmail }
           : {}),
-        ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+        ...(input.metadata !== undefined ? { metadata: nextMetadata } : {}),
         updatedAt: Date.now(),
       });
       await this.publishPublicProjection(saved, this.readPublicMessages());

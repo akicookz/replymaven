@@ -269,6 +269,58 @@ describe("native public MavenChatAgent child", () => {
     await expect(child.getPublicMessages()).resolves.toHaveLength(2);
   });
 
+  nativeTest("keeps reserved metadata when contact metadata omits those keys", async () => {
+    const [
+      { env },
+      { getSubAgentByName },
+      { MavenChatAgent },
+    ] = await Promise.all([
+      import("cloudflare:workers"),
+      import("agents"),
+      import("../maven-chat-agent"),
+    ]);
+    const projectId = "public-child-project";
+    const conversationId = "conversation-reserved-metadata";
+    const parent = env.MAVEN_PROJECT_AGENT.get(
+      env.MAVEN_PROJECT_AGENT.idFromName(projectId),
+    );
+    await parent.registerPublicConversation(conversationId);
+    const child = await getSubAgentByName(
+      parent,
+      MavenChatAgent,
+      `pub_${conversationId}`,
+    );
+    await expect(child.importLegacyPublicConversation({
+      conversation: {
+        ...conversation(conversationId),
+        metadata: {
+          locale: "en",
+          lastSidechatTurnOrigin: "telegram",
+          agentHandbackInstructions: "stay quiet",
+        },
+      },
+      messages: [{
+        ...publicMessage("visitor-1", "visitor"),
+        conversationId,
+      }],
+      checksum: "checksum-reserved-metadata",
+    })).resolves.toEqual({ status: "imported", revision: 0 });
+
+    await child.updateContact({
+      projectId,
+      conversationId,
+      metadata: { locale: "ko" },
+    });
+
+    await expect(child.getPublicConversationRecord()).resolves.toMatchObject({
+      metadata: {
+        locale: "ko",
+        lastSidechatTurnOrigin: "telegram",
+        agentHandbackInstructions: "stay quiet",
+      },
+    });
+  });
+
   nativeTest("refreshes a legacy-owned child until its first native write", async () => {
     const [
       { env },

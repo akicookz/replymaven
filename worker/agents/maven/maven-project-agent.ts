@@ -92,6 +92,7 @@ import {
 import {
   runStartSidechatTurn,
   type BotNameCommandOrigin,
+  type SidechatClaimResult,
   type SidechatTurnOrigin,
   type StartSidechatTurnResult,
 } from "../../services/start-sidechat-turn";
@@ -225,6 +226,16 @@ function parseMcpToolPolicy(row: McpToolPolicyRow): SidechatToolDescriptor | nul
   } catch {
     return null;
   }
+}
+
+function readStoredSidechatTurnOrigin(
+  metadata: Record<string, unknown> | undefined,
+): SidechatTurnOrigin | null {
+  const value = metadata?.lastSidechatTurnOrigin;
+  if (value === "mcp" || value === "telegram" || value === "slack") {
+    return value;
+  }
+  return null;
 }
 
 export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
@@ -591,6 +602,8 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     actorUserId: string;
     origin: BotNameCommandOrigin;
   }): Promise<StartSidechatTurnResult> {
+    let statusBeforeClaim: SidechatStatus = "idle";
+    let originBeforeClaim: SidechatTurnOrigin | null = null;
     return runStartSidechatTurn(input, {
       getPublicConversation: async (conversationId) => {
         const summary = this.conversationDirectory().getConversation(
@@ -604,8 +617,11 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         const summary = this.conversationDirectory().getConversation(
           conversationId,
         );
-        return { status: summary?.sidechatStatus ?? "idle" };
+        statusBeforeClaim = summary?.sidechatStatus ?? "idle";
+        originBeforeClaim = readStoredSidechatTurnOrigin(summary?.metadata);
+        return { status: statusBeforeClaim };
       },
+      claimWorking: () => this.claimSidechatWorking(input.conversationId),
       writeLastSidechatTurnOrigin: async (origin) => {
         await this.setLastSidechatTurnOrigin(input.conversationId, origin);
       },
@@ -616,6 +632,18 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         );
         const result = await child.submitServerSidechatTurn(fields);
         return result.accepted;
+      },
+      releaseClaim: async () => {
+        this.projectSidechatStatus(input.conversationId, statusBeforeClaim);
+        await this.setLastSidechatTurnOrigin(
+          input.conversationId,
+          originBeforeClaim,
+        );
+      },
+      confirmWorking: () => {
+        this.ctx.waitUntil(
+          this.pingSidechatStatus(input.conversationId, "working"),
+        );
       },
     });
   }
@@ -995,6 +1023,37 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     conversationId: string,
     status: SidechatStatus,
   ): Promise<boolean> {
+    const previousStatus = this.conversationDirectory().getConversation(
+      conversationId,
+    )?.sidechatStatus ?? null;
+    if (!this.projectSidechatStatus(conversationId, status)) return false;
+    if (previousStatus !== status) {
+      this.ctx.waitUntil(this.pingSidechatStatus(conversationId, status));
+    }
+    return true;
+  }
+
+  private claimSidechatWorking(conversationId: string): SidechatClaimResult {
+    if (
+      !this.hasSubAgent(MavenChatAgent, toSidechatChildName(conversationId))
+    ) {
+      return "failed";
+    }
+    const previousStatus = this.conversationDirectory().getConversation(
+      conversationId,
+    )?.sidechatStatus ?? null;
+    if (previousStatus === "working" || previousStatus === "waiting_approval") {
+      return "busy";
+    }
+    return this.projectSidechatStatus(conversationId, "working")
+      ? "claimed"
+      : "failed";
+  }
+
+  private projectSidechatStatus(
+    conversationId: string,
+    status: SidechatStatus,
+  ): boolean {
     const childName = toSidechatChildName(conversationId);
     if (!this.hasSubAgent(MavenChatAgent, childName)) return false;
     const updatedAt = Date.now();
@@ -1014,7 +1073,6 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         },
       },
     });
-    this.ctx.waitUntil(this.pingSidechatStatus(conversationId, status));
     return true;
   }
 
@@ -1025,7 +1083,7 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     const text = sidechatPingText(status);
     if (!text) return;
     const summary = this.conversationDirectory().getConversation(conversationId);
-    if (!summary) return;
+    if (!summary || summary.sidechatStatus !== status) return;
     const origin = readLastSidechatTurnOrigin(summary.metadata);
     if (!origin) return;
     try {

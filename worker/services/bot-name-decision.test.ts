@@ -155,6 +155,7 @@ describe("preserveReservedPublicMetadata", () => {
         lastHumanCommandAt: 40,
         lastTelegramCommandId: "telegram:1",
         lastTelegramCommandConfirm: "Bot resumed.",
+        lastSidechatTurnOrigin: "telegram",
       },
     )).toEqual({
       device: "iphone",
@@ -162,6 +163,7 @@ describe("preserveReservedPublicMetadata", () => {
       lastHumanCommandAt: 40,
       lastTelegramCommandId: "telegram:1",
       lastTelegramCommandConfirm: "Bot resumed.",
+      lastSidechatTurnOrigin: "telegram",
     });
   });
 

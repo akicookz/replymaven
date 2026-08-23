@@ -3,6 +3,7 @@ import type { AppEnv } from "../types";
 
 export type SidechatTurnOrigin = "mcp" | "telegram" | "slack";
 export type BotNameCommandOrigin = SidechatTurnOrigin | "dashboard";
+export type SidechatClaimResult = "claimed" | "busy" | "failed";
 
 export type StartSidechatTurnResult =
   | { accepted: true; status: "working" }
@@ -13,11 +14,14 @@ export interface StartSidechatTurnPort {
     archivedAt: number | null;
   } | null>;
   registerSidechat(conversationId: string): Promise<{ status: SidechatStatus }>;
+  claimWorking(): SidechatClaimResult;
   writeLastSidechatTurnOrigin(origin: SidechatTurnOrigin | null): Promise<void>;
   submitServerSidechatTurn(input: {
     text: string;
     actorUserId: string;
   }): Promise<boolean>;
+  releaseClaim(): Promise<void>;
+  confirmWorking(): void;
 }
 
 export async function runStartSidechatTurn(
@@ -35,23 +39,36 @@ export async function runStartSidechatTurn(
   }
 
   const registered = await port.registerSidechat(input.conversationId);
+  // Shortcut: skip the claim write when register already shows a live turn.
+  // claimWorking is the atomic guard for overlapping starts.
   if (
     registered.status === "working" ||
     registered.status === "waiting_approval"
   ) {
     return { accepted: false, reason: "busy" };
   }
+  const claimed = port.claimWorking();
+  if (claimed === "busy") return { accepted: false, reason: "busy" };
+  if (claimed === "failed") return { accepted: false, reason: "failed" };
 
-  await port.writeLastSidechatTurnOrigin(
-    input.origin === "dashboard" ? null : input.origin,
-  );
-
-  const accepted = await port.submitServerSidechatTurn({
-    text: input.text,
-    actorUserId: input.actorUserId,
-  });
-  if (!accepted) return { accepted: false, reason: "failed" };
-  return { accepted: true, status: "working" };
+  try {
+    await port.writeLastSidechatTurnOrigin(
+      input.origin === "dashboard" ? null : input.origin,
+    );
+    const accepted = await port.submitServerSidechatTurn({
+      text: input.text,
+      actorUserId: input.actorUserId,
+    });
+    if (!accepted) {
+      await port.releaseClaim();
+      return { accepted: false, reason: "failed" };
+    }
+    port.confirmWorking();
+    return { accepted: true, status: "working" };
+  } catch (error) {
+    await port.releaseClaim();
+    throw error;
+  }
 }
 
 export async function startSidechatTurn(input: {
