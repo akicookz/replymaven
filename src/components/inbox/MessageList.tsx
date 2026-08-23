@@ -15,6 +15,10 @@ import {
   PanelLeftOpen,
   X,
 } from "lucide-react";
+import {
+  formatInboxEmptyCopy,
+  inboxEmptyCopy,
+} from "@/lib/inbox/empty-state";
 import { filterTitle, INBOX_SORTS } from "@/lib/inbox/filters";
 import type { InboxFilter, InboxSort } from "@/lib/inbox/filters";
 import type {
@@ -465,10 +469,10 @@ export default function MessageList({
 
         {/* Empty state */}
         {!isLoading && conversations.length === 0 && (
-          <div className="py-10 text-center text-[13px] text-ink-7">
-            {search
-              ? "No conversations match your search."
-              : "No conversations."}
+          <div className="px-4 py-10 text-center text-[13px] text-pretty text-ink-7">
+            {formatInboxEmptyCopy(
+              inboxEmptyCopy({ filter, search, counts, unreadOnly }),
+            )}
           </div>
         )}
       </div>

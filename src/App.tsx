@@ -20,6 +20,7 @@ import AuthGuard from "./components/AuthGuard";
 import OnboardingGuard from "./components/OnboardingGuard";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Landing from "./pages/Landing";
+import LandingMocks from "./pages/LandingMocks";
 import { useSubscription } from "./hooks/use-subscription";
 
 import Dashboard from "./pages/Dashboard";
@@ -277,6 +278,7 @@ function App() {
     />
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/landing-mocks" element={<LandingMocks />} />
 
       <Route
         path="/api/auth/*"

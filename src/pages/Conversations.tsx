@@ -80,6 +80,7 @@ import {
 } from "@/hooks/use-public-chat-agent";
 import { reconcilePublicMessages } from "@/lib/inbox/public-message-adapter";
 import { looksLikeAgentBotNameCommand } from "@/lib/inbox/bot-name-command";
+import InboxEmptyPane from "@/components/inbox/InboxEmptyPane";
 import MessageList from "@/components/inbox/MessageList";
 import ReadingPane from "@/components/inbox/ReadingPane";
 import FocusView, { FocusViewSkeleton } from "@/components/inbox/FocusView";
@@ -2181,9 +2182,14 @@ function Conversations() {
           highlightMessageId={highlightMsgId}
         />
       ) : (
-        <div className="glass-reading flex-1 hidden md:grid place-items-center text-ink-7 text-sm">
-          Select a conversation
-        </div>
+        <InboxEmptyPane
+          filter={filter}
+          search={searchQuery}
+          counts={counts}
+          unreadOnly={unreadOnly}
+          hasConversations={conversations.length > 0}
+          isLoading={convosLoading || isPlaceholderData}
+        />
       )}
       {sidechatPane}
       {sidechatSummarySession.data && (
