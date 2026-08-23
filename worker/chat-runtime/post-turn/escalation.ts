@@ -1,9 +1,13 @@
 import { EmailService } from "../../services/email-service";
 import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import { type ProjectService } from "../../services/project-service";
-import { type TelegramService } from "../../services/telegram-service";
+import {
+  readChannelThreadId,
+  type AgentChannelAdapter,
+} from "../../services/agent-channel";
 import { logError, logInfo } from "../../observability";
 import { buildConversationDeepLink } from "../../lib/deep-links";
+import type { PublicChannelThreads } from "../../../shared/maven-conversation";
 
 export function buildTeamHelpUnavailableMessage(): string {
   return "I couldn't forward that to the team just now. I can keep helping here, or you can try again in a moment.";
@@ -48,7 +52,7 @@ async function runWithExternalActionLease<T>(
 export async function createEscalation(params: {
   chatService: PublicConversationStore;
   projectService: ProjectService;
-  telegramService?: TelegramService;
+  agentChannels?: AgentChannelAdapter[];
   project: { id: string; name: string; slug: string };
   conversation: {
     id: string;
@@ -56,6 +60,7 @@ export async function createEscalation(params: {
     visitorName: string | null;
     visitorEmail: string | null;
     telegramThreadId?: string | null;
+    channelThreads?: PublicChannelThreads;
     status: string;
     metadata: Record<string, unknown> | string | null;
   };
@@ -141,11 +146,7 @@ export async function createEscalation(params: {
   logInfo("escalation.started", {
     projectId: params.project.id,
     conversationId: params.conversation.id,
-    hasTelegram: Boolean(
-      params.telegramService &&
-        params.settings?.telegramBotToken &&
-        params.settings?.telegramChatId,
-    ),
+    hasMessenger: (params.agentChannels ?? []).length > 0,
     hasEmail: Boolean(params.env.RESEND_API_KEY),
     summaryLength: summary.length,
     created,
@@ -237,20 +238,14 @@ export async function createEscalation(params: {
 
   const isUpdate = !created;
 
-  const hasTelegram = Boolean(
-    params.telegramService &&
-      params.settings?.telegramBotToken &&
-      params.settings?.telegramChatId,
-  );
+  const agentChannels = params.agentChannels ?? [];
+  const hasMessenger = agentChannels.length > 0;
   const notificationsEnabled = params.notifyExternalActions !== false;
   let externalActionsClaimed = false;
 
   let telegramThreadId: string | undefined;
-  if (notificationsEnabled && hasTelegram) {
+  if (notificationsEnabled && hasMessenger) {
     try {
-      const replyToMessageId = isUpdate
-        ? parseTelegramThreadId(params.conversation.telegramThreadId)
-        : undefined;
       const notification = await runWithExternalActionLease(
           params.chatService,
           params.project.id,
@@ -260,22 +255,32 @@ export async function createEscalation(params: {
               ? await params.claimExternalNotificationAttempt()
               : true;
             if (!externalActionsClaimed) {
-              return { claimed: false, messageId: null };
+              return { claimed: false, persisted: [] as Array<{
+                channel: AgentChannelAdapter["channel"];
+                threadId: string;
+              }> };
             }
-            const messageId = await params.telegramService!.notifyEscalation(
-              params.settings!.telegramBotToken!,
-              params.settings!.telegramChatId!,
-              {
+            const persisted: Array<{
+              channel: AgentChannelAdapter["channel"];
+              threadId: string;
+            }> = [];
+            for (const adapter of agentChannels) {
+              const threadId = await adapter.notifyEscalation({
+                conversationId: params.conversation.id,
                 visitorName: params.conversation.visitorName,
                 visitorEmail: params.conversation.visitorEmail,
                 summary,
                 conversationUrl,
-                conversationId: params.conversation.id,
                 isUpdate,
-                replyToMessageId,
-              },
-            );
-            return { claimed: true, messageId };
+                threadId: isUpdate
+                  ? readChannelThreadId(params.conversation, adapter.channel)
+                  : null,
+              });
+              if (threadId) {
+                persisted.push({ channel: adapter.channel, threadId });
+              }
+            }
+            return { claimed: true, persisted };
           },
         );
       if (!notification.executed) {
@@ -284,34 +289,35 @@ export async function createEscalation(params: {
       if (!notification.value?.claimed) {
         return { summary, summaryMessageId, created, accepted: true };
       }
-      const messageId = notification.value.messageId ?? null;
-      if (messageId) {
-        telegramThreadId = String(messageId);
-        if (params.persistTelegramThreadId) {
-          for (let attempt = 0; attempt < 2; attempt += 1) {
-            try {
-              const persisted = await params.persistTelegramThreadId(
-                telegramThreadId,
-              );
-              if (!persisted) {
-                logError(
-                  "escalation.telegram_thread_persistence_rejected",
-                  new Error("Telegram thread persistence was rejected"),
-                  {
+      for (const item of notification.value.persisted) {
+        if (item.channel === "telegram") {
+          telegramThreadId = item.threadId;
+          if (params.persistTelegramThreadId) {
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              try {
+                const persisted = await params.persistTelegramThreadId(
+                  telegramThreadId,
+                );
+                if (!persisted) {
+                  logError(
+                    "escalation.telegram_thread_persistence_rejected",
+                    new Error("Telegram thread persistence was rejected"),
+                    {
+                      projectId: params.project.id,
+                      conversationId: params.conversation.id,
+                      telegramThreadId,
+                    },
+                  );
+                }
+                break;
+              } catch (error) {
+                if (attempt === 1) {
+                  logError("escalation.telegram_thread_persistence_failed", error, {
                     projectId: params.project.id,
                     conversationId: params.conversation.id,
                     telegramThreadId,
-                  },
-                );
-              }
-              break;
-            } catch (error) {
-              if (attempt === 1) {
-                logError("escalation.telegram_thread_persistence_failed", error, {
-                  projectId: params.project.id,
-                  conversationId: params.conversation.id,
-                  telegramThreadId,
-                });
+                  });
+                }
               }
             }
           }
@@ -322,7 +328,9 @@ export async function createEscalation(params: {
         conversationId: params.conversation.id,
         telegramThreadId: telegramThreadId ?? null,
         isUpdate,
-        repliedToMessageId: replyToMessageId ?? null,
+        repliedToMessageId: isUpdate
+          ? parseTelegramThreadId(params.conversation.telegramThreadId)
+          : null,
       });
     } catch (error) {
       logError("escalation.telegram_failed", error, {
@@ -350,7 +358,7 @@ export async function createEscalation(params: {
             params.project.id,
             params.conversation.id,
             async () => {
-              if (!hasTelegram) {
+              if (!hasMessenger) {
                 externalActionsClaimed =
                   params.claimExternalNotificationAttempt
                     ? await params.claimExternalNotificationAttempt()

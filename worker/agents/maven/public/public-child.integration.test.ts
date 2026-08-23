@@ -81,6 +81,7 @@ function conversation(
     status: "active",
     closeReason: null,
     telegramThreadId: "telegram-1",
+    channelThreads: { telegram: "telegram-1" },
     metadata: { locale: "en", privateKey: "not-in-agent-state" },
     chatState: { aiParticipation: "continuous" },
     lastActivityAt: 100,

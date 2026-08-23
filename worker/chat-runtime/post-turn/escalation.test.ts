@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createEscalation } from "./escalation";
 import { type PublicConversationStore } from "../../conversations/public-conversation-store";
 import { type ProjectService } from "../../services/project-service";
-import { type TelegramService } from "../../services/telegram-service";
+import { type AgentChannelAdapter } from "../../services/agent-channel";
 import { type PublicMessageRecord } from "../../../shared/maven-conversation";
 
 // ─── createEscalation harness ─────────────────────────────────────────────────
@@ -130,7 +130,7 @@ function baseParams(overrides: Record<string, unknown> = {}) {
   const params = {
     chatService: service,
     projectService: projectServiceStub,
-    telegramService: undefined,
+    agentChannels: [],
     project: { id: "project-1", name: "Acme" },
     conversation: makeConversation(),
     summary: "Visitor needs a refund on order 123.",
@@ -257,64 +257,66 @@ describe("createEscalation - repeat escalation (already forwarded)", () => {
 });
 
 describe("createEscalation - telegram notification", () => {
-  function makeTelegramService() {
+  function makeTelegramAdapter() {
     const calls: Array<{
-      botToken: string;
-      chatId: string;
-      params: {
-        summary: string;
-        conversationUrl: string;
-        isUpdate: boolean;
-        replyToMessageId?: number;
-      };
+      isUpdate: boolean;
+      threadId: string | null;
+      conversationUrl: string;
+      summary: string;
     }> = [];
-    const service = {
-      notifyEscalation: async (
-        botToken: string,
-        chatId: string,
-        p: {
-          summary: string;
-          conversationUrl: string;
-          isUpdate: boolean;
-          replyToMessageId?: number;
-        },
-      ): Promise<number | null> => {
-        calls.push({ botToken, chatId, params: p });
-        return 555;
+    const adapter: AgentChannelAdapter = {
+      channel: "telegram",
+      async resolveConversation() {
+        return { kind: "none", reason: "unused" };
       },
-    } as unknown as TelegramService;
-    return { service, calls };
+      async notifyEscalation(input) {
+        calls.push({
+          isUpdate: input.isUpdate,
+          threadId: input.threadId,
+          conversationUrl: input.conversationUrl,
+          summary: input.summary,
+        });
+        return "555";
+      },
+      async forwardVisitorMessage() {},
+      async confirm() {},
+    };
+    return { adapter, calls };
   }
 
-  const settings = {
-    telegramBotToken: "bot-token",
-    telegramChatId: "chat-id",
-  };
-
   test("first escalation starts a thread linked to the review summary", async () => {
-    const tg = makeTelegramService();
+    const tg = makeTelegramAdapter();
+    const persisted: Array<{ telegramThreadId: string; channelThreads: { telegram: string } }> = [];
     const { params } = baseParams({
-      telegramService: tg.service,
-      settings,
+      agentChannels: [tg.adapter],
+      persistTelegramThreadId: async (threadId: string) => {
+        persisted.push({
+          telegramThreadId: threadId,
+          channelThreads: { telegram: threadId },
+        });
+        return true;
+      },
     });
 
     const result = await createEscalation(params as never);
 
     expect(tg.calls).toHaveLength(1);
-    expect(tg.calls[0].params.isUpdate).toBe(false);
-    expect(tg.calls[0].params.replyToMessageId).toBeUndefined();
-    expect(tg.calls[0].params.conversationUrl).toBe(
+    expect(tg.calls[0].isUpdate).toBe(false);
+    expect(tg.calls[0].threadId).toBeNull();
+    expect(tg.calls[0].conversationUrl).toBe(
       `https://app.test/app/projects/project-1/conversations?filter=needs-you&id=conv-1&msg=${result.summaryMessageId}`,
     );
     expect(result.summaryMessageId).toBeString();
     expect(result.telegramThreadId).toBe("555");
+    expect(persisted).toEqual([
+      { telegramThreadId: "555", channelThreads: { telegram: "555" } },
+    ]);
   });
 
-  test("repeat escalation: isUpdate true, replyTo parsed from telegramThreadId", async () => {
-    const tg = makeTelegramService();
+  test("repeat escalation: isUpdate true, threadId from telegramThreadId", async () => {
+    const tg = makeTelegramAdapter();
     const { params } = baseParams({
-      telegramService: tg.service,
-      settings,
+      agentChannels: [tg.adapter],
       conversation: makeConversation({
         telegramThreadId: "999",
         metadata: JSON.stringify({
@@ -326,15 +328,15 @@ describe("createEscalation - telegram notification", () => {
 
     await createEscalation(params as never);
 
-    expect(tg.calls[0].params.isUpdate).toBe(true);
-    expect(tg.calls[0].params.replyToMessageId).toBe(999);
-    expect(tg.calls[0].params.conversationUrl).toBe(
+    expect(tg.calls[0].isUpdate).toBe(true);
+    expect(tg.calls[0].threadId).toBe("999");
+    expect(tg.calls[0].conversationUrl).toBe(
       "https://app.test/app/projects/project-1/conversations?filter=needs-you&id=conv-1&msg=msg-existing",
     );
   });
 
   test("does not notify after the conversation becomes unavailable", async () => {
-    const tg = makeTelegramService();
+    const tg = makeTelegramAdapter();
     const unavailableChatService = {
       appendSystem: async () => null,
       updateConversation: async () => null,
@@ -342,8 +344,7 @@ describe("createEscalation - telegram notification", () => {
     } as unknown as PublicConversationStore;
     const { params } = baseParams({
       chatService: unavailableChatService,
-      telegramService: tg.service,
-      settings,
+      agentChannels: [tg.adapter],
     });
 
     const result = await createEscalation(params as never);

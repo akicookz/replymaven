@@ -22,6 +22,7 @@ function conversation(id: string, updatedAt = 100): PublicConversationRecord {
     status: "active",
     closeReason: null,
     telegramThreadId: null,
+    channelThreads: {},
     metadata: {},
     chatState: {},
     lastActivityAt: updatedAt,

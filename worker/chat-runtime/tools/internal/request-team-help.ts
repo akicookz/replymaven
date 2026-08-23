@@ -2,6 +2,7 @@ import { z } from "zod";
 import { type PublicConversationStore } from "../../../conversations/public-conversation-store";
 import { type ProjectService } from "../../../services/project-service";
 import { type TelegramService } from "../../../services/telegram-service";
+import { listEnabledAgentChannels } from "../../../services/enabled-agent-channels";
 import { fallbackRenderHandoffMessage } from "../../llm/render-handoff-message";
 import {
   buildTeamHelpUnavailableMessage,
@@ -125,6 +126,26 @@ function getAcceptedTeamRequest(
   }
 }
 
+function enabledChannels(
+  telegramService: TelegramService | undefined,
+  settings: {
+    telegramBotToken?: string | null;
+    telegramChatId?: string | null;
+    botName?: string | null;
+  } | null,
+) {
+  return listEnabledAgentChannels({
+    telegram: telegramService
+      ? {
+          storedBotToken: settings?.telegramBotToken,
+          chatId: settings?.telegramChatId,
+          botName: settings?.botName,
+          service: telegramService,
+        }
+      : null,
+  });
+}
+
 export function createRequestTeamHelpTool(dependencies: {
   context: MavenTurnContext;
   chatService: PublicConversationStore;
@@ -191,7 +212,10 @@ export function createRequestTeamHelpTool(dependencies: {
             await createEscalation({
               chatService: dependencies.chatService,
               projectService: dependencies.projectService,
-              telegramService: dependencies.telegramService,
+              agentChannels: enabledChannels(
+                dependencies.telegramService,
+                settings,
+              ),
               project,
               conversation,
               summary: acceptedRequest.summary,
@@ -317,7 +341,10 @@ export function createRequestTeamHelpTool(dependencies: {
         await createEscalation({
           chatService: dependencies.chatService,
           projectService: dependencies.projectService,
-          telegramService: dependencies.telegramService,
+          agentChannels: enabledChannels(
+            dependencies.telegramService,
+            settings,
+          ),
           project,
           conversation: {
             id: claimedConversation.id,
@@ -325,6 +352,7 @@ export function createRequestTeamHelpTool(dependencies: {
             visitorName: claimedConversation.visitorName,
             visitorEmail: claimedConversation.visitorEmail,
             telegramThreadId: claimedConversation.telegramThreadId,
+            channelThreads: claimedConversation.channelThreads,
             status: claimedConversation.status,
             metadata: claimedConversation.metadata,
           },

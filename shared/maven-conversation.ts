@@ -53,6 +53,24 @@ export interface PublicMessageRecord {
   externalReplyTo?: string | null;
 }
 
+export interface PublicChannelThreads {
+  telegram?: string;
+  slack?: string;
+}
+
+export function publicChannelThreads(
+  telegramThreadId: string | null | undefined,
+  stored?: PublicChannelThreads | null,
+): PublicChannelThreads {
+  const threads: PublicChannelThreads = stored ? { ...stored } : {};
+  if (telegramThreadId) {
+    threads.telegram = telegramThreadId;
+  } else {
+    delete threads.telegram;
+  }
+  return threads;
+}
+
 export interface PublicConversationRecord {
   id: string;
   projectId: string;
@@ -63,6 +81,7 @@ export interface PublicConversationRecord {
   status: PublicConversationStatus;
   closeReason: "resolved" | "ended" | "spam" | "bot_resolved" | null;
   telegramThreadId: string | null;
+  channelThreads: PublicChannelThreads;
   metadata: Record<string, unknown>;
   chatState: Record<string, unknown>;
   lastActivityAt: number;

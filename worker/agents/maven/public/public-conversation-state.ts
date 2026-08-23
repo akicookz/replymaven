@@ -1,4 +1,7 @@
-import type { PublicConversationRecord } from "../../../../shared/maven-conversation";
+import {
+  publicChannelThreads,
+  type PublicConversationRecord,
+} from "../../../../shared/maven-conversation";
 
 type SqlBinding = string | number | null;
 
@@ -72,6 +75,7 @@ function mapStateRow(
     status: row.status as PublicConversationRecord["status"],
     closeReason: row.close_reason as PublicConversationRecord["closeReason"],
     telegramThreadId: row.telegram_thread_id,
+    channelThreads: publicChannelThreads(row.telegram_thread_id),
     metadata: parseJsonRecord(row.metadata_json),
     chatState: parseJsonRecord(row.chat_state_json),
     lastActivityAt: row.last_activity_at,

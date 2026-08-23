@@ -28,6 +28,7 @@ import type {
 } from "../../../shared/sidechat-agent";
 import {
   parseMavenChildName,
+  publicChannelThreads,
   toPublicChildName,
   type PublicConversationRecord,
   type PublicMessageRecord,
@@ -136,6 +137,8 @@ import { CustomerIdentityService } from "../../services/customer-identity-servic
 import { GuidelineService } from "../../services/guideline-service";
 import { ProjectService } from "../../services/project-service";
 import { TelegramService } from "../../services/telegram-service";
+import { listEnabledAgentChannels } from "../../services/enabled-agent-channels";
+import { forwardVisitorThroughAgentChannels } from "../../services/run-agent-channel-outbound";
 import { ToolService } from "../../services/tool-service";
 import { VisitorBanService } from "../../services/visitor-ban-service";
 import { MAVEN_ASSIGNEE_ID } from "../../../shared/maven-assignee";
@@ -825,12 +828,17 @@ export class MavenChatAgent extends AIChatAgent<
 
     if (gate === "muted") return new Response(null, { status: 204 });
     if (gate === "human_mode") {
-      if (
-        settings?.telegramBotToken &&
-        settings.telegramChatId &&
-        currentState.status !== "closed"
-      ) {
-        const telegram = new TelegramService(db, this.env.ENCRYPTION_KEY);
+      const channels = listEnabledAgentChannels({
+        telegram: settings?.telegramBotToken && settings.telegramChatId
+          ? {
+              storedBotToken: settings.telegramBotToken,
+              chatId: settings.telegramChatId,
+              botName: settings.botName,
+              service: new TelegramService(db, this.env.ENCRYPTION_KEY),
+            }
+          : null,
+      });
+      if (channels.length > 0 && currentState.status !== "closed") {
         this.ctx.waitUntil((async () => {
           const lease = await this.acquireExternalAction({
             projectId,
@@ -838,16 +846,14 @@ export class MavenChatAgent extends AIChatAgent<
           });
           if (!lease) return;
           try {
-            await telegram.forwardVisitorMessage(
-              settings.telegramBotToken!,
-              settings.telegramChatId!,
-              currentState.visitorName,
-              submitted.content,
-              currentState.id,
-              currentState.telegramThreadId
-                ? Number.parseInt(currentState.telegramThreadId, 10)
-                : undefined,
-            );
+            await forwardVisitorThroughAgentChannels({
+              channels,
+              conversationId: currentState.id,
+              visitorName: currentState.visitorName,
+              content: submitted.content,
+              channelThreads: currentState.channelThreads,
+              telegramThreadId: currentState.telegramThreadId,
+            });
           } finally {
             await this.releaseExternalAction(lease);
           }
@@ -1920,6 +1926,7 @@ export class MavenChatAgent extends AIChatAgent<
       ) return;
       const saved = this.saveNextPublicState(state, {
         telegramThreadId: threadId,
+        channelThreads: publicChannelThreads(threadId, state.channelThreads),
         updatedAt: Date.now(),
       });
       await this.publishPublicProjection(saved, this.readPublicMessages());
@@ -2228,6 +2235,7 @@ export class MavenChatAgent extends AIChatAgent<
       ) return true;
       const saved = this.saveNextPublicState(state, {
         telegramThreadId: threadId,
+        channelThreads: publicChannelThreads(threadId, state.channelThreads),
         metadata: {
           ...state.metadata,
           mavenTeamRequestTelegramThreadAcceptanceToken: acceptanceToken,
@@ -2764,6 +2772,10 @@ export class MavenChatAgent extends AIChatAgent<
       status: state.status,
       closeReason: state.closeReason,
       telegramThreadId: state.telegramThreadId,
+      channelThreads: publicChannelThreads(
+        state.telegramThreadId,
+        state.channelThreads,
+      ),
       metadata: structuredClone(state.metadata),
       chatState: structuredClone(state.chatState),
       lastActivityAt: state.lastActivityAt,

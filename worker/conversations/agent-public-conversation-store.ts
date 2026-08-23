@@ -1,9 +1,10 @@
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { parseMessageImageUrls } from "../../shared/message-images";
-import type {
-  PublicConversationRecord,
-  PublicMessageRecord,
-  PublicSourceReference,
+import {
+  publicChannelThreads,
+  type PublicConversationRecord,
+  type PublicMessageRecord,
+  type PublicSourceReference,
 } from "../../shared/maven-conversation";
 import type {
   MavenConversationListQuery,
@@ -362,6 +363,7 @@ function summaryToConversation(
     status: summary.status,
     closeReason: summary.closeReason,
     telegramThreadId: summary.telegramThreadId,
+    channelThreads: publicChannelThreads(summary.telegramThreadId),
     metadata: structuredClone(summary.metadata),
     chatState: {},
     lastActivityAt: summary.lastActivityAt,
@@ -441,6 +443,7 @@ export class AgentPublicConversationStore implements PublicConversationStore {
       status: "active",
       closeReason: null,
       telegramThreadId: null,
+      channelThreads: {},
       metadata: structuredClone(input.metadata ?? {}),
       chatState: {},
       lastActivityAt: now,

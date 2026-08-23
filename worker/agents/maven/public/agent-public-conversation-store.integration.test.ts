@@ -20,6 +20,7 @@ function conversation(): PublicConversationRecord {
     status: "active",
     closeReason: null,
     telegramThreadId: null,
+    channelThreads: {},
     metadata: { imported: true },
     chatState: {},
     lastActivityAt: 100,

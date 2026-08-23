@@ -137,6 +137,7 @@ describe("public conversation storage conversion", () => {
       status: "waiting_agent",
       closeReason: "resolved",
       telegramThreadId: "123",
+      channelThreads: { telegram: "123" },
       metadata: { locale: "en", nested: { safe: true } },
       chatState: { state: "escalating", ownershipRevision: 7 },
       lastActivityAt: 1786582923004,

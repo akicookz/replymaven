@@ -141,6 +141,9 @@ function publicConversationSnapshot(
     ...conversation,
     metadata: conversation.metadata ? JSON.parse(conversation.metadata) : {},
     chatState: conversation.chatState ? JSON.parse(conversation.chatState) : {},
+    channelThreads: conversation.telegramThreadId
+      ? { telegram: conversation.telegramThreadId }
+      : {},
     closeReason: null,
     lastActivityAt: 0,
     visitorLastSeenAt: null,

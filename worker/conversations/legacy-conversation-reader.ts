@@ -3,10 +3,11 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { conversations, messages } from "../db";
 import type { ConversationRow, MessageRow } from "../db";
 import { parseMessageImageUrls } from "../../shared/message-images";
-import type {
-  PublicConversationRecord,
-  PublicMessageRecord,
-  PublicSourceReference,
+import {
+  publicChannelThreads,
+  type PublicConversationRecord,
+  type PublicMessageRecord,
+  type PublicSourceReference,
 } from "../../shared/maven-conversation";
 
 // Read-only access to the frozen legacy D1 conversation tables. The Agent
@@ -75,6 +76,7 @@ export function mapD1ConversationRow(
     status: row.status,
     closeReason: row.closeReason,
     telegramThreadId: row.telegramThreadId,
+    channelThreads: publicChannelThreads(row.telegramThreadId),
     metadata: parseJsonRecord(row.metadata),
     chatState,
     lastActivityAt: row.lastActivityAt?.getTime() ?? row.createdAt.getTime(),

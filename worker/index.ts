@@ -51,6 +51,8 @@ import { AiService } from "./services/ai-service";
 import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
 import { runAgentChannelInbound } from "./services/run-agent-channel-inbound";
 import { createTelegramAgentChannel } from "./services/telegram-agent-channel";
+import { listEnabledAgentChannels } from "./services/enabled-agent-channels";
+import { forwardVisitorThroughAgentChannels } from "./services/run-agent-channel-outbound";
 import {
   canHandConversationToMaven,
   recordMavenAssignment,
@@ -1292,7 +1294,16 @@ const app = new Hono<HonoAppContext>()
     const escalation = await createEscalation({
       chatService,
       projectService,
-      telegramService,
+      agentChannels: listEnabledAgentChannels({
+        telegram: telegramService
+          ? {
+              storedBotToken: settings?.telegramBotToken,
+              chatId: settings?.telegramChatId,
+              botName: settings?.botName,
+              service: telegramService,
+            }
+          : null,
+      }),
       project: { id: project.id, name: project.name, slug: project.slug },
       conversation: {
         id: conversation.id,
@@ -1300,6 +1311,7 @@ const app = new Hono<HonoAppContext>()
         visitorName: conversation.visitorName,
         visitorEmail: conversation.visitorEmail,
         telegramThreadId: conversation.telegramThreadId,
+        channelThreads: conversation.channelThreads,
         status: conversation.status,
         metadata: conversation.metadata,
       },
@@ -2243,7 +2255,6 @@ const app = new Hono<HonoAppContext>()
       );
       if (!stillOperational) return c.json({ ok: true });
 
-      // Forward to Telegram if conversation is in agent mode
       if (
         conversation.status === "waiting_agent" ||
         conversation.status === "agent_replied"
@@ -2253,24 +2264,28 @@ const app = new Hono<HonoAppContext>()
           const tgSettings = await telegramService.getTelegramSettings(
             project.id,
           );
-          if (tgSettings?.telegramBotToken && tgSettings?.telegramChatId) {
-            const telegramBotToken = tgSettings.telegramBotToken;
-            const telegramChatId = tgSettings.telegramChatId;
-            const replyTo = conversation.telegramThreadId
-              ? parseInt(conversation.telegramThreadId, 10)
-              : undefined;
+          const channels = listEnabledAgentChannels({
+            telegram: tgSettings?.telegramBotToken && tgSettings.telegramChatId
+              ? {
+                  storedBotToken: tgSettings.telegramBotToken,
+                  chatId: tgSettings.telegramChatId,
+                  service: telegramService,
+                }
+              : null,
+          });
+          if (channels.length > 0) {
             await runWithConversationExternalAction(
               chatService,
               project.id,
               conversation.id,
-              () => telegramService.forwardVisitorMessage(
-                telegramBotToken,
-                telegramChatId,
-                conversation.visitorName ?? senderEmail,
-                `[via email] ${cleanedText}`,
-                conversation.id,
-                replyTo,
-              ),
+              () => forwardVisitorThroughAgentChannels({
+                channels,
+                conversationId: conversation.id,
+                visitorName: conversation.visitorName ?? senderEmail,
+                content: `[via email] ${cleanedText}`,
+                channelThreads: conversation.channelThreads,
+                telegramThreadId: conversation.telegramThreadId,
+              }),
             );
           }
         } catch (err) {

@@ -23,6 +23,7 @@ function conversation(
     status: "active",
     closeReason: null,
     telegramThreadId: null,
+    channelThreads: {},
     metadata: {},
     chatState: { aiParticipation: "continuous" },
     lastActivityAt: 100,

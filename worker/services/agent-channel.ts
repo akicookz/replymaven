@@ -15,6 +15,17 @@ export interface AgentChannelInbound {
   replyToText: string | null;
 }
 
+export function readChannelThreadId(
+  conversation: {
+    telegramThreadId?: string | null;
+    channelThreads?: { telegram?: string; slack?: string } | null;
+  },
+  channel: AgentChannelId,
+): string | null {
+  return conversation.channelThreads?.[channel]
+    ?? (channel === "telegram" ? conversation.telegramThreadId ?? null : null);
+}
+
 export interface AgentChannelAdapter {
   readonly channel: AgentChannelId;
   resolveConversation(input: {

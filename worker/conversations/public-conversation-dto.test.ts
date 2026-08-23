@@ -21,6 +21,7 @@ describe("public conversation legacy DTOs", () => {
       status: "active",
       closeReason: null,
       telegramThreadId: null,
+      channelThreads: {},
       metadata: { country: "KR" },
       chatState: { state: "ai_active" },
       lastActivityAt: 1_800_000_000_000,

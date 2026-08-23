@@ -52,8 +52,9 @@ export async function publicConversationImportChecksum(
   conversation: PublicConversationRecord,
   messages: PublicMessageRecord[],
 ): Promise<string> {
+  const { channelThreads: _channelThreads, ...checksumConversation } = conversation;
   const bytes = new TextEncoder().encode(
-    JSON.stringify(stableValue({ conversation, messages })),
+    JSON.stringify(stableValue({ conversation: checksumConversation, messages })),
   );
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");

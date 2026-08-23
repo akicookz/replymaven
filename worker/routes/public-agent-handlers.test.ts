@@ -21,6 +21,7 @@ function conversation(
     status: "active",
     closeReason: null,
     telegramThreadId: null,
+    channelThreads: {},
     metadata: {},
     chatState: {},
     lastActivityAt: 100,
