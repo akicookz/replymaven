@@ -1552,6 +1552,8 @@ const app = new Hono<HonoAppContext>()
           env: c.env,
           projectSettings,
           projectName: project?.name ?? "Support",
+          actorUserId: project?.userId ?? "",
+          origin: "telegram",
         }),
       appendHuman: async (fields) =>
         chatService.appendHuman({
@@ -1700,6 +1702,8 @@ const app = new Hono<HonoAppContext>()
           env: c.env,
           projectSettings,
           projectName: project?.name ?? "Support",
+          actorUserId: project?.userId ?? "",
+          origin: "slack",
         }),
       appendHuman: async (fields) =>
         chatService.appendHuman({
@@ -7050,6 +7054,8 @@ const app = new Hono<HonoAppContext>()
         env: c.env,
         projectSettings,
         projectName: project.name,
+        actorUserId: user.id,
+        origin: "dashboard",
       });
       if (command.handled) {
         return c.json({

@@ -7,6 +7,7 @@ import {
   telegramCommandClaimPatch,
   type BotNameDecision,
 } from "./bot-name-decision";
+import type { BotNameCommandOrigin } from "./start-sidechat-turn";
 
 export interface BotNameOwnershipSnapshot {
   status: PublicConversationStatus
@@ -28,6 +29,12 @@ export interface ApplyBotNameCommandDeps {
     content: string
     expected: BotNameOwnershipSnapshot
   }): Promise<boolean>
+  startSidechatTurn(input: {
+    text: string
+  }): Promise<
+    | { accepted: true; status: "working" }
+    | { accepted: false; reason: "busy" | "archived" | "failed" }
+  >
 }
 
 interface ApplyBotNameCommandInput {
@@ -36,6 +43,7 @@ interface ApplyBotNameCommandInput {
   metadata: Record<string, unknown>
   now: number
   commandId?: string
+  origin?: BotNameCommandOrigin
   deps: ApplyBotNameCommandDeps
 }
 
@@ -95,13 +103,32 @@ export async function applyBotNameCommand(
   }
 
   let spoke = false;
+  let investigated = false;
   let confirmation = confirmBotNameDecision({
     effect: "none",
     handedToAi: decision.ownership === "ai",
     storedInstructions: decision.instructions === "set",
     spoke,
   });
-  if (decision.speak === "now") {
+  if (decision.investigate === "now") {
+    const started = await deps.startSidechatTurn({ text: rawAgentText });
+    if (started.accepted) {
+      investigated = true;
+      confirmation = confirmBotNameDecision({
+        effect: "none",
+        handedToAi: decision.ownership === "ai",
+        storedInstructions: decision.instructions === "set",
+        investigated: true,
+      });
+    } else if (started.reason === "busy") {
+      confirmation = confirmBotNameDecision({
+        effect: "none",
+        investigateBusy: true,
+      });
+    } else {
+      confirmation = "Maven could not start that. Open Sidechat in the dashboard.";
+    }
+  } else if (decision.speak === "now") {
     if (!snapshot) {
       confirmation = "Bot response canceled because the conversation changed.";
     } else {
@@ -123,6 +150,10 @@ export async function applyBotNameCommand(
           : "Bot response canceled because the conversation changed.";
       }
     }
+  }
+  if (investigated) {
+    instructionPatch.lastSidechatTurnOrigin =
+      input.origin && input.origin !== "dashboard" ? input.origin : null;
   }
 
   await writeMetadata(deps, metadata, instructionPatch, commandId, confirmation);

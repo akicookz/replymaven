@@ -10,6 +10,7 @@ function decision(
     instructions: "keep",
     speak: "silent",
     effect: "none",
+    investigate: "none",
     reason: null,
     ...overrides,
   };
@@ -54,6 +55,10 @@ function createDeps() {
     }) {
       calls.push(`persist-bot:${input.expected.chatState}:${input.content}`);
       return spoke;
+    },
+    async startSidechatTurn(input: { text: string }) {
+      calls.push(`investigate:${input.text}`);
+      return { accepted: true as const, status: "working" as const };
     },
   };
   return deps;
@@ -196,6 +201,57 @@ describe("applyBotNameCommand", () => {
       "status:closed:spam",
       "spam-sweep",
     ]);
+  });
+
+  test("starts a sidechat investigate turn and does not speak", async () => {
+    const deps = createDeps();
+    const result = await applyBotNameCommand({
+      rawAgentText: "check his billing",
+      decision: decision({
+        instructions: "set",
+        investigate: "now",
+        speak: "now",
+      }),
+      metadata: {},
+      now: 50,
+      deps,
+    });
+    expect(result.confirmation).toBe("Maven is looking into that.");
+    expect(deps.calls).toEqual([
+      "ownership:human",
+      "investigate:check his billing",
+      "metadata",
+    ]);
+  });
+
+  test("confirms busy when Sidechat is already working", async () => {
+    const deps = createDeps();
+    deps.startSidechatTurn = async () => {
+      deps.calls.push("investigate:busy");
+      return { accepted: false, reason: "busy" };
+    };
+    const result = await applyBotNameCommand({
+      rawAgentText: "check his billing",
+      decision: decision({ investigate: "now" }),
+      metadata: {},
+      now: 50,
+      deps,
+    });
+    expect(result.confirmation).toBe("Maven is already working on this.");
+    expect(deps.calls).toEqual(["ownership:human", "investigate:busy", "metadata"]);
+  });
+
+  test("close ignores investigate", async () => {
+    const deps = createDeps();
+    const result = await applyBotNameCommand({
+      rawAgentText: "close this",
+      decision: decision({ effect: "close", investigate: "now" }),
+      metadata: {},
+      now: 50,
+      deps,
+    });
+    expect(result.confirmation).toBe("Conversation closed.");
+    expect(deps.calls).toEqual(["status:closed:resolved"]);
   });
 
   test("stores raw text and does not speak when the decision is invalid", async () => {

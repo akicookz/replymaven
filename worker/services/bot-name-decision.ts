@@ -3,6 +3,7 @@ export interface BotNameDecision {
   instructions: "set" | "clear" | "keep"
   speak: "now" | "silent"
   effect: "none" | "close" | "ban"
+  investigate: "now" | "none"
   reason: string | null
 }
 
@@ -10,6 +11,7 @@ const OWNERSHIP = new Set(["human", "ai"]);
 const INSTRUCTIONS = new Set(["set", "clear", "keep"]);
 const SPEAK = new Set(["now", "silent"]);
 const EFFECT = new Set(["none", "close", "ban"]);
+const INVESTIGATE = new Set(["now", "none"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -29,6 +31,10 @@ export function parseBotNameDecision(value: unknown): BotNameDecision | null {
   const speak = readEnum(value.speak, SPEAK);
   const effect = readEnum(value.effect, EFFECT);
   if (!ownership || !instructions || !speak || !effect) return null;
+  const investigate = value.investigate === undefined
+    ? "none"
+    : readEnum(value.investigate, INVESTIGATE);
+  if (!investigate) return null;
   const reason = typeof value.reason === "string" && value.reason.trim()
     ? value.reason.trim()
     : null;
@@ -37,6 +43,7 @@ export function parseBotNameDecision(value: unknown): BotNameDecision | null {
     instructions: instructions as BotNameDecision["instructions"],
     speak: speak as BotNameDecision["speak"],
     effect: effect as BotNameDecision["effect"],
+    investigate: investigate as BotNameDecision["investigate"],
     reason,
   };
 }
@@ -54,6 +61,8 @@ export interface BotNameConfirmInput {
   handedToAi?: boolean
   storedInstructions?: boolean
   spoke?: boolean
+  investigated?: boolean
+  investigateBusy?: boolean
 }
 
 export function confirmBotNameDecision(input: BotNameConfirmInput): string {
@@ -63,6 +72,8 @@ export function confirmBotNameDecision(input: BotNameConfirmInput): string {
       ? `Visitor banned and conversation closed. Reason: ${input.reason}`
       : "Visitor banned and conversation closed.";
   }
+  if (input.investigateBusy) return "Maven is already working on this.";
+  if (input.investigated) return "Maven is looking into that.";
   if (input.spoke) return "Bot responded.";
   if (input.handedToAi) return "Bot resumed.";
   if (input.storedInstructions) return "Instructions saved.";
@@ -81,6 +92,7 @@ const RESERVED_PUBLIC_METADATA_KEYS = [
   "lastHumanCommandAt",
   "lastTelegramCommandId",
   "lastTelegramCommandConfirm",
+  "lastSidechatTurnOrigin",
 ] as const;
 
 export function preserveReservedPublicMetadata(

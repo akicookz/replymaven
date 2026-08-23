@@ -2,6 +2,7 @@ import { type DrizzleD1Database } from "drizzle-orm/d1";
 import type { PublicConversationStore } from "../conversations/public-conversation-store";
 import { parseAgentBotNameCommand } from "../chat-runtime/routing/public-turn-gates";
 import type { ProjectSettingsRow } from "../db";
+import type { AppEnv } from "../types";
 import { AiService } from "./ai-service";
 import {
   applyBotNameCommand,
@@ -9,6 +10,10 @@ import {
 } from "./apply-bot-name-command";
 import type { BotNameDecision } from "./bot-name-decision";
 import { recordMavenAssignment } from "./maven-assignment";
+import {
+  startSidechatTurn,
+  type BotNameCommandOrigin,
+} from "./start-sidechat-turn";
 import { VisitorBanService } from "./visitor-ban-service";
 
 const BARE_HANDBACK_DECISION: BotNameDecision = {
@@ -16,6 +21,7 @@ const BARE_HANDBACK_DECISION: BotNameDecision = {
   instructions: "clear",
   speak: "silent",
   effect: "none",
+  investigate: "none",
   reason: null,
 };
 
@@ -33,6 +39,7 @@ interface BotNameCommandEnv {
   AI_MODEL: string;
   GEMINI_API_KEY: string;
   OPENAI_API_KEY: string;
+  MAVEN_PROJECT_AGENT: AppEnv["MAVEN_PROJECT_AGENT"];
 }
 
 interface BotNameCommandConversation {
@@ -55,6 +62,8 @@ export async function executeChannelBotNameCommand(input: {
   env: BotNameCommandEnv;
   projectSettings: ProjectSettingsRow | null;
   projectName: string;
+  actorUserId: string;
+  origin: BotNameCommandOrigin;
 }): Promise<
   | { handled: false }
   | { handled: true; confirmation: string; handedToAi: boolean }
@@ -76,6 +85,7 @@ export async function executeChannelBotNameCommand(input: {
     metadata: input.conversation.metadata,
     now: input.now,
     commandId: input.commandId,
+    origin: input.origin,
     deps: createBotNameCommandDeps(input, aiService),
   });
   if (applied.handedToAi) {
@@ -101,8 +111,11 @@ function createBotNameCommandDeps(
     conversation: BotNameCommandConversation;
     chatService: PublicConversationStore;
     db: DrizzleD1Database<Record<string, unknown>>;
+    env: BotNameCommandEnv;
     projectSettings: ProjectSettingsRow | null;
     projectName: string;
+    actorUserId: string;
+    origin: BotNameCommandOrigin;
   },
   aiService: AiService,
 ): ApplyBotNameCommandDeps {
@@ -182,6 +195,16 @@ function createBotNameCommandDeps(
         fields.expected,
       );
       return Boolean(botMessage);
+    },
+    async startSidechatTurn(fields) {
+      return startSidechatTurn({
+        projectId,
+        conversationId: conversation.id,
+        text: fields.text,
+        actorUserId: input.actorUserId,
+        origin: input.origin,
+        env: input.env,
+      });
     },
   };
 }

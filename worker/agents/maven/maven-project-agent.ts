@@ -80,6 +80,21 @@ import {
   ConversationDirectory,
   type ConversationDirectorySql,
 } from "./conversation-directory";
+import { TelegramService } from "../../services/telegram-service";
+import { SlackService } from "../../services/slack-service";
+import { listEnabledAgentChannels } from "../../services/enabled-agent-channels";
+import { logError } from "../../observability";
+import {
+  readLastSidechatTurnOrigin,
+  sidechatPingText,
+  type SidechatStatusView,
+} from "../../services/sidechat-status";
+import {
+  runStartSidechatTurn,
+  type BotNameCommandOrigin,
+  type SidechatTurnOrigin,
+  type StartSidechatTurnResult,
+} from "../../services/start-sidechat-turn";
 
 interface McpConnectionMetadataRow {
   id: string;
@@ -570,6 +585,76 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     }
   }
 
+  async startSidechatTurn(input: {
+    conversationId: string;
+    text: string;
+    actorUserId: string;
+    origin: BotNameCommandOrigin;
+  }): Promise<StartSidechatTurnResult> {
+    return runStartSidechatTurn(input, {
+      getPublicConversation: async (conversationId) => {
+        const summary = this.conversationDirectory().getConversation(
+          conversationId,
+        );
+        if (!summary || summary.visitorId === "") return null;
+        return { archivedAt: summary.archivedAt };
+      },
+      registerSidechat: async (conversationId) => {
+        await this.registerSidechat(conversationId);
+        const summary = this.conversationDirectory().getConversation(
+          conversationId,
+        );
+        return { status: summary?.sidechatStatus ?? "idle" };
+      },
+      writeLastSidechatTurnOrigin: async (origin) => {
+        await this.setLastSidechatTurnOrigin(input.conversationId, origin);
+      },
+      submitServerSidechatTurn: async (fields) => {
+        const child = await this.subAgent(
+          MavenChatAgent,
+          toSidechatChildName(input.conversationId),
+        );
+        const result = await child.submitServerSidechatTurn(fields);
+        return result.accepted;
+      },
+    });
+  }
+
+  async setLastSidechatTurnOrigin(
+    conversationId: string,
+    origin: SidechatTurnOrigin | null,
+  ): Promise<void> {
+    const summary = this.conversationDirectory().getConversation(conversationId);
+    if (!summary || summary.visitorId === "") return;
+    const child = await this.subAgent(MavenChatAgent, summary.publicChildName);
+    await child.setLastSidechatTurnOrigin(origin);
+  }
+
+  async getSidechatStatusView(
+    conversationId: string,
+  ): Promise<SidechatStatusView | null> {
+    const summary = this.conversationDirectory().getConversation(conversationId);
+    if (!summary || summary.visitorId === "") return null;
+    const status = summary.sidechatStatus ?? "idle";
+    if (!this.hasSubAgent(MavenChatAgent, toSidechatChildName(conversationId))) {
+      return {
+        status,
+        hasDraft: false,
+        waitingApproval: status === "waiting_approval",
+      };
+    }
+    const child = await this.subAgent(
+      MavenChatAgent,
+      toSidechatChildName(conversationId),
+    );
+    const hasDraft = await child.hasSettledReplyDraft();
+    return {
+      status,
+      hasDraft,
+      waitingApproval: status === "waiting_approval",
+    };
+  }
+
   async registerPublicConversation(
     conversationId: string,
   ): Promise<{ childName: `pub_${string}`; created: boolean }> {
@@ -929,7 +1014,57 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
         },
       },
     });
+    this.ctx.waitUntil(this.pingSidechatStatus(conversationId, status));
     return true;
+  }
+
+  private async pingSidechatStatus(
+    conversationId: string,
+    status: SidechatStatus,
+  ): Promise<void> {
+    const text = sidechatPingText(status);
+    if (!text) return;
+    const summary = this.conversationDirectory().getConversation(conversationId);
+    if (!summary) return;
+    const origin = readLastSidechatTurnOrigin(summary.metadata);
+    if (!origin) return;
+    try {
+      const db = drizzle(this.env.DB);
+      const settings = await new ProjectService(db).getSettings(this.name);
+      const channels = listEnabledAgentChannels({
+        telegram: settings?.telegramBotToken && settings.telegramChatId
+          ? {
+              storedBotToken: settings.telegramBotToken,
+              chatId: settings.telegramChatId,
+              botName: settings.botName,
+              service: new TelegramService(db, this.env.ENCRYPTION_KEY),
+            }
+          : null,
+        slack: settings?.slackBotToken && settings.slackChannelId
+          ? {
+              storedBotToken: settings.slackBotToken,
+              channelId: settings.slackChannelId,
+              botName: settings.botName,
+              service: new SlackService(db, this.env.ENCRYPTION_KEY),
+            }
+          : null,
+      });
+      const adapter = channels.find((channel) => channel.channel === origin);
+      if (!adapter) return;
+      const threadId = origin === "telegram"
+        ? summary.telegramThreadId
+        : summary.slackThreadId ?? null;
+      await adapter.confirm({
+        text,
+        replyToExternalId: threadId ?? "",
+      });
+    } catch (error) {
+      logError("sidechat_status.ping_failed", error, {
+        conversationId,
+        status,
+        origin,
+      });
+    }
   }
 
   async isSidechatOperational(

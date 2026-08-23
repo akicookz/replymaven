@@ -24,6 +24,7 @@ describe("parseBotNameDecision", () => {
       instructions: "set",
       speak: "now",
       effect: "none",
+      investigate: "none",
       reason: null,
     });
   });
@@ -44,6 +45,27 @@ describe("parseBotNameDecision", () => {
     expect(parseBotNameDecision("take over")).toBeNull();
   });
 
+  test("treats a missing investigate key as none", () => {
+    expect(parseBotNameDecision({
+      ownership: "human",
+      instructions: "set",
+      speak: "silent",
+      effect: "none",
+      reason: null,
+    })?.investigate).toBe("none");
+  });
+
+  test("rejects an invalid investigate value", () => {
+    expect(parseBotNameDecision({
+      ownership: "human",
+      instructions: "set",
+      speak: "silent",
+      effect: "none",
+      investigate: "maybe",
+      reason: null,
+    })).toBeNull();
+  });
+
   test("keeps a blank ban reason for the worker to fill from raw text", () => {
     expect(parseBotNameDecision({
       ownership: "human",
@@ -56,6 +78,7 @@ describe("parseBotNameDecision", () => {
       instructions: "keep",
       speak: "silent",
       effect: "ban",
+      investigate: "none",
       reason: null,
     });
   });
@@ -98,6 +121,14 @@ describe("confirmBotNameDecision", () => {
       storedInstructions: false,
       spoke: false,
     })).toBe("Bot stayed quiet.");
+    expect(confirmBotNameDecision({
+      effect: "none",
+      investigated: true,
+    })).toBe("Maven is looking into that.");
+    expect(confirmBotNameDecision({
+      effect: "none",
+      investigateBusy: true,
+    })).toBe("Maven is already working on this.");
   });
 });
 

@@ -33,6 +33,8 @@ describe("native Sidechat privacy boundary", () => {
       expect(source).not.toContain("data-reply-draft");
       expect(source).not.toContain("data-safe-activity");
     }
+    expect(mcp).toContain("registerSidechatTools");
+    expect(telegram).not.toContain("start-sidechat-turn");
   });
 
   test("keeps native route JSON bounded to safe session and connection views", async () => {

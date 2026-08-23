@@ -14,6 +14,7 @@ import {
   createUIMessageStreamResponse,
   getToolName,
   isToolUIPart,
+  readUIMessageStream,
   type ToolSet,
   stepCountIs,
   streamText,
@@ -21,9 +22,13 @@ import {
   type UIMessage,
 } from "ai";
 import type {
+  ExecuteProjectToolRequest,
+  ExecuteProjectToolResult,
   MavenConversationSummary,
   PendingSidechatApprovalScope,
+  SidechatCustomerContext,
   SidechatStatus,
+  SidechatToolDescriptor,
   SidechatToolPresentation,
 } from "../../../shared/sidechat-agent";
 import {
@@ -146,6 +151,8 @@ import { MAVEN_ASSIGNEE_ID } from "../../../shared/maven-assignee";
 import { mavenAssignedSystemContent } from "../../services/maven-assignment";
 import { logError } from "../../observability";
 import { resolvePendingPublicContactUpdate } from "./public/public-human-mode";
+import { hasSettledReplyDraft } from "../../services/sidechat-status";
+import type { SidechatTurnOrigin } from "../../services/start-sidechat-turn";
 
 type SidechatDataParts = Record<string, unknown> & {
   "turn-accepted": { messageId: string };
@@ -205,13 +212,156 @@ interface SidechatStatusUpdater {
   ): Promise<boolean>;
 }
 
+interface SidechatTurnParent extends SidechatStatusUpdater {
+  getSidechatContext(
+    childName: string,
+    conversationId: string,
+  ): Promise<SidechatCustomerContext>;
+  getSidechatToolDescriptors(
+    childName: string,
+    conversationId: string,
+  ): Promise<SidechatToolDescriptor[]>;
+  executeProjectTool(
+    request: ExecuteProjectToolRequest,
+  ): Promise<ExecuteProjectToolResult>;
+}
+
 interface SidechatMessageStore {
+  name: string;
   messages: UIMessage[];
   persistMessages(
     messages: UIMessage[],
     excludeBroadcastIds?: string[],
     options?: { _deleteStaleRows?: boolean },
   ): Promise<void>;
+}
+
+interface SidechatTurnAgent extends SidechatMessageStore {
+  createSidechatLanguageModel(): LanguageModel;
+}
+
+async function executeSidechatTurn(input: {
+  agent: SidechatTurnAgent;
+  writer: {
+    write(part: unknown): void;
+    merge(stream: ReadableStream<unknown>): void;
+  };
+  parent: SidechatTurnParent;
+  conversationId: string;
+  actorUserId: string;
+  submittedMessageId: string | null;
+  continuation: boolean;
+  abortSignal: AbortSignal | undefined;
+  onFinish: Parameters<AIChatAgent<AppEnv>["onChatMessage"]>[0];
+}): Promise<void> {
+  const parentForFailure: SidechatStatusUpdater = input.parent;
+  try {
+    if (!await input.parent.isSidechatOperational(
+      input.agent.name,
+      input.conversationId,
+    )) {
+      await discardArchivedSubmission(input.agent, input.submittedMessageId);
+      throw new Error("Sidechat conversation is archived");
+    }
+    if (input.submittedMessageId) {
+      input.writer.write(buildTurnAcceptedPart(input.submittedMessageId));
+    }
+    await input.parent.updateSidechatSummary(input.conversationId, "working");
+    const [context, descriptors] = await Promise.all([
+      input.parent.getSidechatContext(input.agent.name, input.conversationId),
+      input.parent.getSidechatToolDescriptors(
+        input.agent.name,
+        input.conversationId,
+      ),
+    ]);
+    if (context.archivedAt !== null) {
+      await discardArchivedSubmission(input.agent, input.submittedMessageId);
+      throw new Error("Sidechat conversation is archived");
+    }
+    const model = input.agent.createSidechatLanguageModel();
+    const tools: ToolSet = {
+      present_reply_draft: createReplyDraftTool(),
+      ...buildSidechatDynamicTools({
+        descriptors,
+        childName: input.agent.name,
+        conversationId: input.conversationId,
+        actorUserId: input.actorUserId,
+        execute: (request) => input.parent.executeProjectTool(request),
+        emitActivity(part) {
+          input.writer.write(part);
+        },
+      }),
+    };
+    const result = streamText({
+      model,
+      system: buildSidechatSystemPrompt(context),
+      messages: await convertToModelMessages(
+        selectSidechatModelMessages(input.agent.messages, input.continuation),
+      ),
+      tools,
+      stopWhen: stepCountIs(8),
+      abortSignal: input.abortSignal,
+      onFinish(event) {
+        return input.onFinish(
+          event as unknown as Parameters<typeof input.onFinish>[0],
+        );
+      },
+    });
+    const seedToolCalls = new Map<string, string>();
+    for (const message of input.agent.messages) {
+      if (message.role !== "assistant") continue;
+      for (const part of message.parts) {
+        if (isToolUIPart(part)) {
+          seedToolCalls.set(part.toolCallId, getToolName(part));
+        }
+      }
+    }
+    const projectChunk = createPrivateToolChunkProjector(
+      new Map(
+        descriptors
+          .map((descriptor) => [
+            descriptor.exposedName,
+            {
+              safety: resolveSidechatToolSafety(descriptor),
+              tool: sidechatToolPresentation(descriptor),
+            },
+          ] as const),
+      ),
+      Date.now,
+      seedToolCalls,
+    );
+    input.writer.merge(
+      result
+        .toUIMessageStream<SidechatUIMessage>({
+          sendReasoning: true,
+        })
+        .pipeThrough(
+          new TransformStream({
+            transform(chunk, controller) {
+              for (const projected of projectChunk(chunk)) {
+                controller.enqueue(projected as typeof chunk);
+              }
+            },
+          }),
+        ),
+    );
+  } catch (error) {
+    logError("sidechat_turn.setup_failed", error, {
+      childName: input.agent.name,
+      conversationId: input.conversationId,
+      continuation: input.continuation,
+    });
+    if (await parentForFailure.isSidechatOperational(
+      input.agent.name,
+      input.conversationId,
+    )) {
+      await parentForFailure.updateSidechatSummary(
+        input.conversationId,
+        "failed",
+      );
+    }
+    throw new Error("Sidechat turn setup failed");
+  }
 }
 
 async function discardArchivedSubmission(
@@ -483,6 +633,9 @@ export class MavenChatAgent extends AIChatAgent<
       await discardArchivedSubmission(this, submittedMessageId);
       return new Response(null, { status: 409 });
     }
+    if (typeof parent.setLastSidechatTurnOrigin === "function") {
+      await parent.setLastSidechatTurnOrigin(conversationId, null);
+    }
 
     const stream = createUIMessageStream<SidechatUIMessage>({
       originalMessages: this.messages as SidechatUIMessage[],
@@ -490,117 +643,129 @@ export class MavenChatAgent extends AIChatAgent<
         return "The Sidechat response failed.";
       },
       execute: async ({ writer }) => {
-        const parentForFailure: SidechatStatusUpdater = parent;
-        try {
-          if (!await parent.isSidechatOperational(this.name, conversationId)) {
-            await discardArchivedSubmission(this, submittedMessageId);
-            throw new Error("Sidechat conversation is archived");
-          }
-          if (submittedMessageId) {
-            writer.write(buildTurnAcceptedPart(submittedMessageId));
-          }
-          await parent.updateSidechatSummary(conversationId, "working");
-          const [context, descriptors] = await Promise.all([
-            parent.getSidechatContext(this.name, conversationId),
-            parent.getSidechatToolDescriptors(this.name, conversationId),
-          ]);
-          if (context.archivedAt !== null) {
-            await discardArchivedSubmission(this, submittedMessageId);
-            throw new Error("Sidechat conversation is archived");
-          }
-          const model = this.createSidechatLanguageModel();
-          const tools: ToolSet = {
-            present_reply_draft: createReplyDraftTool(),
-            ...buildSidechatDynamicTools({
-              descriptors,
-              childName: this.name,
-              conversationId,
-              actorUserId: claims.userId,
-              execute: (request) => parent.executeProjectTool(request),
-              emitActivity(part) {
-                writer.write(part);
-              },
-            }),
-          };
-          const result = streamText({
-            model,
-            system: buildSidechatSystemPrompt(context),
-            messages: await convertToModelMessages(
-              selectSidechatModelMessages(
-                this.messages,
-                options.continuation === true,
-              ),
-            ),
-            tools,
-            stopWhen: stepCountIs(8),
-            abortSignal: options.abortSignal,
-            onFinish(event) {
-              return onFinish(
-                event as unknown as Parameters<typeof onFinish>[0],
-              );
-            },
-          });
-          // Tool calls already in the transcript (approved earlier, executed
-          // by this continuation) stream outputs without a tool-input-start;
-          // seed them so those outputs are forwarded and persisted.
-          const seedToolCalls = new Map<string, string>();
-          for (const message of this.messages) {
-            if (message.role !== "assistant") continue;
-            for (const part of message.parts) {
-              if (isToolUIPart(part)) {
-                seedToolCalls.set(part.toolCallId, getToolName(part));
-              }
-            }
-          }
-          const projectChunk = createPrivateToolChunkProjector(
-            new Map(
-              descriptors
-                .map((descriptor) => [
-                  descriptor.exposedName,
-                  {
-                    safety: resolveSidechatToolSafety(descriptor),
-                    tool: sidechatToolPresentation(descriptor),
-                  },
-                ] as const),
-            ),
-            Date.now,
-            seedToolCalls,
-          );
-          writer.merge(
-            result
-              .toUIMessageStream<SidechatUIMessage>({
-                sendReasoning: true,
-              })
-              .pipeThrough(
-                new TransformStream({
-                  transform(chunk, controller) {
-                    for (const projected of projectChunk(chunk)) {
-                      controller.enqueue(projected as typeof chunk);
-                    }
-                  },
-                }),
-              ),
-          );
-        } catch (error) {
-          logError("sidechat_turn.setup_failed", error, {
-            childName: this.name,
-            conversationId,
-            continuation: options.continuation === true,
-          });
-          if (await parentForFailure.isSidechatOperational(
-            this.name,
-            conversationId,
-          )) {
-            await parentForFailure.updateSidechatSummary(
-              conversationId,
-              "failed",
-            );
-          }
-          throw new Error("Sidechat turn setup failed");
-        }
+        await executeSidechatTurn({
+          agent: this as unknown as SidechatTurnAgent,
+          writer,
+          parent: parent as unknown as SidechatTurnParent,
+          conversationId,
+          actorUserId: claims.userId,
+          submittedMessageId,
+          continuation: options.continuation === true,
+          abortSignal: options.abortSignal,
+          onFinish,
+        });
       },
     });
     return createUIMessageStreamResponse({ stream });
+  }
+
+  async submitServerSidechatTurn(input: {
+    text: string;
+    actorUserId: string;
+  }): Promise<{ accepted: true } | { accepted: false }> {
+    if (parseMavenChildName(this.name).kind !== "sidechat") {
+      return { accepted: false };
+    }
+    const conversationId = conversationIdFromChildName(this.name);
+    const parent = await this.parentAgent(MavenProjectAgent);
+    if (!await parent.isSidechatOperational(this.name, conversationId)) {
+      return { accepted: false };
+    }
+    const userMessage: SidechatUIMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      parts: [{ type: "text", text: input.text }],
+    };
+    await this.persistMessages([...this.messages, userMessage]);
+    this.ctx.waitUntil(this.runServerSidechatTurn({
+      actorUserId: input.actorUserId,
+      submittedMessageId: userMessage.id,
+    }));
+    return { accepted: true };
+  }
+
+  async hasSettledReplyDraft(): Promise<boolean> {
+    return hasSettledReplyDraft(this.messages);
+  }
+
+  async setLastSidechatTurnOrigin(
+    origin: SidechatTurnOrigin | null,
+  ): Promise<void> {
+    this.assertPublicChild();
+    await this.runExclusivePublicMutation(async () => {
+      const state = this.requirePublicState();
+      const metadata = { ...state.metadata };
+      if (origin) {
+        metadata.lastSidechatTurnOrigin = origin;
+      } else {
+        delete metadata.lastSidechatTurnOrigin;
+      }
+      if (JSON.stringify(metadata) === JSON.stringify(state.metadata)) return;
+      const saved = this.saveNextPublicState(state, {
+        metadata,
+        updatedAt: Date.now(),
+      });
+      await this.publishPublicProjection(saved, this.readPublicMessages());
+    });
+  }
+
+  private async runServerSidechatTurn(input: {
+    actorUserId: string;
+    submittedMessageId: string;
+  }): Promise<void> {
+    const conversationId = conversationIdFromChildName(this.name);
+    const parent = await this.parentAgent(MavenProjectAgent);
+    try {
+      const stream = createUIMessageStream<SidechatUIMessage>({
+        originalMessages: this.messages as SidechatUIMessage[],
+        onError() {
+          return "The Sidechat response failed.";
+        },
+        execute: async ({ writer }) => {
+          await executeSidechatTurn({
+            agent: this as unknown as SidechatTurnAgent,
+            writer,
+            parent: parent as unknown as SidechatTurnParent,
+            conversationId,
+            actorUserId: input.actorUserId,
+            submittedMessageId: input.submittedMessageId,
+            continuation: false,
+            abortSignal: undefined,
+            onFinish: async () => undefined,
+          });
+        },
+      });
+      let last: SidechatUIMessage | undefined;
+      for await (const message of readUIMessageStream({ stream })) {
+        last = message;
+      }
+      if (!last) {
+        if (await parent.isSidechatOperational(this.name, conversationId)) {
+          await parent.updateSidechatSummary(conversationId, "failed");
+        }
+        return;
+      }
+      const persisted = this.messages.some((message) => message.id === last.id)
+        ? this.messages.map((message) =>
+          message.id === last.id ? last : message
+        )
+        : [...this.messages, last];
+      await this.persistMessages(persisted);
+      await this.onChatResponse({
+        message: last,
+        requestId: input.submittedMessageId,
+        continuation: false,
+        status: "completed",
+      });
+    } catch (error) {
+      logError("sidechat_turn.server_failed", error, {
+        childName: this.name,
+        conversationId,
+      });
+      if (await parent.isSidechatOperational(this.name, conversationId)) {
+        await parent.updateSidechatSummary(conversationId, "failed");
+      }
+    }
   }
 
   private async handlePublicChatMessage(

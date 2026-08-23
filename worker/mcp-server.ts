@@ -43,6 +43,7 @@ import {
   type McpRequestContext,
 } from "./mcp-tool-helpers";
 import { registerHelpdeskTools } from "./mcp-helpdesk-tools";
+import { registerSidechatTools } from "./mcp-sidechat-tools";
 import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -172,6 +173,7 @@ function createReplyMavenMcpServer(context: McpRequestContext): McpServer {
   registerCreateWebpageResourceTool(server, context);
   registerReindexResourceTool(server, context);
   registerHelpdeskTools(server, context);
+  registerSidechatTools(server, context);
 
   return server;
 }
@@ -546,6 +548,8 @@ function registerSendAgentReplyTool(
         env: context.env,
         projectSettings,
         projectName: project?.name ?? "Support",
+        actorUserId: context.userId,
+        origin: "mcp",
       });
       if (command.handled) {
         return textResult({

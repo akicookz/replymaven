@@ -203,6 +203,12 @@ describe("native MavenChatAgent transcript", () => {
           async getSidechatToolDescriptors() {
             return [];
           },
+          async setLastSidechatTurnOrigin() {
+            return;
+          },
+          async executeProjectTool() {
+            throw new Error("unexpected tool");
+          },
         };
       },
     };
@@ -312,6 +318,29 @@ describe("native MavenChatAgent transcript", () => {
     await expect(response.text()).resolves.toBe("");
     expect(fakeAgent.messages).toEqual([]);
     expect(modelCreated).toBe(false);
+  });
+
+  nativeTest("rejects a server Sidechat turn when the child is not operational", async () => {
+    const { MavenChatAgent } = await import("./maven-chat-agent");
+    const fakeAgent = {
+      name: "sc_conversation-1",
+      messages: [],
+      async persistMessages() {
+        throw new Error("should not persist");
+      },
+      async parentAgent() {
+        return {
+          async isSidechatOperational() {
+            return false;
+          },
+        };
+      },
+    };
+    const result = await MavenChatAgent.prototype.submitServerSidechatTurn.call(
+      fakeAgent as never,
+      { text: "check his billing", actorUserId: "user-1" },
+    );
+    expect(result).toEqual({ accepted: false });
   });
 
   nativeTest(
@@ -525,7 +554,7 @@ describe("native MavenChatAgent transcript", () => {
         MavenChatAgent,
         childName,
       );
-      await expect(freshStub.getPrivateTranscriptSnapshot()).resolves.toEqual([
+      await expect(freshStub.getPrivateTranscriptSnapshot()).resolves.toMatchObject([
         userMessage("private-user-1", "Investigate this privately"),
       ]);
     },
@@ -608,10 +637,10 @@ describe("native MavenChatAgent transcript", () => {
     await childA.persistMessages([userMessage("a-1", "Only child A")]);
     await childB.persistMessages([userMessage("b-1", "Only child B")]);
 
-    await expect(childA.getPrivateTranscriptSnapshot()).resolves.toEqual([
+    await expect(childA.getPrivateTranscriptSnapshot()).resolves.toMatchObject([
       userMessage("a-1", "Only child A"),
     ]);
-    await expect(childB.getPrivateTranscriptSnapshot()).resolves.toEqual([
+    await expect(childB.getPrivateTranscriptSnapshot()).resolves.toMatchObject([
       userMessage("b-1", "Only child B"),
     ]);
   });

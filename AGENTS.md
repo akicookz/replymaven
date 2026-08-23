@@ -42,7 +42,7 @@ Read whole files, not the matched lines. Half-read context is where the bugs com
 
 ## Product Overview
 
-ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbot platform built on Cloudflare Workers. Users sign up, create a project/bot, customize its appearance and behavior, add knowledge resources (web pages, PDFs, FAQs), and embed a lightweight chat widget on their website. The bot uses configurable AI models (Google Gemini 3 Flash or OpenAI GPT-5, controlled via the `AI_MODEL` env var) for AI responses, Cloudflare AI Search for RAG over user-uploaded resources, and supports Telegram-based live agent handoff when the bot cannot confidently answer. Users can set the bot name once (e.g. "Luna") and configure a human agent label (e.g. "an engineer") for personalized handoff messages. Agents interact with the bot via `@BotName` commands in Telegram, the dashboard composer, or MCP to hand back control, close conversations, or instruct the bot to respond directly. A command is never stored as a visitor-visible agent row. Handing the thread to AI assigns Maven and writes a dashboard system pill.
+ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbot platform built on Cloudflare Workers. Users sign up, create a project/bot, customize its appearance and behavior, add knowledge resources (web pages, PDFs, FAQs), and embed a lightweight chat widget on their website. The bot uses configurable AI models (Google Gemini 3 Flash or OpenAI GPT-5, controlled via the `AI_MODEL` env var) for AI responses, Cloudflare AI Search for RAG over user-uploaded resources, and supports live agent handoff over Telegram or Slack when the bot cannot confidently answer. Users can set the bot name once (e.g. "Luna") and configure a human agent label (e.g. "an engineer") for personalized handoff messages. Agents interact with the bot via `@BotName` commands in Telegram, Slack, the dashboard composer, or MCP to hand back control, close conversations, instruct the bot to respond directly, or start a private Sidechat investigate turn. MCP also exposes `ask_maven` and `get_sidechat_status`. A command is never stored as a visitor-visible agent row. Handing the thread to AI assigns Maven and writes a dashboard system pill.
 
 ### Core Features
 
@@ -52,7 +52,7 @@ ReplyMaven (replymaven.com) is a multi-tenant AI-powered customer support chatbo
 - **Tone of voice** -- configurable AI personality (professional, friendly, casual, formal, or custom prompt).
 - **Quick actions and quick topics** -- configurable buttons and topic suggestions shown above the chat input.
 - **Intro message** -- the first bot message visitors see when they open the widget.
-- **Telegram live agent handoff** -- when the bot cannot answer or the visitor requests a human, the conversation is relayed to the user's Telegram. Agent replies in Telegram are synced back to the widget. When a conversation is in agent mode, the AI is completely silenced and visitor messages are forwarded to Telegram. Agents use `@BotName` commands (Telegram, dashboard, or MCP) to hand back to AI (with optional instructions), close conversations, or instruct the bot to respond immediately. The inbox Assign menu includes Maven; picking it hands the thread back. Idle takeover after four quiet hours also assigns Maven. New bookings, conversations, and contact form submissions also trigger Telegram notifications when configured.
+- **Live agent handoff** -- when the bot cannot answer or the visitor requests a human, the conversation is relayed to Telegram and/or Slack through `AgentChannelAdapter`. Agent replies in those messengers are synced back to the widget. When a conversation is in agent mode, the AI is completely silenced and visitor messages are forwarded to every enabled messenger. Agents use `@BotName` commands (Telegram, Slack, dashboard, or MCP) to hand back to AI (with optional instructions), close conversations, instruct the bot to respond immediately, or start a Sidechat investigate turn. `ask_maven` starts that investigate turn from MCP. The inbox Assign menu includes Maven; picking it hands the thread back. Idle takeover after four quiet hours also assigns Maven. New bookings, conversations, and contact form submissions also notify enabled messengers when configured.
 - **Canned response auto-drafting** -- after a conversation ends, the AI analyzes it and generates draft canned responses. Users approve or reject drafts from the dashboard.
 - **Customer continuity** -- anonymous widget visitor IDs can be connected to project-scoped customer profiles. Signed server-issued tokens keep exact visitor history together across devices without trusting browser-supplied email.
 
@@ -665,6 +665,7 @@ Do NOT re-add conversation-message caching here -- prior attempts introduced sta
 | POST | `/api/widget/:projectSlug/conversations/:id/messages` | Send message (returns SSE stream, or JSON `{ agentMode: true }` when in agent mode) |
 | GET | `/api/widget/:projectSlug/conversations/:id/messages` | Get conversation history |
 | POST | `/api/telegram/webhook/:projectId` | Telegram bot webhook. Verified with the per-project `secret_token` Telegram echoes in `X-Telegram-Bot-Api-Secret-Token` (derived from `ENCRYPTION_KEY`, `worker/services/telegram-secrets.ts`). The first verified update from a project with no chat id binds that chat; there is no token-polling detect endpoint. |
+| POST | `/api/slack/events/:projectId` | Slack Events API. Verified with the per-project Slack signing secret (`v0:{ts}:{body}` HMAC). The first trusted `event.channel` binds once. |
 | POST | `/api/webhooks/inbound-mail` | Resend inbound webhook (svix-signed). Fetching the body needs a Resend key with read access, not a sending-only one; a failed fetch answers 502 so Resend retries. Replies are routed by the conversation link they quote (`worker/services/inbound-email-routing.ts`) because Resend replaces our `Message-ID` with the sending provider's, so `In-Reply-To` never references an id we issued. Sender-email lookup is the last resort and only ever matches visitors. |
 | GET | `/api/widget-embed.js` | 301 redirect to `widget.replymaven.com` (legacy) |
 
@@ -693,6 +694,8 @@ Do NOT re-add conversation-message caching here -- prior attempts introduced sta
 | POST | `/api/projects/:id/canned-responses/:crId/approve` | Approve draft |
 | GET/PUT | `/api/projects/:id/telegram` | Telegram config |
 | POST | `/api/projects/:id/telegram/test` | Test Telegram connection |
+| GET/PUT | `/api/projects/:id/slack` | Slack config |
+| POST | `/api/projects/:id/slack/test` | Test Slack connection |
 | POST | `/api/upload` | Upload files to R2 |
 
 ---
@@ -770,30 +773,30 @@ Resource ingestion:
 - **PDFs**: File uploaded -> stored in R2 under `{projectId}/` -> AI Search auto-indexes
 - **FAQs**: Stored in D1 + written as markdown to R2 -> AI Search indexes
 
-### Telegram Live Agent Handoff
+### Live agent handoff (Telegram and Slack)
 
-1. User saves the Telegram bot token and `agentName` in dashboard settings. `botName` can be set once, then it is locked. The token is encrypted at rest with `ENCRYPTION_KEY` (`worker/services/telegram-secrets.ts`); every read goes back through `resolveTelegramToken`, and `TelegramService` decrypts internally, so callers pass the stored value and never hold the credential.
-2. Saving registers the webhook with a per-project `secret_token`. The chat id is then learned from the first verified update: the user adds the bot to their group, sends any message, and the bot confirms in the chat. It binds once and is never repointed. A chat id can still be pasted by hand.
-3. When the bot cannot answer confidently or visitor requests a human:
+Messenger transport sits behind `AgentChannelAdapter` (`worker/services/agent-channel.ts`). Telegram and Slack share one inbound handler (`runAgentChannelInbound`) and one outbound fan-out (`forwardVisitorThroughAgentChannels`). Dashboard and MCP ordinary replies do not go through the adapters. Adapters do not interpret `@BotName` or start Sidechat.
+
+1. The owner saves a Telegram bot token or Slack bot token plus signing secret in Tools. `botName` can be set once, then it is locked. Tokens are encrypted at rest. Telegram uses `ENCRYPTION_KEY` (`worker/services/telegram-secrets.ts`). Slack uses its own derived secrets (`worker/services/slack-secrets.ts`).
+2. Telegram: saving registers the webhook with a per-project `secret_token`. The chat id is learned from the first verified update. Slack: Events API at `/api/slack/events/:projectId`. The first trusted `event.channel` binds once.
+3. When the bot cannot answer confidently or the visitor requests a human:
    - Conversation status changes to `waiting_agent`
-   - Worker sends Telegram notification via `notifyHandoff` with recent messages (last 4), dashboard link, and `@BotName` command hints
-   - The Telegram notification's `message_id` is stored as `conversation.telegramThreadId` for reply threading
+   - Enabled adapters send an escalation (`notifyEscalation`) with recent messages, a dashboard link, and `@BotName` command hints
+   - Thread ids are stored on `channelThreads` (`telegram` and/or `slack`). `telegramThreadId` remains `channelThreads.telegram ?? null`
 4. While in agent mode (`waiting_agent` / `agent_replied`):
-   - AI is completely silenced -- visitor messages bypass the entire AI pipeline
-   - Visitor messages are forwarded to Telegram via `forwardVisitorMessage` (threaded using `telegramThreadId`)
+   - AI is completely silenced
+   - Visitor messages are forwarded through every enabled adapter
    - The widget endpoint returns `{ ok: true, agentMode: true }` JSON instead of SSE
-5. Agent replies in Telegram (not prefixed with `@BotName`) -> stored as agent message, status set to `agent_replied`, visitor sees reply via polling
-6. Agent types `@BotName` commands in Telegram, the dashboard composer, or MCP. Bare `@BotName` hands the thread back to AI, assigns Maven, and writes `{name} assigned {botName}`. Any other text is read as ordinary language by `interpretBotNameCommand()` and applied as one decision: keep or hand off ownership, store or clear instructions, speak now or stay silent, close, or ban. Speak-now uses `generateDirectedResponse()`. There is no keyword list. Dashboard and MCP commands are not stored as visitor-visible agent rows. Idle takeover writes `{botName} self-assigned because the human seemed away`.
+5. Agent replies in Telegram or Slack (not prefixed with `@BotName`) are stored as agent messages. Status becomes `agent_replied`.
+6. Agent types `@BotName` commands in Telegram, Slack, the dashboard composer, or MCP. Bare `@BotName` hands the thread back to AI, assigns Maven, and writes `{name} assigned {botName}`. Any other text is read as ordinary language by `interpretBotNameCommand()` and applied as one decision: keep or hand off ownership, store or clear instructions, speak now or stay silent, investigate now, close, or ban. Speak-now uses `generateDirectedResponse()`. Investigate-now starts a private Sidechat turn via `startSidechatTurn` and does not speak to the visitor. MCP `ask_maven` starts the same investigate path. `get_sidechat_status` returns `{ status, hasDraft, waitingApproval }` only. Drafts stay in the dashboard until a human sends them. There is no keyword list. Dashboard and MCP commands are not stored as visitor-visible agent rows. Idle takeover writes `{botName} self-assigned because the human seemed away`.
 
-#### Telegram Notification Methods
+#### Messenger methods
 
 | Method | Trigger | Content |
 |--------|---------|---------|
-| `notifyHandoff` | AI handoff or visitor requests human | Recent messages, summary, dashboard link, command hints |
-| `notifyNewConversation` | First visitor message in a conversation | Visitor info, first message, dashboard link |
-| `notifyNewBooking` | New booking created | Booking details (name, email, time, notes), dashboard link |
-| `notifyContactForm` | Contact form submitted | Form fields, dashboard link |
-| `forwardVisitorMessage` | Visitor sends message while in agent mode | Visitor name + message content, threaded reply |
+| `notifyEscalation` | AI handoff or visitor requests human | Recent messages, summary, dashboard link, command hints |
+| `forwardVisitorMessage` | Visitor sends a message while in agent mode | Visitor name + message content, threaded reply |
+| `confirm` | Command result or Sidechat status ping | Short confirmation text |
 
 ### Page Context API
 
