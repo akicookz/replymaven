@@ -455,6 +455,14 @@ function createHarness(options: {
       };
     },
     async releaseExternalAction() {},
+    async updateChannelThread(
+      _projectId: string,
+      _conversationId: string,
+      _channel: "telegram" | "slack",
+      threadId: string,
+    ) {
+      harness.conversation.telegramThreadId = threadId;
+    },
     async updateTelegramThreadId(
       _projectId: string,
       _conversationId: string,

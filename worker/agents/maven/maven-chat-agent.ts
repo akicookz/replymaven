@@ -137,6 +137,7 @@ import { CustomerIdentityService } from "../../services/customer-identity-servic
 import { GuidelineService } from "../../services/guideline-service";
 import { ProjectService } from "../../services/project-service";
 import { TelegramService } from "../../services/telegram-service";
+import { SlackService } from "../../services/slack-service";
 import { listEnabledAgentChannels } from "../../services/enabled-agent-channels";
 import { forwardVisitorThroughAgentChannels } from "../../services/run-agent-channel-outbound";
 import { ToolService } from "../../services/tool-service";
@@ -837,6 +838,14 @@ export class MavenChatAgent extends AIChatAgent<
               service: new TelegramService(db, this.env.ENCRYPTION_KEY),
             }
           : null,
+        slack: settings?.slackBotToken && settings.slackChannelId
+          ? {
+              storedBotToken: settings.slackBotToken,
+              channelId: settings.slackChannelId,
+              botName: settings.botName,
+              service: new SlackService(db, this.env.ENCRYPTION_KEY),
+            }
+          : null,
       });
       if (channels.length > 0 && currentState.status !== "closed") {
         this.ctx.waitUntil((async () => {
@@ -1000,6 +1009,7 @@ export class MavenChatAgent extends AIChatAgent<
                 chatService: operationalStore,
                 projectService,
                 telegramService,
+                slackService: new SlackService(db, this.env.ENCRYPTION_KEY),
                 acquireHttpRateLimitPermit: () =>
                   this.acquirePublicToolRateLimitPermit(),
                 onTeamRequested() {},
@@ -1917,16 +1927,40 @@ export class MavenChatAgent extends AIChatAgent<
   }
 
   async updatePublicTelegramThreadId(threadId: string): Promise<void> {
+    await this.updatePublicChannelThread("telegram", threadId);
+  }
+
+  async updatePublicChannelThread(
+    channel: "telegram" | "slack",
+    threadId: string,
+  ): Promise<void> {
     await this.runExclusivePublicMutation(async () => {
       const state = this.requirePublicState();
+      if (state.archivedAt !== null || state.purgeStartedAt !== null) return;
+      if (channel === "telegram") {
+        if (state.telegramThreadId === threadId) return;
+        if (
+          state.telegramThreadId !== null &&
+          state.telegramThreadId !== threadId
+        ) return;
+        const saved = this.saveNextPublicState(state, {
+          telegramThreadId: threadId,
+          channelThreads: publicChannelThreads(threadId, state.channelThreads),
+          updatedAt: Date.now(),
+        });
+        await this.publishPublicProjection(saved, this.readPublicMessages());
+        return;
+      }
+      if (state.channelThreads.slack === threadId) return;
       if (
-        state.archivedAt !== null ||
-        state.purgeStartedAt !== null ||
-        state.telegramThreadId === threadId
+        state.channelThreads.slack !== undefined &&
+        state.channelThreads.slack !== threadId
       ) return;
       const saved = this.saveNextPublicState(state, {
-        telegramThreadId: threadId,
-        channelThreads: publicChannelThreads(threadId, state.channelThreads),
+        channelThreads: {
+          ...state.channelThreads,
+          slack: threadId,
+        },
         updatedAt: Date.now(),
       });
       await this.publishPublicProjection(saved, this.readPublicMessages());
@@ -2809,6 +2843,7 @@ export class MavenChatAgent extends AIChatAgent<
       visitorName: state.visitorName,
       visitorEmail: state.visitorEmail,
       telegramThreadId: state.telegramThreadId,
+      slackThreadId: state.channelThreads.slack ?? null,
       status: state.status,
       closeReason: state.closeReason,
       metadata: structuredClone(state.metadata),

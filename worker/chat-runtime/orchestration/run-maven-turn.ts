@@ -4,6 +4,7 @@ import { type PublicConversationStore } from "../../conversations/public-convers
 import { type ProjectService } from "../../services/project-service";
 import { type SourceReference } from "../../services/resource-service";
 import { type TelegramService } from "../../services/telegram-service";
+import { type SlackService } from "../../services/slack-service";
 import { type ToolService } from "../../services/tool-service";
 import { type AppEnv } from "../../types";
 import { streamMavenAgent } from "../agents/support-agent";
@@ -54,6 +55,7 @@ export interface MavenPublicToolDependencies {
   chatService: PublicConversationStore;
   projectService: ProjectService;
   telegramService?: TelegramService;
+  slackService?: SlackService;
   acquireHttpRateLimitPermit(): boolean;
   onTeamRequested(): void;
 }
@@ -218,6 +220,7 @@ export async function runMavenTurn(options: {
       chatService: publicDependencies.chatService,
       projectService: publicDependencies.projectService,
       telegramService: publicDependencies.telegramService,
+      slackService: publicDependencies.slackService,
       env: {
         BETTER_AUTH_URL: options.dependencies.env.BETTER_AUTH_URL,
         RESEND_API_KEY: options.dependencies.env.RESEND_API_KEY,

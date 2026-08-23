@@ -95,7 +95,7 @@ interface AppendPublicMessageFields {
   userId?: string | null;
   id?: string;
   idempotencyKey?: string | null;
-  origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
+  origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
 }
 
@@ -340,7 +340,7 @@ export interface LegacyPublicMessageInput {
   deliveredAt?: Date | null;
   readAt?: Date | null;
   idempotencyKey?: string | null;
-  origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
+  origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
 }
 
@@ -387,6 +387,12 @@ export interface PublicConversationStore {
   updateLegacyEscalationMetadata(projectId: string, conversationId: string, update: PublicLegacyEscalationMetadataUpdate): Promise<PublicConversationRecord | null>;
   persistTeamRequestTelegramThreadId(projectId: string, conversationId: string, acceptanceToken: string, threadId: string): Promise<boolean>;
   updateTelegramThreadId(projectId: string, conversationId: string, threadId: string): Promise<void>;
+  updateChannelThread(
+    projectId: string,
+    conversationId: string,
+    channel: "telegram" | "slack",
+    threadId: string,
+  ): Promise<void>;
   acquireExternalAction(input: PublicExternalActionLeaseInput): Promise<PublicExternalActionLease | null>;
   releaseExternalAction(input: PublicExternalActionLease): Promise<void>;
   markDelivery(input: PublicDeliveryUpdateInput): Promise<string[]>;

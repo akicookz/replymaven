@@ -807,6 +807,12 @@ interface TelegramData {
   telegramChatId: string | null;
 }
 
+interface SlackData {
+  slackBotToken: string | null;
+  slackSigningSecret: string | null;
+  slackChannelId: string | null;
+}
+
 interface ToolsPanelProps {
   projectId: string;
   embedded?: boolean;
@@ -840,6 +846,12 @@ export function ToolsPanel({
   const [telegramChatId, setTelegramChatId] = useState("");
   const [telegramSaveStatus, setTelegramSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [telegramTestResult, setTelegramTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [slackExpanded, setSlackExpanded] = useState(false);
+  const [slackBotToken, setSlackBotToken] = useState("");
+  const [slackSigningSecret, setSlackSigningSecret] = useState("");
+  const [slackChannelId, setSlackChannelId] = useState("");
+  const [slackSaveStatus, setSlackSaveStatus] = useState<"idle" | "success" | "error">("idle");
+  const [slackTestResult, setSlackTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // ─── Queries ──────────────────────────────────────────────────────────────
 
@@ -878,6 +890,17 @@ export function ToolsPanel({
   });
 
   const telegramConfigured = !!(telegramData?.telegramBotToken && telegramData?.telegramChatId);
+
+  const { data: slackData } = useQuery<SlackData>({
+    queryKey: ["slack-config", projectId],
+    queryFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/slack`);
+      if (!res.ok) throw new Error("Failed to fetch slack config");
+      return res.json();
+    },
+  });
+
+  const slackConfigured = !!(slackData?.slackBotToken && slackData.slackSigningSecret);
 
   // ─── Mutations ────────────────────────────────────────────────────────────
 
@@ -1038,6 +1061,55 @@ export function ToolsPanel({
     onError: (err: Error) => {
       setTelegramTestResult({ success: false, message: err.message });
       setTimeout(() => setTelegramTestResult(null), 5000);
+    },
+  });
+
+  const saveSlack = useMutation({
+    mutationFn: async () => {
+      const body: Record<string, string> = {};
+      if (slackBotToken) body.slackBotToken = slackBotToken;
+      if (slackSigningSecret) body.slackSigningSecret = slackSigningSecret;
+      if (slackChannelId) body.slackChannelId = slackChannelId;
+      const res = await fetch(`/api/projects/${projectId}/slack`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed to save" }));
+        throw new Error((err as { error?: string }).error ?? "Failed to save");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      setSlackSaveStatus("success");
+      setSlackBotToken("");
+      setSlackSigningSecret("");
+      queryClient.invalidateQueries({ queryKey: ["slack-config", projectId] });
+      setTimeout(() => setSlackSaveStatus("idle"), 3000);
+    },
+    onError: () => {
+      setSlackSaveStatus("error");
+      setTimeout(() => setSlackSaveStatus("idle"), 3000);
+    },
+  });
+
+  const testSlack = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/projects/${projectId}/slack/test`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { error?: string }).error ?? "Test failed");
+      return data;
+    },
+    onSuccess: () => {
+      setSlackTestResult({ success: true, message: "Test message sent successfully!" });
+      setTimeout(() => setSlackTestResult(null), 5000);
+    },
+    onError: (err: Error) => {
+      setSlackTestResult({ success: false, message: err.message });
+      setTimeout(() => setSlackTestResult(null), 5000);
     },
   });
 
@@ -1721,6 +1793,156 @@ export function ToolsPanel({
                         )}
                       >
                         {telegramTestResult.message}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div
+                className={cn(
+                  "bg-card rounded-xl overflow-hidden",
+                  slackConfigured ? "" : "border-2 border-dashed border-muted",
+                )}
+              >
+                <div
+                  className="flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-muted/30 transition-colors"
+                  onClick={() => setSlackExpanded(!slackExpanded)}
+                >
+                  <div className="flex items-center gap-2 shrink-0">
+                    {slackExpanded ? (
+                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                    )}
+                    <div className={cn(
+                      "w-8 h-8 rounded-lg flex items-center justify-center",
+                      slackConfigured ? "bg-[#4A154B]/15" : "bg-muted",
+                    )}>
+                      <Slack className={cn(
+                        "w-4 h-4",
+                        slackConfigured ? "text-[#4A154B]" : "text-muted-foreground",
+                      )} />
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        Slack Handoff
+                      </p>
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                        Preset
+                      </Badge>
+                      {!slackConfigured && (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-warning border-warning/30">
+                          Not configured
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {slackConfigured
+                        ? "Live agent handoff via Slack when the bot cannot answer"
+                        : "Set up Slack to receive live handoff notifications"}
+                    </p>
+                  </div>
+                </div>
+
+                {slackExpanded && (
+                  <div className="px-4 py-4 space-y-4 bg-muted/20">
+                    <p className="text-xs text-muted-foreground">
+                      When the bot cannot answer a question or the visitor requests a human, the conversation will be forwarded to your Slack channel. This is separate from the send_to_slack HTTP tool.
+                    </p>
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          Bot Token <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          type="password"
+                          value={slackBotToken}
+                          onChange={(e) => setSlackBotToken(e.target.value)}
+                          placeholder={slackConfigured ? "Enter new token to update" : "Paste your Slack bot token"}
+                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          Signing Secret <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          type="password"
+                          value={slackSigningSecret}
+                          onChange={(e) => setSlackSigningSecret(e.target.value)}
+                          placeholder={slackConfigured ? "Enter new signing secret to update" : "Paste the Slack signing secret"}
+                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          Channel ID
+                        </label>
+                        <input
+                          type="text"
+                          value={slackChannelId}
+                          onChange={(e) => setSlackChannelId(e.target.value)}
+                          placeholder={slackData?.slackChannelId ?? "Connects on its own — or paste a channel ID"}
+                          className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {`Point the Slack Events URL at /api/slack/events/${projectId}. The first verified message binds the channel, or paste an ID here.`}
+                        </p>
+                      </div>
+                    </div>
+                    {slackSaveStatus === "error" && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-sm">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        Failed to save Slack settings.
+                      </div>
+                    )}
+                    {slackSaveStatus === "success" && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-success/10 text-success text-sm">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        Settings saved.
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => saveSlack.mutate()}
+                        disabled={saveSlack.isPending || (!slackBotToken && !slackSigningSecret && !slackChannelId)}
+                      >
+                        {saveSlack.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+                        {slackConfigured ? "Update" : "Save"}
+                      </Button>
+                      {slackConfigured && slackData?.slackChannelId && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSlackTestResult(null);
+                            testSlack.mutate();
+                          }}
+                          disabled={testSlack.isPending}
+                        >
+                          {testSlack.isPending ? (
+                            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                          ) : (
+                            <Play className="w-3.5 h-3.5 mr-1.5" />
+                          )}
+                          Send Test Message
+                        </Button>
+                      )}
+                    </div>
+                    {slackTestResult && (
+                      <div
+                        className={cn(
+                          "rounded-lg p-3 text-xs max-h-48 overflow-auto",
+                          slackTestResult.success
+                            ? "bg-success/10 text-success"
+                            : "bg-destructive/10 text-destructive",
+                        )}
+                      >
+                        {slackTestResult.message}
                       </div>
                     )}
                   </div>

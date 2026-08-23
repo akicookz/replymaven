@@ -589,6 +589,12 @@ export const updateTelegramSchema = z.object({
   telegramChatId: z.string().max(100).optional(),
 });
 
+export const updateSlackSchema = z.object({
+  slackBotToken: z.string().max(255).optional(),
+  slackSigningSecret: z.string().max(255).optional(),
+  slackChannelId: z.string().max(100).optional(),
+});
+
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 export const createApiKeySchema = z.object({
   label: z.string().min(1, "Label is required").max(100),

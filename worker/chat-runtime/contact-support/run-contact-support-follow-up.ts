@@ -8,6 +8,7 @@ import { BillingService } from "../../services/billing-service";
 import { GuidelineService } from "../../services/guideline-service";
 import { type ProjectService } from "../../services/project-service";
 import { TelegramService } from "../../services/telegram-service";
+import { SlackService } from "../../services/slack-service";
 import { ToolService } from "../../services/tool-service";
 import { type AppEnv } from "../../types";
 import {
@@ -197,6 +198,7 @@ export async function runContactSupportFollowUp(
           chatService: options.chatService,
           projectService: options.projectService,
           telegramService: new TelegramService(db, env.ENCRYPTION_KEY),
+          slackService: new SlackService(db, env.ENCRYPTION_KEY),
           acquireHttpRateLimitPermit: () => (toolPermits += 1) <= 100,
           onTeamRequested() {},
         },

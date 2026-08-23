@@ -200,6 +200,10 @@ interface PublicChildStub {
     threadId: string,
   ): Promise<boolean>;
   updatePublicTelegramThreadId(threadId: string): Promise<void>;
+  updatePublicChannelThread(
+    channel: "telegram" | "slack",
+    threadId: string,
+  ): Promise<void>;
   acquireExternalAction(
     input: PublicExternalActionLeaseInput,
   ): Promise<PublicExternalActionLease | null>;
@@ -392,7 +396,7 @@ interface NewMessageInput {
   userId?: string | null;
   id?: string;
   idempotencyKey?: string | null;
-  origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
+  origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
 }
 
@@ -942,8 +946,17 @@ export class AgentPublicConversationStore implements PublicConversationStore {
     conversationId: string,
     threadId: string,
   ): Promise<void> {
+    await this.updateChannelThread(projectId, conversationId, "telegram", threadId);
+  }
+
+  async updateChannelThread(
+    projectId: string,
+    conversationId: string,
+    channel: "telegram" | "slack",
+    threadId: string,
+  ): Promise<void> {
     const child = await this.resolveChild(projectId, conversationId);
-    await child?.updatePublicTelegramThreadId(threadId);
+    await child?.updatePublicChannelThread(channel, threadId);
   }
 
   async acquireExternalAction(

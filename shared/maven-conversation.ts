@@ -29,7 +29,7 @@ export interface PublicMessageMetadata {
   emailedAt: number | null;
   systemKind: string | null;
   idempotencyKey?: string | null;
-  origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
+  origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
 }
 
@@ -49,7 +49,7 @@ export interface PublicMessageRecord {
   readAt: number | null;
   emailedAt: number | null;
   idempotencyKey?: string | null;
-  origin?: "widget" | "dashboard" | "telegram" | "email" | "mcp" | null;
+  origin?: "widget" | "dashboard" | "telegram" | "slack" | "email" | "mcp" | null;
   externalReplyTo?: string | null;
 }
 

@@ -44,6 +44,7 @@ export interface MavenConversationSummary {
   visitorName: string | null;
   visitorEmail: string | null;
   telegramThreadId: string | null;
+  slackThreadId?: string | null;
   status: "active" | "waiting_agent" | "agent_replied" | "closed";
   closeReason: "resolved" | "ended" | "spam" | "bot_resolved" | null;
   metadata: Record<string, unknown>;

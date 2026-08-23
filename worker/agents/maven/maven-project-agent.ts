@@ -491,6 +491,13 @@ export class MavenProjectAgent extends Agent<AppEnv, MavenProjectState> {
     );
   }
 
+  async findConversationByChannelThread(
+    channel: "telegram" | "slack",
+    threadId: string,
+  ): Promise<MavenConversationSummary | null> {
+    return this.conversationDirectory().findByChannelThread(channel, threadId);
+  }
+
   async upsertConversationSummary(
     summary: MavenConversationSummary,
   ): Promise<{ applied: boolean; revision: number }> {

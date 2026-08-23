@@ -2,6 +2,7 @@ import { z } from "zod";
 import { type PublicConversationStore } from "../../../conversations/public-conversation-store";
 import { type ProjectService } from "../../../services/project-service";
 import { type TelegramService } from "../../../services/telegram-service";
+import { type SlackService } from "../../../services/slack-service";
 import { listEnabledAgentChannels } from "../../../services/enabled-agent-channels";
 import { fallbackRenderHandoffMessage } from "../../llm/render-handoff-message";
 import {
@@ -128,9 +129,12 @@ function getAcceptedTeamRequest(
 
 function enabledChannels(
   telegramService: TelegramService | undefined,
+  slackService: SlackService | undefined,
   settings: {
     telegramBotToken?: string | null;
     telegramChatId?: string | null;
+    slackBotToken?: string | null;
+    slackChannelId?: string | null;
     botName?: string | null;
   } | null,
 ) {
@@ -143,6 +147,14 @@ function enabledChannels(
           service: telegramService,
         }
       : null,
+    slack: slackService
+      ? {
+          storedBotToken: settings?.slackBotToken,
+          channelId: settings?.slackChannelId,
+          botName: settings?.botName,
+          service: slackService,
+        }
+      : null,
   });
 }
 
@@ -151,6 +163,7 @@ export function createRequestTeamHelpTool(dependencies: {
   chatService: PublicConversationStore;
   projectService: ProjectService;
   telegramService?: TelegramService;
+  slackService?: SlackService;
   env: {
     BETTER_AUTH_URL: string;
     RESEND_API_KEY?: string;
@@ -214,6 +227,7 @@ export function createRequestTeamHelpTool(dependencies: {
               projectService: dependencies.projectService,
               agentChannels: enabledChannels(
                 dependencies.telegramService,
+                dependencies.slackService,
                 settings,
               ),
               project,
@@ -237,6 +251,14 @@ export function createRequestTeamHelpTool(dependencies: {
                   acceptedRequest.acceptanceToken,
                   threadId,
                 );
+              },
+              persistChannelThread(channel, threadId) {
+                return dependencies.chatService.updateChannelThread(
+                  dependencies.context.projectId,
+                  dependencies.context.conversationId,
+                  channel,
+                  threadId,
+                ).then(() => true);
               },
             });
           } catch {
@@ -343,6 +365,7 @@ export function createRequestTeamHelpTool(dependencies: {
           projectService: dependencies.projectService,
           agentChannels: enabledChannels(
             dependencies.telegramService,
+            dependencies.slackService,
             settings,
           ),
           project,
@@ -376,6 +399,14 @@ export function createRequestTeamHelpTool(dependencies: {
               acceptedRequest.acceptanceToken,
               threadId,
             );
+          },
+          persistChannelThread(channel, threadId) {
+            return dependencies.chatService.updateChannelThread(
+              dependencies.context.projectId,
+              dependencies.context.conversationId,
+              channel,
+              threadId,
+            ).then(() => true);
           },
         });
         return createRequestedResult(agentLabel, "created");

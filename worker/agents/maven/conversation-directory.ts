@@ -28,6 +28,7 @@ interface ConversationDirectoryRow {
   visitor_name: string | null;
   visitor_email: string | null;
   telegram_thread_id: string | null;
+  slack_thread_id?: string | null;
   status: string;
   close_reason: string | null;
   metadata_json: string;
@@ -93,6 +94,7 @@ function mapDirectoryRow(row: ConversationDirectoryRow): MavenConversationSummar
     visitorName: row.visitor_name,
     visitorEmail: row.visitor_email,
     telegramThreadId: row.telegram_thread_id,
+    slackThreadId: row.slack_thread_id ?? null,
     status: row.status as MavenConversationSummary["status"],
     closeReason: row.close_reason as MavenConversationSummary["closeReason"],
     metadata: parseMetadata(row.metadata_json),
@@ -628,7 +630,7 @@ export class ConversationDirectory {
       `INSERT INTO conversation_directory (
          conversation_id, public_child_name, sidechat_child_name,
          sidechat_status, customer_id, visitor_id, visitor_name,
-         visitor_email, telegram_thread_id, status, close_reason,
+         visitor_email, telegram_thread_id, slack_thread_id, status, close_reason,
          metadata_json, priority, assignee_id, snoozed_until, archived_at,
          purge_started_at, retention_schedule_id, visitor_last_seen_at, visitor_presence,
          visitor_last_online_at, last_message_id, last_message_author,
@@ -638,7 +640,7 @@ export class ConversationDirectory {
          created_at, updated_at
        ) VALUES (
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        )
        ON CONFLICT(conversation_id) DO UPDATE SET
          public_child_name = excluded.public_child_name,
@@ -655,6 +657,7 @@ export class ConversationDirectory {
          visitor_name = excluded.visitor_name,
          visitor_email = excluded.visitor_email,
          telegram_thread_id = excluded.telegram_thread_id,
+         slack_thread_id = excluded.slack_thread_id,
          status = excluded.status,
          close_reason = excluded.close_reason,
          metadata_json = excluded.metadata_json,
@@ -708,6 +711,7 @@ export class ConversationDirectory {
         summary.visitorName,
         summary.visitorEmail,
         summary.telegramThreadId,
+        summary.slackThreadId ?? null,
         summary.status,
         summary.closeReason,
         serializeMetadata(summary.metadata),
@@ -813,6 +817,19 @@ export class ConversationDirectory {
     return rows[0] ? mapDirectoryRow(rows[0]) : null;
   }
 
+  findByChannelThread(
+    channel: "telegram" | "slack",
+    threadId: string,
+  ): MavenConversationSummary | null {
+    if (channel === "telegram") return this.findByTelegramThreadId(threadId);
+    const rows = this.sql.execute<ConversationDirectoryRow>(
+      `SELECT * FROM conversation_directory
+       WHERE slack_thread_id = ? LIMIT 1`,
+      [threadId],
+    );
+    return rows[0] ? mapDirectoryRow(rows[0]) : null;
+  }
+
   private ensureSchema(): void {
     this.sql.execute(`CREATE TABLE IF NOT EXISTS conversation_directory (
       conversation_id TEXT PRIMARY KEY,
@@ -824,6 +841,7 @@ export class ConversationDirectory {
       visitor_name TEXT,
       visitor_email TEXT,
       telegram_thread_id TEXT,
+      slack_thread_id TEXT,
       status TEXT NOT NULL,
       close_reason TEXT,
       metadata_json TEXT NOT NULL DEFAULT '{}',
@@ -856,6 +874,7 @@ export class ConversationDirectory {
       ["last_message_created_at", "INTEGER"],
       ["retention_schedule_id", "TEXT"],
       ["source_checksum", "TEXT"],
+      ["slack_thread_id", "TEXT"],
     ] as const) {
       try {
         this.sql.execute(
@@ -874,6 +893,7 @@ export class ConversationDirectory {
       "CREATE INDEX IF NOT EXISTS idx_directory_visitor_active ON conversation_directory(visitor_id, archived_at, status, last_activity_at DESC, conversation_id DESC)",
       "CREATE INDEX IF NOT EXISTS idx_directory_email_recent ON conversation_directory(LOWER(TRIM(visitor_email)), archived_at, updated_at DESC, conversation_id DESC)",
       "CREATE INDEX IF NOT EXISTS idx_directory_telegram_thread ON conversation_directory(telegram_thread_id)",
+      "CREATE INDEX IF NOT EXISTS idx_directory_slack_thread ON conversation_directory(slack_thread_id)",
       "CREATE INDEX IF NOT EXISTS idx_directory_created ON conversation_directory(created_at DESC, conversation_id DESC)",
     ]) {
       this.sql.execute(statement, []);

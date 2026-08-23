@@ -55,6 +55,9 @@ export const projectSettings = sqliteTable(
     telegramBotToken: text("telegram_bot_token"), // encrypted
     customerIdentitySecret: text("customer_identity_secret"), // encrypted
     telegramChatId: text("telegram_chat_id"),
+    slackBotToken: text("slack_bot_token"), // encrypted
+    slackSigningSecret: text("slack_signing_secret"), // encrypted
+    slackChannelId: text("slack_channel_id"),
     companyName: text("company_name"),
     companyUrl: text("company_url"),
     industry: text("industry"),

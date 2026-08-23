@@ -79,6 +79,10 @@ export async function createEscalation(params: {
   notifyExternalActions?: boolean;
   claimExternalNotificationAttempt?: () => Promise<boolean>;
   persistTelegramThreadId?: (threadId: string) => Promise<boolean>;
+  persistChannelThread?: (
+    channel: AgentChannelAdapter["channel"],
+    threadId: string,
+  ) => Promise<boolean>;
 }): Promise<{
   summary: string;
   summaryMessageId: string | null;
@@ -292,33 +296,37 @@ export async function createEscalation(params: {
       for (const item of notification.value.persisted) {
         if (item.channel === "telegram") {
           telegramThreadId = item.threadId;
-          if (params.persistTelegramThreadId) {
-            for (let attempt = 0; attempt < 2; attempt += 1) {
-              try {
-                const persisted = await params.persistTelegramThreadId(
-                  telegramThreadId,
-                );
-                if (!persisted) {
-                  logError(
-                    "escalation.telegram_thread_persistence_rejected",
-                    new Error("Telegram thread persistence was rejected"),
-                    {
-                      projectId: params.project.id,
-                      conversationId: params.conversation.id,
-                      telegramThreadId,
-                    },
-                  );
-                }
-                break;
-              } catch (error) {
-                if (attempt === 1) {
-                  logError("escalation.telegram_thread_persistence_failed", error, {
-                    projectId: params.project.id,
-                    conversationId: params.conversation.id,
-                    telegramThreadId,
-                  });
-                }
-              }
+        }
+        const persist = item.channel === "telegram"
+          ? params.persistTelegramThreadId
+          : (threadId: string) =>
+            params.persistChannelThread?.(item.channel, threadId)
+            ?? Promise.resolve(false);
+        if (!persist) continue;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            const persisted = await persist(item.threadId);
+            if (!persisted) {
+              logError(
+                "escalation.channel_thread_persistence_rejected",
+                new Error("Channel thread persistence was rejected"),
+                {
+                  projectId: params.project.id,
+                  conversationId: params.conversation.id,
+                  channel: item.channel,
+                  threadId: item.threadId,
+                },
+              );
+            }
+            break;
+          } catch (error) {
+            if (attempt === 1) {
+              logError("escalation.channel_thread_persistence_failed", error, {
+                projectId: params.project.id,
+                conversationId: params.conversation.id,
+                channel: item.channel,
+                threadId: item.threadId,
+              });
             }
           }
         }

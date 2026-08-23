@@ -52,6 +52,18 @@ import { executeChannelBotNameCommand } from "./services/run-bot-name-command";
 import { runAgentChannelInbound } from "./services/run-agent-channel-inbound";
 import { createTelegramAgentChannel } from "./services/telegram-agent-channel";
 import { listEnabledAgentChannels } from "./services/enabled-agent-channels";
+import {
+  createSlackAgentChannel,
+  readSlackMessageInbound,
+  readSlackUrlVerification,
+} from "./services/slack-agent-channel";
+import { SlackService } from "./services/slack-service";
+import { resolveSlackChannelBinding } from "./services/slack-chat-binding";
+import {
+  encryptSlackSecret,
+  matchesSlackRequestSignature,
+  resolveSlackSecret,
+} from "./services/slack-secrets";
 import { forwardVisitorThroughAgentChannels } from "./services/run-agent-channel-outbound";
 import {
   canHandConversationToMaven,
@@ -236,6 +248,7 @@ import {
   createConversationSchema,
   agentReplySchema,
   updateTelegramSchema,
+  updateSlackSchema,
   onboardingStep1Schema,
   onboardingContextSchema,
   onboardingWidgetSchema,
@@ -1291,6 +1304,10 @@ const app = new Hono<HonoAppContext>()
       settings?.telegramBotToken && settings.telegramChatId
         ? new TelegramService(db, c.env.ENCRYPTION_KEY)
         : undefined;
+    const slackService =
+      settings?.slackBotToken && settings.slackChannelId
+        ? new SlackService(db, c.env.ENCRYPTION_KEY)
+        : undefined;
     const escalation = await createEscalation({
       chatService,
       projectService,
@@ -1301,6 +1318,14 @@ const app = new Hono<HonoAppContext>()
               chatId: settings?.telegramChatId,
               botName: settings?.botName,
               service: telegramService,
+            }
+          : null,
+        slack: slackService
+          ? {
+              storedBotToken: settings?.slackBotToken,
+              channelId: settings?.slackChannelId,
+              botName: settings?.botName,
+              service: slackService,
             }
           : null,
       }),
@@ -1322,6 +1347,21 @@ const app = new Hono<HonoAppContext>()
         RESEND_API_KEY: c.env.RESEND_API_KEY,
       },
       executionCtx: c.executionCtx,
+      persistTelegramThreadId(threadId) {
+        return chatService.updateTelegramThreadId(
+          project.id,
+          conversation.id,
+          threadId,
+        ).then(() => true);
+      },
+      persistChannelThread(channel, threadId) {
+        return chatService.updateChannelThread(
+          project.id,
+          conversation.id,
+          channel,
+          threadId,
+        ).then(() => true);
+      },
     });
     if (escalation.telegramThreadId) {
       await chatService.updateTelegramThreadId(
@@ -1524,6 +1564,154 @@ const app = new Hono<HonoAppContext>()
           externalReplyTo: fields.externalReplyTo,
         }).catch((error: unknown) => {
           logError("telegram.reply_append_failed", error, {
+            projectId,
+            conversationId: fields.conversationId,
+          });
+          return null;
+        }),
+    });
+
+    return c.json({ ok: true });
+  })
+
+  .post("/api/slack/events/:projectId", async (c) => {
+    const ip = getClientIp(c);
+    if (!checkRateLimit(`slack:${ip}`, 60, 60_000)) {
+      return c.json({ error: "Rate limit exceeded" }, 429);
+    }
+
+    const projectId = c.req.param("projectId");
+    const db = drizzle(c.env.DB);
+    const slackService = new SlackService(db, c.env.ENCRYPTION_KEY);
+    const slackSettings = await slackService.getSlackSettings(projectId);
+    if (!slackSettings?.slackBotToken || !slackSettings.slackSigningSecret) {
+      return c.json({ error: "Slack not configured" }, 400);
+    }
+
+    const rawBody = await c.req.text();
+    const signingSecret = await resolveSlackSecret(
+      slackSettings.slackSigningSecret,
+      c.env.ENCRYPTION_KEY,
+    );
+    if (!signingSecret) {
+      return c.json({ error: "Slack not configured" }, 400);
+    }
+    const trusted = await matchesSlackRequestSignature({
+      signingSecret,
+      timestamp: c.req.header("x-slack-request-timestamp"),
+      signature: c.req.header("x-slack-signature"),
+      rawBody,
+    });
+    if (!trusted) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawBody) as unknown;
+    } catch {
+      return c.json({ error: "Invalid payload" }, 400);
+    }
+
+    const challenge = readSlackUrlVerification(payload);
+    if (challenge !== null) {
+      return c.json({ challenge });
+    }
+
+    const inbound = readSlackMessageInbound(payload, projectId);
+    if (!inbound) {
+      return c.json({ ok: true });
+    }
+
+    const binding = resolveSlackChannelBinding({
+      storedChannelId: slackSettings.slackChannelId,
+      trusted: true,
+      channelId: inbound.channelId,
+    });
+    if (binding.action === "bind") {
+      await new ProjectService(db).updateSettings(projectId, {
+        slackChannelId: binding.channelId,
+      });
+      await slackService.postMessage(slackSettings.slackBotToken, {
+        channelId: binding.channelId,
+        text:
+          "*Connected.* Conversations that need a human land here, and replies to them go back to the visitor.",
+        threadTs: inbound.inbound.externalMessageId,
+      }).catch(() => undefined);
+      return c.json({ ok: true });
+    }
+    if (!slackSettings.slackChannelId) {
+      return c.json({ ok: true });
+    }
+
+    const chatService = createPublicConversationStore({ db, env: c.env });
+    const projectService = new ProjectService(db);
+    const projectSettings = await projectService.getSettings(projectId);
+    const project = await projectService.getProjectById(projectId);
+    const botName = projectSettings?.botName;
+    const adapter = createSlackAgentChannel({
+      botName,
+      storedBotToken: slackSettings.slackBotToken,
+      channelId: slackSettings.slackChannelId,
+      service: slackService,
+    });
+    const parent = await getAgentByName(
+      c.env.MAVEN_PROJECT_AGENT,
+      projectId,
+    );
+    await runAgentChannelInbound({
+      adapter,
+      inbound: inbound.inbound,
+      botName,
+      getAgentModeConversations: () =>
+        chatService.getAgentModeConversations(projectId),
+      findByChannelThread: async (threadId) => {
+        const found = await parent.findConversationByChannelThread(
+          "slack",
+          threadId,
+        ) as { conversationId?: string } | null;
+        return found?.conversationId ?? null;
+      },
+      getOperationalConversation: async (conversationId) => {
+        const conversation = await chatService.getOperationalConversationById(
+          conversationId,
+          projectId,
+        );
+        return conversation
+          ? {
+              id: conversation.id,
+              visitorId: conversation.visitorId,
+              visitorEmail: conversation.visitorEmail,
+              metadata: conversation.metadata,
+            }
+          : null;
+      },
+      executeCommand: async (fields) =>
+        executeChannelBotNameCommand({
+          text: fields.text,
+          botName,
+          actorName: fields.actorName,
+          commandId: fields.commandId,
+          now: Date.now(),
+          projectId,
+          conversation: fields.conversation,
+          chatService,
+          db,
+          env: c.env,
+          projectSettings,
+          projectName: project?.name ?? "Support",
+        }),
+      appendHuman: async (fields) =>
+        chatService.appendHuman({
+          projectId,
+          conversationId: fields.conversationId,
+          content: fields.content,
+          senderName: fields.senderName,
+          idempotencyKey: fields.idempotencyKey,
+          origin: "slack",
+          externalReplyTo: fields.externalReplyTo,
+        }).catch((error: unknown) => {
+          logError("slack.reply_append_failed", error, {
             projectId,
             conversationId: fields.conversationId,
           });
@@ -2261,15 +2449,24 @@ const app = new Hono<HonoAppContext>()
       ) {
         try {
           const telegramService = new TelegramService(db, c.env.ENCRYPTION_KEY);
-          const tgSettings = await telegramService.getTelegramSettings(
-            project.id,
-          );
+          const slackService = new SlackService(db, c.env.ENCRYPTION_KEY);
+          const [tgSettings, slackSettings] = await Promise.all([
+            telegramService.getTelegramSettings(project.id),
+            slackService.getSlackSettings(project.id),
+          ]);
           const channels = listEnabledAgentChannels({
             telegram: tgSettings?.telegramBotToken && tgSettings.telegramChatId
               ? {
                   storedBotToken: tgSettings.telegramBotToken,
                   chatId: tgSettings.telegramChatId,
                   service: telegramService,
+                }
+              : null,
+            slack: slackSettings?.slackBotToken && slackSettings.slackChannelId
+              ? {
+                  storedBotToken: slackSettings.slackBotToken,
+                  channelId: slackSettings.slackChannelId,
+                  service: slackService,
                 }
               : null,
           });
@@ -4147,6 +4344,8 @@ const app = new Hono<HonoAppContext>()
       return c.json({
         ...serialized,
         telegramBotToken: settings.telegramBotToken ? "••••••••" : null,
+        slackBotToken: settings.slackBotToken ? "••••••••" : null,
+        slackSigningSecret: settings.slackSigningSecret ? "••••••••" : null,
         helpTopNav: parseHelpTopNav(settings.helpTopNav),
         helpAnalytics: parseHelpAnalytics(settings.helpAnalytics),
       });
@@ -4326,6 +4525,8 @@ const app = new Hono<HonoAppContext>()
     return c.json({
       ...serialized,
       telegramBotToken: settings.telegramBotToken ? "••••••••" : null,
+      slackBotToken: settings.slackBotToken ? "••••••••" : null,
+      slackSigningSecret: settings.slackSigningSecret ? "••••••••" : null,
       helpTopNav: parseHelpTopNav(settings.helpTopNav),
       helpAnalytics: parseHelpAnalytics(settings.helpAnalytics),
     });
@@ -7636,6 +7837,94 @@ const app = new Hono<HonoAppContext>()
     const success = await telegramService.testConnection(
       settings.telegramBotToken,
       settings.telegramChatId,
+    );
+
+    return c.json({ ok: success });
+  })
+
+  .get("/api/projects/:id/slack", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const settings = await projectService.getSettings(project.id);
+    return c.json({
+      slackBotToken: settings?.slackBotToken ? "••••••••" : null,
+      slackSigningSecret: settings?.slackSigningSecret ? "••••••••" : null,
+      slackChannelId: settings?.slackChannelId ?? null,
+    });
+  })
+  .put("/api/projects/:id/slack", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const planLimits = c.get("planLimits");
+    if (planLimits && !planLimits.slack) {
+      return c.json(
+        {
+          error: "Slack integration is available on Pro and Business plans.",
+          code: "feature_not_available",
+        },
+        403,
+      );
+    }
+
+    const body = await c.req.json();
+    const parsed = validate(updateSlackSchema, body);
+    if (!parsed.success) return c.json({ error: parsed.error }, 400);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const storedBotToken = parsed.data.slackBotToken
+      ? await encryptSlackSecret(parsed.data.slackBotToken, c.env.ENCRYPTION_KEY)
+      : undefined;
+    const storedSigningSecret = parsed.data.slackSigningSecret
+      ? await encryptSlackSecret(
+          parsed.data.slackSigningSecret,
+          c.env.ENCRYPTION_KEY,
+        )
+      : undefined;
+    await projectService.updateSettings(project.id, {
+      ...parsed.data,
+      ...(storedBotToken ? { slackBotToken: storedBotToken } : {}),
+      ...(storedSigningSecret
+        ? { slackSigningSecret: storedSigningSecret }
+        : {}),
+    });
+
+    return c.json({ ok: true });
+  })
+  .post("/api/projects/:id/slack/test", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "Unauthorized" }, 401);
+
+    const db = c.get("db");
+    const projectService = new ProjectService(db);
+    const project = await projectService.getProjectById(c.req.param("id"));
+    if (!project || project.userId !== (c.get("effectiveUserId") ?? user.id)) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    const settings = await projectService.getSettings(project.id);
+    if (!settings?.slackBotToken || !settings.slackChannelId) {
+      return c.json({ error: "Slack not configured" }, 400);
+    }
+
+    const slackService = new SlackService(db, c.env.ENCRYPTION_KEY);
+    const success = await slackService.testConnection(
+      settings.slackBotToken,
+      settings.slackChannelId,
     );
 
     return c.json({ ok: success });

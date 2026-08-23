@@ -335,6 +335,44 @@ describe("createEscalation - telegram notification", () => {
     );
   });
 
+  test("stores slack and telegram thread ids separately", async () => {
+    const tg = makeTelegramAdapter();
+    const slackCalls: Array<{ threadId: string | null }> = [];
+    const slack: AgentChannelAdapter = {
+      channel: "slack",
+      async resolveConversation() {
+        return { kind: "none", reason: "unused" };
+      },
+      async notifyEscalation(input) {
+        slackCalls.push({ threadId: input.threadId });
+        return "88.1";
+      },
+      async forwardVisitorMessage() {},
+      async confirm() {},
+    };
+    const persisted: Array<{ channel: string; threadId: string }> = [];
+    const { params } = baseParams({
+      agentChannels: [tg.adapter, slack],
+      persistTelegramThreadId: async (threadId: string) => {
+        persisted.push({ channel: "telegram", threadId });
+        return true;
+      },
+      persistChannelThread: async (channel: string, threadId: string) => {
+        persisted.push({ channel, threadId });
+        return true;
+      },
+    });
+
+    const result = await createEscalation(params as never);
+
+    expect(result.telegramThreadId).toBe("555");
+    expect(persisted).toEqual([
+      { channel: "telegram", threadId: "555" },
+      { channel: "slack", threadId: "88.1" },
+    ]);
+    expect(slackCalls[0].threadId).toBeNull();
+  });
+
   test("does not notify after the conversation becomes unavailable", async () => {
     const tg = makeTelegramAdapter();
     const unavailableChatService = {

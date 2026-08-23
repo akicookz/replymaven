@@ -69,8 +69,8 @@ function readMetadata(
       !isNullableString(value.idempotencyKey)) ||
     (value.origin !== undefined && value.origin !== null &&
       value.origin !== "widget" && value.origin !== "dashboard" &&
-      value.origin !== "telegram" && value.origin !== "email" &&
-      value.origin !== "mcp") ||
+      value.origin !== "telegram" && value.origin !== "slack" &&
+      value.origin !== "email" && value.origin !== "mcp") ||
     (value.externalReplyTo !== undefined &&
       !isNullableString(value.externalReplyTo))
   ) return null;
