@@ -33,6 +33,10 @@ import {
 import { canAccessFeature } from "@/lib/plan";
 import { cn } from "@/lib/utils";
 import { WIDGET_FONTS } from "../../shared/widget-fonts";
+import {
+  widgetRadiusPreset,
+  widgetRadiusStoredPx,
+} from "../../shared/widget-radius";
 
 const PAGE_TITLE = "Appearance";
 const PAGE_DESCRIPTION =
@@ -402,17 +406,10 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
               Border Radius
             </label>
             <Select
-              value={
-                state.form.borderRadius === 0
-                  ? "none"
-                  : state.form.borderRadius === 8
-                    ? "soft"
-                    : "rounded"
-              }
+              value={widgetRadiusPreset(state.form.borderRadius)}
               onValueChange={(value) =>
                 state.updateForm({
-                  borderRadius:
-                    value === "none" ? 0 : value === "soft" ? 8 : 16,
+                  borderRadius: widgetRadiusStoredPx(value),
                 })
               }
             >
@@ -420,9 +417,9 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                <SelectItem value="soft">Soft</SelectItem>
+                <SelectItem value="sharp">Sharp</SelectItem>
                 <SelectItem value="rounded">Rounded</SelectItem>
+                <SelectItem value="pill">Pill</SelectItem>
               </SelectContent>
             </Select>
           </div>

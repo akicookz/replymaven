@@ -25,6 +25,7 @@ import type {
 import { sanitizePageContext } from "../shared/page-context";
 import { sanitizeCustomCss } from "../shared/sanitize-custom-css";
 import { fontFaceCss, resolveWidgetFont } from "../shared/widget-fonts";
+import { widgetRadiusTokens } from "../shared/widget-radius";
 import type { PublicMessageRecord } from "../shared/maven-conversation";
 import { createLazyWidgetAgentChatClient } from "./lazy-agent-chat-client";
 import type { WidgetChatActivity } from "./agent-chat-bridge";
@@ -293,12 +294,13 @@ import {
   // ─── Styles ─────────────────────────────────────────────────────────────────
   const styles = document.createElement("style");
   styles.textContent = `
-    /* Form controls don't inherit font-family by default — without this,
-       buttons/inputs keep the host page's system font when a custom widget
-       font is configured. */
+    /* Form controls and links don't inherit font-family by default — without
+       this, buttons/inputs/anchors keep the host page's font when a custom
+       widget font is configured. */
     .rm-widget-container button, .rm-widget-container input,
     .rm-widget-container textarea, .rm-widget-container select,
-    .rm-inline-bar button, .rm-inline-bar input {
+    .rm-widget-container a,
+    .rm-inline-bar button, .rm-inline-bar input, .rm-inline-bar a {
       font-family: inherit;
     }
     .rm-widget-container {
@@ -332,10 +334,12 @@ import {
       --rm-accent-bg-hover: rgba(37,99,235, 0.15);
       --rm-accent-text: var(--rm-primary, #2563eb);
 
-      /* ─── Derived radius tokens ────────────────────────────────────── */
-      --rm-btn-radius: calc(var(--rm-chat-radius, 16px) * 1.25);
-      --rm-input-radius: calc(var(--rm-chat-radius, 16px) * 0.875);
-      --rm-card-radius: calc(var(--rm-chat-radius, 16px) * 1.0);
+      /* Size tiers. JS overwrites these from Sharp / Rounded / Pill.
+         Controls use min(..., 50%) so 999px becomes a stadium. */
+      --rm-chat-radius: 16px;
+      --rm-card-radius: 12px;
+      --rm-btn-radius: 8px;
+      --rm-input-radius: 8px;
     }
     .rm-widget-container.ready {
       visibility: visible;
@@ -467,7 +471,7 @@ import {
       width: 100%;
       background: var(--rm-bg, #ffffff);
       border: 0.5px solid var(--rm-glow-border, rgba(0,0,0,0.08));
-      border-radius: calc(var(--rm-chat-radius, 16px) * 1.2);
+      border-radius: min(var(--rm-card-radius), 50%);
       box-shadow: 0 6px 24px rgba(0,0,0,0.12);
       overflow: hidden;
       opacity: 0;
@@ -576,7 +580,7 @@ import {
     }
     .rm-greeting-title {
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 500;
       color: var(--rm-text, #18181b);
       line-height: 1.35;
     }
@@ -618,12 +622,15 @@ import {
     .rm-greeting-cta {
       align-self: stretch;
       margin-top: 10px;
-      padding: 9px 14px;
-      border-radius: 999px;
+      min-height: 40px;
+      padding: 0 16px;
+      border-radius: min(var(--rm-btn-radius), 50%);
       background: var(--rm-primary, #2563eb);
       color: var(--rm-brand-text, #ffffff);
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 500;
+      line-height: 1;
+      font-family: inherit;
       border: 0;
       cursor: pointer;
       text-decoration: none;
@@ -710,7 +717,7 @@ import {
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      border-radius: var(--rm-chat-radius, 16px);
+      border-radius: min(var(--rm-chat-radius), 50%);
       box-shadow: var(--rm-shadow);
       border: 1px solid var(--rm-border);
       background: var(--rm-bg);
@@ -1219,7 +1226,7 @@ import {
     }
     .rm-quick-topic {
       padding: 7px 14px;
-      border-radius: var(--rm-btn-radius);
+      border-radius: min(var(--rm-btn-radius), 50%);
       border: 1px solid var(--rm-border);
       background: var(--rm-bg-secondary);
       font-size: 13px;
@@ -1252,7 +1259,7 @@ import {
       display: flex;
       align-items: flex-end;
       border: 1px solid var(--rm-border);
-      border-radius: var(--rm-btn-radius);
+      border-radius: 999px;
       background: var(--rm-input-bg);
       transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
       box-sizing: border-box;
@@ -1642,7 +1649,7 @@ import {
     .rm-home-ask {
       margin-top: 16px;
       border: 1px solid var(--rm-accent-bg-hover);
-      border-radius: var(--rm-card-radius);
+      border-radius: min(var(--rm-card-radius), 50%);
       padding: 14px;
       cursor: pointer;
       box-shadow: 0 1px 4px var(--rm-accent-bg);
@@ -1686,7 +1693,7 @@ import {
       gap: 12px;
       padding: 10px 12px;
       border: 1px solid var(--rm-border);
-      border-radius: var(--rm-input-radius);
+      border-radius: min(var(--rm-card-radius), 50%);
       cursor: pointer;
       text-decoration: none;
       color: inherit;
@@ -1700,7 +1707,7 @@ import {
       width: 34px;
       height: 34px;
       min-width: 34px;
-      border-radius: 8px;
+      border-radius: min(var(--rm-btn-radius), 50%);
       background: var(--rm-accent-bg);
       display: flex;
       align-items: center;
@@ -1956,7 +1963,7 @@ import {
     .rm-form-input {
       padding: 10px 14px;
       border: 1px solid var(--rm-border);
-      border-radius: var(--rm-input-radius);
+      border-radius: min(var(--rm-input-radius), 50%);
       font-size: 16px;
       outline: none;
       font-family: inherit;
@@ -1976,7 +1983,7 @@ import {
     .rm-form-textarea {
       padding: 10px 14px;
       border: 1px solid var(--rm-border);
-      border-radius: var(--rm-input-radius);
+      border-radius: min(var(--rm-input-radius), 50%);
       font-size: 16px;
       outline: none;
       font-family: inherit;
@@ -1996,16 +2003,22 @@ import {
       color: var(--rm-text-muted);
     }
     .rm-form-submit {
-      padding: 12px 24px;
-      border-radius: var(--rm-card-radius);
+      width: 100%;
+      min-height: 40px;
+      padding: 0 16px;
+      border-radius: min(var(--rm-btn-radius), 50%);
       border: none;
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 500;
+      line-height: 1;
       cursor: pointer;
       color: var(--rm-brand-text, #ffffff);
       transition: opacity 0.2s, transform 0.15s;
       font-family: inherit;
       margin-top: 4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
     .rm-form-submit:hover {
       opacity: 0.9;
@@ -2053,7 +2066,7 @@ import {
       align-items: center;
       gap: 6px;
       padding: 9px 16px;
-      border-radius: var(--rm-btn-radius);
+      border-radius: min(var(--rm-btn-radius), 50%);
       border: 1px solid var(--rm-border);
       background: var(--rm-bg-secondary);
       font-size: 13px;
@@ -2106,7 +2119,7 @@ import {
       margin-top: 24px;
       padding: 10px 24px;
       border: 1px solid var(--rm-border);
-      border-radius: var(--rm-input-radius);
+      border-radius: min(var(--rm-input-radius), 50%);
       background: var(--rm-bg-secondary);
       font-size: 13px;
       font-weight: 500;
@@ -2563,7 +2576,7 @@ import {
         display: flex;
       }
       .rm-widget-container.center-inline .rm-chat-window.open .rm-input-shell {
-        border-radius: var(--rm-card-radius);
+        border-radius: 999px;
       }
       .rm-widget-container.center-inline .rm-chat-window.open .rm-input {
         padding: 10px 44px 10px 40px;
@@ -3740,10 +3753,17 @@ import {
         sendBtn.style.backgroundColor = primary;
 
         void isCenterInline; // position handled below
-        if (w.borderRadius) {
+        if (
+          typeof w.borderRadius === "number" &&
+          Number.isFinite(w.borderRadius)
+        ) {
+          const radius = widgetRadiusTokens(w.borderRadius);
+          container.style.setProperty("--rm-chat-radius", `${radius.window}px`);
+          container.style.setProperty("--rm-card-radius", `${radius.card}px`);
+          container.style.setProperty("--rm-btn-radius", `${radius.control}px`);
           container.style.setProperty(
-            "--rm-chat-radius",
-            w.borderRadius + "px",
+            "--rm-input-radius",
+            `${radius.control}px`,
           );
         }
 

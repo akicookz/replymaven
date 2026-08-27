@@ -36,6 +36,11 @@ import {
   WIDGET_FONTS as FONT_OPTIONS,
 } from "../../shared/widget-fonts";
 import { INDUSTRIES } from "../../shared/industries";
+import {
+  widgetRadiusPreset,
+  widgetRadiusStoredPx,
+  widgetRadiusTokens,
+} from "../../shared/widget-radius";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -574,8 +579,7 @@ function WidgetStylePreview({
 }) {
   const domain = formatPreviewDomain(websiteUrl);
   const rgb = hexToRgb(style.primaryColor);
-  const inputRadius = Math.min(style.borderRadius * 0.875, 14);
-
+  const windowRadius = widgetRadiusTokens(style.borderRadius).window;
   useEffect(() => {
     const font = resolveWidgetFont(style.fontFamily);
     const css = font && font.faces.length > 0 ? fontFaceCss(font) : "";
@@ -607,7 +611,7 @@ function WidgetStylePreview({
         isInline ? "w-full max-w-[280px]" : "w-full max-w-[248px]"
       }`}
       style={{
-        borderRadius: `${style.borderRadius}px`,
+        borderRadius: `${windowRadius}px`,
         fontFamily: widgetPreviewFontFamily(style.fontFamily),
       }}
     >
@@ -673,7 +677,7 @@ function WidgetStylePreview({
             className="flex-1 px-3 py-2 text-sm text-[#a1a1aa]"
             style={{
               background: "#f4f4f5",
-              borderRadius: `${inputRadius}px`,
+              borderRadius: "999px",
             }}
           >
             Type a message...
@@ -683,7 +687,7 @@ function WidgetStylePreview({
             style={{
               background: style.primaryColor,
               color: style.textColor,
-              borderRadius: `${inputRadius}px`,
+              borderRadius: "50%",
             }}
           >
             <ArrowRight className="w-4 h-4" />
@@ -696,13 +700,13 @@ function WidgetStylePreview({
   const inlineBar = (
     <div
       className="w-full max-w-[300px] flex items-center gap-2 px-3 py-2.5 bg-white border border-border/80 shadow-sm"
-      style={{ borderRadius: `${style.borderRadius}px` }}
+      style={{ borderRadius: "999px" }}
     >
       <div
         className="flex-1 px-3 py-2 text-sm text-[#a1a1aa]"
         style={{
           background: "#f4f4f5",
-          borderRadius: `${inputRadius}px`,
+          borderRadius: "999px",
         }}
       >
         Type a message...
@@ -712,7 +716,7 @@ function WidgetStylePreview({
         style={{
           background: style.primaryColor,
           color: style.textColor,
-          borderRadius: `${inputRadius}px`,
+          borderRadius: "50%",
         }}
       >
         <ArrowRight className="w-4 h-4" />
@@ -867,25 +871,26 @@ function Step3({
           {/* Border Radius */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">
-              Border Radius: {style.borderRadius}px
+              Border Radius
             </label>
-            <input
-              type="range"
-              min="0"
-              max="50"
-              value={style.borderRadius}
-              onChange={(e) =>
+            <Select
+              value={widgetRadiusPreset(style.borderRadius)}
+              onValueChange={(value) =>
                 onChange({
                   ...style,
-                  borderRadius: Number(e.target.value),
+                  borderRadius: widgetRadiusStoredPx(value),
                 })
               }
-              className="w-full"
-            />
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>Sharp</span>
-              <span>Rounded</span>
-            </div>
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sharp">Sharp</SelectItem>
+                <SelectItem value="rounded">Rounded</SelectItem>
+                <SelectItem value="pill">Pill</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Font */}
