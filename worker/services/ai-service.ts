@@ -191,6 +191,7 @@ Return only this JSON object:
   "speak": "now" | "silent",
   "effect": "none" | "close" | "ban",
   "investigate": "now" | "none",
+  "email": "now" | "none",
   "reason": string | null
 }
 
@@ -200,15 +201,18 @@ Meaning:
 - speak: now means reply to the visitor now. silent means do not send a visitor-visible reply.
 - effect: close ends the conversation. ban blocks the visitor and closes as spam. none means no close or ban.
 - investigate: now starts a private Sidechat turn (billing, Stripe, PostHog, or similar research). none does not.
+- email: now emails the human agent's last visitor-visible reply. none does not.
 - reason: required when effect is ban. Otherwise null.
 
 When investigate is now, set speak to silent. The worker will not send a visitor-visible reply. Close and ban ignore investigate.
+When email is now, set speak to silent and investigate to none. Close and ban ignore email.
 
 Examples:
-- "check his billing" or a Stripe/PostHog lookup → investigate now, speak silent
-- "explain pricing now" → investigate none, speak now
+- "check his billing" or a Stripe/PostHog lookup → investigate now, speak silent, email none
+- "explain pricing now" → investigate none, speak now, email none
+- "email my last reply" or "email this to them" → email now, speak silent, investigate none
 
-The worker applies this object. Do not match English keywords. A request to stay quiet, take over, remember a private note, look something up, close, or ban may be written in any language.
+The worker applies this object. Do not match English keywords. A request to stay quiet, take over, remember a private note, look something up, email the last reply, close, or ban may be written in any language.
 
 JSON:`,
       maxOutputTokens: 256,

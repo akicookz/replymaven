@@ -7,6 +7,7 @@ import {
   telegramCommandClaimPatch,
   type BotNameDecision,
 } from "./bot-name-decision";
+import type { EmailLastReplyResult } from "./email-last-reply";
 import type { BotNameCommandOrigin } from "./start-sidechat-turn";
 
 export interface BotNameOwnershipSnapshot {
@@ -35,6 +36,7 @@ export interface ApplyBotNameCommandDeps {
     | { accepted: true; status: "working" }
     | { accepted: false; reason: "busy" | "archived" | "failed" }
   >
+  emailLastReply(): Promise<EmailLastReplyResult>
 }
 
 interface ApplyBotNameCommandInput {
@@ -110,7 +112,20 @@ export async function applyBotNameCommand(
     storedInstructions: decision.instructions === "set",
     spoke,
   });
-  if (decision.investigate === "now") {
+  if (decision.email === "now") {
+    const emailed = await deps.emailLastReply();
+    confirmation = emailed.ok
+      ? confirmBotNameDecision({
+        effect: "none",
+        handedToAi: decision.ownership === "ai",
+        storedInstructions: decision.instructions === "set",
+        emailed: true,
+      })
+      : confirmBotNameDecision({
+        effect: "none",
+        emailReason: emailed.reason,
+      });
+  } else if (decision.investigate === "now") {
     const started = await deps.startSidechatTurn({ text: rawAgentText });
     if (started.accepted) {
       investigated = true;

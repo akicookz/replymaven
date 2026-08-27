@@ -25,6 +25,7 @@ describe("parseBotNameDecision", () => {
       speak: "now",
       effect: "none",
       investigate: "none",
+      email: "none",
       reason: null,
     });
   });
@@ -43,6 +44,27 @@ describe("parseBotNameDecision", () => {
       reason: null,
     })).toBeNull();
     expect(parseBotNameDecision("take over")).toBeNull();
+  });
+
+  test("treats a missing email key as none", () => {
+    expect(parseBotNameDecision({
+      ownership: "human",
+      instructions: "keep",
+      speak: "silent",
+      effect: "none",
+      reason: null,
+    })?.email).toBe("none");
+  });
+
+  test("rejects an invalid email value", () => {
+    expect(parseBotNameDecision({
+      ownership: "human",
+      instructions: "keep",
+      speak: "silent",
+      effect: "none",
+      email: "maybe",
+      reason: null,
+    })).toBeNull();
   });
 
   test("treats a missing investigate key as none", () => {
@@ -79,6 +101,7 @@ describe("parseBotNameDecision", () => {
       speak: "silent",
       effect: "ban",
       investigate: "none",
+      email: "none",
       reason: null,
     });
   });
@@ -129,6 +152,30 @@ describe("confirmBotNameDecision", () => {
       effect: "none",
       investigateBusy: true,
     })).toBe("Maven is already working on this.");
+    expect(confirmBotNameDecision({
+      effect: "none",
+      emailed: true,
+    })).toBe("Emailed to visitor.");
+    expect(confirmBotNameDecision({
+      effect: "none",
+      emailReason: "no_visitor_email",
+    })).toBe("No visitor email address.");
+    expect(confirmBotNameDecision({
+      effect: "none",
+      emailReason: "no_reply",
+    })).toBe("No agent reply to email.");
+    expect(confirmBotNameDecision({
+      effect: "none",
+      emailReason: "already_emailed",
+    })).toBe("That reply was already emailed.");
+    expect(confirmBotNameDecision({
+      effect: "none",
+      emailReason: "conflict",
+    })).toBe("Conversation changed. Try again.");
+    expect(confirmBotNameDecision({
+      effect: "none",
+      emailReason: "failed",
+    })).toBe("Could not send the email.");
   });
 });
 

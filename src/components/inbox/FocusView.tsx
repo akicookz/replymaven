@@ -21,10 +21,11 @@ interface FocusViewProps {
   onExit: () => void;
   onSend: (
     content?: string,
-    opts?: { imageUrls?: string[]; asEmail?: boolean },
+    opts?: { imageUrls?: string[] },
   ) => void;
   onResolve: (convId: string) => void;
   onDeleteMessage: (messageId: string) => void;
+  onSendEmail?: (messageId: string) => void;
   draft: string;
   setDraft: Dispatch<SetStateAction<string>>;
   onStartSidechat: () => void;
@@ -103,6 +104,7 @@ export default function FocusView({
   onSend,
   onResolve,
   onDeleteMessage,
+  onSendEmail,
   draft,
   setDraft,
   onStartSidechat,
@@ -219,6 +221,7 @@ export default function FocusView({
                   conversation={conversation}
                   loading={messagesLoading}
                   onDeleteMessage={onDeleteMessage}
+                  onSendEmail={onSendEmail}
                   readOnly={!interaction.showMessageActions}
                   contentClassName="!px-[28px] !pt-3 !pb-3"
                 />

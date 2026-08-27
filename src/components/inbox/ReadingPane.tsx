@@ -25,7 +25,7 @@ interface ReadingPaneProps {
   setDraft: Dispatch<SetStateAction<string>>;
   onSend: (
     content?: string,
-    opts?: { imageUrls?: string[]; asEmail?: boolean },
+    opts?: { imageUrls?: string[] },
   ) => void;
   onResolve: (convId: string) => void;
   onSnooze: (convId: string, until: number | null) => void;
@@ -42,6 +42,8 @@ interface ReadingPaneProps {
   onLinkCustomer: () => void;
   /** Delete a sent agent message by id. */
   onDeleteMessage: (messageId: string) => void;
+  /** Email a sent agent or bot message to the visitor. */
+  onSendEmail?: (messageId: string) => void;
   /** Mobile: return to the conversation list (clears the selection). */
   onBack?: () => void;
   onStartSidechat: () => void;
@@ -76,6 +78,7 @@ export default function ReadingPane({
   onCreateCustomer,
   onLinkCustomer,
   onDeleteMessage,
+  onSendEmail,
   onBack,
   onStartSidechat,
   sidechatOpen,
@@ -241,6 +244,7 @@ export default function ReadingPane({
           conversation={conversation}
           loading={messagesLoading}
           onDeleteMessage={onDeleteMessage}
+          onSendEmail={onSendEmail}
           readOnly={!interaction.showMessageActions}
           searchQuery={query}
           activeMatchId={activeMatchId}

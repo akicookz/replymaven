@@ -9,7 +9,11 @@ import {
   type ApplyBotNameCommandDeps,
 } from "./apply-bot-name-command";
 import type { BotNameDecision } from "./bot-name-decision";
+import { emailLastAgentReply } from "./email-last-reply";
+import { EmailService } from "./email-service";
 import { recordMavenAssignment } from "./maven-assignment";
+import { ProjectService } from "./project-service";
+import { WidgetService } from "./widget-service";
 import {
   startSidechatTurn,
   type BotNameCommandOrigin,
@@ -22,6 +26,7 @@ const BARE_HANDBACK_DECISION: BotNameDecision = {
   speak: "silent",
   effect: "none",
   investigate: "none",
+  email: "none",
   reason: null,
 };
 
@@ -40,6 +45,8 @@ interface BotNameCommandEnv {
   GEMINI_API_KEY: string;
   OPENAI_API_KEY: string;
   MAVEN_PROJECT_AGENT: AppEnv["MAVEN_PROJECT_AGENT"];
+  RESEND_API_KEY: string;
+  BETTER_AUTH_URL: string;
 }
 
 interface BotNameCommandConversation {
@@ -114,6 +121,7 @@ function createBotNameCommandDeps(
     env: BotNameCommandEnv;
     projectSettings: ProjectSettingsRow | null;
     projectName: string;
+    actorName: string | null;
     actorUserId: string;
     origin: BotNameCommandOrigin;
   },
@@ -204,6 +212,25 @@ function createBotNameCommandDeps(
         actorUserId: input.actorUserId,
         origin: input.origin,
         env: input.env,
+      });
+    },
+    async emailLastReply() {
+      const [project, widgetCfg] = await Promise.all([
+        new ProjectService(input.db).getProjectById(projectId),
+        new WidgetService(input.db).getWidgetConfig(projectId),
+      ]);
+      const base = input.env.BETTER_AUTH_URL || "https://replymaven.com";
+      return emailLastAgentReply({
+        chatService,
+        emailService: new EmailService(input.env.RESEND_API_KEY),
+        projectId,
+        projectSlug: project?.slug ?? "support",
+        projectName: input.projectName,
+        conversationId: conversation.id,
+        visitorEmail: conversation.visitorEmail,
+        actorName: input.actorName,
+        dashboardUrl: `${base}/app/projects/${projectId}/conversations/${conversation.id}`,
+        accentColor: widgetCfg?.primaryColor ?? null,
       });
     },
   };

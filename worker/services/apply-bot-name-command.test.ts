@@ -11,6 +11,7 @@ function decision(
     speak: "silent",
     effect: "none",
     investigate: "none",
+    email: "none",
     reason: null,
     ...overrides,
   };
@@ -59,6 +60,10 @@ function createDeps() {
     async startSidechatTurn(input: { text: string }) {
       calls.push(`investigate:${input.text}`);
       return { accepted: true as const, status: "working" as const };
+    },
+    async emailLastReply() {
+      calls.push("email:last-reply");
+      return { ok: true as const };
     },
   };
   return deps;
@@ -239,6 +244,40 @@ describe("applyBotNameCommand", () => {
     });
     expect(result.confirmation).toBe("Maven is already working on this.");
     expect(deps.calls).toEqual(["ownership:human", "investigate:busy", "metadata"]);
+  });
+
+  test("emails the last agent reply and does not speak", async () => {
+    const deps = createDeps();
+    const result = await applyBotNameCommand({
+      rawAgentText: "email my last reply",
+      decision: decision({
+        email: "now",
+        speak: "now",
+        investigate: "now",
+      }),
+      metadata: {},
+      now: 50,
+      deps,
+    });
+    expect(result.confirmation).toBe("Emailed to visitor.");
+    expect(deps.calls).toEqual([
+      "ownership:human",
+      "email:last-reply",
+      "metadata",
+    ]);
+  });
+
+  test("close ignores email", async () => {
+    const deps = createDeps();
+    const result = await applyBotNameCommand({
+      rawAgentText: "close this",
+      decision: decision({ effect: "close", email: "now" }),
+      metadata: {},
+      now: 50,
+      deps,
+    });
+    expect(result.confirmation).toBe("Conversation closed.");
+    expect(deps.calls).toEqual(["status:closed:resolved"]);
   });
 
   test("close ignores investigate", async () => {

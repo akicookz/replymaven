@@ -802,12 +802,10 @@ function Conversations() {
     mutationFn: async ({
       content,
       imageUrls,
-      asEmail,
       idempotencyKey,
     }: {
       content: string;
       imageUrls?: string[];
-      asEmail?: boolean;
       idempotencyKey: string;
     }) => {
       const res = await fetch(
@@ -829,27 +827,6 @@ function Conversations() {
       };
       if (data.command) {
         toast.success(data.confirmation || "Command applied");
-        return data;
-      }
-      // After a successful send, optionally email the message to the visitor.
-      if (asEmail && data.id) {
-        try {
-          const emailRes = await fetch(
-            `/api/projects/${projectId}/conversations/${selectedConvo}/send-email`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ messageId: data.id }),
-            },
-          );
-          if (emailRes.ok) {
-            toast.success("Emailed to visitor");
-          } else {
-            toast.error("Message sent but email delivery failed");
-          }
-        } catch {
-          toast.error("Message sent but email delivery failed");
-        }
       }
       return data;
     },
@@ -911,6 +888,65 @@ function Conversations() {
       queryClient.invalidateQueries({
         queryKey: ["conversations", projectId],
       });
+    },
+  });
+
+  const sendEmail = useMutation({
+    mutationFn: async ({
+      conversationId,
+      messageId,
+    }: {
+      conversationId: string;
+      messageId: string;
+    }) => {
+      const res = await fetch(
+        `/api/projects/${projectId}/conversations/${conversationId}/send-email`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messageId }),
+        },
+      );
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        throw new Error(body.error || "Failed to send email");
+      }
+      return body as { ok?: boolean; emailedAt?: string };
+    },
+    onMutate: async ({ conversationId, messageId }) => {
+      await queryClient.cancelQueries({
+        queryKey: ["conversation-detail", conversationId],
+      });
+      const previous = queryClient.getQueryData<ConversationDetail>([
+        "conversation-detail",
+        conversationId,
+      ]);
+      const emailedAt = new Date().toISOString();
+      queryClient.setQueryData<ConversationDetail | undefined>(
+        ["conversation-detail", conversationId],
+        (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            messages: old.messages.map((message) =>
+              message.id === messageId ? { ...message, emailedAt } : message,
+            ),
+          };
+        },
+      );
+      return { previous, conversationId };
+    },
+    onError: (err: Error, _vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(
+          ["conversation-detail", ctx.conversationId],
+          ctx.previous,
+        );
+      }
+      toast.error(err.message || "Failed to send email");
+    },
+    onSuccess: () => {
+      toast.success("Emailed to visitor");
     },
   });
 
@@ -1606,25 +1642,22 @@ function Conversations() {
 
   function handleSend(
     content?: string,
-    opts?: { imageUrls?: string[]; asEmail?: boolean },
+    opts?: { imageUrls?: string[] },
   ) {
     const text = (content ?? draft).trim();
     const imageUrls = opts?.imageUrls ?? [];
     if (!text && imageUrls.length === 0) return;
     if (!selectedConvo) return;
-    // The composer no longer has a "send as email" toggle. Decide automatically:
-    // if the visitor has an email on file and isn't live in the widget right now
-    // (email-origin or offline), also deliver the reply by email so it reaches
-    // them; active widget visitors just get it in-chat. An explicit opts.asEmail
-    // (future callers) still wins.
-    const autoEmail =
-      !!selected?.visitorEmail && selected?.visitorPresence !== "active";
     sendReply.mutate({
       content: text,
       imageUrls,
-      asEmail: opts?.asEmail ?? autoEmail,
       idempotencyKey: crypto.randomUUID(),
     });
+  }
+
+  function handleSendEmail(messageId: string) {
+    if (!selectedConvo) return;
+    sendEmail.mutate({ conversationId: selectedConvo, messageId });
   }
 
   function setSelectedSidechatDraft(value: SetStateAction<string>): void {
@@ -2066,6 +2099,7 @@ function Conversations() {
         onSend={handleSend}
         onResolve={handleResolve}
         onDeleteMessage={handleDeleteMessage}
+        onSendEmail={handleSendEmail}
         draft={draft}
         setDraft={setDraft}
         onStartSidechat={handleStartSidechat}
@@ -2168,6 +2202,7 @@ function Conversations() {
           onCreateCustomer={() => setCreateCustomerOpen(true)}
           onLinkCustomer={() => setLinkCustomerOpen(true)}
           onDeleteMessage={handleDeleteMessage}
+          onSendEmail={handleSendEmail}
           onBack={() => setSelectedConvo(null)}
           onStartSidechat={handleStartSidechat}
           sidechatOpen={sidechatOpen}

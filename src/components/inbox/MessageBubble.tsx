@@ -1,5 +1,8 @@
 import { Mail, Plug, Trash2 } from "lucide-react";
-import { deriveMessageStatus } from "@/lib/inbox/message-status";
+import {
+  deriveEmailAction,
+  deriveMessageStatus,
+} from "@/lib/inbox/message-status";
 import {
   deriveMessageActions,
   deriveMessagePresentation,
@@ -19,6 +22,7 @@ interface MessageBubbleProps {
   message: Message;
   conversation: Conversation;
   onDelete?: (messageId: string) => void;
+  onSendEmail?: (messageId: string) => void;
   readOnly?: boolean;
   /** This message matches the active in-conversation search query. */
   isMatch?: boolean;
@@ -48,6 +52,7 @@ export default function MessageBubble({
   message,
   conversation,
   onDelete,
+  onSendEmail,
   readOnly = false,
   isMatch,
   isActiveMatch,
@@ -107,6 +112,16 @@ export default function MessageBubble({
   const status = !isReceived && perspective === "public"
     ? deriveMessageStatus(message)
     : null;
+  const emailAction = !isReceived && perspective === "public"
+    ? deriveEmailAction({
+        role: message.role,
+        emailedAt: message.emailedAt,
+        visitorEmail: conversation.visitorEmail,
+        readOnly,
+        optimistic: "_optimistic" in message && message._optimistic === true,
+      })
+    : "hidden";
+  const showSendEmail = emailAction === "send" && Boolean(onSendEmail);
   const statusTooltip = [
     message.deliveredAt ? `Delivered ${formatTime(message.deliveredAt)}` : null,
     message.readAt ? `Seen ${formatTime(message.readAt)}` : null,
@@ -116,18 +131,31 @@ export default function MessageBubble({
     .join(" · ");
 
   function renderStatus() {
-    return status && (
+    if (!status) return null;
+    return (
       <span
         className="flex items-baseline gap-1"
         title={statusTooltip || undefined}
       >
         <span aria-hidden="true">·</span>
         <span>{status.label}</span>
-        {status.emailed && (
+        {emailAction === "sent" && (
           <>
             <span aria-hidden="true">·</span>
             <Mail size={11} className="self-center" />
             <span>Emailed</span>
+          </>
+        )}
+        {showSendEmail && onSendEmail && (
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              className="text-[11px] leading-normal text-ink-7 hover:text-ink-3 motion-safe:transition-colors motion-safe:duration-150"
+              onClick={() => onSendEmail(message.id)}
+            >
+              Send as email
+            </button>
           </>
         )}
       </span>

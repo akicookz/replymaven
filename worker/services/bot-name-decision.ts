@@ -4,6 +4,7 @@ export interface BotNameDecision {
   speak: "now" | "silent"
   effect: "none" | "close" | "ban"
   investigate: "now" | "none"
+  email: "now" | "none"
   reason: string | null
 }
 
@@ -12,6 +13,7 @@ const INSTRUCTIONS = new Set(["set", "clear", "keep"]);
 const SPEAK = new Set(["now", "silent"]);
 const EFFECT = new Set(["none", "close", "ban"]);
 const INVESTIGATE = new Set(["now", "none"]);
+const EMAIL = new Set(["now", "none"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -35,6 +37,10 @@ export function parseBotNameDecision(value: unknown): BotNameDecision | null {
     ? "none"
     : readEnum(value.investigate, INVESTIGATE);
   if (!investigate) return null;
+  const email = value.email === undefined
+    ? "none"
+    : readEnum(value.email, EMAIL);
+  if (!email) return null;
   const reason = typeof value.reason === "string" && value.reason.trim()
     ? value.reason.trim()
     : null;
@@ -44,6 +50,7 @@ export function parseBotNameDecision(value: unknown): BotNameDecision | null {
     speak: speak as BotNameDecision["speak"],
     effect: effect as BotNameDecision["effect"],
     investigate: investigate as BotNameDecision["investigate"],
+    email: email as BotNameDecision["email"],
     reason,
   };
 }
@@ -63,6 +70,13 @@ export interface BotNameConfirmInput {
   spoke?: boolean
   investigated?: boolean
   investigateBusy?: boolean
+  emailed?: boolean
+  emailReason?:
+    | "no_visitor_email"
+    | "no_reply"
+    | "already_emailed"
+    | "conflict"
+    | "failed"
 }
 
 export function confirmBotNameDecision(input: BotNameConfirmInput): string {
@@ -74,6 +88,14 @@ export function confirmBotNameDecision(input: BotNameConfirmInput): string {
   }
   if (input.investigateBusy) return "Maven is already working on this.";
   if (input.investigated) return "Maven is looking into that.";
+  if (input.emailed) return "Emailed to visitor.";
+  if (input.emailReason === "no_visitor_email") return "No visitor email address.";
+  if (input.emailReason === "no_reply") return "No agent reply to email.";
+  if (input.emailReason === "already_emailed") {
+    return "That reply was already emailed.";
+  }
+  if (input.emailReason === "conflict") return "Conversation changed. Try again.";
+  if (input.emailReason === "failed") return "Could not send the email.";
   if (input.spoke) return "Bot responded.";
   if (input.handedToAi) return "Bot resumed.";
   if (input.storedInstructions) return "Instructions saved.";
