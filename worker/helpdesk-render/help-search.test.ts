@@ -53,4 +53,34 @@ describe("matchHelpArticlesFromQuery", () => {
       matchHelpArticlesFromQuery("zebra", [install], [guides]),
     ).toEqual([]);
   });
+
+  test("matches body text and returns a snippet", () => {
+    const buried = {
+      ...billing,
+      content:
+        "Ignore the title. Then a long run-up of prose sits here so the snippet window starts after the opening line. The widget embed script goes in the document head.",
+    };
+    const results = matchHelpArticlesFromQuery(
+      "embed script",
+      [buried, install],
+      [guides],
+    );
+    expect(results.map((result) => result.article.id)).toEqual([
+      "art-install",
+      "art-billing",
+    ]);
+    const bodyHit = results.find((result) => result.article.id === "art-billing");
+    expect(bodyHit?.match).toBe("content");
+    expect(bodyHit?.snippet).toContain("widget embed script");
+    expect(bodyHit?.snippet).not.toContain("Ignore the title");
+  });
+
+  test("ignores missing content the same way public nav search does", () => {
+    const results = matchHelpArticlesFromQuery(
+      "document head",
+      [billing, install],
+      [guides],
+    );
+    expect(results).toEqual([]);
+  });
 });

@@ -11,6 +11,7 @@ import {
   publicHelpHtmlChanged,
   scheduleHelpPageCachePurge,
 } from "./helpdesk-render/help-page-cache";
+import { matchHelpArticlesFromQuery } from "./helpdesk-render/help-search";
 import {
   buildHelpUrl,
   resolveHelpCustomUrl,
@@ -47,6 +48,7 @@ export function registerHelpdeskTools(
 ): void {
   registerListHelpCategoriesTool(server, context);
   registerListHelpArticlesTool(server, context);
+  registerSearchHelpArticlesTool(server, context);
   registerGetHelpArticleTool(server, context);
   registerCreateHelpCategoryTool(server, context);
   registerUpdateHelpCategoryTool(server, context);
@@ -142,6 +144,78 @@ function registerListHelpArticlesTool(
       });
 
       return textResult({ articles: articles.map(summarizeHelpArticle) });
+    },
+  );
+}
+
+const SEARCH_HELP_ARTICLES_DEFAULT_LIMIT = 20;
+
+function registerSearchHelpArticlesTool(
+  server: McpServer,
+  context: McpRequestContext,
+): void {
+  server.registerTool(
+    "search_help_articles",
+    {
+      title: "Search help articles",
+      description:
+        "Search help center articles by title, excerpt, and body. Returns summaries plus a short snippet, not the full body. Use get_help_article to read one. Includes drafts unless you pass status.",
+      inputSchema: {
+        projectId: z.string().min(1).describe("ReplyMaven project ID."),
+        query: z
+          .string()
+          .min(1)
+          .max(200)
+          .describe("Text to find in titles, excerpts, or article bodies."),
+        categoryId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Only search articles in this category."),
+        status: z
+          .enum(["draft", "published"])
+          .optional()
+          .describe("Only search articles with this status."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(50)
+          .optional()
+          .describe(
+            `Maximum results to return. Defaults to ${SEARCH_HELP_ARTICLES_DEFAULT_LIMIT}.`,
+          ),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ projectId, query, categoryId, status, limit }) => {
+      requireScope(context, "projects:read");
+
+      const project = await getAccessibleProject(context, projectId);
+      const service = helpdeskService(context);
+      const [articles, categories] = await Promise.all([
+        service.listArticles(project.id, { categoryId, status }),
+        service.listCategories(project.id),
+      ]);
+      const matches = matchHelpArticlesFromQuery(query, articles, categories);
+      const cap = limit ?? SEARCH_HELP_ARTICLES_DEFAULT_LIMIT;
+
+      return textResult({
+        query: query.trim(),
+        results: matches.slice(0, cap).map((match) => ({
+          ...summarizeHelpArticle(match.article),
+          categoryName: match.category.name,
+          categorySlug: match.category.slug,
+          score: match.score,
+          match: match.match,
+          snippet: match.snippet,
+        })),
+      });
     },
   );
 }

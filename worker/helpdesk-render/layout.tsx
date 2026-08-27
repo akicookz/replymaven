@@ -222,6 +222,11 @@ export function Layout(props: LayoutProps) {
         />
         <script
           dangerouslySetInnerHTML={{
+            __html: HELP_NAV_FOCUS_SCRIPT,
+          }}
+        />
+        <script
+          dangerouslySetInnerHTML={{
             __html: IMAGE_ZOOM_SCRIPT,
           }}
         />
@@ -262,6 +267,30 @@ const HELP_NAV_SCRIPT = `
     if (e.key === 'Escape') setOpen(false);
   });
   desktop.addEventListener('change', function(){ setOpen(false); });
+})();
+`;
+
+const HELP_NAV_FOCUS_SCRIPT = `
+(function(){
+  function revealIn(container, el){
+    if (!container || !el) return;
+    var c = container.getBoundingClientRect();
+    var e = el.getBoundingClientRect();
+    if (e.top < c.top) container.scrollTop += e.top - c.top - 8;
+    else if (e.bottom > c.bottom) container.scrollTop += e.bottom - c.bottom + 8;
+  }
+  function focusNav(){
+    revealIn(
+      document.querySelector('.help-sidebar-nav'),
+      document.querySelector('[data-help-nav-current]')
+    );
+    revealIn(
+      document.querySelector('.help-toc'),
+      document.querySelector('.help-toc-link.is-active')
+    );
+  }
+  focusNav();
+  window.addEventListener('load', focusNav);
 })();
 `;
 

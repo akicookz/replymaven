@@ -28,6 +28,8 @@ export function HelpSidebar(props: HelpSidebarProps) {
           const articles = props.articlesByCategory.get(category.id) ?? [];
           const isActiveCategory =
             category.slug === props.activeCategorySlug;
+          const isCurrentCategory =
+            isActiveCategory && props.activeArticleSlug === null;
           const categoryHref = buildHelpUrl({
             projectSlug: props.project.slug,
             customUrl: props.helpCustomUrl,
@@ -39,7 +41,18 @@ export function HelpSidebar(props: HelpSidebarProps) {
                 <span class="help-sidebar-group-icon" aria-hidden="true">
                   {renderCategoryIcon(category.icon)}
                 </span>
-                <a class="help-sidebar-group-name" href={categoryHref}>
+                <a
+                  class={
+                    isCurrentCategory
+                      ? "help-sidebar-group-name active"
+                      : "help-sidebar-group-name"
+                  }
+                  href={categoryHref}
+                  aria-current={isCurrentCategory ? "page" : undefined}
+                  data-help-nav-current={
+                    isCurrentCategory ? "true" : undefined
+                  }
+                >
                   {category.name}
                 </a>
                 <span class="help-sidebar-chevron" aria-hidden="true">
@@ -79,6 +92,7 @@ export function HelpSidebar(props: HelpSidebarProps) {
                           }
                           href={href}
                           aria-current={isActive ? "page" : undefined}
+                          data-help-nav-current={isActive ? "true" : undefined}
                         >
                           {article.title}
                         </a>

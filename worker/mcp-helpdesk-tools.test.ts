@@ -210,7 +210,7 @@ async function seedCategory(harness: Harness): Promise<string> {
 }
 
 describe("MCP helpdesk tools", () => {
-  test("registers all eleven tools", () => {
+  test("registers all twelve tools", () => {
     const harness = createHarness();
     expect([...harness.tools.keys()].sort()).toEqual([
       "archive_help_category",
@@ -222,6 +222,7 @@ describe("MCP helpdesk tools", () => {
       "import_help_image",
       "list_help_articles",
       "list_help_categories",
+      "search_help_articles",
       "update_help_article",
       "update_help_category",
     ]);
@@ -271,6 +272,62 @@ describe("MCP helpdesk tools", () => {
     expect(categories).toHaveLength(1);
     expect(categories[0]!.slug).toBe("getting-started");
     expect(categories[0]!.articleCount).toBe(1);
+  });
+
+  test("search matches body text and omits content", async () => {
+    const harness = createHarness();
+    const categoryId = await seedCategory(harness);
+    const created = await call(harness, "create_help_article", {
+      projectId: "project-1",
+      categoryId,
+      title: "Install Guide",
+      excerpt: "Setup steps",
+      content: "# Install\n\nRun the embed script in the document head.",
+    });
+    await call(harness, "create_help_article", {
+      projectId: "project-1",
+      categoryId,
+      title: "Unrelated",
+      content: "Nothing about that topic.",
+    });
+    const articleId = (created.article as { id: string }).id;
+
+    const found = await call(harness, "search_help_articles", {
+      projectId: "project-1",
+      query: "embed script",
+    });
+    const results = found.results as Array<Record<string, unknown>>;
+    expect(results).toHaveLength(1);
+    expect(results[0]!.id).toBe(articleId);
+    expect(results[0]!.match).toBe("content");
+    expect(results[0]!.snippet).toContain("embed script");
+    expect(results[0]!).not.toHaveProperty("content");
+    expect(results[0]!.categoryName).toBe("Getting Started");
+  });
+
+  test("search includes drafts and can filter them out", async () => {
+    const harness = createHarness();
+    const categoryId = await seedCategory(harness);
+    await call(harness, "create_help_article", {
+      projectId: "project-1",
+      categoryId,
+      title: "Draft note",
+      content: "Secret rotation steps",
+      status: "draft",
+    });
+
+    const all = await call(harness, "search_help_articles", {
+      projectId: "project-1",
+      query: "rotation",
+    });
+    expect((all.results as unknown[]).length).toBe(1);
+
+    const publishedOnly = await call(harness, "search_help_articles", {
+      projectId: "project-1",
+      query: "rotation",
+      status: "published",
+    });
+    expect(publishedOnly.results).toEqual([]);
   });
 
   test("article listings omit content; get returns it", async () => {
