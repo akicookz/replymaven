@@ -20,6 +20,41 @@
   --help-radius-lg: var(--radius);
   --help-radius-xl: calc(var(--radius) * 1.33);
   --help-radius-2xl: calc(var(--radius) * 1.67);
+  --help-scrollbar-thumb: color-mix(in oklch, var(--foreground) 22%, transparent);
+}
+
+/* Thin on-theme bars. Overlay/classic both paint a light track on hover;
+   keep the track invisible so the column color does not flash. */
+.help-sidebar-nav,
+.help-toc,
+.help-prose pre,
+:is(.help-prose, .help-home) .help-table-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--help-scrollbar-thumb) transparent;
+}
+.help-sidebar-nav::-webkit-scrollbar,
+.help-toc::-webkit-scrollbar,
+.help-prose pre::-webkit-scrollbar,
+:is(.help-prose, .help-home) .help-table-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.help-sidebar-nav::-webkit-scrollbar-track,
+.help-toc::-webkit-scrollbar-track,
+.help-prose pre::-webkit-scrollbar-track,
+:is(.help-prose, .help-home) .help-table-scroll::-webkit-scrollbar-track,
+.help-sidebar-nav::-webkit-scrollbar-corner,
+.help-toc::-webkit-scrollbar-corner,
+.help-prose pre::-webkit-scrollbar-corner,
+:is(.help-prose, .help-home) .help-table-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.help-sidebar-nav::-webkit-scrollbar-thumb,
+.help-toc::-webkit-scrollbar-thumb,
+.help-prose pre::-webkit-scrollbar-thumb,
+:is(.help-prose, .help-home) .help-table-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--help-scrollbar-thumb);
+  border-radius: 999px;
 }
 
 /* Lucide markup ships stroke-width="2". This is the visual default. */
@@ -169,6 +204,48 @@
   padding: 0;
   border-radius: 0;
   font-size: 1em;
+}
+.help-prose .help-code {
+  position: relative;
+  margin: 1.25rem 0;
+}
+.help-prose .help-code pre {
+  margin: 0;
+  padding-right: 2.75rem;
+}
+.help-prose .help-code-copy {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 0;
+  line-height: 0;
+  border-radius: var(--help-radius-sm);
+  background: color-mix(in oklch, var(--code) 72%, var(--background));
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.help-prose .help-code-copy:hover,
+.help-prose .help-code-copy:focus-visible {
+  opacity: 1;
+  color: var(--foreground);
+}
+.help-prose .help-code-copy.is-copied {
+  opacity: 1;
+  color: var(--brand);
+}
+.help-prose .help-code-copy svg {
+  display: block;
+}
+.help-prose .help-api-example .help-code {
+  margin: 0;
 }
 .help-prose blockquote {
   border-left: 3px solid var(--brand);

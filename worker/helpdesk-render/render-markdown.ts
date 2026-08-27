@@ -603,8 +603,10 @@ export async function renderMarkdown(
   });
   const rewritten = postProcessLinksAndImages(rawHtml, options);
   return {
-    html: wrapHelpTables(
-      wrapHelpImages(sanitizeRenderedHtml(rewritten, options)),
+    html: wrapHelpCodeBlocks(
+      wrapHelpTables(
+        wrapHelpImages(sanitizeRenderedHtml(rewritten, options)),
+      ),
     ),
     toc,
   };
@@ -891,6 +893,25 @@ function wrapHelpTables(html: string): string {
   return html.replace(/<table\b[\s\S]*?<\/table>/gi, (tag) => {
     if (/\bclass="help-table"/i.test(tag)) return tag;
     return `<div class="help-table"><div class="help-table-scroll">${tag}</div></div>`;
+  });
+}
+
+const CODE_COPY_ICON =
+  `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+  `<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>` +
+  `<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>` +
+  `</svg>`;
+
+function wrapHelpCodeBlocks(html: string): string {
+  return html.replace(/<pre\b[\s\S]*?<\/pre>/gi, (tag) => {
+    if (!/<code\b/i.test(tag)) return tag;
+    return (
+      `<div class="help-code">` +
+      tag +
+      `<button type="button" class="help-code-copy" aria-label="Copy code">` +
+      CODE_COPY_ICON +
+      `</button></div>`
+    );
   });
 }
 

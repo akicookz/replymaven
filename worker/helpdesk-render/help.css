@@ -11,6 +11,20 @@ svg[stroke] {
 html {
   font-optical-sizing: none;
   font-family: var(--font-sans);
+  scrollbar-width: thin;
+  scrollbar-color: var(--help-scrollbar-thumb) transparent;
+}
+html::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+html::-webkit-scrollbar-track,
+html::-webkit-scrollbar-corner {
+  background: transparent;
+}
+html::-webkit-scrollbar-thumb {
+  background-color: var(--help-scrollbar-thumb);
+  border-radius: 999px;
 }
 
 .help-img-zoom {
@@ -242,30 +256,6 @@ html.help-nav-open .help-nav-overlay {
   padding-bottom: 0.5rem;
 }
 
-/* Overlay/classic bars both paint a light track on hover. Keep the track
-   invisible and the thumb on-theme so the column color does not flash. */
-.help-sidebar-nav,
-.help-toc {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent)
-    transparent;
-}
-.help-sidebar-nav::-webkit-scrollbar,
-.help-toc::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.help-sidebar-nav::-webkit-scrollbar-track,
-.help-toc::-webkit-scrollbar-track,
-.help-sidebar-nav::-webkit-scrollbar-corner,
-.help-toc::-webkit-scrollbar-corner {
-  background: transparent;
-}
-.help-sidebar-nav::-webkit-scrollbar-thumb,
-.help-toc::-webkit-scrollbar-thumb {
-  background-color: color-mix(in oklch, var(--foreground) 22%, transparent);
-  border-radius: 999px;
-}
 .help-sidebar-nav > * + * {
   margin-top: 0.25rem;
 }

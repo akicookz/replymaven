@@ -231,6 +231,11 @@ export function Layout(props: LayoutProps) {
           }}
         />
         <script
+          dangerouslySetInnerHTML={{
+            __html: CODE_COPY_SCRIPT,
+          }}
+        />
+        <script
           src="https://widget.replymaven.com/widget-embed.js"
           data-project={props.projectSlug}
           async
@@ -336,6 +341,34 @@ const IMAGE_ZOOM_SCRIPT = `
     if (!img) return;
     e.preventDefault();
     open(img);
+  });
+})();
+`;
+
+const CODE_COPY_SCRIPT = `
+(function(){
+  if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+  var ICON = ' viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+  var COPY = '<svg' + ICON + '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  var CHECK = '<svg' + ICON + '<polyline points="20 6 9 17 4 12"/></svg>';
+  document.addEventListener('click', function(e){
+    var t = e.target;
+    var btn = t && t.closest ? t.closest('.help-code-copy') : null;
+    if (!btn) return;
+    var wrap = btn.closest('.help-code');
+    var code = wrap && wrap.querySelector('code');
+    var text = code && code.textContent;
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(function(){
+      btn.classList.add('is-copied');
+      btn.setAttribute('aria-label', 'Copied');
+      btn.innerHTML = CHECK;
+      setTimeout(function(){
+        btn.classList.remove('is-copied');
+        btn.setAttribute('aria-label', 'Copy code');
+        btn.innerHTML = COPY;
+      }, 1500);
+    }).catch(function(){});
   });
 })();
 `;
