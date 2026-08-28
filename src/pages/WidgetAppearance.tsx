@@ -406,7 +406,7 @@ export function WidgetAppearancePanel({ state }: WidgetAppearancePanelProps) {
               Border Radius
             </label>
             <Select
-              value={widgetRadiusPreset(state.form.borderRadius)}
+              value={widgetRadiusPreset(state.form.borderRadius ?? 16)}
               onValueChange={(value) =>
                 state.updateForm({
                   borderRadius: widgetRadiusStoredPx(value),

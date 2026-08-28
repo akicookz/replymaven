@@ -582,7 +582,8 @@ import {
       font-size: 14px;
       font-weight: 500;
       color: var(--rm-text, #18181b);
-      line-height: 1.35;
+      line-height: 1.3;
+      letter-spacing: 0;
     }
     .rm-greeting-card.compact .rm-greeting-title {
       white-space: nowrap;
@@ -604,8 +605,8 @@ import {
       gap: 5px;
     }
     .rm-greeting-card:not(.compact) .rm-greeting-title {
-      font-size: 17px;
-      letter-spacing: -0.01em;
+      font-size: 14px;
+      letter-spacing: 0;
     }
     .rm-greeting-card:not(.compact) .rm-greeting-desc {
       font-size: 14px;
@@ -630,6 +631,7 @@ import {
       font-size: 14px;
       font-weight: 500;
       line-height: 1;
+      letter-spacing: 0;
       font-family: inherit;
       border: 0;
       cursor: pointer;
@@ -799,19 +801,22 @@ import {
       min-width: 0;
     }
     .rm-header-title {
-      font-weight: 600;
-      font-size: 15px;
+      font-weight: 500;
+      font-size: 14px;
       line-height: 1.3;
+      letter-spacing: 0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .rm-header-subtitle {
-      font-size: 12px;
+      font-size: 13px;
+      font-weight: 500;
       color: var(--rm-text-secondary, #52525b);
       opacity: 1;
       margin-top: 1px;
       line-height: 1.3;
+      letter-spacing: 0;
     }
     .rm-header-close {
       background: var(--rm-bg-secondary, #f4f4f5);
@@ -1229,7 +1234,10 @@ import {
       border-radius: min(var(--rm-btn-radius), 50%);
       border: 1px solid var(--rm-border);
       background: var(--rm-bg-secondary);
-      font-size: 13px;
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1;
+      letter-spacing: 0;
       cursor: pointer;
       transition: background 0.2s, border-color 0.2s;
       color: var(--rm-text);
@@ -1276,7 +1284,9 @@ import {
       border: none;
       border-radius: inherit;
       font-size: 14px;
-      line-height: 1.5;
+      font-weight: 400;
+      line-height: 1.45;
+      letter-spacing: 0;
       outline: none;
       background: transparent;
       color: var(--rm-text);
@@ -1637,12 +1647,16 @@ import {
     }
     .rm-home-title {
       font-size: 20px;
-      font-weight: 600;
-      line-height: 1.3;
+      font-weight: 500;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
       color: var(--rm-text);
     }
     .rm-home-subtitle {
       font-size: 13px;
+      font-weight: 400;
+      line-height: 1.3;
+      letter-spacing: 0;
       color: var(--rm-text-secondary);
       margin-top: 4px;
     }
@@ -1658,7 +1672,10 @@ import {
       display: flex;
       align-items: center;
       gap: 6px;
-      font-size: 12px;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.3;
+      letter-spacing: 0;
       color: var(--rm-accent-text);
       margin-bottom: 8px;
     }
@@ -1670,7 +1687,10 @@ import {
       width: 100%;
       border: none;
       outline: none;
-      font-size: 16px;
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 1.45;
+      letter-spacing: 0;
       color: var(--rm-text);
       background: transparent;
       cursor: pointer;
@@ -1721,8 +1741,10 @@ import {
     }
     .rm-home-link-label {
       flex: 1;
-      font-size: 13.5px;
+      font-size: 14px;
       font-weight: 500;
+      line-height: 1.3;
+      letter-spacing: 0;
       color: var(--rm-text);
     }
     .rm-home-link-arrow {
@@ -1954,6 +1976,8 @@ import {
     .rm-form-label {
       font-size: 13px;
       font-weight: 500;
+      line-height: 1.3;
+      letter-spacing: 0;
       color: var(--rm-text);
     }
     .rm-form-label .rm-required {
@@ -1965,6 +1989,9 @@ import {
       border: 1px solid var(--rm-border);
       border-radius: min(var(--rm-input-radius), 50%);
       font-size: 16px;
+      font-weight: 400;
+      line-height: 1.45;
+      letter-spacing: 0;
       outline: none;
       font-family: inherit;
       color: var(--rm-text);
@@ -1985,6 +2012,9 @@ import {
       border: 1px solid var(--rm-border);
       border-radius: min(var(--rm-input-radius), 50%);
       font-size: 16px;
+      font-weight: 400;
+      line-height: 1.45;
+      letter-spacing: 0;
       outline: none;
       font-family: inherit;
       color: var(--rm-text);
@@ -2011,6 +2041,7 @@ import {
       font-size: 14px;
       font-weight: 500;
       line-height: 1;
+      letter-spacing: 0;
       cursor: pointer;
       color: var(--rm-brand-text, #ffffff);
       transition: opacity 0.2s, transform 0.15s;
@@ -2069,8 +2100,10 @@ import {
       border-radius: min(var(--rm-btn-radius), 50%);
       border: 1px solid var(--rm-border);
       background: var(--rm-bg-secondary);
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 500;
+      line-height: 1;
+      letter-spacing: 0;
       cursor: pointer;
       transition: background 0.2s, border-color 0.2s;
       color: var(--rm-text);
@@ -2121,8 +2154,10 @@ import {
       border: 1px solid var(--rm-border);
       border-radius: min(var(--rm-input-radius), 50%);
       background: var(--rm-bg-secondary);
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 500;
+      line-height: 1;
+      letter-spacing: 0;
       color: var(--rm-text);
       cursor: pointer;
       transition: background 0.15s;
