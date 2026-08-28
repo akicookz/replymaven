@@ -545,6 +545,30 @@ describe("native MavenChatAgent transcript", () => {
         continuation: false,
         status: "aborted",
       });
+      const emptyMessage = {
+        id: "assistant-empty",
+        role: "assistant",
+        parts: [],
+      } as UIMessage;
+      fakeAgent.messages = [emptyMessage];
+      await lifecycle.onChatResponse.call(fakeAgent, {
+        message: emptyMessage,
+        requestId: "request-empty",
+        continuation: false,
+        status: "completed",
+      });
+      const textMessage = {
+        id: "assistant-text",
+        role: "assistant",
+        parts: [{ type: "text", text: "The visitor asked about billing." }],
+      } as UIMessage;
+      fakeAgent.messages = [textMessage];
+      await lifecycle.onChatResponse.call(fakeAgent, {
+        message: textMessage,
+        requestId: "request-text",
+        continuation: false,
+        status: "completed",
+      });
 
       expect(persisted).toHaveLength(1);
       expect(persisted[0]?.[0]?.parts).toContainEqual({
@@ -552,7 +576,13 @@ describe("native MavenChatAgent transcript", () => {
         id: "assistant-complete:reply-draft",
         data: { text: "Completed draft", createdAt: expect.any(Number) },
       });
-      expect(statuses).toEqual(["ready", "waiting_approval", "failed"]);
+      expect(statuses).toEqual([
+        "ready",
+        "waiting_approval",
+        "failed",
+        "failed",
+        "idle",
+      ]);
     },
   );
 

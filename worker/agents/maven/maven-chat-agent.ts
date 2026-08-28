@@ -98,6 +98,11 @@ import {
 } from "../sidechat/reply-draft-tool";
 import { buildSidechatSystemPrompt } from "../sidechat/sidechat-prompt";
 import {
+  hasVisibleSidechatAssistantText,
+  resolveCompletedSidechatSummary,
+  summarizeStreamFinish,
+} from "../sidechat/sidechat-turn-outcome";
+import {
   buildSidechatDynamicTools,
   resolveSidechatToolSafety,
   sidechatToolPresentation,
@@ -149,7 +154,7 @@ import { ToolService } from "../../services/tool-service";
 import { VisitorBanService } from "../../services/visitor-ban-service";
 import { MAVEN_ASSIGNEE_ID } from "../../../shared/maven-assignee";
 import { mavenAssignedSystemContent } from "../../services/maven-assignment";
-import { logError } from "../../observability";
+import { logError, logInfo, logWarn } from "../../observability";
 import { resolvePendingPublicContactUpdate } from "./public/public-human-mode";
 import { hasSettledReplyDraft } from "../../services/sidechat-status";
 import type { SidechatTurnOrigin } from "../../services/start-sidechat-turn";
@@ -292,6 +297,12 @@ async function executeSidechatTurn(input: {
         },
       }),
     };
+    logInfo("sidechat_turn.started", {
+      childName: input.agent.name,
+      conversationId: input.conversationId,
+      continuation: input.continuation,
+      toolCount: Object.keys(tools).length,
+    });
     const result = streamText({
       model,
       system: buildSidechatSystemPrompt(context),
@@ -302,6 +313,12 @@ async function executeSidechatTurn(input: {
       stopWhen: stepCountIs(8),
       abortSignal: input.abortSignal,
       onFinish(event) {
+        logInfo("sidechat_turn.model_finished", {
+          childName: input.agent.name,
+          conversationId: input.conversationId,
+          continuation: input.continuation,
+          ...summarizeStreamFinish(event),
+        });
         return input.onFinish(
           event as unknown as Parameters<typeof input.onFinish>[0],
         );
@@ -1208,11 +1225,25 @@ export class MavenChatAgent extends AIChatAgent<
     const parent = await this.parentAgent(MavenProjectAgent);
     if (!await parent.isSidechatOperational(this.name, conversationId)) return;
     if (result.status !== "completed") {
+      logWarn("sidechat_turn.response_not_completed", {
+        childName: this.name,
+        conversationId,
+        requestId: result.requestId,
+        continuation: result.continuation,
+        status: result.status,
+      });
       await parent.updateSidechatSummary(conversationId, "failed");
       return;
     }
 
     if (hasPendingSidechatApproval([...this.messages, result.message])) {
+      logInfo("sidechat_turn.completed", {
+        childName: this.name,
+        conversationId,
+        requestId: result.requestId,
+        continuation: result.continuation,
+        status: "waiting_approval",
+      });
       await parent.updateSidechatSummary(conversationId, "waiting_approval");
       return;
     }
@@ -1223,11 +1254,34 @@ export class MavenChatAgent extends AIChatAgent<
         messages: this.messages,
         persistMessages: (messages) => this.persistMessages(messages),
       });
-      await parent.updateSidechatSummary(
+      const hasText = hasVisibleSidechatAssistantText(result.message);
+      const status = resolveCompletedSidechatSummary({
+        publishedDraft: published,
+        hasAssistantText: hasText,
+      });
+      const turnContext = {
+        childName: this.name,
         conversationId,
-        published ? "ready" : "idle",
-      );
+        requestId: result.requestId,
+        continuation: result.continuation,
+        status,
+        published,
+        hasText,
+        partTypes: result.message.parts.map((part) => part.type),
+      };
+      if (status === "failed") {
+        logWarn("sidechat_turn.empty_complete", turnContext);
+      } else {
+        logInfo("sidechat_turn.completed", turnContext);
+      }
+      await parent.updateSidechatSummary(conversationId, status);
     } catch (error) {
+      logError("sidechat_turn.complete_failed", error, {
+        childName: this.name,
+        conversationId,
+        requestId: result.requestId,
+        continuation: result.continuation,
+      });
       await parent.updateSidechatSummary(conversationId, "failed");
       throw error;
     }

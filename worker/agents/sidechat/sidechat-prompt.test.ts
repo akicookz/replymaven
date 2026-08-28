@@ -39,6 +39,8 @@ describe("buildSidechatSystemPrompt", () => {
     expect(prompt).toContain("explicit approval from the human agent");
     expect(prompt).toContain("present_reply_draft");
     expect(prompt).toContain("never sent automatically");
+    expect(prompt).toContain("Always write a chat reply to the human agent");
+    expect(prompt).toContain("Do not end a turn with only reasoning");
   });
 
   test("does not reuse visitor-facing handoff, FAQ, or direct-send instructions", () => {
